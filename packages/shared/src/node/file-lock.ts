@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLodyDataDir } from './installation-profile';
@@ -132,6 +133,47 @@ export interface LockOptions {
 }
 
 /**
+ * In-process FIFO queue per lock path.
+ *
+ * The file lock serializes across processes, but most contention is between
+ * async tasks inside a single process. Same-process waiters queue on a promise
+ * chain instead of polling the lock file: no fs churn on the event loop, strict
+ * FIFO ordering, and no wait timeout is needed in-process because the holder is
+ * guaranteed to reach `finally` while the process lives. The `timeout` option
+ * therefore only bounds waiting on *other* processes; it assumes operations
+ * guarded by the lock cannot hang forever (e.g. git calls carry their own
+ * deadline).
+ */
+const inProcessTails = new Map<string, Promise<void>>();
+
+async function withInProcessQueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = inProcessTails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = prev.then(() => mine);
+  inProcessTails.set(key, tail);
+
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (inProcessTails.get(key) === tail) {
+      inProcessTails.delete(key);
+    }
+  }
+}
+
+/**
+ * Tracks locks held by the current async context. Same-process reentrant
+ * acquisition can never succeed (the file lock is not reentrant) and would
+ * deadlock the in-process queue, so fail fast instead.
+ */
+const heldLockPaths = new AsyncLocalStorage<ReadonlySet<string>>();
+
+/**
  * Acquire a file lock and execute a function
  *
  * @param lockName - Name of the lock (will be sanitized for filesystem)
@@ -154,30 +196,41 @@ export async function withFileLock<T>(
   ensureLocksDir(locksDir);
   const lockPath = getLockPath(locksDir, lockName);
 
-  const startTime = Date.now();
-  let currentDelay = retryDelay;
-
-  // Try to acquire lock with exponential backoff
-  while (true) {
-    if (tryAcquireLock(lockPath)) {
-      break;
-    }
-
-    // Check timeout
-    if (Date.now() - startTime > timeout) {
-      throw new Error(`Failed to acquire lock "${lockName}" within ${timeout}ms`);
-    }
-
-    // Wait and retry with exponential backoff
-    await sleep(currentDelay);
-    currentDelay = Math.min(currentDelay * 1.5, maxRetryDelay);
+  const held = heldLockPaths.getStore();
+  if (held?.has(lockPath)) {
+    throw new Error(`withFileLock("${lockName}") is not reentrant within the same process`);
   }
 
-  try {
-    return await fn();
-  } finally {
-    releaseLock(lockPath);
-  }
+  const nextHeld = new Set(held);
+  nextHeld.add(lockPath);
+  return heldLockPaths.run(nextHeld, () =>
+    withInProcessQueue(lockPath, async () => {
+      const startTime = Date.now();
+      let currentDelay = retryDelay;
+
+      // Try to acquire lock with exponential backoff
+      while (true) {
+        if (tryAcquireLock(lockPath)) {
+          break;
+        }
+
+        // Check timeout
+        if (Date.now() - startTime > timeout) {
+          throw new Error(`Failed to acquire lock "${lockName}" within ${timeout}ms`);
+        }
+
+        // Wait and retry with exponential backoff
+        await sleep(currentDelay);
+        currentDelay = Math.min(currentDelay * 1.5, maxRetryDelay);
+      }
+
+      try {
+        return await fn();
+      } finally {
+        releaseLock(lockPath);
+      }
+    })
+  );
 }
 
 /**

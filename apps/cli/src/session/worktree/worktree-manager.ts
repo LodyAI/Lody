@@ -100,6 +100,11 @@ type ReusableBaseBranch = {
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_NAME = 'Lody Archive';
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_EMAIL = 'archive@lody.ai';
 
+// Ceiling for any single git invocation. Must stay well below the file-lock
+// staleness window (30 min) so a stalled git process releases the repo lock
+// by failing instead of looking like a live holder.
+const GIT_OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * Per-repo file lock for git operations (cross-process safe)
  */
@@ -297,6 +302,16 @@ export class WorktreeManager {
 
       let stdout = '';
       let stderr = '';
+      let timedOut = false;
+
+      // Git has no deadline of its own for stalled network operations; without this a
+      // hung fetch/clone would pin the per-repo worktree lock until the file-lock
+      // staleness window frees it.
+      const timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, GIT_OPERATION_TIMEOUT_MS);
+      timeoutTimer.unref();
 
       // Use setEncoding to handle UTF-8 multibyte boundaries correctly
       // (e.g., non-ASCII branch names, file paths, user.name)
@@ -312,10 +327,16 @@ export class WorktreeManager {
       });
 
       child.on('error', (error) => {
+        clearTimeout(timeoutTimer);
         reject(mapGitSpawnError(error, cwd));
       });
 
       child.on('close', (code) => {
+        clearTimeout(timeoutTimer);
+        if (timedOut) {
+          reject(new Error(`git ${args.join(' ')} timed out after ${GIT_OPERATION_TIMEOUT_MS}ms`));
+          return;
+        }
         if (code !== 0) {
           const details = (stderr || stdout || '').trim();
           reject(new Error(details ? details : `git exited with code ${code}`));
