@@ -52,6 +52,14 @@ context/message-flow.md.
   Do not restore a model/avatar header or reserve a desktop avatar indent. Per-turn
   model, mode, reasoning, and other run configuration lives in the footer info control
   beside Copy; the popover is the detailed configuration surface.
+- **Turn duration has one owner per layout.** Desktop: `WorkedGroupHeader` when the turn
+  folds, else the footer action bar AFTER the buttons (`showDuration` encodes which).
+  Mobile: always the footer, BEFORE the buttons, ignoring `showDuration` — and
+  `WorkedGroupHeader` suppresses its own copy there, because both read the same
+  `resolveSessionHistoryDurationMs(message)` and would otherwise print an identical
+  "Worked for 12s" twice per turn. The mobile leading slot also reserves
+  `MOBILE_TURN_ACTION_LEADING_INSET_PX` so the copy button clears the session drawer's
+  edge-back strip (see ../mobile/AGENTS.md); it is layout, not decoration.
 - Virtua positions rows with `position:absolute; top:<cumulative measured height>`;
   stale measured heights make rows overlap. Keep `shift={false}`. `bufferSize` trades
   fast-scroll blanks against the number of still-resizing rows kept mounted.

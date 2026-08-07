@@ -2523,13 +2523,22 @@ const WorkedGroupHeader = ({
   onExpandedChange: (expanded: boolean) => void;
 }) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const durationUnitLabels: DurationUnitLabels = {
     hour: t('time.unitShort.hour', 'h'),
     minute: t('time.unitShort.minute', 'm'),
     second: t('time.unitShort.second', 's'),
   };
+  /* Mobile moves the turn duration to the footer action bar, where it also
+     keeps the copy button clear of the session drawer's left-edge back-swipe
+     strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
+     so keeping it here too would print the same "Worked for 12s" twice, a few
+     rows apart. The header falls back to its existing no-duration copy. */
+  const effectiveDurationMs = isMobile ? null : durationMs;
   const durationLabel =
-    durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
+    effectiveDurationMs === null
+      ? ''
+      : formatDurationCompact(effectiveDurationMs, durationUnitLabels);
   const label = durationLabel
     ? t('sessions.workedFor', {
         duration: durationLabel,
@@ -2698,6 +2707,19 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   );
 });
 
+/**
+ * Width reserved before the mobile assistant-turn action buttons, so the copy
+ * button always clears the session drawer's left-edge back-swipe strip
+ * (`EDGE_ZONE_PX` in `../mobile/mobile-edge-back-swipe`). The turn duration
+ * renders inside it; the reserved width is what makes the guarantee hold even
+ * when the duration is unknown.
+ *
+ * Kept as a local number rather than importing `EDGE_ZONE_PX`, which would pull
+ * the gesture module into the conversation renderer's import graph.
+ * `tests/assistant-turn-action-inset.test.ts` asserts the two stay in sync.
+ */
+export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
+
 const AssistantTurnFooter = ({
   message,
   sessionId,
@@ -2747,10 +2769,21 @@ const AssistantTurnFooter = ({
         locale: toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
       });
   const hasTurnConfigInfo = hasAssistantTurnConfigInfo(message);
+  /* Mobile shows the duration here for EVERY finished turn, ignoring
+     `showDuration`: `WorkedGroupHeader` drops it on mobile (it would otherwise
+     print the identical `resolveSessionHistoryDurationMs` value twice per turn),
+     so this footer is the single place the turn duration appears. */
+  const mobileDurationLabel =
+    isMobile && durationLabel
+      ? t('sessions.workedFor', {
+          duration: durationLabel,
+          defaultValue: 'Worked for {{duration}}',
+        })
+      : '';
   const hasActionBarContent =
     hasCopyableText ||
     completionTimestampLabel.length > 0 ||
-    (showDuration && durationLabel.length > 0 && !isMobile) ||
+    (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined;
 
@@ -2788,30 +2821,40 @@ const AssistantTurnFooter = ({
       {showFinishedMetadata && showActionBar ? (
         <div
           className={cn(
-            'flex flex-wrap items-center text-[11px] text-muted-foreground',
-            /* Mobile aligns the cluster to the TRAILING edge, desktop to the
-               leading one. The native session drawer owns a 48px left-edge
-               back-swipe strip, and no row inside the conversation `VList` can
-               paint above it (virtua sets `contain: strict`, making the list its
-               own stacking context — the composer's `z-40` trick does not reach
-               here). A leading-aligned copy button therefore lands inside that
-               strip and is all but untappable. The mobile row carries no
-               timestamp or duration, so the cluster is its only child and moving
-               it right costs no alignment. */
-            isMobile ? 'min-h-6 justify-end gap-1' : 'min-h-7 justify-start gap-2 px-2',
+            'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
+            isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2 px-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && isTurnHovered && 'opacity-100'
           )}
           data-assistant-turn-actions
         >
+          {/* Mobile leads with the turn duration, and that is load-bearing: the
+             native session drawer owns a left-edge back-swipe strip, and no row
+             inside the conversation `VList` can paint above it (virtua sets
+             `contain: strict`, so the list is its own stacking context and the
+             composer's `z-40` trick does not reach here). A leading copy button
+             lands inside that strip and is all but untappable, so this label is
+             what pushes the cluster clear of it. The reserved min-width holds
+             even when the duration is unknown and the text is empty.
+             Desktop keeps the duration AFTER the buttons (see below). */}
+          {isMobile ? (
+            <span
+              className="shrink-0 tabular-nums"
+              style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
+            >
+              {mobileDurationLabel}
+            </span>
+          ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
              interior padding would push the glyph 7px inside the answer text
              above. Pull the cluster back by that padding so the outermost glyph
              sits on the text's edge (and the inner one keeps the row gap to the
              timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. */}
+             render, the timestamp must stay on the plain gutter. Mobile pulls
+             only the trailing edge — its leading glyph aligns to the duration
+             label, not to the answer text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork ? (
-            <div className="-mx-[7px] flex items-center gap-0.5">
+            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
               {hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
