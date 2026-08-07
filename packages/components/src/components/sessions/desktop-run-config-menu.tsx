@@ -15,7 +15,9 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
@@ -393,7 +395,7 @@ export function DesktopRunConfigMenu({
   /* Plan / Fast. */
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
-    ? resolveOnOffConfigOptionEnabled(planSelector, configOptionValues?.[planSelector.configId])
+    ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
   const fastOn = fastSelector
@@ -585,7 +587,7 @@ export function DesktopRunConfigMenu({
             onToggle={() =>
               onConfigOptionChange?.(
                 planSelector.configId,
-                toggleOnOffConfigOptionValue(
+                togglePlanModeSelectorValue(
                   planSelector,
                   configOptionValues?.[planSelector.configId]
                 )

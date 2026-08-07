@@ -9,6 +9,8 @@ import {
   buildAcpSelectorOptions,
   buildAllConfigOptionSelectors,
   normalizeCodexReasoningEffortSelectors,
+  resolvePlanModeSelectorEnabled,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
 } from '../src/components/shared/acp-selector-options';
 
@@ -783,5 +785,70 @@ describe('buildAcpSelectorOptions', () => {
         selectedModelId: 'gpt-5.6-sol',
       })
     ).toEqual([customSelector]);
+  });
+});
+
+describe('plan mode selector value semantics', () => {
+  /* Upstream Codex publishes plan mode as `collaboration_mode`, a select over
+     `default` / `plan` — not the `on` / `off` pair the fast toggle uses. */
+  const collaborationModeSelector: AcpConfigOptionSelector = {
+    configId: 'collaboration_mode',
+    label: 'Collaboration mode',
+    category: 'collaboration_mode',
+    type: 'select',
+    currentValue: 'default',
+    options: [
+      { value: 'default', label: 'Default' },
+      { value: 'plan', label: 'Plan' },
+    ],
+  };
+  const onOffPlanSelector: AcpConfigOptionSelector = {
+    configId: 'plan-mode',
+    label: 'Plan mode',
+    category: 'plan-mode',
+    type: 'select',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+    ],
+  };
+  const booleanPlanSelector: AcpConfigOptionSelector = {
+    configId: 'plan-mode',
+    label: 'Plan mode',
+    category: 'plan-mode',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
+  };
+
+  it('reads collaboration_mode plan state from default/plan, not on/off', () => {
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, undefined)).toBe(false);
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'plan')).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'default')).toBe(false);
+  });
+
+  it('toggles collaboration_mode to a value the selector accepts', () => {
+    /* Regression: writing 'on' here is invalid for the selector, so the value
+       fell back to `currentValue` and the toggle never flipped. */
+    const enabled = togglePlanModeSelectorValue(collaborationModeSelector, undefined);
+    expect(enabled).toBe('plan');
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, enabled)).toBe(true);
+
+    const disabled = togglePlanModeSelectorValue(collaborationModeSelector, enabled);
+    expect(disabled).toBe('default');
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, disabled)).toBe(false);
+  });
+
+  it('keeps on/off and boolean plan selectors on their own semantics', () => {
+    const on = togglePlanModeSelectorValue(onOffPlanSelector, undefined);
+    expect(on).toBe('on');
+    expect(resolvePlanModeSelectorEnabled(onOffPlanSelector, on)).toBe(true);
+    expect(togglePlanModeSelectorValue(onOffPlanSelector, on)).toBe('off');
+
+    const checked = togglePlanModeSelectorValue(booleanPlanSelector, undefined);
+    expect(checked).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(booleanPlanSelector, checked)).toBe(true);
+    expect(togglePlanModeSelectorValue(booleanPlanSelector, checked)).toBe(false);
   });
 });

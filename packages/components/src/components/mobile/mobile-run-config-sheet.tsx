@@ -9,7 +9,9 @@ import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-lan
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
@@ -262,7 +264,7 @@ function MobileRunConfigSheetRows({
   /* ── Plan / Fast toggles ── */
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
-    ? resolveOnOffConfigOptionEnabled(planSelector, configOptionValues?.[planSelector.configId])
+    ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
   const fastOn = fastSelector
@@ -384,10 +386,7 @@ function MobileRunConfigSheetRows({
           onCheckedChange={() =>
             onConfigOptionChange?.(
               planSelector.configId,
-              toggleOnOffConfigOptionValue(
-                planSelector,
-                configOptionValues?.[planSelector.configId]
-              )
+              togglePlanModeSelectorValue(planSelector, configOptionValues?.[planSelector.configId])
             )
           }
         />

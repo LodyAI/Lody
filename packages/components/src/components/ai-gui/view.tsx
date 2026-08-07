@@ -2788,17 +2788,26 @@ const AssistantTurnFooter = ({
       {showFinishedMetadata && showActionBar ? (
         <div
           className={cn(
-            'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
-            isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2 px-2',
+            'flex flex-wrap items-center text-[11px] text-muted-foreground',
+            /* Mobile aligns the cluster to the TRAILING edge, desktop to the
+               leading one. The native session drawer owns a 48px left-edge
+               back-swipe strip, and no row inside the conversation `VList` can
+               paint above it (virtua sets `contain: strict`, making the list its
+               own stacking context — the composer's `z-40` trick does not reach
+               here). A leading-aligned copy button therefore lands inside that
+               strip and is all but untappable. The mobile row carries no
+               timestamp or duration, so the cluster is its only child and moving
+               it right costs no alignment. */
+            isMobile ? 'min-h-6 justify-end gap-1' : 'min-h-7 justify-start gap-2 px-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && isTurnHovered && 'opacity-100'
           )}
           data-assistant-turn-actions
         >
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
-             interior padding would push the glyph 7px right of the answer text
-             above. Pull the cluster back by that padding so the first glyph sits
-             on the text's left edge (and the last one keeps the row gap to the
+             interior padding would push the glyph 7px inside the answer text
+             above. Pull the cluster back by that padding so the outermost glyph
+             sits on the text's edge (and the inner one keeps the row gap to the
              timestamp). Keep it on the cluster, not the row: when no buttons
              render, the timestamp must stay on the plain gutter. */}
           {hasCopyableText || hasTurnConfigInfo || onFork ? (

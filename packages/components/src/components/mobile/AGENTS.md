@@ -50,9 +50,11 @@ Two families of swipe-back, split by how the surface animates:
   That `z-40` trick does NOT transfer to anything inside the message list:
   virtua's `VList` sets `contain: strict`, so the list is its own stacking
   context and no row can paint above the strip. A left-edge control in a row can
-  only be rescued by insetting it past `EDGE_ZONE_PX`. Known-unfixed case: the
-  assistant turn action bar's copy button (`data-assistant-turn-actions` in
-  `../ai-gui/view.tsx`) sits at x=24..52, so only its rightmost 4px is tappable.
+  only be rescued by moving it out of the strip. The assistant turn action bar
+  (`data-assistant-turn-actions` in `../ai-gui/view.tsx`) does that by aligning
+  its copy/config/fork cluster `justify-end` on mobile (desktop keeps
+  `justify-start`); left-aligned it sat at x=24..52 with only ~4px tappable.
+  Keep it trailing-aligned, and do not add another leading control to a row.
   Full-screen right drawers need `border-l-0!`; plain `border-0` loses to
   Vaul UI's `data-[vaul-drawer-direction=right]:border-l` specificity.
 

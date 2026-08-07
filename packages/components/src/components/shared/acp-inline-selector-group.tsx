@@ -12,7 +12,9 @@ import {
   CLAUDE_FAST_MODE_CONFIG_ID,
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
 } from './acp-selector-options';
 import { AcpSessionSelect, type AcpSessionSelectOption } from './acp-session-select';
 import { getModeIcon, getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
@@ -158,7 +160,7 @@ const renderPlanModeToggle = (
     onChange?: (configId: string, value: AcpConfigOptionValue) => void;
   }
 ) => {
-  const value = resolveOnOffConfigOptionEnabled(selector, values?.[selector.configId]);
+  const value = resolvePlanModeSelectorEnabled(selector, values?.[selector.configId]);
   const disabled = !onChange;
   const displayLabel = 'Plan';
 
@@ -174,7 +176,7 @@ const renderPlanModeToggle = (
             onClick={() =>
               onChange?.(
                 selector.configId,
-                toggleOnOffConfigOptionValue(selector, values?.[selector.configId])
+                togglePlanModeSelectorValue(selector, values?.[selector.configId])
               )
             }
             className={cn(

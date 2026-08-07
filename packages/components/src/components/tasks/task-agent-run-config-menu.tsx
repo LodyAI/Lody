@@ -23,7 +23,9 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
@@ -300,7 +302,7 @@ export function TaskAgentRunConfigMenu({
 
   const planSelector = ordered.planModeSelectors[0];
   const planOn = planSelector
-    ? resolveOnOffConfigOptionEnabled(
+    ? resolvePlanModeSelectorEnabled(
         planSelector,
         value?.configOptionValues?.[planSelector.configId]
       )
@@ -727,7 +729,7 @@ export function TaskAgentRunConfigMenu({
             onToggle={() =>
               patchConfigOption(
                 planSelector.configId,
-                toggleOnOffConfigOptionValue(
+                togglePlanModeSelectorValue(
                   planSelector,
                   value.configOptionValues?.[planSelector.configId]
                 )
