@@ -288,14 +288,14 @@ describe('buildAcpSelectorOptions', () => {
               ],
             },
             {
-              id: 'plan-mode',
-              name: 'Plan mode',
-              category: 'plan-mode',
+              id: 'collaboration_mode',
+              name: 'Collaboration mode',
+              category: 'collaboration_mode',
               type: 'select',
-              currentValue: 'off',
+              currentValue: 'default',
               options: [
-                { value: 'off', name: 'Off' },
-                { value: 'on', name: 'On' },
+                { value: 'default', name: 'Default' },
+                { value: 'plan', name: 'Plan' },
               ],
             },
           ],
@@ -309,7 +309,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'plan-mode',
+      'collaboration_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.5');
@@ -789,8 +789,9 @@ describe('buildAcpSelectorOptions', () => {
 });
 
 describe('plan mode selector value semantics', () => {
-  /* Upstream Codex publishes plan mode as `collaboration_mode`, a select over
-     `default` / `plan` — not the `on` / `off` pair the fast toggle uses. */
+  /* Codex is the only agent that carries plan mode as a config option, and it
+     publishes exactly one shape: a `collaboration_mode` select over
+     `default` / `plan` — never the `on` / `off` pair the fast toggle uses. */
   const collaborationModeSelector: AcpConfigOptionSelector = {
     configId: 'collaboration_mode',
     label: 'Collaboration mode',
@@ -802,33 +803,14 @@ describe('plan mode selector value semantics', () => {
       { value: 'plan', label: 'Plan' },
     ],
   };
-  const onOffPlanSelector: AcpConfigOptionSelector = {
-    configId: 'plan-mode',
-    label: 'Plan mode',
-    category: 'plan-mode',
-    type: 'select',
-    currentValue: 'off',
-    options: [
-      { value: 'off', label: 'Off' },
-      { value: 'on', label: 'On' },
-    ],
-  };
-  const booleanPlanSelector: AcpConfigOptionSelector = {
-    configId: 'plan-mode',
-    label: 'Plan mode',
-    category: 'plan-mode',
-    type: 'boolean',
-    currentValue: false,
-    options: [],
-  };
 
-  it('reads collaboration_mode plan state from default/plan, not on/off', () => {
+  it('reads plan state from default/plan, not on/off', () => {
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, undefined)).toBe(false);
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'plan')).toBe(true);
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'default')).toBe(false);
   });
 
-  it('toggles collaboration_mode to a value the selector accepts', () => {
+  it('toggles to a value the selector accepts', () => {
     /* Regression: writing 'on' here is invalid for the selector, so the value
        fell back to `currentValue` and the toggle never flipped. */
     const enabled = togglePlanModeSelectorValue(collaborationModeSelector, undefined);
@@ -840,15 +822,12 @@ describe('plan mode selector value semantics', () => {
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, disabled)).toBe(false);
   });
 
-  it('keeps on/off and boolean plan selectors on their own semantics', () => {
-    const on = togglePlanModeSelectorValue(onOffPlanSelector, undefined);
-    expect(on).toBe('on');
-    expect(resolvePlanModeSelectorEnabled(onOffPlanSelector, on)).toBe(true);
-    expect(togglePlanModeSelectorValue(onOffPlanSelector, on)).toBe('off');
-
-    const checked = togglePlanModeSelectorValue(booleanPlanSelector, undefined);
-    expect(checked).toBe(true);
-    expect(resolvePlanModeSelectorEnabled(booleanPlanSelector, checked)).toBe(true);
-    expect(togglePlanModeSelectorValue(booleanPlanSelector, checked)).toBe(false);
+  it('resolves an unrecognized stored value through the selector currentValue', () => {
+    const planCurrent: AcpConfigOptionSelector = {
+      ...collaborationModeSelector,
+      currentValue: 'plan',
+    };
+    expect(resolvePlanModeSelectorEnabled(planCurrent, 'bogus')).toBe(true);
+    expect(togglePlanModeSelectorValue(planCurrent, 'bogus')).toBe('default');
   });
 });
