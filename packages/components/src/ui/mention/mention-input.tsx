@@ -14,7 +14,7 @@ import {
   removeMentionText,
 } from './mention-input-core';
 import { MentionHighlighter } from './mention-highlighter';
-import { findTriggerCandidates } from './mention-trigger';
+import { findTriggerCandidates, isMentionNavigationPrefix } from './mention-trigger';
 import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
@@ -599,19 +599,57 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         context.filterStore.search = '';
       }
 
+      function getTriggerSpan() {
+        const triggerIndex = input.value.lastIndexOf(context.trigger, cursorPosition);
+        if (triggerIndex === -1) return null;
+        return {
+          triggerIndex,
+          search: input.value.slice(triggerIndex + context.trigger.length, cursorPosition),
+        };
+      }
+
+      // `highlightedItem` can be a partial snapshot created on hover, so read
+      // navigation data off the registered item instead.
+      function getRegisteredItem(value: string) {
+        return context.getEnabledItems().find((item) => item.value === value) ?? null;
+      }
+
+      /** Descend into the highlighted navigation item, if it is one. */
+      function tryNavigateInto() {
+        if (hasSelection || event.shiftKey) return false;
+        const highlighted = context.highlightedItem;
+        if (!highlighted) return false;
+        const registered = getRegisteredItem(highlighted.value);
+        if (!registered?.navigateText) return false;
+        const span = getTriggerSpan();
+        if (!span) return false;
+        context.onMentionAdd(registered.value, span.triggerIndex);
+        return true;
+      }
+
+      /** Pop a `@ns:` category prefix back to the bare trigger in one keystroke. */
+      function tryNavigateBack() {
+        if (hasSelection || event.shiftKey) return false;
+        const span = getTriggerSpan();
+        if (!span || !isMentionNavigationPrefix(span.search)) return false;
+        const caret = span.triggerIndex + context.trigger.length;
+        const nextValue = input.value.slice(0, caret) + input.value.slice(cursorPosition);
+        applyInputValue(nextValue, caret);
+        context.filterStore.search = '';
+        context.onHighlightedItemChange(null);
+        requestAnimationFrame(() => context.onItemsFilter());
+        return true;
+      }
+
       switch (event.key) {
         case 'Enter': {
-          const lastTriggerIndex = input.value.lastIndexOf(context.trigger, cursorPosition);
-          if (lastTriggerIndex === -1) {
+          const span = getTriggerSpan();
+          if (!span) {
             onMenuClose();
             return;
           }
 
-          const searchText = input.value.slice(
-            lastTriggerIndex + context.trigger.length,
-            cursorPosition
-          );
-
+          const searchText = span.search;
           const exactMatchItem =
             searchText.length > 0
               ? context.getEnabledItems().find((item) => item.label === searchText)
@@ -624,17 +662,37 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           }
 
           event.preventDefault();
-          const shouldCommitDirectory =
-            selectedItem.value.endsWith('/') && selectedItem.label === searchText;
+          // Enter on a navigation item the user has already typed out in full
+          // commits it rather than descending again: typing `@src/` then Enter
+          // inserts `@src`.
+          const registeredItem = getRegisteredItem(selectedItem.value) ?? selectedItem;
+          const shouldCommit =
+            Boolean(registeredItem.navigateText) && registeredItem.label === searchText;
 
-          context.onMentionAdd(selectedItem.value, lastTriggerIndex, {
-            commit: shouldCommitDirectory,
+          context.onMentionAdd(selectedItem.value, span.triggerIndex, {
+            commit: shouldCommit,
           });
           break;
         }
         case 'Tab': {
+          if (tryNavigateInto()) {
+            event.preventDefault();
+            break;
+          }
           if (context.modal) event.preventDefault();
           onMenuClose();
+          break;
+        }
+        case 'ArrowRight': {
+          if (tryNavigateInto()) event.preventDefault();
+          break;
+        }
+        case 'ArrowLeft': {
+          if (tryNavigateBack()) event.preventDefault();
+          break;
+        }
+        case 'Backspace': {
+          if (tryNavigateBack()) event.preventDefault();
           break;
         }
         case 'ArrowDown': {

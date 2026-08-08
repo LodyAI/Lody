@@ -307,11 +307,18 @@ function FileMentionMenu({
           <div className="scrollbar-pro max-h-[260px] overflow-auto overflow-x-auto">
             {fileIndexed.map((item, index) => {
               const token = item.token;
+              const isDirectory = item.kind === 'dir';
               return (
                 <MentionItem
                   key={token}
                   value={token}
                   label={token}
+                  kind={isDirectory ? 'dir' : 'file'}
+                  // Selecting a directory descends into it; committing one
+                  // (Enter on an exact match) drops the trailing slash so the
+                  // text reads `@src/components`.
+                  navigateText={isDirectory ? `@${token}` : undefined}
+                  insertText={isDirectory ? `@${token.replace(/\/+$/, '')}` : undefined}
                   onMentionSelect={() => {
                     captureMentionFileSelect(postHog, analyticsBase, {
                       kind: item.kind,

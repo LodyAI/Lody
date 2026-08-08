@@ -40,11 +40,36 @@ interface MentionItemProps
 
   /** Called when this item is committed as a mention by mouse or keyboard. */
   onMentionSelect?: () => void;
+
+  /**
+   * Literal text written into the input when this item is committed, replacing
+   * the whole span from the trigger to the caret. Must carry its own leading
+   * marker. Defaults to `${trigger}${label}`.
+   */
+  insertText?: string;
+
+  /**
+   * Makes this item a navigation step: selecting it rewrites the trigger span
+   * to this text and keeps the menu open, without recording a mention.
+   */
+  navigateText?: string;
+
+  /** Mention kind recorded on the committed range. */
+  kind?: ItemData["kind"];
 }
 
 const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
   (props, forwardedRef) => {
-    const { value, label: labelProp, disabled = false, onMentionSelect, ...itemProps } = props;
+    const {
+      value,
+      label: labelProp,
+      disabled = false,
+      onMentionSelect,
+      insertText,
+      navigateText,
+      kind,
+      ...itemProps
+    } = props;
     const context = useMentionContext(ITEM_NAME);
     const [itemNode, setItemNode] = React.useState<ItemElement | null>(null);
     const itemNodeRef = React.useRef<ItemElement | null>(null);
@@ -83,8 +108,21 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
         label,
         disabled: isDisabled,
         onMentionSelect: handleMentionSelect,
+        insertText,
+        navigateText,
+        kind,
       });
-    }, [label, value, isDisabled, handleMentionSelect, itemNode, context.onItemRegister]);
+    }, [
+      label,
+      value,
+      isDisabled,
+      handleMentionSelect,
+      itemNode,
+      context.onItemRegister,
+      insertText,
+      navigateText,
+      kind,
+    ]);
 
     const isVisible = context.getIsItemVisible(value);
 

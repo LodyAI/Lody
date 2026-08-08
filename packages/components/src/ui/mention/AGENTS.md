@@ -4,6 +4,20 @@ Shared mention primitive used by composer autocomplete surfaces.
 
 ## Invariants
 
+- Inserted text comes from the item, not from the trigger. `MentionItem`'s
+  `insertText` (commit) and `navigateText` (drill-down) replace the whole span
+  from the trigger character to the caret, so each carries its own leading
+  marker; without them the primitive falls back to `${trigger}${label}`.
+- An item with `navigateText` is a navigation step: selecting it rewrites the
+  trigger span, keeps the menu open, and records neither a mention range nor a
+  selected value. `onMentionAdd(..., { commit: true })` overrides that and
+  commits through `insertText`. Directory drill-down is one caller of this
+  contract, not a primitive special case — the primitive must not infer
+  navigation from a trailing `/`.
+- Backspace/ArrowLeft pop a `<namespace>:` drill-down prefix back to the bare
+  trigger in one keystroke (`isMentionNavigationPrefix`); path drill-downs are
+  excluded so Backspace still walks a path one character at a time.
+  Tab/ArrowRight descend into a highlighted navigation item.
 - Desktop `MentionContent` is caret-anchored vertically but horizontally constrained
   to the textarea range via its virtual collision boundary and
   `--mention-input-width`.
@@ -27,4 +41,4 @@ Shared mention primitive used by composer autocomplete surfaces.
   handles drawer-safe portal placement.
 - `mention-item.tsx`, `mention-label.tsx`, `mention-highlighter.tsx`, and
   `mention-trigger.ts` provide row selection, accessibility label, inline
-  highlighting, and trigger parsing helpers.
+  highlighting, and trigger/drill-down-prefix parsing helpers.
