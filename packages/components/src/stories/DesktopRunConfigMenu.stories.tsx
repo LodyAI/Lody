@@ -91,13 +91,13 @@ const selectors: AcpConfigOptionSelector[] = [
   },
   {
     type: 'select',
-    configId: 'collaboration_mode',
-    category: 'collaboration_mode',
-    label: 'Collaboration mode',
-    currentValue: 'default',
+    configId: 'plan-mode',
+    category: 'plan-mode',
+    label: 'Plan mode',
+    currentValue: 'off',
     options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
     ],
   },
   {

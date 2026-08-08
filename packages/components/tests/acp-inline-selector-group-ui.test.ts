@@ -25,14 +25,13 @@ const selectors: AcpConfigOptionSelector[] = [
     ],
   },
   {
-    configId: 'collaboration_mode',
-    label: 'Collaboration mode',
-    category: 'collaboration_mode',
+    configId: 'plan-mode',
+    label: 'Plan Mode',
     type: 'select',
-    currentValue: 'default',
+    currentValue: 'off',
     options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
     ],
   },
 ];
@@ -83,14 +82,14 @@ describe('AcpBottomBarModeSelector UI', () => {
     });
   }
 
-  it('uses highlighted active styling for fast mode and labels the plan toggle Plan', () => {
-    renderSelector({ 'fast-mode': 'on', collaboration_mode: 'plan' });
+  it('uses highlighted active styling for fast mode and shortens Plan Mode to Plan', () => {
+    renderSelector({ 'fast-mode': 'on', 'plan-mode': 'on' });
 
     const fastModeButton = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Fast Mode"]'
     );
     const planModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Collaboration mode"]'
+      'button[aria-label="Plan Mode"]'
     );
 
     expect(fastModeButton?.className).toContain('bg-primary/[0.12]');

@@ -6,6 +6,8 @@ import {
   CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
   CODEX_COLLABORATION_MODE_PLAN_VALUE,
   CODEX_FAST_MODE_CONFIG_ID,
+  CODEX_PLAN_MODE_CONFIG_ID,
+  CONFIG_OPTION_OFF_VALUE,
   CONFIG_OPTION_ON_VALUE,
 } from '../src/components/shared/acp-selector-options';
 import {
@@ -81,27 +83,31 @@ describe('codex plan decision helpers', () => {
     expect(findLatestCompletedCodexProposedPlan(history)).toBeNull();
   });
 
-  it('detects and disables Codex collaboration plan mode', () => {
+  it('detects and disables the Codex plan-mode config option', () => {
     const config = {
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+      [CODEX_PLAN_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
       [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
       reasoning_effort: 'low',
     };
 
     expect(isCodexPlanModeEnabled(config)).toBe(true);
     expect(disableCodexPlanMode(config)).toEqual({
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+      [CODEX_PLAN_MODE_CONFIG_ID]: CONFIG_OPTION_OFF_VALUE,
       [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
       reasoning_effort: 'low',
     });
   });
 
-  it('reports plan mode off when collaboration mode is absent or default', () => {
-    expect(isCodexPlanModeEnabled({})).toBe(false);
-    expect(
-      isCodexPlanModeEnabled({
-        [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
-      })
-    ).toBe(false);
+  it('detects and disables upstream Codex collaboration plan mode', () => {
+    const config = {
+      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+      [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
+    };
+
+    expect(isCodexPlanModeEnabled(config)).toBe(true);
+    expect(disableCodexPlanMode(config)).toEqual({
+      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+      [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
+    });
   });
 });

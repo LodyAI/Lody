@@ -160,12 +160,9 @@ describe('agent run config selection', () => {
     });
   });
 
-  it('rejects a plan-mode option that is not the collaboration_mode select', () => {
-    /* Codex publishes exactly one plan shape. An on/off option under some other
-       id is not plan mode, so the request must fail loudly rather than run with
-       planning silently off. */
-    const other = codexCapability();
-    other.configOptions = other.configOptions?.map((option) =>
+  it('keeps the legacy Codex plan-mode toggle compatible', () => {
+    const legacy = codexCapability();
+    legacy.configOptions = legacy.configOptions?.map((option) =>
       option.id === 'collaboration_mode'
         ? {
             ...option,
@@ -179,9 +176,9 @@ describe('agent run config selection', () => {
           }
         : option
     );
-    expect(() => resolveAgentRunConfigSelection({ planMode: true }, other)).toThrow(
-      'does not offer a plan mode'
-    );
+    expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({
+      configOptionValues: { 'plan-mode': 'on' },
+    });
   });
 
   it('selects the plan permission mode for agents without a plan toggle', () => {
