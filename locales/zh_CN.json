@@ -3293,6 +3293,16 @@
         "label": "命令",
         "hint": "Agent 命令，会替换整条输入"
       }
+    },
+    "menu": {
+      "back": "返回",
+      "noResults": "没有结果",
+      "loading": "加载中…"
+    },
+    "file": {
+      "loadError": "加载文件列表失败。",
+      "truncatedGithub": "仓库过大，GitHub 返回的文件列表被截断。",
+      "truncatedLocal": "项目过大，本地文件列表被截断。"
     }
   }
 }

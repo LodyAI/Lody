@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
+import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
@@ -13,10 +14,13 @@ import {
   type MentionSurface,
 } from '@/components/mentions/mention-analytics';
 import {
+  buildItemSuggestions,
+  getIssuePrFuseOptions,
   IssuePrMentionHydrator,
   IssuePrMentionMenu,
   IssuePrMentionTitleHint,
   useKnownIssuePrItems,
+  type ItemSuggestion as IssuePrSuggestion,
 } from '@/components/mentions/issue-pr-hash-mention';
 import {
   buildPathSuggestions,
@@ -26,6 +30,13 @@ import {
   hydrateFileMentionsFromText,
   type PathSuggestion,
 } from '@/components/mentions/file-at-mention';
+import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
+import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
+import {
+  buildMentionFileIndex,
+  useMentionCategories,
+  type MentionCategorySources,
+} from '@/components/mentions/mention-registry';
 import {
   buildLazyDirectoryToken,
   type MentionFileDataState,
@@ -38,6 +49,7 @@ import {
   SkillMentionMenu,
   getAllowedSkillMentionDirs,
   type SkillMentionAgent,
+  type SkillMentionItem,
   type SkillMentionMenuPlacement,
   useMentionProjectSkills,
 } from '@/components/mentions/mention-skill-source';
@@ -351,6 +363,194 @@ function FileMentionMenu({
 }
 
 // ============================================================================
+// Two-level `@` menu
+// ============================================================================
+
+/**
+ * Builds the mention registry from the composer's already-fetched data and
+ * renders the single `@` menu. Lives inside `<Mention>` so Fuse loading stays
+ * keyed to the menu actually being open, and sits behind `twoLevelMentions`
+ * while the per-trigger menus remain the default.
+ */
+function TwoLevelMentionMenu({
+  fileData,
+  fileSourceKind,
+  enableFileMentions,
+  onLazyDirectoryOpen,
+  enableIssueMentions,
+  repoFullName,
+  issuePrData,
+  enableSkillMentions,
+  skillItems,
+  skillState,
+  allowedSkillDirs,
+  enableCommandMentions,
+  availableCommands,
+}: {
+  fileData: MentionFileDataState;
+  fileSourceKind: MentionFileSourceKind;
+  enableFileMentions: boolean;
+  onLazyDirectoryOpen?: (directoryId: string) => void;
+  enableIssueMentions: boolean;
+  repoFullName?: string;
+  issuePrData: ReturnType<typeof useKnownIssuePrItems>['issuePrData'];
+  enableSkillMentions: boolean;
+  skillItems: SkillMentionItem[];
+  skillState: { status: string; error?: string };
+  allowedSkillDirs: ReadonlySet<string> | null;
+  enableCommandMentions: boolean;
+  availableCommands?: AcpCommandSummary[];
+}) {
+  const context = useMentionContext('TwoLevelMentionMenu');
+  const { t } = useTranslation();
+  const active = context.open;
+
+  const fileIndex = React.useMemo(
+    () =>
+      enableFileMentions ? buildMentionFileIndex(fileData.entry, buildLazyDirectoryToken) : null,
+    [enableFileMentions, fileData.entry]
+  );
+  const fileFuseCtor = useMentionFuseCtor<PathSuggestion>(active && fileIndex !== null);
+  const fileFuse = React.useMemo(() => {
+    if (!fileFuseCtor || !fileIndex) return null;
+    try {
+      return new fileFuseCtor(fileIndex.allSuggestions, getFuseOptions());
+    } catch {
+      return null;
+    }
+  }, [fileFuseCtor, fileIndex]);
+
+  const issuePrSuggestions = React.useMemo(
+    () =>
+      enableIssueMentions && issuePrData.entry ? buildItemSuggestions(issuePrData.entry.items) : [],
+    [enableIssueMentions, issuePrData.entry]
+  );
+  const issuePrFuseCtor = useMentionFuseCtor<IssuePrSuggestion>(
+    active && issuePrSuggestions.length > 0
+  );
+  const createIssuePrFuse = React.useCallback(
+    (list: IssuePrSuggestion[]) => {
+      if (!issuePrFuseCtor || list.length === 0) return null;
+      try {
+        return new issuePrFuseCtor(list, getIssuePrFuseOptions());
+      } catch {
+        return null;
+      }
+    },
+    [issuePrFuseCtor]
+  );
+
+  const fileSource = React.useMemo<MentionCategorySources['file']>(
+    () => ({
+      enabled: enableFileMentions,
+      status:
+        fileData.status === 'error'
+          ? 'error'
+          : fileData.status === 'loading' && !fileData.entry
+            ? 'loading'
+            : 'ready',
+      message:
+        fileData.status === 'error'
+          ? (fileData.error ?? t('mention.file.loadError', 'Failed to load files.'))
+          : undefined,
+      notice: fileData.entry?.truncated
+        ? fileSourceKind === 'github'
+          ? t(
+              'mention.file.truncatedGithub',
+              'Repo is very large; GitHub returned a truncated file list.'
+            )
+          : t(
+              'mention.file.truncatedLocal',
+              'Project is very large; local file list was truncated.'
+            )
+        : undefined,
+      index: fileIndex,
+      fuse: fileFuse,
+    }),
+    [enableFileMentions, fileData, fileFuse, fileIndex, fileSourceKind, t]
+  );
+
+  const issuePrSource = React.useMemo<MentionCategorySources['issuePr']>(
+    () => ({
+      enabled: enableIssueMentions,
+      status:
+        issuePrData.status === 'error'
+          ? 'error'
+          : issuePrData.status === 'loading' && !issuePrData.entry
+            ? 'loading'
+            : 'ready',
+      message: !repoFullName
+        ? t('mention.issuePr.selectRepo', 'Select a repo to mention issues/PRs.')
+        : issuePrData.status === 'error'
+          ? (issuePrData.error ?? t('mention.issuePr.loadError', 'Failed to load issues and PRs.'))
+          : undefined,
+      suggestions: issuePrSuggestions,
+      createFuse: createIssuePrFuse,
+    }),
+    [createIssuePrFuse, enableIssueMentions, issuePrData, issuePrSuggestions, repoFullName, t]
+  );
+
+  const skillSource = React.useMemo<MentionCategorySources['skill']>(
+    () => ({
+      enabled: enableSkillMentions,
+      status:
+        skillState.status === 'error' && skillItems.length === 0
+          ? 'error'
+          : skillState.status === 'loading' && skillItems.length === 0
+            ? 'loading'
+            : 'ready',
+      message:
+        skillState.status === 'error' && skillItems.length === 0
+          ? (skillState.error ??
+            t('workspace.projects.skills.mention.error', 'Failed to load skills.'))
+          : undefined,
+      items: skillItems,
+      allowedDirs: allowedSkillDirs,
+    }),
+    [allowedSkillDirs, enableSkillMentions, skillItems, skillState, t]
+  );
+
+  const commandSource = React.useMemo<MentionCategorySources['command']>(
+    () => ({ enabled: enableCommandMentions, commands: availableCommands ?? [] }),
+    [availableCommands, enableCommandMentions]
+  );
+
+  const categories = useMentionCategories(
+    React.useMemo(
+      () => ({
+        file: fileSource,
+        issuePr: issuePrSource,
+        skill: skillSource,
+        command: commandSource,
+      }),
+      [commandSource, fileSource, issuePrSource, skillSource]
+    )
+  );
+
+  // Ask the provider to list a directory the user has drilled into but that was
+  // never expanded, so the second level fills in instead of showing nothing.
+  const requestedLazyDirectoriesRef = React.useRef<Set<string>>(new Set());
+  const lazyDirectoryIdByToken = React.useMemo(() => {
+    const ids = new Map<string, string>();
+    for (const entry of fileData.entry?.lazyDirectories ?? []) {
+      const token = buildLazyDirectoryToken(entry.path);
+      if (token) ids.set(token, entry.directoryId);
+    }
+    return ids;
+  }, [fileData.entry]);
+  const search = context.filterStore.search;
+  React.useEffect(() => {
+    if (!active || !onLazyDirectoryOpen) return;
+    const directoryId = lazyDirectoryIdByToken.get(search.trim());
+    if (!directoryId || requestedLazyDirectoriesRef.current.has(directoryId)) return;
+    requestedLazyDirectoriesRef.current.add(directoryId);
+    onLazyDirectoryOpen(directoryId);
+  }, [active, lazyDirectoryIdByToken, onLazyDirectoryOpen, search]);
+
+  return <MentionTwoLevelMenu categories={categories} />;
+}
+
+// ============================================================================
 // Hydrators
 // ============================================================================
 
@@ -420,6 +620,11 @@ export interface CombinedMentionTextareaProps extends Omit<
   mentionSurface?: MentionSurface;
   /** `$` menu placement; landing uses caret/default positioning. */
   skillMentionPlacement?: SkillMentionMenuPlacement;
+  /**
+   * Route every mention type through the single `@` two-level menu instead of
+   * the per-type triggers. `/` stays a direct route to commands either way.
+   */
+  twoLevelMentions?: boolean;
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
@@ -443,6 +648,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       skillAgent,
       mentionSurface = 'unknown',
       skillMentionPlacement,
+      twoLevelMentions = false,
       value,
       onValueChange,
       containerClassName,
@@ -619,6 +825,13 @@ export const CombinedMentionTextarea = React.forwardRef<
     const isSlashOnly = !value || /^\/\S*$/.test(value);
     const triggers = React.useMemo(() => {
       const t: string[] = [];
+      // The two-level menu reaches every type through `@`; `/` survives as the
+      // one exception because a slash command must own the whole prompt.
+      if (twoLevelMentions) {
+        if (enableFileMentions || enableIssueMentions || enableSkillMentions) t.push('@');
+        if (enableCommandMentions && isSlashOnly) t.push('/');
+        return t;
+      }
       if (enableFileMentions) t.push('@');
       if (enableIssueMentions) t.push('#');
       if (enableSkillMentions) t.push(SKILL_MENTION_TRIGGER);
@@ -630,6 +843,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableSkillMentions,
       enableCommandMentions,
       isSlashOnly,
+      twoLevelMentions,
     ]);
 
     if (!enableMentions) {
@@ -702,32 +916,52 @@ export const CombinedMentionTextarea = React.forwardRef<
           className={cn('resize-none', className)}
           {...props}
         />
-        <FileMentionMenu
-          sourceKind={fileSourceKind}
-          fileData={fileData}
-          onLazyDirectoryOpen={handleLazyDirectoryOpen}
-          surface={mentionSurface}
-        />
-        {enableIssueMentions ? (
-          <IssuePrMentionMenu
+        {twoLevelMentions ? (
+          <TwoLevelMentionMenu
+            fileData={fileData}
+            fileSourceKind={fileSourceKind}
+            enableFileMentions={enableFileMentions}
+            onLazyDirectoryOpen={handleLazyDirectoryOpen}
+            enableIssueMentions={enableIssueMentions}
             repoFullName={githubRepoFullName}
-            isPublic={githubRepoIsPublic}
             issuePrData={issuePrData}
-            surface={mentionSurface}
-          />
-        ) : null}
-        {enableCommandMentions && availableCommands ? (
-          <CommandSlashMentionMenu commands={availableCommands} surface={mentionSurface} />
-        ) : null}
-        {enableSkillMentions ? (
-          <SkillMentionMenu
+            enableSkillMentions={enableSkillMentions}
             skillItems={skillItems}
-            status={skillState.status}
-            error={skillState.error}
-            allowedDirs={allowedSkillDirs}
-            placement={skillMentionPlacement}
+            skillState={skillState}
+            allowedSkillDirs={allowedSkillDirs}
+            enableCommandMentions={enableCommandMentions}
+            availableCommands={availableCommands}
           />
-        ) : null}
+        ) : (
+          <>
+            <FileMentionMenu
+              sourceKind={fileSourceKind}
+              fileData={fileData}
+              onLazyDirectoryOpen={handleLazyDirectoryOpen}
+              surface={mentionSurface}
+            />
+            {enableIssueMentions ? (
+              <IssuePrMentionMenu
+                repoFullName={githubRepoFullName}
+                isPublic={githubRepoIsPublic}
+                issuePrData={issuePrData}
+                surface={mentionSurface}
+              />
+            ) : null}
+            {enableCommandMentions && availableCommands ? (
+              <CommandSlashMentionMenu commands={availableCommands} surface={mentionSurface} />
+            ) : null}
+            {enableSkillMentions ? (
+              <SkillMentionMenu
+                skillItems={skillItems}
+                status={skillState.status}
+                error={skillState.error}
+                allowedDirs={allowedSkillDirs}
+                placement={skillMentionPlacement}
+              />
+            ) : null}
+          </>
+        )}
       </Mention>
     );
   }

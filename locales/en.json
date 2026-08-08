@@ -3295,6 +3295,16 @@
         "label": "Commands",
         "hint": "Agent commands; replaces the whole prompt"
       }
+    },
+    "menu": {
+      "back": "Back",
+      "noResults": "No results",
+      "loading": "Loading…"
+    },
+    "file": {
+      "loadError": "Failed to load files.",
+      "truncatedGithub": "Repo is very large; GitHub returned a truncated file list.",
+      "truncatedLocal": "Project is very large; local file list was truncated."
     }
   }
 }

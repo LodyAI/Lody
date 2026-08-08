@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { AcpCommandSummary } from '@lody/shared';
 import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
 import {
+  buildPathSuggestions,
   getSuggestions,
   type FuseInstance,
   type PathSuggestion,
@@ -66,6 +67,12 @@ export type MentionCategory = {
   id: MentionCategoryId;
   /** The `<namespace>:` segment of the drill-down prefix. */
   namespace: string;
+  /**
+   * A trigger character that opens this category directly, bypassing the
+   * category list. Only `/` keeps one: a slash command must own the whole
+   * prompt, so it never nests under a category.
+   */
+  directTrigger?: string;
   label: string;
   hint: string;
   icon: MentionIcon;
@@ -156,6 +163,29 @@ export function selectMentionMenuView(
   };
 }
 
+/**
+ * The view for the active trigger. `@` runs the full two-level contract; a
+ * category with a `directTrigger` opens straight into its own level.
+ */
+export function selectMentionMenuViewForTrigger(
+  categories: readonly MentionCategory[],
+  trigger: string,
+  search: string,
+  options?: { aggregateLimitPerCategory?: number }
+): MentionMenuView | null {
+  if (trigger === MENTION_TRIGGER) {
+    return selectMentionMenuView(categories, search, options);
+  }
+  const direct = categories.find((entry) => entry.directTrigger === trigger);
+  if (!direct) return null;
+  return {
+    level: 'category',
+    category: direct,
+    term: search,
+    candidates: direct.getCandidates(search),
+  };
+}
+
 // ============================================================================
 // Candidate builders
 // ============================================================================
@@ -165,6 +195,38 @@ export type FileSuggestionIndex = {
   files: PathSuggestion[];
   allSuggestions: PathSuggestion[];
 };
+
+/**
+ * Rankable file index for the mention menu. The GitHub/worktree tree only
+ * yields files, so directories are synthesised by `buildPathSuggestions`;
+ * lazily-listed directories are folded in on top so `@` completion can offer a
+ * directory it has not expanded yet.
+ */
+export function buildMentionFileIndex(
+  entry: { paths: string[]; lazyDirectories?: ReadonlyArray<{ path: string }> } | null,
+  buildLazyDirectoryToken: (path: string) => string | null
+): FileSuggestionIndex | null {
+  if (!entry) return null;
+  const base = buildPathSuggestions(entry.paths);
+  const tokens = new Set(base.allTokens);
+  const lazyDirs: PathSuggestion[] = [];
+  for (const lazy of entry.lazyDirectories ?? []) {
+    const token = buildLazyDirectoryToken(lazy.path);
+    if (!token || tokens.has(token)) continue;
+    tokens.add(token);
+    lazyDirs.push({
+      kind: 'dir',
+      path: token.replace(/\/+$/u, ''),
+      token,
+      searchable: token.toLowerCase(),
+    });
+  }
+  if (lazyDirs.length === 0) return base;
+  const dirs = [...base.dirs, ...lazyDirs].sort((left, right) =>
+    left.token.localeCompare(right.token)
+  );
+  return { dirs, files: base.files, allSuggestions: [...dirs, ...base.files] };
+}
 
 export function toFileCandidate(item: PathSuggestion): MentionCandidate {
   const isDirectory = item.kind === 'dir';
@@ -369,6 +431,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
       categories.push({
         id: 'command',
         namespace: 'cmd',
+        directTrigger: '/',
         label: t('mention.category.command.label', 'Commands'),
         hint: t('mention.category.command.hint', 'Agent commands; replaces the whole prompt'),
         icon: 'command',

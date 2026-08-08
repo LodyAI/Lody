@@ -4,8 +4,12 @@ Product-level mention sources built on `src/ui/mention`.
 
 ## Invariants
 
-- `CombinedMentionTextarea` wires the composer triggers: `@` files, `#`
-  issues/PRs, `/` commands, and `$` skills.
+- `CombinedMentionTextarea` wires the composer triggers. Default (per-type)
+  routing is `@` files, `#` issues/PRs, `/` commands, and `$` skills. With
+  `twoLevelMentions`, every type is reached through the single `@` two-level
+  menu and only `/` keeps a direct route, because a slash command must own the
+  whole prompt. Both paths must stay mounted-exclusively: two menus rendering
+  into `MentionContent` at once would fight over the same anchor.
 - Desktop mention menus should render through `MentionContent` and cap width with
   `var(--mention-input-width)` so menus stay inside the composer/input range.
 - `$` skill mention tokens must remain whitespace-free; trigger parsing scans
@@ -56,6 +60,8 @@ Product-level mention sources built on `src/ui/mention`.
   indexing and `@` candidates.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
+- `mention-two-level-menu.tsx` renders that contract as the single `@` menu.
+- `mention-fuse.ts` owns the shared, module-cached `fuse.js` import.
 - The `@` file menu must not load Fuse or rebuild provider entries from
   per-render derived objects. Keep Fuse constructor loading module-cached and
   keyed by menu activation; reuse provider file entries when paths/lazy dirs are
