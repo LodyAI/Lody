@@ -34,7 +34,7 @@ type RepoIssuesAndPRsResult = {
   items: IssueOrPR[];
 };
 
-type ItemSuggestion = {
+export type ItemSuggestion = {
   number: number;
   url?: string;
   title: string;
@@ -187,7 +187,7 @@ function publishIssuePrCacheEntry(key: string, entry: RepoIssuesAndPRsResult) {
 // Mention Utils
 // ============================================================================
 
-function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
+export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   return items.map((item) => {
     const numberLabel = String(item.number);
     return {
@@ -203,7 +203,7 @@ function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   });
 }
 
-function getIssuePrFuseOptions() {
+export function getIssuePrFuseOptions() {
   return {
     keys: ['searchableNumber', 'searchableTitle'],
     includeScore: true,
@@ -269,7 +269,7 @@ function githubIssuePrUrl(repoFullName: string, type: 'issue' | 'pr', number: nu
   return `https://github.com/${safeRepo}/${segment}/${number}`;
 }
 
-function getIssuePrSuggestions(
+export function getIssuePrSuggestions(
   suggestions: ItemSuggestion[],
   term: string,
   fuse: FuseInstance<ItemSuggestion> | null

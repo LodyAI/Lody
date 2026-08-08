@@ -3272,5 +3272,29 @@
   "sessions.autoReview.confirmMerge": "Merge now",
   "sessions.autoReview.confirmMergeHelper": "First automatic merge in this workspace.",
   "sessions.autoReview.resume": "Resume",
-  "sessions.autoReview.resumeHelper": "Picks up where it stopped."
+  "sessions.autoReview.resumeHelper": "Picks up where it stopped.",
+  "mention": {
+    "category": {
+      "file": {
+        "label": "Files",
+        "hint": "Files and directories in this project"
+      },
+      "issue": {
+        "label": "Issues",
+        "hint": "Open issues in this repository"
+      },
+      "pr": {
+        "label": "Pull Requests",
+        "hint": "Open pull requests in this repository"
+      },
+      "skill": {
+        "label": "Skills",
+        "hint": "Project and global skills for this agent"
+      },
+      "command": {
+        "label": "Commands",
+        "hint": "Agent commands; replaces the whole prompt"
+      }
+    }
+  }
 }

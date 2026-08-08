@@ -3270,5 +3270,29 @@
   "sessions.autoReview.confirmMerge": "现在合入",
   "sessions.autoReview.confirmMergeHelper": "这是该工作区第一次自动合入。",
   "sessions.autoReview.resume": "继续",
-  "sessions.autoReview.resumeHelper": "从暂停的地方接着跑。"
+  "sessions.autoReview.resumeHelper": "从暂停的地方接着跑。",
+  "mention": {
+    "category": {
+      "file": {
+        "label": "文件",
+        "hint": "当前项目中的文件与目录"
+      },
+      "issue": {
+        "label": "Issues",
+        "hint": "当前仓库的 open issue"
+      },
+      "pr": {
+        "label": "Pull Requests",
+        "hint": "当前仓库的 open pull request"
+      },
+      "skill": {
+        "label": "Skills",
+        "hint": "当前 agent 可用的项目与全局 skill"
+      },
+      "command": {
+        "label": "命令",
+        "hint": "Agent 命令，会替换整条输入"
+      }
+    }
+  }
 }

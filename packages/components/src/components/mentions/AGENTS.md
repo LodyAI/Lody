@@ -34,6 +34,19 @@ Product-level mention sources built on `src/ui/mention`.
   top-aligns the list/detail panes.
 - Hydrators should only add ranges for known tokens/items and should preserve
   existing external `pasted_text` mention ranges.
+- A `MentionCandidate`'s `insertText` must keep its type's existing prompt form
+  (`@path`, `#123`, `$token`, `/cmd`). Reaching a type through `@` must not
+  change what the agent receives.
+- `MentionCategory.getCandidates` stays lazy. Ranking the file index is the
+  expensive one, so a query scoped to another category must never call it, and a
+  bare `@` must call none of them.
+- Issues and PRs rank over their own slice of the shared cache. The shared
+  ranking caps its result set, so ranking the merged list first lets a long issue
+  list starve every PR out of the PR category.
+- `@` directory candidates must carry both `navigateText` (`@dir/`, descend) and
+  `insertText` (`@dir`, commit without the trailing slash). The primitive no
+  longer infers drill-down from a trailing `/`, so dropping either prop silently
+  turns directories into plain one-shot mentions.
 
 ## Files
 
@@ -41,10 +54,8 @@ Product-level mention sources built on `src/ui/mention`.
   `MentionInput` for chat composer usage.
 - `file-at-mention.tsx` and `mention-project-file-source.ts` provide file path
   indexing and `@` candidates.
-- `@` directory candidates must carry both `navigateText` (`@dir/`, descend) and
-  `insertText` (`@dir`, commit without the trailing slash). The primitive no
-  longer infers drill-down from a trailing `/`, so dropping either prop silently
-  turns directories into plain one-shot mentions.
+- `mention-registry.ts` holds the two-level menu contract: category definitions,
+  candidate building, and `selectMentionMenuView`.
 - The `@` file menu must not load Fuse or rebuild provider entries from
   per-render derived objects. Keep Fuse constructor loading module-cached and
   keyed by menu activation; reuse provider file entries when paths/lazy dirs are
