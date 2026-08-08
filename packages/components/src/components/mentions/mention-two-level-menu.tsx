@@ -1,5 +1,8 @@
 import * as React from 'react';
+import { useAtomValue } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
+import { currentWorkspaceIdAtom } from '@/atoms';
 import {
   Boxes,
   ChevronLeft,
@@ -20,6 +23,12 @@ import {
   type MentionIcon,
   type MentionMenuView,
 } from '@/components/mentions/mention-registry';
+import {
+  captureMentionCategoryEnter,
+  captureMentionMenuOpen,
+  captureMentionSelect,
+  type MentionSurface,
+} from '@/components/mentions/mention-analytics';
 
 type MentionContextValue = NonNullable<ReturnType<typeof useMentionContext>>;
 
@@ -91,7 +100,13 @@ function CategoryRow({ category }: { category: MentionCategory }) {
   );
 }
 
-function CandidateRow({ candidate }: { candidate: MentionCandidate }) {
+function CandidateRow({
+  candidate,
+  onSelect,
+}: {
+  candidate: MentionCandidate;
+  onSelect?: () => void;
+}) {
   return (
     <MentionItem
       value={candidate.value}
@@ -99,6 +114,7 @@ function CandidateRow({ candidate }: { candidate: MentionCandidate }) {
       kind={candidate.kind}
       insertText={candidate.insertText}
       navigateText={candidate.navigateText}
+      onMentionSelect={onSelect}
     >
       <CandidateIcon icon={candidate.icon} path={candidate.iconPath} className={ICON_CLASS} />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -184,10 +200,12 @@ export function MentionTwoLevelMenuBody({
   view,
   onBack,
   showBack,
+  onCandidateSelect,
 }: {
   view: MentionMenuView;
   onBack: () => void;
   showBack: boolean;
+  onCandidateSelect?: (category: MentionCategory, rank: number) => void;
 }) {
   const { t } = useTranslation();
 
@@ -213,8 +231,12 @@ export function MentionTwoLevelMenuBody({
         {view.groups.map((group) => (
           <React.Fragment key={group.category.id}>
             <GroupLabel>{group.category.label}</GroupLabel>
-            {group.candidates.map((candidate) => (
-              <CandidateRow key={candidate.value} candidate={candidate} />
+            {group.candidates.map((candidate, rank) => (
+              <CandidateRow
+                key={candidate.value}
+                candidate={candidate}
+                onSelect={() => onCandidateSelect?.(group.category, rank)}
+              />
             ))}
           </React.Fragment>
         ))}
@@ -235,8 +257,12 @@ export function MentionTwoLevelMenuBody({
         </Message>
       ) : candidates.length > 0 ? (
         <div className="scrollbar-pro max-h-[280px] overflow-y-auto">
-          {candidates.map((candidate) => (
-            <CandidateRow key={candidate.value} candidate={candidate} />
+          {candidates.map((candidate, rank) => (
+            <CandidateRow
+              key={candidate.value}
+              candidate={candidate}
+              onSelect={() => onCandidateSelect?.(category, rank)}
+            />
           ))}
         </div>
       ) : category.status === 'loading' ? (
@@ -253,7 +279,13 @@ export function MentionTwoLevelMenuBody({
  * scoped category. Replaces the per-trigger menus; `/` still opens the command
  * category directly through its `directTrigger`.
  */
-export function MentionTwoLevelMenu({ categories }: { categories: MentionCategory[] }) {
+export function MentionTwoLevelMenu({
+  categories,
+  surface = 'unknown',
+}: {
+  categories: MentionCategory[];
+  surface?: MentionSurface;
+}) {
   const context = useMentionContext('MentionTwoLevelMenu');
   const isMobile = useIsMentionMobile();
   const trigger = context.trigger;
@@ -296,6 +328,58 @@ export function MentionTwoLevelMenu({ categories }: { categories: MentionCategor
     navigateBackToCategories(context);
   }, [context]);
 
+  const postHog = usePostHog();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const analyticsBase = React.useMemo(() => ({ workspaceId, surface }), [surface, workspaceId]);
+
+  // One `menu_open` per open, reset when it closes.
+  const menuOpenTrackedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!open) {
+      menuOpenTrackedRef.current = false;
+      return;
+    }
+    if (menuOpenTrackedRef.current) return;
+    menuOpenTrackedRef.current = true;
+    captureMentionMenuOpen(postHog, analyticsBase, {
+      level: view?.level ?? 'none',
+      categoryCount: categories.length,
+    });
+  }, [analyticsBase, categories.length, open, postHog, view?.level]);
+
+  // The first-to-second-level step. Reported from the resolved view rather than
+  // the row callback: a navigation item never fires `onMentionSelect`, and this
+  // also covers the keyboard route into a category.
+  const enteredCategoryRef = React.useRef<string | null>(null);
+  const scopedCategoryId = view?.level === 'category' ? view.category.id : null;
+  const scopedTermLength = view?.level === 'category' ? view.term.length : 0;
+  React.useEffect(() => {
+    if (!scopedCategoryId) {
+      enteredCategoryRef.current = null;
+      return;
+    }
+    if (enteredCategoryRef.current === scopedCategoryId) return;
+    enteredCategoryRef.current = scopedCategoryId;
+    captureMentionCategoryEnter(postHog, analyticsBase, {
+      category: scopedCategoryId,
+      termLength: scopedTermLength,
+    });
+    // `scopedTermLength` is read at entry only; it must not re-fire on typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsBase, postHog, scopedCategoryId]);
+
+  const handleCandidateSelect = React.useCallback(
+    (category: MentionCategory, rank: number) => {
+      captureMentionSelect(postHog, analyticsBase, {
+        category: category.id,
+        level: view?.level ?? 'none',
+        rank,
+        termLength: search.length,
+      });
+    },
+    [analyticsBase, postHog, search.length, view?.level]
+  );
+
   if (!view) return null;
 
   // A category reached through its own trigger has no level above it to go back
@@ -310,7 +394,12 @@ export function MentionTwoLevelMenu({ categories }: { categories: MentionCategor
         isMobile && 'w-full'
       )}
     >
-      <MentionTwoLevelMenuBody view={view} onBack={handleBack} showBack={showBack} />
+      <MentionTwoLevelMenuBody
+        view={view}
+        onBack={handleBack}
+        showBack={showBack}
+        onCandidateSelect={handleCandidateSelect}
+      />
     </MentionContent>
   );
 }

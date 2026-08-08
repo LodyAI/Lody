@@ -1,7 +1,5 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
-import { useTranslation } from 'react-i18next';
-import { Boxes } from 'lucide-react';
 import {
   compareProjectSkillScope,
   getRegisteredGlobalSkillDirs,
@@ -12,21 +10,14 @@ import {
   type ProjectSkillScope,
 } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
-import { MentionContent, MentionItem, useMentionContext } from '@/ui/mention';
-import { useIsMentionMobile } from '@/ui/mention/mention-mobile-content';
+import { useMentionContext } from '@/ui/mention';
 import {
   useProjectSkills,
   type ProjectSkillsSource,
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import {
-  SkillScopeBadge,
-  SkillSymlinkBadge,
-  SkillVersionBadge,
-} from '@/components/settings/skill-badges';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import {} from '@/components/settings/skill-badges';
 
 /**
  * `$`-triggered skill mention (phase 2 of docs/project-skills.md).
@@ -48,7 +39,6 @@ const SKILL_MENTION_PROMPT_PREFIX = '/';
    already-expanded detector both derive from this so they cannot drift. */
 const SKILL_MENTION_PATH_LABEL = 'Skill Path';
 const SKILL_MENTION_PATH_ANNOTATION_RE = new RegExp(`^\\s*\\[${SKILL_MENTION_PATH_LABEL}\\]\\(`);
-const SKILL_MENTION_MENU_TOP_OFFSET_PX = 20;
 export type SkillMentionMenuPlacement = 'above-input' | 'caret';
 export type SkillMentionAgent = {
   cliType: AgentConfigCliType;
@@ -475,225 +465,4 @@ export function SkillMentionHydrator({
   }, [context, enabled, knownTokens, text]);
 
   return null;
-}
-
-// ============================================================================
-// Menu
-// ============================================================================
-
-function SkillDetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground/70">{label}</dt>
-      <dd className={cn('min-w-0 break-words text-muted-foreground', mono && 'font-mono')}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-/** Left-hand card: the scrollable name-only candidate list. Its own height so
-   it does not share/stretch with the detail card beside it. */
-function SkillMentionList({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="scrollbar-pro max-h-[min(340px,55vh)] w-[184px] min-w-[160px] shrink-0 overflow-y-auto rounded-md rounded-r-none border border-border bg-popover py-1 text-popover-foreground shadow-md">
-      {children}
-    </div>
-  );
-}
-
-/** Right-hand card: full content for the highlighted/hovered skill. Independent
-   height + scroll from the list card. */
-function SkillMentionDetail({ item }: { item: SkillMentionItem }) {
-  const { t } = useTranslation();
-  const { skill, scope } = item;
-  return (
-    <div className="scrollbar-pro -ml-px flex max-h-[min(340px,55vh)] min-w-0 flex-1 flex-col overflow-y-auto rounded-md rounded-l-none border border-border bg-popover px-3 py-2.5 text-popover-foreground shadow-md">
-      <span className="min-w-0 truncate text-sm font-semibold text-foreground">{skill.name}</span>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <SkillScopeBadge scope={scope} size="sm" className="shrink-0" />
-        {skill.version ? <SkillVersionBadge version={skill.version} size="sm" /> : null}
-        {skill.isSymlink ? <SkillSymlinkBadge size="sm" withTooltip={false} /> : null}
-      </div>
-      {skill.description ? (
-        <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-          {skill.description}
-        </p>
-      ) : null}
-      <dl className="mt-2.5 flex flex-col gap-1 text-[11px]">
-        {skill.author ? (
-          <SkillDetailRow
-            label={t('workspace.projects.skills.mention.detailAuthor', 'Author')}
-            value={skill.author}
-          />
-        ) : null}
-        <SkillDetailRow
-          label={t('workspace.projects.skills.mention.detailPath', 'Path')}
-          value={skill.relativePath}
-          mono
-        />
-        {skill.symlinkTarget ? (
-          <SkillDetailRow
-            label={t('workspace.projects.skills.mention.detailLinksTo', 'Links to')}
-            value={skill.symlinkTarget}
-            mono
-          />
-        ) : null}
-      </dl>
-    </div>
-  );
-}
-
-export function SkillMentionMenu({
-  skillItems,
-  status,
-  error,
-  allowedDirs,
-  placement = 'above-input',
-}: {
-  skillItems: SkillMentionItem[];
-  status: ReturnType<typeof useProjectSkills>['status'];
-  error?: string;
-  /** Directories the selected ACP provider uses; null = no provider filter. */
-  allowedDirs: ReadonlySet<string> | null;
-  /** `caret` uses MentionContent's default bottom/caret placement and top-aligns panes. */
-  placement?: SkillMentionMenuPlacement;
-}) {
-  const context = useMentionContext('SkillMentionMenu');
-  const { t } = useTranslation();
-  const isMobile = useIsMentionMobile();
-  const trigger = context.trigger;
-  const searchTerm = trigger === SKILL_MENTION_TRIGGER ? context.filterStore.search : '';
-
-  const filtered = React.useMemo(() => {
-    if (trigger !== SKILL_MENTION_TRIGGER) return [];
-    return selectSkillMentionCandidates(skillItems, searchTerm, allowedDirs);
-  }, [skillItems, searchTerm, trigger, allowedDirs]);
-
-  // Match the desktop popover width to the composer input so the two-pane menu
-  // reads as part of the input. Tracked via ResizeObserver; capped to the
-  // viewport by `max-w` on the content.
-  //
-  // Gated on the `$` menu actually being up. This component renders `null` for
-  // every other trigger (see the early return below), so an ungated layout
-  // effect measured the composer on EVERY composer mount — including each
-  // session switch, where it forced a full synchronous style recalc of the
-  // freshly mounted conversation (~25ms per switch in a DevTools trace) for a
-  // width nothing ever read.
-  const inputRef = context.inputRef;
-  const menuActive = context.open && trigger === SKILL_MENTION_TRIGGER;
-  const [anchorWidth, setAnchorWidth] = React.useState<number | null>(null);
-  React.useLayoutEffect(() => {
-    if (!menuActive) return undefined;
-    const el = inputRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const measure = () => setAnchorWidth(el.getBoundingClientRect().width || null);
-    measure();
-    return observeResizeOnAnimationFrame(el, () => measure());
-  }, [inputRef, menuActive]);
-
-  const autoHighlightKey = `${searchTerm}\0${filtered[0]?.token ?? ''}\0${filtered.length}`;
-  const lastAutoHighlightKeyRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!context.open || trigger !== SKILL_MENTION_TRIGGER) {
-      lastAutoHighlightKeyRef.current = null;
-      return;
-    }
-    if (lastAutoHighlightKeyRef.current === autoHighlightKey) return;
-    lastAutoHighlightKeyRef.current = autoHighlightKey;
-    const items = context.getEnabledItems();
-    if (!items.length) return;
-    requestAnimationFrame(() => {
-      const first = items[0] ?? null;
-      if (first) context.onHighlightedItemChange(first);
-    });
-  }, [autoHighlightKey, context, trigger]);
-
-  if (trigger !== SKILL_MENTION_TRIGGER) return null;
-
-  const isInitialLoading = status === 'loading' && skillItems.length === 0;
-  let message: string | null = null;
-  let messageIsError = false;
-  if (isInitialLoading) {
-    message = t('workspace.projects.skills.mention.loading', 'Loading skills…');
-  } else if (status === 'error' && skillItems.length === 0) {
-    message = error ?? t('workspace.projects.skills.mention.error', 'Failed to load skills.');
-    messageIsError = true;
-  } else if (filtered.length === 0) {
-    message = t('workspace.projects.skills.mention.empty', 'No matching skills');
-  }
-
-  const desktopPositionProps =
-    placement === 'above-input'
-      ? {
-          positionAnchor: 'input-top' as const,
-          side: 'top' as const,
-          sideOffset: SKILL_MENTION_MENU_TOP_OFFSET_PX,
-          avoidCollisions: false,
-        }
-      : {};
-  const desktopPaneAlignmentClassName = placement === 'caret' ? 'items-start' : 'items-end';
-
-  if (message) {
-    return (
-      <MentionContent
-        {...desktopPositionProps}
-        className="w-max max-w-[min(360px,var(--mention-input-width),calc(100vw-2rem))]"
-      >
-        <div
-          className={cn(
-            'px-2 py-1.5 text-sm',
-            messageIsError ? 'text-destructive' : 'text-muted-foreground'
-          )}
-        >
-          {message}
-        </div>
-      </MentionContent>
-    );
-  }
-
-  // Compact rows: just the skill name. Details live in the desktop side panel;
-  // mobile (no hover) shows the plain name list only.
-  const listRows = filtered.map((item) => (
-    <MentionItem key={item.token} value={item.token} label={item.token}>
-      <Boxes className="h-4 w-4 shrink-0 opacity-70" />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.token}</span>
-    </MentionItem>
-  ));
-
-  // Mobile (docked full-width panel, no hover): a plain name-only list. No side
-  // detail panel — it would not fit the narrow docked strip and there is no
-  // hover/keyboard affordance to preview it.
-  if (isMobile) {
-    return (
-      <MentionContent className="w-max max-w-[min(var(--mention-input-width),calc(100vw-2rem))]">
-        <div className="scrollbar-pro max-h-[min(320px,48vh)] overflow-y-auto">{listRows}</div>
-      </MentionContent>
-    );
-  }
-
-  // Desktop two-pane: compact list on the left, a detail panel on the right
-  // that previews the highlighted (hover or keyboard) skill.
-  const highlightedToken = context.highlightedItem?.value ?? null;
-  const detailItem =
-    filtered.find((item) => item.token === highlightedToken) ?? filtered[0] ?? null;
-
-  // Two independent cards (list + detail) side by side: the MentionContent
-  // wrapper is neutralized to a transparent flex container so each card carries
-  // its own border / shadow / height and the two never share a height.
-  return (
-    <MentionContent
-      {...desktopPositionProps}
-      className={cn(
-        'flex w-[min(640px,var(--mention-input-width),calc(100vw-2rem))]',
-        'max-w-[min(var(--mention-input-width),calc(100vw-2rem))]',
-        desktopPaneAlignmentClassName,
-        'overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none'
-      )}
-      style={anchorWidth ? { width: anchorWidth } : undefined}
-    >
-      <SkillMentionList>{listRows}</SkillMentionList>
-      {detailItem ? <SkillMentionDetail item={detailItem} /> : null}
-    </MentionContent>
-  );
 }

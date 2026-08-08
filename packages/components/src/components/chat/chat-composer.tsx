@@ -259,7 +259,6 @@ export function ChatComposer({
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
   const effectivePromptRows = singleLineMobile ? 1 : promptRows;
-  const skillMentionPlacement = isLanding ? 'caret' : 'above-input';
   // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
   // AND non-mobile layout so phone frames / narrow viewports never show a
   // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
@@ -810,7 +809,6 @@ export function ChatComposer({
                 mentionSource={mentionSource}
                 availableCommands={availableCommands}
                 skillAgent={skillAgent}
-                skillMentionPlacement={skillMentionPlacement}
                 value={promptValue}
                 onValueChange={onPromptChange}
                 externalMentions={pastedTextMentions}
@@ -907,7 +905,6 @@ export function ChatComposer({
               mentionSource={mentionSource}
               availableCommands={availableCommands}
               skillAgent={skillAgent}
-              skillMentionPlacement={skillMentionPlacement}
               value={promptValue}
               onValueChange={onPromptChange}
               externalMentions={pastedTextMentions}

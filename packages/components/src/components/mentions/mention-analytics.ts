@@ -145,7 +145,12 @@ export function captureMentionFileMenuOpen(
 export function captureMentionFileSelect(
   postHog: PostHogAnalyticsClient | null | undefined,
   base: MentionAnalyticsBaseProps,
-  props: { kind: 'file' | 'dir'; rank: number; termLength: number; sourceKind: MentionFileSourceKind }
+  props: {
+    kind: 'file' | 'dir';
+    rank: number;
+    termLength: number;
+    sourceKind: MentionFileSourceKind;
+  }
 ): void {
   capturePostHogEvent(
     postHog,
@@ -245,5 +250,57 @@ export function captureMentionCommandMenuEmpty(
     postHog,
     'mention/command/menu_empty',
     withBase({ term_length: props.termLength, command_count: props.commandCount }, base)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Single `@` two-level menu
+//
+// One menu replaced the four per-trigger menus, so these carry a `category`
+// dimension instead of living in per-type event families. Together they give
+// the first-level -> second-level funnel: menu_open -> category_enter -> select.
+// ---------------------------------------------------------------------------
+
+export function captureMentionMenuOpen(
+  postHog: PostHogAnalyticsClient | null | undefined,
+  base: MentionAnalyticsBaseProps,
+  props: { level: string; categoryCount: number }
+): void {
+  capturePostHogEvent(
+    postHog,
+    'mention/menu_open',
+    withBase({ level: props.level, category_count: props.categoryCount }, base)
+  );
+}
+
+export function captureMentionCategoryEnter(
+  postHog: PostHogAnalyticsClient | null | undefined,
+  base: MentionAnalyticsBaseProps,
+  props: { category: string; termLength: number }
+): void {
+  capturePostHogEvent(
+    postHog,
+    'mention/category_enter',
+    withBase({ category: props.category, term_length: props.termLength }, base)
+  );
+}
+
+export function captureMentionSelect(
+  postHog: PostHogAnalyticsClient | null | undefined,
+  base: MentionAnalyticsBaseProps,
+  props: { category: string; level: string; rank: number; termLength: number }
+): void {
+  capturePostHogEvent(
+    postHog,
+    'mention/select',
+    withBase(
+      {
+        category: props.category,
+        level: props.level,
+        rank: props.rank,
+        term_length: props.termLength,
+      },
+      base
+    )
   );
 }

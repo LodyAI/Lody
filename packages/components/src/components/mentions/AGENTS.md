@@ -4,17 +4,16 @@ Product-level mention sources built on `src/ui/mention`.
 
 ## Invariants
 
-- `CombinedMentionTextarea` wires the composer triggers. Default (per-type)
-  routing is `@` files, `#` issues/PRs, `/` commands, and `$` skills. With
-  `twoLevelMentions`, every type is reached through the single `@` two-level
-  menu and only `/` keeps a direct route, because a slash command must own the
-  whole prompt. Both paths must stay mounted-exclusively: two menus rendering
-  into `MentionContent` at once would fight over the same anchor.
+- `@` is the only menu trigger. Every mention type is reached through the
+  single two-level menu; `/` is the one exception and still opens commands
+  directly, because a slash command must own the whole prompt. `#` and `$` no
+  longer open a menu — but their hydrators stay, so a hand-typed or pasted
+  `#123` / `$token` is still highlighted and still expands before send.
 - Desktop mention menus should render through `MentionContent` and cap width with
   `var(--mention-input-width)` so menus stay inside the composer/input range.
-- `$` skill mention tokens must remain whitespace-free; trigger parsing scans
-  from `$` to the next whitespace.
-- `$` skill menu shows skills from `useProjectSkills`, not Codex's runtime
+- `$` skill tokens must remain whitespace-free; hydration scans from `$` to the
+  next whitespace.
+- `$` skill candidates come from `useProjectSkills`, not Codex's runtime
   skill registry. The same CLI `list-global-skills` home scan returns two scopes:
   `global` (user-authored, over `ALL_KNOWN_GLOBAL_SKILL_DIRS`) and `system`
   (agent built-ins, over `ALL_KNOWN_SYSTEM_SKILL_DIRS` — e.g. codex
@@ -31,11 +30,6 @@ Product-level mention sources built on `src/ui/mention`.
   `SKILL.md` path; home-scoped (`global` + `system`) skills use the CLI-provided
   absolute `SKILL.md` path. Display order is project → global → system
   (`compareProjectSkillScope`).
-- The desktop `$` skill menu defaults to `side="top"` with
-  `positionAnchor="input-top"`, `avoidCollisions={false}`, and a 20px offset;
-  session/dialog panes bottom-align above the input. Chat landing passes caret
-  placement so it uses the normal below-caret `MentionContent` positioning and
-  top-aligns the list/detail panes.
 - Hydrators should only add ranges for known tokens/items and should preserve
   existing external `pasted_text` mention ranges.
 - A `MentionCandidate`'s `insertText` must keep its type's existing prompt form
@@ -60,15 +54,16 @@ Product-level mention sources built on `src/ui/mention`.
   indexing and `@` candidates.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
-- `mention-two-level-menu.tsx` renders that contract as the single `@` menu.
+- `mention-two-level-menu.tsx` renders that contract as the single `@` menu and
+  owns the `menu_open` -> `category_enter` -> `select` funnel. `category_enter`
+  is reported from the resolved view, not a row callback: a navigation item
+  never fires `onMentionSelect`, and the keyboard route must count too.
 - `mention-fuse.ts` owns the shared, module-cached `fuse.js` import.
-- The `@` file menu must not load Fuse or rebuild provider entries from
-  per-render derived objects. Keep Fuse constructor loading module-cached and
-  keyed by menu activation; reuse provider file entries when paths/lazy dirs are
-  unchanged.
-- `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, hydration,
-  menu rows, and post-insert title hints.
-- `command-slash-mention.tsx` provides `/` command filtering and analytics.
+- The menu must not load Fuse or rebuild provider entries from per-render
+  derived objects. Keep Fuse constructor loading module-cached and keyed by menu
+  activation; reuse provider file entries when paths/lazy dirs are unchanged.
+- `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
+  hydration, and post-insert title hints.
 - `mention-skill-source.tsx` provides `$` skill discovery, provider directory
-  filtering, hydration, and the desktop two-pane skill menu.
+  filtering, hydration, and the before-send prompt expansion.
 - `mention-analytics.ts` centralizes mention analytics event helpers.

@@ -12,10 +12,9 @@ import {
   normalizeGithubFetchErrorCode,
   type MentionSurface,
 } from '@/components/mentions/mention-analytics';
-import { getIssuePrHashTriggerRefreshDecision } from '@/lib/issue-pr-trigger-refresh';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
-import { MentionContent, MentionItem, useMentionContext } from '@/ui/mention';
+import { useMentionContext } from '@/ui/mention';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 
 // ============================================================================
@@ -48,8 +47,6 @@ export type ItemSuggestion = {
 type FuseInstance<T> = {
   search: (pattern: string, options?: { limit?: number }) => Array<{ item: T; score?: number }>;
 };
-
-type FuseConstructor<T> = new (list: T[], options?: Record<string, unknown>) => FuseInstance<T>;
 
 export type IssuePrKnownItem = {
   url?: string;
@@ -218,51 +215,6 @@ export function getIssuePrFuseOptions() {
 // this out of component state means once it has loaded for any consumer, every
 // other consumer reads it synchronously during render — no extra Effect, no
 // "wait one extra commit before fuzzy search activates".
-let fuseCtorCache: unknown | null = null;
-let fuseCtorPromise: Promise<unknown> | null = null;
-const fuseCtorSubscribers = new Set<() => void>();
-
-function loadFuseCtor(): void {
-  if (fuseCtorCache) return;
-  if (fuseCtorPromise) return;
-  fuseCtorPromise = import('fuse.js')
-    .then((mod) => {
-      const ctor = (mod as unknown as { default?: unknown }).default ?? mod;
-      fuseCtorCache = ctor;
-      fuseCtorSubscribers.forEach((cb) => {
-        cb();
-      });
-      return ctor;
-    })
-    .catch((err: unknown) => {
-      fuseCtorPromise = null;
-      throw err;
-    });
-}
-
-function subscribeFuseCtor(callback: () => void): () => void {
-  fuseCtorSubscribers.add(callback);
-  return () => {
-    fuseCtorSubscribers.delete(callback);
-  };
-}
-
-function getFuseCtorSnapshot(): unknown | null {
-  return fuseCtorCache;
-}
-
-function useFuseCtor<T>(enabled: boolean): FuseConstructor<T> | null {
-  const ctor = React.useSyncExternalStore(
-    subscribeFuseCtor,
-    getFuseCtorSnapshot,
-    getFuseCtorSnapshot
-  );
-  if (enabled && !ctor) {
-    loadFuseCtor();
-  }
-  return (ctor as FuseConstructor<T> | null) ?? null;
-}
-
 function githubIssuePrUrl(repoFullName: string, type: 'issue' | 'pr', number: number) {
   const safeRepo = repoFullName.trim();
   const segment = type === 'pr' ? 'pull' : 'issues';
@@ -650,201 +602,12 @@ export function IssuePrMentionHydrator({
 // UI Components
 // ============================================================================
 
-function IssuePrMentionLoadingSkeleton() {
-  const rows = ['w-[72%]', 'w-[54%]', 'w-[86%]', 'w-[63%]', 'w-[78%]', 'w-[58%]'];
-
-  return (
-    <div className="px-2 py-2">
-      <div className="animate-pulse space-y-2">
-        {rows.map((widthClass, index) => (
-          <div
-            // eslint-disable-next-line react/no-array-index-key
-            key={index}
-            className={cn('h-4 rounded-xs', 'bg-muted/70', widthClass)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function getItemIconMeta(type: 'issue' | 'pr') {
   if (type === 'pr') {
     return { Icon: GitPullRequest, iconClassName: 'text-github-open' };
   }
   return { Icon: CircleDot, iconClassName: 'text-status-info' };
 }
-
-export function IssuePrMentionMenu({
-  repoFullName,
-  isPublic,
-  issuePrData,
-  surface = 'unknown',
-}: {
-  repoFullName?: string;
-  isPublic?: boolean;
-  issuePrData: UseRepoIssuesAndPRsResult;
-  surface?: MentionSurface;
-}) {
-  const context = useMentionContext('IssuePrMentionMenu');
-  const postHog = usePostHog();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const { t } = useTranslation();
-  const trigger = context.trigger;
-  const refreshIssuePrData = issuePrData.refresh;
-
-  const issuePrTerm = trigger === '#' ? context.filterStore.search : '';
-  const issuePrSuggestions = React.useMemo(() => {
-    if (!issuePrData.entry || trigger !== '#') return [];
-    const repo = issuePrData.entry.repoFullName;
-    const normalized = issuePrData.entry.items.map((item) => ({
-      ...item,
-      url: item.url ?? githubIssuePrUrl(repo, item.type, item.number),
-    }));
-    return buildItemSuggestions(normalized);
-  }, [issuePrData.entry, trigger]);
-
-  const issuePrFuseCtor = useFuseCtor<ItemSuggestion>(issuePrSuggestions.length > 0);
-
-  const issuePrFuse = React.useMemo(() => {
-    if (!issuePrFuseCtor || !issuePrSuggestions.length) return null;
-    try {
-      return new issuePrFuseCtor(issuePrSuggestions, getIssuePrFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [issuePrFuseCtor, issuePrSuggestions]);
-
-  const issuePrIndexed = React.useMemo(() => {
-    if (trigger !== '#') return [];
-    return getIssuePrSuggestions(issuePrSuggestions, issuePrTerm, issuePrFuse);
-  }, [issuePrSuggestions, issuePrTerm, issuePrFuse, trigger]);
-
-  React.useEffect(() => {
-    if (!context.open) return;
-    if (context.highlightedItem) return;
-    if (trigger !== '#') return;
-    const items = context.getEnabledItems();
-    if (!items.length) return;
-    requestAnimationFrame(() => {
-      const first = items[0] ?? null;
-      if (first) context.onHighlightedItemChange(first);
-    });
-  }, [context, issuePrIndexed, trigger]);
-
-  const openTrackedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!context.open || trigger !== '#') {
-      openTrackedRef.current = false;
-      return;
-    }
-    if (openTrackedRef.current) return;
-    openTrackedRef.current = true;
-
-    const repoIsPublic = isPublic ?? false;
-    const repoId = repoFullName ? getRepoAnalyticsId(repoFullName, repoIsPublic) : null;
-
-    capturePostHogEvent(postHog, 'mention/issue_pr/menu_open', {
-      workspace_id: workspaceId,
-      surface,
-      repo: repoId,
-      hasRepo: Boolean(repoFullName),
-      hasEntry: Boolean(issuePrData.entry),
-      status: issuePrData.status,
-      itemsCount: issuePrData.entry?.items.length ?? 0,
-      termLength: issuePrTerm.length,
-      online: getIsOnline(),
-    });
-  }, [
-    context.open,
-    issuePrData.entry,
-    issuePrData.status,
-    issuePrTerm.length,
-    isPublic,
-    postHog,
-    repoFullName,
-    surface,
-    trigger,
-    workspaceId,
-  ]);
-
-  const refreshedRepoForCurrentHashTriggerRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    const decision = getIssuePrHashTriggerRefreshDecision({
-      trigger,
-      repoFullName,
-      refreshedRepoForCurrentHashTrigger: refreshedRepoForCurrentHashTriggerRef.current,
-    });
-    refreshedRepoForCurrentHashTriggerRef.current = decision.nextRefreshedRepoForCurrentHashTrigger;
-    if (!decision.shouldRefresh) return;
-    void refreshIssuePrData();
-  }, [refreshIssuePrData, repoFullName, trigger]);
-
-  if (trigger !== '#') return null;
-
-  return (
-    <MentionContent className="w-max max-w-[min(var(--mention-input-width),calc(100vw-2rem))]">
-      {!repoFullName ? (
-        <div className="px-2 py-1.5 text-sm text-muted-foreground">
-          {t('mention.issuePr.selectRepo', 'Select a repo to mention issues/PRs.')}
-        </div>
-      ) : issuePrData.status === 'loading' && !issuePrData.entry ? (
-        <IssuePrMentionLoadingSkeleton />
-      ) : issuePrData.status === 'error' ? (
-        <div className="px-2 py-1.5 text-sm text-destructive">
-          {issuePrData.error ?? t('mention.issuePr.loadError', 'Failed to load issues and PRs.')}
-        </div>
-      ) : null}
-
-      {issuePrIndexed.length > 0 ? (
-        <div className="scrollbar-pro max-h-[260px] overflow-auto overflow-x-auto">
-          {issuePrIndexed.map((item, index) => {
-            const token = item.token;
-            const { Icon, iconClassName } = getItemIconMeta(item.type);
-            return (
-              <MentionItem
-                key={token}
-                value={token}
-                label={item.label}
-                onMentionSelect={() => {
-                  const repoIsPublic = isPublic ?? false;
-                  const repoId = repoFullName
-                    ? getRepoAnalyticsId(repoFullName, repoIsPublic)
-                    : null;
-                  capturePostHogEvent(postHog, 'mention/issue_pr/select', {
-                    workspace_id: workspaceId,
-                    surface,
-                    repo: repoId,
-                    type: item.type,
-                    number: item.number,
-                    rank: index,
-                    termLength: issuePrTerm.length,
-                    itemsCount: issuePrData.entry?.items.length ?? 0,
-                    online: getIsOnline(),
-                  });
-                }}
-              >
-                <Icon className={cn('h-4 w-4 shrink-0', iconClassName)} />
-                <span className="shrink-0 rounded-xs border border-border/60 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-                  #{item.number}
-                </span>
-                <span className="min-w-0 truncate text-sm font-medium">{item.title}</span>
-              </MentionItem>
-            );
-          })}
-        </div>
-      ) : repoFullName && issuePrData.status !== 'loading' ? (
-        <div className="px-2 py-1.5 text-sm text-muted-foreground">
-          {t('mention.issuePr.noResults', 'No results')}
-        </div>
-      ) : null}
-    </MentionContent>
-  );
-}
-
-// ============================================================================
-// Inline Title Hint (after insertion)
-// ============================================================================
 
 const ISSUE_PR_TITLE_HINT_CLOSE_DELAY_MS = 650;
 
