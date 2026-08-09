@@ -1961,6 +1961,8 @@
   "settings.about.developerMode": "Developer mode",
   "settings.about.developerModeHelper": "Shows local diagnostic controls in settings.",
   "settings.beta.title": "Beta features",
+  "settings.beta.inbox": "Inbox",
+  "settings.beta.inboxHelper": "Show the unfinished mobile Inbox tab. In development — expect rough edges.",
   "settings.beta.tasks": "Tasks",
   "settings.beta.tasksHelper": "Track work you are not starting yet, separately from chats. In development — expect rough edges.",
   "settings.about.visitWebsite": "Visit website",

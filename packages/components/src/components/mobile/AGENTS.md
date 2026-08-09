@@ -75,7 +75,8 @@ Two families of swipe-back, split by how the surface animates:
   `mobile-chat-landing-screen.tsx`, `mobile-archive-screen.tsx`.
 - Home dock tabs: `mobile-home-screen.tsx` `workspaceTabSpecs` builds
   Inbox / Chat / Tasks / Projects. Inbox only renders when the caller passes
-  `showInboxTab` (multi-member workspaces); Tasks only renders when the caller
+  `showInboxTab` (multi-member workspace AND the developer-mode Inbox beta gate);
+  Tasks only renders when the caller
   passes `showTasksTab` (Tasks beta gate — see
   `../tasks/AGENTS.md`); its body is the shared `TasksListBody mobile
 embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`

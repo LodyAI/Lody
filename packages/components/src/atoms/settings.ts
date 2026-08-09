@@ -163,9 +163,10 @@ export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
   false
 );
 
-/** localStorage keys for the Tasks beta gate — keep in sync with the atoms below. */
+/** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
 export const DEVELOPER_MODE_STORAGE_KEY = 'lody-developer-mode-enabled';
 export const TASKS_BETA_STORAGE_KEY = 'lody-tasks-beta-enabled';
+export const INBOX_BETA_STORAGE_KEY = 'lody-inbox-beta-enabled';
 
 /**
  * Synchronous read of the Tasks feature gate from localStorage.
@@ -221,6 +222,20 @@ export const tasksBetaEnabledAtom = atomWithStorage<boolean>(
  */
 export const tasksFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(tasksBetaEnabledAtom)
+);
+
+// Opt-in for the unfinished mobile Inbox. Like Tasks, this is reachable only
+// from the beta section while Developer mode is on.
+export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
+  INBOX_BETA_STORAGE_KEY,
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/** The single gate for showing the unfinished mobile Inbox entry. */
+export const inboxFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
 );
 
 /** localStorage keys for the experimental features gate. */

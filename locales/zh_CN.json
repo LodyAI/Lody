@@ -1959,6 +1959,8 @@
   "settings.about.developerMode": "开发者模式",
   "settings.about.developerModeHelper": "在设置中显示本地诊断控件。",
   "settings.beta.title": "Beta 功能",
+  "settings.beta.inbox": "收件箱",
+  "settings.beta.inboxHelper": "显示尚未完成的移动端收件箱入口。开发中，可能有粗糙的地方。",
   "settings.beta.tasks": "任务",
   "settings.beta.tasksHelper": "把还不打算现在开始的工作单独记下来，与对话分开。开发中，可能有粗糙的地方。",
   "settings.about.visitWebsite": "访问官网",

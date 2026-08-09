@@ -64,6 +64,7 @@ import {
   chatLandingSessionStateAtomFamily,
   currentWorkspaceIdAtom,
   getAllAgentConfigAtom,
+  inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
@@ -4473,17 +4474,22 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Tasks beta gate (developer mode → Beta features). Drives the extra
-     dock tab on the mobile home. When the gate is off a stale 'tasks'
-     selection must render as Chat — as if the tab were never built. */
+  /* Developer-only beta gates drive the extra dock tabs on mobile home.
+     When a gate is off, a stale selection must render as Chat — as if
+     the tab were never built. Inbox also retains its team-workspace gate. */
   const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
+  const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled ? 'chat' : selectedMobileHomeTab;
+    (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
+    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
+      ? 'chat'
+      : selectedMobileHomeTab;
   useEffect(() => {
-    if (!showProjectSharing && selectedMobileHomeTab === 'inbox') {
+    if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
     }
-  }, [selectedMobileHomeTab, showProjectSharing]);
+  }, [selectedMobileHomeTab, showMobileInbox]);
   const mobileInboxItems = useMemo<MobileInboxItem[]>(
     () =>
       (inboxRows ?? [])
@@ -5588,14 +5594,14 @@ function WorkspaceChatLanding({
           workspaceOptions={mobileHomeWorkspaceOptions}
           machines={mobileHomeMachines}
           inboxItems={mobileInboxItems}
-          inboxLoading={showProjectSharing && inboxRows === undefined}
+          inboxLoading={showMobileInbox && inboxRows === undefined}
           onInboxItemSelect={handleMobileInboxItemSelect}
           onInboxItemDismiss={handleMobileInboxItemDismiss}
           connectionUiState={mobileHomeConnectionUiState}
           isInitialDataLoading={isInitialDataLoading}
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
-          showInboxTab={showProjectSharing}
+          showInboxTab={showMobileInbox}
           showTasksTab={tasksFeatureEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
