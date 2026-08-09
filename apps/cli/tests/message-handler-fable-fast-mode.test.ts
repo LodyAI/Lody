@@ -99,7 +99,7 @@ function createHarness() {
 }
 
 describe('MessageHandler Claude Fable Fast mode compatibility', () => {
-  it.each(['fast', 'fast-mode', 'fast_mode'])(
+  it.each(['fast', 'fast-mode'])(
     'does not send %s=false to a Fable model',
     async (configId) => {
       const { apply, session, setSessionConfigOption } = createHarness();

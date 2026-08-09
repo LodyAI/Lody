@@ -421,10 +421,7 @@ const humanizeConfigKey = (key: string): string => {
     effort: 'Reasoning',
     thought_level: 'Reasoning',
     'fast-mode': 'Fast mode',
-    fast_mode: 'Fast mode',
     fast: 'Fast mode',
-    'plan-mode': 'Plan mode',
-    plan_mode: 'Plan mode',
     collaboration_mode: 'Plan mode',
     mode: 'Mode',
   };

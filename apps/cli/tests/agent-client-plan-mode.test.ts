@@ -998,11 +998,11 @@ describe('AgentClient plan mode permission restoration', () => {
         setSessionConfigOption: setSessionConfigOptionSpy,
       };
 
-      await client.setSessionConfigOption('acp-test' as ACPSessionId, 'fast_mode', true);
+      await client.setSessionConfigOption('acp-test' as ACPSessionId, 'fast-mode', true);
 
       expect(setSessionConfigOptionSpy).toHaveBeenCalledWith({
         sessionId: 'acp-test',
-        configId: 'fast_mode',
+        configId: 'fast-mode',
         type: 'boolean',
         value: true,
       });
