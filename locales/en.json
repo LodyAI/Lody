@@ -3289,5 +3289,11 @@
   "mention.file.loadError": "Failed to load files.",
   "mention.file.truncatedGithub": "Repo is very large; GitHub returned a truncated file list.",
   "mention.file.truncatedLocal": "Project is very large; local file list was truncated.",
-  "workspace.projects.skills.mention.detailSymlink": "symlink"
+  "workspace.projects.skills.mention.detailSymlink": "symlink",
+  "mention.category.session.label": "Sessions",
+  "mention.category.session.hint": "Reference another session's history",
+  "mention.session.detailId": "Session id",
+  "mention.session.detailSends": "Sends",
+  "mention.session.detailProject": "Project",
+  "mention.session.untitled": "Untitled session"
 }

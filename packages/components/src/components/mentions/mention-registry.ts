@@ -17,6 +17,12 @@ import {
   selectSkillMentionCandidates,
   type SkillMentionItem,
 } from '@/components/mentions/mention-skill-source';
+import {
+  SESSION_MENTION_PREFIX,
+  buildSessionMentionPrompt,
+  selectSessionMentionCandidates,
+  type SessionMentionItem,
+} from '@/components/mentions/mention-session-source';
 import type { MentionKind } from '@/ui/mention/index';
 
 /**
@@ -29,9 +35,9 @@ export const MENTION_TRIGGER = '@';
 /** Per-category cap when one query is answered across every category. */
 export const AGGREGATE_LIMIT_PER_CATEGORY = 4;
 
-export type MentionCategoryId = 'file' | 'issue' | 'pr' | 'skill' | 'command';
+export type MentionCategoryId = 'file' | 'issue' | 'pr' | 'skill' | 'command' | 'session';
 
-export type MentionIcon = 'file' | 'dir' | 'issue' | 'pr' | 'skill' | 'command';
+export type MentionIcon = 'file' | 'dir' | 'issue' | 'pr' | 'skill' | 'command' | 'session';
 
 export type MentionCategoryStatus = 'ready' | 'loading' | 'error';
 
@@ -347,6 +353,49 @@ export function buildSkillCandidates(
   );
 }
 
+/** i18n'd labels for the session detail panel. */
+export type SessionDetailLabels = {
+  sessionId: string;
+  sends: string;
+  project: string;
+  untitled: string;
+};
+
+export function toSessionCandidate(
+  item: SessionMentionItem,
+  labels: SessionDetailLabels
+): MentionCandidate {
+  const title = item.title || labels.untitled;
+  const rows: NonNullable<MentionCandidateDetail['rows']> = [];
+  if (item.projectLabel) rows.push({ label: labels.project, value: item.projectLabel });
+  rows.push({ label: labels.sessionId, value: item.sessionId, mono: true });
+  // The one type where the composer text is not what the agent gets, so the
+  // panel shows exactly what will be sent instead of leaving it a surprise.
+  rows.push({ label: labels.sends, value: buildSessionMentionPrompt(item.sessionId), mono: true });
+  return {
+    // The range payload is the real id; the text only ever carries the slug.
+    value: item.sessionId,
+    label: item.slug,
+    insertText: `${SESSION_MENTION_PREFIX}${item.slug}`,
+    kind: 'session',
+    icon: 'session',
+    title,
+    subtitle: item.projectLabel,
+    mono: false,
+    detail: { title, description: undefined, rows },
+  };
+}
+
+export function buildSessionCandidates(
+  items: readonly SessionMentionItem[],
+  term: string,
+  labels: SessionDetailLabels
+): MentionCandidate[] {
+  return selectSessionMentionCandidates(items, term).map((item) =>
+    toSessionCandidate(item, labels)
+  );
+}
+
 export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
   return {
     value: command.name,
@@ -399,6 +448,9 @@ export type MentionCategorySources = {
   command?: SourceState & {
     commands: readonly AcpCommandSummary[];
   };
+  session?: SourceState & {
+    items: readonly SessionMentionItem[];
+  };
 };
 
 /**
@@ -407,7 +459,7 @@ export type MentionCategorySources = {
  */
 export function useMentionCategories(sources: MentionCategorySources): MentionCategory[] {
   const { t } = useTranslation();
-  const { file, issuePr, skill, command } = sources;
+  const { file, issuePr, skill, command, session } = sources;
 
   const issueFuse = React.useMemo(() => {
     if (!issuePr?.enabled) return null;
@@ -478,6 +530,25 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
       });
     }
 
+    if (session?.enabled) {
+      categories.push({
+        id: 'session',
+        namespace: 'session',
+        label: t('mention.category.session.label', 'Sessions'),
+        hint: t('mention.category.session.hint', "Reference another session's history"),
+        icon: 'session',
+        status: session.status ?? 'ready',
+        message: session.message,
+        getCandidates: (term) =>
+          buildSessionCandidates(session.items, term, {
+            sessionId: t('mention.session.detailId', 'Session id'),
+            sends: t('mention.session.detailSends', 'Sends'),
+            project: t('mention.session.detailProject', 'Project'),
+            untitled: t('mention.session.untitled', 'Untitled session'),
+          }),
+      });
+    }
+
     if (command?.enabled) {
       categories.push({
         id: 'command',
@@ -493,5 +564,5 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     }
 
     return categories;
-  }, [command, file, issueFuse, issuePr, prFuse, skill, t]);
+  }, [command, file, issueFuse, issuePr, prFuse, session, skill, t]);
 }

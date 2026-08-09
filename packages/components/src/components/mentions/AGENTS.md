@@ -41,6 +41,20 @@ Product-level mention sources built on `src/ui/mention`.
 - Issues and PRs rank over their own slice of the shared cache. The shared
   ranking caps its result set, so ranking the merged list first lets a long issue
   list starve every PR out of the PR category.
+- `@session:` is the only type whose displayed text differs from what the agent
+  receives: the composer holds `@session:<title-slug>`, the mention range holds
+  the real `sessionId`, and `useMentionPromptExpansion` rewrites the token into
+  an id-bearing MCP instruction on send. Its `@session:` prefix therefore stays
+  in the committed text — it is the expansion anchor, unlike every other
+  namespace prefix, which is consumed on commit.
+- An unresolvable session slug is sent verbatim. A stale token the agent can
+  ignore beats a confidently wrong session id, so expansion never guesses.
+- Session slugs resolve through the live list first, then a `localStorage`
+  slug -> id map. The store is synchronous on purpose: expansion runs on the
+  send path, and an async store would make that whole path async.
+- `useMentionPromptExpansion` is the single before-send text transform. There are
+  exactly two send paths, so per-type expansion hooks must compose here rather
+  than being wired into both by hand.
 - A candidate describes its side panel through the neutral `MentionCandidateDetail`
   fields, not its own component, so one pane serves every category. The pane is
   desktop-only: the docked mobile strip is too narrow and has no hover to preview
@@ -64,6 +78,9 @@ Product-level mention sources built on `src/ui/mention`.
   owns the `menu_open` -> `category_enter` -> `select` funnel. `category_enter`
   is reported from the resolved view, not a row callback: a navigation item
   never fires `onMentionSelect`, and the keyboard route must count too.
+- `mention-session-source.ts` owns `@session:` slugs, candidates, the slug -> id
+  cache, hydration, and the before-send expansion.
+- `mention-expansion.ts` composes every before-send transform into one hook.
 - `mention-fuse.ts` owns the shared, module-cached `fuse.js` import.
 - The menu must not load Fuse or rebuild provider entries from per-render
   derived objects. Keep Fuse constructor loading module-cached and keyed by menu

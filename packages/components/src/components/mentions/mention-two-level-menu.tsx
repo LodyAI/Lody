@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleDot,
   GitPullRequest,
+  MessageSquare,
   Terminal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -79,6 +80,8 @@ function CandidateIcon({
       return <Boxes className={className} />;
     case 'command':
       return <Terminal className={className} />;
+    case 'session':
+      return <MessageSquare className={className} />;
   }
 }
 

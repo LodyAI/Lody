@@ -18,6 +18,14 @@ import {
   hydrateFileMentionsFromText,
   type PathSuggestion,
 } from '@/components/mentions/file-at-mention';
+import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
+import {
+  buildSessionMentionItems,
+  hydrateSessionMentionsFromText,
+  rememberSessionMentionSlugs,
+  resolveSessionMentionIds,
+  type SessionMentionItem,
+} from '@/components/mentions/mention-session-source';
 import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
@@ -67,6 +75,7 @@ function TwoLevelMentionMenu({
   allowedSkillDirs,
   enableCommandMentions,
   availableCommands,
+  sessionItems,
   surface,
 }: {
   fileData: MentionFileDataState;
@@ -82,6 +91,7 @@ function TwoLevelMentionMenu({
   allowedSkillDirs: ReadonlySet<string> | null;
   enableCommandMentions: boolean;
   availableCommands?: AcpCommandSummary[];
+  sessionItems: SessionMentionItem[];
   surface: MentionSurface;
 }) {
   const context = useMentionContext('TwoLevelMentionMenu');
@@ -193,6 +203,11 @@ function TwoLevelMentionMenu({
     [allowedSkillDirs, enableSkillMentions, skillItems, skillState, t]
   );
 
+  const sessionSource = React.useMemo<MentionCategorySources['session']>(
+    () => ({ enabled: sessionItems.length > 0, items: sessionItems }),
+    [sessionItems]
+  );
+
   const commandSource = React.useMemo<MentionCategorySources['command']>(
     () => ({ enabled: enableCommandMentions, commands: availableCommands ?? [] }),
     [availableCommands, enableCommandMentions]
@@ -204,9 +219,10 @@ function TwoLevelMentionMenu({
         file: fileSource,
         issuePr: issuePrSource,
         skill: skillSource,
+        session: sessionSource,
         command: commandSource,
       }),
-      [commandSource, fileSource, issuePrSource, skillSource]
+      [commandSource, fileSource, issuePrSource, sessionSource, skillSource]
     )
   );
 
@@ -285,6 +301,44 @@ function FileMentionHydrator({
   return null;
 }
 
+function SessionMentionHydrator({
+  text,
+  items,
+  enabled,
+}: {
+  text: string;
+  items: readonly SessionMentionItem[];
+  enabled: boolean;
+}) {
+  const context = useMentionContext('SessionMentionHydrator');
+  const initialTextRef = React.useRef(text);
+  const hydratedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!enabled || hydratedRef.current) return;
+    const initialText = initialTextRef.current;
+    if (!initialText || text !== initialText || context.open) return;
+
+    const hydrated = hydrateSessionMentionsFromText(initialText, resolveSessionMentionIds(items));
+    if (hydrated.mentions.length === 0) return;
+
+    hydratedRef.current = true;
+    context.onMentionsChange((prev) => {
+      const merged = [...prev, ...hydrated.mentions].sort((a, b) => a.start - b.start);
+      const seen = new Set<string>();
+      return merged.filter((mention) => {
+        const key = `${mention.start}:${mention.end}:${mention.value}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    });
+    context.onValueChange((prev) => Array.from(new Set([...(prev ?? []), ...hydrated.values])));
+  }, [context, enabled, items, text]);
+
+  return null;
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -301,6 +355,8 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
+  /** Dropped from the `@session:` category — a session never references itself. */
+  currentSessionId?: string | null;
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
@@ -323,6 +379,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
+      currentSessionId,
       value,
       onValueChange,
       containerClassName,
@@ -402,6 +459,16 @@ export const CombinedMentionTextarea = React.forwardRef<
       },
       [initializeLazyDirectory]
     );
+    const { sessions: visibleSessions } = useVisibleSessionMetas();
+    const sessionItems = React.useMemo(
+      () => buildSessionMentionItems(visibleSessions, currentSessionId),
+      [currentSessionId, visibleSessions]
+    );
+    // Persist slug -> id so a draft reloaded later still resolves its mentions.
+    React.useEffect(() => {
+      rememberSessionMentionSlugs(sessionItems);
+    }, [sessionItems]);
+
     const { skillState, skillItems, knownSkillTokens } = useMentionProjectSkills(
       mentionSource,
       skillsActive,
@@ -552,6 +619,11 @@ export const CombinedMentionTextarea = React.forwardRef<
           getKnownPaths={getKnownFileTokens}
           enabled={enableFileMentions}
         />
+        <SessionMentionHydrator
+          text={value}
+          items={sessionItems}
+          enabled={sessionItems.length > 0}
+        />
         {enableSkillMentions ? (
           <SkillMentionHydrator
             text={value}
@@ -597,6 +669,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           allowedSkillDirs={allowedSkillDirs}
           enableCommandMentions={enableCommandMentions}
           availableCommands={availableCommands}
+          sessionItems={sessionItems}
           surface={mentionSurface}
         />
       </Mention>

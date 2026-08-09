@@ -24,7 +24,7 @@ import {
 } from '@/components/chat/chat-composer';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { useSkillMentionPromptExpansion } from '@/components/mentions/mention-skill-source';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import {
@@ -1893,11 +1893,12 @@ export const SessionChatInputArea = memo(
           : undefined,
       [isArchived, session.agentType, session.cliType, session.machineId]
     );
-    const expandSkillMentionsForPrompt = useSkillMentionPromptExpansion(
-      isArchived ? undefined : mentionSource,
+    const expandSkillMentionsForPrompt = useMentionPromptExpansion({
+      source: isArchived ? undefined : mentionSource,
       skillAgent,
-      userInput
-    );
+      promptValue: userInput,
+      currentSessionId: session.id,
+    });
     expandSkillMentionsForPromptRef.current = expandSkillMentionsForPrompt;
 
     const tone = isDark ? 'dark' : 'light';

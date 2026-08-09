@@ -156,7 +156,7 @@ import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
 } from '@/components/mentions/issue-pr-hash-mention';
-import { useSkillMentionPromptExpansion } from '@/components/mentions/mention-skill-source';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -3679,11 +3679,11 @@ function WorkspaceChatLanding({
     selectedRepo,
     workspaceId,
   ]);
-  const expandSkillMentionsForPrompt = useSkillMentionPromptExpansion(
-    mentionSource,
+  const expandSkillMentionsForPrompt = useMentionPromptExpansion({
+    source: mentionSource,
     skillAgent,
-    prompt
-  );
+    promptValue: prompt,
+  });
   const promptPlaceholder = t(
     getChatComposerPromptPlaceholderKey({ mentionSource, availableCommands })
   );
