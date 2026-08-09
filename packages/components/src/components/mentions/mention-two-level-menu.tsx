@@ -95,10 +95,7 @@ function CategoryRow({ category }: { category: MentionCategory }) {
       navigateText={getCategoryNavigateText(category)}
     >
       <CandidateIcon icon={category.icon} className={ICON_CLASS} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{category.label}</span>
-        <span className="truncate text-xs text-muted-foreground">{category.hint}</span>
-      </div>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{category.label}</span>
       <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" />
     </MentionItem>
   );
@@ -209,15 +206,8 @@ function Message({ children, tone }: { children: React.ReactNode; tone?: 'error'
   );
 }
 
-function CategoryBreadcrumb({
-  category,
-  showBack,
-  onBack,
-}: {
-  category: MentionCategory;
-  showBack: boolean;
-  onBack: () => void;
-}) {
+/** The second level's only chrome: the way back. */
+function CategoryBreadcrumb({ showBack, onBack }: { showBack: boolean; onBack: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border bg-popover px-2 py-1.5 text-xs text-muted-foreground">
@@ -233,10 +223,6 @@ function CategoryBreadcrumb({
           {t('mention.menu.back', 'Back')}
         </button>
       ) : null}
-      <span className="font-mono text-[11px] text-foreground/70">
-        {getCategoryNavigateText(category)}
-      </span>
-      <span className="min-w-0 truncate">{category.hint}</span>
     </div>
   );
 }
@@ -309,7 +295,7 @@ export function MentionTwoLevelMenuBody({
     const { category, candidates } = view;
     return (
       <>
-        <CategoryBreadcrumb category={category} showBack={showBack} onBack={onBack} />
+        <CategoryBreadcrumb showBack={showBack} onBack={onBack} />
         {category.notice ? (
           <div className="px-2 pt-2 pb-1 text-xs text-muted-foreground">{category.notice}</div>
         ) : null}

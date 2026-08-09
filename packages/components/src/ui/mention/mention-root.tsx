@@ -356,6 +356,13 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     itemMap,
     onFilter,
     exactMatch,
+    // Menus rank and slice their own candidates before rendering them, so the
+    // built-in scorer must not decide visibility on top of that. Left on, it
+    // matched the search term against each item's `value`, which hid every row
+    // whose payload happened not to contain the term — an issue row (`#3312`)
+    // under a text query — and a hidden row renders null, so its collection
+    // entry lost its node and arrow-key movement stopped at the first group.
+    manualFiltering: true,
     onCallback: (itemCount) => {
       if (autoCloseOnEmpty && itemCount === 0) {
         // Close the menu if no items match the filter

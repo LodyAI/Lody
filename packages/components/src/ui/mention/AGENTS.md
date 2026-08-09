@@ -18,6 +18,11 @@ Shared mention primitive used by composer autocomplete surfaces.
   trigger in one keystroke (`isMentionNavigationPrefix`); path drill-downs are
   excluded so Backspace still walks a path one character at a time.
   Tab/ArrowRight descend into a highlighted navigation item.
+- The primitive does not filter. Menus rank and slice their own candidates, so
+  `useFilterStore` runs with `manualFiltering`; letting the built-in scorer also
+  match the search term against each item's `value` hides rows whose payload
+  happens not to contain it, and a hidden row renders null, which strips its node
+  from the collection and breaks arrow-key movement across groups.
 - Desktop `MentionContent` is caret-anchored vertically but horizontally constrained
   to the textarea range via its virtual collision boundary and
   `--mention-input-width`.

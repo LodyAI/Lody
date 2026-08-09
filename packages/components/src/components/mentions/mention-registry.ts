@@ -380,8 +380,6 @@ export function toSessionCandidate(
     kind: 'session',
     icon: 'session',
     title,
-    subtitle: item.projectLabel,
-    mono: false,
     detail: { title, description: undefined, rows },
   };
 }
