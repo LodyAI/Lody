@@ -41,6 +41,12 @@ Product-level mention sources built on `src/ui/mention`.
 - Issues and PRs rank over their own slice of the shared cache. The shared
   ranking caps its result set, so ranking the merged list first lets a long issue
   list starve every PR out of the PR category.
+- A candidate describes its side panel through the neutral `MentionCandidateDetail`
+  fields, not its own component, so one pane serves every category. The pane is
+  desktop-only: the docked mobile strip is too narrow and has no hover to preview
+  with.
+- Locale files are flat dotted-key maps — i18next runs with `keySeparator: false`,
+  so a nested block never resolves and silently falls back to the inline default.
 - `@` directory candidates must carry both `navigateText` (`@dir/`, descend) and
   `insertText` (`@dir`, commit without the trailing slash). The primitive no
   longer infers drill-down from a trailing `/`, so dropping either prop silently
@@ -54,10 +60,6 @@ Product-level mention sources built on `src/ui/mention`.
   indexing and `@` candidates.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
-- A candidate describes its side panel through the neutral `MentionCandidateDetail`
-  fields, not its own component, so one pane serves every category. The pane is
-  desktop-only: the docked mobile strip is too narrow and has no hover to preview
-  with.
 - `mention-two-level-menu.tsx` renders that contract as the single `@` menu and
   owns the `menu_open` -> `category_enter` -> `select` funnel. `category_enter`
   is reported from the resolved view, not a row callback: a navigation item

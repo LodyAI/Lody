@@ -3273,38 +3273,21 @@
   "sessions.autoReview.confirmMergeHelper": "First automatic merge in this workspace.",
   "sessions.autoReview.resume": "Resume",
   "sessions.autoReview.resumeHelper": "Picks up where it stopped.",
-  "mention": {
-    "category": {
-      "file": {
-        "label": "Files",
-        "hint": "Files and directories in this project"
-      },
-      "issue": {
-        "label": "Issues",
-        "hint": "Open issues in this repository"
-      },
-      "pr": {
-        "label": "Pull Requests",
-        "hint": "Open pull requests in this repository"
-      },
-      "skill": {
-        "label": "Skills",
-        "hint": "Project and global skills for this agent"
-      },
-      "command": {
-        "label": "Commands",
-        "hint": "Agent commands; replaces the whole prompt"
-      }
-    },
-    "menu": {
-      "back": "Back",
-      "noResults": "No results",
-      "loading": "Loading…"
-    },
-    "file": {
-      "loadError": "Failed to load files.",
-      "truncatedGithub": "Repo is very large; GitHub returned a truncated file list.",
-      "truncatedLocal": "Project is very large; local file list was truncated."
-    }
-  }
+  "mention.category.file.label": "Files",
+  "mention.category.file.hint": "Files and directories in this project",
+  "mention.category.issue.label": "Issues",
+  "mention.category.issue.hint": "Open issues in this repository",
+  "mention.category.pr.label": "Pull Requests",
+  "mention.category.pr.hint": "Open pull requests in this repository",
+  "mention.category.skill.label": "Skills",
+  "mention.category.skill.hint": "Project and global skills for this agent",
+  "mention.category.command.label": "Commands",
+  "mention.category.command.hint": "Agent commands; replaces the whole prompt",
+  "mention.menu.back": "Back",
+  "mention.menu.noResults": "No results",
+  "mention.menu.loading": "Loading…",
+  "mention.file.loadError": "Failed to load files.",
+  "mention.file.truncatedGithub": "Repo is very large; GitHub returned a truncated file list.",
+  "mention.file.truncatedLocal": "Project is very large; local file list was truncated.",
+  "workspace.projects.skills.mention.detailSymlink": "symlink"
 }

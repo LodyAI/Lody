@@ -3271,38 +3271,21 @@
   "sessions.autoReview.confirmMergeHelper": "这是该工作区第一次自动合入。",
   "sessions.autoReview.resume": "继续",
   "sessions.autoReview.resumeHelper": "从暂停的地方接着跑。",
-  "mention": {
-    "category": {
-      "file": {
-        "label": "文件",
-        "hint": "当前项目中的文件与目录"
-      },
-      "issue": {
-        "label": "Issues",
-        "hint": "当前仓库的 open issue"
-      },
-      "pr": {
-        "label": "Pull Requests",
-        "hint": "当前仓库的 open pull request"
-      },
-      "skill": {
-        "label": "Skills",
-        "hint": "当前 agent 可用的项目与全局 skill"
-      },
-      "command": {
-        "label": "命令",
-        "hint": "Agent 命令，会替换整条输入"
-      }
-    },
-    "menu": {
-      "back": "返回",
-      "noResults": "没有结果",
-      "loading": "加载中…"
-    },
-    "file": {
-      "loadError": "加载文件列表失败。",
-      "truncatedGithub": "仓库过大，GitHub 返回的文件列表被截断。",
-      "truncatedLocal": "项目过大，本地文件列表被截断。"
-    }
-  }
+  "mention.category.file.label": "文件",
+  "mention.category.file.hint": "当前项目中的文件与目录",
+  "mention.category.issue.label": "Issues",
+  "mention.category.issue.hint": "当前仓库的 open issue",
+  "mention.category.pr.label": "Pull Requests",
+  "mention.category.pr.hint": "当前仓库的 open pull request",
+  "mention.category.skill.label": "Skills",
+  "mention.category.skill.hint": "当前 agent 可用的项目与全局 skill",
+  "mention.category.command.label": "命令",
+  "mention.category.command.hint": "Agent 命令，会替换整条输入",
+  "mention.menu.back": "返回",
+  "mention.menu.noResults": "没有结果",
+  "mention.menu.loading": "加载中…",
+  "mention.file.loadError": "加载文件列表失败。",
+  "mention.file.truncatedGithub": "仓库过大，GitHub 返回的文件列表被截断。",
+  "mention.file.truncatedLocal": "项目过大，本地文件列表被截断。",
+  "workspace.projects.skills.mention.detailSymlink": "符号链接"
 }
