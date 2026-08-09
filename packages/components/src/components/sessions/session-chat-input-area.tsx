@@ -2107,6 +2107,7 @@ export const SessionChatInputArea = memo(
         mentionSource={isArchived ? undefined : mentionSource}
         availableCommands={isArchived ? undefined : availableCommands}
         skillAgent={skillAgent}
+        currentSessionId={session.id}
         promptRef={textareaRef}
         promptValue={submissionPending ? '' : userInput}
         onPromptChange={handleInputChange}

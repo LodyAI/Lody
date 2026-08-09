@@ -97,6 +97,8 @@ export interface ChatComposerProps {
      `$` menu surface that machine's global skills even for GitHub / plain-agent
      chats (not just local-project chats). */
   skillAgent?: SkillMentionAgent;
+  /** Dropped from the `@session:` category — a session never references itself. */
+  currentSessionId?: string | null;
   promptId?: string;
   promptValue: string;
   onPromptChange: (value: string) => void;
@@ -204,6 +206,7 @@ export function ChatComposer({
   mentionSource,
   availableCommands,
   skillAgent,
+  currentSessionId,
   promptId,
   promptValue,
   onPromptChange,
@@ -809,6 +812,7 @@ export function ChatComposer({
                 mentionSource={mentionSource}
                 availableCommands={availableCommands}
                 skillAgent={skillAgent}
+                currentSessionId={currentSessionId}
                 value={promptValue}
                 onValueChange={onPromptChange}
                 externalMentions={pastedTextMentions}
@@ -905,6 +909,7 @@ export function ChatComposer({
               mentionSource={mentionSource}
               availableCommands={availableCommands}
               skillAgent={skillAgent}
+              currentSessionId={currentSessionId}
               value={promptValue}
               onValueChange={onPromptChange}
               externalMentions={pastedTextMentions}
