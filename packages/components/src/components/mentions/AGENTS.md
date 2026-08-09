@@ -54,6 +54,10 @@ Product-level mention sources built on `src/ui/mention`.
   indexing and `@` candidates.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
+- A candidate describes its side panel through the neutral `MentionCandidateDetail`
+  fields, not its own component, so one pane serves every category. The pane is
+  desktop-only: the docked mobile strip is too narrow and has no hover to preview
+  with.
 - `mention-two-level-menu.tsx` renders that contract as the single `@` menu and
   owns the `menu_open` -> `category_enter` -> `select` funnel. `category_enter`
   is reported from the resolved view, not a row callback: a navigation item

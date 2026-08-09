@@ -19,6 +19,7 @@ import {
   getCategoryNavigateText,
   selectMentionMenuViewForTrigger,
   type MentionCandidate,
+  type MentionCandidateDetail,
   type MentionCategory,
   type MentionIcon,
   type MentionMenuView,
@@ -139,6 +140,51 @@ function CandidateRow({
   );
 }
 
+/**
+ * Desktop side panel for the highlighted candidate. Mobile docks a narrow
+ * full-width strip with no hover, so it stays list-only.
+ */
+function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
+  return (
+    <div className="scrollbar-pro max-h-[320px] w-[248px] shrink-0 overflow-y-auto border-l border-border px-3 py-2.5">
+      <p className="truncate text-sm font-semibold text-foreground">{detail.title}</p>
+      {detail.badges?.length ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {detail.badges.map((badge) => (
+            <span
+              key={badge}
+              className="rounded-sm border border-border px-1.5 py-px text-[10.5px] text-muted-foreground"
+            >
+              {badge}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {detail.description ? (
+        <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+          {detail.description}
+        </p>
+      ) : null}
+      {detail.rows?.length ? (
+        <dl className="mt-2.5 flex flex-col gap-1 text-[11px]">
+          {detail.rows.map((row) => (
+            <div key={row.label} className="flex flex-col gap-0.5">
+              <dt className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground/70">
+                {row.label}
+              </dt>
+              <dd
+                className={cn('min-w-0 break-words text-muted-foreground', row.mono && 'font-mono')}
+              >
+                {row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  );
+}
+
 function GroupLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-[0.04em] text-muted-foreground/70">
@@ -201,77 +247,91 @@ export function MentionTwoLevelMenuBody({
   onBack,
   showBack,
   onCandidateSelect,
+  detail,
 }: {
   view: MentionMenuView;
   onBack: () => void;
   showBack: boolean;
   onCandidateSelect?: (category: MentionCategory, rank: number) => void;
+  /** Side panel for the highlighted candidate; omitted on mobile. */
+  detail?: MentionCandidateDetail | null;
 }) {
   const { t } = useTranslation();
+  const list = renderLevel();
 
-  if (view.level === 'categories') {
-    return (
-      <div className="scrollbar-pro max-h-[300px] overflow-y-auto">
-        {view.categories.map((category) => (
-          <CategoryRow key={category.id} category={category} />
-        ))}
-      </div>
-    );
-  }
+  if (!detail) return list;
+  return (
+    <div className="flex items-stretch">
+      <div className="min-w-0 flex-1">{list}</div>
+      <CandidateDetailPane detail={detail} />
+    </div>
+  );
 
-  if (view.level === 'aggregate') {
-    if (view.categories.length === 0 && view.groups.length === 0) {
-      return <Message>{t('mention.menu.noResults', 'No results')}</Message>;
+  function renderLevel() {
+    if (view.level === 'categories') {
+      return (
+        <div className="scrollbar-pro max-h-[300px] overflow-y-auto">
+          {view.categories.map((category) => (
+            <CategoryRow key={category.id} category={category} />
+          ))}
+        </div>
+      );
     }
+
+    if (view.level === 'aggregate') {
+      if (view.categories.length === 0 && view.groups.length === 0) {
+        return <Message>{t('mention.menu.noResults', 'No results')}</Message>;
+      }
+      return (
+        <div className="scrollbar-pro max-h-[320px] overflow-y-auto">
+          {view.categories.map((category) => (
+            <CategoryRow key={category.id} category={category} />
+          ))}
+          {view.groups.map((group) => (
+            <React.Fragment key={group.category.id}>
+              <GroupLabel>{group.category.label}</GroupLabel>
+              {group.candidates.map((candidate, rank) => (
+                <CandidateRow
+                  key={candidate.value}
+                  candidate={candidate}
+                  onSelect={() => onCandidateSelect?.(group.category, rank)}
+                />
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+      );
+    }
+
+    const { category, candidates } = view;
     return (
-      <div className="scrollbar-pro max-h-[320px] overflow-y-auto">
-        {view.categories.map((category) => (
-          <CategoryRow key={category.id} category={category} />
-        ))}
-        {view.groups.map((group) => (
-          <React.Fragment key={group.category.id}>
-            <GroupLabel>{group.category.label}</GroupLabel>
-            {group.candidates.map((candidate, rank) => (
+      <>
+        <CategoryBreadcrumb category={category} showBack={showBack} onBack={onBack} />
+        {category.notice ? (
+          <div className="px-2 pt-2 pb-1 text-xs text-muted-foreground">{category.notice}</div>
+        ) : null}
+        {category.message ? (
+          <Message tone={category.status === 'error' ? 'error' : undefined}>
+            {category.message}
+          </Message>
+        ) : candidates.length > 0 ? (
+          <div className="scrollbar-pro max-h-[280px] overflow-y-auto">
+            {candidates.map((candidate, rank) => (
               <CandidateRow
                 key={candidate.value}
                 candidate={candidate}
-                onSelect={() => onCandidateSelect?.(group.category, rank)}
+                onSelect={() => onCandidateSelect?.(category, rank)}
               />
             ))}
-          </React.Fragment>
-        ))}
-      </div>
+          </div>
+        ) : category.status === 'loading' ? (
+          <Message>{t('mention.menu.loading', 'Loading…')}</Message>
+        ) : (
+          <Message>{t('mention.menu.noResults', 'No results')}</Message>
+        )}
+      </>
     );
   }
-
-  const { category, candidates } = view;
-  return (
-    <>
-      <CategoryBreadcrumb category={category} showBack={showBack} onBack={onBack} />
-      {category.notice ? (
-        <div className="px-2 pt-2 pb-1 text-xs text-muted-foreground">{category.notice}</div>
-      ) : null}
-      {category.message ? (
-        <Message tone={category.status === 'error' ? 'error' : undefined}>
-          {category.message}
-        </Message>
-      ) : candidates.length > 0 ? (
-        <div className="scrollbar-pro max-h-[280px] overflow-y-auto">
-          {candidates.map((candidate, rank) => (
-            <CandidateRow
-              key={candidate.value}
-              candidate={candidate}
-              onSelect={() => onCandidateSelect?.(category, rank)}
-            />
-          ))}
-        </div>
-      ) : category.status === 'loading' ? (
-        <Message>{t('mention.menu.loading', 'Loading…')}</Message>
-      ) : (
-        <Message>{t('mention.menu.noResults', 'No results')}</Message>
-      )}
-    </>
-  );
 }
 
 /**
@@ -327,6 +387,24 @@ export function MentionTwoLevelMenu({
   const handleBack = React.useCallback(() => {
     navigateBackToCategories(context);
   }, [context]);
+
+  // Side panel follows the highlight. Falls back to the first candidate so the
+  // pane is populated before the highlight effect lands, and stays off mobile
+  // where the docked strip is too narrow and there is no hover to preview with.
+  const visibleCandidates = React.useMemo(() => {
+    if (!view) return [];
+    if (view.level === 'category') return view.candidates;
+    if (view.level === 'aggregate') return view.groups.flatMap((group) => group.candidates);
+    return [];
+  }, [view]);
+  const highlightedValue = context.highlightedItem?.value ?? null;
+  const detail = React.useMemo(() => {
+    if (isMobile) return null;
+    const match =
+      visibleCandidates.find((candidate) => candidate.value === highlightedValue) ??
+      visibleCandidates[0];
+    return match?.detail ?? null;
+  }, [highlightedValue, isMobile, visibleCandidates]);
 
   const postHog = usePostHog();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -389,7 +467,8 @@ export function MentionTwoLevelMenu({
   return (
     <MentionContent
       className={cn(
-        'w-max max-w-[min(var(--mention-input-width),calc(100vw-2rem))]',
+        'max-w-[min(var(--mention-input-width),calc(100vw-2rem))]',
+        detail ? 'w-[min(640px,var(--mention-input-width),calc(100vw-2rem))]' : 'w-max',
         // The docked mobile panel is its own scroll container.
         isMobile && 'w-full'
       )}
@@ -399,6 +478,7 @@ export function MentionTwoLevelMenu({
         onBack={handleBack}
         showBack={showBack}
         onCandidateSelect={handleCandidateSelect}
+        detail={detail}
       />
     </MentionContent>
   );

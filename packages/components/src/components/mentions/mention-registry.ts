@@ -35,6 +35,18 @@ export type MentionIcon = 'file' | 'dir' | 'issue' | 'pr' | 'skill' | 'command';
 
 export type MentionCategoryStatus = 'ready' | 'loading' | 'error';
 
+/**
+ * Side-panel content for a highlighted candidate. Deliberately neutral: the
+ * menu renders one pane for every category, so a source describes its detail in
+ * plain fields rather than shipping its own component.
+ */
+export type MentionCandidateDetail = {
+  title: string;
+  badges?: string[];
+  description?: string;
+  rows?: Array<{ label: string; value: string; mono?: boolean }>;
+};
+
 export type MentionCandidate = {
   /** Payload recorded on the mention range; also the row key. */
   value: string;
@@ -61,6 +73,8 @@ export type MentionCandidate = {
   mono?: boolean;
   /** Path an extension-aware icon derives its glyph from. */
   iconPath?: string;
+  /** Rendered in the desktop side panel while this candidate is highlighted. */
+  detail?: MentionCandidateDetail;
 };
 
 export type MentionCategory = {
@@ -282,7 +296,25 @@ export function buildIssuePrCandidates(
   return getIssuePrSuggestions(scoped, term, fuse).map(toIssuePrCandidate);
 }
 
-export function toSkillCandidate(item: SkillMentionItem): MentionCandidate {
+/** i18n'd labels for the skill detail panel, supplied by `useMentionCategories`. */
+export type SkillDetailLabels = {
+  author: string;
+  path: string;
+  linksTo: string;
+  symlink: string;
+};
+
+export function toSkillCandidate(
+  item: SkillMentionItem,
+  labels: SkillDetailLabels
+): MentionCandidate {
+  const { skill } = item;
+  const rows: NonNullable<MentionCandidateDetail['rows']> = [];
+  if (skill.author) rows.push({ label: labels.author, value: skill.author });
+  rows.push({ label: labels.path, value: skill.relativePath, mono: true });
+  if (skill.symlinkTarget) {
+    rows.push({ label: labels.linksTo, value: skill.symlinkTarget, mono: true });
+  }
   return {
     value: item.token,
     label: item.token,
@@ -291,15 +323,28 @@ export function toSkillCandidate(item: SkillMentionItem): MentionCandidate {
     kind: 'skill',
     icon: 'skill',
     title: item.token,
+    detail: {
+      title: skill.name,
+      badges: [
+        item.scope,
+        ...(skill.version ? [`v${skill.version}`] : []),
+        ...(skill.isSymlink ? [labels.symlink] : []),
+      ],
+      description: skill.description,
+      rows,
+    },
   };
 }
 
 export function buildSkillCandidates(
   items: readonly SkillMentionItem[],
   term: string,
-  allowedDirs: ReadonlySet<string> | null
+  allowedDirs: ReadonlySet<string> | null,
+  labels: SkillDetailLabels
 ): MentionCandidate[] {
-  return selectSkillMentionCandidates(items, term, allowedDirs).map(toSkillCandidate);
+  return selectSkillMentionCandidates(items, term, allowedDirs).map((item) =>
+    toSkillCandidate(item, labels)
+  );
 }
 
 export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
@@ -423,7 +468,13 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'skill',
         status: skill.status ?? 'ready',
         message: skill.message,
-        getCandidates: (term) => buildSkillCandidates(skill.items, term, skill.allowedDirs),
+        getCandidates: (term) =>
+          buildSkillCandidates(skill.items, term, skill.allowedDirs, {
+            author: t('workspace.projects.skills.mention.detailAuthor', 'Author'),
+            path: t('workspace.projects.skills.mention.detailPath', 'Path'),
+            linksTo: t('workspace.projects.skills.mention.detailLinksTo', 'Links to'),
+            symlink: t('workspace.projects.skills.mention.detailSymlink', 'symlink'),
+          }),
       });
     }
 

@@ -8,10 +8,7 @@ import type { IssuePRMention } from '@lody/shared';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import {
-  normalizeGithubFetchErrorCode,
-  type MentionSurface,
-} from '@/components/mentions/mention-analytics';
+import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';

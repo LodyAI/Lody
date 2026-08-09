@@ -9,7 +9,9 @@ import type { Mention as MentionRange } from '../src/ui/mention/mention-root';
 import { MentionTwoLevelMenuBody } from '../src/components/mentions/mention-two-level-menu';
 import {
   selectMentionMenuView,
+  toSkillCandidate,
   type MentionCandidate,
+  type MentionCandidateDetail,
   type MentionCategory,
 } from '../src/components/mentions/mention-registry';
 
@@ -84,9 +86,11 @@ function makeCategories(): MentionCategory[] {
 function Harness({
   initialValue,
   categories,
+  detail,
 }: {
   initialValue: string;
   categories: MentionCategory[];
+  detail?: MentionCandidateDetail | null;
 }) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
@@ -107,7 +111,7 @@ function Harness({
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
-      <MentionTwoLevelMenuBody view={view} onBack={() => {}} showBack />
+      <MentionTwoLevelMenuBody view={view} onBack={() => {}} showBack detail={detail} />
     </Mention>
   );
 }
@@ -139,9 +143,13 @@ describe('MentionTwoLevelMenuBody', () => {
     originalRequestAnimationFrame = undefined;
   });
 
-  function render(initialValue: string, categories = makeCategories()) {
+  function render(
+    initialValue: string,
+    categories = makeCategories(),
+    detail?: MentionCandidateDetail | null
+  ) {
     act(() => {
-      root?.render(<Harness initialValue={initialValue} categories={categories} />);
+      root?.render(<Harness initialValue={initialValue} categories={categories} detail={detail} />);
     });
     const input = container?.querySelector('textarea');
     if (!input) throw new Error('Expected mention textarea to render');
@@ -212,5 +220,76 @@ describe('MentionTwoLevelMenuBody', () => {
 
     expect(container?.textContent).toContain('Failed to load issues and PRs.');
     expect(rowTitles()).toEqual([]);
+  });
+
+  it('renders the detail panel beside the rows when one is supplied', () => {
+    render('@issue:', makeCategories(), {
+      title: 'code-collab-debug',
+      badges: ['project', 'v2'],
+      description: 'Diagnose Code Collab diffs.',
+      rows: [{ label: 'Path', value: '.claude/skills/x/SKILL.md', mono: true }],
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).toContain('code-collab-debug');
+    expect(text).toContain('project');
+    expect(text).toContain('Diagnose Code Collab diffs.');
+    expect(text).toContain('.claude/skills/x/SKILL.md');
+    // The rows are still there beside it.
+    expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
+  });
+
+  it('omits the detail panel when the candidate has none', () => {
+    render('@issue:', makeCategories(), null);
+
+    expect(container?.querySelector('dl')).toBeNull();
+  });
+});
+
+describe('skill candidate detail', () => {
+  const labels = { author: 'Author', path: 'Path', linksTo: 'Links to', symlink: 'symlink' };
+
+  it('carries the skill metadata the old two-pane menu showed', () => {
+    const candidate = toSkillCandidate(
+      {
+        token: 'code-collab-debug',
+        dir: '.claude/skills',
+        scope: 'project',
+        skill: {
+          name: 'Code Collab Debug',
+          description: 'Diagnose Code Collab diffs.',
+          relativePath: '.claude/skills/code-collab-debug/SKILL.md',
+          version: '2',
+          author: 'zx',
+          isSymlink: true,
+          symlinkTarget: '../shared/skill',
+        },
+      } as Parameters<typeof toSkillCandidate>[0],
+      labels
+    );
+
+    expect(candidate.insertText).toBe('$code-collab-debug');
+    expect(candidate.detail?.title).toBe('Code Collab Debug');
+    expect(candidate.detail?.badges).toEqual(['project', 'v2', 'symlink']);
+    expect(candidate.detail?.rows).toEqual([
+      { label: 'Author', value: 'zx' },
+      { label: 'Path', value: '.claude/skills/code-collab-debug/SKILL.md', mono: true },
+      { label: 'Links to', value: '../shared/skill', mono: true },
+    ]);
+  });
+
+  it('omits rows the skill does not have', () => {
+    const candidate = toSkillCandidate(
+      {
+        token: 'plain',
+        dir: '.claude/skills',
+        scope: 'global',
+        skill: { name: 'Plain', relativePath: 'a/SKILL.md' },
+      } as Parameters<typeof toSkillCandidate>[0],
+      labels
+    );
+
+    expect(candidate.detail?.badges).toEqual(['global']);
+    expect(candidate.detail?.rows).toEqual([{ label: 'Path', value: 'a/SKILL.md', mono: true }]);
   });
 });
