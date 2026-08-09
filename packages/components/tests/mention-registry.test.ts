@@ -35,7 +35,6 @@ function makeCategory(
     id,
     namespace,
     label,
-    hint: '',
     icon: 'file',
     status: 'ready',
     getCandidates,

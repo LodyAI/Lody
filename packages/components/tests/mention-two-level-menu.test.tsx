@@ -51,7 +51,6 @@ function makeCategories(): MentionCategory[] {
       id: 'file',
       namespace: 'file',
       label: 'Files',
-      hint: 'Files and directories',
       icon: 'file',
       status: 'ready',
       getCandidates: (term) =>
@@ -72,7 +71,6 @@ function makeCategories(): MentionCategory[] {
       id: 'issue',
       namespace: 'issue',
       label: 'Issues',
-      hint: 'Open issues',
       icon: 'issue',
       status: 'ready',
       getCandidates: (term) =>

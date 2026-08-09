@@ -114,7 +114,6 @@ function category(
   id: MentionCategory['id'],
   namespace: string,
   label: string,
-  hint: string,
   icon: MentionCategory['icon'],
   candidates: MentionCandidate[],
   overrides?: Partial<MentionCategory>
@@ -123,7 +122,6 @@ function category(
     id,
     namespace,
     label,
-    hint,
     icon,
     status: 'ready',
     getCandidates: (term) =>
@@ -135,18 +133,11 @@ function category(
 }
 
 const CATEGORIES: MentionCategory[] = [
-  category('file', 'file', 'Files', 'Files and directories in this project', 'file', FILES),
-  category('issue', 'issue', 'Issues', 'Open issues in this repository', 'issue', ISSUES),
-  category('pr', 'pr', 'Pull Requests', 'Open pull requests in this repository', 'pr', []),
-  category('skill', 'skill', 'Skills', 'Project and global skills for this agent', 'skill', SKILLS),
-  category(
-    'command',
-    'cmd',
-    'Commands',
-    'Agent commands; replaces the whole prompt',
-    'command',
-    COMMANDS
-  ),
+  category('file', 'file', 'Files', 'file', FILES),
+  category('issue', 'issue', 'Issues', 'issue', ISSUES),
+  category('pr', 'pr', 'Pull Requests', 'pr', []),
+  category('skill', 'skill', 'Skills', 'skill', SKILLS),
+  category('command', 'cmd', 'Commands', 'command', COMMANDS),
 ];
 
 type HarnessProps = {

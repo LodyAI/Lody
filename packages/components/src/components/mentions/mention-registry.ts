@@ -94,7 +94,6 @@ export type MentionCategory = {
    */
   directTrigger?: string;
   label: string;
-  hint: string;
   icon: MentionIcon;
   status: MentionCategoryStatus;
   /** Rendered instead of rows: an error, or "select a repo first". */
@@ -476,7 +475,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'file',
         namespace: 'file',
         label: t('mention.category.file.label', 'Files'),
-        hint: t('mention.category.file.hint', 'Files and directories in this project'),
         icon: 'file',
         status: file.status ?? 'ready',
         message: file.message,
@@ -490,7 +488,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'issue',
         namespace: 'issue',
         label: t('mention.category.issue.label', 'Issues'),
-        hint: t('mention.category.issue.hint', 'Open issues in this repository'),
         icon: 'issue',
         status: issuePr.status ?? 'ready',
         message: issuePr.message,
@@ -501,7 +498,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'pr',
         namespace: 'pr',
         label: t('mention.category.pr.label', 'Pull Requests'),
-        hint: t('mention.category.pr.hint', 'Open pull requests in this repository'),
         icon: 'pr',
         status: issuePr.status ?? 'ready',
         message: issuePr.message,
@@ -514,7 +510,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'skill',
         namespace: 'skill',
         label: t('mention.category.skill.label', 'Skills'),
-        hint: t('mention.category.skill.hint', 'Project and global skills for this agent'),
         icon: 'skill',
         status: skill.status ?? 'ready',
         message: skill.message,
@@ -533,7 +528,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'session',
         namespace: 'session',
         label: t('mention.category.session.label', 'Sessions'),
-        hint: t('mention.category.session.hint', "Reference another session's history"),
         icon: 'session',
         status: session.status ?? 'ready',
         message: session.message,
@@ -553,7 +547,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         namespace: 'cmd',
         directTrigger: '/',
         label: t('mention.category.command.label', 'Commands'),
-        hint: t('mention.category.command.hint', 'Agent commands; replaces the whole prompt'),
         icon: 'command',
         status: command.status ?? 'ready',
         message: command.message,
