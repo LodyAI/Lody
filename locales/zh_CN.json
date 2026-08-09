@@ -3284,8 +3284,5 @@
   "mention.file.truncatedLocal": "项目过大，本地文件列表被截断。",
   "workspace.projects.skills.mention.detailSymlink": "符号链接",
   "mention.category.session.label": "会话",
-  "mention.session.detailId": "会话 id",
-  "mention.session.detailSends": "实际发送",
-  "mention.session.detailProject": "项目",
   "mention.session.untitled": "未命名会话"
 }

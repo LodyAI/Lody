@@ -3286,8 +3286,5 @@
   "mention.file.truncatedLocal": "Project is very large; local file list was truncated.",
   "workspace.projects.skills.mention.detailSymlink": "symlink",
   "mention.category.session.label": "Sessions",
-  "mention.session.detailId": "Session id",
-  "mention.session.detailSends": "Sends",
-  "mention.session.detailProject": "Project",
   "mention.session.untitled": "Untitled session"
 }

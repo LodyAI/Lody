@@ -18,6 +18,11 @@ Shared mention primitive used by composer autocomplete surfaces.
   trigger in one keystroke (`isMentionNavigationPrefix`); path drill-downs are
   excluded so Backspace still walks a path one character at a time.
   Tab/ArrowRight descend into a highlighted navigation item.
+- `MentionItem` registers its stable ref object, never a `{ current: node }`
+  snapshot. The collection keys its map by that object and sorts by document
+  position through `.current`, so a snapshot taken before the node mounts leaves
+  a null-node entry behind — the sort collapses around it and highlight movement
+  matches the wrong row.
 - The primitive does not filter. Menus rank and slice their own candidates, so
   `useFilterStore` runs with `manualFiltering`; letting the built-in scorer also
   match the search term against each item's `value` hides rows whose payload

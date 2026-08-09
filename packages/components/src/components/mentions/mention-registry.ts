@@ -19,7 +19,6 @@ import {
 } from '@/components/mentions/mention-skill-source';
 import {
   SESSION_MENTION_PREFIX,
-  buildSessionMentionPrompt,
   selectSessionMentionCandidates,
   type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
@@ -352,11 +351,7 @@ export function buildSkillCandidates(
   );
 }
 
-/** i18n'd labels for the session detail panel. */
 export type SessionDetailLabels = {
-  sessionId: string;
-  sends: string;
-  project: string;
   untitled: string;
 };
 
@@ -364,13 +359,6 @@ export function toSessionCandidate(
   item: SessionMentionItem,
   labels: SessionDetailLabels
 ): MentionCandidate {
-  const title = item.title || labels.untitled;
-  const rows: NonNullable<MentionCandidateDetail['rows']> = [];
-  if (item.projectLabel) rows.push({ label: labels.project, value: item.projectLabel });
-  rows.push({ label: labels.sessionId, value: item.sessionId, mono: true });
-  // The one type where the composer text is not what the agent gets, so the
-  // panel shows exactly what will be sent instead of leaving it a surprise.
-  rows.push({ label: labels.sends, value: buildSessionMentionPrompt(item.sessionId), mono: true });
   return {
     // The range payload is the real id; the text only ever carries the slug.
     value: item.sessionId,
@@ -378,8 +366,8 @@ export function toSessionCandidate(
     insertText: `${SESSION_MENTION_PREFIX}${item.slug}`,
     kind: 'session',
     icon: 'session',
-    title,
-    detail: { title, description: undefined, rows },
+    title: item.title || labels.untitled,
+    subtitle: item.projectLabel,
   };
 }
 
@@ -533,9 +521,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         message: session.message,
         getCandidates: (term) =>
           buildSessionCandidates(session.items, term, {
-            sessionId: t('mention.session.detailId', 'Session id'),
-            sends: t('mention.session.detailSends', 'Sends'),
-            project: t('mention.session.detailProject', 'Project'),
             untitled: t('mention.session.untitled', 'Untitled session'),
           }),
       });
