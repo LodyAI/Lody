@@ -58,16 +58,13 @@ interface ItemData {
   kind?: MentionKind;
 }
 
-type MentionKind =
-  | 'mention'
-  | 'file'
-  | 'dir'
-  | 'issue'
-  | 'pr'
-  | 'skill'
-  | 'command'
-  | 'session'
-  | 'pasted_text';
+/**
+ * `pasted_text` is the one kind the primitive itself branches on — an external
+ * range it renders but never owns. Everything else is an opaque tag the menu
+ * chooses, recorded on the range and echoed as `data-mention-kind`, so adding a
+ * mention category does not touch this file.
+ */
+type MentionKind = 'mention' | 'pasted_text' | (string & {});
 
 interface Mention extends Omit<ItemData, 'label' | 'disabled'> {
   start: number;
@@ -111,6 +108,14 @@ interface MentionContextValue {
   mentions: Mention[];
   onMentionsChange: React.Dispatch<React.SetStateAction<Mention[]>>;
   onMentionAdd: (value: string, triggerIndex: number, options?: { commit?: boolean }) => void;
+  /**
+   * Pop the text between the trigger and the caret back to the bare trigger,
+   * undoing one drill-down step. Returns false when there is no trigger to pop
+   * back to. The caller decides *when* this applies (Backspace on a namespace
+   * prefix, the menu's Back button); the transaction itself lives here because
+   * it has to interleave the controlled value commit with caret restoration.
+   */
+  onNavigateBack: () => boolean;
   onMentionsRemove: (mentionsToRemove: Mention[]) => void;
   onMentionClick?: (mention: Mention) => void;
   pendingSelection: MentionSelectionRange | null;
@@ -505,6 +510,26 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     ]
   );
 
+  const onNavigateBack = React.useCallback(() => {
+    const input = inputRef.current;
+    if (!input) return false;
+    const caretPosition = input.selectionStart ?? input.value.length;
+    const triggerIndex = input.value.lastIndexOf(trigger, caretPosition);
+    if (triggerIndex === -1) return false;
+
+    const caret = triggerIndex + trigger.length;
+    const nextValue = input.value.slice(0, caret) + input.value.slice(caretPosition);
+    setInputValue(nextValue);
+    // Same reason as `onMentionAdd`: MentionInput restores the caret once it has
+    // rendered this exact value, because touching the DOM selection here races
+    // the controlled value commit.
+    setPendingSelection({ start: caret, end: caret, expectedValue: nextValue });
+    filterStore.search = '';
+    setHighlightedItem(null);
+    requestAnimationFrame(() => onItemsFilter());
+    return true;
+  }, [filterStore, onItemsFilter, setInputValue, trigger]);
+
   const onMentionsRemove = React.useCallback(
     (mentionsToRemove: Mention[]) => {
       const input = inputRef.current;
@@ -576,6 +601,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       mentions={mentions}
       onMentionsChange={setMentions}
       onMentionAdd={onMentionAdd}
+      onNavigateBack={onNavigateBack}
       onMentionsRemove={onMentionsRemove}
       onMentionClick={onMentionClick}
       pendingSelection={pendingSelection}

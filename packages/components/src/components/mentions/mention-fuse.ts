@@ -45,8 +45,14 @@ export function useMentionFuseCtor<T>(enabled: boolean): FuseConstructor<T> | nu
     getFuseCtorSnapshot,
     getFuseCtorSnapshot
   );
+  // Latched: `enabled` gates the import so mounting a composer never pulls Fuse
+  // in, but once a menu has activated the constructor keeps being handed back.
+  // Dropping it on close would throw away the caller's index and rebuild it —
+  // over the whole file list — on the very next keystroke that reopens the menu.
+  const activatedRef = React.useRef(false);
+  if (enabled) activatedRef.current = true;
   React.useEffect(() => {
     if (enabled) loadFuseCtor();
   }, [enabled]);
-  return enabled ? (ctor as FuseConstructor<T> | null) : null;
+  return activatedRef.current ? (ctor as FuseConstructor<T> | null) : null;
 }

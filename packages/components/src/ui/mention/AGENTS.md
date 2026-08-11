@@ -18,6 +18,17 @@ Shared mention primitive used by composer autocomplete surfaces.
   trigger in one keystroke (`isMentionNavigationPrefix`); path drill-downs are
   excluded so Backspace still walks a path one character at a time.
   Tab/ArrowRight descend into a highlighted navigation item.
+- The pop-back itself is `context.onNavigateBack()`, owned by the root next to
+  `onMentionAdd`: it has to interleave the controlled value commit with caret
+  restoration, so a menu's own Back affordance calls it rather than restaging the
+  transaction. Callers decide only *when* it applies.
+- `mention-trigger.ts` is the single owner of the `<namespace>:` grammar
+  (`parseMentionNamespaceSearch`). The menu resolves its level from the same
+  parse Backspace pops from, so the two cannot disagree about what is a
+  namespace.
+- `MentionKind` stays product-neutral: `pasted_text` is the only member the
+  primitive branches on, and every other kind is an opaque tag the menu chooses.
+  Adding a mention category must not edit this package.
 - `MentionItem` registers its stable ref object, never a `{ current: node }`
   snapshot. The collection keys its map by that object and sorts by document
   position through `.current`, so a snapshot taken before the node mounts leaves

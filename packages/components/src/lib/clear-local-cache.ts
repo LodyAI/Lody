@@ -95,6 +95,9 @@ const LOCAL_STORAGE_CACHE_KEYS = [
   // Cached current-user snapshot (`auth-bootstrap.ts`); the auth token itself
   // is deliberately kept — a cache clear does not sign the user out.
   'lody:auth-bootstrap',
+  // `@session:` slug → sessionId map (`mention-session-source.ts`); rebuilt from
+  // the live session list as soon as a composer mounts.
+  'lody:session-mention-slugs',
 ];
 
 const LOCAL_STORAGE_CACHE_KEY_PREFIXES = [

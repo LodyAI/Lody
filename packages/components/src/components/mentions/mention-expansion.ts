@@ -1,15 +1,13 @@
 import * as React from 'react';
-import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import {
   useSkillMentionPromptExpansion,
   type SkillMentionAgent,
 } from '@/components/mentions/mention-skill-source';
 import {
-  buildSessionMentionItems,
   expandSessionMentionsInText,
-  rememberSessionMentionSlugs,
   resolveSessionMentionIds,
+  useSessionMentionItems,
   SESSION_MENTION_PREFIX,
 } from '@/components/mentions/mention-session-source';
 
@@ -43,18 +41,7 @@ export function useMentionPromptExpansion({
   const expandSkills = useSkillMentionPromptExpansion(source, skillAgent, promptValue);
   // Read here rather than through props: the two send paths should not have to
   // know which data an expansion needs.
-  const { sessions } = useVisibleSessionMetas();
-
-  const sessionItems = React.useMemo(
-    () => buildSessionMentionItems(sessions, currentSessionId),
-    [currentSessionId, sessions]
-  );
-
-  // Keep the slug -> id map durable so a draft reloaded tomorrow, or one whose
-  // session has since been renamed, still resolves.
-  React.useEffect(() => {
-    rememberSessionMentionSlugs(sessionItems);
-  }, [sessionItems]);
+  const sessionItems = useSessionMentionItems(currentSessionId);
 
   return React.useCallback(
     (text: string) => {

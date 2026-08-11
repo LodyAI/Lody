@@ -123,62 +123,6 @@ function withBase(
 // capturePostHogEvent already null-guards the client and sanitizes properties,
 // so these helpers are side-effect-only and never throw into product code.
 
-export function captureMentionFileMenuOpen(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { sourceKind: MentionFileSourceKind; status: string; itemsCount: number }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/file/menu_open',
-    withBase(
-      {
-        source_kind: props.sourceKind,
-        status: props.status,
-        items_count: props.itemsCount,
-      },
-      base
-    )
-  );
-}
-
-export function captureMentionFileSelect(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: {
-    kind: 'file' | 'dir';
-    rank: number;
-    termLength: number;
-    sourceKind: MentionFileSourceKind;
-  }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/file/select',
-    withBase(
-      {
-        kind: props.kind,
-        rank: props.rank,
-        term_length: props.termLength,
-        source_kind: props.sourceKind,
-      },
-      base
-    )
-  );
-}
-
-export function captureMentionFileMenuEmpty(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { sourceKind: MentionFileSourceKind; termLength: number }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/file/menu_empty',
-    withBase({ source_kind: props.sourceKind, term_length: props.termLength }, base)
-  );
-}
-
 export function captureMentionFileFetchError(
   postHog: PostHogAnalyticsClient | null | undefined,
   base: MentionAnalyticsBaseProps,
@@ -207,49 +151,6 @@ export function captureMentionFileLocalFetchError(
     postHog,
     'mention/file/local_fetch_error',
     withBase({ error_code: props.errorCode, source_kind: props.sourceKind }, base)
-  );
-}
-
-export function captureMentionCommandMenuOpen(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { itemsCount: number; termLength: number }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/command/menu_open',
-    withBase({ items_count: props.itemsCount, term_length: props.termLength }, base)
-  );
-}
-
-export function captureMentionCommandSelect(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { commandName: string; rank: number; termLength: number }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/command/select',
-    withBase(
-      {
-        command_name: props.commandName,
-        rank: props.rank,
-        term_length: props.termLength,
-      },
-      base
-    )
-  );
-}
-
-export function captureMentionCommandMenuEmpty(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  base: MentionAnalyticsBaseProps,
-  props: { termLength: number; commandCount: number }
-): void {
-  capturePostHogEvent(
-    postHog,
-    'mention/command/menu_empty',
-    withBase({ term_length: props.termLength, command_count: props.commandCount }, base)
   );
 }
 

@@ -18,15 +18,15 @@ import {
   hydrateFileMentionsFromText,
   type PathSuggestion,
 } from '@/components/mentions/file-at-mention';
-import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import {
-  buildSessionMentionItems,
   hydrateSessionMentionsFromText,
-  rememberSessionMentionSlugs,
   resolveSessionMentionIds,
+  useSessionMentionItems,
+  SESSION_MENTION_PREFIX,
   type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
 import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
+import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
   buildMentionFileIndex,
@@ -264,39 +264,14 @@ function FileMentionHydrator({
   getKnownPaths: () => Set<string>;
   enabled: boolean;
 }) {
-  const context = useMentionContext('FileMentionHydrator');
-  const initialTextRef = React.useRef(text);
-  const hydratedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!enabled) return;
-    if (hydratedRef.current) return;
-    const initialText = initialTextRef.current;
-    if (!initialText) return;
-    if (text !== initialText) return;
-    if (context.open) return;
-    const knownPaths = getKnownPaths();
-    if (knownPaths.size === 0) return;
-
-    const hydrated = hydrateFileMentionsFromText(initialText, knownPaths);
-    if (hydrated.mentions.length === 0) return;
-
-    hydratedRef.current = true;
-    context.onMentionsChange((prev) => {
-      const merged = [...prev, ...hydrated.mentions].sort((a, b) => a.start - b.start);
-      const seen = new Set<string>();
-      return merged.filter((m) => {
-        const key = `${m.start}:${m.end}:${m.value}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    });
-    context.onValueChange((prev) => {
-      const next = new Set([...(prev ?? []), ...hydrated.values]);
-      return Array.from(next);
-    });
-  }, [context, enabled, getKnownPaths, text]);
+  const hydrate = React.useCallback(
+    (value: string) => {
+      const knownPaths = getKnownPaths();
+      return knownPaths.size === 0 ? null : hydrateFileMentionsFromText(value, knownPaths);
+    },
+    [getKnownPaths]
+  );
+  useMentionHydration('FileMentionHydrator', { text, enabled, hydrate });
 
   return null;
 }
@@ -310,31 +285,16 @@ function SessionMentionHydrator({
   items: readonly SessionMentionItem[];
   enabled: boolean;
 }) {
-  const context = useMentionContext('SessionMentionHydrator');
-  const initialTextRef = React.useRef(text);
-  const hydratedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!enabled || hydratedRef.current) return;
-    const initialText = initialTextRef.current;
-    if (!initialText || text !== initialText || context.open) return;
-
-    const hydrated = hydrateSessionMentionsFromText(initialText, resolveSessionMentionIds(items));
-    if (hydrated.mentions.length === 0) return;
-
-    hydratedRef.current = true;
-    context.onMentionsChange((prev) => {
-      const merged = [...prev, ...hydrated.mentions].sort((a, b) => a.start - b.start);
-      const seen = new Set<string>();
-      return merged.filter((mention) => {
-        const key = `${mention.start}:${mention.end}:${mention.value}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    });
-    context.onValueChange((prev) => Array.from(new Set([...(prev ?? []), ...hydrated.values])));
-  }, [context, enabled, items, text]);
+  const hydrate = React.useCallback(
+    (value: string) =>
+      // Reading the slug cache parses localStorage, so only pay for it once the
+      // draft actually carries the anchor.
+      value.includes(SESSION_MENTION_PREFIX)
+        ? hydrateSessionMentionsFromText(value, resolveSessionMentionIds(items))
+        : null,
+    [items]
+  );
+  useMentionHydration('SessionMentionHydrator', { text, enabled, hydrate });
 
   return null;
 }
@@ -459,15 +419,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       },
       [initializeLazyDirectory]
     );
-    const { sessions: visibleSessions } = useVisibleSessionMetas();
-    const sessionItems = React.useMemo(
-      () => buildSessionMentionItems(visibleSessions, currentSessionId),
-      [currentSessionId, visibleSessions]
-    );
-    // Persist slug -> id so a draft reloaded later still resolves its mentions.
-    React.useEffect(() => {
-      rememberSessionMentionSlugs(sessionItems);
-    }, [sessionItems]);
+    const sessionItems = useSessionMentionItems(currentSessionId);
 
     const { skillState, skillItems, knownSkillTokens } = useMentionProjectSkills(
       mentionSource,

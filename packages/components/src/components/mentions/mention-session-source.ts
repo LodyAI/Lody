@@ -1,4 +1,7 @@
+import * as React from 'react';
 import type { SessionId, SessionMeta } from '@lody/shared';
+import { getEffectiveLatestMessageAt } from '@/components/sessions/session-list-rows';
+import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 
 /**
  * `@session:` mention — the one type whose displayed text is not what the agent
@@ -57,19 +60,13 @@ export function buildSessionMentionSlug(title: string | undefined, sessionId: st
   return Array.from(normalized).slice(0, MAX_SLUG_LENGTH).join('');
 }
 
-function getActivityAt(session: SessionMeta): number {
-  if (typeof session.lastMessageAt === 'number') return session.lastMessageAt;
-  const created = Date.parse(session.createdAt);
-  return Number.isNaN(created) ? 0 : created;
-}
-
+/** Repo the session belongs to, or nothing — `project.kind` is not a label. */
 function getProjectLabel(session: SessionMeta): string | undefined {
-  if (session.repoFullName) return session.repoFullName;
   const project = session.project;
-  if (project && typeof project === 'object' && 'kind' in project) {
-    return typeof project.kind === 'string' ? project.kind : undefined;
+  if (project?.kind === 'local') {
+    return project.githubRepoFullName ?? session.repoFullName ?? undefined;
   }
-  return undefined;
+  return session.repoFullName ?? undefined;
 }
 
 /**
@@ -88,7 +85,7 @@ export function buildSessionMentionItems(
 ): SessionMentionItem[] {
   const ordered = sessions
     .filter((session) => session.id !== currentSessionId && !session.isArchived)
-    .map((session) => ({ session, activityAt: getActivityAt(session) }))
+    .map((session) => ({ session, activityAt: getEffectiveLatestMessageAt(session) }))
     .sort((left, right) => right.activityAt - left.activityAt);
 
   const takenSlugs = new Set<string>();
@@ -114,12 +111,20 @@ export function buildSessionMentionItems(
   return items;
 }
 
+/**
+ * Cap matching the other categories': the list is recency-ordered, so a
+ * workspace with hundreds of sessions must not render a row — and register a
+ * collection item the arrow keys then walk — for every one of them.
+ */
+const MAX_SESSION_SUGGESTIONS = 50;
+
 export function selectSessionMentionCandidates(
   items: readonly SessionMentionItem[],
-  term: string
+  term: string,
+  limit = MAX_SESSION_SUGGESTIONS
 ): SessionMentionItem[] {
   const query = term.trim().toLowerCase();
-  if (!query) return [...items];
+  if (!query) return items.slice(0, limit);
   return items
     .map((item) => {
       const slug = item.slug.toLowerCase();
@@ -131,6 +136,7 @@ export function selectSessionMentionCandidates(
     })
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => a.score - b.score || b.item.activityAt - a.item.activityAt)
+    .slice(0, limit)
     .map((entry) => entry.item);
 }
 
@@ -155,11 +161,9 @@ const SLUG_CACHE_LIMIT = 200;
 
 type SlugCache = Record<string, string>;
 
-function readSlugCache(): SlugCache {
-  if (typeof localStorage === 'undefined') return {};
+function parseSlugCache(raw: string | null): SlugCache {
+  if (!raw) return {};
   try {
-    const raw = localStorage.getItem(SLUG_CACHE_KEY);
-    if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const out: SlugCache = {};
@@ -172,18 +176,54 @@ function readSlugCache(): SlugCache {
   }
 }
 
+function readSlugCache(): SlugCache {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    return parseSlugCache(localStorage.getItem(SLUG_CACHE_KEY));
+  } catch {
+    return {};
+  }
+}
+
 export function rememberSessionMentionSlugs(items: readonly SessionMentionItem[]): void {
   if (typeof localStorage === 'undefined' || items.length === 0) return;
   try {
-    const merged: SlugCache = { ...readSlugCache() };
+    const raw = localStorage.getItem(SLUG_CACHE_KEY);
+    const merged: SlugCache = { ...parseSlugCache(raw) };
     for (const item of items) merged[item.slug] = item.sessionId;
     const entries = Object.entries(merged);
     // Oldest insertions fall off first; re-inserting a slug refreshes its place.
     const trimmed = entries.slice(Math.max(0, entries.length - SLUG_CACHE_LIMIT));
-    localStorage.setItem(SLUG_CACHE_KEY, JSON.stringify(Object.fromEntries(trimmed)));
+    const serialized = JSON.stringify(Object.fromEntries(trimmed));
+    // The session list ticks several times a second while an agent streams and
+    // almost every tick leaves this map identical. `setItem` is synchronous, so
+    // re-writing the same bytes would block the main thread for nothing.
+    if (serialized === raw) return;
+    localStorage.setItem(SLUG_CACHE_KEY, serialized);
   } catch {
     // A full or unavailable store only costs us stale-draft resolution.
   }
+}
+
+/**
+ * The mentionable sessions for a composer, plus the slug -> id cache write.
+ *
+ * One owner on purpose: the composer's menu and `useMentionPromptExpansion` both
+ * need the same items, and deriving them separately meant re-slugging every
+ * visible session twice on each session-list tick.
+ */
+export function useSessionMentionItems(currentSessionId?: string | null): SessionMentionItem[] {
+  const { sessions } = useVisibleSessionMetas();
+  const items = React.useMemo(
+    () => buildSessionMentionItems(sessions, currentSessionId),
+    [currentSessionId, sessions]
+  );
+  // Keep the slug -> id map durable so a draft reloaded tomorrow, or one whose
+  // session has since been renamed, still resolves.
+  React.useEffect(() => {
+    rememberSessionMentionSlugs(items);
+  }, [items]);
+  return items;
 }
 
 /** Live items win; the cache covers reloaded drafts and renamed sessions. */

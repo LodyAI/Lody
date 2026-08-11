@@ -632,13 +632,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         if (hasSelection || event.shiftKey) return false;
         const span = getTriggerSpan();
         if (!span || !isMentionNavigationPrefix(span.search)) return false;
-        const caret = span.triggerIndex + context.trigger.length;
-        const nextValue = input.value.slice(0, caret) + input.value.slice(cursorPosition);
-        applyInputValue(nextValue, caret);
-        context.filterStore.search = '';
-        context.onHighlightedItemChange(null);
-        requestAnimationFrame(() => context.onItemsFilter());
-        return true;
+        return context.onNavigateBack();
       }
 
       switch (event.key) {

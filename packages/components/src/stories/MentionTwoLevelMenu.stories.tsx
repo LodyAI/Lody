@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Mention, MentionInput } from '@/ui/mention';
 import { MentionTwoLevelMenuBody } from '@/components/mentions/mention-two-level-menu';
 import {
+  getMentionViewCandidates,
   selectMentionMenuView,
   toCommandCandidate,
   toFileCandidate,
@@ -24,6 +25,7 @@ const SKILL_LABELS = {
   path: 'Path',
   linksTo: 'Links to',
   symlink: 'symlink',
+  scope: { project: 'Project', global: 'Global', system: 'System' },
 };
 
 const FILES: MentionCandidate[] = [
@@ -150,12 +152,7 @@ type HarnessProps = {
 
 function Harness({ search, categories = CATEGORIES, withDetail = true }: HarnessProps) {
   const view = selectMentionMenuView(categories, search);
-  const candidates =
-    view.level === 'category'
-      ? view.candidates
-      : view.level === 'aggregate'
-        ? view.groups.flatMap((group) => group.candidates)
-        : [];
+  const candidates = getMentionViewCandidates(view);
   const detail = withDetail ? (candidates[0]?.detail ?? null) : null;
   const inputValue = `@${search}`;
 

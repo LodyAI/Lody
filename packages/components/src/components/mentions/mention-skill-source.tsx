@@ -10,14 +10,13 @@ import {
   type ProjectSkillScope,
 } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
-import { useMentionContext } from '@/ui/mention';
 import {
   useProjectSkills,
   type ProjectSkillsSource,
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import {} from '@/components/settings/skill-badges';
+import { useMentionHydration } from '@/components/mentions/mention-hydration';
 
 /**
  * `$`-triggered skill mention (phase 2 of docs/project-skills.md).
@@ -39,7 +38,6 @@ const SKILL_MENTION_PROMPT_PREFIX = '/';
    already-expanded detector both derive from this so they cannot drift. */
 const SKILL_MENTION_PATH_LABEL = 'Skill Path';
 const SKILL_MENTION_PATH_ANNOTATION_RE = new RegExp(`^\\s*\\[${SKILL_MENTION_PATH_LABEL}\\]\\(`);
-export type SkillMentionMenuPlacement = 'above-input' | 'caret';
 export type SkillMentionAgent = {
   cliType: AgentConfigCliType;
   agentType: string;
@@ -434,35 +432,12 @@ export function SkillMentionHydrator({
   knownTokens: ReadonlySet<string>;
   enabled: boolean;
 }) {
-  const context = useMentionContext('SkillMentionHydrator');
-  const initialTextRef = React.useRef(text);
-  const hydratedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!enabled) return;
-    if (hydratedRef.current) return;
-    const initialText = initialTextRef.current;
-    if (!initialText) return;
-    if (text !== initialText) return;
-    if (knownTokens.size === 0) return;
-    if (context.open) return;
-
-    const hydrated = hydrateSkillMentionsFromText(initialText, knownTokens);
-    if (hydrated.mentions.length === 0) return;
-
-    hydratedRef.current = true;
-    context.onMentionsChange((prev) => {
-      const merged = [...prev, ...hydrated.mentions].sort((a, b) => a.start - b.start);
-      const seen = new Set<string>();
-      return merged.filter((mention) => {
-        const key = `${mention.start}:${mention.end}:${mention.value}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    });
-    context.onValueChange((prev) => Array.from(new Set([...(prev ?? []), ...hydrated.values])));
-  }, [context, enabled, knownTokens, text]);
+  const hydrate = React.useCallback(
+    (value: string) =>
+      knownTokens.size === 0 ? null : hydrateSkillMentionsFromText(value, knownTokens),
+    [knownTokens]
+  );
+  useMentionHydration('SkillMentionHydrator', { text, enabled, hydrate });
 
   return null;
 }

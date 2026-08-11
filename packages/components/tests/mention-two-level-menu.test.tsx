@@ -245,7 +245,13 @@ describe('MentionTwoLevelMenuBody', () => {
 });
 
 describe('skill candidate detail', () => {
-  const labels = { author: 'Author', path: 'Path', linksTo: 'Links to', symlink: 'symlink' };
+  const labels = {
+    author: 'Author',
+    path: 'Path',
+    linksTo: 'Links to',
+    symlink: 'symlink',
+    scope: { project: 'Project', global: 'Global', system: 'System' },
+  };
 
   it('carries the skill metadata the old two-pane menu showed', () => {
     const candidate = toSkillCandidate(
@@ -268,7 +274,7 @@ describe('skill candidate detail', () => {
 
     expect(candidate.insertText).toBe('$code-collab-debug');
     expect(candidate.detail?.title).toBe('Code Collab Debug');
-    expect(candidate.detail?.badges).toEqual(['project', 'v2', 'symlink']);
+    expect(candidate.detail?.badges).toEqual(['Project', 'v2', 'symlink']);
     expect(candidate.detail?.rows).toEqual([
       { label: 'Author', value: 'zx' },
       { label: 'Path', value: '.claude/skills/code-collab-debug/SKILL.md', mono: true },
@@ -287,7 +293,7 @@ describe('skill candidate detail', () => {
       labels
     );
 
-    expect(candidate.detail?.badges).toEqual(['global']);
+    expect(candidate.detail?.badges).toEqual(['Global']);
     expect(candidate.detail?.rows).toEqual([{ label: 'Path', value: 'a/SKILL.md', mono: true }]);
   });
 });

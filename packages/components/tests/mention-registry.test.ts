@@ -167,11 +167,10 @@ describe('candidate insertion semantics', () => {
     expect(candidate.title).toBe('Broken menu');
   });
 
-  it('marks slash commands as replacing the whole prompt', () => {
+  it('keeps the slash form for commands', () => {
     const [candidate] = buildCommandCandidates([{ name: 'review', description: 'Review' }], '');
 
     expect(candidate?.insertText).toBe('/review');
-    expect(candidate?.replacesWholePrompt).toBe(true);
   });
 });
 
@@ -187,8 +186,9 @@ describe('buildIssuePrCandidates', () => {
       makeIssuePrSuggestion(901, 'pr', 'second pr'),
     ];
 
-    const prs = buildIssuePrCandidates(suggestions, 'pr', '', null);
-    const issues = buildIssuePrCandidates(suggestions, 'issue', '', null);
+    const scopedTo = (type: 'issue' | 'pr') => suggestions.filter((item) => item.type === type);
+    const prs = buildIssuePrCandidates(scopedTo('pr'), '', null);
+    const issues = buildIssuePrCandidates(scopedTo('issue'), '', null);
 
     expect(prs.map((entry) => entry.value)).toEqual(['#900', '#901']);
     expect(issues.every((entry) => entry.kind === 'issue')).toBe(true);

@@ -22,6 +22,7 @@ import {
   selectSessionMentionCandidates,
   type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
+import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import type { MentionKind } from '@/ui/mention/index';
 
 /**
@@ -64,11 +65,6 @@ export type MentionCandidate = {
   insertText: string;
   /** Set when selecting the candidate descends a level instead of committing. */
   navigateText?: string;
-  /**
-   * Slash commands must occupy the whole prompt, so committing one replaces the
-   * composer instead of splicing into the trigger span.
-   */
-  replacesWholePrompt?: boolean;
   kind: MentionKind;
   icon: MentionIcon;
   title: string;
@@ -102,9 +98,11 @@ export type MentionCategory = {
   /**
    * Candidates for a term inside this category. Lazy on purpose: ranking the
    * file index is the expensive one, and a query aimed at another category
-   * must not pay for it.
+   * must not pay for it. `limit` is passed down to the source so the aggregate
+   * level, which shows a handful of rows per category, does not build a
+   * candidate object for every ranked result it is about to drop.
    */
-  getCandidates: (term: string) => MentionCandidate[];
+  getCandidates: (term: string, limit?: number) => MentionCandidate[];
 };
 
 export type MentionCandidateGroup = {
@@ -136,7 +134,13 @@ export function getCategoryNavigateText(category: Pick<MentionCategory, 'namespa
   return `${MENTION_TRIGGER}${category.namespace}:`;
 }
 
-const NAMESPACE_SEARCH_RE = /^([a-z][a-z0-9-]*):(.*)$/;
+/** Every candidate the view is currently showing, in display order. */
+export function getMentionViewCandidates(view: MentionMenuView | null): MentionCandidate[] {
+  if (!view) return [];
+  if (view.level === 'category') return view.candidates;
+  if (view.level === 'aggregate') return view.groups.flatMap((group) => group.candidates);
+  return [];
+}
 
 function matchesCategoryName(category: MentionCategory, term: string): boolean {
   const query = term.toLowerCase();
@@ -153,11 +157,11 @@ export function selectMentionMenuView(
   search: string,
   options?: { aggregateLimitPerCategory?: number }
 ): MentionMenuView {
-  const namespaceMatch = NAMESPACE_SEARCH_RE.exec(search);
-  if (namespaceMatch) {
-    const category = categories.find((entry) => entry.namespace === namespaceMatch[1]);
+  const namespaced = parseMentionNamespaceSearch(search);
+  if (namespaced) {
+    const category = categories.find((entry) => entry.namespace === namespaced.namespace);
     if (category) {
-      const term = namespaceMatch[2] ?? '';
+      const { term } = namespaced;
       return { level: 'category', category, term, candidates: category.getCandidates(term) };
     }
   }
@@ -169,7 +173,9 @@ export function selectMentionMenuView(
   const limit = options?.aggregateLimitPerCategory ?? AGGREGATE_LIMIT_PER_CATEGORY;
   const groups: MentionCandidateGroup[] = [];
   for (const category of categories) {
-    const candidates = category.getCandidates(search).slice(0, limit);
+    // `limit` is passed down so a source can stop early, and enforced here so
+    // the cap holds whether or not it did.
+    const candidates = category.getCandidates(search, limit).slice(0, limit);
     if (candidates.length > 0) groups.push({ category, candidates });
   }
 
@@ -207,6 +213,11 @@ export function selectMentionMenuViewForTrigger(
 // ============================================================================
 // Candidate builders
 // ============================================================================
+
+/** Cut a ranked list down before it is mapped into candidate objects. */
+function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
+  return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
+}
 
 export type FileSuggestionIndex = {
   dirs: PathSuggestion[];
@@ -266,10 +277,11 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
 export function buildFileCandidates(
   index: FileSuggestionIndex | null,
   term: string,
-  fuse: FuseInstance<PathSuggestion> | null
+  fuse: FuseInstance<PathSuggestion> | null,
+  limit?: number
 ): MentionCandidate[] {
   if (!index) return [];
-  return getSuggestions(index, term, fuse).map(toFileCandidate);
+  return applyLimit(getSuggestions(index, term, fuse), limit).map(toFileCandidate);
 }
 
 export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
@@ -288,16 +300,16 @@ export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
 /**
  * Issues and PRs share one cache but rank separately, so each category ranks
  * over its own slice — the shared ranking caps its result set, and ranking the
- * merged list first would let one type starve the other.
+ * merged list first would let one type starve the other. `scoped` is that
+ * slice, partitioned once by the caller rather than per keystroke.
  */
 export function buildIssuePrCandidates(
-  suggestions: readonly IssuePrSuggestion[],
-  type: 'issue' | 'pr',
+  scoped: IssuePrSuggestion[],
   term: string,
-  fuse: FuseInstance<IssuePrSuggestion> | null
+  fuse: FuseInstance<IssuePrSuggestion> | null,
+  limit?: number
 ): MentionCandidate[] {
-  const scoped = suggestions.filter((item) => item.type === type);
-  return getIssuePrSuggestions(scoped, term, fuse).map(toIssuePrCandidate);
+  return applyLimit(getIssuePrSuggestions(scoped, term, fuse), limit).map(toIssuePrCandidate);
 }
 
 /** i18n'd labels for the skill detail panel, supplied by `useMentionCategories`. */
@@ -306,6 +318,8 @@ export type SkillDetailLabels = {
   path: string;
   linksTo: string;
   symlink: string;
+  /** Scope badge text, keyed by `SkillMentionItem['scope']`. */
+  scope: Record<SkillMentionItem['scope'], string>;
 };
 
 export function toSkillCandidate(
@@ -330,7 +344,7 @@ export function toSkillCandidate(
     detail: {
       title: skill.name,
       badges: [
-        item.scope,
+        labels.scope[item.scope],
         ...(skill.version ? [`v${skill.version}`] : []),
         ...(skill.isSymlink ? [labels.symlink] : []),
       ],
@@ -344,9 +358,10 @@ export function buildSkillCandidates(
   items: readonly SkillMentionItem[],
   term: string,
   allowedDirs: ReadonlySet<string> | null,
-  labels: SkillDetailLabels
+  labels: SkillDetailLabels,
+  limit?: number
 ): MentionCandidate[] {
-  return selectSkillMentionCandidates(items, term, allowedDirs).map((item) =>
+  return applyLimit(selectSkillMentionCandidates(items, term, allowedDirs), limit).map((item) =>
     toSkillCandidate(item, labels)
   );
 }
@@ -374,9 +389,10 @@ export function toSessionCandidate(
 export function buildSessionCandidates(
   items: readonly SessionMentionItem[],
   term: string,
-  labels: SessionDetailLabels
+  labels: SessionDetailLabels,
+  limit?: number
 ): MentionCandidate[] {
-  return selectSessionMentionCandidates(items, term).map((item) =>
+  return selectSessionMentionCandidates(items, term, limit).map((item) =>
     toSessionCandidate(item, labels)
   );
 }
@@ -385,8 +401,9 @@ export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate
   return {
     value: command.name,
     label: command.name,
+    // A slash command already owns the whole prompt: its `/` trigger only fires
+    // on a slash-only composer, so the trigger span *is* the prompt.
     insertText: `/${command.name}`,
-    replacesWholePrompt: true,
     kind: 'command',
     icon: 'command',
     title: `/${command.name}`,
@@ -396,9 +413,10 @@ export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate
 
 export function buildCommandCandidates(
   commands: readonly AcpCommandSummary[],
-  term: string
+  term: string,
+  limit?: number
 ): MentionCandidate[] {
-  return filterAndRankSlashCommands([...commands], term).map(toCommandCandidate);
+  return applyLimit(filterAndRankSlashCommands([...commands], term), limit).map(toCommandCandidate);
 }
 
 // ============================================================================
@@ -446,14 +464,26 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
   const { t } = useTranslation();
   const { file, issuePr, skill, command, session } = sources;
 
-  const issueFuse = React.useMemo(() => {
-    if (!issuePr?.enabled) return null;
-    return issuePr.createFuse(issuePr.suggestions.filter((item) => item.type === 'issue'));
-  }, [issuePr]);
-  const prFuse = React.useMemo(() => {
-    if (!issuePr?.enabled) return null;
-    return issuePr.createFuse(issuePr.suggestions.filter((item) => item.type === 'pr'));
-  }, [issuePr]);
+  // Partitioned once and shared with the Fuse indexes: the cache holds both
+  // types, and re-splitting it inside `getCandidates` walked the whole list
+  // twice on every keystroke.
+  const issueSuggestions = React.useMemo(
+    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'issue') : []),
+    [issuePr]
+  );
+  const prSuggestions = React.useMemo(
+    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'pr') : []),
+    [issuePr]
+  );
+  const createIssuePrFuse = issuePr?.createFuse;
+  const issueFuse = React.useMemo(
+    () => createIssuePrFuse?.(issueSuggestions) ?? null,
+    [createIssuePrFuse, issueSuggestions]
+  );
+  const prFuse = React.useMemo(
+    () => createIssuePrFuse?.(prSuggestions) ?? null,
+    [createIssuePrFuse, prSuggestions]
+  );
 
   return React.useMemo(() => {
     const categories: MentionCategory[] = [];
@@ -467,7 +497,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         status: file.status ?? 'ready',
         message: file.message,
         notice: file.notice,
-        getCandidates: (term) => buildFileCandidates(file.index, term, file.fuse),
+        getCandidates: (term, limit) => buildFileCandidates(file.index, term, file.fuse, limit),
       });
     }
 
@@ -479,8 +509,8 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'issue',
         status: issuePr.status ?? 'ready',
         message: issuePr.message,
-        getCandidates: (term) =>
-          buildIssuePrCandidates(issuePr.suggestions, 'issue', term, issueFuse),
+        getCandidates: (term, limit) =>
+          buildIssuePrCandidates(issueSuggestions, term, issueFuse, limit),
       });
       categories.push({
         id: 'pr',
@@ -489,7 +519,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'pr',
         status: issuePr.status ?? 'ready',
         message: issuePr.message,
-        getCandidates: (term) => buildIssuePrCandidates(issuePr.suggestions, 'pr', term, prFuse),
+        getCandidates: (term, limit) => buildIssuePrCandidates(prSuggestions, term, prFuse, limit),
       });
     }
 
@@ -501,13 +531,26 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'skill',
         status: skill.status ?? 'ready',
         message: skill.message,
-        getCandidates: (term) =>
-          buildSkillCandidates(skill.items, term, skill.allowedDirs, {
-            author: t('workspace.projects.skills.mention.detailAuthor', 'Author'),
-            path: t('workspace.projects.skills.mention.detailPath', 'Path'),
-            linksTo: t('workspace.projects.skills.mention.detailLinksTo', 'Links to'),
-            symlink: t('workspace.projects.skills.mention.detailSymlink', 'symlink'),
-          }),
+        getCandidates: (term, limit) =>
+          buildSkillCandidates(
+            skill.items,
+            term,
+            skill.allowedDirs,
+            {
+              author: t('workspace.projects.skills.mention.detailAuthor', 'Author'),
+              path: t('workspace.projects.skills.mention.detailPath', 'Path'),
+              linksTo: t('workspace.projects.skills.mention.detailLinksTo', 'Links to'),
+              symlink: t('workspace.projects.skills.mention.detailSymlink', 'symlink'),
+              // Same keys as the Skills tab's scope badge — the pane must not
+              // fall back to the raw enum value.
+              scope: {
+                project: t('workspace.projects.skills.scopeProject', 'Project'),
+                global: t('workspace.projects.skills.scopeGlobal', 'Global'),
+                system: t('workspace.projects.skills.scopeSystem', 'System'),
+              },
+            },
+            limit
+          ),
       });
     }
 
@@ -519,10 +562,13 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'session',
         status: session.status ?? 'ready',
         message: session.message,
-        getCandidates: (term) =>
-          buildSessionCandidates(session.items, term, {
-            untitled: t('mention.session.untitled', 'Untitled session'),
-          }),
+        getCandidates: (term, limit) =>
+          buildSessionCandidates(
+            session.items,
+            term,
+            { untitled: t('mention.session.untitled', 'Untitled session') },
+            limit
+          ),
       });
     }
 
@@ -535,10 +581,21 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'command',
         status: command.status ?? 'ready',
         message: command.message,
-        getCandidates: (term) => buildCommandCandidates(command.commands, term),
+        getCandidates: (term, limit) => buildCommandCandidates(command.commands, term, limit),
       });
     }
 
     return categories;
-  }, [command, file, issueFuse, issuePr, prFuse, session, skill, t]);
+  }, [
+    command,
+    file,
+    issueFuse,
+    issuePr,
+    issueSuggestions,
+    prFuse,
+    prSuggestions,
+    session,
+    skill,
+    t,
+  ]);
 }

@@ -9,6 +9,7 @@ import type { IssuePRMention } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
+import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';
@@ -559,38 +560,12 @@ export function IssuePrMentionHydrator({
   knownItems: Map<number, IssuePrKnownItem>;
   enabled: boolean;
 }) {
-  const context = useMentionContext('IssuePrMentionHydrator');
-  const initialTextRef = React.useRef(text);
-  const hydratedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!enabled) return;
-    if (hydratedRef.current) return;
-    const initialText = initialTextRef.current;
-    if (!initialText) return;
-    if (text !== initialText) return;
-    if (knownItems.size === 0) return;
-    if (context.open) return;
-
-    const hydrated = hydrateIssuePrMentionsFromText(initialText, knownItems);
-    if (hydrated.mentions.length === 0) return;
-
-    hydratedRef.current = true;
-    context.onMentionsChange((prev) => {
-      const merged = [...prev, ...hydrated.mentions].sort((a, b) => a.start - b.start);
-      const seen = new Set<string>();
-      return merged.filter((m) => {
-        const key = `${m.start}:${m.end}:${m.value}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    });
-    context.onValueChange((prev) => {
-      const next = new Set([...(prev ?? []), ...hydrated.values]);
-      return Array.from(next);
-    });
-  }, [context, enabled, knownItems, text]);
+  const hydrate = React.useCallback(
+    (value: string) =>
+      knownItems.size === 0 ? null : hydrateIssuePrMentionsFromText(value, knownItems),
+    [knownItems]
+  );
+  useMentionHydration('IssuePrMentionHydrator', { text, enabled, hydrate });
 
   return null;
 }

@@ -18,6 +18,7 @@ import { MentionContent, MentionItem, useMentionContext } from '@/ui/mention';
 import { useIsMentionMobile } from '@/ui/mention/mention-mobile-content';
 import {
   getCategoryNavigateText,
+  getMentionViewCandidates,
   selectMentionMenuViewForTrigger,
   type MentionCandidate,
   type MentionCandidateDetail,
@@ -31,32 +32,6 @@ import {
   captureMentionSelect,
   type MentionSurface,
 } from '@/components/mentions/mention-analytics';
-
-type MentionContextValue = NonNullable<ReturnType<typeof useMentionContext>>;
-
-/**
- * Pop the `@<ns>:` prefix back to a bare `@`, the click equivalent of the
- * primitive's Backspace/ArrowLeft contract. Mobile has no Backspace habit, so
- * the second level always carries a visible way out.
- */
-function navigateBackToCategories(context: MentionContextValue): void {
-  const input = context.inputRef.current;
-  if (!input) return;
-  const caretPosition = input.selectionStart ?? input.value.length;
-  const triggerIndex = input.value.lastIndexOf(context.trigger, caretPosition);
-  if (triggerIndex === -1) return;
-
-  const caret = triggerIndex + context.trigger.length;
-  const nextValue = input.value.slice(0, caret) + input.value.slice(caretPosition);
-  context.onInputValueChange(nextValue);
-  // Let MentionInput restore the caret once it renders this exact value;
-  // touching the DOM selection here races the controlled value commit.
-  context.onPendingSelectionChange({ start: caret, end: caret, expectedValue: nextValue });
-  context.filterStore.search = '';
-  context.onHighlightedItemChange(null);
-  requestAnimationFrame(() => context.onItemsFilter());
-  input.focus();
-}
 
 function CandidateIcon({
   icon,
@@ -82,6 +57,8 @@ function CandidateIcon({
       return <Terminal className={className} />;
     case 'session':
       return <MessageSquare className={className} />;
+    default:
+      return null;
   }
 }
 
@@ -373,19 +350,18 @@ export function MentionTwoLevelMenu({
     });
   }, [getEnabledItems, highlightKey, onHighlightedItemChange]);
 
+  // The click equivalent of the primitive's Backspace/ArrowLeft contract; mobile
+  // has no Backspace habit, so the second level always carries a visible way
+  // out. Focus stays in the composer — the menu closes the moment it blurs.
+  const { onNavigateBack, inputRef } = context;
   const handleBack = React.useCallback(() => {
-    navigateBackToCategories(context);
-  }, [context]);
+    if (onNavigateBack()) inputRef.current?.focus();
+  }, [inputRef, onNavigateBack]);
 
   // Side panel follows the highlight. Falls back to the first candidate so the
   // pane is populated before the highlight effect lands, and stays off mobile
   // where the docked strip is too narrow and there is no hover to preview with.
-  const visibleCandidates = React.useMemo(() => {
-    if (!view) return [];
-    if (view.level === 'category') return view.candidates;
-    if (view.level === 'aggregate') return view.groups.flatMap((group) => group.candidates);
-    return [];
-  }, [view]);
+  const visibleCandidates = React.useMemo(() => getMentionViewCandidates(view), [view]);
   const highlightedValue = context.highlightedItem?.value ?? null;
   const detail = React.useMemo(() => {
     if (isMobile) return null;
