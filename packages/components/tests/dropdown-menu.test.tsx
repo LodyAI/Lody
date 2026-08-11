@@ -325,6 +325,55 @@ describe('DropdownMenu', () => {
     expect(document.activeElement).not.toBe(permission);
   });
 
+  it('touch tap opens the menu without leaking the synthetic pointerdown to ancestors', async () => {
+    // Simulates a vaul Drawer.Content ancestor: it grabs the pointer in
+    // onPointerDown via setPointerCapture, which throws NotFoundError for a
+    // synthetic event (no active pointer). The trigger's touch re-dispatch
+    // must toggle Radix on the trigger element but never reach ancestors.
+    const ancestorPointerDowns: string[] = [];
+    await act(async () => {
+      root?.render(
+        <div
+          onPointerDown={(event) => {
+            ancestorPointerDowns.push(event.pointerType);
+          }}
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger>Touch menu</DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem>Touch item</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      );
+    });
+
+    const trigger = getButton('Touch menu');
+    await act(async () => {
+      trigger.dispatchEvent(
+        new TestPointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          pointerType: 'touch',
+        })
+      );
+    });
+    // The real touch pointerdown is blocked for Radix (no menu yet) but
+    // still bubbles to ancestors as a genuine pointer event.
+    expect(document.body.textContent).not.toContain('Touch item');
+    expect(ancestorPointerDowns).toEqual(['touch']);
+
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    // The synthetic re-dispatch toggles the menu on the trigger itself...
+    expect(document.body.textContent).toContain('Touch item');
+    // ...but never bubbles to ancestor pointer handlers (vaul's onPress).
+    expect(ancestorPointerDowns).toEqual(['touch']);
+  });
+
   function getButton(name: string): HTMLButtonElement {
     const button = Array.from(document.querySelectorAll('button')).find((node) =>
       node.textContent?.includes(name)

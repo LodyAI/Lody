@@ -13,6 +13,7 @@ import {
   getLocalProjectGitStateAtRootPath,
   normalizeLocalProjectRootPath,
   resolveLocalProjectBranchAtRootPath,
+  selectLocalProjectBranchSelector,
 } from '@lody/shared/node/local-project';
 import {
   type ACPSessionConfig,
@@ -1056,7 +1057,12 @@ export async function resolveLocalProjectBranchForCreate(
     baseBranch: gitState.currentBranch,
     fallbackBranch: gitState.defaultBranch ?? gitState.branches[0],
   });
-  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch);
+  // `branch` is either a selector this project reported or a name a human typed
+  // as `--branch`. A typed `main` may match both refs/heads/main and
+  // refs/remotes/origin/main, so validate it the way git resolves it.
+  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
+    preferLocalOnCollision: true,
+  });
   return branch;
 }
 
@@ -2311,10 +2317,13 @@ async function resolveLocalProjectBranchOnMachine(args: {
     baseBranch: response.state.currentBranch,
     fallbackBranch: response.state.defaultBranch ?? response.state.branches[0],
   });
-  if (!response.state.branches.includes(branch)) {
+  // Only the remote machine can resolve refs, so map a typed `--branch main`
+  // onto one of the selectors it reported instead of demanding an exact match.
+  const selected = selectLocalProjectBranchSelector(response.state.branches, branch);
+  if (!selected) {
     throw new Error(`Local project branch not found: ${branch}`);
   }
-  return branch;
+  return selected;
 }
 
 async function resolveLocalProjectRefOnMachineOrThrow(
@@ -2408,8 +2417,7 @@ export function resolveCreateCurrentSessionId(
   env: NodeJS.ProcessEnv = process.env
 ): SessionId | undefined {
   return (normalizeCliValue(options.currentSessionId) ?? normalizeCliValue(env.LODY_SESSION_ID)) as
-    | SessionId
-    | undefined;
+    SessionId | undefined;
 }
 
 export function assertSupportedParentDepth(
@@ -2442,8 +2450,7 @@ async function resolveCreateContext(args: {
   }
   const parentSessionId = (parentSelector ??
     (args.options.useCurrentSessionAsParent === true ? currentSessionId : undefined)) as
-    | SessionId
-    | undefined;
+    SessionId | undefined;
   if (args.options.useCurrentSessionAsParent === true && !parentSessionId) {
     throw new Error('No current session is available for --use-current-session-as-parent.');
   }
@@ -2471,8 +2478,7 @@ async function resolveCreateContext(args: {
   // An explicit taskId wins; otherwise inherit from the session that asked for
   // this one, which is what keeps agent-spawned work on the same task.
   const taskId = (normalizeCliValue(args.options.taskId) ?? currentSession?.taskId) as
-    | TaskId
-    | undefined;
+    TaskId | undefined;
   const targetMachine = await resolveTargetMachineForCreate({
     manager: args.manager,
     workspaceId,
@@ -2670,8 +2676,7 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
 export function buildLegacyMachineRestoreQueueCleanupPatch(
   sessionId: SessionId,
   machineMeta:
-    | Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'>
-    | undefined
+    Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | undefined
 ): Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | null {
   const nextNeedToArchiveSessions = { ...(machineMeta?.needToArchiveSessions ?? {}) };
   const nextNeedToDeleteSessions = { ...(machineMeta?.needToDeleteSessions ?? {}) };
@@ -4164,8 +4169,7 @@ const sessionArchiveCommand = new Command('archive')
           );
           const machineRoomId = getMachineRoomId(session.machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
+            MachineLegacyMetaFields | undefined;
           await manager.repo.upsertDocMeta(machineRoomId, {
             needToArchiveSessions: {
               ...(machineMeta?.needToArchiveSessions ?? {}),
@@ -4215,8 +4219,7 @@ const sessionRestoreCommand = new Command('restore')
           const nowMs = getServerNow();
           const machineRoomId = getMachineRoomId(session.machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
+            MachineLegacyMetaFields | undefined;
           const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
           if (machinePatch) {
             await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
@@ -4276,8 +4279,7 @@ const sessionDeleteCommand = new Command('delete')
           const requestedAt = getServerNow();
           const machineRoomId = getMachineRoomId(machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
+            MachineLegacyMetaFields | undefined;
           const machineFlockHandle = await manager.repo.openFlockDoc(
             getMachineFlockDocId(workspace.id as WorkspaceId, machineId)
           );
@@ -4346,8 +4348,7 @@ const sessionDeleteCommand = new Command('delete')
           const requestedAt = getServerNow();
           const machineRoomId = getMachineRoomId(machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
+            MachineLegacyMetaFields | undefined;
           const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
           if (machinePatch) {
             await manager.repo.upsertDocMeta(machineRoomId, machinePatch);

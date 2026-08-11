@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import fs from 'node:fs';
-import path from 'node:path';
 import chalk from 'chalk';
 import { fetchCliRuntimeState } from '@lody/cli-supervisor';
 import {
@@ -17,30 +15,13 @@ import { AuthClient, performLoginWithAuthCredential } from '@/lib/auth';
 import { createHybridLogger, getLogger } from '@/utils/logger';
 import { buildDaemonStartPassthroughArgs, type DaemonStartOptions } from './daemon-start-options';
 import { formatDaemonBackendStatus } from './daemon-status-format';
+import { readLatestLogTail } from '@/utils/log-files';
 
 async function exitDaemonCommand(code: number): Promise<void> {
   process.exitCode = code;
   // Flush buffered analytics before the one-shot daemon command exits.
   await flushTelemetry();
   process.exit(code);
-}
-
-function findLatestLogFile(): string | null {
-  try {
-    if (!fs.existsSync(LODY_LOG_DIR)) return null;
-    const files = fs
-      .readdirSync(LODY_LOG_DIR)
-      .filter((f) => f.endsWith('.log'))
-      .map((f) => ({
-        name: f,
-        mtime: fs.statSync(path.join(LODY_LOG_DIR, f)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime);
-    const latest = files[0];
-    return latest ? path.join(LODY_LOG_DIR, latest.name) : null;
-  } catch {
-    return null;
-  }
 }
 
 type StopResult =
@@ -374,20 +355,18 @@ export const daemonCommand = new Command('daemon')
       .option('-n, --lines <count>', 'number of lines to show', '50')
       .action(async (options: { lines: string }) => {
         const lineCount = parseInt(options.lines, 10) || 50;
-        const logFile = findLatestLogFile();
-
-        if (!logFile) {
-          console.log(`No log files found in ${LODY_LOG_DIR}`);
-          await exitDaemonCommand(1);
-          return;
-        }
 
         try {
-          const content = fs.readFileSync(logFile, 'utf8');
-          const lines = content.split('\n');
-          const tail = lines.slice(-lineCount).join('\n');
-          console.log(chalk.dim(`--- ${logFile} (last ${lineCount} lines) ---`));
-          console.log(tail);
+          const tail = await readLatestLogTail(LODY_LOG_DIR, lineCount);
+          if (!tail) {
+            console.log(`No log files found in ${LODY_LOG_DIR}`);
+            await exitDaemonCommand(1);
+            return;
+          }
+          console.log(
+            chalk.dim(`--- ${LODY_LOG_DIR}/${tail.files.join(', ')} (last ${lineCount} lines) ---`)
+          );
+          console.log(tail.text);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
           console.error(`Failed to read log file: ${message}`);

@@ -4,14 +4,12 @@ import type {
   PrStatus,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
-  SessionLegacyMetaFields,
   SessionMeta,
   SessionStatus,
 } from '@lody/shared';
 import {
   deriveSessionPullRequestReadiness,
   getSessionPullRequestLegacyFields,
-  isSessionGoalWorking,
   parseGitHubPrNumber,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
@@ -122,12 +120,11 @@ export function getEffectiveSessionActivitySummary(
   childSessionsByParent?: Map<string, SessionMeta[]>,
   liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
 ): EffectiveSessionActivitySummary {
-  const legacy = session as SessionLegacyMetaFields;
   const liveStatus = liveSessionStatuses?.get(session.id);
-  // Sidebar working state is presence/goal only. Meta dispatch pointers are
-  // CLI dispatch mechanics and can be stale in this client — deriving a
-  // spinner from them shows sessions as working long after they finished.
-  let isWorking = liveStatus != null || isSessionGoalWorking(legacy.latestGoal);
+  // Sidebar working state is live presence only. A goal may remain active while
+  // quiescent, and meta dispatch pointers can be stale in this client — deriving
+  // a spinner from either shows sessions as working long after the prompt finished.
+  let isWorking = liveStatus != null;
   let isWaitingPermission = liveStatus?.type === 'requestPermission';
   let hasUnreadMessages = sessionHasUnreadMessages(session);
   let latestMessageAt =
@@ -136,12 +133,8 @@ export function getEffectiveSessionActivitySummary(
   const children = childSessionsByParent?.get(session.id);
   if (children) {
     for (const child of children) {
-      const legacyChild = child as SessionLegacyMetaFields;
       const childLiveStatus = liveSessionStatuses?.get(child.id);
-      if (
-        !isWorking &&
-        (childLiveStatus != null || isSessionGoalWorking(legacyChild.latestGoal))
-      ) {
+      if (!isWorking && childLiveStatus != null) {
         isWorking = true;
       }
       if (!isWaitingPermission && childLiveStatus?.type === 'requestPermission') {
@@ -246,8 +239,7 @@ export function mapSessionMetaToTaskListTask(
     latestMessageAt,
     addedLines: lineChange.add,
     deletedLines: lineChange.del,
-    isWorking:
-      liveStatus != null || isSessionGoalWorking((session as SessionLegacyMetaFields).latestGoal),
+    isWorking: liveStatus != null,
     hasUnreadMessages,
     isOffline,
     isWaitingPermission: liveStatus?.type === 'requestPermission',

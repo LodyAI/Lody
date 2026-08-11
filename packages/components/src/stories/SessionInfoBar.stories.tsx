@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { fn } from 'storybook/test';
 import {
   getServerNow,
+  SESSION_GOAL_COMMANDS,
   type GitHubMergeMethod,
   type PendingScheduledTask,
   type SessionGoalCommand,
@@ -157,6 +158,7 @@ function StoryHarness({
       <SessionInfoBar
         status={status}
         goal={currentGoal}
+        goalCommands={SESSION_GOAL_COMMANDS}
         goalPendingCommand={goalPending}
         onGoalCommand={fn()}
         onGoalDismiss={() => setCurrentGoal(null)}
@@ -513,6 +515,7 @@ function PeekPlayground() {
       <SessionInfoBar
         status={null}
         goal={goal}
+        goalCommands={SESSION_GOAL_COMMANDS}
         onGoalCommand={fn()}
         onGoalDismiss={() => setGoal(null)}
         scheduledTasks={tasks}

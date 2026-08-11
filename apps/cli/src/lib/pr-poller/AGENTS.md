@@ -86,6 +86,11 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   starting ref — would associate unrelated PRs). Discovery continues while an
   open/draft PR exists (newer-PR detection); only idle-terminal owners
   (terminal current PR + unchanged `repo|branch` fingerprint) stop entirely.
+- **Direct local projects have no Session-owned branch.** A local project using
+  its original directory (`useWorktree !== true`, with legacy `isWorktree`
+  honored) gets no PR discovery, status polling, or post-turn automatic PR
+  association. Its current branch is shared mutable directory state and cannot
+  safely identify a Session's PR.
 - **No turn-end hook.** Post-turn freshness comes from the `lastMessageAt`
   activity rule (high lane for 10 min); do not re-add scheduler callbacks to
   turn finalization.

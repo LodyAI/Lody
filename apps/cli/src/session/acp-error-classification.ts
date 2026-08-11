@@ -50,6 +50,15 @@ const getACPDiagnosticText = (error: unknown, parsedError?: ParsedACPError | nul
   return formatErrorMessage(error);
 };
 
+const AUTHENTICATION_REQUIRED_PATTERNS = [
+  /\bnot logged in\b/i,
+  /\bauthentication required\b/i,
+  /\bplease run\s+\/login\b/i,
+  /\bsession expired\b[\s\S]{0,160}\b(?:log|sign) in again\b/i,
+  /\brefresh token\b[\s\S]{0,160}\b(?:already used|expired|revoked|cannot be refreshed|could not be refreshed)\b/i,
+  /\baccess token\b[\s\S]{0,160}\bcould not be refreshed\b[\s\S]{0,160}\brefresh token\b/i,
+] as const;
+
 export const parseACPError = (error: unknown): ParsedACPError | null => {
   if (!error || typeof error !== 'object') {
     return null;
@@ -94,10 +103,26 @@ export const isAcpSessionNotFoundError = (error: unknown): boolean => {
   return /\bsession not found\b/i.test(getACPDiagnosticText(error, parsed));
 };
 
+/**
+ * Some provider runtimes still wrap expired OAuth credentials in an ACP
+ * internal error instead of using ACP's dedicated auth-required code. Keep the
+ * compatibility match narrow and limited to provider-owned instructions that
+ * explicitly require another login.
+ */
+export const isAuthenticationRequiredACPError = (error: unknown): boolean => {
+  const parsed = parseACPError(error);
+  if (parsed?.code === ACP_ERROR_CODES.AUTH_REQUIRED) {
+    return true;
+  }
+  const diagnosticText = getACPDiagnosticText(error, parsed);
+  return AUTHENTICATION_REQUIRED_PATTERNS.some((pattern) => pattern.test(diagnosticText));
+};
+
 export const mapACPErrorToFailureReason = (error: ParsedACPError): ChatFailedReason => {
+  if (isAuthenticationRequiredACPError(error)) {
+    return 'acp_auth_required';
+  }
   switch (error.code) {
-    case ACP_ERROR_CODES.AUTH_REQUIRED:
-      return 'acp_auth_required';
     case ACP_ERROR_CODES.INTERNAL_ERROR:
       // Some ACP adapters wrap a stale JSON-RPC transport as "-32603 Internal error".
       // Treat known transport-disposal text as a recoverable agent disconnect instead
@@ -130,12 +155,13 @@ export const shouldTerminateOnACPError = (
   error: ParsedACPError,
   failureReason: ChatFailedReason
 ): boolean => {
+  if (failureReason === 'acp_auth_required') {
+    return true;
+  }
   if (failureReason === 'acp_upstream_api_error') {
     return false;
   }
-  return (
-    error.code === ACP_ERROR_CODES.AUTH_REQUIRED || error.code === ACP_ERROR_CODES.INTERNAL_ERROR
-  );
+  return error.code === ACP_ERROR_CODES.INTERNAL_ERROR;
 };
 
 export const shouldRecoverStaleACPConnectionPrompt = (args: {

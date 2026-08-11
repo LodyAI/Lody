@@ -5,7 +5,10 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import { resolveSessionDispatchAction } from './session-dispatch-logic';
+import {
+  findNextDispatchableUserTurn,
+  resolveSessionDispatchAction,
+} from './session-dispatch-logic';
 import { SessionExecutionService } from './session-execution-service';
 
 describe('resolveSessionDispatchAction rewrite barrier', () => {
@@ -44,6 +47,48 @@ describe('resolveSessionDispatchAction rewrite barrier', () => {
         machineId
       )
     ).toEqual({ type: 'noop', reason: 'rewrite-barrier' });
+  });
+});
+
+describe('findNextDispatchableUserTurn steer intent', () => {
+  const machineId = 'machine-1' as MachineId;
+  const guide = {
+    id: 'guide-user',
+    timestamp: '2026-08-03T00:00:01.000Z',
+    role: 'user' as const,
+    items: [{ type: 'text' as const, text: 'do it differently' }],
+    fileDiff: [],
+    status: 'pending_apply' as const,
+  };
+  const baseMeta = {
+    id: 'session-1',
+    machineId,
+    createdAt: '2026-08-03T00:00:00.000Z',
+    userId: 'user-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    status: SessionStatusFactory.idle(),
+    lastHandledUserMsgId: 'earlier-user',
+  } as SessionMeta;
+
+  it('leaves an ordinary guide alone: it belongs to the steer path, not dispatch', () => {
+    expect(findNextDispatchableUserTurn([guide], baseMeta)).toBeNull();
+  });
+
+  it('dispatches a guide the dispatch pointer was re-aimed at after the agent refused it', () => {
+    expect(
+      findNextDispatchableUserTurn([guide], { ...baseMeta, latestUserMsgId: 'guide-user' })
+    ).toEqual(guide);
+  });
+
+  it('does not re-dispatch a re-aimed guide that already ran', () => {
+    expect(
+      findNextDispatchableUserTurn([guide], {
+        ...baseMeta,
+        latestUserMsgId: 'guide-user',
+        lastHandledUserMsgId: 'guide-user',
+      })
+    ).toBeNull();
   });
 });
 

@@ -51,6 +51,11 @@ Root `AGENTS.md` also applies.
   channel keyed by request id. Preload subscribes before `invoke`, removes the
   listener after settlement, accepts the legacy single-JSON response, and treats only
   the final response as completion.
+- Image preview export (`services/image-export-service.ts`) keeps the native
+  menu, clipboard, and save dialog here because the renderer holds the only copy
+  of the image (a `blob:` URL main cannot download). Bytes cross once, after the
+  menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
+  under `node --test` without the `electron` runtime.
 - Use `pnpm --dir apps/electron preview:local` only when a smoke/E2E harness has
   already prepared and validated the OSS build artifacts. That low-level command must
   remain `--skipBuild --mode oss`.

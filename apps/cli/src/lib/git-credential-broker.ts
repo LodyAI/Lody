@@ -15,6 +15,20 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 export const BROKER_STATE_FILE_PATH = path.join(getLodyDataDir(), 'broker.json');
 
 /**
+ * Per-workspace broker state file.
+ *
+ * The shared `broker.json` is last-writer-wins across the workspaces of a fleet
+ * process. The credential helper falls back to it when its broker URL refuses a
+ * connection (e.g. the broker rebound to a new port), so with the shared file a
+ * workspace A session could recover onto workspace B's broker and authenticate
+ * through B's token manager. Sessions get their own file so that fallback stays
+ * inside the workspace that owns the session.
+ */
+export const getBrokerStateFilePathForWorkspace = (workspaceId: string): string =>
+  path.join(getLodyDataDir(), `broker-${encodeURIComponent(workspaceId)}.json`);
+export const LODY_GIT_CRED_BROKER_STATE_FILE_ENV = 'LODY_GIT_CRED_BROKER_STATE_FILE';
+
+/**
  * Path inside containers where the broker state file is mounted.
  */
 export const BROKER_STATE_FILE_CONTAINER_PATH = '/home/node/.lody/broker.json';
@@ -162,32 +176,44 @@ const HEALTH_CHECK_TIMEOUT_MS = 5_000; // 5 seconds
 /**
  * Write the broker state to a file so containers can always find the current broker.
  */
-const writeBrokerStateFile = (env: GitCredentialBrokerEnv): void => {
+const writeBrokerStateFile = (env: GitCredentialBrokerEnv, workspaceId?: string): void => {
   const dir = path.dirname(BROKER_STATE_FILE_PATH);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    BROKER_STATE_FILE_PATH,
-    JSON.stringify({ url: env.url, port: env.port, token: env.token }, null, 2),
-    { encoding: 'utf8', mode: 0o600 } // Readable only by owner for security
-  );
+  const contents = JSON.stringify({ url: env.url, port: env.port, token: env.token }, null, 2);
+  const options = { encoding: 'utf8', mode: 0o600 } as const; // Readable only by owner for security
+  // The shared file stays for containers and CLI-restart recovery that only know
+  // the legacy path. It is last-writer-wins across workspaces, so the per-workspace
+  // file is the one sessions are pointed at.
+  writeFileSync(BROKER_STATE_FILE_PATH, contents, options);
+  if (workspaceId) {
+    writeFileSync(getBrokerStateFilePathForWorkspace(workspaceId), contents, options);
+  }
 };
 
-/**
- * Remove the broker state file on shutdown.
- */
-const removeBrokerStateFile = (): void => {
+const removeFileIfExists = (filePath: string): void => {
   try {
-    if (existsSync(BROKER_STATE_FILE_PATH)) {
-      unlinkSync(BROKER_STATE_FILE_PATH);
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
     }
   } catch {
     // Ignore errors during cleanup
   }
 };
 
+/**
+ * Remove the broker state file on shutdown.
+ */
+const removeBrokerStateFile = (workspaceId?: string): void => {
+  removeFileIfExists(BROKER_STATE_FILE_PATH);
+  if (workspaceId) {
+    removeFileIfExists(getBrokerStateFilePathForWorkspace(workspaceId));
+  }
+};
+
 export class GitCredentialBroker {
   private readonly logger: Logger;
   private readonly tokenManager: CloudGithubTokenManager;
+  private readonly workspaceId: string | undefined;
   private readonly contexts = new Map<string, GitCredentialBrokerSessionContext>();
   private readonly sessionContextTokens = new Map<string, string>();
   private server: http.Server | null = null;
@@ -195,9 +221,19 @@ export class GitCredentialBroker {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private isRecovering = false;
 
-  constructor(options: { tokenManager: CloudGithubTokenManager; logger?: Logger }) {
+  constructor(options: {
+    tokenManager: CloudGithubTokenManager;
+    workspaceId?: string;
+    logger?: Logger;
+  }) {
     this.logger = options.logger ?? getLogger('git-cred-broker');
     this.tokenManager = options.tokenManager;
+    this.workspaceId = options.workspaceId;
+  }
+
+  /** Path this broker publishes its state to, for callers pointing a session at it. */
+  getStateFilePath(): string | undefined {
+    return this.workspaceId ? getBrokerStateFilePathForWorkspace(this.workspaceId) : undefined;
   }
 
   private readonly resolveContext = (
@@ -242,7 +278,7 @@ export class GitCredentialBroker {
     process.env.LODY_GIT_CRED_BROKER_TOKEN = token;
 
     // Write state file so containers can always find the current broker
-    writeBrokerStateFile(this.env);
+    writeBrokerStateFile(this.env, this.workspaceId);
 
     this.logger.debug(`Git credential broker listening on 0.0.0.0:${port}`);
 
@@ -440,7 +476,7 @@ export class GitCredentialBroker {
       process.env.LODY_GIT_CRED_BROKER_TOKEN = previousToken;
 
       // Update state file so containers can find the new broker
-      writeBrokerStateFile(this.env);
+      writeBrokerStateFile(this.env, this.workspaceId);
 
       if (boundPort === previousPort) {
         this.logger.debug(`Git credential broker recovered on same port ${boundPort}`);
@@ -455,7 +491,7 @@ export class GitCredentialBroker {
       this.env = null;
       delete process.env.LODY_GIT_CRED_BROKER_URL;
       delete process.env.LODY_GIT_CRED_BROKER_TOKEN;
-      removeBrokerStateFile();
+      removeBrokerStateFile(this.workspaceId);
     } finally {
       this.isRecovering = false;
     }
@@ -474,7 +510,7 @@ export class GitCredentialBroker {
     this.env = null;
     delete process.env.LODY_GIT_CRED_BROKER_URL;
     delete process.env.LODY_GIT_CRED_BROKER_TOKEN;
-    removeBrokerStateFile();
+    removeBrokerStateFile(this.workspaceId);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }

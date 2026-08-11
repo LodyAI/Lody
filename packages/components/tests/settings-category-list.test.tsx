@@ -84,16 +84,33 @@ describe('SettingsCategoryList', () => {
   it('keeps settings category rows navigating normally', async () => {
     await renderList();
 
+    expect(container?.textContent).not.toContain('My Machines');
+    expect(container?.textContent).not.toContain('People');
+
+    await act(async () => {
+      getButton('Preferences').click();
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/$workspaceName/settings/preferences',
+      params: { workspaceName: 'acme' },
+      search: expect.any(Function),
+    });
+    expect(store?.get(bugReportDialogOpenAtom)).toBe(false);
+  });
+
+  it('routes workspace member management through General', async () => {
+    await renderList();
+
     await act(async () => {
       getButton('General').click();
     });
 
     expect(navigateMock).toHaveBeenCalledWith({
-      to: '/$workspaceName/settings/general',
+      to: '/$workspaceName/settings/workspace',
       params: { workspaceName: 'acme' },
       search: expect.any(Function),
     });
-    expect(store?.get(bugReportDialogOpenAtom)).toBe(false);
   });
 
   it('navigates to the appearance category', async () => {

@@ -61,7 +61,14 @@ export function parseEnvVarsText(text: string): EnvVarsParseResult {
     }
 
     const key = trimmedLine.slice(0, equalIndex).trim();
-    const value = trimmedLine.slice(equalIndex + 1);
+    const rawValue = trimmedLine.slice(equalIndex + 1);
+    const quote = rawValue[0];
+    const value =
+      rawValue.length >= 2 &&
+      (quote === '"' || quote === "'") &&
+      rawValue[rawValue.length - 1] === quote
+        ? rawValue.slice(1, -1)
+        : rawValue;
 
     // Validate key format (alphanumeric + underscore, starts with letter or underscore)
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
@@ -222,7 +229,7 @@ export function EnvVarsTextarea({
       <p className="text-xs text-muted-foreground">
         {t('agents.envVarsTextareaHelp', {
           defaultValue:
-            'One variable per line in KEY=VALUE format. A leading "export" is stripped automatically. Lines starting with # are comments. Do not add quotes around values; quotes will be treated as part of the value.',
+            'One variable per line in KEY=VALUE format. A leading "export" and matching quotes around values are stripped automatically. Lines starting with # are comments.',
         })}
       </p>
     </div>

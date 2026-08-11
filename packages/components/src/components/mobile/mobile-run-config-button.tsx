@@ -5,6 +5,7 @@ import { classifyPermissionModeFace } from '@lody/shared';
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
@@ -115,7 +116,7 @@ export function useRunConfigFace({
 
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
-    ? resolveOnOffConfigOptionEnabled(planSelector, configOptionValues?.[planSelector.configId])
+    ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
   const fastOn = fastSelector

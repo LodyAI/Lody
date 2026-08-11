@@ -15,7 +15,7 @@ describe('buildAssistantTurnConfigRows', () => {
         configOptionValues: {
           'reasoning_effort': 'medium',
           'fast-mode': true,
-          'plan-mode': 'off',
+          collaboration_mode: 'plan',
         },
       }
     );
@@ -26,7 +26,9 @@ describe('buildAssistantTurnConfigRows', () => {
         { label: 'Mode', value: 'Accept edits' },
         { label: 'Reasoning', value: 'Medium' },
         { label: 'Fast mode', value: 'On' },
-        { label: 'Plan mode', value: 'Off' },
+        /* `collaboration_mode` is a select, not an on/off toggle, so the value
+           column shows the selected mode verbatim rather than On/Off. */
+        { label: 'Plan mode', value: 'plan' },
       ])
     );
   });

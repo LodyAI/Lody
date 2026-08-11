@@ -2,7 +2,7 @@ import {
   buildPendingUserHistoryEntry,
   getServerNow,
   getSessionRoomId,
-  isSessionGoalWorking,
+  isSessionGoalActive,
   normalizeSessionInputBlocks,
   resolveLatestSessionGoalFromHistory,
   sessionEditAndResendFailure,
@@ -162,7 +162,7 @@ export class SessionEditAndResendService {
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
     const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
     const execution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-    if (meta.autoReview || execution.hasActiveAutomation || isSessionGoalWorking(latestGoal)) {
+    if (meta.autoReview || execution.hasActiveAutomation || isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
         'ACTIVE_AUTOMATION',
@@ -254,7 +254,7 @@ export class SessionEditAndResendService {
         if (
           freshMeta.autoReview ||
           freshExecution.hasActiveAutomation ||
-          isSessionGoalWorking(freshGoal)
+          isSessionGoalActive(freshGoal)
         ) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
@@ -365,7 +365,7 @@ export class SessionEditAndResendService {
           const currentGoal =
             resolveLatestSessionGoalFromHistory(currentHistory) ??
             (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
-          if (isSessionGoalWorking(currentGoal)) {
+          if (isSessionGoalActive(currentGoal)) {
             throw new Error(
               '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
             );

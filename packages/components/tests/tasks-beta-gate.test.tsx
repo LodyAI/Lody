@@ -87,7 +87,9 @@ describe('BetaFeaturesSection', () => {
     store.set(developerModeEnabledAtom, true);
     renderWith(store, <BetaFeaturesSection />);
 
-    const toggle = container.querySelector<HTMLButtonElement>('button[role="switch"]');
+    const toggle = container.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="Tasks"]'
+    );
     expect(toggle).not.toBeNull();
     expect(toggle?.getAttribute('aria-checked')).toBe('false');
     expect(store.get(tasksFeatureEnabledAtom)).toBe(false);

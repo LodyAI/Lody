@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { MachineId, MachineViewMeta } from '@lody/shared';
-import { resolveDesktopMachineSelection } from '../src/components/settings/machine-selection';
+import {
+  buildWorkspaceMachineSelectionPool,
+  resolveDesktopMachineSelection,
+} from '../src/components/settings/machine-selection';
 import type { MachineTabItem } from '../src/components/settings/machine-tab-list';
 
 const machine = (id: string): MachineViewMeta => ({
@@ -23,6 +26,39 @@ const item = (id: string, overrides: Partial<MachineTabItem> = {}): MachineTabIt
 const OWN_LOCAL = 'own-local' as MachineId;
 const OWN_OTHER = 'own-other' as MachineId;
 const TEAMMATE = 'teammate' as MachineId;
+
+describe('buildWorkspaceMachineSelectionPool', () => {
+  it('includes a directly targeted private machine owned by the current user', () => {
+    const privateOwn = item(OWN_LOCAL, { isOwn: true, sharedWithTeam: false });
+    const shared = item(TEAMMATE);
+    const result = buildWorkspaceMachineSelectionPool({
+      filteredItems: [shared],
+      allItems: [privateOwn, shared],
+      selectedMachineId: OWN_LOCAL,
+    });
+    expect(result.map((entry) => entry.machine.id)).toEqual([OWN_LOCAL, TEAMMATE]);
+  });
+
+  it('includes a directly targeted shared machine hidden by the current filter', () => {
+    const sharedOwn = item(OWN_OTHER, { isOwn: true });
+    const result = buildWorkspaceMachineSelectionPool({
+      filteredItems: [],
+      allItems: [sharedOwn],
+      selectedMachineId: OWN_OTHER,
+    });
+    expect(result).toEqual([sharedOwn]);
+  });
+
+  it('does not expose another member private machine through a direct target', () => {
+    const privateTeammate = item(TEAMMATE, { sharedWithTeam: false });
+    const result = buildWorkspaceMachineSelectionPool({
+      filteredItems: [],
+      allItems: [privateTeammate],
+      selectedMachineId: TEAMMATE,
+    });
+    expect(result).toEqual([]);
+  });
+});
 
 describe('resolveDesktopMachineSelection', () => {
   it('keeps a selection that is visible in the pool', () => {

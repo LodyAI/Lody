@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
-import { settingsActiveTabAtom, settingsDialogOpenAtom } from '@/atoms';
+import {
+  settingsActiveTabAtom,
+  settingsDialogOpenAtom,
+  settingsSelectedMachineIdAtom,
+  settingsSelectedProjectKeyAtom,
+} from '@/atoms';
+import type { MachineId } from '@lody/shared';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { getSettingsBackDestination, resolveSettingsCloseTo } from '@/lib/settings-navigation';
@@ -46,23 +52,23 @@ export function SettingsLayoutComponent() {
     [activeTabId]
   );
 
-  // Mobile agent-config detail view (URL has ?machine=<id>) swaps the settings
+  // Mobile machine detail views (URL has ?machine=<id>) swap the settings
   // header for a back-only bar that returns to the machine list.
   const locationSearch = location.search as Record<string, unknown>;
   const hasAgentConfigMachineParam =
     typeof locationSearch.machine === 'string' && locationSearch.machine.length > 0;
   const isMobileMachineDetail =
     isMobile &&
-    (activeTabId === 'agent-config' || activeTabId === 'devices') &&
+    (activeTabId === 'agents' || activeTabId === 'machines') &&
     hasAgentConfigMachineParam;
 
   const handleBack = useCallback(() => {
     if (isMobileMachineDetail) {
       void navigate({
         to:
-          activeTabId === 'devices'
-            ? '/$workspaceName/settings/devices'
-            : '/$workspaceName/settings/agent-config',
+          activeTabId === 'agents'
+            ? '/$workspaceName/settings/agents'
+            : '/$workspaceName/settings/machines',
         params: { workspaceName },
         search: (prev) => ({ ...prev, machine: undefined }),
         replace: true,
@@ -90,14 +96,7 @@ export function SettingsLayoutComponent() {
       to: '/$workspaceName/chat',
       params: { workspaceName },
     });
-  }, [
-    activeTabId,
-    isMobile,
-    isMobileMachineDetail,
-    navigate,
-    settingsListPage,
-    workspaceName,
-  ]);
+  }, [activeTabId, isMobile, isMobileMachineDetail, navigate, settingsListPage, workspaceName]);
 
   // Close (exit) settings entirely — back to where it was opened from (the `from` search
   // param, preserved across tabs) or the chat landing. Used by ⌘, (toggle) and Esc.
@@ -117,9 +116,19 @@ export function SettingsLayoutComponent() {
   // the workspace stays visible behind the dialog instead of a blank settings page.
   const setSettingsModalOpen = useSetAtom(settingsDialogOpenAtom);
   const setSettingsModalTab = useSetAtom(settingsActiveTabAtom);
+  const setSettingsMachineTarget = useSetAtom(settingsSelectedMachineIdAtom);
+  const setSettingsProjectTarget = useSetAtom(settingsSelectedProjectKeyAtom);
   useEffect(() => {
     if (isMobile) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
+    setSettingsMachineTarget(
+      typeof locationSearch.machine === 'string'
+        ? (locationSearch.machine as MachineId)
+        : null
+    );
+    setSettingsProjectTarget(
+      typeof locationSearch.project === 'string' ? locationSearch.project : null
+    );
     setSettingsModalOpen(true);
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
@@ -135,6 +144,10 @@ export function SettingsLayoutComponent() {
     workspaceName,
     setSettingsModalOpen,
     setSettingsModalTab,
+    setSettingsMachineTarget,
+    setSettingsProjectTarget,
+    locationSearch.machine,
+    locationSearch.project,
   ]);
 
   // Esc closes the settings page — unless a modal/menu/popover (incl. shortcut recording,
@@ -162,8 +175,8 @@ export function SettingsLayoutComponent() {
   const mobileTitle = settingsListPage
     ? t('settings.title')
     : activeTab
-      ? t(activeTab.labelKey)
-      : t('settings.title');
+    ? t(activeTab.labelKey)
+    : t('settings.title');
 
   /* Workspace tabbar (本地 / GitHub / Chat / 设置) navigates back to the
      chat landing for the first three tabs; the 设置 tab is a no-op
@@ -196,7 +209,7 @@ export function SettingsLayoutComponent() {
           title={mobileTitle}
           isNativeApp={isNativeApp}
           isMachineDetail={isMobileMachineDetail}
-          isAgentConfigTab={activeTab?.id === 'agent-config'}
+          isAgentConfigTab={activeTab?.id === 'agents'}
           onBack={handleBack}
           onWorkspaceTabSelect={showWorkspaceTabBar ? handleWorkspaceTabSelect : undefined}
           workspaceTabLabels={{

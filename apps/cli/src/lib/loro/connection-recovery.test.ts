@@ -268,15 +268,63 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     expect(metaSynced).toHaveBeenCalledTimes(2);
   });
 
+  it('throttles the expensive fan-out on a transport-only flap but never the online signal', async () => {
+    // The two signals carry different meanings and must not be collapsed again.
+    // `meta-room-synced` drives O(rooms) rescans, so a flap that never took the
+    // meta room down is rate-limited. `streams-online` releases work parked
+    // while offline (a dirty Machine Flock doc arms no timer of its own), so it
+    // must fire on every edge.
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+    const metaSynced = vi.fn();
+    const streamsOnline = vi.fn();
+    instance.onMetaRoomSynced(metaSynced);
+    instance.onStreamsOnline(streamsOnline);
+
+    for (let round = 0; round < 5; round++) {
+      instance.setTransportStatus('disconnected');
+      instance.setTransportStatus('connected');
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    // First recovery is not delayed (cold start); the rest wait out the floor.
+    expect(metaSynced).toHaveBeenCalledTimes(1);
+    expect(streamsOnline).toHaveBeenCalledTimes(5);
+
+    // Deferred, never dropped: the throttled emit lands once the floor elapses.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(metaSynced).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not throttle a fan-out after the meta room actually degraded', async () => {
+    // A real meta-room outage may have missed remote metadata, so its rescan
+    // must not be held behind the transport-flap floor.
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+    const metaSynced = vi.fn();
+    instance.onMetaRoomSynced(metaSynced);
+
+    metaSub.emitStatus('error');
+    metaSub.emitStatus('joined');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(metaSynced).toHaveBeenCalledTimes(1);
+
+    // Immediately again, well inside the 30s floor.
+    metaSub.emitStatus('error');
+    metaSub.emitStatus('joined');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(metaSynced).toHaveBeenCalledTimes(2);
+  });
+
   it('reports a newly joined replacement meta room', async () => {
     const replacementMetaSub = createMetaSub('joined');
     const reconnect = vi.fn(async () => {});
     const joinMetaRoom = vi.fn(async () => replacementMetaSub);
-    const instance = createController(
-      { reconnect, joinMetaRoom },
-      null,
-      { initialTransportStatus: 'connected' }
-    );
+    const instance = createController({ reconnect, joinMetaRoom }, null, {
+      initialTransportStatus: 'connected',
+    });
     const metaSynced = vi.fn();
     instance.onMetaRoomSynced(metaSynced);
 

@@ -30,7 +30,7 @@ describe('shouldNotifySessionCompletion', () => {
     ).toBe(true);
   });
 
-  it('suppresses normal completion notifications while a goal is still active', () => {
+  it('notifies when a prompt completes while a persistent goal remains active', () => {
     expect(
       shouldNotifySessionCompletion({
         initialized: true,
@@ -39,7 +39,7 @@ describe('shouldNotifySessionCompletion', () => {
         currentStatusType: 'idle',
         latestGoal: activeGoal,
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('does not suppress when the latest goal is no longer active', () => {

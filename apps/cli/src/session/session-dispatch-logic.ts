@@ -204,7 +204,9 @@ export function resolveSessionCancelAction(
  *
  * 1. **New status field** (`entry.status`): 'pending', 'seen', or 'processing'.
  *    Lifecycle: `pending` → `seen` → `processing` → `handled`.
- *    `pending_apply` is guide intent and is deliberately not dispatched here.
+ *    `pending_apply` is guide intent and is deliberately not dispatched here,
+ *    unless `latestUserMsgId` explicitly names it — that is a guide the agent
+ *    refused, re-aimed at ordinary dispatch.
  *
  * 2. **Legacy read field** (`entry.read === false`): Older sessions without the
  *    `status` field.
@@ -231,6 +233,19 @@ export function findNextDispatchableUserTurn(
     // Path 1: New status field — explicit lifecycle state
     if (typeof entry.status === 'string') {
       if (entry.status === 'pending' || entry.status === 'seen' || entry.status === 'processing') {
+        return entry;
+      }
+      // `pending_apply` is steer intent, not a dispatch request — with one
+      // exception: a steer the agent refused gets the dispatch pointer re-aimed
+      // at it (`SessionExecutionService.requeueUndeliveredSteer`, or the Web
+      // client's own promotion). That pointer is a later and more explicit
+      // signal than the status, and honoring it here is what lets the message
+      // run after a restart even if the status flip never reached this machine.
+      if (
+        entry.status === 'pending_apply' &&
+        entry.id === meta.latestUserMsgId &&
+        entry.id !== meta.lastHandledUserMsgId
+      ) {
         return entry;
       }
       continue; // 'handled', 'error', etc. — skip

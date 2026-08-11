@@ -9,27 +9,14 @@ export type VirtualFileTreeRow = {
 
 export const FILE_TREE_VIRTUALIZE_THRESHOLD = 50;
 
-export function countTreeDataItems(items: readonly TreeDataItem[]): number {
-  let count = 0;
-  const walk = (nodes: readonly TreeDataItem[]) => {
-    for (const node of nodes) {
-      count += 1;
-      if (node.children?.length) {
-        walk(node.children);
-      }
-    }
-  };
-  walk(items);
-  return count;
-}
-
-export function shouldVirtualizeFileTreeData(
-  items: readonly TreeDataItem[],
-  threshold = FILE_TREE_VIRTUALIZE_THRESHOLD
-): boolean {
-  return countTreeDataItems(items) > threshold;
-}
-
+/**
+ * Whether the flat row list is long enough to virtualize.
+ *
+ * This is the SINGLE virtualization gate for the file tree, and it counts
+ * VISIBLE rows. An earlier second gate counted every node in the tree including
+ * collapsed ones, and crossing it swapped the whole renderer, so a lazily
+ * growing tree could thrash between two very different row implementations.
+ */
 export function shouldVirtualizeVisibleFileTreeRows(
   rowCount: number,
   threshold = FILE_TREE_VIRTUALIZE_THRESHOLD
@@ -56,10 +43,18 @@ export function flattenVisibleFileTreeRows(
   return rows;
 }
 
-export function pruneExpandedFileTreeIds(
-  expandedIds: ReadonlySet<string>,
+/**
+ * Drop expanded ids that no longer name an expandable node in `items`.
+ *
+ * Returns the SAME set reference when nothing was pruned. The caller feeds this
+ * straight into `setState`, and the file tree's source data churns by reference
+ * on every file-watcher tick — allocating a fresh equal Set each time forced an
+ * extra render plus a re-flatten and a virtualizer pass per tick.
+ */
+export function pruneExpandedFileTreeIds<T extends ReadonlySet<string>>(
+  expandedIds: T,
   items: readonly TreeDataItem[]
-): Set<string> {
+): T | Set<string> {
   const validIds = new Set<string>();
   const walk = (nodes: readonly TreeDataItem[]) => {
     for (const node of nodes) {
@@ -70,5 +65,9 @@ export function pruneExpandedFileTreeIds(
     }
   };
   walk(items);
-  return new Set([...expandedIds].filter((id) => validIds.has(id)));
+  const retained = [...expandedIds].filter((id) => validIds.has(id));
+  if (retained.length === expandedIds.size) {
+    return expandedIds;
+  }
+  return new Set(retained);
 }

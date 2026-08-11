@@ -5,7 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { developerModeEnabledAtom, tasksBetaEnabledAtom } from '../src/atoms/settings';
+import {
+  developerModeEnabledAtom,
+  inboxBetaEnabledAtom,
+  inboxFeatureEnabledAtom,
+  tasksBetaEnabledAtom,
+} from '../src/atoms/settings';
 import { MobileAboutSettings } from '../src/components/mobile/mobile-about-settings';
 import { initI18n } from '../src/i18n';
 
@@ -74,7 +79,7 @@ describe('MobileAboutSettings developer mode', () => {
     expect(switchLabelled('Developer mode')).not.toBeNull();
   });
 
-  it('does not show the Tasks beta switch until Developer mode is actually on', () => {
+  it('does not show beta switches until Developer mode is actually on', () => {
     const store = createStore();
     render(store);
     for (let i = 0; i < 7; i += 1) act(() => revealRow().click());
@@ -82,11 +87,13 @@ describe('MobileAboutSettings developer mode', () => {
     // Revealed, but not enabled: the beta section stays away.
     expect(switchLabelled('Developer mode')).not.toBeNull();
     expect(switchLabelled('Tasks')).toBeNull();
+    expect(switchLabelled('Inbox')).toBeNull();
 
     act(() => switchLabelled('Developer mode')?.click());
 
     expect(store.get(developerModeEnabledAtom)).toBe(true);
     expect(switchLabelled('Tasks')).not.toBeNull();
+    expect(switchLabelled('Inbox')).not.toBeNull();
   });
 
   it('turns the Tasks beta on from mobile, which is the whole point of this surface', () => {
@@ -101,6 +108,20 @@ describe('MobileAboutSettings developer mode', () => {
     expect(store.get(tasksBetaEnabledAtom)).toBe(true);
   });
 
+  it('enables the mobile Inbox gate only after its beta switch is enabled', () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    render(store);
+
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
+    const inbox = switchLabelled('Inbox');
+    expect(inbox).not.toBeNull();
+    act(() => inbox?.click());
+
+    expect(store.get(inboxBetaEnabledAtom)).toBe(true);
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(true);
+  });
+
   it('re-hides the switch when Developer mode is turned off, so the reveal must be earned again', () => {
     const store = createStore();
     store.set(developerModeEnabledAtom, true);
@@ -112,18 +133,23 @@ describe('MobileAboutSettings developer mode', () => {
     expect(store.get(developerModeEnabledAtom)).toBe(false);
     expect(switchLabelled('Developer mode')).toBeNull();
     expect(switchLabelled('Tasks')).toBeNull();
+    expect(switchLabelled('Inbox')).toBeNull();
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
   });
 
-  it('keeps the Tasks opt-in when Developer mode goes off', () => {
+  it('keeps beta opt-ins when Developer mode goes off', () => {
     const store = createStore();
     store.set(developerModeEnabledAtom, true);
     store.set(tasksBetaEnabledAtom, true);
+    store.set(inboxBetaEnabledAtom, true);
     render(store);
 
     act(() => switchLabelled('Developer mode')?.click());
 
-    // Same rule as desktop: the gate is a conjunction, so Tasks disappears, but
-    // the choice survives for when Developer mode comes back.
+    // Same rule as desktop: each gate is a conjunction, so the features
+    // disappear, but both choices survive for when Developer mode comes back.
     expect(store.get(tasksBetaEnabledAtom)).toBe(true);
+    expect(store.get(inboxBetaEnabledAtom)).toBe(true);
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
   });
 });

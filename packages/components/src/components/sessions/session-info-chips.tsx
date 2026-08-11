@@ -135,12 +135,15 @@ export type GoalChipCommandHandler = (
  */
 export function GoalChip({
   goal,
+  commands,
   pendingCommand,
   onGoalCommand,
   onDismiss,
   ...itemMode
 }: {
   goal: SessionGoalMessage;
+  /** Commands the current session transport can safely dispatch. */
+  commands?: readonly SessionGoalCommand[];
   pendingCommand?: SessionGoalCommand | null;
   onGoalCommand?: GoalChipCommandHandler;
   onDismiss?: (goal: SessionGoalMessage) => void;
@@ -161,9 +164,12 @@ export function GoalChip({
 
   const isPending = pendingCommand != null;
   const isCleared = isSessionGoalCleared(goal);
-  const showPause = goal.status === 'active' && onGoalCommand != null;
-  const showResume = goal.status === 'paused' && onGoalCommand != null;
-  const showClear = !isCleared && onGoalCommand != null;
+  const showPause =
+    goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
+  const showResume =
+    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear =
+    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const durationUnitLabels: DurationUnitLabels = {

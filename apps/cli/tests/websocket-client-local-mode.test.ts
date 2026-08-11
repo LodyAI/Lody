@@ -74,6 +74,7 @@ function createRuntimeForLocalModeTest() {
       getDocMeta: vi.fn(async () => undefined),
     },
     onMetaRoomSynced: vi.fn(() => vi.fn()),
+    onStreamsOnline: vi.fn(() => vi.fn()),
   };
 
   const runtime = new MachineRuntime({

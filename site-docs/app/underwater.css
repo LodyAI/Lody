@@ -2772,6 +2772,13 @@ html.underwater-landing-page.dark
   text-decoration: none;
 }
 
+/* Ghost button under the primary CTA — same width so the pair reads as one stack. */
+.uw-cta__book-call {
+  min-width: min(18rem, 100%);
+  justify-content: center;
+  text-decoration: none;
+}
+
 .uw-cta__secondary {
   display: flex;
   flex-wrap: wrap;

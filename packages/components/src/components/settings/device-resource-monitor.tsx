@@ -19,6 +19,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { Button } from '@/ui/button';
+import { Card } from '@/ui/card';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,9 +100,9 @@ export function DeviceResourceMonitor({
   }
 
   return (
-    <div className="divide-border/60 md:divide-y">
+    <div>
       <section className={cn('py-3', sectionPadX)}>
-        <div className="grid grid-cols-3 gap-x-2 sm:gap-x-6">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <ResourceMetric
             icon={TerminalSquare}
             label={t('settings.devices.resources.cli', 'CLI')}
@@ -114,7 +115,7 @@ export function DeviceResourceMonitor({
             mobileLabel="ACP"
             resource={snapshot.sessionsAggregate}
           />
-          <div className="min-w-0">
+          <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
             <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
               <Gauge className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
               <span className="truncate">
@@ -148,31 +149,29 @@ export function DeviceResourceMonitor({
                 </>
               }
             />
-          </div>
+          </Card>
         </div>
       </section>
 
-      <section className={cn('pb-3 pt-0 md:py-3', flush ? 'px-0' : 'px-2 md:px-4')}>
-        {snapshot.sessions.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">
-            {t('settings.devices.sessions.empty', 'No resident ACP sessions')}
-          </div>
-        ) : (
-          <SessionTable
-            sessions={snapshot.sessions}
-            sessionMetas={sessionMetas}
-            agentConfigs={agentConfigs}
-            onOpenSession={onOpenSession}
-            onTerminateSession={onTerminateSession}
-          />
-        )}
-        {snapshot.sessionsTruncated && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-status-warning">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            {t('settings.devices.sessions.truncated', 'Only the first 100 sessions are shown.')}
-          </div>
-        )}
-      </section>
+      {snapshot.sessions.length > 0 || snapshot.sessionsTruncated ? (
+        <section className={cn('pb-3 pt-4 md:pb-4 md:pt-5', flush ? 'px-0' : 'px-2 md:px-4')}>
+          {snapshot.sessions.length > 0 ? (
+            <SessionTable
+              sessions={snapshot.sessions}
+              sessionMetas={sessionMetas}
+              agentConfigs={agentConfigs}
+              onOpenSession={onOpenSession}
+              onTerminateSession={onTerminateSession}
+            />
+          ) : null}
+          {snapshot.sessionsTruncated ? (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-status-warning">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {t('settings.devices.sessions.truncated', 'Only the first 100 sessions are shown.')}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -192,7 +191,7 @@ function ResourceMetric({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="min-w-0">
+    <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
       <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
         <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         {mobileLabel && <span className="truncate sm:hidden">{mobileLabel}</span>}
@@ -201,24 +200,21 @@ function ResourceMetric({
           <span className="min-w-0 truncate font-mono text-muted-foreground/80">{trailing}</span>
         )}
       </div>
-      <StatRow
-        label={t('settings.devices.sessions.cpu', 'CPU')}
-        value={formatCpu(resource)}
-      />
+      <StatRow label={t('settings.devices.sessions.cpu', 'CPU')} value={formatCpu(resource)} />
       <StatRow
         label={t('settings.devices.sessions.memoryShort', 'Mem')}
         value={formatBytes(resource.memoryBytes)}
       />
-    </div>
+    </Card>
   );
 }
 
 /** Micro-label + prominent value pair used by the resource metric groups. */
 function StatRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="mt-1 flex items-baseline gap-2">
-      <span className="w-8 shrink-0 text-[10px] text-muted-foreground/70">{label}</span>
-      <span className="min-w-0 truncate text-xs font-semibold tabular-nums text-foreground min-[360px]:text-sm">
+    <div className="mt-1 flex items-baseline gap-1.5 sm:gap-2">
+      <span className="w-7 shrink-0 text-[10px] text-muted-foreground/70 sm:w-8">{label}</span>
+      <span className="min-w-0 truncate text-xs font-semibold tabular-nums text-foreground sm:text-sm">
         {value}
       </span>
     </div>
@@ -275,7 +271,7 @@ function SessionTable({
 
   return (
     <>
-      <div className="overflow-hidden border-b border-border/60 md:border-y">
+      <div className="overflow-hidden rounded-lg border border-border/60 bg-background">
         <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-medium text-muted-foreground md:grid">
           <span>{t('settings.devices.sessions.session', 'Session')}</span>
           <span className="truncate text-center">

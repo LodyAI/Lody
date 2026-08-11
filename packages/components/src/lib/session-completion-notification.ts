@@ -1,4 +1,4 @@
-import { isSessionGoalWorking, type SessionGoalMessage } from '@lody/shared';
+import type { SessionGoalMessage } from '@lody/shared';
 
 export function isAppForeground(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
@@ -23,14 +23,12 @@ export function shouldNotifySessionCompletion({
   enabled,
   previousStatusType,
   currentStatusType,
-  latestGoal,
 }: ShouldNotifySessionCompletionInput): boolean {
   return (
     initialized &&
     enabled &&
     previousStatusType !== undefined &&
     previousStatusType !== 'idle' &&
-    currentStatusType === 'idle' &&
-    !isSessionGoalWorking(latestGoal)
+    currentStatusType === 'idle'
   );
 }

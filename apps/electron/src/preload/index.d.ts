@@ -1,6 +1,8 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   CheckForElectronUpdateResult,
+  CopyImageToClipboardInput,
+  CopyImageToClipboardResult,
   ElectronAutoLaunchStatusResult,
   ElectronAuthCallbackInput,
   ElectronAuthCallbackSession,
@@ -20,10 +22,14 @@ import type {
   OpenSystemNotificationSettingsResult,
   QuitAndInstallElectronUpdateResult,
   RestartCliResult,
+  SaveImageFileInput,
+  SaveImageFileResult,
   SendLocalProjectControlResult,
   SendLocalMachineRpcResult,
   SendSessionFileLocalInput,
   SendSessionFileLocalResult,
+  ShowImagePreviewMenuInput,
+  ShowImagePreviewMenuResult,
   SetElectronAutoLaunchResult,
   SetGlobalShortcutInput,
   SetGlobalShortcutResult,
@@ -165,6 +171,11 @@ type LodyRendererApi = {
   selectLocalProjectDirectory: () => Promise<
     { rootPath: string; machineId: string } | { error: string } | null
   >
+  imagePreview: {
+    showMenu: (input: ShowImagePreviewMenuInput) => Promise<ShowImagePreviewMenuResult>
+    copyToClipboard: (input: CopyImageToClipboardInput) => Promise<CopyImageToClipboardResult>
+    saveAs: (input: SaveImageFileInput) => Promise<SaveImageFileResult>
+  }
   getLocalProjectGitState: (
     workspaceId: string,
     localProjectId: string

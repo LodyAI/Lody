@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isSessionGoalComplete,
   isSessionGoalPaused,
+  isSessionGoalActive,
   isSessionGoalWorking,
   resolveLatestSessionGoalFromHistory,
   resolveVisibleSessionGoal,
@@ -102,11 +103,15 @@ describe('session goal state helpers', () => {
     });
   });
 
-  it('maps goal statuses to working/paused/complete states', () => {
-    expect(isSessionGoalWorking(goal)).toBe(true);
+  it('maps goal statuses to active/paused/complete states', () => {
+    expect(isSessionGoalActive(goal)).toBe(true);
     expect(isSessionGoalPaused({ ...goal, status: 'paused' })).toBe(true);
     expect(isSessionGoalComplete({ ...goal, status: 'complete' })).toBe(true);
-    expect(isSessionGoalWorking({ ...goal, status: 'complete' })).toBe(false);
+    expect(isSessionGoalActive({ ...goal, status: 'complete' })).toBe(false);
+  });
+
+  it('keeps the legacy working helper as an active-state compatibility alias', () => {
+    expect(isSessionGoalWorking(goal)).toBe(isSessionGoalActive(goal));
   });
 
   it('shows a new goal on the same Codex thread after dismissing the cleared snapshot', () => {

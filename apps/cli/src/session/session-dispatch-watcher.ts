@@ -132,11 +132,7 @@ export type SessionRpcTurnOffer = {
 };
 
 export type SessionRpcTurnOfferDisposition =
-  | 'accepted'
-  | 'duplicate'
-  | 'already-terminal'
-  | 'not-owned'
-  | 'error';
+  'accepted' | 'duplicate' | 'already-terminal' | 'not-owned' | 'error';
 
 type StashedRpcTurn = {
   entry: SessionHistoryInput;

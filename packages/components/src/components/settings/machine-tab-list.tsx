@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, ListFilter, Users } from 'lucide-react';
+import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
 import type { MachineVisibilityAccess } from '@/hooks/use-visible-machine-metas';
@@ -14,6 +14,8 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { UserAvatar } from '@/components/user-avatar';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -24,6 +26,13 @@ export type MachineTabItem = {
   sharedWithTeam: boolean;
 };
 
+export type MachineTabOwner = {
+  id: string;
+  name: string;
+  image?: string | null;
+  email?: string | null;
+};
+
 export type MachineTabListProps = {
   items: MachineTabItem[];
   selectedMachineId: MachineId | null;
@@ -32,6 +41,10 @@ export type MachineTabListProps = {
   onFilterChange: (next: MachineSettingsFilter) => void;
   totalBeforeFilter: number;
   variant?: MachineTabListVariant;
+  showFilter?: boolean;
+  /** Workspace Machines are all shared, so show ownership instead of redundant access state. */
+  showOwner?: boolean;
+  ownerByUserId?: ReadonlyMap<string, MachineTabOwner>;
 };
 
 export function MachineTabList({
@@ -42,91 +55,119 @@ export function MachineTabList({
   onFilterChange,
   totalBeforeFilter,
   variant = 'compact',
+  showFilter = true,
+  showOwner = false,
+  ownerByUserId,
 }: MachineTabListProps) {
   const { t } = useTranslation();
   const hiddenByFilter = Math.max(0, totalBeforeFilter - items.length);
+
+  return (
+    <TooltipProvider delayDuration={250}>
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <div className="flex items-center justify-between gap-2 px-2 pb-2">
+          <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
+            {t('workspace.machines.title', 'Machines')}
+          </p>
+          {showFilter ? (
+            <MachineListFilterButton filter={filter} onFilterChange={onFilterChange} />
+          ) : null}
+        </div>
+
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
+          <ul className={cn('min-w-0', variant === 'detailed' ? 'space-y-2' : 'space-y-1')}>
+            {items.map((item) =>
+              variant === 'detailed' ? (
+                <DetailedMachineTab
+                  key={item.machine.id}
+                  item={item}
+                  isSelected={item.machine.id === selectedMachineId}
+                  onSelect={() => onSelect(item.machine.id)}
+                  showOwner={showOwner}
+                  ownerByUserId={ownerByUserId}
+                />
+              ) : (
+                <MachineTab
+                  key={item.machine.id}
+                  item={item}
+                  isSelected={item.machine.id === selectedMachineId}
+                  onSelect={() => onSelect(item.machine.id)}
+                  showOwner={showOwner}
+                  ownerByUserId={ownerByUserId}
+                />
+              )
+            )}
+          </ul>
+          {items.length === 0 && (
+            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {totalBeforeFilter === 0
+                ? t('workspace.machines.empty', 'No machines connected')
+                : t(
+                    'settings.agent.machineTabs.filter.noMatch',
+                    'No machines match these filters.'
+                  )}
+              {hiddenByFilter > 0 && (
+                <div className="mt-2">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto px-0 text-xs"
+                    onClick={() => onFilterChange({ onlineOnly: false, mineOnly: false })}
+                  >
+                    {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+export function MachineListFilterButton({
+  filter,
+  onFilterChange,
+}: {
+  filter: MachineSettingsFilter;
+  onFilterChange: (next: MachineSettingsFilter) => void;
+}) {
+  const { t } = useTranslation();
   const isFilterActive = filter.onlineOnly || filter.mineOnly;
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      <div className="flex items-center justify-between gap-2 px-2 pb-2">
-        <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
-          {t('workspace.machines.title', 'Machines')}
-        </p>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'h-7 w-7 shrink-0 border-0 shadow-none',
-                isFilterActive && 'bg-hover text-foreground'
-              )}
-              aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-            >
-              <ListFilter className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuLabel className="font-medium text-muted-foreground">
-              {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <FilterItem
-              label={t('settings.agent.machineTabs.filter.online', 'Online')}
-              checked={filter.onlineOnly}
-              onSelect={() => onFilterChange({ ...filter, onlineOnly: !filter.onlineOnly })}
-            />
-            <FilterItem
-              label={t('settings.agent.machineTabs.filter.mine', 'My machines')}
-              checked={filter.mineOnly}
-              onSelect={() => onFilterChange({ ...filter, mineOnly: !filter.mineOnly })}
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
-        <ul className={cn('min-w-0', variant === 'detailed' ? 'space-y-2' : 'space-y-1')}>
-          {items.map((item) =>
-            variant === 'detailed' ? (
-              <DetailedMachineTab
-                key={item.machine.id}
-                item={item}
-                isSelected={item.machine.id === selectedMachineId}
-                onSelect={() => onSelect(item.machine.id)}
-              />
-            ) : (
-              <MachineTab
-                key={item.machine.id}
-                item={item}
-                isSelected={item.machine.id === selectedMachineId}
-                onSelect={() => onSelect(item.machine.id)}
-              />
-            )
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'h-7 w-7 shrink-0 border-0 shadow-none',
+            isFilterActive && 'bg-hover text-foreground'
           )}
-        </ul>
-        {items.length === 0 && (
-          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-            {totalBeforeFilter === 0
-              ? t('workspace.machines.empty', 'No machines connected')
-              : t('settings.agent.machineTabs.filter.noMatch', 'No machines match these filters.')}
-            {hiddenByFilter > 0 && (
-              <div className="mt-2">
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto px-0 text-xs"
-                  onClick={() => onFilterChange({ onlineOnly: false, mineOnly: false })}
-                >
-                  {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+          aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
+        >
+          <ListFilter className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuLabel className="font-medium text-muted-foreground">
+          {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <FilterItem
+          label={t('settings.agent.machineTabs.filter.online', 'Online')}
+          checked={filter.onlineOnly}
+          onSelect={() => onFilterChange({ ...filter, onlineOnly: !filter.onlineOnly })}
+        />
+        <FilterItem
+          label={t('settings.agent.machineTabs.filter.mine', 'My machines')}
+          checked={filter.mineOnly}
+          onSelect={() => onFilterChange({ ...filter, mineOnly: !filter.mineOnly })}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -134,10 +175,14 @@ function MachineTab({
   item,
   isSelected,
   onSelect,
+  showOwner,
+  ownerByUserId,
 }: {
   item: MachineTabItem;
   isSelected: boolean;
   onSelect: () => void;
+  showOwner: boolean;
+  ownerByUserId?: ReadonlyMap<string, MachineTabOwner>;
 }) {
   const { t } = useTranslation();
   return (
@@ -168,15 +213,10 @@ function MachineTab({
           }
         />
         <span className="min-w-0 flex-1 truncate">{item.machine.name || item.machine.id}</span>
-        {item.sharedWithTeam ? (
-          <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <Users className="h-3 w-3" aria-hidden />
-            {t('workspace.machines.shared', 'Shared')}
-          </span>
+        {showOwner ? (
+          <MachineOwnerAvatar item={item} ownerByUserId={ownerByUserId} />
         ) : (
-          <span className="shrink-0 text-[10px] text-muted-foreground/60">
-            {t('workspace.machines.private', 'Private')}
-          </span>
+          <MachineAccessStatus sharedWithTeam={item.sharedWithTeam} />
         )}
       </button>
     </li>
@@ -187,10 +227,14 @@ function DetailedMachineTab({
   item,
   isSelected,
   onSelect,
+  showOwner,
+  ownerByUserId,
 }: {
   item: MachineTabItem;
   isSelected: boolean;
   onSelect: () => void;
+  showOwner: boolean;
+  ownerByUserId?: ReadonlyMap<string, MachineTabOwner>;
 }) {
   const { t } = useTranslation();
   const onlineText = item.isOnline
@@ -223,11 +267,10 @@ function DetailedMachineTab({
             <span className="min-w-0 truncate text-sm font-semibold">
               {item.machine.name || item.machine.id}
             </span>
-            {item.sharedWithTeam && (
-              <Users
-                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                aria-label={t('workspace.machines.sharedWithTeamLabel', 'Shared with team')}
-              />
+            {showOwner ? (
+              <MachineOwnerAvatar item={item} ownerByUserId={ownerByUserId} />
+            ) : (
+              <MachineAccessStatus sharedWithTeam={item.sharedWithTeam} />
             )}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
@@ -256,6 +299,81 @@ function DetailedMachineTab({
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
       </button>
     </li>
+  );
+}
+
+function MachineOwnerAvatar({
+  item,
+  ownerByUserId,
+}: {
+  item: MachineTabItem;
+  ownerByUserId?: ReadonlyMap<string, MachineTabOwner>;
+}) {
+  const { t } = useTranslation();
+  const ownerUserId = item.machine.ownerUserId ?? null;
+  const owner = ownerUserId ? ownerByUserId?.get(ownerUserId) : undefined;
+  const ownerName = owner?.name || owner?.email || ownerUserId || t('common.unknown', 'Unknown');
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex shrink-0 cursor-default rounded-full"
+          aria-label={t('workspace.machines.ownerTooltip', {
+            owner: ownerName,
+            defaultValue: 'Machine owner: {{owner}}',
+          })}
+        >
+          <UserAvatar
+            user={owner ?? (ownerUserId ? { id: ownerUserId, name: ownerName } : null)}
+            className="h-5 w-5 text-[9px]"
+            fallbackClassName="bg-muted text-muted-foreground"
+            showIcon={!ownerUserId}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">
+        {t('workspace.machines.ownerTooltip', {
+          owner: ownerName,
+          defaultValue: 'Machine owner: {{owner}}',
+        })}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function MachineAccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
+  const { t } = useTranslation();
+  const Icon = sharedWithTeam ? Users : LockKeyhole;
+  const label = sharedWithTeam
+    ? t('workspace.machines.shared', 'Shared')
+    : t('workspace.machines.private', 'Private');
+  const description = sharedWithTeam
+    ? t(
+        'workspace.machines.sharedTooltip',
+        'Workspace members can access this machine. Only the machine owner can change sharing.'
+      )
+    : t(
+        'workspace.machines.privateTooltip',
+        'Only the machine owner can access this machine. It is not available to other workspace members.'
+      );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground"
+          aria-label={`${label}. ${description}`}
+        >
+          <Icon className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+          <span>{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-64 leading-relaxed">
+        <p className="font-medium">{label}</p>
+        <p className="mt-0.5 text-muted-foreground">{description}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

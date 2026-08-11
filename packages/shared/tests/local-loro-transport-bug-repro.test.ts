@@ -43,9 +43,12 @@ import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
 import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
-import type {
-  LocalLoroDataPlaneClientMessage,
-  LocalLoroDataPlaneServerMessage,
+import {
+  base64ToBytes,
+  bytesToBase64,
+  LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+  type LocalLoroDataPlaneClientMessage,
+  type LocalLoroDataPlaneServerMessage,
 } from '../src/local-loro-data-plane';
 import { MemoryFlock } from './helpers/memory-flock';
 
@@ -118,6 +121,22 @@ class RelayHarness {
     const doc = new LoroDoc();
     this.serverDocs.set(key, doc);
     return doc;
+  }
+
+  /**
+   * Models `repo.unloadDoc(docId)`: the doc is persisted and evicted from the
+   * repo's instance cache, so the NEXT `resolveDoc` hands out a different
+   * `LoroDoc` object loaded from storage. This is what CLI session GC does to an
+   * idle session while a renderer is still subscribed to its room.
+   */
+  unloadServerDoc(workspaceId: string, docId: string): void {
+    const key = `${workspaceId}:${docId}`;
+    const previous = this.serverDocs.get(key);
+    if (!previous) return;
+    const snapshot = previous.export({ mode: 'snapshot' });
+    const reloaded = new LoroDoc();
+    reloaded.import(snapshot);
+    this.serverDocs.set(key, reloaded);
   }
 
   serverMetaFlock(workspaceId: string): MemoryFlock {
@@ -481,5 +500,278 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
     // R5.1: the room was released at zero subscribers; nothing is pushed to a
     // renderer that no longer exists.
     expect(docUpdatesPushed() - baseline).toBe(0);
+  });
+
+  // F9: a doc room resolves its LoroDoc once and keeps it while a renderer
+  // stays subscribed, but the repo may evict that instance (session GC ->
+  // `repo.unloadDoc`) and hand out a different object next time. Without
+  // `invalidateDocRoom` the room keeps importing/exporting the orphan, which
+  // silently severs sync in BOTH directions while the room still reports
+  // `joined`. Observed in production as a user turn that never reached the CLI,
+  // so `TurnHistoryGate` held the whole agent reply for its full 20s timeout.
+  describe('F9: repo doc eviction must invalidate the cached data-plane room', () => {
+    it('drops renderer uploads into the orphaned instance when the room is not invalidated', async () => {
+      const harness = new RelayHarness();
+      const renderer = harness.createAdapter('ws', 'renderer:1');
+      const doc = new LoroDoc();
+      renderer.joinDocRoom('doc-1', doc);
+      await harness.settle();
+
+      insert(doc, 0, 'before-unload');
+      await harness.settle();
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
+
+      harness.unloadServerDoc('ws', 'doc-1');
+
+      insert(doc, text(doc).length, '|after-unload');
+      await harness.settle();
+
+      // The upload was applied to the evicted instance, so the repo's current
+      // doc — the one the CLI reads and persists — never sees it.
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
+    });
+
+    it('recovers both directions once the evicted room is invalidated', async () => {
+      const harness = new RelayHarness();
+      const renderer = harness.createAdapter('ws', 'renderer:1');
+      const doc = new LoroDoc();
+      const subscription = renderer.joinDocRoom('doc-1', doc);
+      await harness.settle();
+
+      insert(doc, 0, 'before-unload');
+      await harness.settle();
+
+      harness.unloadServerDoc('ws', 'doc-1');
+      harness.engineFor('ws').invalidateDocRoom('doc-1');
+      // No manual reconnect: the engine publishes a terminal room status and
+      // the adapter repairs that one room itself, so recovery must happen
+      // without the workspace reconnect loop being involved at all.
+      await harness.settle();
+      expect(subscription.status).toBe('joined');
+
+      // Up-sync: the write made before the eviction is reconciled at join, and
+      // new renderer writes land in the repo's current doc.
+      insert(doc, text(doc).length, '|after-invalidate');
+      await harness.settle();
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload|after-invalidate');
+
+      // Down-sync: CLI writes on the current instance reach the renderer again.
+      const current = harness.serverDoc('ws', 'doc-1');
+      insert(current, text(current).length, '|cli-write');
+      await harness.settle();
+      expect(text(doc)).toBe('before-unload|after-invalidate|cli-write');
+    });
+
+    it('recovers an upload that landed in the window between eviction and invalidation', async () => {
+      const harness = new RelayHarness();
+      const renderer = harness.createAdapter('ws', 'renderer:1');
+      const doc = new LoroDoc();
+      renderer.joinDocRoom('doc-1', doc);
+      await harness.settle();
+
+      insert(doc, 0, 'before-unload');
+      await harness.settle();
+
+      // Invalidation is deliberately sequenced AFTER the unload, so there is a
+      // window where the room still routes to the orphan. This pins the reason
+      // that is acceptable: the peer reconciles against the server version on
+      // (re)join and re-uploads whatever the server is missing, so a write lost
+      // in the window comes back. (Sequencing it BEFORE would instead let a
+      // racing join re-open the doc into the repo cache just in time to be
+      // stranded again — silently, with no status published.)
+      harness.unloadServerDoc('ws', 'doc-1');
+      insert(doc, text(doc).length, '|written-in-window');
+      await harness.settle();
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
+
+      harness.engineFor('ws').invalidateDocRoom('doc-1');
+      await harness.settle();
+
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload|written-in-window');
+    });
+
+    it('discards a room build that was in flight when the invalidation landed', async () => {
+      // `invalidateDocRoom` looks the room up in `this.rooms`, but a build still
+      // inside `ensureRoom` has not installed its entry yet — so the lookup
+      // misses it, nothing is published, and the build then installs a room
+      // bound to the instance the repo just evicted. That is the original bug
+      // with no recovery signal at all, and it is reachable because
+      // `unloadDocRoom` awaits `repo.unloadDoc` before it invalidates.
+      const tasks: Array<() => void | Promise<void>> = [];
+      const currentDocs = new Map<string, LoroDoc>();
+      let openGate = (): void => {};
+      const gate = new Promise<void>((resolve) => {
+        openGate = () => resolve();
+      });
+      let parkNextResolve = true;
+
+      const engine = new LocalLoroDataPlaneServer({
+        workspaceId: 'ws',
+        resolveDoc: async (docId) => {
+          // Capture BEFORE parking: this models the real race, where
+          // `openPersistedDoc` has already handed back an instance and the
+          // eviction happens while the rest of the build is still running.
+          // (Reading the map after the gate would silently hand out the fresh
+          // instance and the race could never manifest.)
+          const doc = currentDocs.get(docId);
+          if (!doc) throw new Error(`no doc ${docId}`);
+          if (parkNextResolve) {
+            parkNextResolve = false;
+            await gate;
+          }
+          return doc;
+        },
+        resolveFlockDoc: async () => new MemoryFlock(),
+        scheduler: {
+          scheduleDataWork: (work) => {
+            tasks.push(work);
+            return () => {};
+          },
+        },
+      });
+
+      const evicted = new LoroDoc();
+      currentDocs.set('doc-1', evicted);
+
+      const connection = { id: 'dp:1', send: () => {} };
+      const joining = engine.handleMessage(connection, {
+        type: 'join',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        requestId: 'join:1',
+        workspaceId: 'ws',
+        peerId: 'renderer:1',
+        room: { scope: 'doc', docId: 'doc-1' },
+      });
+      await Promise.resolve();
+
+      // The repo evicts while that join is parked inside `resolveDoc`; the next
+      // `openPersistedDoc` would hand out this different instance.
+      const reloaded = new LoroDoc();
+      reloaded.import(evicted.export({ mode: 'snapshot' }));
+      currentDocs.set('doc-1', reloaded);
+      engine.invalidateDocRoom('doc-1');
+
+      openGate();
+      await joining;
+      for (const task of tasks.splice(0)) await task();
+
+      // A peer upload must reach the repo's CURRENT doc, not the orphan.
+      const peer = new LoroDoc();
+      insert(peer, 0, 'from-peer');
+      await engine.handleMessage(connection, {
+        type: 'update',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: 'ws',
+        peerId: 'renderer:1',
+        room: { scope: 'doc', docId: 'doc-1' },
+        haveVersion: bytesToBase64(peer.oplogVersion().encode()),
+        payload: {
+          kind: 'doc-update',
+          dataBase64: bytesToBase64(peer.export({ mode: 'update' })),
+        },
+      });
+
+      expect(text(reloaded)).toBe('from-peer');
+      expect(text(evicted)).toBe('');
+    });
+
+    // The generation check inside `ensureRoom` only covers the window BEFORE the
+    // entry is installed. An invalidation landing between `rooms.set` and the
+    // awaiting caller resuming would hand back an already-dead entry, which is
+    // worse than the bug this class fixes: `handleJoin` registers the peer on
+    // it, `buildJoinReplyFrames` then finds no room and emits nothing, and the
+    // client is parked on `connecting` forever — not a terminal status, so the
+    // renderer's reconnect loop never fires either.
+    //
+    // The install and the caller's resumption are one microtask apart, so
+    // rather than guess that distance (scheduler luck, and a test that silently
+    // stops covering anything when the code shifts by a hop), sweep the
+    // invalidation across a fixed range of microtask depths and require the
+    // invariant to hold at every one. Deterministic: same depths every run.
+    for (const depth of [0, 1, 2, 3, 4, 5, 6, 7]) {
+      it(`answers a join whose room is invalidated ${depth} microtask(s) into the build`, async () => {
+        const tasks: Array<() => void | Promise<void>> = [];
+        const currentDocs = new Map<string, LoroDoc>();
+        let armed = true;
+        const engine = new LocalLoroDataPlaneServer({
+          workspaceId: 'ws',
+          resolveDoc: async (docId) => {
+            const doc = currentDocs.get(docId);
+            if (!doc) throw new Error(`no doc ${docId}`);
+            if (armed) {
+              armed = false;
+              let chain = Promise.resolve();
+              for (let hop = 0; hop < depth; hop += 1) {
+                chain = chain.then(() => undefined);
+              }
+              void chain.then(() => {
+                const reloaded = new LoroDoc();
+                reloaded.import(doc.export({ mode: 'snapshot' }));
+                currentDocs.set(docId, reloaded);
+                engine.invalidateDocRoom(docId);
+              });
+            }
+            return doc;
+          },
+          resolveFlockDoc: async () => new MemoryFlock(),
+          scheduler: {
+            scheduleDataWork: (work) => {
+              tasks.push(work);
+              return () => {};
+            },
+          },
+        });
+
+        const seeded = new LoroDoc();
+        insert(seeded, 0, 'seed');
+        currentDocs.set('doc-1', seeded);
+
+        const frames: LocalLoroDataPlaneServerMessage[] = [];
+        const connection = {
+          id: 'dp:1',
+          send: (frame: LocalLoroDataPlaneServerMessage) => {
+            frames.push(frame);
+          },
+        };
+        await engine.handleMessage(connection, {
+          type: 'join',
+          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+          requestId: 'join:1',
+          workspaceId: 'ws',
+          peerId: 'renderer:1',
+          room: { scope: 'doc', docId: 'doc-1' },
+        });
+        for (const task of tasks.splice(0)) await task();
+
+        // The invariant: the peer is never left silent. Either the join is
+        // answered, or it is told the room is gone so it re-joins. Silence is
+        // the unrecoverable state — the client parks on `connecting`, which is
+        // not terminal, so the renderer's reconnect loop never fires.
+        const joined = frames.filter((f) => f.type === 'joined' && f.requestId === 'join:1');
+        const terminalStatus = frames.filter(
+          (f) => f.type === 'room-status' && (f.status === 'disconnected' || f.status === 'error')
+        );
+        expect(joined.length + terminalStatus.length).toBeGreaterThan(0);
+
+        if (joined.length > 0) {
+          // The room it was registered on must be the live one, so a CLI write
+          // on the repo's CURRENT doc still reaches the peer.
+          const current = currentDocs.get('doc-1');
+          if (!current) throw new Error('missing current doc');
+          insert(current, text(current).length, '|after');
+          for (const task of tasks.splice(0)) await task();
+          const peerDoc = new LoroDoc();
+          for (const frame of frames) {
+            if (
+              (frame.type === 'joined' || frame.type === 'update') &&
+              frame.payload?.kind === 'doc-update'
+            ) {
+              peerDoc.import(base64ToBytes(frame.payload.dataBase64));
+            }
+          }
+          expect(text(peerDoc)).toBe('seed|after');
+        }
+      });
+    }
   });
 });

@@ -23,6 +23,8 @@
  *   story preview chrome (backdrop/frame) is not production.
  */
 import type { Decorator, Meta, StoryObj } from '@storybook/react';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
@@ -34,6 +36,7 @@ import {
   getMachineRoomId,
   getServerNow,
   getSessionRoomId,
+  SESSION_GOAL_COMMANDS,
   type AgentConfigId,
   type AgentConfigMeta,
   type LodyPresenceInstanceId,
@@ -116,10 +119,50 @@ const STORY_LOCAL_PROJECT_ID = 'local:lody' as LocalProjectId;
 const STORY_AUTH_TOKEN = 'storybook-token';
 const STORY_USER_ID = 'user-storybook-session-page';
 
-type PageState = 'idle' | 'permission' | 'question';
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: STORY_USER_ID, name: 'Zixuan' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      {
+        id: STORY_WORKSPACE_ID,
+        name: 'Storybook Workspace',
+        slug: STORY_WORKSPACE_SLUG,
+        role: 'owner',
+      },
+    ],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
+
+type PageState = 'idle' | 'working' | 'permission' | 'question';
 type DeviceFrame = 'desktop' | 'mobile';
 
 const action = fn();
+const STREAM_INTERVAL_MS = 60;
+const STREAM_CHUNK_TOTAL = 180;
+const STREAM_CHUNKS = Array.from({ length: STREAM_CHUNK_TOTAL }, (_, index) => {
+  const item = index + 1;
+  if (item % 12 === 0) {
+    return [
+      '',
+      `### Render checkpoint ${item / 12}`,
+      '',
+      '| Surface | Observation |',
+      '| --- | --- |',
+      `| Message stream | chunk ${item} appended |`,
+      '| Working status | indicator remains active |',
+      '',
+    ].join('\n');
+  }
+  if (item % 5 === 0) {
+    return `\n- Inspecting the visible conversation tree at streaming chunk ${item}.`;
+  }
+  return ` The mock stream keeps extending the current assistant response (${item}).`;
+});
 
 const storySharing: SessionSharingState = {
   visibility: 'private',
@@ -264,13 +307,19 @@ const buildSessionId = (state: PageState, frame: DeviceFrame): SessionId =>
 
 const buildSession = (state: PageState, frame: DeviceFrame): SessionMeta => {
   const sessionId = buildSessionId(state, frame);
+  const status =
+    state === 'idle'
+      ? ({ type: 'idle' } as const)
+      : state === 'working'
+        ? ({ type: 'running' } as const)
+        : ({ type: 'requestPermission' } as const);
   return {
     id: sessionId,
     machineId: STORY_MACHINE_ID,
     createdAt: '2026-07-09T09:30:00.000Z',
     title: 'Session conversation page',
     userId: STORY_USER_ID,
-    status: state === 'idle' ? { type: 'idle' } : { type: 'requestPermission' },
+    status,
     cliType: 'builtin',
     agentType: 'codex',
     agentConfigId: STORY_AGENT_CONFIG_ID,
@@ -341,6 +390,84 @@ const baseMessages = (): SessionHistoryParsed[] => [
     ],
   }),
 ];
+
+const buildWorkingHistory = (streamChunkCount: number): SessionHistoryParsed[] => {
+  const messages = baseMessages();
+  for (let index = 0; index < 14; index += 1) {
+    const turn = index + 1;
+    messages.push(
+      buildMessage({
+        id: `working-user-${turn}`,
+        role: 'user',
+        userId: STORY_USER_ID,
+        timestamp: `2026-07-09T09:${String(32 + index).padStart(2, '0')}:00.000Z`,
+        items: [
+          {
+            type: 'text',
+            text: `Continue the renderer investigation with synthetic checkpoint ${turn}.`,
+          },
+        ],
+      }),
+      buildMessage({
+        id: `working-assistant-${turn}`,
+        role: 'assistant',
+        timestamp: `2026-07-09T09:${String(32 + index).padStart(2, '0')}:20.000Z`,
+        finished: true,
+        modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+        items: [
+          {
+            type: 'text',
+            text: [
+              `Synthetic completed turn ${turn}.`,
+              '',
+              '- Read the current message projection.',
+              '- Compared the virtual rows and sticky-scroll state.',
+              '- Kept this fixture synthetic so it is safe to commit.',
+            ].join('\n'),
+          },
+        ],
+      })
+    );
+  }
+
+  messages.push(
+    buildMessage({
+      id: 'working-user-current',
+      role: 'user',
+      userId: STORY_USER_ID,
+      timestamp: '2026-07-09T09:48:00.000Z',
+      items: [
+        {
+          type: 'text',
+          text: 'Reproduce the rendering cost while the main conversation is streaming.',
+        },
+      ],
+    }),
+    buildMessage({
+      id: 'working-assistant-current',
+      role: 'assistant',
+      timestamp: '2026-07-09T09:48:05.000Z',
+      finished: false,
+      modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+      items: [
+        {
+          type: 'thought',
+          text: 'Tracing the Storybook conversation surface while the response grows.',
+        },
+        {
+          type: 'text',
+          text: [
+            'I am reproducing the streaming render workload in the complete conversation page.',
+            '',
+            'The Story keeps the real message list, composer, info bar, tab bar, and working indicator mounted.',
+            ...STREAM_CHUNKS.slice(0, streamChunkCount),
+          ].join('\n'),
+        },
+      ],
+    })
+  );
+  return messages;
+};
 
 const permissionOptions = [
   { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
@@ -427,7 +554,10 @@ const questionToolCall = (): MessageContent => ({
   },
 });
 
-const buildHistory = (state: PageState): SessionHistoryParsed[] => {
+const buildHistory = (state: PageState, streamChunkCount = 0): SessionHistoryParsed[] => {
+  if (state === 'working') {
+    return buildWorkingHistory(streamChunkCount);
+  }
   const messages = baseMessages();
   if (state === 'permission') {
     messages.push(
@@ -498,13 +628,18 @@ function createStoryStore(session: SessionMeta, state: PageState) {
     [getSessionRoomId(session.id)]: session,
   });
   if (state !== 'idle') {
+    const instanceId = `storybook-${state}` as LodyPresenceInstanceId;
+    const status =
+      state === 'working'
+        ? ({ type: 'running' } as const)
+        : ({ type: 'requestPermission' } as const);
     store.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(session.id, 'storybook-permission' as LodyPresenceInstanceId)]: {
+      [getLodySessionPresenceKey(session.id, instanceId)]: {
         kind: 'session',
         sessionId: session.id,
         machineId: STORY_MACHINE_ID,
-        instanceId: 'storybook-permission' as LodyPresenceInstanceId,
-        status: { type: 'requestPermission' },
+        instanceId,
+        status,
         updatedAt: getServerNow(),
       },
     });
@@ -522,6 +657,7 @@ function StoryInfoBar({ session }: { session: SessionMeta }) {
         objective: 'Ship the session info bar and wire it into production.',
         status: 'active',
       }}
+      goalCommands={SESSION_GOAL_COMMANDS}
       onGoalCommand={fn()}
       scheduledTasks={[
         {
@@ -541,7 +677,7 @@ function StoryInfoBar({ session }: { session: SessionMeta }) {
   );
 }
 
-function StoryComposer({ session }: { session: SessionMeta }) {
+function StoryComposer({ session, isAgentBusy }: { session: SessionMeta; isAgentBusy: boolean }) {
   const [mode, setMode] = useState<string | null>(selectorOptions.modeOptions[0]?.value ?? null);
   const [model, setModel] = useState<string | null>(selectorOptions.modelOptions[0]?.value ?? null);
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
@@ -558,7 +694,7 @@ function StoryComposer({ session }: { session: SessionMeta }) {
       session={session}
       sessionLocalProjectRootPath="/Users/developer/Code/lody"
       isMachineRemoved={false}
-      isAgentBusy={false}
+      isAgentBusy={isAgentBusy}
       isDark
       isEmptyConversation={false}
       selectedModeId={mode}
@@ -585,13 +721,42 @@ function StoryComposer({ session }: { session: SessionMeta }) {
 
 function StoryShell({ state, frame }: { state: PageState; frame: DeviceFrame }) {
   const { t } = useTranslation();
+  const [streamChunkCount, setStreamChunkCount] = useState(0);
   const session = useMemo(() => buildSession(state, frame), [frame, state]);
   const store = useMemo(() => createStoryStore(session, state), [session, state]);
-  const history = useMemo(() => buildHistory(state), [state]);
+  useEffect(() => {
+    setStreamChunkCount(0);
+    if (state !== 'working') {
+      return undefined;
+    }
+    const interval = window.setInterval(() => {
+      setStreamChunkCount((current) => {
+        if (current >= STREAM_CHUNK_TOTAL) {
+          window.clearInterval(interval);
+          return current;
+        }
+        return current + 1;
+      });
+    }, STREAM_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [state]);
+  const history = useMemo(() => buildHistory(state, streamChunkCount), [state, streamChunkCount]);
   const permissionHistory = history as unknown as SessionDoc['history'];
-  const liveStatus = state === 'idle' ? undefined : ({ type: 'requestPermission' } as const);
+  const liveStatus =
+    state === 'idle'
+      ? undefined
+      : state === 'working'
+        ? ({ type: 'running' } as const)
+        : ({ type: 'requestPermission' } as const);
   const shouldShowPermissionSurface = hasPendingPermissionRequest(liveStatus, permissionHistory);
   const translate = (key: string, fallback: string) => String(t(key, fallback));
+  const isWorking = state === 'working';
+  const streamPhase =
+    !isWorking || streamChunkCount === 0
+      ? 'initializing'
+      : streamChunkCount < STREAM_CHUNK_TOTAL
+        ? 'streaming'
+        : 'indicator-only';
   const childSession = {
     ...session,
     id: `${session.id}-child` as SessionId,
@@ -745,134 +910,147 @@ function StoryShell({ state, frame }: { state: PageState; frame: DeviceFrame }) 
   );
 
   return (
-    <Provider store={store}>
-      <AuthProvider authClient={storyAuthClient}>
-        <StableSessionContext.Provider value={storyStableSessionValue}>
-          <div
-            className={cn(
-              'text-foreground',
-              // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
-              // h-full resolves and the conversation fills the real height.
-              frame === 'mobile' ? 'h-dvh w-full bg-background' : 'h-dvh bg-muted/35 p-4 sm:p-6'
-            )}
-          >
+    <PlatformContext.Provider value={storyPlatform}>
+      <Provider store={store}>
+        <AuthProvider authClient={storyAuthClient}>
+          <StableSessionContext.Provider value={storyStableSessionValue}>
             <div
-              className={cn('overflow-hidden bg-background', frameClassName)}
-              style={
-                frame === 'mobile'
-                  ? ({ '--conversation-top-inset': '3rem' } as CSSProperties)
-                  : undefined
-              }
+              data-testid="session-conversation-story"
+              data-stream-chunk={streamChunkCount}
+              data-stream-total={STREAM_CHUNK_TOTAL}
+              data-stream-phase={streamPhase}
+              className={cn(
+                'text-foreground',
+                // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
+                // h-full resolves and the conversation fills the real height.
+                frame === 'mobile' ? 'h-dvh w-full bg-background' : 'h-dvh bg-muted/35 p-4 sm:p-6'
+              )}
             >
-              <SessionConversationPage
-                className="h-full"
-                headerSlot={
-                  frame !== 'mobile' ? null : (
-                    // Mirrors the production mobile header (session-detail.tsx
-                    // `if (isMobile)`): a FLOATING frosted BaseHeader (absolute,
-                    // translucent + backdrop-blur, no border, 3rem tall) with
-                    // glass buttons; the conversation scrolls under it via the
-                    // `--conversation-top-inset` var set on the frame below.
-                    <BaseHeader
-                      hideMenuButton
-                      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-                      style={{ height: '3rem' }}
-                      leading={
-                        // Mirrors production `MobileSessionHeaderBackButton`.
-                        <GlassIconButton label={translate('common.back', 'Back')} onClick={action}>
-                          <ChevronLeft className="h-5 w-5" />
-                        </GlassIconButton>
-                      }
-                      title={mobileTitleNode}
-                      actions={mobileHeaderActions}
-                    />
-                  )
+              <div
+                className={cn('overflow-hidden bg-background', frameClassName)}
+                style={
+                  frame === 'mobile'
+                    ? ({ '--conversation-top-inset': '3rem' } as CSSProperties)
+                    : undefined
                 }
-                subHeaderSlot={
-                  // Mobile has no tab bar now (tabs live in the 💬 sheet); desktop keeps it.
-                  frame === 'mobile' ? null : (
-                    // Mirrors the production merged top row (session-detail
-                    // desktop): tabs + right-side toolbar ("…" menu) in ONE bar;
-                    // the old repo-title header row is gone.
-                    <SessionTabBar
-                      variant="session"
-                      parentSession={session}
-                      childSessions={[childSession]}
-                      draftTabs={[]}
-                      archivedChildSessions={[]}
-                      activeTabSessionId={session.id}
-                      onTabSelect={action}
-                      onNewTab={action}
-                      onTabRename={action}
-                      onTabClose={action}
-                      tabOrder={[childSession.id]}
-                      rightSlot={
-                        <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-                          <SessionAccessControl state={storySharing} onShareWithTeam={action} />
-                          {headerMenuNode}
-                        </div>
-                      }
-                    />
-                  )
-                }
-                bodySlot={
-                  <SessionConversationPageBody
-                    streamSlot={
-                      <SessionChatStreamView
-                        sessionId={session.id}
-                        items={toStreamItems(session.id, history)}
-                        renderMessageRow={renderMessageRow}
-                        className="h-full"
-                        agentActivityLabel={
-                          shouldShowPermissionSurface ? 'Waiting for your response' : null
+              >
+                <SessionConversationPage
+                  className="h-full"
+                  headerSlot={
+                    frame !== 'mobile' ? null : (
+                      // Mirrors the production mobile header (session-detail.tsx
+                      // `if (isMobile)`): a FLOATING frosted BaseHeader (absolute,
+                      // translucent + backdrop-blur, no border, 3rem tall) with
+                      // glass buttons; the conversation scrolls under it via the
+                      // `--conversation-top-inset` var set on the frame below.
+                      <BaseHeader
+                        hideMenuButton
+                        className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+                        style={{ height: '3rem' }}
+                        leading={
+                          // Mirrors production `MobileSessionHeaderBackButton`.
+                          <GlassIconButton
+                            label={translate('common.back', 'Back')}
+                            onClick={action}
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </GlassIconButton>
                         }
-                        agentActivityTone={shouldShowPermissionSurface ? 'warning' : 'primary'}
+                        title={mobileTitleNode}
+                        actions={mobileHeaderActions}
                       />
-                    }
-                    permissionSlot={
-                      <FloatingPermissionRequest
-                        sessionId={session.id}
-                        sessionStatus={liveStatus}
-                        sessionHistory={permissionHistory}
+                    )
+                  }
+                  subHeaderSlot={
+                    // Mobile has no tab bar now (tabs live in the 💬 sheet); desktop keeps it.
+                    frame === 'mobile' ? null : (
+                      // Mirrors the production merged top row (session-detail
+                      // desktop): tabs + right-side toolbar ("…" menu) in ONE bar;
+                      // the old repo-title header row is gone.
+                      <SessionTabBar
+                        variant="session"
+                        parentSession={session}
+                        childSessions={[childSession]}
+                        draftTabs={[]}
+                        archivedChildSessions={[]}
+                        activeTabSessionId={session.id}
+                        onTabSelect={action}
+                        onNewTab={action}
+                        onTabRename={action}
+                        onTabClose={action}
+                        tabOrder={[childSession.id]}
+                        rightSlot={
+                          <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+                            <SessionAccessControl state={storySharing} onShareWithTeam={action} />
+                            {headerMenuNode}
+                          </div>
+                        }
                       />
-                    }
-                    composerSlot={
-                      shouldShowPermissionSurface ? null : (
-                        <>
-                          {/* Mirrors the production info bar (cluster + stage)
+                    )
+                  }
+                  bodySlot={
+                    <SessionConversationPageBody
+                      streamSlot={
+                        <SessionChatStreamView
+                          sessionId={session.id}
+                          items={toStreamItems(session.id, history)}
+                          renderMessageRow={renderMessageRow}
+                          className="h-full"
+                          agentActivityLabel={
+                            isWorking
+                              ? translate('sessions.statusIndicator.thinking', 'Thinking')
+                              : shouldShowPermissionSurface
+                                ? 'Waiting for your response'
+                                : null
+                          }
+                          agentActivityTone={shouldShowPermissionSurface ? 'warning' : 'primary'}
+                        />
+                      }
+                      permissionSlot={
+                        <FloatingPermissionRequest
+                          sessionId={session.id}
+                          sessionStatus={liveStatus}
+                          sessionHistory={permissionHistory}
+                        />
+                      }
+                      composerSlot={
+                        shouldShowPermissionSurface ? null : (
+                          <>
+                            {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
-                          <StoryInfoBar session={session} />
-                          <StoryComposer session={session} />
-                        </>
-                      )
-                    }
-                  />
-                }
-              />
-              {frame === 'mobile' ? (
-                <>
-                  <MobileSessionTabSheet
-                    open={tabSheetOpen}
-                    onOpenChange={setTabSheetOpen}
-                    conversations={mobileConversations}
-                    viewers={mobileViewers}
-                    onSelectConversation={action}
-                    onNewConversation={action}
-                    onSelectViewer={action}
-                  />
-                  <MobileSessionMenuSheet
-                    open={menuSheetOpen}
-                    onOpenChange={setMenuSheetOpen}
-                    infoRows={mobileMenuInfoRows}
-                    actions={mobileMenuActions}
-                  />
-                </>
-              ) : null}
+                            <StoryInfoBar session={session} />
+                            <StoryComposer session={session} isAgentBusy={isWorking} />
+                          </>
+                        )
+                      }
+                    />
+                  }
+                />
+                {frame === 'mobile' ? (
+                  <>
+                    <MobileSessionTabSheet
+                      open={tabSheetOpen}
+                      onOpenChange={setTabSheetOpen}
+                      conversations={mobileConversations}
+                      viewers={mobileViewers}
+                      onSelectConversation={action}
+                      onNewConversation={action}
+                      onSelectViewer={action}
+                    />
+                    <MobileSessionMenuSheet
+                      open={menuSheetOpen}
+                      onOpenChange={setMenuSheetOpen}
+                      infoRows={mobileMenuInfoRows}
+                      actions={mobileMenuActions}
+                    />
+                  </>
+                ) : null}
+              </div>
             </div>
-          </div>
-        </StableSessionContext.Provider>
-      </AuthProvider>
-    </Provider>
+          </StableSessionContext.Provider>
+        </AuthProvider>
+      </Provider>
+    </PlatformContext.Provider>
   );
 }
 
@@ -981,6 +1159,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DesktopIdle: Story = {
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopStreamingWorking: Story = {
+  args: { state: 'working' },
   globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
 };

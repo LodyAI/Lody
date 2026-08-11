@@ -12,20 +12,25 @@ const sidebarPanelMock = vi.hoisted(() => ({
 
 vi.mock('../src/ui/resizable', () => ({
   ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ResizablePanel: forwardRef<unknown, { children: React.ReactNode; id?: string }>(
-    function MockResizablePanel({ children, id }, ref) {
-      useImperativeHandle(ref, () =>
-        id === 'sidebar'
-          ? {
-              collapse: sidebarPanelMock.collapse,
-              getSize: sidebarPanelMock.getSize,
-              resize: sidebarPanelMock.resize,
-            }
-          : {}
-      );
-      return <div data-panel-id={id}>{children}</div>;
-    }
-  ),
+  ResizablePanel: forwardRef<
+    unknown,
+    { children: React.ReactNode; id?: string; style?: React.CSSProperties }
+  >(function MockResizablePanel({ children, id, style }, ref) {
+    useImperativeHandle(ref, () =>
+      id === 'sidebar'
+        ? {
+            collapse: sidebarPanelMock.collapse,
+            getSize: sidebarPanelMock.getSize,
+            resize: sidebarPanelMock.resize,
+          }
+        : {}
+    );
+    return (
+      <div data-panel-id={id} style={style}>
+        {children}
+      </div>
+    );
+  }),
   ResizableHandle: ({ disabled }: { disabled?: boolean }) => (
     <div data-disabled={String(Boolean(disabled))} />
   ),
@@ -44,7 +49,7 @@ vi.mock('framer-motion', () => ({
       transition?: unknown;
     }) => <div {...props} />,
   },
-  useReducedMotion: () => true,
+  useReducedMotion: () => false,
 }));
 
 import {
@@ -250,5 +255,100 @@ describe('DesktopSessionDetailLayout sidebarMinWidthRequest', () => {
     renderLayout({ sidebarOpen: true, sidebarMinWidthRequest: request });
 
     expect(sidebarPanelMock.resize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DesktopSessionDetailLayout sidebarRestoreSeq', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  /** Captured `requestAnimationFrame` callbacks, flushed explicitly by the test. */
+  let pendingFrames: Array<FrameRequestCallback> = [];
+
+  const renderLayout = (overrides: Partial<DesktopSessionDetailLayoutProps>) => {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    act(() => {
+      root?.render(
+        <DesktopSessionDetailLayout
+          defaultSizes={{ main: 70, sidebar: 30 }}
+          topBar={null}
+          chatSurfaces={null}
+          terminalDock={null}
+          secondaryPanel={null}
+          sidebarOpen
+          onSidebarCollapse={() => {}}
+          deleteConfirmDialog={null}
+          {...overrides}
+        />
+      );
+    });
+    if (!container) throw new Error('Expected a mounted container');
+    return container;
+  };
+
+  const sidebarTransitionDuration = () =>
+    container?.querySelector<HTMLElement>('[data-panel-id="sidebar"]')?.style.transitionDuration;
+
+  const flushFrames = () => {
+    const frames = pendingFrames;
+    pendingFrames = [];
+    act(() => {
+      for (const frame of frames) frame(0);
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pendingFrames = [];
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      pendingFrames.push(callback);
+      return pendingFrames.length;
+    });
+    vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+    }
+    container?.remove();
+    root = undefined;
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('animates a sidebar change the user asked for', () => {
+    renderLayout({ sidebarOpen: false, sidebarRestoreSeq: 1 });
+    flushFrames();
+
+    renderLayout({ sidebarOpen: true, sidebarRestoreSeq: 1 });
+
+    expect(sidebarPanelMock.resize).toHaveBeenCalled();
+    expect(sidebarTransitionDuration()).toBe('220ms');
+  });
+
+  it('applies a restored sidebar state without a transition', () => {
+    renderLayout({ sidebarOpen: false, sidebarRestoreSeq: 1 });
+    flushFrames();
+
+    // A session switch: the new session's sidebar state arrives with a bumped seq.
+    renderLayout({ sidebarOpen: true, sidebarRestoreSeq: 2 });
+
+    expect(sidebarPanelMock.resize).toHaveBeenCalled();
+    expect(sidebarTransitionDuration()).toBe('0ms');
+  });
+
+  it('re-arms the transition only after a frame has rendered with it suppressed', () => {
+    renderLayout({ sidebarOpen: true, sidebarRestoreSeq: 1 });
+    flushFrames();
+
+    renderLayout({ sidebarOpen: false, sidebarRestoreSeq: 2 });
+    expect(sidebarTransitionDuration()).toBe('0ms');
+
+    flushFrames();
+    expect(sidebarTransitionDuration()).toBe('220ms');
   });
 });

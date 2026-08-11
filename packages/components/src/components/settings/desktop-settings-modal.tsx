@@ -1,17 +1,29 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { Bug } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
-import type { MachineId } from '@lody/shared';
-import { bugReportDialogOpenAtom, settingsActiveTabAtom, settingsDialogOpenAtom } from '@/atoms';
+import {
+  bugReportDialogOpenAtom,
+  settingsActiveTabAtom,
+  settingsDialogOpenAtom,
+  settingsSelectedMachineIdAtom,
+  settingsSelectedProjectKeyAtom,
+} from '@/atoms';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
+import { useOrganization } from '@/hooks/useOrganization';
+import { useStableSession } from '@/hooks/useStableSession';
 import { SettingsDataCacheProvider } from './settings-data-cache';
-import { useVisibleSettingsTabs, type SettingsTabId } from './settings-tabs';
+import {
+  useVisibleSettingsTabs,
+  type SettingsSectionId,
+  type SettingsTabId,
+} from './settings-tabs';
+import { SettingsAccountEntry } from './settings-account-entry';
 import { GeneralSettingsComponent } from './general-setting';
 import { AppearanceSettingsComponent } from './appearance-setting';
 import { AccountSettingsComponent } from './account-setting';
@@ -58,12 +70,19 @@ export function DesktopSettingsModal() {
 function SettingsModalBody() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useAtom(settingsActiveTabAtom);
+  const setSelectedMachineId = useSetAtom(settingsSelectedMachineIdAtom);
+  const setSelectedProjectKey = useSetAtom(settingsSelectedProjectKeyAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
   const canReportBug = useAppCapability('bugReport');
+  const { activeOrganization } = useOrganization();
+  const { data: session } = useStableSession();
   const platformTabs = useVisibleSettingsTabs();
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
+  const navigationTabs = visibleTabs.filter(
+    (tab) => !tab.multiMemberOnly || (activeOrganization?.members.length ?? 0) > 1
+  );
 
   const handleReportBug = useCallback(() => {
     setBugReportDialogOpen(true);
@@ -71,45 +90,91 @@ function SettingsModalBody() {
 
   const activeTabConfig = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
   const resolvedActiveTab = activeTabConfig.id;
+  const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
+  const selectTab = useCallback(
+    (tabId: SettingsTabId) => {
+      setSelectedMachineId(null);
+      setSelectedProjectKey(null);
+      setActiveTab(tabId);
+    },
+    [setActiveTab, setSelectedMachineId, setSelectedProjectKey]
+  );
+  const groupedSections: Array<{
+    id: Exclude<SettingsSectionId, 'account'>;
+    label: string;
+  }> = [
+    { id: 'personal', label: t('settings.sections.personal', 'Personal') },
+    { id: 'workspace', label: t('settings.sections.workspace', 'Workspace') },
+    { id: 'other', label: t('settings.sections.misc', 'Other') },
+  ];
   // These tabs render their own in-content header (title + per-tab actions like
   // "add project"), so we drop the chrome title to avoid showing it twice.
   const selfTitledTab =
     resolvedActiveTab === 'projects' ||
-    resolvedActiveTab === 'devices' ||
-    resolvedActiveTab === 'agent-config';
+    resolvedActiveTab === 'machines' ||
+    resolvedActiveTab === 'agents';
 
   return (
     <SettingsDataCacheProvider>
       <DialogDescription className="sr-only">{t('settings.title')}</DialogDescription>
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="flex w-56 flex-col border-r bg-background">
-          <nav className="space-y-1 p-4">
-            {visibleTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={cn(
-                  'w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors',
-                  resolvedActiveTab === tab.id
-                    ? 'bg-secondary text-secondary-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-secondary-foreground'
-                )}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                }}
-              >
-                {t(tab.labelKey)}
-              </button>
-            ))}
+        <aside className="flex w-60 flex-col border-e bg-background">
+          <nav className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="space-y-4">
+              {groupedSections.map((section) => {
+                const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                const showsAccountEntry = section.id === 'personal' && accountTab;
+                if (tabs.length === 0 && !showsAccountEntry) return null;
+                return (
+                  <section key={section.id} aria-label={section.label}>
+                    <h2 className="px-2.5 pb-1 text-xs font-medium text-muted-foreground/55">
+                      {section.label}
+                    </h2>
+                    <div className="space-y-0.5">
+                      {showsAccountEntry ? (
+                        <SettingsAccountEntry
+                          user={session?.user}
+                          active={resolvedActiveTab === 'account'}
+                          onSelect={() => selectTab('account')}
+                        />
+                      ) : null}
+                      {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            className={cn(
+                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium transition-colors',
+                              resolvedActiveTab === tab.id
+                                ? 'bg-secondary text-secondary-foreground'
+                                : 'text-muted-foreground hover:bg-secondary/50 hover:text-secondary-foreground'
+                            )}
+                            onClick={() => selectTab(tab.id)}
+                          >
+                            <Icon
+                              className="h-4 w-4 shrink-0 opacity-80"
+                              strokeWidth={1.75}
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0 truncate">{t(tab.labelKey)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
           </nav>
           {canReportBug && (
-            <div className="mt-auto p-4">
+            <div className="mt-auto p-3">
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
                 onClick={handleReportBug}
               >
-                <Bug className="h-4 w-4" />
+                <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
                 {t('bugReport.title', 'Report a bug')}
               </button>
             </div>
@@ -142,34 +207,39 @@ function SettingsModalBody() {
 }
 
 function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
-  // agent-config tracks the selected machine in URL search on the route version;
-  // in the modal it is purely local component state.
-  const [selectedMachineId, setSelectedMachineId] = useState<MachineId | null>(null);
+  // Mobile routes keep the machine in URL search. The modal uses a shared atom
+  // so Account shortcuts can select a machine before switching tabs.
+  const [selectedMachineId, setSelectedMachineId] = useAtom(settingsSelectedMachineIdAtom);
 
   switch (tabId) {
-    case 'general':
+    case 'preferences':
       return <GeneralSettingsComponent />;
     case 'appearance':
       return <AppearanceSettingsComponent />;
     case 'account':
-      return <AccountSettingsComponent />;
+      return <AccountSettingsComponent surface="account" />;
+    case 'workspace':
+      return <AccountSettingsComponent surface="workspace" />;
+    case 'people':
+      return <AccountSettingsComponent surface="workspace" />;
     case 'billing':
       return <BillingSettingsComponent />;
-    case 'stats':
+    case 'ai-usage':
       return <StatsSettingsComponent />;
     case 'projects':
       return <ProjectSettingsComponent />;
-    case 'agent-config':
+    case 'agents':
       return (
         <MachineAgentSettings
+          mode="agents"
           selectedMachineId={selectedMachineId}
           onSelectedMachineChange={setSelectedMachineId}
         />
       );
-    case 'devices':
+    case 'machines':
       return (
         <MachineAgentSettings
-          mode="devices"
+          mode="machines"
           selectedMachineId={selectedMachineId}
           onSelectedMachineChange={setSelectedMachineId}
         />

@@ -24,24 +24,33 @@ import {
   type OrganizationMemberRef,
   type OrganizationMemberRole,
 } from '@/lib/organization-member-role';
-import { AccountSettingsPure, type WorkspaceDeleteBillingGuard } from './account-setting-pure';
+import {
+  AccountSettingsPure,
+  type AccountSettingsSurface,
+  type WorkspaceDeleteBillingGuard,
+} from './account-setting-pure';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
+import { AccountMachinesOverview } from './account-machines-overview';
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
 
-export function AccountSettingsComponent() {
-  // The whole account tab (profile, members, invites, password, CLI keys,
-  // delete account) is a cloud-account surface. Registry-level gating already
-  // hides the tab without 'cloudAccount'; safety net for deep links.
+export function AccountSettingsComponent({
+  surface = 'account',
+}: {
+  surface?: AccountSettingsSurface;
+}) {
+  // Personal account and workspace administration are cloud-account surfaces.
+  // Registry-level gating hides their tabs without `cloudAccount`; this is the
+  // safety net for direct and legacy deep links.
   const cloudAccountAvailable = useAppCapability('cloudAccount');
   if (!cloudAccountAvailable) {
     return null;
   }
-  return <CloudAccountSettings />;
+  return <CloudAccountSettings surface={surface} />;
 }
 
-function CloudAccountSettings() {
+function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const signOut = useAuthSignOut();
@@ -617,6 +626,7 @@ function CloudAccountSettings() {
   if (orgLoading) {
     return (
       <AccountSettingsPure
+        surface={surface}
         loading
         currentUser={currentUser}
         organization={{ id: '', name: '' }}
@@ -647,12 +657,14 @@ function CloudAccountSettings() {
 
   return (
     <AccountSettingsPure
+      surface={surface}
       currentUser={currentUser}
       organization={activeOrganization}
       role={role as 'owner' | 'admin' | 'member'}
       hasAdminPermission={hasAdminPermission}
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
+      accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
       workspaceJoinRequestsSlot={
         role === 'owner' ? (
           <WorkspaceJoinRequestsSettings workspaceId={activeOrganization.id} />

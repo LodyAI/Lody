@@ -132,14 +132,12 @@ describe('resolveLocalProjectForApp', () => {
   });
 
   it('still resolves the deterministic project id when the daemon is down', async () => {
-    const send = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: false,
-        type: 'local-project/add',
-        error: 'daemon_unavailable',
-        message: 'Local CLI daemon is not running.',
-      })
-    );
+    const send = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: false,
+      type: 'local-project/add',
+      error: 'daemon_unavailable',
+      message: 'Local CLI daemon is not running.',
+    }));
 
     const target = await resolveLocalProjectForApp({
       machineId: MACHINE_ID,
@@ -156,14 +154,12 @@ describe('resolveLocalProjectForApp', () => {
   });
 
   it('propagates other control failures', async () => {
-    const send = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: false,
-        type: 'local-project/add',
-        error: 'path_invalid',
-        message: 'Selected path is not a directory',
-      })
-    );
+    const send = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: false,
+      type: 'local-project/add',
+      error: 'path_invalid',
+      message: 'Selected path is not a directory',
+    }));
 
     await expect(
       resolveLocalProjectForApp({

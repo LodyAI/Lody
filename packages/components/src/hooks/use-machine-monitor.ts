@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { type MachineId, type MachineMonitorSnapshot } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -16,6 +16,7 @@ export function useMachineMonitor(args: {
 } {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const [snapshot, setSnapshot] = useState<MachineMonitorSnapshot | null>(null);
+  const snapshotCacheRef = useRef(new Map<MachineId, MachineMonitorSnapshot>());
   const [visible, setVisible] = useState(
     () => typeof document === 'undefined' || document.visibilityState === 'visible'
   );
@@ -27,13 +28,14 @@ export function useMachineMonitor(args: {
   }, []);
 
   useEffect(() => {
-    setSnapshot(null);
+    setSnapshot(args.machineId ? (snapshotCacheRef.current.get(args.machineId) ?? null) : null);
     if (!runtime || !args.enabled || !args.online || !args.machineId || !visible) return undefined;
     return runtime.subscribeMachineMonitor(args.machineId, (next) => {
       setSnapshot((current) => {
         if (!next) return current;
         if (next.machineId !== args.machineId) return current;
         if (current && next.updatedAtMs < current.updatedAtMs) return current;
+        snapshotCacheRef.current.set(args.machineId, next);
         return next;
       });
     });
@@ -46,5 +48,11 @@ export function useMachineMonitor(args: {
   if (!args.enabled || !args.online || !visible) {
     return { snapshot: null, state: 'disabled', refresh };
   }
-  return { snapshot, state: 'active', refresh };
+  const visibleSnapshot =
+    snapshot?.machineId === args.machineId
+      ? snapshot
+      : args.machineId
+        ? (snapshotCacheRef.current.get(args.machineId) ?? null)
+        : null;
+  return { snapshot: visibleSnapshot, state: 'active', refresh };
 }

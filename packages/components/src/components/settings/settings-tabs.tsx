@@ -3,6 +3,7 @@ import type { PlatformCapability } from '@lody/platform';
 import { useAppCapabilityCheck } from '../../lib/app-platform';
 import {
   Bot,
+  Building2,
   ChartNoAxesCombined,
   CreditCard,
   FolderOpen,
@@ -11,63 +12,61 @@ import {
   Keyboard,
   Monitor,
   Palette,
-  Settings,
+  SlidersHorizontal,
   UserRound,
 } from 'lucide-react';
 
+export type SettingsSectionId = 'account' | 'personal' | 'workspace' | 'other';
+
 export type SettingsTabId =
-  | 'general'
-  | 'appearance'
   | 'account'
-  | 'billing'
-  | 'stats'
-  | 'projects'
-  | 'devices'
-  | 'agent-config'
-  | 'github'
+  | 'preferences'
+  | 'appearance'
   | 'keyboard-shortcuts'
+  | 'workspace'
+  | 'people'
+  | 'machines'
+  | 'agents'
+  | 'projects'
+  | 'github'
+  | 'ai-usage'
+  | 'billing'
   | 'about';
+
+export type SettingsPath =
+  | '/$workspaceName/settings/account'
+  | '/$workspaceName/settings/preferences'
+  | '/$workspaceName/settings/appearance'
+  | '/$workspaceName/settings/keyboard-shortcuts'
+  | '/$workspaceName/settings/workspace'
+  | '/$workspaceName/settings/people'
+  | '/$workspaceName/settings/machines'
+  | '/$workspaceName/settings/agents'
+  | '/$workspaceName/settings/projects'
+  | '/$workspaceName/settings/github'
+  | '/$workspaceName/settings/ai-usage'
+  | '/$workspaceName/settings/billing'
+  | '/$workspaceName/settings/about';
 
 export type SettingsTabConfig = {
   id: SettingsTabId;
+  section: SettingsSectionId;
   labelKey: string;
   descriptionKey: string;
   icon: LucideIcon;
   /** Cloud capability the whole tab depends on; the tab hides when missing. */
   capability?: PlatformCapability;
-  path:
-    | '/$workspaceName/settings/general'
-    | '/$workspaceName/settings/appearance'
-    | '/$workspaceName/settings/account'
-    | '/$workspaceName/settings/billing'
-    | '/$workspaceName/settings/stats'
-    | '/$workspaceName/settings/projects'
-    | '/$workspaceName/settings/devices'
-    | '/$workspaceName/settings/agent-config'
-    | '/$workspaceName/settings/github'
-    | '/$workspaceName/settings/keyboard-shortcuts'
-    | '/$workspaceName/settings/about';
+  /** The workspace machine inventory has no useful distinction in a solo workspace. */
+  multiMemberOnly?: boolean;
+  path: SettingsPath;
 };
 
-export const SETTINGS_DEFAULT_TAB: SettingsTabId = 'general';
+export const SETTINGS_DEFAULT_TAB: SettingsTabId = 'account';
 
 export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   {
-    id: 'general',
-    labelKey: 'settings.tabs.general',
-    descriptionKey: 'settings.categories.general.description',
-    icon: Settings,
-    path: '/$workspaceName/settings/general',
-  },
-  {
-    id: 'appearance',
-    labelKey: 'settings.tabs.appearance',
-    descriptionKey: 'settings.categories.appearance.description',
-    icon: Palette,
-    path: '/$workspaceName/settings/appearance',
-  },
-  {
     id: 'account',
+    section: 'account',
     labelKey: 'settings.tabs.account',
     descriptionKey: 'settings.categories.account.description',
     icon: UserRound,
@@ -75,36 +74,66 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/account',
   },
   {
-    id: 'agent-config',
-    labelKey: 'settings.tabs.agentConfig',
-    descriptionKey: 'settings.categories.agentConfig.description',
-    icon: Bot,
-    path: '/$workspaceName/settings/agent-config',
+    id: 'preferences',
+    section: 'personal',
+    labelKey: 'settings.tabs.preferences',
+    descriptionKey: 'settings.categories.preferences.description',
+    icon: SlidersHorizontal,
+    path: '/$workspaceName/settings/preferences',
   },
   {
-    id: 'stats',
-    labelKey: 'settings.tabs.stats',
-    descriptionKey: 'settings.categories.stats.description',
-    icon: ChartNoAxesCombined,
-    capability: 'usageAnalytics',
-    path: '/$workspaceName/settings/stats',
+    id: 'appearance',
+    section: 'personal',
+    labelKey: 'settings.tabs.appearance',
+    descriptionKey: 'settings.categories.appearance.description',
+    icon: Palette,
+    path: '/$workspaceName/settings/appearance',
+  },
+  {
+    id: 'keyboard-shortcuts',
+    section: 'personal',
+    labelKey: 'settings.tabs.keyboardShortcuts',
+    descriptionKey: 'settings.categories.keyboardShortcuts.description',
+    icon: Keyboard,
+    path: '/$workspaceName/settings/keyboard-shortcuts',
+  },
+  {
+    id: 'workspace',
+    section: 'workspace',
+    labelKey: 'settings.tabs.workspaceGeneral',
+    descriptionKey: 'settings.categories.workspace.description',
+    icon: Building2,
+    capability: 'cloudAccount',
+    path: '/$workspaceName/settings/workspace',
+  },
+  {
+    id: 'machines',
+    section: 'workspace',
+    labelKey: 'settings.tabs.machines',
+    descriptionKey: 'settings.categories.machines.description',
+    icon: Monitor,
+    multiMemberOnly: true,
+    path: '/$workspaceName/settings/machines',
+  },
+  {
+    id: 'agents',
+    section: 'workspace',
+    labelKey: 'settings.tabs.agents',
+    descriptionKey: 'settings.categories.agents.description',
+    icon: Bot,
+    path: '/$workspaceName/settings/agents',
   },
   {
     id: 'projects',
+    section: 'workspace',
     labelKey: 'settings.tabs.projects',
     descriptionKey: 'settings.categories.projects.description',
     icon: FolderOpen,
     path: '/$workspaceName/settings/projects',
   },
   {
-    id: 'devices',
-    labelKey: 'settings.tabs.devices',
-    descriptionKey: 'settings.categories.devices.description',
-    icon: Monitor,
-    path: '/$workspaceName/settings/devices',
-  },
-  {
     id: 'github',
+    section: 'workspace',
     labelKey: 'settings.tabs.github',
     descriptionKey: 'settings.categories.github.description',
     icon: Github,
@@ -112,14 +141,17 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/github',
   },
   {
-    id: 'keyboard-shortcuts',
-    labelKey: 'settings.tabs.keyboardShortcuts',
-    descriptionKey: 'settings.categories.keyboardShortcuts.description',
-    icon: Keyboard,
-    path: '/$workspaceName/settings/keyboard-shortcuts',
+    id: 'ai-usage',
+    section: 'workspace',
+    labelKey: 'settings.tabs.aiUsage',
+    descriptionKey: 'settings.categories.aiUsage.description',
+    icon: ChartNoAxesCombined,
+    capability: 'usageAnalytics',
+    path: '/$workspaceName/settings/ai-usage',
   },
   {
     id: 'billing',
+    section: 'workspace',
     labelKey: 'settings.tabs.billing',
     descriptionKey: 'settings.categories.billing.description',
     icon: CreditCard,
@@ -128,6 +160,7 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   },
   {
     id: 'about',
+    section: 'other',
     labelKey: 'settings.tabs.about',
     descriptionKey: 'settings.categories.about.description',
     icon: Info,
@@ -135,51 +168,38 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   },
 ];
 
-/**
- * Settings tabs visible on the current platform: tabs whose `capability` is
- * missing (open-source local build) are dropped at the registry level so no
- * consumer renders an entry point for them.
- */
-export function useVisibleSettingsTabs(): SettingsTabConfig[] {
+export function useVisibleSettingsTabs(options?: {
+  includeMultiMemberOnly?: boolean;
+}): SettingsTabConfig[] {
   const hasCapability = useAppCapabilityCheck();
+  const includeMultiMemberOnly = options?.includeMultiMemberOnly ?? true;
   return SETTINGS_TAB_CONFIGS.filter(
-    (tab) => tab.capability === undefined || hasCapability(tab.capability)
+    (tab) =>
+      (tab.capability === undefined || hasCapability(tab.capability)) &&
+      (!tab.multiMemberOnly || includeMultiMemberOnly)
   );
 }
 
 export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
-  if (pathname.endsWith('/settings/general')) {
-    return 'general';
-  }
-  if (pathname.endsWith('/settings/appearance')) {
-    return 'appearance';
-  }
-  if (pathname.endsWith('/settings/account')) {
-    return 'account';
-  }
-  if (pathname.endsWith('/settings/billing')) {
-    return 'billing';
-  }
-  if (pathname.endsWith('/settings/stats')) {
-    return 'stats';
-  }
-  if (pathname.endsWith('/settings/projects')) {
-    return 'projects';
-  }
-  if (pathname.endsWith('/settings/devices')) {
-    return 'devices';
-  }
-  if (pathname.endsWith('/settings/agent-config')) {
-    return 'agent-config';
-  }
-  if (pathname.endsWith('/settings/github')) {
-    return 'github';
-  }
-  if (pathname.endsWith('/settings/keyboard-shortcuts')) {
-    return 'keyboard-shortcuts';
-  }
-  if (pathname.endsWith('/settings/about')) {
-    return 'about';
-  }
-  return null;
+  const suffixes: Array<[string, SettingsTabId]> = [
+    ['/settings/account', 'account'],
+    ['/settings/preferences', 'preferences'],
+    ['/settings/general', 'preferences'],
+    ['/settings/appearance', 'appearance'],
+    ['/settings/keyboard-shortcuts', 'keyboard-shortcuts'],
+    ['/settings/my-machines', 'machines'],
+    ['/settings/workspace', 'workspace'],
+    ['/settings/people', 'workspace'],
+    ['/settings/machines', 'machines'],
+    ['/settings/devices', 'machines'],
+    ['/settings/agents', 'agents'],
+    ['/settings/agent-config', 'agents'],
+    ['/settings/projects', 'projects'],
+    ['/settings/github', 'github'],
+    ['/settings/ai-usage', 'ai-usage'],
+    ['/settings/stats', 'ai-usage'],
+    ['/settings/billing', 'billing'],
+    ['/settings/about', 'about'],
+  ];
+  return suffixes.find(([suffix]) => pathname.endsWith(suffix))?.[1] ?? null;
 }

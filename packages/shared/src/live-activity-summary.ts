@@ -1,6 +1,5 @@
-import type { AgentConfigMeta, SessionLegacyMetaFields, SessionMeta, SessionStatus } from './schema';
+import type { AgentConfigMeta, SessionMeta, SessionStatus } from './schema';
 import { isSessionActiveWithHeartbeat } from './session-status-machine';
-import { isSessionGoalWorking } from './goal';
 import { resolveAgentBrandId, type AgentBrandId } from './agent-brand';
 import { getSessionLaunchConfigLegacyFields } from './machine-flock';
 
@@ -104,13 +103,11 @@ function resolveStatus(
   liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
 ): LiveActivityConversationStatus | null {
   const liveStatus = liveSessionStatuses?.get(session.id);
-  const legacy = session as SessionLegacyMetaFields;
-
   if (liveSessionStatuses) {
     if (liveStatus?.type === 'requestPermission') {
       return 'permission';
     }
-    if (liveStatus != null || isSessionGoalWorking(legacy.latestGoal)) {
+    if (liveStatus != null) {
       return 'running';
     }
   } else {
@@ -118,7 +115,7 @@ function resolveStatus(
     if (session.status?.type === 'requestPermission') {
       return isHeartbeatActive ? 'permission' : null;
     }
-    if (isHeartbeatActive || isSessionGoalWorking(legacy.latestGoal)) {
+    if (isHeartbeatActive) {
       return 'running';
     }
   }

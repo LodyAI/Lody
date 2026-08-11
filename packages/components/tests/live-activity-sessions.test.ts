@@ -133,6 +133,33 @@ describe('buildLiveActivityConversationItems', () => {
     ).toEqual({ permission: 2, question: 0, running: 1, unread: 1 });
   });
 
+  it('does not report a quiescent session as running only because its goal is active', () => {
+    const session = {
+      ...baseSession,
+      status: { type: 'idle' },
+      lastMessageAt: 100,
+      lastReadAt: 200,
+      latestGoal: {
+        type: 'goal',
+        threadId: 'thread-1',
+        objective: 'Keep the objective available',
+        status: 'active',
+      },
+    } as unknown as SessionMeta;
+
+    expect(buildItems([session])).toEqual([]);
+    expect(
+      buildLiveActivityConversationItems({
+        sessions: [session],
+        currentUserId: 'user-1',
+        defaultTitle: 'New Task',
+        statusLabels: labels,
+        formatUpdatedAt: (updatedAt) => String(updatedAt),
+        liveSessionStatuses: new Map(),
+      })
+    ).toEqual([]);
+  });
+
   it('builds an alert candidate for the latest permission request', () => {
     const sessions = [
       {

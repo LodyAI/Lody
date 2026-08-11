@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
@@ -85,7 +87,7 @@ export function MobilePlanModeToggle({
   );
   const planSelector = planModeSelectors[0];
   const planValue = planSelector
-    ? resolveOnOffConfigOptionEnabled(planSelector, configOptionValues?.[planSelector.configId])
+    ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   if (!planSelector) return null;
   /* "计划" — the chip's label sits to the right of the icon (desktop
@@ -101,7 +103,7 @@ export function MobilePlanModeToggle({
       onToggle={() =>
         onConfigOptionChange?.(
           planSelector.configId,
-          toggleOnOffConfigOptionValue(planSelector, configOptionValues?.[planSelector.configId])
+          togglePlanModeSelectorValue(planSelector, configOptionValues?.[planSelector.configId])
         )
       }
       withLabel

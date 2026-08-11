@@ -157,6 +157,7 @@ describe('createTaskAutomationWorkspace', () => {
       },
       isTransportConnected: () => true,
       onMetaRoomSynced: () => () => undefined,
+      onStreamsOnline: () => () => undefined,
     } as unknown as LoroDocumentManager;
 
     const started: string[] = [];
@@ -247,6 +248,7 @@ describe('createTaskAutomationWorkspace', () => {
       },
       isTransportConnected: () => true,
       onMetaRoomSynced: () => () => undefined,
+      onStreamsOnline: () => () => undefined,
     } as unknown as LoroDocumentManager;
 
     const handle = createTaskAutomationWorkspace({

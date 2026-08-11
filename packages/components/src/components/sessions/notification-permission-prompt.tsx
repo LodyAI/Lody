@@ -94,7 +94,7 @@ export function NotificationPermissionPrompt({
     setVisible(false);
     // Open the general settings (modal on desktop, route on mobile).
     if (workspaceSlug) {
-      openSettings('general');
+      openSettings('preferences');
     }
   }, [openSettings, workspaceSlug]);
 

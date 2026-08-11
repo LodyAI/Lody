@@ -40,9 +40,9 @@ describe('sharing review readiness and action', () => {
     ).toBe(false);
   });
 
-  it('routes machine privacy to devices and leaves observer-only notices informational', () => {
+  it('routes machine privacy to Machines and leaves observer-only notices informational', () => {
     expect(getSharingReviewActionTarget({ privateMachineCount: 1, privateProjectCount: 1 })).toBe(
-      'devices'
+      'machines'
     );
     expect(getSharingReviewActionTarget({ privateMachineCount: 0, privateProjectCount: 1 })).toBe(
       'projects'

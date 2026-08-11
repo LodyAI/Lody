@@ -43,7 +43,6 @@ import { isMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { QueuedMessageBehaviorControl } from '@/components/settings/queued-message-behavior-control';
-import { ReviewPolicySection } from '@/components/settings/review-policy-setting';
 import { useAppCapability } from '@/lib/app-platform';
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -398,8 +397,8 @@ export function MobileGeneralSettings() {
           isElectron
             ? 'settings.notifications.permissionDeniedStatusDesktop'
             : isNative
-              ? 'settings.notifications.permissionDeniedStatusNative'
-              : 'settings.notifications.permissionDeniedStatus'
+            ? 'settings.notifications.permissionDeniedStatusNative'
+            : 'settings.notifications.permissionDeniedStatus'
         );
       default:
         return t('settings.notifications.permissionDefault');
@@ -803,8 +802,6 @@ export function MobileGeneralSettings() {
           </MobileSettingsRowGroup>
         </MobileSettingsSection>
       )}
-
-      <ReviewPolicySection />
 
       <ClearCacheConfirmDialog
         open={clearCache.dialogOpen}

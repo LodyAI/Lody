@@ -176,4 +176,21 @@ describe('DeviceResourceMonitor session status presentation', () => {
       expect(tooltip?.textContent).toContain('Waiting for permission');
     });
   });
+
+  it('keeps the resource cards and omits the empty ACP session message', async () => {
+    await act(async () => {
+      root?.render(
+        <TooltipProvider delayDuration={0}>
+          <DeviceResourceMonitor
+            snapshot={{ ...snapshot, sessions: [] }}
+            state="active"
+            agentConfigs={agentConfigs}
+          />
+        </TooltipProvider>
+      );
+    });
+
+    expect(container?.textContent).toContain('CLI');
+    expect(container?.textContent).not.toContain('No resident ACP sessions');
+  });
 });

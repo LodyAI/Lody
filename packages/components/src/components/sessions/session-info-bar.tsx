@@ -31,6 +31,7 @@ export type SessionInfoBarProps = {
   onOpenTask?: (taskId: string) => void;
   /** Active/paused/terminal goal snapshot; the chip replaces the old sticky top banner. */
   goal?: SessionGoalMessage | null;
+  goalCommands?: readonly SessionGoalCommand[];
   goalPendingCommand?: SessionGoalCommand | null;
   onGoalCommand?: GoalChipCommandHandler;
   onGoalDismiss?: (goal: SessionGoalMessage) => void;
@@ -103,6 +104,7 @@ export type SessionInfoBarProps = {
 export function SessionInfoBar({
   status,
   goal,
+  goalCommands,
   goalPendingCommand,
   onGoalCommand,
   onGoalDismiss,
@@ -224,6 +226,7 @@ export function SessionInfoBar({
           <GoalChip
             key={key}
             goal={goal}
+            commands={goalCommands}
             pendingCommand={goalPendingCommand}
             onGoalCommand={onGoalCommand}
             onDismiss={onGoalDismiss}

@@ -1,9 +1,10 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { hashAnalyticsId, isConvexError, isConvexUnauthenticatedError } from '@lody/shared';
+import { hashAnalyticsId, isConvexUnauthenticatedError } from '@lody/shared';
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { jotaiStore } from '@/lib/utils';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import { ErrorBoundaryFallback } from '@/components/error-boundary-fallback';
 
 export type ErrorBoundaryFallbackProps = {
   error: Error;
@@ -67,6 +68,11 @@ export type ErrorBoundaryProps = {
   onError?: (error: Error, info: ErrorInfo) => void;
   fallback?: ReactNode;
   fallbackRender?: (props: ErrorBoundaryFallbackProps) => ReactNode;
+  /**
+   * Show the error text and technical details in the default fallback.
+   * Defaults to `true` on every build: a crash the user cannot read or copy is a
+   * crash we never hear about.
+   */
   showErrorDetails?: boolean;
   propagateAuthErrors?: boolean;
 };
@@ -74,7 +80,26 @@ export type ErrorBoundaryProps = {
 type ErrorBoundaryState = {
   error: Error | null;
   componentStack: string | null;
+  /** Signature of the error the last AUTOMATIC reset tried to recover from. */
+  autoResetSignature: string | null;
+  /** Consecutive automatic resets attempted for `autoResetSignature`. */
+  autoResetCount: number;
 };
+
+/**
+ * How many times a boundary may silently re-render a crashed subtree for the
+ * same error before it stops and leaves the crash screen up.
+ *
+ * `resetKeys` recovery is what makes navigating away from a crashed route work,
+ * but when the error reproduces on every render it turns into an invisible
+ * retry loop: the screen flickers, the user cannot read the error, and they get
+ * stuck. Past this budget, recovery must come from a button the user pressed.
+ */
+const MAX_AUTOMATIC_RESETS = 2;
+
+function errorSignature(error: Error): string {
+  return `${error.name}|${error.message}`;
+}
 
 function didResetKeysChange(
   prevKeys: ReadonlyArray<unknown> | undefined,
@@ -93,109 +118,19 @@ function didResetKeysChange(
   return false;
 }
 
-function DefaultFallback({
-  error,
-  resetErrorBoundary,
-  variant,
-  componentStack,
-  showErrorDetails,
-}: ErrorBoundaryFallbackProps & {
-  variant: ErrorBoundaryVariant;
-  componentStack: string | null;
-  showErrorDetails: boolean;
-}) {
-  const isDev = import.meta.env.DEV;
-  const containsRawConvexServerDetails =
-    isConvexError(error) || error.message.trimStart().startsWith('[CONVEX ');
-
-  const containerClassName =
-    variant === 'page'
-      ? 'flex min-h-[50vh] w-full flex-col items-center justify-center p-6 text-center'
-      : variant === 'section'
-        ? 'w-full rounded-lg border border-border/60 bg-background/80 p-4'
-        : 'inline-flex w-fit items-center gap-2 rounded-md border border-border/60 bg-background/80 px-3 py-2';
-
-  const titleClassName =
-    variant === 'page'
-      ? 'text-base font-semibold text-foreground'
-      : variant === 'inline'
-        ? 'text-xs font-semibold text-foreground'
-        : 'text-sm font-semibold text-foreground';
-
-  const descClassName =
-    variant === 'page'
-      ? 'mt-1 text-sm text-muted-foreground'
-      : variant === 'inline'
-        ? 'text-xs text-muted-foreground'
-        : 'mt-1 text-xs text-muted-foreground';
-
-  const buttonBase =
-    'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
-
-  const primaryButton = `${buttonBase} bg-primary px-3 py-2 text-primary-foreground hover:bg-primary/90`;
-  const secondaryButton = `${buttonBase} border border-input-border bg-background px-3 py-2 text-foreground hover:bg-hover hover:text-hover-foreground`;
-  const formattedErrorDetails = [
-    error.name ? `${error.name}: ${error.message}` : error.message,
-    componentStack?.trim(),
-    isDev ? error.stack?.trim() : null,
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join('\n\n');
-
-  return (
-    <div role="alert" className={containerClassName}>
-      <div className={titleClassName}>
-        {variant === 'inline' ? 'Error' : 'Something went wrong'}
-      </div>
-      {variant === 'inline' ? (
-        <div className={descClassName}>Retry this part.</div>
-      ) : (
-        <div className={descClassName}>
-          The app is still running. You can retry this section, or reload the page.
-        </div>
-      )}
-      {showErrorDetails && !containsRawConvexServerDetails && formattedErrorDetails ? (
-        <pre className="mt-3 w-full max-w-3xl overflow-auto rounded-md bg-muted/60 p-3 text-left text-xs text-foreground">
-          {formattedErrorDetails}
-        </pre>
-      ) : null}
-      <div
-        className={
-          variant === 'page'
-            ? 'mt-4 flex flex-wrap justify-center gap-2'
-            : variant === 'inline'
-              ? 'flex gap-2'
-              : 'mt-3 flex gap-2'
-        }
-      >
-        <button
-          type="button"
-          className={variant === 'inline' ? secondaryButton : primaryButton}
-          onClick={resetErrorBoundary}
-        >
-          Try again
-        </button>
-        {variant === 'inline' ? null : (
-          <button
-            type="button"
-            className={secondaryButton}
-            onClick={() => {
-              if (typeof window === 'undefined') return;
-              window.location.reload();
-            }}
-          >
-            Reload
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  override state: ErrorBoundaryState = { error: null, componentStack: null };
+  override state: ErrorBoundaryState = {
+    error: null,
+    componentStack: null,
+    autoResetSignature: null,
+    autoResetCount: 0,
+  };
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(
+    error: Error
+  ): Pick<ErrorBoundaryState, 'error' | 'componentStack'> {
+    // Deliberately leaves the automatic-reset bookkeeping alone: it is what
+    // tells us this error is the same one we already tried to recover from.
     return { error, componentStack: null };
   }
 
@@ -241,15 +176,49 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidUpdate(prevProps: Readonly<ErrorBoundaryProps>) {
-    if (!this.state.error) return;
-    if (!didResetKeysChange(prevProps.resetKeys, this.props.resetKeys)) return;
+    const keysChanged = didResetKeysChange(prevProps.resetKeys, this.props.resetKeys);
+    const { error, autoResetSignature, autoResetCount } = this.state;
 
-    this.reset();
+    if (!error) {
+      // A committed render without an error means the automatic recovery
+      // actually worked (a crash loop never gets here — the retry throws during
+      // render, so `error` is set again before this commit). Forget the budget
+      // so a later, unrelated crash still gets its own automatic recovery.
+      if (autoResetCount > 0) {
+        this.setState({ autoResetSignature: null, autoResetCount: 0 });
+      }
+      return;
+    }
+
+    if (!keysChanged) return;
+
+    const signature = errorSignature(error);
+    if (signature === autoResetSignature && autoResetCount >= MAX_AUTOMATIC_RESETS) {
+      // Same error keeps coming back. Stop re-rendering it behind the user's
+      // back and leave the crash screen up so they can read and report it. The
+      // fallback says so and keeps "Try again" available, so a user who ends up
+      // here after the subtree recovered is one click from continuing.
+      return;
+    }
+
+    this.props.onReset?.();
+    this.setState((previous) => ({
+      error: null,
+      componentStack: null,
+      autoResetSignature: signature,
+      autoResetCount: previous.autoResetSignature === signature ? previous.autoResetCount + 1 : 1,
+    }));
   }
 
+  /** Explicit user retry. Clears the loop budget — the user is in control now. */
   private reset = () => {
     this.props.onReset?.();
-    this.setState({ error: null, componentStack: null });
+    this.setState({
+      error: null,
+      componentStack: null,
+      autoResetSignature: null,
+      autoResetCount: 0,
+    });
   };
 
   override render() {
@@ -275,11 +244,18 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     return (
-      <DefaultFallback
+      <ErrorBoundaryFallback
         {...fallbackProps}
         variant={this.props.variant ?? 'section'}
         componentStack={this.state.componentStack}
-        showErrorDetails={this.props.showErrorDetails ?? import.meta.env.DEV}
+        boundaryName={this.props.name}
+        automaticRetriesStopped={
+          errorSignature(error) === this.state.autoResetSignature &&
+          this.state.autoResetCount >= MAX_AUTOMATIC_RESETS
+        }
+        // Details are shown in production too: without them a wedged user has
+        // nothing to report and we have nothing to debug.
+        showErrorDetails={this.props.showErrorDetails ?? true}
       />
     );
   }

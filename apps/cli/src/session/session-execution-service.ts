@@ -29,8 +29,6 @@ import {
   type ProjectRef,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
-  resolveLatestSessionGoalFromHistory,
-  isSessionGoalWorking,
   getSessionRoomId,
   getServerNow,
   SessionCreateRequestValidated,
@@ -38,8 +36,6 @@ import {
   type SessionId,
   type SessionInputBlock,
   type SessionTurnInputConfig,
-  type SessionGoalMessage,
-  type SessionLegacyMetaFields,
   type SessionMeta,
   SessionStatusFactory,
   SessionChatRequestValidated,
@@ -75,13 +71,8 @@ import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
   checkoutLocalProjectBranchAtRootPath,
   createLocalProjectBranchSelector,
-  getLocalProjectBranchUpstreamRefAtRootPath,
-  getLocalProjectCurrentBranchNameAtRootPath,
   getLocalProjectGitStateAtRootPath,
-  parseLocalProjectBranchRefAtRootPath,
   resolveLocalProjectBranchAtRootPath,
-  resolveLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectLegacyBaseBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/setting';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -95,7 +86,7 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
+import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -1081,6 +1072,12 @@ export class SessionExecutionService {
     return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
       const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
       if (!releaseConflict) {
+        // Nothing was submitted, so this guide is still ours to run. Only the
+        // dispatch pointer is written: the history flip needs the lease we just
+        // failed to take, and dispatch honors the pointer on its own.
+        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+          canWriteHistory: false,
+        });
         return {
           type: 'session/steer_response',
           sessionId: options.sessionId,
@@ -1117,15 +1114,30 @@ export class SessionExecutionService {
       disposition,
       ...(error ? { error } : {}),
     });
+    /**
+     * The agent never took this prompt, so the user turn is still ours to run.
+     * Only for rejections that provably happened before (or instead of) provider
+     * submission — after submission the provider may already have committed the
+     * steer, and re-sending would duplicate it.
+     */
+    const rejectUndelivered = async (
+      disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
+      error?: string
+    ): Promise<SessionSteerResponse> => {
+      await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+        canWriteHistory: true,
+      });
+      return reject(disposition, error);
+    };
     const runtime = this.turnRuntimeBySession.get(options.sessionId);
     if (!runtime || !runtime.session) {
-      return reject('no-active-turn');
+      return await rejectUndelivered('no-active-turn');
     }
     if (runtime.turnId !== options.expectedTurnId) {
-      return reject('stale-turn');
+      return await rejectUndelivered('stale-turn');
     }
     if (!runtime.promptInFlight) {
-      return reject('no-active-turn');
+      return await rejectUndelivered('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
       return {
@@ -1139,29 +1151,35 @@ export class SessionExecutionService {
     const { agentClient, acpSessionId } = runtime.session;
     const steerCapability = agentClient?.getAcknowledgedSteerCapability();
     if (!agentClient || !acpSessionId || !steerCapability) {
-      return reject('unsupported');
+      return await rejectUndelivered('unsupported');
     }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
-        return reject('unsupported', `Active turn configuration differs: ${mismatch}`);
+        return await rejectUndelivered(
+          'unsupported',
+          `Active turn configuration differs: ${mismatch}`
+        );
       }
     }
-    const rejectBeforeProviderSubmission = (): SessionSteerResponse | null => {
+    const rejectBeforeProviderSubmission = async (): Promise<SessionSteerResponse | null> => {
       if (
         this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
         runtime.turnId !== options.expectedTurnId
       ) {
-        return reject('stale-turn');
+        return await rejectUndelivered('stale-turn');
       }
-      // No provider request has been submitted yet, so the Web client can
-      // safely promote this guide to an ordinary follow-up turn.
+      // No provider request has been submitted yet, so this guide is still
+      // ours to run as an ordinary follow-up turn.
       if (!runtime.promptInFlight) {
-        return reject('no-active-turn');
+        return await rejectUndelivered('no-active-turn');
       }
       return null;
     };
 
+    // Everything up to `steerPrompt` returning is provably undelivered; after
+    // that only the agent's own inject-or-refuse verdict can say so.
+    let submittedToAgent = false;
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
@@ -1174,7 +1192,7 @@ export class SessionExecutionService {
         inputBlocks,
         issuePRMentions: options.inputConfig.issuePRMentions,
       });
-      const preConfigRejection = rejectBeforeProviderSubmission();
+      const preConfigRejection = await rejectBeforeProviderSubmission();
       if (preConfigRejection) {
         return preConfigRejection;
       }
@@ -1182,18 +1200,22 @@ export class SessionExecutionService {
         await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig);
       }
 
-      const preSubmitRejection = rejectBeforeProviderSubmission();
+      const preSubmitRejection = await rejectBeforeProviderSubmission();
       if (preSubmitRejection) {
         return preSubmitRejection;
       }
       const ownedPromptRun = runtime.activePromptRun;
       if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
-        return reject('busy', 'Prompt owner was transitioning between logical turns');
+        return await rejectUndelivered(
+          'busy',
+          'Prompt owner was transitioning between logical turns'
+        );
       }
 
       const previousTurnId = runtime.turnId;
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
+      submittedToAgent = true;
       const application = await steerRun.applied;
       try {
         if (
@@ -1271,8 +1293,105 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
-      return reject('error', formatErrorMessage(error));
+      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
+      if (!notDelivered) {
+        return reject('error', formatErrorMessage(error));
+      }
+      // `no-active-turn` for the agent's own refusal: it is the disposition
+      // steer-aware clients already treat as "re-send this turn normally", so
+      // an older client recovers the message too.
+      return await rejectUndelivered(
+        error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
+        formatErrorMessage(error)
+      );
     }
+  }
+
+  /**
+   * Re-route a steer the agent never accepted into ordinary dispatch, so it runs
+   * as the next message once the active turn ends — the same treatment a queued
+   * message gets. Without this it would sit in `pending_apply`, which dispatch
+   * skips, and never run at all.
+   *
+   * The `latestUserMsgId` pointer is the load-bearing half, not the entry status:
+   * `SessionDispatchWatcher.sessionNeedsActiveWatch` reads META only, so a turn
+   * visible solely in history is dropped the moment the session goes idle (the
+   * watcher unsubscribes) and is never reconsidered, including after a daemon
+   * restart. The pointer is also what survives a cancel. It is the same pointer a
+   * Web send writes, so this is the ordinary dispatch signal, not a second path.
+   */
+  private async requeueUndeliveredSteer(
+    sessionId: SessionId,
+    userTurnId: string,
+    { canWriteHistory }: { canWriteHistory: boolean }
+  ): Promise<void> {
+    try {
+      // Guards against a late duplicate steer request resurrecting a turn that
+      // already ran: it is running now, it finished here, or it finished before
+      // its history entry ever synced.
+      if (
+        this.getActiveUserTurnId(sessionId) === userTurnId ||
+        this.getTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId) !== undefined
+      ) {
+        return;
+      }
+      const meta = await this.getSessionMeta(sessionId);
+      if (meta?.lastHandledUserMsgId === userTurnId) {
+        return;
+      }
+      if (canWriteHistory) {
+        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+        if (!(await this.markSteerTurnPending(sessionDoc, userTurnId))) {
+          return;
+        }
+      }
+      await this.upsertSessionMeta(sessionId, {
+        latestUserMsgId: userTurnId,
+        lastMissingHistoryUserMsgId: undefined,
+      });
+      this.deps.logger.info(
+        `[${sessionId}] Undelivered steer ${userTurnId} requeued as a follow-up turn`
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        `[${sessionId}] Failed to requeue undelivered steer ${userTurnId}: ${formatErrorMessage(
+          error
+        )}`
+      );
+    }
+  }
+
+  /**
+   * Flip a guide's history entry from `pending_apply` (steer intent, which
+   * dispatch deliberately skips) to `pending` (dispatchable).
+   *
+   * Returns false when the entry has already started, finished, or been
+   * canceled, so a late duplicate steer request cannot resurrect it. A missing
+   * entry returns true: it has not synced here yet and the RPC offer carries the
+   * payload.
+   */
+  private async markSteerTurnPending(
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    let queueable = true;
+    await sessionDoc.updateHistory((history) =>
+      history.map((entry) => {
+        if (entry.id !== userTurnId || entry.role !== 'user') {
+          return entry;
+        }
+        queueable =
+          entry.status === 'pending_apply' || entry.status === 'pending' || entry.status === 'seen';
+        return entry.status === 'pending_apply'
+          ? {
+              ...entry,
+              status: 'pending' as const,
+              read: getLegacyReadForSessionHistoryStatus('pending'),
+            }
+          : entry;
+      })
+    );
+    return queueable;
   }
 
   async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {
@@ -1356,30 +1475,6 @@ export class SessionExecutionService {
       throw error;
     } finally {
       span.end({ outcome });
-    }
-  }
-
-  private async resolveLatestGoalForCompletionNotification(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument
-  ): Promise<SessionGoalMessage | null> {
-    let metaGoal: SessionGoalMessage | null = null;
-    try {
-      const meta = await sessionDoc.getMetaState();
-      metaGoal = (meta as SessionLegacyMetaFields | null | undefined)?.latestGoal ?? null;
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read latest goal meta before completion notification: ${formatErrorMessage(error)}`
-      );
-    }
-
-    try {
-      return resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory()) ?? metaGoal;
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read latest goal history before completion notification: ${formatErrorMessage(error)}`
-      );
-      return metaGoal;
     }
   }
 
@@ -1884,9 +1979,6 @@ export class SessionExecutionService {
     project: Extract<ProjectRef, { kind: 'local' }>;
     workdir: string;
     branch: string;
-    storedBaseBranch?: string;
-    restoring?: boolean;
-    restoreBranchName?: string;
     onBaseRefResolved?: (baseRef: string) => Promise<void>;
   }): Promise<{ executionBranch: string; baseRef: string }> {
     const { project, workdir, branch } = options;
@@ -1896,122 +1988,14 @@ export class SessionExecutionService {
       throw new Error(`Local project is not a git repository: ${project.localProjectId}`);
     }
 
-    const currentBranchName = await getLocalProjectCurrentBranchNameAtRootPath(workdir);
-    const restoreBranchName = options.restoreBranchName?.trim();
-    const resolveExistingExecutionBranch = async (
-      resolvedBranch:
-        | Awaited<ReturnType<typeof parseLocalProjectBranchRefAtRootPath>>
-        | Awaited<ReturnType<typeof resolveLocalProjectBranchAtRootPath>>
-    ): Promise<string | null> => {
-      if (resolvedBranch.kind === 'local') {
-        return currentBranchName === resolvedBranch.branchName ? currentBranchName : null;
-      }
-      if (
-        restoreBranchName &&
-        (await getLocalProjectBranchUpstreamRefAtRootPath(workdir, restoreBranchName)) ===
-          resolvedBranch.refName
-      ) {
-        if (currentBranchName === restoreBranchName) return restoreBranchName;
-        return (
-          await checkoutLocalProjectBranchAtRootPath(
-            workdir,
-            createLocalProjectBranchSelector({ kind: 'local', branchName: restoreBranchName })
-          )
-        ).currentBranch;
-      }
-      if (options.restoring && restoreBranchName) {
-        throw new Error(
-          `Cannot restore local project session branch ${restoreBranchName}: ` +
-            `the branch is missing or no longer tracks ${resolvedBranch.refName}`
-        );
-      }
-      if (
-        options.restoring &&
-        !restoreBranchName &&
-        currentBranchName &&
-        (await getLocalProjectBranchUpstreamRefAtRootPath(workdir, currentBranchName)) ===
-          resolvedBranch.refName
-      ) {
-        return currentBranchName;
-      }
-      return null;
-    };
-    let persistedBaseRef: string | undefined;
-    const persistBaseRef = async (baseRef: string): Promise<void> => {
-      if (persistedBaseRef === baseRef) return;
-      await options.onBaseRefResolved?.(baseRef);
-      persistedBaseRef = baseRef;
-    };
-
-    const storedBaseBranch = options.storedBaseBranch?.trim();
-    if (storedBaseBranch && storedBaseBranch !== branch) {
-      const parsedBaseRef = await parseLocalProjectBranchRefAtRootPath(workdir, storedBaseBranch);
-      await persistBaseRef(parsedBaseRef.refName);
-      if (project.useWorktree === true) {
-        return {
-          executionBranch: parsedBaseRef.refName,
-          baseRef: parsedBaseRef.refName,
-        };
-      }
-      const existingExecutionBranch = await resolveExistingExecutionBranch(parsedBaseRef);
-      if (existingExecutionBranch) {
-        return { executionBranch: existingExecutionBranch, baseRef: parsedBaseRef.refName };
-      }
-    }
-
-    if (
-      storedBaseBranch === branch &&
-      project.useWorktree !== true &&
-      !branch.startsWith('refs/')
-    ) {
-      const trackingBranchNames = [restoreBranchName, currentBranchName].filter(
-        (candidate, index, candidates): candidate is string =>
-          Boolean(candidate) && candidates.indexOf(candidate) === index
-      );
-      for (const trackingBranchName of trackingBranchNames) {
-        const upstreamRef = await getLocalProjectBranchUpstreamRefAtRootPath(
-          workdir,
-          trackingBranchName
-        );
-        if (!upstreamRef) continue;
-        const parsedBaseRef = await parseLocalProjectBranchRefAtRootPath(workdir, upstreamRef);
-        await persistBaseRef(parsedBaseRef.refName);
-        const existingExecutionBranch = await resolveExistingExecutionBranch(parsedBaseRef);
-        if (existingExecutionBranch) {
-          return { executionBranch: existingExecutionBranch, baseRef: parsedBaseRef.refName };
-        }
-      }
-    }
-
-    let resolvedBranch;
-    try {
-      resolvedBranch =
-        storedBaseBranch && storedBaseBranch !== branch
-          ? await resolveLocalProjectBranchRefAtRootPath(workdir, storedBaseBranch)
-          : (storedBaseBranch === branch || options.restoring) && project.useWorktree !== true
-            ? await resolveLocalProjectLegacyBaseBranchAtRootPath(workdir, branch)
-            : await resolveLocalProjectBranchAtRootPath(workdir, branch);
-    } catch (error) {
-      if (
-        project.useWorktree === true &&
-        options.restoring &&
-        storedBaseBranch === branch &&
-        restoreBranchName &&
-        formatErrorMessage(error).includes('Local project branch not found:')
-      ) {
-        // Legacy worktree metadata has no namespace information. If its base
-        // disappeared, let WorktreeManager restore the recorded session branch;
-        // it checks that branch before it ever needs to resolve this raw base.
-        // Ambiguous selectors still fail closed above.
-        return { executionBranch: branch, baseRef: branch };
-      }
-      throw error;
-    }
+    const resolvedBranch = await resolveLocalProjectBranchAtRootPath(workdir, branch, {
+      preferLocalOnCollision: true,
+    });
 
     // Persist the namespace decision before checkout can create a same-named
     // local tracking branch. A process exit after checkout must not make the
-    // next restore reinterpret the selector against a different ref set.
-    await persistBaseRef(resolvedBranch.refName);
+    // durable metadata reinterpret the selector against a different ref set.
+    await options.onBaseRefResolved?.(resolvedBranch.refName);
 
     if (project.useWorktree === true) {
       return {
@@ -2019,9 +2003,8 @@ export class SessionExecutionService {
         baseRef: resolvedBranch.refName,
       };
     }
-    const existingExecutionBranch = await resolveExistingExecutionBranch(resolvedBranch);
-    if (existingExecutionBranch) {
-      return { executionBranch: existingExecutionBranch, baseRef: resolvedBranch.refName };
+    if (resolvedBranch.kind === 'local' && gitState.currentBranch === resolvedBranch.branchName) {
+      return { executionBranch: resolvedBranch.branchName, baseRef: resolvedBranch.refName };
     }
 
     return {
@@ -2429,19 +2412,6 @@ export class SessionExecutionService {
     if (isTurnCancelled() || ctx.abortSignal?.aborted) {
       this.deps.logger.debug(
         `[${sessionId}] Turn ${turnId} was cancelled before completion notification; skipping session completion notification`
-      );
-      return;
-    }
-
-    const latestGoal = await this.runTurnFinalizationStage(
-      sessionId,
-      turnId,
-      'resolveLatestGoalForCompletionNotification',
-      async () => await this.resolveLatestGoalForCompletionNotification(sessionId, sessionDoc)
-    );
-    if (isSessionGoalWorking(latestGoal)) {
-      this.deps.logger.debug(
-        `[${sessionId}] Skipping session completion notification because a thread goal is still active`
       );
       return;
     }
@@ -2917,9 +2887,17 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     userTurnId: string
   ): Promise<void> {
+    const existingMeta = await this.getSessionMeta(sessionId);
     await this.setUserTurnStatus(sessionDoc, userTurnId, 'processing');
     await this.upsertSessionMeta(sessionId, {
-      latestUserMsgId: userTurnId,
+      // Taking ownership must not demote a pointer that already names a LATER
+      // turn (a send that landed while this one was starting, or a second
+      // refused steer). `sessionNeedsActiveWatch` reads meta only, so demoting
+      // it here means this turn's own completion writes
+      // `latestUserMsgId === lastHandledUserMsgId` and every turn queued behind
+      // it becomes invisible to the watcher — including after a restart. The
+      // terminal writes preserve the pointer for exactly the same reason.
+      latestUserMsgId: this.resolveLatestUserMsgIdForTerminalTurn(existingMeta, userTurnId),
       processingUserMsgId: userTurnId,
       lastMissingHistoryUserMsgId: undefined,
     });
@@ -3037,6 +3015,13 @@ export class SessionExecutionService {
     await this.clearDispatchProcessing(sessionId);
   }
 
+  /**
+   * The dispatch pointer for a turn this machine owns: keep a pointer that names
+   * a DIFFERENT turn (one that arrived while this one held the session and is
+   * still outstanding), otherwise name this turn. Applies both when a turn takes
+   * ownership and when it releases it — collapsing the pointer in either place
+   * hides the turns queued behind it from `sessionNeedsActiveWatch`.
+   */
   private resolveLatestUserMsgIdForTerminalTurn(
     meta: SessionMeta | undefined,
     terminalUserTurnId: string
@@ -3316,28 +3301,11 @@ export class SessionExecutionService {
         self.deps.logger.debug(
           `[${sessionId}] Resuming status published; preparing session restore (resumeSource=${resumeSource} resumeSessionId=${resumeSessionId ?? 'none'})`
         );
-        let restoreBranch = project?.branch?.trim() || undefined;
-        if (project?.kind === 'local' && restoreWorkdir && restoreBranch) {
-          const localProject = project;
-          const requestedRestoreBranch = restoreBranch;
-          const preparedBranch = yield* self.tryPromise(() =>
-            self.prepareLocalProjectBranch({
-              project: localProject,
-              workdir: restoreWorkdir,
-              branch: requestedRestoreBranch,
-              storedBaseBranch: meta?.baseBranch,
-              restoring: true,
-              restoreBranchName: meta?.branchName,
-              onBaseRefResolved: async (baseRef) => {
-                if (meta?.baseBranch !== baseRef) {
-                  await self.upsertSessionMeta(sessionId, { baseBranch: baseRef });
-                  await self.deps.workspaceDocument.persistPendingChanges('session-local-base-ref');
-                }
-              },
-            })
-          );
-          restoreBranch = preparedBranch.executionBranch;
-        }
+        // Resuming an ACP process must not resolve or switch branches in a
+        // local project. That is true both for the registered project directory
+        // and for an existing session worktree: the user's current branch is
+        // part of the workspace state being resumed.
+        const restoreBranch = project?.branch?.trim() || undefined;
         const restoreConfig: SessionConfig = {
           sessionId,
           workspaceId: message.workspaceId,

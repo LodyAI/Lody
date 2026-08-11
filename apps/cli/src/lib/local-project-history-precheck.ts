@@ -27,8 +27,7 @@ export type LocalProjectSetupRequest = Extract<
 >;
 
 export type RemoteLocalProjectControlRequest =
-  | LocalProjectHistoryRequest
-  | LocalProjectSetupRequest;
+  LocalProjectHistoryRequest | LocalProjectSetupRequest;
 
 export type LocalProjectHistoryPrecheckOk = {
   ok: true;
@@ -43,8 +42,7 @@ export type LocalProjectHistoryPrecheckError = {
 };
 
 export type LocalProjectHistoryPrecheckResult =
-  | LocalProjectHistoryPrecheckOk
-  | LocalProjectHistoryPrecheckError;
+  LocalProjectHistoryPrecheckOk | LocalProjectHistoryPrecheckError;
 
 const HISTORY_REQUEST_TYPES: ReadonlySet<LocalProjectHistoryRequestType> = new Set([
   'local-project/sync-history',

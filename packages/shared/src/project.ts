@@ -168,6 +168,25 @@ export function resolveProjectGitHubRepo(project: unknown): string | undefined {
 }
 
 /**
+ * Whether a local-project Session runs in the project's original shared
+ * directory rather than a Session-owned worktree.
+ *
+ * `SessionMeta.isWorktree` is accepted separately for legacy/restored local
+ * worktree Sessions whose persisted `ProjectRef` predates `useWorktree`.
+ */
+export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unknown): boolean {
+  if (!project || typeof project !== 'object') {
+    return false;
+  }
+  const typedProject = project as { kind?: unknown; useWorktree?: unknown };
+  return (
+    typedProject.kind === 'local' &&
+    typedProject.useWorktree !== true &&
+    sessionIsWorktree !== true
+  );
+}
+
+/**
  * Structural, brand-agnostic view of a `ProjectRef` so this helper accepts both
  * the branded `ProjectRef` (web) and the Zod-inferred preparation spec (CLI),
  * whose `localProjectId` is a plain string.

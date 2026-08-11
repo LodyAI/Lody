@@ -9,8 +9,34 @@ export type DesktopMachineSelection = {
 };
 
 /**
+ * A direct settings shortcut must be able to open an owned private machine or a
+ * shared machine hidden by the current list filter. Unshared machines owned by
+ * somebody else remain outside the selectable workspace pool.
+ */
+export function buildWorkspaceMachineSelectionPool(args: {
+  filteredItems: readonly MachineTabItem[];
+  allItems: readonly MachineTabItem[];
+  selectedMachineId: MachineId | null;
+}): readonly MachineTabItem[] {
+  const { filteredItems, allItems, selectedMachineId } = args;
+  const selectedItem = selectedMachineId
+    ? allItems.find(
+        (item) =>
+          item.machine.id === selectedMachineId && (item.sharedWithTeam || item.isOwn)
+      )
+    : undefined;
+  if (
+    !selectedItem ||
+    filteredItems.some((item) => item.machine.id === selectedItem.machine.id)
+  ) {
+    return filteredItems;
+  }
+  return [selectedItem, ...filteredItems];
+}
+
+/**
  * Desktop settings invariant: the selected detail must stay visible in the pool
- * the machine selector renders (Devices: filtered tabItems; Agents: allItems).
+ * the machine selector renders (Machines: filtered tabItems; Agents: allItems).
  * When the current selection is filtered out — synchronously (filter toggles)
  * or asynchronously (an Online-filtered machine goes offline) — fall back to
  * the local machine, then the first own machine, then the first visible one;

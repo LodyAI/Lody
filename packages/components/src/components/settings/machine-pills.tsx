@@ -9,6 +9,8 @@ export type MachinePillItem = {
   online?: boolean;
   /** Overrides the status dot (e.g. the GitHub glyph). */
   icon?: ReactNode;
+  /** Workspace Agents can include private machines without sharing them. */
+  private?: boolean;
 };
 
 /**
@@ -99,6 +101,11 @@ export function MachinePills({
                 />
               ) : null}
               <span className="whitespace-nowrap">{pill.label}</span>
+              {pill.private ? (
+                <span className="text-[10px] font-normal text-muted-foreground/70">
+                  {t('workspace.machines.private', 'Private')}
+                </span>
+              ) : null}
             </button>
           );
         })}

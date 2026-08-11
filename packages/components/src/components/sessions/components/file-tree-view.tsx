@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
-import { TreeDataItem, TreeView } from '@/components/tree-view';
+import { type TreeDataItem } from '@/components/tree-view';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
@@ -20,7 +20,6 @@ import { cn } from '@/lib/utils';
 import {
   flattenVisibleFileTreeRows,
   pruneExpandedFileTreeIds,
-  shouldVirtualizeFileTreeData,
   shouldVirtualizeVisibleFileTreeRows,
   type VirtualFileTreeRow as VirtualFileTreeRowModel,
 } from '@/lib/file-tree-virtualization';
@@ -77,7 +76,6 @@ type FileTreeRenderBranch =
   | 'unavailable'
   | 'provider-unavailable'
   | 'empty'
-  | 'virtual-tree'
   | 'tree';
 
 // Full-height wrapper so the skeleton fills the panel and clips overflow instead
@@ -161,36 +159,60 @@ function VirtualFileTree({
   readonly data: readonly TreeDataItem[];
   readonly viewportRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | undefined>();
 
   useEffect(() => {
+    // `pruneExpandedFileTreeIds` returns the same reference when nothing was
+    // pruned, so a churning `data` reference does not schedule a real update.
     setExpandedIds((current) => pruneExpandedFileTreeIds(current, data));
   }, [data]);
 
   const rows = useMemo(() => flattenVisibleFileTreeRows(data, expandedIds), [data, expandedIds]);
   const getVirtualItemKey = useCallback((index: number) => rows[index]?.item.id ?? index, [rows]);
+  const shouldVirtualizeRows = shouldVirtualizeVisibleFileTreeRows(rows.length);
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rows.length,
     getScrollElement: () => viewportRef.current,
     estimateSize: () => VIRTUAL_FILE_TREE_ROW_HEIGHT_PX,
     getItemKey: getVirtualItemKey,
     overscan: VIRTUAL_FILE_TREE_OVERSCAN,
+    enabled: shouldVirtualizeRows,
     useAnimationFrameWithResizeObserver: true,
   });
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const shouldVirtualizeRows = shouldVirtualizeVisibleFileTreeRows(rows.length);
-  const renderMode =
-    shouldVirtualizeRows && virtualItems.length > 0 ? 'virtualized' : 'static-visible';
 
+  // The virtualizer reads `getScrollElement()` from a layout effect, and the
+  // Radix ScrollArea viewport it points at is an ANCESTOR host node: React
+  // attaches that ref only after this child's layout effects have already run,
+  // so the first pass always sees `null` and produces an empty range. The
+  // viewport can also legitimately measure 0 while the panel is still being
+  // laid out. Re-measure once the scrollport is attached and on every resize.
+  //
+  // This must never fall back to rendering every row: doing so mounted the
+  // entire expanded tree at exactly the moment virtualization was needed.
+  useEffect(() => {
+    if (!shouldVirtualizeRows) return undefined;
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    rowVirtualizer.measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => rowVirtualizer.measure());
+    observer.observe(viewport);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rowVirtualizer is stable; re-run when the gate flips.
+  }, [shouldVirtualizeRows, viewportRef]);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const renderMode = shouldVirtualizeRows ? 'virtualized' : 'static-visible';
+
+  // Log transitions only. This used to re-log on every range change, which put
+  // an allocation into the debug ring buffer on each scroll frame.
   useEffect(() => {
     logCodeCollabDebug('file tree virtual rows state', {
       visibleRowCount: rows.length,
-      shouldVirtualizeRows,
-      virtualItemCount: virtualItems.length,
       renderMode,
     });
-  }, [renderMode, rows.length, shouldVirtualizeRows, virtualItems.length]);
+  }, [renderMode, rows.length]);
 
   const toggleDirectory = useCallback((itemId: string) => {
     setExpandedIds((current) => {
@@ -204,7 +226,7 @@ function VirtualFileTree({
     });
   }, []);
 
-  if (!shouldVirtualizeRows || virtualItems.length === 0) {
+  if (!shouldVirtualizeRows) {
     return (
       <div role="tree" className="min-w-0">
         {rows.map((row) => (
@@ -220,6 +242,9 @@ function VirtualFileTree({
     );
   }
 
+  // Keep the total-size spacer even while the range is empty: it gives the
+  // scrollport the scrollable height that lets a measure pass resolve a real
+  // range, instead of collapsing to zero height and never recovering.
   return (
     <div
       role="tree"
@@ -245,7 +270,12 @@ function VirtualFileTree({
   );
 }
 
-function VirtualFileTreeRow({
+// Memoized: TanStack Virtual re-renders the list on every scroll frame, so
+// without this each frame re-ran every mounted row. `flattenVisibleFileTreeRows`
+// allocates fresh row objects per flatten, but a flatten only happens when the
+// tree data or the expanded set actually changes — scrolling alone reuses the
+// same row objects, so a plain reference comparison is enough to skip the work.
+const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   row,
   selected,
   virtualStart,
@@ -292,6 +322,8 @@ function VirtualFileTreeRow({
       disabled={disabled}
       className={cn(
         'group flex w-full items-center pr-2 text-left text-sm outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
+        // `w-full` resolves against the positioned ancestor once absolute, so
+        // the hover/selection background still spans the full row.
         virtualStart !== undefined && 'absolute left-0 top-0',
         selected &&
           'bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground',
@@ -337,7 +369,7 @@ function VirtualFileTreeRow({
       </span>
     </button>
   );
-}
+});
 
 function ControlledFileTreeView({
   handleOpenFile,
@@ -370,7 +402,6 @@ function ControlledFileTreeView({
       : providerFileTree.state;
     return fileTreeToTreeData(tree, handleOpenFile, handleLazyDirectoryOpen);
   }, [changedFilePathSet, providerFileTree.state, handleOpenFile, handleLazyDirectoryOpen]);
-  const shouldVirtualizeTree = shouldVirtualizeFileTreeData(fileTreeData);
   const message = providerFileTree.message ?? fileProviderMessage;
 
   // Collapse the connecting/ready phases into a single "loading" surface: the
@@ -386,9 +417,7 @@ function ControlledFileTreeView({
           ? 'unavailable'
           : providerFileTree.state.length === 0
             ? 'empty'
-            : shouldVirtualizeTree
-              ? 'virtual-tree'
-              : 'tree';
+            : 'tree';
 
   useEffect(() => {
     logCodeCollabDebug('file tree (controlled) render branch', {
@@ -435,16 +464,7 @@ function ControlledFileTreeView({
   return (
     <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
       <div className="p-1">
-        {renderBranch === 'virtual-tree' ? (
-          <VirtualFileTree data={fileTreeData} viewportRef={scrollViewportRef} />
-        ) : (
-          <TreeView
-            data={fileTreeData}
-            defaultNodeIcon={DefaultFolderIcon}
-            defaultLeafIcon={DefaultFileIcon}
-            className="p-0"
-          />
-        )}
+        <VirtualFileTree data={fileTreeData} viewportRef={scrollViewportRef} />
       </div>
     </ScrollArea>
   );
@@ -619,7 +639,6 @@ const AutoFileTreeView = ({
     () => fileTreeToTreeData(activeFileTree, handleOpenFile, handleLazyDirectoryOpen),
     [activeFileTree, handleLazyDirectoryOpen, handleOpenFile]
   );
-  const shouldVirtualizeTree = shouldVirtualizeFileTreeData(fileTreeData);
   const localStatus = localProjectFileData.status;
   const localError = localProjectFileData.error;
   const localHasEntry = Boolean(localProjectFileData.entry);
@@ -639,9 +658,7 @@ const AutoFileTreeView = ({
         ? 'local-error'
         : activeFileTree.length === 0
           ? 'empty'
-          : shouldVirtualizeTree
-            ? 'virtual-tree'
-            : 'tree'
+          : 'tree'
     : shouldUseProviderFileList
       ? !providerFileTree.ready
         ? 'provider-loading'
@@ -649,9 +666,7 @@ const AutoFileTreeView = ({
           ? 'provider-unavailable'
           : activeFileTree.length === 0
             ? 'empty'
-            : shouldVirtualizeTree
-              ? 'virtual-tree'
-              : 'tree'
+            : 'tree'
       : effectiveFileProviderPending
         ? 'provider-pending'
         : 'unavailable';
@@ -763,16 +778,7 @@ const AutoFileTreeView = ({
   return (
     <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
       <div className="p-1">
-        {fileTreeRenderBranch === 'virtual-tree' ? (
-          <VirtualFileTree data={fileTreeData} viewportRef={scrollViewportRef} />
-        ) : (
-          <TreeView
-            data={fileTreeData}
-            defaultNodeIcon={DefaultFolderIcon}
-            defaultLeafIcon={DefaultFileIcon}
-            className="p-0"
-          />
-        )}
+        <VirtualFileTree data={fileTreeData} viewportRef={scrollViewportRef} />
 
         {shouldUseLocalFileList && localListTruncated ? (
           <div className="pt-2 text-xs text-muted-foreground">{localTruncatedLabel}</div>

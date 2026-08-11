@@ -44,5 +44,20 @@ File attachments use `file` blocks; the product contract is in
   pinch scale at `1` (no shrink-below-fit rubber band; max stays 6×). Do not replace
   this with an outer `overlayRender`/React state clamp; that fights PhotoView's touch
   state.
+- One viewer, two presentations (`zoomable-image-viewer.css`): touch keeps the
+  full-bleed overlay; desktop (`useIsMobile() === false`) gets a lightbox — the
+  photo inset by a `transform: scale()`, a translucent + blurred mask
+  (`maskOpacity`), a gradient top bar padded clear of the macOS traffic lights /
+  Windows caption buttons, and no `1 / 1` counter for a single image. Never inset
+  the photo by capping `width`/`height` (PhotoView centers the box IT sized, so a
+  capped box lands off center) or by padding (it erases an image smaller than the
+  inset).
+- Right-click inside the viewer opens a NATIVE Copy / Save menu, Electron only
+  (`../../lib/image-preview-export.ts` + `apps/electron/.../image-export-service.ts`).
+  The image is a `blob:` URL, so main cannot download it: main pops the menu and
+  the renderer sends bytes for the chosen action — PNG re-encoded through a canvas
+  for the clipboard, original encoding for the save. Callers pass `fileName` on
+  each `ZoomableImageViewerItem` for the save-dialog default. With no preload
+  bridge the handler must not `preventDefault()`: web keeps the browser's menu.
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.

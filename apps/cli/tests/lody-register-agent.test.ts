@@ -143,6 +143,7 @@ describe('Lody.registerAgent', () => {
     const documentManager = {
       hasCompletedInitialMetaSync: vi.fn(() => false),
       onMetaRoomSynced: vi.fn(() => () => {}),
+      onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => await waitForInitialMetaSync),
       syncMachineFlockDoc,
       hasAgentConfig,
@@ -195,6 +196,7 @@ describe('Lody.registerAgent', () => {
     const documentManager = {
       hasCompletedInitialMetaSync: vi.fn(() => false),
       onMetaRoomSynced: vi.fn(() => () => {}),
+      onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => false),
       syncMachineFlockDoc: vi.fn(async () => true),
       hasAgentConfig: vi.fn(async () => false),

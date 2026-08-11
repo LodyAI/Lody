@@ -182,3 +182,89 @@ describe('buildAssistantTurnRenderLayout', () => {
     expect(layout.firstWorkBlockIndex).toBe(0);
   });
 });
+
+describe('buildAssistantTurnRenderLayout plan segments', () => {
+  // Plan mode is a permission MODE, so the same ACP turn proposes the plan and
+  // then implements it. One foldable region would bury the whole implementation
+  // in the plan's "Worked for …" row.
+  const planTurnItems: MessageContent[] = [
+    tool('read-1', 'read', { locations: [{ path: 'src/a.ts' }] }),
+    tool('grep-1', 'search'),
+    { type: 'text', text: '# Plan\n1. Do the thing' },
+    tool('switch-1', 'switch_mode', { title: 'Exited Plan Mode' }),
+    { type: 'thought', text: 'Start with the parser.' },
+    tool('edit-1', 'edit', { locations: [{ path: 'src/a.ts' }] }),
+    { type: 'text', text: 'Done, changed 1 file.' },
+  ];
+
+  it('cuts a segment after the plan-exit card so approved work folds on its own', () => {
+    const layout = buildAssistantTurnRenderLayout('assistant-1', planTurnItems, true);
+
+    // [pre-plan activity] [plan text] [Exited Plan Mode] | [execution activity] [answer]
+    expect(layout.blocks.map((block) => block.kind)).toEqual([
+      'activity_group',
+      'content',
+      'content',
+      'activity_group',
+      'content',
+    ]);
+    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([
+      [0, 3],
+      [3, 5],
+    ]);
+
+    const [planSegment, executionSegment] = layout.segments;
+    if (!planSegment || !executionSegment) throw new Error('Expected two segments');
+
+    // Plan segment: the pre-plan exploration folds, the plan and its card stay.
+    expect(layout.blocks.map((block) => planSegment.workBlockKeys.has(block.key))).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // Execution segment: its own work folds, its own answer stays visible.
+    expect(layout.blocks.map((block) => executionSegment.workBlockKeys.has(block.key))).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it('keeps one segment for an ordinary turn', () => {
+    const layout = buildAssistantTurnRenderLayout(
+      'assistant-1',
+      [tool('read-1', 'read'), { type: 'text', text: 'Done.' }],
+      true
+    );
+
+    expect(layout.segments).toHaveLength(1);
+    expect(layout.segments[0]?.blockRange).toEqual([0, 2]);
+  });
+
+  it('does not open an empty trailing segment when the turn ends on the plan card', () => {
+    const layout = buildAssistantTurnRenderLayout(
+      'assistant-1',
+      [
+        { type: 'text', text: '# Plan' },
+        tool('switch-1', 'switch_mode', { title: 'Exited Plan Mode' }),
+      ],
+      true
+    );
+
+    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([[0, 2]]);
+  });
+
+  it('keeps the segment shape while the turn is still streaming, folding nothing', () => {
+    const layout = buildAssistantTurnRenderLayout('assistant-1', planTurnItems, false);
+
+    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([
+      [0, 3],
+      [3, 5],
+    ]);
+    expect(layout.workBlockKeys.size).toBe(0);
+  });
+});

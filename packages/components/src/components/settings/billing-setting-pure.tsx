@@ -7,6 +7,7 @@ import { Progress } from '@/ui/progress';
 import { Skeleton } from '@/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { PricingPageLink } from '../shared/pricing-page-link';
+import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { settingContainerClass } from '.';
 
@@ -512,7 +513,10 @@ export function BillingSettingsView({
               ))}
             </ul>
 
-            <PricingPageLink />
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <PricingPageLink />
+              <FounderCallLink />
+            </div>
 
             {canManage ? (
               <div className="border-t border-border/60 pt-4">

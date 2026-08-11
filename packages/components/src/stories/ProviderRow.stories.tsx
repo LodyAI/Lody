@@ -152,6 +152,7 @@ export const ClaudeNoLimits: Story = {
   args: {
     config: makeConfig({ name: 'Claude Code', cliType: 'builtin', agentType: 'claude' }),
     machine: makeMachine(),
+    showActions: true,
   },
 };
 

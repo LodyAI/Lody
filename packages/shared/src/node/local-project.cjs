@@ -168,6 +168,24 @@ function parseBranchSelector(selector) {
   return null;
 }
 
+function selectLocalProjectBranchSelector(branches, branchName) {
+  const normalizedBranchName = branchName.trim();
+  if (!normalizedBranchName) return null;
+  if (branches.includes(normalizedBranchName)) return normalizedBranchName;
+
+  const localSelector = createLocalProjectBranchSelector({
+    kind: 'local',
+    branchName: normalizedBranchName,
+  });
+  if (branches.includes(localSelector)) return localSelector;
+
+  const remoteMatches = branches.filter((branch) => {
+    const parsed = parseBranchSelector(branch);
+    return parsed?.kind === 'remote' && parsed.branchName === normalizedBranchName;
+  });
+  return remoteMatches.length === 1 ? remoteMatches[0] : null;
+}
+
 function findQualifiedRemoteName(remotes, branchName) {
   return (
     [...remotes]
@@ -256,14 +274,14 @@ async function getLocalProjectCurrentBranchNameAtRootPath(rootPath) {
   return branchName || null;
 }
 
-async function resolveLocalProjectLegacyBaseBranchAtRootPath(rootPath, branchName) {
+async function resolveLocalProjectLegacyBaseBranchAtRootPath(rootPath, branchName, options = {}) {
   const normalizedRootPath = ensureLocalProjectRootPath(rootPath);
   const normalizedBranchName = branchName.trim();
   if (!normalizedBranchName) {
     throw new Error('Branch name is required');
   }
 
-  if (!parseBranchSelector(normalizedBranchName)) {
+  if (options.useWorktree !== true && !parseBranchSelector(normalizedBranchName)) {
     await assertGitRepository(normalizedRootPath);
     const localRef = `refs/heads/${normalizedBranchName}`;
     if (await resolveCommitAtRef(normalizedRootPath, localRef)) {
@@ -279,10 +297,12 @@ async function resolveLocalProjectLegacyBaseBranchAtRootPath(rootPath, branchNam
     }
   }
 
-  return await resolveLocalProjectBranchAtRootPath(normalizedRootPath, normalizedBranchName);
+  return await resolveLocalProjectBranchAtRootPath(normalizedRootPath, normalizedBranchName, {
+    preferLocalOnCollision: true,
+  });
 }
 
-async function resolveLocalProjectBranchAtRootPath(rootPath, branchName) {
+async function resolveLocalProjectBranchAtRootPath(rootPath, branchName, options = {}) {
   const normalizedRootPath = ensureLocalProjectRootPath(rootPath);
   const normalizedBranchName = branchName.trim();
   if (!normalizedBranchName) {
@@ -344,7 +364,7 @@ async function resolveLocalProjectBranchAtRootPath(rootPath, branchName) {
       commitHash,
     });
   }
-  if (localCommit && matches.length === 0) {
+  if (localCommit && (matches.length === 0 || options.preferLocalOnCollision === true)) {
     return {
       kind: 'local',
       branchName: normalizedBranchName,
@@ -865,6 +885,7 @@ module.exports = {
   getLocalProjectWorkingTreeAtRootPath,
   getLocalProjectGitStateAtRootPath,
   createLocalProjectBranchSelector,
+  selectLocalProjectBranchSelector,
   getLocalProjectBranchUpstreamRefAtRootPath,
   getLocalProjectCurrentBranchNameAtRootPath,
   resolveLocalProjectBranchAtRootPath,

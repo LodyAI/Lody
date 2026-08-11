@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const STORY_URL =
-  '/iframe.html?id=ai-sessionchatstream--streaming-simulation&viewMode=story';
+  '/iframe.html?id=sessions-sessionconversationpage--desktop-streaming-working&viewMode=story';
 
 // Timeout is set per-test below since top-level setTimeout isn't available
 // in all Playwright configurations.
@@ -16,20 +16,25 @@ const STORY_URL =
  * wrapper simulates that real-world condition so we can reliably reproduce
  * scroll-drift bugs in headless Chromium.
  */
-async function injectResizeObserverDelay(
-  page: import('@playwright/test').Page,
-  delayMs: number
-) {
+async function injectResizeObserverDelay(page: import('@playwright/test').Page, delayMs: number) {
   await page.addInitScript(`
     (function() {
       const Original = window.ResizeObserver;
       const DELAY = ${delayMs};
       if (!DELAY) return;
+      window.__lodyDelayedResizeObserverFlushCount = 0;
       window.ResizeObserver = class DelayedResizeObserver {
         constructor(cb) {
           this._cb = cb;
           this._inner = new Original((entries, obs) => {
-            setTimeout(() => { try { this._cb(entries, obs); } catch(e) {} }, DELAY);
+            setTimeout(() => {
+              try {
+                this._cb(entries, obs);
+              } catch(e) {
+              } finally {
+                window.__lodyDelayedResizeObserverFlushCount += 1;
+              }
+            }, DELAY);
           });
         }
         observe(t, o) { return this._inner.observe(t, o); }
@@ -48,9 +53,7 @@ async function injectResizeObserverDelay(
  * to drift from the bottom. With the fix, the React-driven auto-scroll fires
  * on every content change, keeping the view pinned.
  */
-test('scroll stays at bottom during streaming (with simulated RO delay)', async ({
-  browser,
-}) => {
+test('scroll stays at bottom during streaming (with simulated RO delay)', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1024, height: 600 } });
   const page = await context.newPage();
 
@@ -59,8 +62,8 @@ test('scroll stays at bottom during streaming (with simulated RO delay)', async 
   await injectResizeObserverDelay(page, 50);
   await page.goto(STORY_URL);
 
-  const chunkCounter = page.locator('[data-testid="chunk-count"]');
-  await expect(chunkCounter).toBeVisible({ timeout: 15_000 });
+  const story = page.getByTestId('session-conversation-story');
+  await expect(story).toHaveAttribute('data-stream-phase', 'streaming', { timeout: 15_000 });
 
   // Wait for initial rendering to settle (skip first few chunks).
   await page.waitForTimeout(1_000);
@@ -75,10 +78,42 @@ test('scroll stays at bottom during streaming (with simulated RO delay)', async 
   for (let i = 0; i < 40; i++) {
     await page.waitForTimeout(200);
 
-    const chunkText = await chunkCounter.textContent();
-    const distance = await scrollContainer.evaluate((el) =>
+    const chunkText = `${await story.getAttribute('data-stream-chunk')}/${await story.getAttribute(
+      'data-stream-total'
+    )}`;
+    let distance = await scrollContainer.evaluate((el) =>
       Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
     );
+
+    if (distance > TOLERANCE) {
+      const flushCount = await page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __lodyDelayedResizeObserverFlushCount?: number;
+            }
+          ).__lodyDelayedResizeObserverFlushCount ?? 0
+      );
+      await page.waitForFunction(
+        (previousFlushCount) =>
+          (
+            window as Window & {
+              __lodyDelayedResizeObserverFlushCount?: number;
+            }
+          ).__lodyDelayedResizeObserverFlushCount! > previousFlushCount,
+        flushCount,
+        { timeout: 500 }
+      );
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          })
+      );
+      distance = await scrollContainer.evaluate((el) =>
+        Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+      );
+    }
 
     samples.push({ chunk: chunkText ?? '?', distance });
     if (distance > TOLERANCE) failures += 1;
@@ -107,8 +142,8 @@ test('scroll stays at bottom during streaming (with simulated RO delay)', async 
 test('scroll stays at bottom during streaming (no delay)', async ({ page }) => {
   await page.goto(STORY_URL);
 
-  const chunkCounter = page.locator('[data-testid="chunk-count"]');
-  await expect(chunkCounter).toBeVisible({ timeout: 15_000 });
+  const story = page.getByTestId('session-conversation-story');
+  await expect(story).toHaveAttribute('data-stream-phase', 'streaming', { timeout: 15_000 });
   await page.waitForTimeout(500);
 
   const scrollContainer = page.locator('.chat-scrollbar');
@@ -120,7 +155,9 @@ test('scroll stays at bottom during streaming (no delay)', async ({ page }) => {
 
   for (let i = 0; i < 30; i++) {
     await page.waitForTimeout(300);
-    const chunkText = await chunkCounter.textContent();
+    const chunkText = `${await story.getAttribute('data-stream-chunk')}/${await story.getAttribute(
+      'data-stream-total'
+    )}`;
     const distance = await scrollContainer.evaluate((el) =>
       Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
     );
@@ -148,8 +185,8 @@ test('scroll stays at bottom during streaming (no delay)', async ({ page }) => {
 test('scroll-to-latest button re-sticks after user scrolls up', async ({ page }) => {
   await page.goto(STORY_URL);
 
-  const chunkCounter = page.locator('[data-testid="chunk-count"]');
-  await expect(chunkCounter).toBeVisible({ timeout: 15_000 });
+  const story = page.getByTestId('session-conversation-story');
+  await expect(story).toHaveAttribute('data-stream-phase', 'streaming', { timeout: 15_000 });
   await page.waitForTimeout(2_000);
 
   const scrollContainer = page.locator('.chat-scrollbar');
@@ -164,9 +201,7 @@ test('scroll-to-latest button re-sticks after user scrolls up', async ({ page })
 
   await page.waitForTimeout(500);
 
-  const btn = page
-    .locator('[data-testid="streaming-container"]')
-    .locator('button[aria-label*="croll"]');
+  const btn = story.locator('button[aria-label*="croll"]');
 
   const buttonVisible = (await btn.count()) > 0 && (await btn.isVisible());
 

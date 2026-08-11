@@ -13,7 +13,7 @@ function SettingsIndexComponent() {
   if (!isMobile) {
     return (
       <Navigate
-        to="/$workspaceName/settings/general"
+        to="/$workspaceName/settings/preferences"
         params={{ workspaceName }}
         search={(prev) => prev}
         replace

@@ -75,11 +75,7 @@ export type ManagedRuntimeStatus =
   | { kind: 'installed'; platformArch: string; version: string; command: string };
 
 export type ManagedRuntimeProgressPhase =
-  | 'downloading'
-  | 'verifying'
-  | 'extracting'
-  | 'publishing'
-  | 'complete';
+  'downloading' | 'verifying' | 'extracting' | 'publishing' | 'complete';
 
 export type ManagedRuntimeProgressEvent = {
   runtimeName: ManagedRuntimeName;
@@ -273,43 +269,43 @@ const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
     platforms: {
       'darwin-arm64': {
         fileName: 'codex-package-aarch64-apple-darwin.tar.zst',
-        sha256: '24067128ccca24e4c582df7fabca06c107d9802e3ccc1280c6fa5dc3186f4a29',
-        size: 87286963,
+        sha256: '4b0a3c2967f6db11b67dac0a6f0630327077888157b2020b5b1159e8d4a5a01c',
+        size: 77491677,
         compression: 'zstd',
         cmd: 'bin/codex',
       },
       'darwin-x64': {
         fileName: 'codex-package-x86_64-apple-darwin.tar.zst',
-        sha256: 'b15c6922599097c24e700563e59feb0b59cc84b60eadf036ea38d4118e900c9c',
-        size: 95382310,
+        sha256: '373c728c0912b7c65af742bb649f0ff056300f8e8a33a619be0bab62f2afc6ba',
+        size: 85008508,
         compression: 'zstd',
         cmd: 'bin/codex',
       },
       'linux-arm64': {
         fileName: 'codex-package-aarch64-unknown-linux-musl.tar.zst',
-        sha256: '8f27d60343abd8a6016516974f8b55e512b1a3b614841596fd548745b9c4c3ed',
-        size: 90024268,
+        sha256: '692ff5c5d9eb86774c0448d930895e46659eee6a2c12f46b97399da458c1e8b7',
+        size: 80608473,
         compression: 'zstd',
         cmd: 'bin/codex',
       },
       'linux-x64': {
         fileName: 'codex-package-x86_64-unknown-linux-musl.tar.zst',
-        sha256: '8ed235186b6a53e62d8228057fba5c5da4c63eeafff046fc1161b9c2298461f9',
-        size: 96762435,
+        sha256: '494368127e27ab625b2a5e759f83447e1d7d00b6ae49a5e2c17df5fd7c4aac1d',
+        size: 86804357,
         compression: 'zstd',
         cmd: 'bin/codex',
       },
       'win32-arm64': {
         fileName: 'codex-package-aarch64-pc-windows-msvc.tar.zst',
-        sha256: 'ab915ae7861c86148078484df27c9a4900411ed25ad4435613f235c50acc4151',
-        size: 101491458,
+        sha256: '0c9d43e1ce013900850c82ab558cbafae9e8b05363689ab68cc0b4c87ac2b267',
+        size: 88080469,
         compression: 'zstd',
         cmd: 'bin/codex.exe',
       },
       'win32-x64': {
         fileName: 'codex-package-x86_64-pc-windows-msvc.tar.zst',
-        sha256: '608c193cb0723af1759e44747229c3a68e38988042abd7cf0f6efb9de6ef6b92',
-        size: 108999653,
+        sha256: '5931e080440a0bff1413d55b62921e26238f5410d82d79e5327202bfef1833a4',
+        size: 95093149,
         compression: 'zstd',
         cmd: 'bin/codex.exe',
       },

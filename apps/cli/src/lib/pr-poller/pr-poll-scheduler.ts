@@ -1,4 +1,9 @@
-import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
+import {
+  collectViewedSessionIdsFromPresence,
+  getServerNow,
+  isDirectLocalProject,
+  type SessionId,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { buildPrPollBatchQuery, type PrPollBatchQuery } from './graphql-batch-builder';
@@ -1004,6 +1009,11 @@ export class PrPollScheduler {
       // session existence).
       let freshMeta = await runtime.handle.readOwnerMeta(ownerSessionId);
       if (!freshMeta || freshMeta.isArchived || freshMeta.machineId !== runtime.handle.machineId) {
+        return failed;
+      }
+      if (isDirectLocalProject(freshMeta.project, freshMeta.isWorktree)) {
+        // The original local directory has no Session-owned branch. Drop a
+        // result that was already in flight when the Session changed context.
         return failed;
       }
 

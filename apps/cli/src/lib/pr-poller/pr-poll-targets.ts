@@ -1,4 +1,5 @@
 import {
+  isDirectLocalProject,
   parseGitHubPullRequestUrl,
   resolveProjectGitHubRepo,
   type SessionId,
@@ -27,9 +28,10 @@ export type PrPollStatusTarget = {
 
 /**
  * A `(repository, runtime head branch)` query for the newest PR on that
- * branch. Exists whenever the repository context is resolvable and the owner
- * is not idle-terminal — including when an open/draft PR is already
- * associated (a newer PR on the same branch must still be discovered).
+ * branch. Exists whenever the repository context is resolvable, the branch is
+ * Session-owned, and the owner is not idle-terminal — including when an
+ * open/draft PR is already associated (a newer PR on the same branch must
+ * still be discovered).
  */
 export type PrPollDiscoveryTarget = {
   repoFullName: string;
@@ -141,6 +143,7 @@ export function enumeratePrPollTargets(
     }
 
     const runtimeBranch = resolveDiscoveryBranch(ownerMeta) ?? null;
+    const prPollingEnabled = !isDirectLocalProject(ownerMeta.project, ownerMeta.isWorktree);
     entries.set(ownerSessionId, {
       ownerSessionId,
       memberSessionIds: [sessionId],
@@ -149,13 +152,15 @@ export function enumeratePrPollTargets(
         sessionId === ownerSessionId ? null : (meta.lastMessageAt ?? null)
       ),
       runtimeBranch,
-      statusTargets: collectStatusTargets(ownerMeta),
-      discoveryTarget: collectDiscoveryTarget(
-        ownerMeta,
-        runtimeBranch,
-        discoveryFingerprints[ownerSessionId],
-        resolveGitHubRepo
-      ),
+      statusTargets: prPollingEnabled ? collectStatusTargets(ownerMeta) : [],
+      discoveryTarget: prPollingEnabled
+        ? collectDiscoveryTarget(
+            ownerMeta,
+            runtimeBranch,
+            discoveryFingerprints[ownerSessionId],
+            resolveGitHubRepo
+          )
+        : null,
     });
   }
 

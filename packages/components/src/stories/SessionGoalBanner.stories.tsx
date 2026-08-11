@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 
-import type { SessionGoalMessage } from '@lody/shared';
+import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
 import { SessionGoalBanner } from '@/components/sessions/session-goal-banner';
 
 const baseGoal: SessionGoalMessage = {
@@ -35,6 +35,9 @@ const longObjective =
 const meta = {
   title: 'Sessions/SessionGoalBanner',
   component: SessionGoalBanner,
+  args: {
+    commands: SESSION_GOAL_COMMANDS,
+  },
   parameters: {
     layout: 'padded',
   },

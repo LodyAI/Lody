@@ -562,9 +562,42 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       if (!state || state.closed || !sameRoom(state.room, message.room)) {
         return;
       }
+      // A terminally-failed room is cleared only by an explicit
+      // `subscription.rejoin()` (R4). Applying a server push here would
+      // downgrade its `error` to whatever was pushed and quietly re-enter it
+      // into the reconnect loops that R4 excludes it from.
+      if (state.terminalError) {
+        return;
+      }
       this.setRoomStatus(state, message.status);
       if (message.status === 'joined') {
         this.resolveSyncedWaiters(state);
+        return;
+      }
+      // A server-pushed TERMINAL status means this one room is gone and must be
+      // re-established (today the only publisher is the CLI's
+      // `invalidateDocRoom`, after the repo evicted the room's doc). Repair it
+      // here, room-scoped.
+      //
+      // The alternative was to leave it to the workspace reconnect loop, which
+      // is what a terminal status would otherwise reach via
+      // `needsReconnect()`. That makes one dead room cost a workspace-wide
+      // reconcile: it releases every idle document store and rejoins EVERY
+      // local room, and charges a backoff step forgiven only after 30s of
+      // health. A session being GC'd is routine, so that would ratchet local
+      // reconnect latency for the whole workspace.
+      //
+      // NOTE the consequence, because a previous version of this comment got it
+      // wrong: `sendJoin` below sets a non-terminal status in this same
+      // synchronous block, so the workspace loop NEVER observes the terminal
+      // status and is NOT a backstop here. If the rejoin frame is lost — the
+      // relay drops client frames silently while the renderer still reports
+      // connected — this room stays stale until the next
+      // `handleConnectionStatus(true)` edge rejoins everything. That is the
+      // same recovery contract every other frame this transport sends already
+      // has (see the F5b regression case), not a gap introduced here.
+      if (message.status === 'disconnected' || message.status === 'error') {
+        this.rejoinRoom(state);
       }
       return;
     }

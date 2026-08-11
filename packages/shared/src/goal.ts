@@ -92,8 +92,15 @@ export const resolveVisibleSessionGoal = (
   return resolved;
 };
 
-export const isSessionGoalWorking = (goal: SessionGoalMessage | null | undefined): boolean =>
+/** A persistent objective can be active while the ACP session has no running prompt. */
+export const isSessionGoalActive = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'active';
+
+/**
+ * @deprecated Use `isSessionGoalActive`. This reports persistent goal state,
+ * not whether an ACP prompt is currently running.
+ */
+export const isSessionGoalWorking = isSessionGoalActive;
 
 export const isSessionGoalPaused = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'paused';

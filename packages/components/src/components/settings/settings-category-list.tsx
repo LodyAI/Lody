@@ -3,15 +3,17 @@ import { Bug, ChevronRight } from 'lucide-react';
 import { Card, CardContent } from '@/ui/card';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
-import { bugReportDialogOpenAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import { bugReportDialogOpenAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
+import { useOrganization } from '@/hooks/useOrganization';
 import {
   useVisibleSettingsTabs,
   type SettingsTabConfig,
-  type SettingsTabId,
+  type SettingsSectionId,
 } from './settings-tabs';
+import { SettingsAccountEntry } from './settings-account-entry';
 
 type SettingsCategoryListProps = {
   workspaceName?: string;
@@ -27,49 +29,25 @@ type SettingsCategoryListProps = {
    freely. The list still works if a tab id is missing from this map
    (we render whichever ids exist) or unknown to it (those fall into
    `misc`). */
-/* Tabs hidden from the mobile settings list because their content is
-   surfaced somewhere more contextual:
-   - `projects`: per-project share + ACP history sync now live in the
-     project's own detail page (`MobileLocalProjectSettings`). The
-     workspace-wide `/settings/projects` URL still works for users
-     who navigate there directly.
-   - `keyboard-shortcuts`: mobile does not expose keyboard shortcut
-     customization from the settings list. */
-const HIDDEN_FROM_MOBILE_LIST = new Set<SettingsTabId>(['projects', 'keyboard-shortcuts']);
-
 const SETTINGS_SECTIONS: Array<{
-  id: 'personal' | 'workspace' | 'misc';
+  id: Exclude<SettingsSectionId, 'account'>;
   headingKey: string;
   defaultHeading: string;
-  tabIds: SettingsTabId[];
 }> = [
   {
     id: 'personal',
     headingKey: 'settings.sections.personal',
     defaultHeading: 'Personal',
-    tabIds: ['general', 'appearance', 'account'],
   },
   {
     id: 'workspace',
     headingKey: 'settings.sections.workspace',
     defaultHeading: 'Workspace',
-    /* 统计 leads the workspace group: usage rollups are the most
-       common "what's happening in this workspace" question, so we
-       surface it at the top of the section. `projects` is
-       intentionally excluded on mobile — per-project share + ACP
-       history-sync controls live inside each project's detail page
-       (see `MobileLocalProjectSettings` mounted by
-       `chat-landing.tsx` for `MobileProjectScreen`'s settings tab).
-       The desktop sidebar still includes it via
-       `SETTINGS_TAB_CONFIGS` so the `/settings/projects` URL stays
-       reachable for power users / Storybook. */
-    tabIds: ['stats', 'billing', 'devices', 'agent-config', 'github'],
   },
   {
-    id: 'misc',
+    id: 'other',
     headingKey: 'settings.sections.misc',
     defaultHeading: 'Other',
-    tabIds: ['about'],
   },
 ];
 
@@ -79,110 +57,19 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
   const canReportBug = useAppCapability('bugReport');
-  const visibleTabs = useVisibleSettingsTabs();
+  const { activeOrganization } = useOrganization();
+  const user = useAtomValue(userAtom);
+  const visibleTabs = useVisibleSettingsTabs({
+    includeMultiMemberOnly: (activeOrganization?.members.length ?? 0) > 1,
+  });
   const resolvedWorkspaceName = workspaceName ?? workspaceSlug ?? null;
   const isNativeApp = isNativeAppShell();
-
-  const tabsById = new Map<SettingsTabId, SettingsTabConfig>(
-    visibleTabs.map((tab) => [tab.id, tab])
-  );
-  /* Any tab id that's defined in SETTINGS_TAB_CONFIGS but not assigned
-     to a section above falls into the misc bucket so we never silently
-     drop a settings page — except for tabs in
-     `HIDDEN_FROM_MOBILE_LIST` which are intentionally omitted (their
-     content lives elsewhere on mobile). */
-  const usedTabIds = new Set<SettingsTabId>();
-  for (const section of SETTINGS_SECTIONS) {
-    for (const id of section.tabIds) usedTabIds.add(id);
-  }
-  const orphanIds = visibleTabs
-    .map((tab) => tab.id)
-    .filter((id) => !usedTabIds.has(id) && !HIDDEN_FROM_MOBILE_LIST.has(id));
+  const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
 
   const openCategory = (category: SettingsTabConfig) => {
     if (!resolvedWorkspaceName) return;
-    if (category.path === '/$workspaceName/settings/general') {
-      void navigate({
-        to: '/$workspaceName/settings/general',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/appearance') {
-      void navigate({
-        to: '/$workspaceName/settings/appearance',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/account') {
-      void navigate({
-        to: '/$workspaceName/settings/account',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/billing') {
-      void navigate({
-        to: '/$workspaceName/settings/billing',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/stats') {
-      void navigate({
-        to: '/$workspaceName/settings/stats',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/projects') {
-      void navigate({
-        to: '/$workspaceName/settings/projects',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/devices') {
-      void navigate({
-        to: '/$workspaceName/settings/devices',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/agent-config') {
-      void navigate({
-        to: '/$workspaceName/settings/agent-config',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/github') {
-      void navigate({
-        to: '/$workspaceName/settings/github',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/keyboard-shortcuts') {
-      void navigate({
-        to: '/$workspaceName/settings/keyboard-shortcuts',
-        params: { workspaceName: resolvedWorkspaceName },
-        search: (prev) => prev,
-      });
-      return;
-    }
     void navigate({
-      to: '/$workspaceName/settings/about',
+      to: category.path,
       params: { workspaceName: resolvedWorkspaceName },
       search: (prev) => prev,
     });
@@ -193,14 +80,15 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   return (
     <div className="flex min-h-full flex-col pb-6 pt-3">
       <div className="flex flex-col gap-5">
+        {accountTab ? (
+          <div className="mx-3">
+            <SettingsAccountEntry user={user} mobile onSelect={() => openCategory(accountTab)} />
+          </div>
+        ) : null}
         {SETTINGS_SECTIONS.map((section) => {
-          const ids = section.id === 'misc' ? [...section.tabIds, ...orphanIds] : section.tabIds;
-          const sectionTabs = ids
-            .map((id) => tabsById.get(id))
-            .filter(
-              (tab): tab is SettingsTabConfig =>
-                tab != null && !(tab.id === 'billing' && isNativeApp)
-            );
+          const sectionTabs = visibleTabs.filter(
+            (tab) => tab.section === section.id && !(tab.id === 'billing' && isNativeApp)
+          );
           if (sectionTabs.length === 0) return null;
           return (
             <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
@@ -328,81 +216,8 @@ export function SettingsCategoryGrid() {
     if (!workspaceSlug) {
       return;
     }
-
-    if (category.path === '/$workspaceName/settings/general') {
-      void navigate({
-        to: '/$workspaceName/settings/general',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/appearance') {
-      void navigate({
-        to: '/$workspaceName/settings/appearance',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/account') {
-      void navigate({
-        to: '/$workspaceName/settings/account',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/billing') {
-      void navigate({
-        to: '/$workspaceName/settings/billing',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/stats') {
-      void navigate({
-        to: '/$workspaceName/settings/stats',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/projects') {
-      void navigate({
-        to: '/$workspaceName/settings/projects',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/agent-config') {
-      void navigate({
-        to: '/$workspaceName/settings/agent-config',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/github') {
-      void navigate({
-        to: '/$workspaceName/settings/github',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
-    if (category.path === '/$workspaceName/settings/keyboard-shortcuts') {
-      void navigate({
-        to: '/$workspaceName/settings/keyboard-shortcuts',
-        params: { workspaceName: workspaceSlug },
-        search: (prev) => prev,
-      });
-      return;
-    }
     void navigate({
-      to: '/$workspaceName/settings/about',
+      to: category.path,
       params: { workspaceName: workspaceSlug },
       search: (prev) => prev,
     });

@@ -227,6 +227,33 @@ function parseBranchSelector(
   return null;
 }
 
+/**
+ * Maps a branch name onto one of the selectors a project reported, applying the
+ * same local-first precedence as `preferLocalOnCollision`. Callers that only
+ * hold a remote machine's branch list use this instead of a plain membership
+ * test, so a human-typed `main` still finds `lody:branch:local:main`.
+ */
+export function selectLocalProjectBranchSelector(
+  branches: string[],
+  branchName: string
+): string | null {
+  const normalizedBranchName = branchName.trim();
+  if (!normalizedBranchName) return null;
+  if (branches.includes(normalizedBranchName)) return normalizedBranchName;
+
+  const localSelector = createLocalProjectBranchSelector({
+    kind: 'local',
+    branchName: normalizedBranchName,
+  });
+  if (branches.includes(localSelector)) return localSelector;
+
+  const remoteMatches = branches.filter((branch) => {
+    const parsed = parseBranchSelector(branch);
+    return parsed?.kind === 'remote' && parsed.branchName === normalizedBranchName;
+  });
+  return remoteMatches.length === 1 ? remoteMatches[0]! : null;
+}
+
 function findQualifiedRemoteName(remotes: string[], branchName: string): string | null {
   return (
     [...remotes]
@@ -328,7 +355,8 @@ export async function getLocalProjectCurrentBranchNameAtRootPath(
 
 export async function resolveLocalProjectLegacyBaseBranchAtRootPath(
   rootPath: string,
-  branchName: string
+  branchName: string,
+  options: { useWorktree?: boolean } = {}
 ): Promise<ResolvedLocalProjectBranch> {
   const normalizedRootPath = ensureLocalProjectRootPath(rootPath);
   const normalizedBranchName = branchName.trim();
@@ -336,11 +364,13 @@ export async function resolveLocalProjectLegacyBaseBranchAtRootPath(
     throw new Error('Branch name is required');
   }
 
-  // Old sessions stored the selector in baseBranch. A remote-only selector may
-  // since have created a same-named local tracking branch, so recover its exact
-  // upstream before ordinary selector precedence can mistake the work branch
-  // for the review base.
-  if (!parseBranchSelector(normalizedBranchName)) {
+  // Old sessions stored the selector in baseBranch. In checkout mode a
+  // remote-only selector may since have created a same-named local tracking
+  // branch, so recover its exact upstream before ordinary selector precedence
+  // can mistake the work branch for the review base. Worktree mode never checks
+  // the base out in the project root, so a same-named local branch there is the
+  // user's own branch and must be preserved as-is.
+  if (options.useWorktree !== true && !parseBranchSelector(normalizedBranchName)) {
     await assertGitRepository(normalizedRootPath);
     const localRef = `refs/heads/${normalizedBranchName}`;
     if (await resolveCommitAtRef(normalizedRootPath, localRef)) {
@@ -356,12 +386,29 @@ export async function resolveLocalProjectLegacyBaseBranchAtRootPath(
     }
   }
 
-  return await resolveLocalProjectBranchAtRootPath(normalizedRootPath, normalizedBranchName);
+  // A legacy value was handed straight to `git checkout` / `git worktree add`,
+  // which resolve a bare name local-first. Keep that precedence: `master` in a
+  // repository that also has `origin/master` meant refs/heads/master, and
+  // failing it as ambiguous strands every session created before selectors.
+  return await resolveLocalProjectBranchAtRootPath(normalizedRootPath, normalizedBranchName, {
+    preferLocalOnCollision: true,
+  });
 }
 
+/**
+ * Resolves a branch selector to an exact ref.
+ *
+ * By default an unqualified name that matches both `refs/heads/<name>` and a
+ * remote-tracking ref fails as ambiguous, which is what keeps the selectors
+ * emitted by `getLocalProjectGitStateAtRootPath` round-tripping exactly.
+ * `preferLocalOnCollision` relaxes that to Git's own precedence (local branch
+ * wins) and belongs on the paths that consume a human-typed or pre-selector
+ * name, where refusing `main` would be nothing but a dead end.
+ */
 export async function resolveLocalProjectBranchAtRootPath(
   rootPath: string,
-  branchName: string
+  branchName: string,
+  options: { preferLocalOnCollision?: boolean } = {}
 ): Promise<ResolvedLocalProjectBranch> {
   const normalizedRootPath = ensureLocalProjectRootPath(rootPath);
   const normalizedBranchName = branchName.trim();
@@ -429,7 +476,7 @@ export async function resolveLocalProjectBranchAtRootPath(
       commitHash,
     });
   }
-  if (localCommit && matches.length === 0) {
+  if (localCommit && (matches.length === 0 || options.preferLocalOnCollision === true)) {
     return {
       kind: 'local',
       branchName: normalizedBranchName,

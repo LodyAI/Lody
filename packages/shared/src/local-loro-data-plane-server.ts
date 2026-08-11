@@ -230,7 +230,11 @@ function syncTaskKey(key: string, peerId: string): string {
  */
 export class LocalLoroDataPlaneServer {
   private readonly rooms = new Map<string, RoomEntry>();
-  private readonly resolveInFlight = new Map<string, Promise<RoomEntry>>();
+  // `null` resolves mean the build was superseded by an invalidation; retry.
+  private readonly resolveInFlight = new Map<string, Promise<RoomEntry | null>>();
+  // Per room key, bumped by `invalidateDocRoom`, so a room build already in
+  // flight can discover that the doc it resolved has since been evicted.
+  private readonly roomGenerations = new Map<string, number>();
   // Every connected client receives workspace presence pushes.
   private readonly presenceReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
   private readonly machineMonitorReceivers = new Map<string, LocalLoroDataPlaneServerConnection>();
@@ -286,6 +290,75 @@ export class LocalLoroDataPlaneServer {
         room,
         status,
       });
+    }
+  }
+
+  /**
+   * Drop the cached room for `docId` because its underlying LoroDoc instance is
+   * no longer the repo's.
+   *
+   * A doc room resolves its `LoroDoc` ONCE (`buildDocRoom`) and holds it for as
+   * long as the room has subscribers. `repo.unloadDoc(docId)` evicts that
+   * instance from the repo's cache, so the next `openPersistedDoc` returns a
+   * DIFFERENT object — and the room keeps importing/exporting against the
+   * orphan: renderer uploads vanish, CLI writes stop being pushed, and nothing
+   * errors (the room stays `joined`, and relay pings never touch this path).
+   * Re-joining does not repair it either, because `ensureRoom` returns the
+   * cached entry.
+   *
+   * The caller must invoke this AFTER the unload completes, so a racing join
+   * cannot re-open the doc into the repo cache just before it is evicted.
+   * Updates that land in the window are not lost: peers reconcile against the
+   * server version on (re)join and re-upload whatever the server is missing.
+   */
+  invalidateDocRoom(docId: string): void {
+    const room: LocalLoroDataPlaneRoom = { scope: 'doc', docId };
+    const key = roomKey(room);
+    // Bump FIRST and unconditionally, ahead of the `this.rooms` lookup: a room
+    // build racing this eviction has not installed its entry yet, so the lookup
+    // would miss it and return having published nothing. The generation is what
+    // lets that build discard itself instead of installing a room bound to the
+    // instance the repo just dropped.
+    this.roomGenerations.set(key, (this.roomGenerations.get(key) ?? 0) + 1);
+    const entry = this.rooms.get(key);
+    if (!entry || entry.scope !== 'doc') {
+      return;
+    }
+    // Queued sync work names (room, peer) and is materialized at write time, so
+    // a task left over from the old room would export against the REBUILT one
+    // and could emit an `update` ahead of its `joined` reply, breaking the FIFO
+    // ordering `enqueueJoinReply` relies on.
+    this.dropQueuedRoomWork(key);
+    // Publish before dropping the entry: `publishRoomStatus` reads the room's
+    // subscribers, and outbound recovery depends entirely on the peer rejoining
+    // — once the entry is gone there is no subscriber left to mark dirty, so a
+    // renderer that is only READING the session would stay stale forever.
+    //
+    // `disconnected` and not `reconnecting`: only `disconnected`/`error` are
+    // terminal in `createRoomSyncTracker.needsReconnect()`, and that predicate
+    // is what `roomSyncRegistry.anyNeedsReconnect()` — hence the renderer's
+    // local reconnect loop — gates on. A `reconnecting` status reads as
+    // "already recovering" and the loop would never fire. `disconnected` is
+    // also the honest description: the server dropped this room and the peer
+    // must re-join to get another one.
+    this.publishRoomStatus(room, 'disconnected');
+    entry.unsubscribe();
+    entry.subscribers.clear();
+    entry.uploadAssemblers.clear();
+    this.rooms.delete(key);
+  }
+
+  /** Forget queued writer work naming a room that no longer exists. */
+  private dropQueuedRoomWork(key: string): void {
+    for (const writer of this.writers.values()) {
+      writer.queue = writer.queue.filter(
+        (task) => !((task.kind === 'sync' || task.kind === 'join-reply') && task.roomKey === key)
+      );
+      for (const taskKey of [...writer.queuedSyncKeys]) {
+        if (taskKey.startsWith(`${key}\n`)) {
+          writer.queuedSyncKeys.delete(taskKey);
+        }
+      }
     }
   }
 
@@ -399,6 +472,7 @@ export class LocalLoroDataPlaneServer {
       entry.subscribers.clear();
     }
     this.rooms.clear();
+    this.roomGenerations.clear();
     for (const writer of this.writers.values()) {
       this.cancelScheduledDataPump(writer);
       writer.unsubscribeDrain?.();
@@ -448,31 +522,46 @@ export class LocalLoroDataPlaneServer {
     connection: LocalLoroDataPlaneServerConnection,
     message: LocalLoroJoinMessage
   ): Promise<void> {
-    const entry = await this.ensureRoom(message.room);
-    // Register inbound (serialized with leave/detach on this connection), then
-    // let the writer build the catch-up reply when the connection is writable.
-    // The reply task is FIFO-ordered before any sync task this registration can
-    // produce, so `joined` always precedes the room's `update` frames.
-    if (entry.scope === 'doc') {
-      entry.subscribers.set(message.peerId, {
-        peerId: message.peerId,
-        connection,
-        latestJoinRequestId: message.requestId,
-        lastSentVV: decodeVersion(message.haveVersion),
-      });
-    } else {
-      entry.subscribers.set(message.peerId, {
-        peerId: message.peerId,
-        connection,
-        latestJoinRequestId: message.requestId,
-        lastSentVersion: decodeFlockVersion(message.haveVersion),
-      });
-    }
-    this.enqueueJoinReply(connection, roomKey(message.room), message.peerId, message.requestId);
-    if (message.room.scope === 'doc') {
-      this.notifyDocRoomJoin(message.room.docId);
-    } else if (message.room.scope === 'flock-doc') {
-      this.notifyFlockRoomJoin(message.room.flockDocId);
+    const key = roomKey(message.room);
+    for (;;) {
+      const entry = await this.ensureRoom(message.room);
+      // The liveness check and the registration below MUST stay in one
+      // synchronous block. `ensureRoom`'s generation check only covers the
+      // window before the entry is installed, and every `await` after it —
+      // including returning from a helper — reopens the window. Registering on
+      // an invalidated entry is worse than the bug this class fixes:
+      // `buildJoinReplyFrames` would find no room and emit nothing, parking the
+      // client on `connecting` forever, which is not terminal and so never
+      // wakes the renderer's reconnect loop.
+      if (this.rooms.get(key) !== entry) {
+        continue;
+      }
+      // Register inbound (serialized with leave/detach on this connection), then
+      // let the writer build the catch-up reply when the connection is writable.
+      // The reply task is FIFO-ordered before any sync task this registration can
+      // produce, so `joined` always precedes the room's `update` frames.
+      if (entry.scope === 'doc') {
+        entry.subscribers.set(message.peerId, {
+          peerId: message.peerId,
+          connection,
+          latestJoinRequestId: message.requestId,
+          lastSentVV: decodeVersion(message.haveVersion),
+        });
+      } else {
+        entry.subscribers.set(message.peerId, {
+          peerId: message.peerId,
+          connection,
+          latestJoinRequestId: message.requestId,
+          lastSentVersion: decodeFlockVersion(message.haveVersion),
+        });
+      }
+      this.enqueueJoinReply(connection, key, message.peerId, message.requestId);
+      if (message.room.scope === 'doc') {
+        this.notifyDocRoomJoin(message.room.docId);
+      } else if (message.room.scope === 'flock-doc') {
+        this.notifyFlockRoomJoin(message.room.flockDocId);
+      }
+      return;
     }
   }
 
@@ -507,7 +596,15 @@ export class LocalLoroDataPlaneServer {
     connection: LocalLoroDataPlaneServerConnection,
     message: LocalLoroUpdateMessage
   ): Promise<void> {
-    const entry = await this.ensureRoom(message.room);
+    const key = roomKey(message.room);
+    let entry = await this.ensureRoom(message.room);
+    // Same one-synchronous-block requirement as `handleJoin`: an invalidation
+    // landing after the entry was installed but before this resumes would make
+    // the import below write into the doc the repo already evicted, on an entry
+    // that is no longer subscribed — dead in both directions, silently.
+    while (this.rooms.get(key) !== entry) {
+      entry = await this.ensureRoom(message.room);
+    }
     if (entry.scope === 'doc') {
       if (message.payload.kind === 'flock-json') {
         this.sendError(connection, {
@@ -577,28 +674,50 @@ export class LocalLoroDataPlaneServer {
 
   private async ensureRoom(room: LocalLoroDataPlaneRoom): Promise<RoomEntry> {
     const key = roomKey(room);
-    const existing = this.rooms.get(key);
-    if (existing) {
-      return existing;
-    }
-    const inFlight = this.resolveInFlight.get(key);
-    if (inFlight) {
-      return await inFlight;
-    }
-    const build = (async (): Promise<RoomEntry> => {
-      const entry =
-        room.scope === 'doc'
-          ? await this.buildDocRoom(room, room.docId)
-          : await this.buildFlockRoom(room, await this.resolveFlockForRoom(room));
-      if (this.disposed) {
-        entry.unsubscribe();
-        throw new Error('data_plane_engine_disposed');
+    // Loops only when an invalidation lands while this call was resolving, and
+    // every retry needs its own invalidation — so it cannot spin.
+    for (;;) {
+      const existing = this.rooms.get(key);
+      if (existing) {
+        return existing;
       }
-      this.rooms.set(key, entry);
-      return entry;
-    })().finally(() => this.resolveInFlight.delete(key));
-    this.resolveInFlight.set(key, build);
-    return await build;
+      const inFlight = this.resolveInFlight.get(key);
+      if (inFlight) {
+        const shared = await inFlight;
+        if (shared) {
+          return shared;
+        }
+        continue;
+      }
+      // Captured BEFORE resolving. `resolveDoc` reads the repo's instance
+      // cache, so a build that started before `invalidateDocRoom` bumped this
+      // counter can be holding the very instance the repo then evicted.
+      // Installing it would recreate the orphaned room that invalidation exists
+      // to prevent — and silently, because that invalidation found no entry in
+      // `this.rooms` and so published no status to trigger a rejoin.
+      const generation = this.roomGenerations.get(key) ?? 0;
+      const build = (async (): Promise<RoomEntry | null> => {
+        const entry =
+          room.scope === 'doc'
+            ? await this.buildDocRoom(room, room.docId)
+            : await this.buildFlockRoom(room, await this.resolveFlockForRoom(room));
+        if (this.disposed) {
+          entry.unsubscribe();
+          throw new Error('data_plane_engine_disposed');
+        }
+        if ((this.roomGenerations.get(key) ?? 0) !== generation) {
+          entry.unsubscribe();
+          return null;
+        }
+        this.rooms.set(key, entry);
+        return entry;
+      })().finally(() => this.resolveInFlight.delete(key));
+      this.resolveInFlight.set(key, build);
+      const resolved = await build;
+      if (resolved) {
+        return resolved;
+      }
+    }
   }
 
   private async buildDocRoom(room: LocalLoroDataPlaneRoom, docId: string): Promise<DocRoomEntry> {

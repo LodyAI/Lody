@@ -28,7 +28,7 @@ export type ChatLandingProjectRecency = {
   byProject: ReadonlyMap<string, number>;
 };
 
-export type SharingReviewActionTarget = 'devices' | 'projects' | null;
+export type SharingReviewActionTarget = 'machines' | 'projects' | null;
 
 export function getSharingReviewActionTarget({
   privateMachineCount,
@@ -37,7 +37,7 @@ export function getSharingReviewActionTarget({
   privateMachineCount: number;
   privateProjectCount: number;
 }): SharingReviewActionTarget {
-  if (privateMachineCount > 0) return 'devices';
+  if (privateMachineCount > 0) return 'machines';
   if (privateProjectCount > 0) return 'projects';
   return null;
 }

@@ -136,6 +136,22 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `loro/machine-flock-sync-coordinator.ts` owns the live room, dirty state, and
   exponential retry; request-scoped `syncOnce()` failures must not make local project
   add/update flows fail after the local write is durable.
+- **Streams recovery has TWO signals and they must not be recombined**
+  (`loro/connection-recovery.ts`). `onStreamsOnline` is cheap, unthrottled, and
+  fires on every health rising edge — it RELEASES work parked while offline
+  (dirty Machine Flock docs, which arm no timer of their own, plus the
+  task/review automation queues). `onMetaRoomSynced` is the EXPENSIVE
+  "rescan the workspace index" signal whose listeners do O(rooms) work, so it
+  waits for meta catch-up and is rate-limited to one fan-out per
+  `LODY_LORO_META_SYNCED_MIN_INTERVAL_MS` (30s) — deferred, never dropped,
+  because the dispatch bootstrap scan is the only retry path for a session whose
+  reconcile threw. A fan-out that follows a real meta-room outage skips the
+  floor; a transport-only flap does not. One signal carrying both meanings is
+  what turned a single stuck room into ~3400 session reconciles/minute.
+  Backoff is flap-aware for the same reason: health that does not survive
+  `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
+  charges the attempt counter instead of resetting it, and `force` must not
+  clear that history. Regression coverage: `tests/reconnect-storm-repro.test.ts`.
 - `provider-setup-manager.ts` owns durable default managed-builtin creation;
   setup rows with executable runtime overrides are invalid. The future
   config stays under `['providerSetup', configId]` while runtime/auth/live-probe

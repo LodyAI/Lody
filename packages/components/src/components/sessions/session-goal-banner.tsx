@@ -30,6 +30,8 @@ export type SessionGoalBannerCommandHandler = (
 
 interface SessionGoalBannerProps {
   goal: SessionGoalMessage | null | undefined;
+  /** Commands the current session transport can safely dispatch. */
+  commands?: readonly SessionGoalCommand[];
   pendingCommand?: SessionGoalCommand | null;
   onGoalCommand?: SessionGoalBannerCommandHandler;
   /** Dismiss the banner once the goal is in a terminal state. When omitted
@@ -117,6 +119,7 @@ export const formatTokensCompact = (value: number): string => {
  */
 export const SessionGoalBanner = memo(function SessionGoalBanner({
   goal,
+  commands,
   pendingCommand,
   onGoalCommand,
   onDismiss,
@@ -167,9 +170,12 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
   const statusLabel = t(meta.labelKey, meta.fallbackLabel);
   const isPending = pendingCommand != null;
   const isCleared = isSessionGoalCleared(goal);
-  const showPause = goal.status === 'active' && onGoalCommand != null;
-  const showResume = goal.status === 'paused' && onGoalCommand != null;
-  const showClear = !isCleared && onGoalCommand != null;
+  const showPause =
+    goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
+  const showResume =
+    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear =
+    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const triggerCommand = (command: SessionGoalCommand) => {

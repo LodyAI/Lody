@@ -38,6 +38,7 @@ export function AcpAuthenticationPanel({
   runtimeOverrides,
   env,
   compact = false,
+  reauthentication = false,
   onAuthenticated,
 }: {
   machineId: MachineId | null;
@@ -48,6 +49,7 @@ export function AcpAuthenticationPanel({
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;
   compact?: boolean;
+  reauthentication?: boolean;
   onAuthenticated?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -254,7 +256,7 @@ export function AcpAuthenticationPanel({
             <LogIn className="h-3.5 w-3.5" />
             {phase === 'error' || phase === 'cancelled'
               ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
-              : phase === 'authenticated'
+              : phase === 'authenticated' || reauthentication
                 ? t('agents.authentication.signInAgain', 'Sign in again')
                 : t('agents.authentication.signIn', 'Sign in with {{provider}}', { provider })}
           </Button>

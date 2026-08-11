@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACP_ERROR_CODES,
   getACPErrorUserMessage,
+  isAuthenticationRequiredACPError,
   isAgentDisconnectedError,
   isAcpSessionNotFoundError,
   mapACPErrorToFailureReason,
@@ -81,6 +82,40 @@ describe('ACP error classification', () => {
     if (!parsed) {
       throw new Error('expected ACP error to parse');
     }
+    expect(mapACPErrorToFailureReason(parsed)).toBe('acp_internal_error');
+  });
+
+  it.each([
+    'Not logged in · Please run /login',
+    'Session expired. Please run /login to sign in again.',
+    'refresh token cannot be refreshed',
+    'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
+  ])('maps provider reauthentication errors to acp_auth_required: %s', (details) => {
+    const parsed = parseACPError({
+      code: ACP_ERROR_CODES.INTERNAL_ERROR,
+      message: 'Internal error',
+      data: { details },
+    });
+
+    if (!parsed) {
+      throw new Error('expected ACP error to parse');
+    }
+    expect(isAuthenticationRequiredACPError(parsed)).toBe(true);
+    expect(mapACPErrorToFailureReason(parsed)).toBe('acp_auth_required');
+    expect(shouldTerminateOnACPError(parsed, 'acp_auth_required')).toBe(true);
+  });
+
+  it('does not treat unrelated token refresh errors as provider login failures', () => {
+    const parsed = parseACPError({
+      code: ACP_ERROR_CODES.INTERNAL_ERROR,
+      message: 'Internal error',
+      data: { details: 'Failed to refresh the model catalog cache token' },
+    });
+
+    if (!parsed) {
+      throw new Error('expected ACP error to parse');
+    }
+    expect(isAuthenticationRequiredACPError(parsed)).toBe(false);
     expect(mapACPErrorToFailureReason(parsed)).toBe('acp_internal_error');
   });
 

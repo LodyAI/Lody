@@ -66,6 +66,59 @@ const createService = (options: {
   });
 
 describe('TurnPostProcessingService', () => {
+  it('does not detect or associate a PR for a direct local project', async () => {
+    const logger = createLogger();
+    const service = createService({ logger });
+    const exec = vi.fn();
+    const session = {
+      getWorkdir: () => '/repo',
+      exec,
+    } as unknown as ISession;
+
+    const detected = await service.detectAndAssociatePR({
+      sessionId,
+      session,
+      sessionDoc: createSessionDoc(),
+      project: localProject,
+      branchName: 'main',
+    });
+
+    expect(detected).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('still detects a PR for a local-project worktree', async () => {
+    const logger = createLogger();
+    const service = createService({ logger });
+    const exec = vi.fn(async () =>
+      JSON.stringify([
+        {
+          number: 42,
+          url: 'https://github.com/owner/repo/pull/42',
+          state: 'OPEN',
+          isDraft: false,
+          headRefName: 'feature/worktree',
+          baseRefName: 'main',
+        },
+      ])
+    );
+    const session = {
+      getWorkdir: () => '/repo',
+      exec,
+    } as unknown as ISession;
+
+    const detected = await service.detectAndAssociatePR({
+      sessionId,
+      session,
+      sessionDoc: createSessionDoc(),
+      project: { ...localProject, useWorktree: true },
+      branchName: 'feature/worktree',
+    });
+
+    expect(detected?.prNumber).toBe(42);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
   it('does not auto-commit a local project running in its original directory', async () => {
     const logger = createLogger();
     const runAutoPrompt = vi.fn(async (_ctx: AutoPromptContext): Promise<AutoPromptResult> => {

@@ -126,6 +126,13 @@ type Story = StoryObj<typeof meta>;
 
 export const OwnerView: Story = {};
 
+export const WorkspaceGeneralMerged: Story = {
+  args: {
+    surface: 'workspace',
+    pendingInvitations: mockPendingInvitations,
+  },
+};
+
 export const MemberView: Story = {
   args: {
     role: 'member',

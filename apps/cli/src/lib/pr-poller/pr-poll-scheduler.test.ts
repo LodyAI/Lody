@@ -965,6 +965,40 @@ describe('PrPollScheduler', () => {
     expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
   });
 
+  it('drops in-flight results when a session switches to a direct local project', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+      })
+    );
+    clientHandler = async (batch) => {
+      workspace.metas.set(sid('s1'), {
+        ...workspace.metas.get(sid('s1'))!,
+        project: {
+          kind: 'local',
+          githubRepoFullName: 'owner/repo',
+        } as SessionMeta['project'],
+      });
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success') {
+        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
+          ...discovery,
+          prs: [observation(55)],
+        }));
+      }
+      return outcome;
+    };
+    await startWith([workspace]);
+
+    expect(workspace.associateCalls).toHaveLength(0);
+    expect(workspace.writtenPatches).toHaveLength(0);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toBeUndefined();
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+  });
+
   it('does not write or associate for an owner that migrated machines mid-poll', async () => {
     const workspace = new FakeWorkspace('ws1');
     workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));

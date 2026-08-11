@@ -195,7 +195,7 @@ describe('enumeratePrPollTargets', () => {
     expect(entry?.runtimeBranch).toBeNull();
   });
 
-  it('resolves the GitHub repo for local projects with a GitHub remote', () => {
+  it('skips PR discovery and status polling for a direct local project', () => {
     const [entry] = enumeratePrPollTargets([
       alive(
         's1',
@@ -204,6 +204,49 @@ describe('enumeratePrPollTargets', () => {
             kind: 'local',
             githubRepoFullName: 'owner/local-repo',
           } as SessionMeta['project'],
+          branchName: 'fix/y',
+          pullRequests: [
+            { url: 'https://github.com/owner/local-repo/pull/7', status: 'open' },
+          ],
+        })
+      ),
+    ]);
+
+    expect(entry?.statusTargets).toEqual([]);
+    expect(entry?.discoveryTarget).toBeNull();
+  });
+
+  it('resolves the GitHub repo for local-project worktrees', () => {
+    const [entry] = enumeratePrPollTargets([
+      alive(
+        's1',
+        makeMeta({
+          project: {
+            kind: 'local',
+            githubRepoFullName: 'owner/local-repo',
+            useWorktree: true,
+          } as SessionMeta['project'],
+          branchName: 'fix/y',
+        })
+      ),
+    ]);
+
+    expect(entry?.discoveryTarget).toEqual({
+      repoFullName: 'owner/local-repo',
+      branch: 'fix/y',
+    });
+  });
+
+  it('honors legacy isWorktree metadata for local-project discovery', () => {
+    const [entry] = enumeratePrPollTargets([
+      alive(
+        's1',
+        makeMeta({
+          project: {
+            kind: 'local',
+            githubRepoFullName: 'owner/local-repo',
+          } as SessionMeta['project'],
+          isWorktree: true,
           branchName: 'fix/y',
         })
       ),

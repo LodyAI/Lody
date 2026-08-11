@@ -2,6 +2,10 @@
   height: auto;
   inset: 0;
   width: auto;
+  /* react-photo-view's own 2000 sits off the app's z-index scale and, more to
+     the point, above the toast layer — the viewer's own "Image copied" /
+     "Image saved" confirmations would render behind it. */
+  z-index: var(--z-image-viewer, 95);
 }
 
 .lody-photo-slider .PhotoView-Slider__BannerWrap {
@@ -24,4 +28,92 @@
 .lody-photo-slider .lody-photo-slider-image {
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+/* Desktop lightbox.
+ *
+ * A phone viewer fills the screen because the screen IS the surface. In a
+ * desktop window the same treatment reads as "the app is gone": the photo runs
+ * edge to edge into an opaque black window with a 24px close glyph in the
+ * corner. Everything below turns the same viewer into an overlay ON the app —
+ * inset photo, translucent mask, and a top bar that clears the native window
+ * controls. `--desktop` comes from `useIsMobile()` in the component, so the
+ * layout breakpoint that decides every other surface decides this one too.
+ */
+.lody-photo-slider--desktop .lody-photo-slider-image {
+  /* Inset with a TRANSFORM, never a smaller box and never padding.
+     react-photo-view sizes the photo to the window and then positions it by
+     translating that exact box, so capping `width`/`height` pushes the photo
+     off center, and padding would swallow an image smaller than the inset
+     whole. A transform leaves the box (and therefore every drag/zoom
+     coordinate) untouched and shrinks around the box's own center, which is
+     where the library already centered it.
+     Inline `transform` is only set while rotating, which this viewer does not
+     expose. */
+  transform: scale(0.92);
+  transform-origin: center;
+  /* The box now matches the photo exactly (no letterboxing), so a frame can
+     ride on the element itself. */
+  border-radius: 4px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 45%);
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__Backdrop {
+  /* Alpha comes from `maskOpacity` (inline, so it wins over any rule here);
+     the blur is what keeps a busy conversation behind from reading through as
+     legible text. */
+  backdrop-filter: blur(16px);
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__BannerWrap {
+  /* A solid bar draws a hard line across the mask for no reason — the controls
+     already sit on a dark backdrop. */
+  background: linear-gradient(to bottom, rgb(0 0 0 / 45%), rgb(0 0 0 / 0%));
+  height: 56px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+/* Native window controls are drawn above web content, so the bar has to yield
+   its own space to them: macOS traffic lights on the left (matching the `pl-20`
+   inset used by the session header), Windows caption buttons on the right
+   (3 × 46px, `MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`'s strip). */
+.lody-photo-slider--desktop.lody-photo-slider--mac-controls .PhotoView-Slider__BannerWrap {
+  padding-left: 80px;
+}
+
+.lody-photo-slider--desktop.lody-photo-slider--win-controls .PhotoView-Slider__BannerWrap {
+  padding-right: 144px;
+}
+
+/* The bar lays its two children out with `space-between`, so the counter has to
+   keep its slot — hiding it outright would slide the close button to the left
+   edge. */
+.lody-photo-slider--single .PhotoView-Slider__Counter {
+  visibility: hidden;
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__toolbarIcon {
+  border-radius: 8px;
+  margin: 6px;
+  padding: 8px;
+  transition:
+    background-color 0.15s linear,
+    opacity 0.2s linear;
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__toolbarIcon:hover {
+  background-color: rgb(255 255 255 / 14%);
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__ArrowLeft svg,
+.lody-photo-slider--desktop .PhotoView-Slider__ArrowRight svg {
+  background: rgb(255 255 255 / 12%);
+  border-radius: 9999px;
+  transition: background-color 0.15s linear;
+}
+
+.lody-photo-slider--desktop .PhotoView-Slider__ArrowLeft:hover svg,
+.lody-photo-slider--desktop .PhotoView-Slider__ArrowRight:hover svg {
+  background: rgb(255 255 255 / 22%);
 }

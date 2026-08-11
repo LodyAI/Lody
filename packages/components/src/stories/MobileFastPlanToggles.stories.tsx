@@ -25,15 +25,15 @@ const baseSelectors: AcpConfigOptionSelector[] = [
   },
   {
     type: 'select',
-    configId: 'plan-mode',
-    category: 'plan-mode',
-    label: 'Plan mode',
+    configId: 'collaboration_mode',
+    category: 'collaboration_mode',
+    label: 'Collaboration mode',
     description: 'Plan before editing.',
     options: [
-      { value: 'off', label: 'Off' },
-      { value: 'on', label: 'On' },
+      { value: 'default', label: 'Default' },
+      { value: 'plan', label: 'Plan' },
     ],
-    currentValue: 'off',
+    currentValue: 'default',
   },
 ];
 
@@ -99,6 +99,6 @@ export const BothOff: Story = {};
 
 export const BothOn: Story = {
   args: {
-    initialValues: { 'fast-mode': 'on', 'plan-mode': 'on' },
+    initialValues: { 'fast-mode': 'on', collaboration_mode: 'plan' },
   },
 };

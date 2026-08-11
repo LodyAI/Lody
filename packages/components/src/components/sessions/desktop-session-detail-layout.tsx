@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,19 @@ export type DesktopSessionDetailLayoutProps = {
    * unreadable at the default panel width.
    */
   sidebarMinWidthRequest?: { seq: number; minWidthPx: number } | null;
+  /**
+   * Bumped by the parent whenever `sidebarOpen` changes because panel state was
+   * RESTORED — a session switch, or the `?pr=` deep link landing once the PR
+   * resolves — rather than because the user asked for it.
+   *
+   * A restore renders straight to the target size instead of replaying the
+   * expand/collapse transition. `flex-grow`/`min-width` are layout properties,
+   * so animating them runs a full style → layout → paint → compositing pass
+   * every frame for the whole detail tree; a trace of two session switches
+   * spent ~400ms of near-saturated main thread per switch on exactly that, for
+   * an animation the user never asked for. User-driven toggles still animate.
+   */
+  sidebarRestoreSeq?: number;
 };
 
 /** The conversation column keeps at least this much width when a sidebar
@@ -41,6 +54,7 @@ export function DesktopSessionDetailLayout({
   onSidebarCollapse,
   deleteConfirmDialog,
   sidebarMinWidthRequest,
+  sidebarRestoreSeq = 0,
 }: DesktopSessionDetailLayoutProps) {
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const groupWrapperRef = useRef<HTMLDivElement>(null);
@@ -49,6 +63,8 @@ export function DesktopSessionDetailLayout({
   const lastConsumedSidebarRequestSeqRef = useRef(0);
   const [isResizing, setIsResizing] = useState(false);
   const shouldReduceMotion = useReducedMotion();
+  const [appliedRestoreSeq, setAppliedRestoreSeq] = useState(sidebarRestoreSeq);
+  const isRestoringSidebar = appliedRestoreSeq !== sidebarRestoreSeq;
 
   /** px → panel-group percent, or null when the window is too narrow to spare
    *  the width (the conversation column would drop below its floor). */
@@ -106,7 +122,18 @@ export function DesktopSessionDetailLayout({
     panel.resize(Math.max(panel.getSize(), percent));
   }, [sidebarMinWidthRequest, sidebarOpen, sidebarMinWidthToPercent]);
 
-  const transitionDuration = shouldReduceMotion ? '0ms' : '220ms';
+  // Re-arm the transition only once the browser has rendered a frame with it
+  // suppressed. `panel.resize()` reaches the DOM through a PanelGroup state
+  // update, so restoring the duration any earlier can land in the SAME style
+  // recalc as the new `flex-grow` — and the restore would animate after all.
+  useEffect(() => {
+    if (!isRestoringSidebar) return undefined;
+    const frame = requestAnimationFrame(() => setAppliedRestoreSeq(sidebarRestoreSeq));
+    return () => cancelAnimationFrame(frame);
+  }, [isRestoringSidebar, sidebarRestoreSeq]);
+
+  const animatesSidebar = !shouldReduceMotion && !isRestoringSidebar;
+  const transitionDuration = animatesSidebar ? '220ms' : '0ms';
 
   return (
     <div ref={groupWrapperRef} className="relative h-full w-full">
@@ -185,7 +212,7 @@ export function DesktopSessionDetailLayout({
             animate={{ x: sidebarOpen ? 0 : '100%' }}
             aria-hidden={!sidebarOpen}
             transition={{
-              duration: shouldReduceMotion ? 0 : 0.22,
+              duration: animatesSidebar ? 0.22 : 0,
               ease: [0.32, 0.72, 0, 1],
             }}
           >

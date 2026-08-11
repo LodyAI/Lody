@@ -36,7 +36,7 @@ const requiredPublishedRuntimeDependencies = [
 // repackages node-pty 1.1.0-beta14, which predates the queued pty writer and writes
 // through tty.WriteStream, where EAGAIN is masked and can block (microsoft/node-pty#833).
 const requiredExactPublishedRuntimeDependencies = new Map([
-  ['loro-crdt', '1.13.9'],
+  ['loro-crdt', '1.14.0'],
   ['@lydell/node-pty', '1.2.0-beta.14'],
 ]);
 

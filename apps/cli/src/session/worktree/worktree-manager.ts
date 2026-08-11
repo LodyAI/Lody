@@ -88,6 +88,34 @@ export interface WorktreeManagerConfig {
 
 type RepoFetchMode = 'skip' | 'best-effort' | 'required';
 
+/**
+ * Broker coordinates for authenticated host-side git, supplied by the caller.
+ *
+ * INVARIANT: host git must never resolve the credential broker from ambient
+ * `process.env`. Every workspace runtime in a fleet process owns its own
+ * `GitCredentialBroker` bound to its own workspace-scoped `GitHubTokenManager`,
+ * and they all write the same process-global `LODY_GIT_CRED_BROKER_*` variables,
+ * so the ambient value belongs to whichever workspace started or recovered its
+ * broker last. A session in workspace A would then authenticate through
+ * workspace B's token manager and get `repo_not_linked` for a repo A has linked.
+ *
+ * This must stay a per-call argument rather than manager state: `getWorktreeManager`
+ * caches by `repoId` alone, so two workspaces sharing a repo share one instance.
+ */
+export type GitCredentialBrokerAuth = {
+  workspaceId: string;
+  url: string;
+  token: string;
+};
+
+const buildBrokerAuthEnv = (auth: GitCredentialBrokerAuth | undefined): NodeJS.ProcessEnv =>
+  auth
+    ? {
+        LODY_GIT_CRED_BROKER_URL: auth.url,
+        LODY_GIT_CRED_BROKER_TOKEN: auth.token,
+      }
+    : {};
+
 export type RemoveWorktreeOptions = {
   baseBranchName?: string;
 };
@@ -99,6 +127,11 @@ type ReusableBaseBranch = {
 
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_NAME = 'Lody Archive';
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_EMAIL = 'archive@lody.ai';
+
+// Ceiling for any single git invocation. Must stay well below the file-lock
+// staleness window (30 min) so a stalled git process releases the repo lock
+// by failing instead of looking like a live holder.
+const GIT_OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Per-repo file lock for git operations (cross-process safe)
@@ -297,6 +330,16 @@ export class WorktreeManager {
 
       let stdout = '';
       let stderr = '';
+      let timedOut = false;
+
+      // Git has no deadline of its own for stalled network operations; without this a
+      // hung fetch/clone would pin the per-repo worktree lock until the file-lock
+      // staleness window frees it.
+      const timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, GIT_OPERATION_TIMEOUT_MS);
+      timeoutTimer.unref();
 
       // Use setEncoding to handle UTF-8 multibyte boundaries correctly
       // (e.g., non-ASCII branch names, file paths, user.name)
@@ -312,10 +355,16 @@ export class WorktreeManager {
       });
 
       child.on('error', (error) => {
+        clearTimeout(timeoutTimer);
         reject(mapGitSpawnError(error, cwd));
       });
 
       child.on('close', (code) => {
+        clearTimeout(timeoutTimer);
+        if (timedOut) {
+          reject(new Error(`git ${args.join(' ')} timed out after ${GIT_OPERATION_TIMEOUT_MS}ms`));
+          return;
+        }
         if (code !== 0) {
           const details = (stderr || stdout || '').trim();
           reject(new Error(details ? details : `git exited with code ${code}`));
@@ -416,6 +465,7 @@ export class WorktreeManager {
   private async diagnoseGitHubGitAuthFailure(options: {
     operation: string;
     errorMessage: string;
+    brokerAuth?: GitCredentialBrokerAuth;
   }): Promise<void> {
     if (!isTerminalPromptsDisabledErrorMessage(options.errorMessage)) {
       return;
@@ -423,8 +473,12 @@ export class WorktreeManager {
 
     const remote = parseGitHubHttpsRemote(this.repoUrl);
     const helperPath = getCredentialHelperHostPath(this.repoId);
-    const brokerUrl = process.env.LODY_GIT_CRED_BROKER_URL;
-    const brokerToken = process.env.LODY_GIT_CRED_BROKER_TOKEN;
+    // Probe the SAME broker the failing git command used. Reading process.env here
+    // would probe whichever workspace wrote the global pointer last, which is exactly
+    // the misrouting this argument exists to prevent — the resulting `repo_not_linked`
+    // then looks like the caller's workspace lacks the link when it does not.
+    const brokerUrl = options.brokerAuth?.url;
+    const brokerToken = options.brokerAuth?.token;
 
     // Write helper debug JSONL under the repo mount so it persists and is easy to retrieve.
     const debugFile = path.join(this.repoDir, `git-cred-helper-${Date.now()}-${process.pid}.jsonl`);
@@ -432,6 +486,9 @@ export class WorktreeManager {
     const diagnostics: Record<string, unknown> = {
       repoId: this.repoId,
       operation: options.operation,
+      // Names the workspace whose broker/token manager was actually used, so a
+      // multi-workspace misroute is visible in the log instead of inferred.
+      brokerWorkspaceId: options.brokerAuth?.workspaceId ?? null,
       repoUrl: maskGitUrl(this.repoUrl),
       isSshRepoUrl: isSshGitUrl(this.repoUrl),
       remoteHost: remote?.host ?? null,
@@ -504,6 +561,7 @@ export class WorktreeManager {
       fs.mkdirSync(this.repoDir, { recursive: true });
       const env: NodeJS.ProcessEnv = {
         ...process.env,
+        ...buildBrokerAuthEnv(options.brokerAuth),
         LODY_GIT_CRED_HELPER_DEBUG: 'true',
         LODY_GIT_CRED_HELPER_DEBUG_FILE: debugFile,
       };
@@ -678,7 +736,10 @@ export class WorktreeManager {
    * - `best-effort`: fetch if possible, but do not fail callers.
    * - `required`: fetch must succeed; otherwise throw (used when cutting a new worktree).
    */
-  private async ensureRepoLocked(fetchMode: RepoFetchMode = 'best-effort'): Promise<void> {
+  private async ensureRepoLocked(
+    fetchMode: RepoFetchMode = 'best-effort',
+    brokerAuth?: GitCredentialBrokerAuth
+  ): Promise<void> {
     if (this.source.kind === 'local-shared') {
       await this.ensureLocalSharedRepoLocked();
       return;
@@ -705,11 +766,16 @@ export class WorktreeManager {
       try {
         await this.runGit(
           [...this.buildGitAuthArgs(), 'clone', '--bare', cloneUrl, this.bareGitDir],
-          this.baseDir
+          this.baseDir,
+          buildBrokerAuthEnv(brokerAuth)
         );
       } catch (error) {
         const message = formatErrorMessage(error);
-        await this.diagnoseGitHubGitAuthFailure({ operation: 'clone', errorMessage: message });
+        await this.diagnoseGitHubGitAuthFailure({
+          operation: 'clone',
+          errorMessage: message,
+          brokerAuth,
+        });
         throw new Error(`[${this.repoId}] Failed to clone bare repository: ${message}`, {
           cause: error,
         });
@@ -736,7 +802,8 @@ export class WorktreeManager {
     try {
       await this.runGit(
         [...this.buildGitAuthArgs(), 'fetch', 'origin', '--prune'],
-        this.bareGitDir
+        this.bareGitDir,
+        buildBrokerAuthEnv(brokerAuth)
       );
       let originHead: string | null = null;
       let originMain: string | null = null;
@@ -763,7 +830,11 @@ export class WorktreeManager {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      await this.diagnoseGitHubGitAuthFailure({ operation: 'fetch', errorMessage: message });
+      await this.diagnoseGitHubGitAuthFailure({
+        operation: 'fetch',
+        errorMessage: message,
+        brokerAuth,
+      });
       if (fetchMode === 'required') {
         throw new Error(`[${this.repoId}] Failed to fetch from origin: ${message}`, {
           cause: error,
@@ -940,8 +1011,13 @@ export class WorktreeManager {
           if (await this.hasCommitish(preferred)) return preferred;
           throw new Error(`Local project branch not found: ${preferred}`);
         }
-        return (await resolveLocalProjectBranchAtRootPath(this.source.originalRootPath, preferred))
-          .refName;
+        // `preferred` can still be a pre-selector bare name, which git itself
+        // would resolve local-first rather than reject.
+        return (
+          await resolveLocalProjectBranchAtRootPath(this.source.originalRootPath, preferred, {
+            preferLocalOnCollision: true,
+          })
+        ).refName;
       }
       if (await this.hasCommitish('HEAD')) return 'HEAD';
       throw new Error(`[${this.repoId}] Local repository has no commit to use as a worktree base`);
@@ -1012,9 +1088,9 @@ export class WorktreeManager {
   /**
    * Ensure the base repository is cloned/fetched
    */
-  async ensureRepo(): Promise<void> {
+  async ensureRepo(options?: { brokerAuth?: GitCredentialBrokerAuth }): Promise<void> {
     return withRepoLock(this.repoId, async () => {
-      await this.ensureRepoLocked('best-effort');
+      await this.ensureRepoLocked('best-effort', options?.brokerAuth);
     });
   }
 

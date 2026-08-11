@@ -31,7 +31,9 @@
   uses the project share mutation, which also shares its machine atomically. Route
   project share failures through `useConvexErrorMessage` so expired auth requests
   recovery and raw Convex details never reach the toast. GitHub options do not use
-  this local-project access badge.
+  this local-project access badge. The desktop machine selector marks an option as
+  local only when its value exactly matches `visibleLocalMachineId`; ownership and
+  Private access are independent and must never stand in for the local probe.
 - The landing composer footer is ordered run config → permission → usage on
   desktop. Mobile new-chat uses the same consolidated `MobileSessionRunConfig`
   face + sheet as the in-session composer (agent/model/reasoning/permission/

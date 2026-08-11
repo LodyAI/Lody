@@ -43,7 +43,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   Do not restore a per-trigger scan: `onMetaRoomSynced` fires on Streams recovery, so a
   misread transport edge turns into an O(rooms) scan every few seconds. Coalescing bounds
   the work per trigger, not the trigger rate — keeping that rate sane is the connection
-  recovery boundary's job
+  recovery boundary's job, and it now does: `onMetaRoomSynced` is rate-limited in
+  `../lib/loro/connection-recovery.ts`, while the cheap "back online" edge moved to
+  `onStreamsOnline`. Do not add a competing throttle here — that would move the cost
+  model and hide the one that matters
   (context/code-collab-flow.md).
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns: the agent
   starts immediately, but turn-scoped history LIST writes (assistant entry, ACP
@@ -56,10 +59,28 @@ delegation proofs or a shared-machine gate without a new product and security de
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+  Goal lifecycle is independent from prompt lifecycle: an `active` session goal does
+  not suppress turn completion or completion notification once the current prompt is
+  quiescent. Use live execution/presence for current-work signals; goal activity may
+  still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
   `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
-  the same history entry. Because teardown/cancel finalize (`message-handler.ts`
+  the same history entry.
+  INVARIANT: a steer (guide) the agent never accepted must not stay parked in
+  `pending_apply` — dispatch skips that status, so nothing else would ever run it.
+  `requeueUndeliveredSteer` hands it back to ordinary dispatch, and the load-bearing
+  write is the `latestUserMsgId` POINTER, not the entry status: `sessionNeedsActiveWatch`
+  reads meta only, so a turn visible solely in history is dropped the moment the
+  session goes idle (the watcher unsubscribes) and never reconsidered, restart
+  included. That is also why `findNextDispatchableUserTurn` dispatches a
+  `pending_apply` entry the pointer explicitly names — the flip to `pending` is a UI
+  and durability nicety that a not-yet-synced entry never receives. Only
+  pre-submission rejections plus the agent's own `AgentSteerNotDeliveredError` refusal
+  qualify: after submission the provider may already have committed the steer, and
+  re-sending would duplicate it. An entry that is already active, terminal, or past
+  `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
+  Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
   existing-entry branch clears `finished`/`endedAt`/`permissionWaitMs` when re-adopting
@@ -163,6 +184,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   launch config rule: do not write per-session `sessionLaunchConfig`; first
   `session/create` payload is transient, resume/dispatch resolve from agent config/project,
   and the legacy row is fallback/cleanup only.
+- Resuming a Session on a local project must use the workspace's current branch as-is, including
+  worktree mode. Branch selection may resolve and check out a branch during the initial
+  `session/create`, but an ACP restore must never prepare or switch back to the Session's recorded
+  branch.
 - `turn-post-processing-service.ts` — post-turn work (titles, notifications).
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow
   cache, D11). It may allow owner-cached turns from the catalog snapshot, deny

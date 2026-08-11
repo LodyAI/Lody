@@ -15,7 +15,7 @@ export const shouldCollapseAssistantMessageItem = ({
   isTurnFinished: boolean;
 }): boolean => {
   const itemCount = items.length;
-  const visibleTextIndex = getTextIndexBeforeTrailingImageGroup(items);
+  const visibleTextIndex = getTextIndexBeforeTrailingNeverCollapsedItems(items);
 
   return (
     isTurnFinished &&
@@ -31,16 +31,23 @@ export const shouldCollapseAssistantMessageItem = ({
   );
 };
 
-const getTextIndexBeforeTrailingImageGroup = (items: MessageContent[]): number => {
+/**
+ * Items that are appended AFTER the assistant's answer and are themselves never
+ * collapsed: generated images, and the "Exited Plan Mode" switch that closes a
+ * plan turn. The answer before them is still the answer, so it must not be
+ * demoted to process output just because it is no longer the last item.
+ */
+const isTrailingNeverCollapsedItem = (content: MessageContent | undefined): boolean =>
+  content?.type === 'image_group' ||
+  (content?.type === 'tool_call' && content.kind === 'switch_mode');
+
+const getTextIndexBeforeTrailingNeverCollapsedItems = (items: MessageContent[]): number => {
   let index = items.length - 1;
-  if (items[index]?.type !== 'image_group') {
+  if (!isTrailingNeverCollapsedItem(items[index])) {
     return -1;
   }
 
-  // Generated images are appended after the assistant's text answer; keep that
-  // answer visible instead of treating it as process output just because it is
-  // no longer the last item.
-  while (index >= 0 && items[index]?.type === 'image_group') {
+  while (index >= 0 && isTrailingNeverCollapsedItem(items[index])) {
     index -= 1;
   }
 

@@ -47,6 +47,7 @@ import { taskQuickAddOpenAtom, taskQuickAddStatusAtom } from '@/atoms/tasks';
 import { lodyConnectionUiStateAtom } from '@/atoms/control-connection';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
+import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import {
   chatScopeAtom,
@@ -1306,22 +1307,38 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [setLocalProjectCollapseState]
   );
 
+  const handleNavigateToProject = useCallback(
+    (machineId: MachineId, localProjectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: { context: 'local' as const, machine: machineId, project: localProjectId },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
   const handleImportLocalProject = useCallback(async () => {
     if (!isElectron || !runtime) return;
-    if (!window.api?.selectLocalProjectDirectory) {
-      return;
-    }
+    const selectDirectory = window.api?.selectLocalProjectDirectory;
+    if (!selectDirectory) return;
 
     try {
-      await selectAndWriteLocalProject({
-        runtime,
-        selectDirectory: window.api.selectLocalProjectDirectory,
-        timeoutMessage: t('localProjects.add.timeout', 'The machine did not respond in time.'),
+      await importSidebarLocalProject({
+        importProject: () =>
+          selectAndWriteLocalProject({
+            runtime,
+            selectDirectory,
+            timeoutMessage: t('localProjects.add.timeout', 'The machine did not respond in time.'),
+          }),
+        navigateToProject: handleNavigateToProject,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [runtime, t]);
+  }, [handleNavigateToProject, runtime, t]);
 
   const handleConfirmRemoveLocalProject = useCallback(async () => {
     const pending = pendingLocalProjectRemoval;
@@ -1415,19 +1432,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     }
     return map;
   }, [localProjectSessionsByKey]);
-
-  const handleNavigateToProject = useCallback(
-    (machineId: MachineId, localProjectId: string) => {
-      if (!workspaceSlug) return;
-      closeMobileDrawer();
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-        search: { context: 'local' as const, machine: machineId, project: localProjectId },
-      });
-    },
-    [closeMobileDrawer, router, workspaceSlug]
-  );
 
   const handleNavigateToSession = useCallback(
     (sessionId: string) => {
@@ -2585,7 +2589,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="text-sm text-foreground/80">
+          <div className="min-w-0 text-sm text-foreground/80 [overflow-wrap:anywhere]">
             {(pendingLocalProjectRemoval?.pathLabel ?? pendingLocalProjectRemoval?.name) || ''}
           </div>
           {pendingLocalProjectRemoval && pendingLocalProjectRemoval.runningSessionCount > 0 ? (

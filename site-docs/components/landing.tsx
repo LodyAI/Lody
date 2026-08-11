@@ -4,6 +4,7 @@ import type { MobileDeepSectionCopy } from './landing-mobile-deep-section';
 import type { OrchestrationSectionCopy } from './landing-orchestration-section';
 import type { PowerSectionCopy } from './landing-power-section';
 import type { SubscriptionsSectionCopy } from './landing-subscriptions-section';
+import { founderCallUrl } from '@site/lib/founder-call';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 import { UnderwaterExperience } from './underwater-experience';
@@ -125,6 +126,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       allPlatformsHref: '/download',
       webApp: 'Web app',
       webAppHref: '/login',
+      bookCall: 'Book a founder call',
+      bookCallHref: founderCallUrl('landing'),
       labels: {
         macArm: 'Download for macOS',
         macIntel: 'Intel Mac',
@@ -241,6 +244,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       allPlatformsHref: '/zh/download',
       webApp: 'Web App',
       webAppHref: '/login',
+      bookCall: '和创始人聊聊',
+      bookCallHref: founderCallUrl('landing'),
       labels: {
         macArm: '下载 macOS 版',
         macIntel: 'Intel Mac',

@@ -1,96 +1,106 @@
+import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { TreeView, type TreeDataItem } from '@/components/tree-view';
-import {
-  createFileIconComponent,
-  createFolderIconComponent,
-  DefaultFileIcon,
-  DefaultFolderIcon,
-} from '@/components/icons/file-icons';
+import { fn } from 'storybook/test';
+import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 
-// Mirrors the repo-root file list rendered by FileTreeView (collapsed folders +
-// files). TreeView is the shared row renderer, so this story exercises the same
-// row height / padding used in the session "Files" tab.
-const folder = (name: string): TreeDataItem => ({
-  id: name,
-  name,
-  icon: createFolderIconComponent(name),
-  openIcon: createFolderIconComponent(name),
-  forceNode: true,
-  children: [],
-});
-
-const file = (name: string): TreeDataItem => ({
-  id: name,
-  name,
-  icon: createFileIconComponent(name),
-});
-
-const repoRoot: TreeDataItem[] = [
-  folder('.changeset'),
-  folder('.cursor'),
-  folder('.devcontainer'),
-  folder('.github'),
-  folder('.vscode'),
-  folder('crates'),
-  folder('docs'),
-  folder('examples'),
-  folder('moon'),
-  folder('packages'),
-  folder('plans'),
-  folder('scripts'),
-  folder('skills'),
-  folder('sponsorkit'),
-  folder('supply-chain'),
-  file('.editorconfig'),
-  file('.gitignore'),
-  file('AGENTS.md'),
-  file('Cargo.lock'),
-  file('Cargo.toml'),
-  file('cliff.toml'),
-  file('CONTRIBUTING.md'),
-  file('deno.lock'),
-  file('deny.toml'),
-  file('LICENSE'),
-  file('package.json'),
-  file('pnpm-lock.yaml'),
-  file('pnpm-workspace.yaml'),
-  file('README.md'),
-  file('rust-toolchain'),
-  file('sponsorkit.config.js'),
+// Renders the REAL session "Files" surface. `FileTreeProviderView` owns the
+// ScrollArea, the flat virtualized row list, and the row height / indent, so this
+// story exercises production rows rather than re-composing them here.
+const folderPaths = [
+  '.changeset',
+  '.cursor',
+  '.devcontainer',
+  '.github',
+  '.vscode',
+  'crates',
+  'docs',
+  'examples',
+  'moon',
+  'packages',
+  'plans',
+  'scripts',
+  'skills',
+  'sponsorkit',
+  'supply-chain',
 ];
 
-// Mirror FileTreeView's container: the tree sits inside a padded wrapper while
-// TreeView itself runs with p-0, so this is the padding between the list and the
-// surrounding panel frame.
-function RepoRootFileTree() {
+const rootFiles = [
+  '.editorconfig',
+  '.gitignore',
+  'AGENTS.md',
+  'Cargo.lock',
+  'Cargo.toml',
+  'cliff.toml',
+  'CONTRIBUTING.md',
+  'deno.lock',
+  'deny.toml',
+  'LICENSE',
+  'package.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'README.md',
+  'rust-toolchain',
+  'sponsorkit.config.js',
+];
+
+// One nested file per folder so each directory is a real expandable node, which
+// is how the provider file index actually reports directories.
+const repoRootPaths = [...folderPaths.map((folder) => `${folder}/README.md`), ...rootFiles];
+
+// Well past the virtualization threshold, so this story covers the windowed row
+// path that large repositories hit.
+const largeRepoPaths = Array.from(
+  { length: 600 },
+  (_, index) => `packages/app/src/module-${String(index).padStart(3, '0')}.ts`
+);
+
+function FileTreeStory({ paths }: { readonly paths: readonly string[] }) {
+  const provider = useMemo(
+    () =>
+      createFakeSessionFileProvider({
+        sourceState: 'live-collaborative',
+        files: paths.map((path) => ({
+          path,
+          kind: 'text' as const,
+          sourceState: 'live-collaborative' as const,
+        })),
+      }),
+    [paths]
+  );
+
   return (
-    <div className="p-1">
-      <TreeView
-        data={repoRoot}
-        defaultNodeIcon={DefaultFolderIcon}
-        defaultLeafIcon={DefaultFileIcon}
-        className="p-0"
-      />
-    </div>
+    <FileTreeProviderView
+      fileProvider={provider}
+      fileProviderPending={false}
+      handleOpenFile={fn()}
+    />
   );
 }
 
 const meta = {
   title: 'Sessions/FileTreeList',
-  component: RepoRootFileTree,
+  component: FileTreeStory,
   parameters: {
     layout: 'centered',
   },
   decorators: [
     (Story) => (
-      <div className="h-[640px] w-[320px] overflow-auto border border-border bg-background">
+      <div className="h-[640px] w-[320px] border border-border bg-background">
         <Story />
       </div>
     ),
   ],
-} satisfies Meta<typeof RepoRootFileTree>;
+} satisfies Meta<typeof FileTreeStory>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const RepoRoot: Story = {};
+export const RepoRoot: Story = {
+  args: { paths: repoRootPaths },
+};
+
+// Scroll this one: only a viewport-sized window of rows is ever mounted.
+export const LargeVirtualizedTree: Story = {
+  args: { paths: largeRepoPaths },
+};

@@ -184,6 +184,34 @@ describe('shouldCollapseAssistantMessageItem', () => {
     ).toEqual([true, false, false]);
   });
 
+  it('keeps the plan visible when Exited Plan Mode ends the turn', () => {
+    // Approving a plan splits the ACP turn (CLI `rollAssistantEntryForPlanExit`),
+    // so the plan turn ends on the switch card. The plan is that turn's answer
+    // and must not be folded away as progress output.
+    const items = [
+      text('progress note'),
+      text('# Plan\n1. Do the thing'),
+      {
+        type: 'tool_call',
+        toolCallId: 'call-plan',
+        status: 'completed',
+        kind: 'switch_mode',
+        title: 'Exited Plan Mode',
+      },
+    ] satisfies MessageContent[];
+
+    expect(
+      items.map((content, index) =>
+        shouldCollapseAssistantMessageItem({
+          content,
+          index,
+          items,
+          isTurnFinished: true,
+        })
+      )
+    ).toEqual([true, false, false]);
+  });
+
   it('does not collapse plan blocks', () => {
     const items = [
       text('hidden progress'),

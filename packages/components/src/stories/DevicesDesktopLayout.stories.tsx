@@ -9,16 +9,25 @@ import type {
   SessionId,
   SessionMeta,
 } from '@lody/shared';
-import { MachineTabList, type MachineTabItem } from '@/components/settings/machine-tab-list';
+import {
+  MachineListFilterButton,
+  type MachineTabItem,
+} from '@/components/settings/machine-tab-list';
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
-import { resolveDesktopMachineSelection } from '@/components/settings/machine-selection';
+import {
+  MachineConnectedResources,
+  type MachineConnectedProject,
+} from '@/components/settings/my-machine-connected-resources';
+import {
+  WorkspaceMachineCollapsedRow,
+  WorkspaceMachineExpandedSection,
+  type WorkspaceMachineAccordionMeta,
+} from '@/components/settings/workspace-machine-accordion';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
 
 /**
- * Composed preview of the desktop Devices settings tab: machines get their own
- * left column with per-row share status, and the selected machine renders a
- * detail pane whose header exposes rename/share/restart/revoke/delete inline
- * (no ⋮ menu on desktop). Mirrors `MachineAgentSettings` mode="devices".
+ * Composed preview of the desktop Machines settings tab: every machine owns a
+ * full-width accordion row, and only the selected machine mounts its detail pane.
  */
 
 type FixtureMachine = {
@@ -74,6 +83,32 @@ const fixtureMachines: FixtureMachine[] = [
     ownerName: null,
   },
 ];
+
+const machineOwners = new Map([
+  [
+    'user-story',
+    { id: 'user-story', name: 'Zixuan Chen', email: 'zixuan@example.com', image: null },
+  ],
+  [
+    'user-teammate',
+    { id: 'user-teammate', name: 'Bob Smith', email: 'bob@example.com', image: null },
+  ],
+]);
+
+const directoryCounts = new Map<MachineId, number>([
+  ['machine-mbp' as MachineId, 4],
+  ['machine-mini' as MachineId, 2],
+  ['machine-beast' as MachineId, 6],
+  ['machine-hel' as MachineId, 0],
+]);
+
+const connectedProjects = (machineId: MachineId): MachineConnectedProject[] =>
+  Array.from({ length: directoryCounts.get(machineId) ?? 0 }, (_, index) => ({
+    key: `${machineId}:project-${index}`,
+    name: index === 0 ? 'lody' : `connected-project-${index + 1}`,
+    rootPath: `/Users/zixuan/Code/${index === 0 ? 'lody' : `project-${index + 1}`}`,
+    sharedWithTeam: index % 2 === 0,
+  }));
 
 const resource = {
   memoryBytes: 768 * 1024 * 1024,
@@ -224,12 +259,18 @@ const sessionMetas = (machineId: MachineId): SessionMeta[] => [
   },
 ];
 
-function DevicesDesktopLayout({ initialSelectedId }: { initialSelectedId?: MachineId }) {
+function DevicesDesktopLayout({
+  initialSelectedId,
+  resourcePending = false,
+}: {
+  initialSelectedId?: MachineId;
+  resourcePending?: boolean;
+}) {
   const [filter, setFilter] = useState<MachineSettingsFilter>({
     onlineOnly: false,
     mineOnly: false,
   });
-  const [selectedId, setSelectedId] = useState<MachineId>(
+  const [selectedId, setSelectedId] = useState<MachineId | null>(
     initialSelectedId ?? fixtureMachines[0]!.id
   );
 
@@ -266,86 +307,121 @@ function DevicesDesktopLayout({ initialSelectedId }: { initialSelectedId?: Machi
     [allItems, filter]
   );
 
-  // Mirror the desktop invariant from MachineAgentSettings: the detail pane can
-  // only render a machine that is visible in the (filtered) list; a filtered-out
-  // selection falls back to a visible machine.
-  const { resolved: resolvedMachine } = resolveDesktopMachineSelection({
-    pool: items,
-    selectedMachineId: selectedId,
-    localMachineId: fixtureMachines[0]!.id,
-  });
-  const selected =
-    fixtureMachines.find((machine) => machine.id === resolvedMachine?.id) ?? null;
+  const sharedItems = items.filter((item) => item.sharedWithTeam);
+  const privateItems = allItems.filter((item) => !item.sharedWithTeam);
+
+  const getAccordionMeta = (item: MachineTabItem): WorkspaceMachineAccordionMeta => {
+    const ownerUserId = item.machine.ownerUserId ?? 'user-story';
+    return {
+      machine: item.machine,
+      isOnline: item.isOnline,
+      isLocal: item.machine.id === fixtureMachines[0]!.id,
+      isPrivate: !item.sharedWithTeam,
+      owner: machineOwners.get(ownerUserId) ?? null,
+      directoryCount: directoryCounts.get(item.machine.id) ?? 0,
+      agentCount: agentConfigs(item.machine.id).length,
+    };
+  };
+
+  const renderMachine = (item: MachineTabItem) => {
+    const fixture = fixtureMachines.find((machine) => machine.id === item.machine.id)!;
+    const accordionMeta = getAccordionMeta(item);
+    if (selectedId !== item.machine.id) {
+      return (
+        <WorkspaceMachineCollapsedRow
+          key={item.machine.id}
+          meta={accordionMeta}
+          onExpand={() => setSelectedId(item.machine.id)}
+        />
+      );
+    }
+
+    return (
+      <WorkspaceMachineExpandedSection
+        key={item.machine.id}
+        meta={accordionMeta}
+        onCollapse={() => setSelectedId(null)}
+      >
+        <MachineDetailPane
+          key={fixture.id}
+          mode="devices"
+          readOnly={!fixture.isOwn}
+          machine={item.machine}
+          configs={agentConfigs(fixture.id)}
+          isOwn={fixture.isOwn}
+          isLocal={fixture.id === fixtureMachines[0]!.id}
+          ownerName={fixture.ownerName}
+          sharedWithTeam={fixture.sharedWithTeam}
+          canDelete={!fixture.isOnline && fixture.isOwn}
+          onRename={fn(async () => {})}
+          onDelete={fn(async () => {})}
+          onSharedWithTeamChange={fixture.isOwn ? fn(async () => {}) : undefined}
+          onAddConfig={fn()}
+          onEditConfig={fn()}
+          onDeleteConfig={fn(async () => {})}
+          onRefreshConfig={fn(async () => {})}
+          onPing={fixture.isOwn ? fn(async () => 18) : undefined}
+          onRestartDaemon={fixture.isOwn && fixture.isOnline ? fn(async () => {}) : undefined}
+          canRevokeCredentials={fixture.isOwn}
+          onRevokeCredentials={fixture.isOwn ? fn(async () => {}) : undefined}
+          monitorSnapshot={
+            fixture.isOnline && !resourcePending ? monitorSnapshot(fixture.id) : null
+          }
+          monitorState={fixture.isOnline ? 'active' : 'disabled'}
+          monitorSessionMetas={sessionMetas(fixture.id)}
+          onOpenMonitorSession={fn()}
+          onTerminateMonitorSession={fixture.isOwn ? fn(async () => {}) : undefined}
+          footer={
+            <MachineConnectedResources
+              machineId={fixture.id}
+              configs={agentConfigs(fixture.id)}
+              preloadedProjects={connectedProjects(fixture.id)}
+              projectsLoading={false}
+              readOnly
+              onManageAgents={fn()}
+            />
+          }
+          accordion={{
+            meta: accordionMeta,
+            onCollapse: () => setSelectedId(null),
+            headerRenderedExternally: true,
+          }}
+        />
+      </WorkspaceMachineExpandedSection>
+    );
+  };
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
       <div className="min-w-0">
-        <h2 className="text-base font-semibold text-foreground">Devices</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-base font-semibold text-foreground">Machines</h2>
+          <MachineListFilterButton filter={filter} onFilterChange={setFilter} />
+        </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Resource usage and running agents on each connected device.
+          View workspace machines and manage the machines you own.
         </p>
       </div>
-      <div className="flex min-w-0 items-start gap-5">
-        <aside className="w-60 shrink-0">
-          <MachineTabList
-            items={items}
-            selectedMachineId={selected?.id ?? null}
-            onSelect={setSelectedId}
-            filter={filter}
-            onFilterChange={setFilter}
-            totalBeforeFilter={allItems.length}
-          />
-        </aside>
-        <div className="min-w-0 flex-1">
-          {selected ? (
-            <MachineDetailPane
-              key={selected.id}
-              mode="devices"
-              machine={{
-                id: selected.id,
-                name: selected.name,
-                os: selected.os,
-                cliVersion: selected.cliVersion,
-                sessions: [],
-                raceLimits: {},
-                ownerUserId: selected.isOwn ? 'user-story' : 'user-teammate',
-              }}
-              configs={agentConfigs(selected.id)}
-              isOwn={selected.isOwn}
-              isLocal={selected.id === fixtureMachines[0]!.id}
-              ownerName={selected.ownerName}
-              sharedWithTeam={selected.sharedWithTeam}
-              canDelete={!selected.isOnline && selected.isOwn}
-              onRename={fn(async () => {})}
-              onDelete={fn(async () => {})}
-              onSharedWithTeamChange={selected.isOwn ? fn(async () => {}) : undefined}
-              onAddConfig={fn()}
-              onEditConfig={fn()}
-              onDeleteConfig={fn(async () => {})}
-              onRefreshConfig={fn(async () => {})}
-              onPing={fn(async () => 18)}
-              onRestartDaemon={selected.isOnline ? fn(async () => {}) : undefined}
-              canRevokeCredentials={selected.isOwn}
-              onRevokeCredentials={selected.isOwn ? fn(async () => {}) : undefined}
-              monitorSnapshot={selected.isOnline ? monitorSnapshot(selected.id) : null}
-              monitorState={selected.isOnline ? 'active' : 'disabled'}
-              monitorSessionMetas={sessionMetas(selected.id)}
-              onOpenMonitorSession={fn()}
-              onTerminateMonitorSession={fn(async () => {})}
-            />
-          ) : (
-            <div className="px-1 py-8 text-center text-sm text-muted-foreground">
-              Select a device.
-            </div>
-          )}
+      <div className="space-y-3">{sharedItems.map(renderMachine)}</div>
+      <section className="space-y-3 pt-3">
+        <div className="px-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">Your private machines</h3>
+            <span className="text-xs text-muted-foreground">{privateItems.length}</span>
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            These machines are not available to other workspace members. Select one to manage
+            sharing.
+          </p>
         </div>
-      </div>
+        <div className="space-y-3">{privateItems.map(renderMachine)}</div>
+      </section>
     </div>
   );
 }
 
 const meta = {
-  title: 'Settings/DevicesDesktopLayout',
+  title: 'Settings/MachinesDesktopLayout',
   component: DevicesDesktopLayout,
   parameters: { layout: 'fullscreen' },
   decorators: [
@@ -370,4 +446,8 @@ export const TeammateMachine: Story = {
 
 export const OfflinePrivateMachine: Story = {
   args: { initialSelectedId: 'machine-hel' as MachineId },
+};
+
+export const WaitingForResourceSample: Story = {
+  args: { resourcePending: true },
 };

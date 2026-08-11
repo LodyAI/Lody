@@ -37,11 +37,13 @@ export function useVisibleLocalProjects(
 }
 
 export function useVisibleLocalProjectsFromMachineIndex(
-  visibleMachineIndex: Pick<VisibleMachineIndex, 'machines' | 'accessByMachineId' | 'isLoading'>
+  visibleMachineIndex: Pick<VisibleMachineIndex, 'machines' | 'accessByMachineId' | 'isLoading'>,
+  options: { enabled?: boolean } = {}
 ): VisibleLocalProjectIndex {
+  const enabled = options.enabled ?? true;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const {
     machines: visibleMachines,
@@ -50,17 +52,18 @@ export function useVisibleLocalProjectsFromMachineIndex(
   } = visibleMachineIndex;
   const queriedAccessRows = useCloudQuery(
     cloudOperations.localProjects.listVisibleLocalProjects,
-    workspaceId ? { workspaceId } : 'skip'
+    enabled && workspaceId ? { workspaceId } : 'skip'
   );
   const rawAccessRows = queriedAccessRows ?? EMPTY_ACCESS_ROWS;
   const isLoading =
-    machineVisibilityLoading ||
-    isAuthedWorkspaceQueryLoading({
-      workspaceId,
-      isConvexAuthLoading,
-      canQuery,
-      queryResult: queriedAccessRows,
-    });
+    enabled &&
+    (machineVisibilityLoading ||
+      isAuthedWorkspaceQueryLoading({
+        workspaceId,
+        isConvexAuthLoading,
+        canQuery,
+        queryResult: queriedAccessRows,
+      }));
 
   return useMemo(
     () =>

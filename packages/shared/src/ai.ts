@@ -1074,13 +1074,13 @@ export type SessionGoalContent = {
   objective: string;
   status: SessionGoalStatus;
   tokenBudget?: number | null;
-  /** Legacy Codex goal telemetry. Current ACP goal snapshots do not report it. */
+  /** Legacy Codex goal telemetry. Current ACP goal snapshots may omit it. */
   tokensUsed?: number;
-  /** Legacy Codex goal telemetry. Current ACP goal snapshots do not report it. */
+  /** Legacy Codex goal telemetry. Current ACP goal snapshots may omit it. */
   timeUsedSeconds?: number;
-  /** Legacy goal timestamp retained for previously persisted history. */
+  /** ACP goal timestamp; legacy history may also contain it. */
   createdAt?: number;
-  /** Legacy goal timestamp retained for previously persisted history. */
+  /** ACP goal timestamp; legacy history may also contain it. */
   updatedAt?: number;
 };
 

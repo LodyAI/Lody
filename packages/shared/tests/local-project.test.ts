@@ -15,6 +15,7 @@ import {
   resolveLocalProjectBranchAtRootPath,
   resolveLocalProjectBranchRefAtRootPath,
   resolveLocalProjectLegacyBaseBranchAtRootPath,
+  selectLocalProjectBranchSelector,
 } from '../src/node/local-project';
 
 const require = createRequire(import.meta.url);
@@ -25,6 +26,7 @@ const {
   parseLocalProjectBranchRefAtRootPath: parseLocalProjectBranchRefAtRootPathCjs,
   resolveLocalProjectBranchRefAtRootPath: resolveLocalProjectBranchRefAtRootPathCjs,
   resolveLocalProjectLegacyBaseBranchAtRootPath: resolveLocalProjectLegacyBaseBranchAtRootPathCjs,
+  selectLocalProjectBranchSelector: selectLocalProjectBranchSelectorCjs,
 } = require('../src/node/local-project.cjs') as {
   checkoutLocalProjectBranchAtRootPath: (
     rootPath: string,
@@ -35,8 +37,10 @@ const {
   ) => ReturnType<typeof getLocalProjectGitStateAtRootPath>;
   resolveLocalProjectBranchAtRootPath: (
     rootPath: string,
-    branchName: string
+    branchName: string,
+    options?: { preferLocalOnCollision?: boolean }
   ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
+  selectLocalProjectBranchSelector: (branches: string[], branchName: string) => string | null;
   parseLocalProjectBranchRefAtRootPath: (
     rootPath: string,
     refName: string
@@ -47,7 +51,8 @@ const {
   ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
   resolveLocalProjectLegacyBaseBranchAtRootPath: (
     rootPath: string,
-    branchName: string
+    branchName: string,
+    options?: { useWorktree?: boolean }
   ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
 };
 
@@ -432,6 +437,172 @@ describe('local-project helpers', () => {
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
+
+  it(
+    'keeps a legacy base on the local branch when no upstream records the base',
+    async () => {
+      tempDir = makeTempDir();
+      const projectDir = createGitProjectWithRemotes(tempDir, [
+        { name: 'origin', url: path.join(tempDir, 'origin.git') },
+      ]);
+      const remoteCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
+      runGit(projectDir, ['update-ref', 'refs/remotes/origin/master', remoteCommit]);
+      // `git checkout -b` records no upstream, which is the ordinary shape for a
+      // `master` that predates selectors.
+      runGit(projectDir, ['checkout', '-b', 'master']);
+      fs.writeFileSync(path.join(projectDir, 'local.txt'), 'local only\n', 'utf8');
+      runGit(projectDir, ['add', 'local.txt']);
+      runGit(projectDir, [
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.com',
+        'commit',
+        '-m',
+        'local master',
+      ]);
+      const localCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
+      runGit(projectDir, ['checkout', 'main']);
+      expect(localCommit).not.toBe(remoteCommit);
+
+      const expected = {
+        kind: 'local',
+        refName: 'refs/heads/master',
+        commitHash: localCommit,
+      };
+      for (const options of [undefined, { useWorktree: true }, { useWorktree: false }]) {
+        await expect(
+          resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'master', options)
+        ).resolves.toMatchObject(expected);
+        await expect(
+          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'master', options)
+        ).resolves.toMatchObject(expected);
+      }
+
+      // The strict selector contract is unchanged: only the legacy/human paths
+      // fall back to Git's local-first precedence.
+      await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'master')).rejects.toThrow(
+        'Local project branch is ambiguous: master'
+      );
+      await expect(
+        resolveLocalProjectBranchAtRootPath(projectDir, 'master', { preferLocalOnCollision: true })
+      ).resolves.toMatchObject(expected);
+      await expect(
+        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'master', {
+          preferLocalOnCollision: true,
+        })
+      ).resolves.toMatchObject(expected);
+    },
+    GIT_HELPER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'keeps a worktree base on the local branch even when it tracks a remote',
+    async () => {
+      tempDir = makeTempDir();
+      const projectDir = createGitProjectWithRemotes(tempDir, [
+        { name: 'origin', url: path.join(tempDir, 'origin.git') },
+      ]);
+      const remoteCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
+      runGit(projectDir, ['update-ref', 'refs/remotes/origin/main', remoteCommit]);
+      runGit(projectDir, ['branch', '--set-upstream-to=origin/main', 'main']);
+      fs.writeFileSync(path.join(projectDir, 'local.txt'), 'ahead of origin\n', 'utf8');
+      runGit(projectDir, ['add', 'local.txt']);
+      runGit(projectDir, [
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.com',
+        'commit',
+        '-m',
+        'ahead of origin',
+      ]);
+      const localCommit = runGit(projectDir, ['rev-parse', 'HEAD']);
+      expect(localCommit).not.toBe(remoteCommit);
+
+      // Worktree mode never checked the base out in the project root, so the
+      // local branch is the user's own and stays the base.
+      const worktreeExpected = {
+        kind: 'local',
+        refName: 'refs/heads/main',
+        commitHash: localCommit,
+      };
+      await expect(
+        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main', { useWorktree: true })
+      ).resolves.toMatchObject(worktreeExpected);
+      await expect(
+        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main', { useWorktree: true })
+      ).resolves.toMatchObject(worktreeExpected);
+
+      // Checkout mode still recovers the upstream, because there the local
+      // branch may be the session's own work branch.
+      const checkoutExpected = {
+        kind: 'remote',
+        refName: 'refs/remotes/origin/main',
+        commitHash: remoteCommit,
+      };
+      await expect(
+        resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main')
+      ).resolves.toMatchObject(checkoutExpected);
+      await expect(
+        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main')
+      ).resolves.toMatchObject(checkoutExpected);
+    },
+    GIT_HELPER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'still refuses a legacy base that only matches several remotes',
+    async () => {
+      tempDir = makeTempDir();
+      const projectDir = createGitProjectWithRemotes(tempDir, [
+        { name: 'origin', url: path.join(tempDir, 'origin.git') },
+        { name: 'upstream', url: path.join(tempDir, 'upstream.git') },
+      ]);
+      runGit(projectDir, ['update-ref', 'refs/remotes/origin/release', 'HEAD']);
+      runGit(projectDir, ['update-ref', 'refs/remotes/upstream/release', 'HEAD']);
+
+      // Git refuses this too ("matched multiple remote tracking branches"), and
+      // there is no local branch whose precedence could break the tie.
+      const expectedMessage =
+        'Local project branch is ambiguous: release. Matches: refs/remotes/origin/release, refs/remotes/upstream/release';
+      for (const options of [undefined, { useWorktree: true }]) {
+        await expect(
+          resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'release', options)
+        ).rejects.toThrow(expectedMessage);
+        await expect(
+          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'release', options)
+        ).rejects.toThrow(expectedMessage);
+      }
+    },
+    GIT_HELPER_TEST_TIMEOUT_MS
+  );
+
+  it('maps a bare branch name onto a reported selector, preferring the local one', () => {
+    const branches = [
+      'lody:branch:local:main',
+      'lody:branch:remote:origin:main',
+      'origin/release',
+      'lody:branch:remote:origin:solo',
+      'lody:branch:remote:upstream:shared',
+      'lody:branch:remote:origin:shared',
+    ];
+
+    for (const select of [selectLocalProjectBranchSelector, selectLocalProjectBranchSelectorCjs]) {
+      expect(select(branches, 'main')).toBe('lody:branch:local:main');
+      expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
+        'lody:branch:remote:origin:main'
+      );
+      // Exact members win before any precedence rule applies.
+      expect(select(branches, 'origin/release')).toBe('origin/release');
+      // A bare name with a single remote match resolves to that remote.
+      expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
+      // Several remotes and no local branch stays unresolved.
+      expect(select(branches, 'shared')).toBeNull();
+      expect(select(branches, 'missing')).toBeNull();
+      expect(select(branches, '  ')).toBeNull();
+    }
+  });
 
   it(
     'rejects an unqualified branch that exists on multiple remotes',

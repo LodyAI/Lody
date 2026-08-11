@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../lib';
 import { commands, registerBuiltInCommands } from '../lib/commands';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
+import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
 import { useSetAtom } from 'jotai';
 import {
   detectBrowserLanguage,
@@ -47,6 +48,16 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
       console.error('AppInitializer: failed to initialize i18n', error);
     });
   }, [setLanguage]);
+
+  /* Run a pending "clear cache" / "clear all local data" request as early as
+     possible. `RuntimeProvider` also awaits it (and shares the same one-shot
+     promise, so the repo IndexedDB is never reopened mid-delete), but it only
+     mounts once a workspace id exists. A user wedged before that — stuck on
+     sign-in, which is exactly when the crash screen's hard reset gets used —
+     would otherwise carry the pending flag forever. */
+  useEffect(() => {
+    void maybeClearLodyCacheOnBoot();
+  }, []);
 
   useEffect(() => {
     const syncLanguage = (language: string) => {

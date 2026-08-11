@@ -1,9 +1,25 @@
 import { useCallback } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentWorkspaceSlugAtom, settingsActiveTabAtom, settingsDialogOpenAtom } from '@/atoms';
-import { type SettingsTabId } from '@/components/settings/settings-tabs';
+import type { MachineId } from '@lody/shared';
+import {
+  currentWorkspaceSlugAtom,
+  settingsActiveTabAtom,
+  settingsDialogOpenAtom,
+  settingsSelectedMachineIdAtom,
+  settingsSelectedProjectKeyAtom,
+} from '@/atoms';
+import {
+  SETTINGS_DEFAULT_TAB,
+  type SettingsTabId,
+} from '@/components/settings/settings-tabs';
+import { useAppCapability } from '@/lib/app-platform';
 import { useIsMobile } from './use-mobile';
+
+type OpenSettingsOptions = {
+  machineId?: MachineId;
+  projectKey?: string;
+};
 
 /**
  * Single entry point for opening settings from anywhere in the app.
@@ -21,15 +37,22 @@ export function useOpenSettings() {
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const setOpen = useSetAtom(settingsDialogOpenAtom);
   const setActiveTab = useSetAtom(settingsActiveTabAtom);
+  const setSelectedMachineId = useSetAtom(settingsSelectedMachineIdAtom);
+  const setSelectedProjectKey = useSetAtom(settingsSelectedProjectKeyAtom);
+  const cloudAccountAvailable = useAppCapability('cloudAccount');
 
   const openSettings = useCallback(
-    (tab?: SettingsTabId) => {
+    (tab?: SettingsTabId, options?: OpenSettingsOptions) => {
       if (!workspaceSlug) return;
 
+      const resolvedTab = tab ?? (cloudAccountAvailable ? SETTINGS_DEFAULT_TAB : 'preferences');
+      if (options) {
+        setSelectedMachineId(options.machineId ?? null);
+        setSelectedProjectKey(options.projectKey ?? null);
+      }
+
       if (!isMobile) {
-        if (tab) {
-          setActiveTab(tab);
-        }
+        setActiveTab(resolvedTab);
         setOpen(true);
         return;
       }
@@ -37,21 +60,48 @@ export function useOpenSettings() {
       // Mobile: navigate to the matching full-page route. Each `to` is a literal so
       // the router can type-check params (mirrors the former route-based tab nav).
       const params = { workspaceName: workspaceSlug };
-      switch (tab) {
+      switch (resolvedTab) {
         case 'account':
           void router.navigate({ to: '/$workspaceName/settings/account', params });
           return;
-        case 'stats':
-          void router.navigate({ to: '/$workspaceName/settings/stats', params });
+        case 'preferences':
+          void router.navigate({ to: '/$workspaceName/settings/preferences', params });
+          return;
+        case 'appearance':
+          void router.navigate({ to: '/$workspaceName/settings/appearance', params });
+          return;
+        case 'workspace':
+          void router.navigate({ to: '/$workspaceName/settings/workspace', params });
+          return;
+        case 'people':
+          void router.navigate({ to: '/$workspaceName/settings/people', params });
+          return;
+        case 'ai-usage':
+          void router.navigate({ to: '/$workspaceName/settings/ai-usage', params });
           return;
         case 'projects':
-          void router.navigate({ to: '/$workspaceName/settings/projects', params });
+          void router.navigate({
+            to: '/$workspaceName/settings/projects',
+            params,
+            search: {
+              machine: options?.machineId,
+              project: options?.projectKey,
+            },
+          });
           return;
-        case 'devices':
-          void router.navigate({ to: '/$workspaceName/settings/devices', params });
+        case 'machines':
+          void router.navigate({
+            to: '/$workspaceName/settings/machines',
+            params,
+            search: { machine: options?.machineId },
+          });
           return;
-        case 'agent-config':
-          void router.navigate({ to: '/$workspaceName/settings/agent-config', params });
+        case 'agents':
+          void router.navigate({
+            to: '/$workspaceName/settings/agents',
+            params,
+            search: { machine: options?.machineId },
+          });
           return;
         case 'github':
           void router.navigate({ to: '/$workspaceName/settings/github', params });
@@ -62,9 +112,6 @@ export function useOpenSettings() {
         case 'about':
           void router.navigate({ to: '/$workspaceName/settings/about', params });
           return;
-        case 'general':
-          void router.navigate({ to: '/$workspaceName/settings/general', params });
-          return;
         case 'billing':
           void router.navigate({ to: '/$workspaceName/settings/billing', params });
           return;
@@ -72,7 +119,16 @@ export function useOpenSettings() {
           void router.navigate({ to: '/$workspaceName/settings', params });
       }
     },
-    [isMobile, router, setActiveTab, setOpen, workspaceSlug]
+    [
+      cloudAccountAvailable,
+      isMobile,
+      router,
+      setActiveTab,
+      setOpen,
+      setSelectedMachineId,
+      setSelectedProjectKey,
+      workspaceSlug,
+    ]
   );
 
   const closeSettings = useCallback(() => {

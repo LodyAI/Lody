@@ -33,7 +33,6 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { UserAvatar } from '../user-avatar';
-import { isNativeIOSAppShell } from '@/lib/native-platform';
 import type { OrganizationMemberRef, OrganizationMemberRole } from '@/lib/organization-member-role';
 import {
   Dialog,
@@ -108,7 +107,10 @@ export type WorkspaceDeleteBillingGuard =
   | { kind: 'active-subscription' }
   | { kind: 'cancel-scheduled'; formattedPeriodEnd: string | null };
 
+export type AccountSettingsSurface = 'account' | 'workspace';
+
 export interface AccountSettingsPureProps {
+  surface?: AccountSettingsSurface;
   currentUser?: {
     id?: string | null;
     name?: string | null;
@@ -126,6 +128,8 @@ export interface AccountSettingsPureProps {
   members: AccountMember[];
   pendingInvitations: Invitation[];
   workspaceJoinRequestsSlot?: ReactNode;
+  /** Account-only machine overview supplied by the runtime-aware container. */
+  accountMachinesSlot?: ReactNode;
   memberLimit?: number | null;
   memberLimitReached?: boolean;
   billingUiAvailable?: boolean;
@@ -170,6 +174,7 @@ export interface AccountSettingsPureProps {
 }
 
 export function AccountSettingsPure({
+  surface = 'account',
   currentUser,
   organization,
   role,
@@ -177,6 +182,7 @@ export function AccountSettingsPure({
   members,
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
+  accountMachinesSlot,
   memberLimit = null,
   memberLimitReached = false,
   billingUiAvailable = true,
@@ -217,10 +223,7 @@ export function AccountSettingsPure({
 }: AccountSettingsPureProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  // In-app account deletion is an Apple App Store requirement; only surface it
-  // on the native iOS app (not web, Android, or desktop).
-  const showAccountDeletion = isNativeIOSAppShell();
-
+  const isWorkspaceSurface = surface === 'workspace';
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
@@ -465,6 +468,7 @@ export function AccountSettingsPure({
   if (isMobile) {
     return (
       <MobileAccountSettings
+        surface={surface}
         currentUser={currentUser}
         organization={organization}
         role={role}
@@ -506,6 +510,7 @@ export function AccountSettingsPure({
         onCopyGeneratedCliApiKey={onCopyGeneratedCliApiKey}
         onClearGeneratedCliApiKey={onClearGeneratedCliApiKey}
         onRevokeCliApiKey={onRevokeCliApiKey}
+        accountMachinesSlot={accountMachinesSlot}
       />
     );
   }
@@ -513,362 +518,374 @@ export function AccountSettingsPure({
   return (
     <div className={settingContainerClass}>
       {/* Profile: user avatar, display name, connected accounts, password. */}
-      <CompactSection
-        title={t('settings.profile.title')}
-        headerRight={currentUser?.email || undefined}
-      >
-        <CompactRow label={t('settings.profile.name')}>
-          {canEditUserName ? (
-            isEditingUserName ? (
-              <Input
-                ref={userNameInputRef}
-                id="profile-name"
-                value={userNameDraft}
-                onChange={(event) => setUserNameDraft(event.target.value)}
-                onBlur={() => {
-                  void commitUserNameEdit();
-                }}
-                onKeyDown={handleUserNameKeyDown}
-                maxLength={120}
-                placeholder={t('settings.profile.namePlaceholder')}
-                disabled={isSavingUserName}
-                className="h-8 w-full min-w-0 sm:max-w-md"
-                aria-label={t('settings.profile.name')}
-              />
+      {surface === 'account' ? (
+        <CompactSection
+          title={t('settings.profile.title')}
+          headerRight={currentUser?.email || undefined}
+        >
+          <CompactRow label={t('settings.profile.name')}>
+            {canEditUserName ? (
+              isEditingUserName ? (
+                <Input
+                  ref={userNameInputRef}
+                  id="profile-name"
+                  value={userNameDraft}
+                  onChange={(event) => setUserNameDraft(event.target.value)}
+                  onBlur={() => {
+                    void commitUserNameEdit();
+                  }}
+                  onKeyDown={handleUserNameKeyDown}
+                  maxLength={120}
+                  placeholder={t('settings.profile.namePlaceholder')}
+                  disabled={isSavingUserName}
+                  className="h-8 w-full min-w-0 sm:max-w-md"
+                  aria-label={t('settings.profile.name')}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  onClick={beginUserNameEdit}
+                  disabled={isSavingUserName}
+                  aria-label={t('settings.profile.nameEditLabel')}
+                >
+                  <span className="min-w-0 truncate">
+                    {userNameBaseline || t('settings.profile.nameEmpty')}
+                  </span>
+                  {isSavingUserName ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  )}
+                </button>
+              )
             ) : (
-              <button
-                type="button"
-                className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
-                onClick={beginUserNameEdit}
-                disabled={isSavingUserName}
-                aria-label={t('settings.profile.nameEditLabel')}
-              >
-                <span className="min-w-0 truncate">
-                  {userNameBaseline || t('settings.profile.nameEmpty')}
-                </span>
-                {isSavingUserName ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                ) : (
-                  <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
-                )}
-              </button>
-            )
-          ) : (
-            <span className="truncate font-medium">{userNameBaseline || '—'}</span>
-          )}
-        </CompactRow>
-        <CompactRow label={t('settings.profile.avatar.label')}>
-          <AvatarEditor
-            kind="user"
-            name={userNameBaseline}
-            image={userImage}
-            email={currentUser?.email}
-            editable={Boolean(onUploadAvatar)}
-            onUpload={(file) => handleUploadAvatar('user', file)}
-          />
-        </CompactRow>
-        {showLinkedAccounts ? (
-          <CompactRow label={t('settings.profile.bindings.label')}>
-            <LinkedAccountsList
-              accounts={linkedAccounts}
-              loading={isLoadingLinkedAccounts}
-              onConnect={onConnectAccount}
+              <span className="truncate font-medium">{userNameBaseline || '—'}</span>
+            )}
+          </CompactRow>
+          <CompactRow label={t('settings.profile.avatar.label')}>
+            <AvatarEditor
+              kind="user"
+              name={userNameBaseline}
+              image={userImage}
+              email={currentUser?.email}
+              editable={Boolean(onUploadAvatar)}
+              onUpload={(file) => handleUploadAvatar('user', file)}
             />
           </CompactRow>
-        ) : null}
-        {onChangePassword && onSetupPassword ? (
-          <CompactRow
-            label={t('settings.profile.password.label')}
-            helper={
-              hasPasswordCredential
-                ? t('settings.profile.password.helper')
-                : t('settings.profile.password.setupHelper')
-            }
-          >
-            <ChangePasswordButton
-              hasPassword={hasPasswordCredential}
-              onChangePassword={onChangePassword}
-              onVerifyCurrentPassword={onVerifyCurrentPassword}
-              onSetupPassword={onSetupPassword}
-            />
+          {showLinkedAccounts ? (
+            <CompactRow label={t('settings.profile.bindings.label')}>
+              <LinkedAccountsList
+                accounts={linkedAccounts}
+                loading={isLoadingLinkedAccounts}
+                onConnect={onConnectAccount}
+              />
+            </CompactRow>
+          ) : null}
+          {onChangePassword && onSetupPassword ? (
+            <CompactRow
+              label={t('settings.profile.password.label')}
+              helper={
+                hasPasswordCredential
+                  ? t('settings.profile.password.helper')
+                  : t('settings.profile.password.setupHelper')
+              }
+            >
+              <ChangePasswordButton
+                hasPassword={hasPasswordCredential}
+                onChangePassword={onChangePassword}
+                onVerifyCurrentPassword={onVerifyCurrentPassword}
+                onSetupPassword={onSetupPassword}
+              />
+            </CompactRow>
+          ) : null}
+          <CompactRow label={t('settings.account.signOut')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
+              onClick={() => {
+                void onSignOut();
+              }}
+            >
+              <LogOut className="mr-1.5 h-3.5 w-3.5" />
+              {t('settings.account.signOut')}
+            </Button>
           </CompactRow>
-        ) : null}
-        <CompactRow label={t('settings.account.signOut')}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
-            onClick={() => {
-              void onSignOut();
-            }}
-          >
-            <LogOut className="mr-1.5 h-3.5 w-3.5" />
-            {t('settings.account.signOut')}
-          </Button>
-        </CompactRow>
-      </CompactSection>
+        </CompactSection>
+      ) : null}
+
+      {surface === 'account' ? accountMachinesSlot : null}
 
       {/* Workspace: name + logo. */}
-      <CompactSection title={t('settings.workspace.title')}>
-        <CompactRow label={t('settings.account.workspaceName')}>
-          {canRenameOrganization ? (
-            isEditingWorkspaceName ? (
-              <Input
-                ref={workspaceNameInputRef}
-                id="workspace-name"
-                value={workspaceNameDraft}
-                onChange={(event) => setWorkspaceNameDraft(event.target.value)}
-                onBlur={() => {
-                  void commitWorkspaceNameEdit();
-                }}
-                onKeyDown={handleWorkspaceNameKeyDown}
-                maxLength={120}
-                placeholder={t('settings.account.workspaceNamePlaceholder')}
-                disabled={isRenamingOrganization}
-                className="h-8 w-full min-w-0 sm:max-w-md"
-                aria-label={t('settings.account.workspaceName')}
-              />
+      {isWorkspaceSurface ? (
+        <CompactSection title={t('settings.workspace.title')}>
+          <CompactRow label={t('settings.account.workspaceName')}>
+            {canRenameOrganization ? (
+              isEditingWorkspaceName ? (
+                <Input
+                  ref={workspaceNameInputRef}
+                  id="workspace-name"
+                  value={workspaceNameDraft}
+                  onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                  onBlur={() => {
+                    void commitWorkspaceNameEdit();
+                  }}
+                  onKeyDown={handleWorkspaceNameKeyDown}
+                  maxLength={120}
+                  placeholder={t('settings.account.workspaceNamePlaceholder')}
+                  disabled={isRenamingOrganization}
+                  className="h-8 w-full min-w-0 sm:max-w-md"
+                  aria-label={t('settings.account.workspaceName')}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  onClick={beginWorkspaceNameEdit}
+                  disabled={isRenamingOrganization}
+                  aria-label={t('settings.account.workspaceNameEditLabel')}
+                >
+                  <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
+                  {isRenamingOrganization ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  )}
+                </button>
+              )
             ) : (
-              <button
-                type="button"
-                className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
-                onClick={beginWorkspaceNameEdit}
-                disabled={isRenamingOrganization}
-                aria-label={t('settings.account.workspaceNameEditLabel')}
-              >
-                <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
-                {isRenamingOrganization ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                ) : (
-                  <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
-                )}
-              </button>
-            )
-          ) : (
-            <span className="truncate font-medium">{organization.name}</span>
-          )}
-        </CompactRow>
-        <CompactRow label={t('settings.workspace.avatar.label')}>
-          <AvatarEditor
-            kind="workspace"
-            name={workspaceNameBaseline}
-            image={workspaceLogo}
-            editable={canRenameOrganization && Boolean(onUploadAvatar)}
-            onUpload={(file) => handleUploadAvatar('workspace', file)}
-          />
-        </CompactRow>
-      </CompactSection>
+              <span className="truncate font-medium">{organization.name}</span>
+            )}
+          </CompactRow>
+          <CompactRow label={t('settings.workspace.avatar.label')}>
+            <AvatarEditor
+              kind="workspace"
+              name={workspaceNameBaseline}
+              image={workspaceLogo}
+              editable={canRenameOrganization && Boolean(onUploadAvatar)}
+              onUpload={(file) => handleUploadAvatar('workspace', file)}
+            />
+          </CompactRow>
+        </CompactSection>
+      ) : null}
 
-      <Dialog open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {hasGeneratedCliApiKey
-                ? t('settings.account.cliAuth.createdDialogTitle')
-                : t('settings.account.cliAuth.createDialogTitle')}
-            </DialogTitle>
-            <DialogDescription>
-              {hasGeneratedCliApiKey
-                ? t('settings.account.cliAuth.createdDialogDescription')
-                : t('settings.account.cliAuth.createDialogDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          {hasGeneratedCliApiKey ? (
-            <div className="space-y-3 py-4 text-sm">
-              <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
+      {surface === 'account' ? (
+        <Dialog open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {hasGeneratedCliApiKey
+                  ? t('settings.account.cliAuth.createdDialogTitle')
+                  : t('settings.account.cliAuth.createDialogTitle')}
+              </DialogTitle>
+              <DialogDescription>
+                {hasGeneratedCliApiKey
+                  ? t('settings.account.cliAuth.createdDialogDescription')
+                  : t('settings.account.cliAuth.createDialogDescription')}
+              </DialogDescription>
+            </DialogHeader>
+            {hasGeneratedCliApiKey ? (
+              <div className="space-y-3 py-4 text-sm">
+                <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void onCopyGeneratedCliApiKey?.();
+                  }}
+                  disabled={!onCopyGeneratedCliApiKey}
+                >
+                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.account.cliAuth.copyGeneratedButton')}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2 py-4">
+                <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
+                <Input
+                  id="cli-api-key-note"
+                  value={cliApiKeyNote}
+                  onChange={(event) => setCliApiKeyNote(event.target.value)}
+                  maxLength={160}
+                  placeholder={t('settings.account.cliAuth.notePlaceholder')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.account.cliAuth.noteHelper')}
+                </p>
+              </div>
+            )}
+            <DialogFooter>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  void onCopyGeneratedCliApiKey?.();
-                }}
-                disabled={!onCopyGeneratedCliApiKey}
+                onClick={() => handleCliApiKeyDialogOpenChange(false)}
+                disabled={isCreatingCliApiKey}
               >
-                <Copy className="mr-1.5 h-3.5 w-3.5" />
-                {t('settings.account.cliAuth.copyGeneratedButton')}
+                {hasGeneratedCliApiKey ? t('common.close') : t('common.cancel')}
               </Button>
-            </div>
-          ) : (
-            <div className="space-y-2 py-4">
-              <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
-              <Input
-                id="cli-api-key-note"
-                value={cliApiKeyNote}
-                onChange={(event) => setCliApiKeyNote(event.target.value)}
-                maxLength={160}
-                placeholder={t('settings.account.cliAuth.notePlaceholder')}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('settings.account.cliAuth.noteHelper')}
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleCliApiKeyDialogOpenChange(false)}
-              disabled={isCreatingCliApiKey}
-            >
-              {hasGeneratedCliApiKey ? t('common.close') : t('common.cancel')}
-            </Button>
-            {!hasGeneratedCliApiKey && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  void handleCreateCliApiKey();
-                }}
-                disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
-              >
-                {isCreatingCliApiKey && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                {t('settings.account.cliAuth.createConfirmButton')}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog
-        open={Boolean(cliApiKeyToRevoke)}
-        onOpenChange={(open) => {
-          if (!open) setCliApiKeyToRevoke(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('settings.account.cliAuth.revokeDialogDescription', {
-                note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={Boolean(revokingCliApiKeyId)}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void (async () => {
-                  if (!cliApiKeyToRevoke) return;
-                  await onRevokeCliApiKey?.(cliApiKeyToRevoke.id);
-                  setCliApiKeyToRevoke(null);
-                })();
-              }}
-              disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {revokingCliApiKeyId ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              {!hasGeneratedCliApiKey && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void handleCreateCliApiKey();
+                  }}
+                  disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
+                >
+                  {isCreatingCliApiKey && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  {t('settings.account.cliAuth.createConfirmButton')}
+                </Button>
               )}
-              {t('settings.account.cliAuth.revokeConfirmButton')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {surface === 'account' ? (
+        <AlertDialog
+          open={Boolean(cliApiKeyToRevoke)}
+          onOpenChange={(open) => {
+            if (!open) setCliApiKeyToRevoke(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('settings.account.cliAuth.revokeDialogDescription', {
+                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={Boolean(revokingCliApiKeyId)}>
+                {t('common.cancel')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  void (async () => {
+                    if (!cliApiKeyToRevoke) return;
+                    await onRevokeCliApiKey?.(cliApiKeyToRevoke.id);
+                    setCliApiKeyToRevoke(null);
+                  })();
+                }}
+                disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {revokingCliApiKeyId ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {t('settings.account.cliAuth.revokeConfirmButton')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
 
       {/* Members */}
-      <CompactSection
-        title={t('workspace.members.title')}
-        actions={
-          hasAdminPermission && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={t('workspace.members.invite')}
-              onClick={() => setInviteDialogOpen(true)}
-            >
-              <UserPlus className="h-4 w-4" />
-            </Button>
-          )
-        }
-      >
-        {members.map((member) => {
-          const isEditable =
-            hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
+      {isWorkspaceSurface ? (
+        <CompactSection
+          title={t('workspace.members.title')}
+          actions={
+            hasAdminPermission && (
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={t('workspace.members.invite')}
+                onClick={() => setInviteDialogOpen(true)}
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            )
+          }
+        >
+          {members.map((member) => {
+            const isEditable =
+              hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
 
-          return (
-            <div key={member.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-              <UserAvatar user={member.user} className="h-7 w-7 shrink-0 text-[11px]" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium leading-tight">
-                  {member.user?.name || '—'}
-                  {member.userId === currentUser?.id && (
-                    <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
-                      ({t('workspace.members.you', 'you')})
+            return (
+              <div key={member.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                <UserAvatar user={member.user} className="h-7 w-7 shrink-0 text-[11px]" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium leading-tight">
+                    {member.user?.name || '—'}
+                    {member.userId === currentUser?.id && (
+                      <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                        ({t('workspace.members.you', 'you')})
+                      </span>
+                    )}
+                  </p>
+                  <p className="truncate text-xs leading-tight text-muted-foreground">
+                    {member.user?.email}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {isEditable ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                          {t(`organization.role.${member.role}`)}
+                          <ChevronDown className="h-3 w-3 opacity-50" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            void onUpdateRole(member, 'member');
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-3.5 w-3.5',
+                              member.role === 'member' ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          {t('organization.role.member')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            void onUpdateRole(member, 'admin');
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-3.5 w-3.5',
+                              member.role === 'admin' ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          {t('organization.role.admin')}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                      {t(`organization.role.${member.role}`)}
                     </span>
                   )}
-                </p>
-                <p className="truncate text-xs leading-tight text-muted-foreground">
-                  {member.user?.email}
-                </p>
+                  {isEditable && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        setUserToDelete(member.id);
+                        setDeleteUserDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {isEditable ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                        {t(`organization.role.${member.role}`)}
-                        <ChevronDown className="h-3 w-3 opacity-50" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => {
-                          void onUpdateRole(member, 'member');
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            'mr-2 h-3.5 w-3.5',
-                            member.role === 'member' ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        {t('organization.role.member')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          void onUpdateRole(member, 'admin');
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            'mr-2 h-3.5 w-3.5',
-                            member.role === 'admin' ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        {t('organization.role.admin')}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : (
-                  <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                    {t(`organization.role.${member.role}`)}
-                  </span>
-                )}
-                {isEditable && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => {
-                      setUserToDelete(member.id);
-                      setDeleteUserDialogOpen(true);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </CompactSection>
+            );
+          })}
+        </CompactSection>
+      ) : null}
 
       {/* Pending Invitations */}
-      {pendingInvitations.length > 0 && (
+      {isWorkspaceSurface && pendingInvitations.length > 0 ? (
         <CompactSection title={t('workspace.invitations.title')}>
           {pendingInvitations.map((invitation) => (
             <div key={invitation.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
@@ -940,11 +957,11 @@ export function AccountSettingsPure({
             </div>
           ))}
         </CompactSection>
-      )}
+      ) : null}
 
-      {workspaceJoinRequestsSlot}
+      {isWorkspaceSurface ? workspaceJoinRequestsSlot : null}
 
-      {canGenerateCliApiKey && (
+      {surface === 'account' && canGenerateCliApiKey ? (
         <CompactSection
           title={t('settings.account.cliAuth.title')}
           description={t('settings.account.cliAuth.description')}
@@ -1040,66 +1057,52 @@ export function AccountSettingsPure({
             })
           )}
         </CompactSection>
-      )}
+      ) : null}
 
       {/* Danger Zone */}
-      <CompactSection title={t('workspace.danger.title')} className="border-destructive/20">
-        {role !== 'owner' && (
-          <CompactRow
-            label={t('workspace.danger.leaveWorkspace.title')}
-            helper={t('workspace.danger.leaveWorkspace.description')}
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setLeaveDialogOpen(true)}
+      {isWorkspaceSurface ? (
+        <CompactSection title={t('workspace.danger.title')} className="border-destructive/20">
+          {role !== 'owner' && (
+            <CompactRow
+              label={t('workspace.danger.leaveWorkspace.title')}
+              helper={t('workspace.danger.leaveWorkspace.description')}
             >
-              {t('workspace.danger.leaveWorkspace.button')}
-            </Button>
-          </CompactRow>
-        )}
-        {role === 'owner' && (
-          <CompactRow
-            label={t('workspace.danger.deleteWorkspace.title')}
-            helper={t('workspace.danger.deleteWorkspace.description')}
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => {
-                // A live subscription blocks deletion outright; surface the
-                // guidance dialog instead of the type-to-confirm flow (the
-                // backend would reject the delete anyway).
-                if (deleteBillingGuard?.kind === 'active-subscription') {
-                  setDeleteBlockedDialogOpen(true);
-                  return;
-                }
-                setDeleteDialogOpen(true);
-              }}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setLeaveDialogOpen(true)}
+              >
+                {t('workspace.danger.leaveWorkspace.button')}
+              </Button>
+            </CompactRow>
+          )}
+          {role === 'owner' && (
+            <CompactRow
+              label={t('workspace.danger.deleteWorkspace.title')}
+              helper={t('workspace.danger.deleteWorkspace.description')}
             >
-              {t('workspace.danger.deleteWorkspace.button')}
-            </Button>
-          </CompactRow>
-        )}
-        {showAccountDeletion && (
-          <CompactRow
-            label={t('settings.account.accountDeletion.title')}
-            helper={t('settings.account.accountDeletion.description')}
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteAccountDialogOpen(true)}
-            >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.account.accountDeletion.button')}
-            </Button>
-          </CompactRow>
-        )}
-      </CompactSection>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => {
+                  // A live subscription blocks deletion outright; surface the
+                  // guidance dialog instead of the type-to-confirm flow (the
+                  // backend would reject the delete anyway).
+                  if (deleteBillingGuard?.kind === 'active-subscription') {
+                    setDeleteBlockedDialogOpen(true);
+                    return;
+                  }
+                  setDeleteDialogOpen(true);
+                }}
+              >
+                {t('workspace.danger.deleteWorkspace.button')}
+              </Button>
+            </CompactRow>
+          )}
+        </CompactSection>
+      ) : null}
 
       {/* Invite Dialog */}
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>

@@ -10,6 +10,13 @@ arrive: context/message-flow.md "Upstream".
 
 - `agent-client.ts` — the ACP connection: initialize/session lifecycle, client
   capabilities (fs, elicitation), permission/fs request handling, update callbacks.
+  Goal session-info updates use provider-neutral `_meta.goal`; keep the
+  `_meta.codex.goal` reader only as a compatibility fallback for older Codex adapters.
+  A present neutral field wins, including `null`, so malformed new metadata is not
+  silently hidden by a legacy duplicate. Validate neutral snapshots against
+  `controlMethod: _session/goal`; normalize neutral `limited` to the legacy durable
+  `blocked` status so older readers can consume mixed-version history without
+  inventing a provider-specific limit reason.
   Its built-in `lody` stdio MCP config is an explicit environment allowlist, not
   ordinary child-process inheritance. Keep the public CLI deployment endpoints
   (`LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, `LODY_SERVER_URL`) in that config so
@@ -18,6 +25,15 @@ arrive: context/message-flow.md "Upstream".
   cannot inherit Lody cloud endpoints. Never add
   CLI credentials or other secrets; the MCP subprocess loads the daemon owner's
   local credential through the existing CLI auth path.
+  Acknowledged steer is inject-or-refuse, and `AgentSteerNotDeliveredError` marks
+  ONLY the provable refusal: a local pre-write failure, or the agent's own
+  JSON-RPC `invalid request` answer. A closed connection, a dead agent process, or
+  an internal error may have left the prompt inside the live turn — the caller
+  re-sends an undelivered steer, so widening that classification sends the user's
+  message twice. The applied-waiter must also wait for the steer request's own
+  answer before giving up on the upstream turn's response: the Codex adapter drains
+  session notifications before refusing, so the turn's response routinely wins that
+  race and would otherwise mask the refusal.
 - `acp-runner.ts` — process spawn/restart around the client.
 - `setting.ts` — launch resolution. Builtin Claude/Codex/Kimi require
   `resolveACPProcessLaunchAsync()` because they may install Lody-managed native

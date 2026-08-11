@@ -315,6 +315,72 @@ describe('SessionManager child session workdir resolution', () => {
     );
   });
 
+  it('bases a legacy worktree on the local branch that shadows a same-named remote', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const parentSessionId = 'parent-shadowed-base' as SessionId;
+    const childSessionId = 'child-shadowed-base' as SessionId;
+    const localProjectId = 'local-project-shadowed-base' as LocalProjectId;
+    // The shape every pre-selector project has: a `master` that exists both
+    // locally and on origin. It used to fail the turn as ambiguous.
+    const remoteCommit = runGit(sourceDir, ['rev-parse', 'main']);
+    runGit(sourceDir, ['remote', 'add', 'origin', path.join(tempHome, 'origin.git')]);
+    runGit(sourceDir, ['update-ref', 'refs/remotes/origin/master', remoteCommit]);
+    runGit(sourceDir, ['branch', 'master']);
+
+    const parentDoc = createSessionDoc({
+      id: parentSessionId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
+      createdAt: '2026-06-20T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      project: {
+        kind: 'local',
+        localProjectId,
+        branch: 'master',
+        useWorktree: true,
+      },
+      baseBranch: 'master',
+      isWorktree: true,
+    });
+    const docs = new Map<SessionId, FakeSessionDoc>([[parentSessionId, parentDoc]]);
+    const workspaceDocument = createWorkspaceDocument(docs);
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+    const sharedWorkdir = await (
+      manager as unknown as {
+        resolveSharedWorkdir(config: SessionConfig, repoId: undefined): Promise<string | undefined>;
+      }
+    ).resolveSharedWorkdir(
+      createSessionConfig({
+        sessionId: childSessionId,
+        parentSessionId,
+        branch: 'master',
+        workdir: sourceDir,
+        project: {
+          kind: 'local',
+          localProjectId,
+          branch: 'master',
+          useWorktree: true,
+        },
+      }),
+      undefined
+    );
+
+    expect(sharedWorkdir).toBeTruthy();
+    expect(parentDoc.setBaseBranch).toHaveBeenCalledWith('refs/heads/master');
+  });
+
   it('recreates a parent worktree from its recorded branch after a legacy base is deleted', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const parentSessionId = 'parent-deleted-base' as SessionId;
@@ -398,7 +464,7 @@ describe('SessionManager worktree setup', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
-  it('does not rerun setup when restoring a session with an existing local worktree', async () => {
+  it('does not rerun setup or switch branches when restoring an existing local worktree', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'setup-resume-session' as SessionId;
     const localProjectId = 'local-project-1' as LocalProjectId;
@@ -427,15 +493,21 @@ describe('SessionManager worktree setup', () => {
       },
     });
 
-    await createSessionInner(manager, config);
+    const createdSession = await createSessionInner(manager, config);
     expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
+    const workdir = createdSession.getWorkdir();
+    runGit(workdir, ['switch', '-c', 'user/switched-worktree']);
+    writeFileSync(path.join(workdir, 'dirty.txt'), 'keep me\n', 'utf8');
 
-    await createSessionInner(manager, {
+    const resumedSession = await createSessionInner(manager, {
       ...config,
       resume: true,
     });
 
     expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
+    expect(resumedSession.getWorkdir()).toBe(workdir);
+    expect(runGit(workdir, ['symbolic-ref', '--short', 'HEAD'])).toBe('user/switched-worktree');
+    expect(runGit(workdir, ['status', '--porcelain'])).toContain('?? dirty.txt');
   });
 
   it('runs setup only after a speculative worktree is adopted by durable creation', async () => {

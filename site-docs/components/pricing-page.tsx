@@ -14,6 +14,8 @@
 import NumberFlow from '@number-flow/react';
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 
+import { founderCallUrl } from '@site/lib/founder-call';
+
 import { LandingEffects } from './landing-interactions';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
@@ -51,6 +53,8 @@ type PricingPlan = {
   featured?: boolean;
   cta: string;
   href: string;
+  /** Optional low-key link under the primary CTA (e.g. book a founder call). */
+  secondaryCta?: { label: string; href: string };
   tone: PlanTone;
   features: readonly PlanFeature[];
 };
@@ -203,6 +207,7 @@ const copy = {
         description: 'For organizations with contracts, governance, and deployment requirements.',
         cta: 'Contact us',
         href: 'mailto:sales@lody.ai',
+        secondaryCta: { label: 'Book a founder call', href: founderCallUrl('pricing') },
         tone: 'deep',
         features: [
           'Custom contracts and invoicing',
@@ -401,6 +406,7 @@ const copy = {
         description: '为有合同、治理、安全审查和部署需求的组织设计。',
         cta: '联系我们',
         href: 'mailto:sales@lody.ai',
+        secondaryCta: { label: '和创始人聊聊', href: founderCallUrl('pricing') },
         tone: 'deep',
         features: [
           '定制合同与发票',
@@ -825,6 +831,17 @@ function PricingCard({
         <span>{plan.cta}</span>
         <ArrowIcon />
       </a>
+
+      {plan.secondaryCta ? (
+        <a
+          className="pricing-card-secondary-cta"
+          href={plan.secondaryCta.href}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {plan.secondaryCta.label}
+        </a>
+      ) : null}
 
       <ul className="pricing-card-features">
         {plan.features.map((feature) => {

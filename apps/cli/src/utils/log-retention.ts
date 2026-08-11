@@ -1,13 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { parseDailyLogFileName } from './log-files';
 
 export const LODY_LOG_DIR = path.join(getLodyDataDir(), 'logs');
 export const LODY_LOG_RETENTION_DAYS = 7;
 export const LODY_LOG_RETENTION_MS = LODY_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 export const LODY_LOG_RETENTION_MAX_FILES = `${LODY_LOG_RETENTION_DAYS}d`;
 
-const MANAGED_LOG_FILE_PATTERN = /\.log(?:\.\d+)?(?:\.gz)?$|\.jsonl(?:\.gz)?$/i;
+const MANAGED_JSONL_FILE_PATTERN = /\.jsonl(?:\.gz)?$/i;
+
+// Daily-log naming lives in `log-files.ts` so retention and the log readers
+// cannot drift apart on what a rotated file is called.
+const isManagedLogFile = (name: string): boolean =>
+  parseDailyLogFileName(name) !== null || MANAGED_JSONL_FILE_PATTERN.test(name);
 
 function removeEmptyDirectories(dirPath: string, preserveRoot: boolean): void {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -55,7 +61,7 @@ export function cleanupExpiredLogs(
         continue;
       }
 
-      if (!entry.isFile() || !MANAGED_LOG_FILE_PATTERN.test(entry.name)) {
+      if (!entry.isFile() || !isManagedLogFile(entry.name)) {
         continue;
       }
 

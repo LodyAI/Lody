@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ComponentType } from 'react';
 import {
   compoundExtensionMap,
   extensionMap,
@@ -97,20 +97,47 @@ export const FolderIcon = ({ folderPath, className = 'h-4 w-4' }: FolderIconProp
   return <img src={iconUrl} alt="" className={className} />;
 };
 
-// Factory function to create icon components for TreeView
+// Factory functions to create icon components for tree rows.
+//
+// These are cached by RESOLVED ICON NAME rather than by path. Two things follow,
+// and both matter for the file tree:
+//
+//  1. Component identity is stable across tree rebuilds. Returning a fresh
+//     component type per call made React unmount and remount every icon
+//     whenever the parent rebuilt its tree data with the same paths, which also
+//     defeated row memoization.
+//  2. The cache is bounded by the icon set shipped in this package (a few
+//     hundred SVG names), not by the number of files in the repository.
+const fileIconComponentCache = new Map<string, ComponentType<{ className?: string }>>();
+const folderIconComponentCache = new Map<string, ComponentType<{ className?: string }>>();
+
 export const createFileIconComponent = (filePath: string) => {
-  const FileIconComponent = ({ className }: { className?: string }) => (
-    <FileIcon filePath={filePath} className={className} />
+  const iconName = getFileIconName(filePath);
+  const cached = fileIconComponentCache.get(iconName);
+  if (cached) {
+    return cached;
+  }
+  const iconUrl = getFileIconUrl(iconName);
+  const FileIconComponent = ({ className = 'h-4 w-4' }: { className?: string }) => (
+    <img src={iconUrl} alt="" className={className} />
   );
-  FileIconComponent.displayName = 'FileIconComponent';
+  FileIconComponent.displayName = `FileIconComponent(${iconName})`;
+  fileIconComponentCache.set(iconName, FileIconComponent);
   return FileIconComponent;
 };
 
 export const createFolderIconComponent = (folderPath: string) => {
-  const FolderIconComponent = ({ className }: { className?: string }) => (
-    <FolderIcon folderPath={folderPath} className={className} />
+  const iconName = getFolderIconName(folderPath);
+  const cached = folderIconComponentCache.get(iconName);
+  if (cached) {
+    return cached;
+  }
+  const iconUrl = getFolderIconUrl(iconName);
+  const FolderIconComponent = ({ className = 'h-4 w-4' }: { className?: string }) => (
+    <img src={iconUrl} alt="" className={className} />
   );
-  FolderIconComponent.displayName = 'FolderIconComponent';
+  FolderIconComponent.displayName = `FolderIconComponent(${iconName})`;
+  folderIconComponentCache.set(iconName, FolderIconComponent);
   return FolderIconComponent;
 };
 

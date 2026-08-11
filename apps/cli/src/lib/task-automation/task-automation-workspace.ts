@@ -72,7 +72,10 @@ export function createTaskAutomationWorkspace(
   // enough: if nothing changed remotely while we were down, no row event arrives
   // and a queued task would wait for unrelated activity. Meta-room sync is the
   // existing "we are connected again" signal.
-  const detachReconnect = documentManager.onMetaRoomSynced(() => {
+  // Parked-work release, so it rides the cheap unthrottled online edge rather
+  // than the rate-limited index-rescan signal: a queued task must not wait out
+  // the fan-out floor.
+  const detachReconnect = documentManager.onStreamsOnline(() => {
     if (disposed) {
       return;
     }

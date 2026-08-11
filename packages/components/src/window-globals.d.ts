@@ -4,6 +4,8 @@ import type { CodeCollabDebugGlobal } from './lib/code-collab-global-debug';
 import type { WorkspacePresenceDebugGlobal } from './providers/workspace-presence-transport';
 import type {
   CheckForElectronUpdateResult,
+  CopyImageToClipboardInput,
+  CopyImageToClipboardResult,
   ElectronAutoLaunchStatusResult,
   ElectronCliState,
   ElectronLocalPlatformSnapshot,
@@ -33,6 +35,8 @@ import type {
   OpenSystemNotificationSettingsResult,
   QuitAndInstallElectronUpdateResult,
   RestartCliResult,
+  SaveImageFileInput,
+  SaveImageFileResult,
   SetElectronAutoLaunchResult,
   SendLocalMachineRpcResult,
   SendLocalProjectControlResult,
@@ -41,6 +45,8 @@ import type {
   SendSessionFileLocalResult,
   SessionCompletionNotificationClickPayload,
   SessionId,
+  ShowImagePreviewMenuInput,
+  ShowImagePreviewMenuResult,
   ShowSessionCompletionNotificationInput,
   ShowSessionCompletionNotificationResult,
   TerminateCliResult,
@@ -177,6 +183,11 @@ declare global {
       selectLocalProjectDirectory?: () => Promise<
         { rootPath: string; machineId: string } | { error: string } | null
       >;
+      imagePreview?: {
+        showMenu: (input: ShowImagePreviewMenuInput) => Promise<ShowImagePreviewMenuResult>;
+        copyToClipboard: (input: CopyImageToClipboardInput) => Promise<CopyImageToClipboardResult>;
+        saveAs: (input: SaveImageFileInput) => Promise<SaveImageFileResult>;
+      };
       getLocalProjectGitState?: (
         workspaceId: string,
         localProjectId: string

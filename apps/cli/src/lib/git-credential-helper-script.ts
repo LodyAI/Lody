@@ -47,15 +47,20 @@ const debug = (event, data) => {
   }
 };
 
-// Broker state file paths - check both container and host locations
+// Broker state file paths - check both container and host locations.
+// LODY_GIT_CRED_BROKER_STATE_FILE, when set, names the state file of the broker
+// owned by THIS session's workspace and must win: the shared broker.json is
+// last-writer-wins across the workspaces of a fleet process, so falling back to
+// it can recover onto another workspace's broker and token manager.
 const BROKER_STATE_PATHS = [
+  process.env.LODY_GIT_CRED_BROKER_STATE_FILE,
   '/home/node/.lody/broker.json',  // Container path
   path.join(
     process.env.LODY_DATA_DIR ||
       path.join(os.homedir(), process.env.LODY_PLATFORM === 'local' ? '.lody-oss' : '.lody'),
     'broker.json'
   ), // Host path (native mode)
-];
+].filter(Boolean);
 
 /**
  * Read broker config from state file only.

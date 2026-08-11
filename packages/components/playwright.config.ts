@@ -6,12 +6,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   use: {
-    baseURL: 'http://localhost:6006',
+    baseURL: 'http://127.0.0.1:6006',
     trace: 'on-first-retry',
   },
   webServer: {
     command: 'pnpm storybook --ci',
-    url: 'http://localhost:6006',
+    url: 'http://127.0.0.1:6006',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

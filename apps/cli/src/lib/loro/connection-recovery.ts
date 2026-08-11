@@ -19,6 +19,7 @@ import {
 import { readTimeoutEnv, withTimeout } from './timeout-utils';
 
 export type MetaRoomSyncedListener = (reason: string) => void | Promise<void>;
+export type StreamsOnlineListener = (reason: string) => void | Promise<void>;
 
 type ReconnectOptions = {
   force?: boolean;
@@ -34,6 +35,31 @@ const REJOIN_SWEEP_CONCURRENCY = 4;
 // recovery fiber (or cleanUp) for longer than a few batches, however many
 // rooms are errored. Leftovers wait for the next watchdog pass.
 const REJOIN_SWEEP_MAX_BATCHES = 3;
+/**
+ * Floor on how often the EXPENSIVE `meta-room-synced` fan-out may run.
+ *
+ * Its listeners do O(rooms) rescans, so the trigger rate is what decides
+ * whether a degraded transport costs a few scans or thousands. Per
+ * `src/session/AGENTS.md`, coalescing bounds the work per trigger and keeping
+ * that rate sane "is the connection recovery boundary's job" — so the throttle
+ * lives here rather than in each listener. A throttled emit is always
+ * DEFERRED, never dropped: the dispatch bootstrap scan is the only retry path
+ * for a session whose reconcile threw, so dropping one can strand it.
+ */
+const DEFAULT_META_SYNCED_MIN_INTERVAL_MS = 30_000;
+/**
+ * How long health must HOLD before the reconnect backoff is trusted again.
+ *
+ * The aggregate transport status covers every joined room, so a single stuck
+ * room can flip it `disconnected -> connecting -> disconnected` about once a
+ * second. Each transient healthy blip used to zero `reconnectAttempt`, so the
+ * 1s->30s exponential backoff never engaged and the recovery loop ran at its
+ * base delay indefinitely. Health that does not survive this window counts as
+ * a failed recovery and backs off instead.
+ */
+const DEFAULT_HEALTH_STABILITY_WINDOW_MS = 5_000;
+/** Keeps the backoff exponent (and its log lines) in a sane range. */
+const MAX_RECONNECT_ATTEMPT = 30;
 
 export const computeLoroReconnectDelayMs = (
   attempt: number,
@@ -111,6 +137,7 @@ export type LoroStreamsHealth =
 export class LoroConnectionRecoveryController {
   private readonly recoveryEvents = Effect.runSync(Queue.unbounded<RecoveryEvent>());
   private readonly metaRoomSyncedListeners = new Set<MetaRoomSyncedListener>();
+  private readonly streamsOnlineListeners = new Set<StreamsOnlineListener>();
   private readonly pendingReconnectCompletions = new Set<ReconnectCompletion>();
   private readonly eventFiber: Fiber.RuntimeFiber<never, never>;
   private readonly repo: LoroRepo;
@@ -133,6 +160,27 @@ export class LoroConnectionRecoveryController {
   private reconnectAttempt = 0;
   private initialMetaSyncCompleted: boolean;
   private isCleanedUp = false;
+  /** When the current healthy stretch began; null while unhealthy. */
+  private healthySinceMs: number | null = null;
+  /** Set once this episode has actually attempted recovery. */
+  private isRecoveryEpisode = false;
+  /**
+   * Whether the current healthy stretch was reached BY a recovery. Only such a
+   * stretch can be a flap: the first fault of an episode is the outage itself,
+   * not a recovery that failed to stick, and must not be charged to the backoff.
+   */
+  private healthRoseFromRecovery = false;
+  private backoffResetTimer: NodeJS.Timeout | null = null;
+  private lastMetaSyncedEmitMs = 0;
+  private pendingMetaSyncedEmit: { reason: string } | null = null;
+  private metaSyncedThrottleTimer: NodeJS.Timeout | null = null;
+  /**
+   * Whether the meta room actually degraded since the last fan-out. A recovery
+   * episode that took the meta room down may have missed remote metadata, so it
+   * rescans immediately; a transport-only flap (meta stayed 'joined') cannot
+   * have missed a meta event and takes the throttled path.
+   */
+  private metaRoomDegradedSinceEmit = true;
 
   constructor(options: LoroConnectionRecoveryControllerOptions) {
     this.repo = options.repo;
@@ -188,9 +236,11 @@ export class LoroConnectionRecoveryController {
     // sustaining loop that burned daemon CPU.
     if (wasHealthy && !isHealthy) {
       this.streamsRecoveryGeneration += 1;
+      this.handleHealthFell('transport-disconnected');
     }
     if (isHealthy) {
       if (!wasHealthy) {
+        this.handleHealthRose();
         this.offerStreamsReady(this.metaSub, 'transport-connected');
       }
       this.resetReconnectBackoff('transport-connected');
@@ -199,6 +249,40 @@ export class LoroConnectionRecoveryController {
     if (status === 'disconnected') {
       this.scheduleReconnect('transport-disconnected');
     }
+  }
+
+  /**
+   * Health just came back. Start the stability clock; the backoff counter is
+   * only trusted once health survives {@link DEFAULT_HEALTH_STABILITY_WINDOW_MS}.
+   */
+  private handleHealthRose(): void {
+    this.healthySinceMs = Date.now();
+    this.healthRoseFromRecovery = this.isRecoveryEpisode;
+    this.isRecoveryEpisode = false;
+  }
+
+  /**
+   * Health just dropped. A healthy stretch shorter than the stability window
+   * was not a real recovery — it is a flap, so charge it to the backoff instead
+   * of letting the next attempt start from the base delay again.
+   */
+  private handleHealthFell(reason: string): void {
+    this.cancelBackoffReset();
+    const heldMs =
+      this.healthySinceMs === null ? Number.POSITIVE_INFINITY : Date.now() - this.healthySinceMs;
+    const cameFromRecovery = this.healthRoseFromRecovery;
+    this.healthySinceMs = null;
+    this.healthRoseFromRecovery = false;
+    if (!cameFromRecovery || heldMs >= this.readHealthStabilityWindowMs()) {
+      return;
+    }
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPT) {
+      return;
+    }
+    this.reconnectAttempt += 1;
+    this.logger.debug(
+      `[${this.workspaceId}] Streams health did not hold (${Math.round(heldMs)}ms, reason=${reason}); backing off (attempt=${this.reconnectAttempt})`
+    );
   }
 
   async reconnect(reason: string): Promise<void> {
@@ -221,10 +305,38 @@ export class LoroConnectionRecoveryController {
     });
   }
 
+  /**
+   * The EXPENSIVE recovery signal: "the workspace index may have missed events,
+   * rescan it". Listeners here do O(rooms) work, so this is rate-limited (see
+   * {@link DEFAULT_META_SYNCED_MIN_INTERVAL_MS}) and only fires after the meta
+   * room confirms catch-up.
+   *
+   * If your listener just needs to release work that was held while offline,
+   * use {@link onStreamsOnline} instead — it is unconditional and immediate.
+   */
   onMetaRoomSynced(listener: MetaRoomSyncedListener): () => void {
     this.metaRoomSyncedListeners.add(listener);
     return () => {
       this.metaRoomSyncedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * The CHEAP recovery signal: "the Streams plane is usable again".
+   *
+   * Fires on every health rising edge, with no sync wait and no throttle, so
+   * work that was parked while offline resumes promptly. This exists because
+   * `onMetaRoomSynced` used to carry both meanings: throttling it alone would
+   * have stalled the parked-work consumers (a dirty Machine Flock doc arms no
+   * timer of its own — this signal is its only wake-up — and the task/review
+   * automation queues wait for an unrelated index change otherwise).
+   *
+   * Listeners MUST be cheap and idempotent: there is no rate limit here.
+   */
+  onStreamsOnline(listener: StreamsOnlineListener): () => void {
+    this.streamsOnlineListeners.add(listener);
+    return () => {
+      this.streamsOnlineListeners.delete(listener);
     };
   }
 
@@ -328,7 +440,14 @@ export class LoroConnectionRecoveryController {
       clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
     }
+    this.cancelBackoffReset();
+    if (this.metaSyncedThrottleTimer) {
+      clearTimeout(this.metaSyncedThrottleTimer);
+      this.metaSyncedThrottleTimer = null;
+    }
+    this.pendingMetaSyncedEmit = null;
     this.metaRoomSyncedListeners.clear();
+    this.streamsOnlineListeners.clear();
     this.resolvePendingReconnectCompletions();
 
     await Promise.allSettled([this.activeOperation ?? Promise.resolve()]);
@@ -451,6 +570,9 @@ export class LoroConnectionRecoveryController {
     this.metaSub = metaSub;
     this.metaSource = metaSub ? streamsRoomBinding(metaSub) : null;
     this.streamsRecoveryGeneration += 1;
+    // A replacement meta room starts from nothing known, so the next fan-out
+    // must not be throttled away.
+    this.metaRoomDegradedSinceEmit = true;
 
     if (!metaSub) {
       this.logger.debug(`[${this.workspaceId}] Loro meta room status: not_joined`);
@@ -483,11 +605,21 @@ export class LoroConnectionRecoveryController {
   ): void {
     const previous = this.metaRoomStatus;
     const didChange = previous !== status;
+    const wasHealthy = this.isStreamsHealthy();
     this.metaRoomStatus = status;
+    const isHealthy = this.isStreamsHealthy();
     if (previous === 'joined' && status !== 'joined') {
       // Invalidate a queued ready event as soon as this recovery episode
       // leaves joined. A later fully healthy state will queue the new generation.
       this.streamsRecoveryGeneration += 1;
+      // The meta room really went down, so remote metadata may have been missed
+      // while it was away: the next fan-out skips the throttle.
+      this.metaRoomDegradedSinceEmit = true;
+    }
+    if (wasHealthy && !isHealthy) {
+      this.handleHealthFell(`meta-room-${status}`);
+    } else if (!wasHealthy && isHealthy) {
+      this.handleHealthRose();
     }
 
     if (didChange) {
@@ -536,6 +668,9 @@ export class LoroConnectionRecoveryController {
     if (this.isCleanedUp || this.isStreamsHealthy() || this.reconnectTimer) {
       return;
     }
+    // From here on, any health we regain was reached BY a recovery, so losing
+    // it again is a flap rather than a fresh outage.
+    this.isRecoveryEpisode = true;
 
     const baseDelayMs = readTimeoutEnv(
       'LODY_LORO_AUTO_RECONNECT_DELAY_MS',
@@ -587,6 +722,9 @@ export class LoroConnectionRecoveryController {
     if (!metaSub || !this.isStreamsHealthy()) {
       return;
     }
+    // Cheap consumers are told immediately; only the O(rooms) rescan waits for
+    // the meta catch-up ceremony below.
+    this.emitStreamsOnline(reason);
     this.offer({
       type: 'meta-room-ready',
       metaSub,
@@ -595,7 +733,59 @@ export class LoroConnectionRecoveryController {
     });
   }
 
+  private emitStreamsOnline(reason: string): void {
+    for (const listener of this.streamsOnlineListeners) {
+      void Promise.resolve(listener(reason)).catch((error: unknown) => {
+        this.logger.debug(
+          `[${this.workspaceId}] Streams online listener failed: ${formatErrorMessage(error)}`
+        );
+      });
+    }
+  }
+
+  private readHealthStabilityWindowMs(): number {
+    return readTimeoutEnv(
+      'LODY_LORO_HEALTH_STABILITY_WINDOW_MS',
+      DEFAULT_HEALTH_STABILITY_WINDOW_MS
+    );
+  }
+
+  /**
+   * Clear the backoff only once health has HELD for the stability window.
+   *
+   * Called on every healthy landing, so it must not reset eagerly: under a
+   * flapping aggregate the healthy stretches are ~1s long, and resetting on
+   * each of them is what pinned the recovery loop at its 1s base delay.
+   */
   private resetReconnectBackoff(reason: string): void {
+    if (this.reconnectAttempt === 0 || this.backoffResetTimer || this.isCleanedUp) {
+      return;
+    }
+    const windowMs = this.readHealthStabilityWindowMs();
+    if (windowMs <= 0) {
+      this.applyReconnectBackoffReset(reason);
+      return;
+    }
+    // Healthy without a recorded rising edge (e.g. a status path that did not
+    // cross one): start the clock now rather than trusting health immediately.
+    const healthySinceMs = this.healthySinceMs ?? Date.now();
+    this.healthySinceMs = healthySinceMs;
+    const remainingMs = windowMs - (Date.now() - healthySinceMs);
+    if (remainingMs <= 0) {
+      this.applyReconnectBackoffReset(reason);
+      return;
+    }
+    this.backoffResetTimer = setTimeout(() => {
+      this.backoffResetTimer = null;
+      if (this.isCleanedUp || !this.isStreamsHealthy() || this.healthySinceMs === null) {
+        return;
+      }
+      this.applyReconnectBackoffReset(reason);
+    }, remainingMs);
+    this.backoffResetTimer.unref?.();
+  }
+
+  private applyReconnectBackoffReset(reason: string): void {
     if (this.reconnectAttempt === 0) {
       return;
     }
@@ -603,6 +793,13 @@ export class LoroConnectionRecoveryController {
       `[${this.workspaceId}] Resetting Loro streams reconnect backoff (reason=${reason}, attempts=${this.reconnectAttempt})`
     );
     this.reconnectAttempt = 0;
+  }
+
+  private cancelBackoffReset(): void {
+    if (this.backoffResetTimer) {
+      clearTimeout(this.backoffResetTimer);
+      this.backoffResetTimer = null;
+    }
   }
 
   private updateBackoffAfterReconnect(reason: string, options: ReconnectOptions): void {
@@ -616,7 +813,9 @@ export class LoroConnectionRecoveryController {
     }
 
     if (options.force) {
-      this.reconnectAttempt = 0;
+      // `force` already passes `resetBackoff: true` down to repo.reconnect();
+      // it must NOT additionally erase this controller's flap history, or a
+      // caller-triggered reconnect would hand the loop its base delay back.
       return;
     }
 
@@ -846,6 +1045,43 @@ export class LoroConnectionRecoveryController {
       return;
     }
     this.emittedStreamsRecoveryGeneration = generation;
+
+    const minIntervalMs = readTimeoutEnv(
+      'LODY_LORO_META_SYNCED_MIN_INTERVAL_MS',
+      DEFAULT_META_SYNCED_MIN_INTERVAL_MS
+    );
+    const nowMs = Date.now();
+    const elapsedMs = nowMs - this.lastMetaSyncedEmitMs;
+    // A real meta-room outage rescans right away; a transport-only flap waits
+    // out the floor. Either way the emit happens — never dropped.
+    if (this.metaRoomDegradedSinceEmit || minIntervalMs <= 0 || elapsedMs >= minIntervalMs) {
+      this.deliverMetaRoomSynced(reason, nowMs);
+      return;
+    }
+
+    this.pendingMetaSyncedEmit = { reason };
+    if (this.metaSyncedThrottleTimer) {
+      return;
+    }
+    const delayMs = Math.max(1, minIntervalMs - elapsedMs);
+    this.logger.debug(
+      `[${this.workspaceId}] Deferring meta-room-synced fan-out by ${delayMs}ms (reason=${reason}); the meta room never left 'joined'`
+    );
+    this.metaSyncedThrottleTimer = setTimeout(() => {
+      this.metaSyncedThrottleTimer = null;
+      const pending = this.pendingMetaSyncedEmit;
+      this.pendingMetaSyncedEmit = null;
+      if (!pending || this.isCleanedUp) {
+        return;
+      }
+      this.deliverMetaRoomSynced(pending.reason, Date.now());
+    }, delayMs);
+    this.metaSyncedThrottleTimer.unref?.();
+  }
+
+  private deliverMetaRoomSynced(reason: string, atMs: number): void {
+    this.lastMetaSyncedEmitMs = atMs;
+    this.metaRoomDegradedSinceEmit = false;
     for (const listener of this.metaRoomSyncedListeners) {
       void Promise.resolve(listener(reason)).catch((error: unknown) => {
         this.logger.debug(

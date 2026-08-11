@@ -24,7 +24,6 @@ import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { AutoArchiveSection } from './auto-archive-setting';
 import { ExperimentalFeaturesSection } from './experimental-features-setting';
-import { ReviewPolicySection } from './review-policy-setting';
 import {
   getOneSignalPermissionState,
   getOneSignalPushSubscriptionOptedIn,
@@ -412,8 +411,8 @@ export function GeneralSettingsComponent() {
           isElectron
             ? 'settings.notifications.permissionDeniedStatusDesktop'
             : isNative
-              ? 'settings.notifications.permissionDeniedStatusNative'
-              : 'settings.notifications.permissionDeniedStatus'
+            ? 'settings.notifications.permissionDeniedStatusNative'
+            : 'settings.notifications.permissionDeniedStatus'
         );
       default:
         return t('settings.notifications.permissionDefault');
@@ -824,7 +823,6 @@ export function GeneralSettingsComponent() {
         {githubIntegrationAvailable ? <AutoArchiveSection /> : null}
 
         <ExperimentalFeaturesSection />
-        <ReviewPolicySection />
 
         {isElectron && (
           <div id="path-launchers" className="scroll-mt-24">

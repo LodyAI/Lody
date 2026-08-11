@@ -113,6 +113,7 @@ import {
   type EagerSyncHighWaterCache,
 } from '@/lib/eager-sync-high-water-cache';
 import { isRemoteCursorDebugEnabled } from '@/lib/remote-cursor-debug';
+import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '@/lib/clear-local-cache';
 import { runStartupAcpCapabilitiesRefresh } from './startup-acp-capabilities-refresh';
 import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-connection';
 import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade';
@@ -232,8 +233,6 @@ function waitForPromiseOrAbort<T>(promise: Promise<T>, signal: AbortSignal): Pro
     );
   });
 }
-const META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX = 'lody:loroStreamsMetaCursorBypass';
-
 export {
   computeLocalReconnectDelayMs,
   waitForLocalReconnectDelayEffect,

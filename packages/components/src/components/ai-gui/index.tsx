@@ -69,6 +69,7 @@ export interface SessionChatStreamProps {
   onFilePathClick?: (filePath: string) => void;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
+  assistantActionsMessageId?: string | null;
   onForkLastAssistant?: (turnId: string) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   forkingAssistantMessageId?: string | null;
@@ -129,6 +130,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onFilePathClick,
       messageFileDiffEntriesByTurn,
       assistantActions,
+      assistantActionsMessageId,
       onForkLastAssistant,
       forkingAssistantMessageId,
       onNavigateSession,
@@ -224,6 +226,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
         assistantActions={assistantActions}
+        assistantActionsMessageId={assistantActionsMessageId}
         onForkLastAssistant={hasForkLastAssistant ? stableOnForkLastAssistant : undefined}
         forkingAssistantMessageId={forkingAssistantMessageId}
         agentActivityLabel={agentActivityLabel}

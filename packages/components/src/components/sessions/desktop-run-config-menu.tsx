@@ -15,7 +15,9 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
+  resolvePlanModeSelectorEnabled,
   toggleOnOffConfigOptionValue,
+  togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
@@ -25,6 +27,7 @@ import type { AgentSelection } from '@/components/shared/agent-selector';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
+import { Badge } from '@/ui/badge';
 import { Switch } from '@/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -86,14 +89,21 @@ function OptionItem({
       // from getting tall enough to overflow.
       className="items-start gap-2 py-1"
     >
-      {icon}
+      {/* Center the icon/check on the label's first line box (text-[0.8rem] +
+          leading-tight = 16px): vertically centered on single-line rows, and
+          hugging the first line when a description wraps below. */}
+      {icon ? <span className="flex h-4 shrink-0 items-center">{icon}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
       </span>
-      {selected ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {selected ? (
+        <span className="flex h-4 shrink-0 items-center">
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      ) : null}
     </DropdownMenuItem>
   );
 }
@@ -166,6 +176,7 @@ export type DesktopMachineMenuOption = {
 
 export function DesktopMachineMenu({
   value,
+  visibleLocalMachineId = null,
   selectedLabel,
   options,
   onChange,
@@ -174,6 +185,7 @@ export function DesktopMachineMenu({
   onAddMachine,
 }: {
   value: MachineId | null;
+  visibleLocalMachineId?: MachineId | null;
   selectedLabel?: string | null;
   options: ReadonlyArray<DesktopMachineMenuOption>;
   onChange: (machineId: MachineId) => void;
@@ -183,6 +195,7 @@ export function DesktopMachineMenu({
 }) {
   const { t } = useTranslation();
   const selectedOption = options.find((option) => option.value === value);
+  const selectedIsLocal = selectedOption?.value === visibleLocalMachineId;
   const label =
     selectedOption?.label ?? selectedLabel ?? t('chat.machineSelector.placeholder', 'Machine');
   const isDisabled = disabled || (options.length === 0 && !onAddMachine);
@@ -204,6 +217,11 @@ export function DesktopMachineMenu({
         >
           <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{label}</span>
+          {selectedIsLocal ? (
+            <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              {t('chat.machineSelector.local', 'Local')}
+            </Badge>
+          ) : null}
           {selectedOption?.isPrivate ? (
             <LockKeyhole
               className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
@@ -233,6 +251,11 @@ export function DesktopMachineMenu({
             >
               {option.label}
             </span>
+            {option.value === visibleLocalMachineId ? (
+              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+                {t('chat.machineSelector.local', 'Local')}
+              </Badge>
+            ) : null}
             {option.isPrivate ? (
               <Tooltip delayDuration={250}>
                 <TooltipTrigger asChild>
@@ -393,7 +416,7 @@ export function DesktopRunConfigMenu({
   /* Plan / Fast. */
   const planSelector = planModeSelectors[0];
   const planOn = planSelector
-    ? resolveOnOffConfigOptionEnabled(planSelector, configOptionValues?.[planSelector.configId])
+    ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
   const fastOn = fastSelector
@@ -504,7 +527,7 @@ export function DesktopRunConfigMenu({
                         agentType={config.agentType}
                         brandId={config.brandId}
                         env={config.env}
-                        className="mt-0.5 h-4 w-4 shrink-0"
+                        className="h-4 w-4 shrink-0"
                       />
                     }
                     label={config.name}
@@ -585,7 +608,7 @@ export function DesktopRunConfigMenu({
             onToggle={() =>
               onConfigOptionChange?.(
                 planSelector.configId,
-                toggleOnOffConfigOptionValue(
+                togglePlanModeSelectorValue(
                   planSelector,
                   configOptionValues?.[planSelector.configId]
                 )

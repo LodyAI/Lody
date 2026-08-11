@@ -159,6 +159,7 @@ import { toast } from 'sonner';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
+import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
 import { TaskProposalNotice } from '@/components/tasks/task-proposal-notice';
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
@@ -200,7 +201,9 @@ const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
 interface BubbleExpandState {
-  groupExpanded: boolean;
+  /** Keyed by `AssistantTurnRenderSegment.key`: a turn can have more than one
+   *  foldable region (plan, then the approved implementation). */
+  expandedWorkedGroups: Record<string, boolean>;
   expandedGroups: Record<string, boolean>;
   expandedByIndex: Record<number, boolean>;
   planOpen: boolean;
@@ -215,7 +218,7 @@ const MAX_EXPAND_CACHE = 500;
 function getExpandState(messageId: string): BubbleExpandState {
   return (
     expandStateCache.get(messageId) ?? {
-      groupExpanded: false,
+      expandedWorkedGroups: {},
       expandedGroups: {},
       expandedByIndex: {},
       planOpen: false,
@@ -260,7 +263,12 @@ export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
-  | { kind: 'worked_group_header'; expanded: boolean; durationMs: number | null }
+  | {
+      kind: 'worked_group_header';
+      segmentKey: string;
+      expanded: boolean;
+      durationMs: number | null;
+    }
   | { kind: 'content'; block: Extract<AssistantTurnRenderBlock, { kind: 'content' }> }
   | {
       kind: 'activity_group_header';
@@ -321,6 +329,13 @@ export interface AssistantMessageAction {
   tone?: 'default' | 'accent';
 }
 
+// Exported for focused message/action binding tests.
+export const resolveAssistantMessageActions = (
+  messageId: string,
+  actionsMessageId: string | null | undefined,
+  actions: AssistantMessageAction[] | undefined
+): AssistantMessageAction[] | undefined => (messageId === actionsMessageId ? actions : undefined);
+
 export type GoalCommand = SessionGoalCommand;
 
 export interface SessionChatStreamViewProps {
@@ -338,6 +353,7 @@ export interface SessionChatStreamViewProps {
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
+  assistantActionsMessageId?: string | null;
   onForkLastAssistant?: (turnId: string) => void;
   forkingAssistantMessageId?: string | null;
   agentActivityLabel?: string | null;
@@ -421,10 +437,7 @@ const humanizeConfigKey = (key: string): string => {
     effort: 'Reasoning',
     thought_level: 'Reasoning',
     'fast-mode': 'Fast mode',
-    fast_mode: 'Fast mode',
     fast: 'Fast mode',
-    'plan-mode': 'Plan mode',
-    plan_mode: 'Plan mode',
     collaboration_mode: 'Plan mode',
     mode: 'Mode',
   };
@@ -687,6 +700,8 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
   subagentTasks: ReturnType<typeof collectSubagentTasks>;
 };
 
+const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
+
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
 // purely from the message's id/items/finished state, and `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
@@ -718,7 +733,7 @@ type AssistantTurnRowsCacheEntry = {
   messageIndex: number;
   isLastAssistantMessage: boolean;
   fileDiffs: readonly AssistantEditedFileEntry[];
-  lastAssistantActions: AssistantMessageAction[] | undefined;
+  scopedAssistantActions: AssistantMessageAction[] | undefined;
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
 };
@@ -730,6 +745,7 @@ export const buildChatVirtualRows = ({
   lastAssistantMessageId,
   messageFileDiffEntriesByTurn,
   assistantActions,
+  assistantActionsMessageId,
   activeSearchBlockId,
   expansionVersion,
 }: {
@@ -737,6 +753,7 @@ export const buildChatVirtualRows = ({
   lastAssistantMessageId: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
+  assistantActionsMessageId?: string | null;
   activeSearchBlockId?: string | null;
   expansionVersion: number;
 }): ChatVirtualRow[] => {
@@ -761,16 +778,18 @@ export const buildChatVirtualRows = ({
         ? (message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES)
         : (messageFileDiffEntriesByTurn[message.id] ?? EMPTY_EDITED_FILE_ENTRIES);
     const isLastAssistantMessage = message.id === lastAssistantMessageId;
-    // Actions only affect the last assistant turn's footer; scoping the dep this
-    // way keeps an actions-array identity change from invalidating every turn.
-    const lastAssistantActions = isLastAssistantMessage ? assistantActions : undefined;
+    const scopedAssistantActions = resolveAssistantMessageActions(
+      message.id,
+      assistantActionsMessageId,
+      assistantActions
+    );
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
       cachedRows.messageIndex === messageIndex &&
       cachedRows.isLastAssistantMessage === isLastAssistantMessage &&
       cachedRows.fileDiffs === fileDiffs &&
-      cachedRows.lastAssistantActions === lastAssistantActions &&
+      cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.expansionVersion === expansionVersion
     ) {
@@ -778,8 +797,7 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, workBlockKeys, firstWorkBlockIndex, entries, subagentTasks } =
-      getAssistantTurnLayout(message);
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
     const cachedState = getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -792,32 +810,12 @@ export const buildChatVirtualRows = ({
     // turns fully expanded. `message.finished` alone is not enough: it is set on every
     // teardown/cancel path too, not just on a completed answer. Do not relax this back to
     // `finished && workBlockKeys.size > 0` — see AGENTS.md "Worked for …" invariants.
-    const hasVisibleFinalContent = blocks.some((block) => !workBlockKeys.has(block.key));
-    const shouldUseWorkedGroup =
-      message.finished === true &&
-      (workBlockKeys.size > 0 || subagentTasks.length > 0) &&
-      hasVisibleFinalContent;
-    const workedSearchEntries: { itemIndex: number }[] = [];
-    for (const block of blocks) {
-      if (!workBlockKeys.has(block.key)) continue;
-      if (block.kind === 'content') {
-        workedSearchEntries.push(block.entry);
-      } else {
-        workedSearchEntries.push(...block.entries);
-      }
-    }
-    for (let itemIndex = 0; itemIndex < message.items.length; itemIndex += 1) {
-      if (message.items[itemIndex]?.type === 'subagent_task') {
-        workedSearchEntries.push({ itemIndex });
-      }
-    }
-    const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
-      message.id,
-      workedSearchEntries,
-      activeSearchBlockId
-    );
-    const isWorkedGroupExpanded =
-      shouldUseWorkedGroup && (isWorkedSearchExpanded || cachedState.groupExpanded);
+    //
+    // Evaluated PER SEGMENT: a plan-approval turn has two regions and each needs
+    // its own verdict, or the implementation would fold into the plan's row.
+    const isTurnFinished = message.finished === true;
+    // Subagent tasks are message-scoped, so they ride the LAST segment.
+    const lastSegmentIndex = segments.length - 1;
     const assistantRows: AssistantChatVirtualRow[] = [];
 
     if ((message.plan?.length ?? 0) > 0) {
@@ -911,19 +909,77 @@ export const buildChatVirtualRows = ({
       });
     };
 
-    if (shouldUseWorkedGroup) {
+    let anySegmentUsesWorkedGroup = false;
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+      const segment = segments[segmentIndex];
+      if (!segment) continue;
+      const [segmentStart, segmentEnd] = segment.blockRange;
+      const isLastSegment = segmentIndex === lastSegmentIndex;
+      const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+
+      let hasVisibleFinalContent = false;
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        if (block && !segment.workBlockKeys.has(block.key)) {
+          hasVisibleFinalContent = true;
+          break;
+        }
+      }
+      const shouldUseWorkedGroup =
+        isTurnFinished &&
+        (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
+        hasVisibleFinalContent;
+
+      const workedSearchEntries: { itemIndex: number }[] = [];
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        if (!block || !segment.workBlockKeys.has(block.key)) continue;
+        if (block.kind === 'content') {
+          workedSearchEntries.push(block.entry);
+        } else {
+          workedSearchEntries.push(...block.entries);
+        }
+      }
+      if (isLastSegment) {
+        for (let itemIndex = 0; itemIndex < message.items.length; itemIndex += 1) {
+          if (message.items[itemIndex]?.type === 'subagent_task') {
+            workedSearchEntries.push({ itemIndex });
+          }
+        }
+      }
+      const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
+        message.id,
+        workedSearchEntries,
+        activeSearchBlockId
+      );
+      const isWorkedGroupExpanded =
+        shouldUseWorkedGroup &&
+        (isWorkedSearchExpanded || cachedState.expandedWorkedGroups[segment.key] === true);
+      anySegmentUsesWorkedGroup ||= shouldUseWorkedGroup;
+
+      if (!shouldUseWorkedGroup) {
+        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+          const block = blocks[blockIndex];
+          if (block) appendBlockRows(assistantRows, block, blockIndex, false);
+        }
+        if (segmentSubagentTasks.length > 0) {
+          appendSubagentTasksRow(assistantRows, false);
+        }
+        continue;
+      }
+
       // Collapsed is the default state, and the detail rows of a collapsed
       // group are discarded unrendered — don't pay for building them. Initial
       // mount of a long finished session hits this for every turn.
       const workedRows: AssistantChatVirtualRow[] = [];
       if (isWorkedGroupExpanded) {
-        for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
           const block = blocks[blockIndex];
-          if (block && workBlockKeys.has(block.key)) {
+          if (block && segment.workBlockKeys.has(block.key)) {
             appendBlockRows(workedRows, block, blockIndex, true);
           }
         }
-        if (subagentTasks.length > 0) {
+        if (segmentSubagentTasks.length > 0) {
           appendSubagentTasksRow(workedRows, true);
         }
       }
@@ -931,13 +987,16 @@ export const buildChatVirtualRows = ({
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
-          key: `assistant:${message.id}:worked-header`,
+          key: `assistant:${message.id}:${segment.key}:worked-header`,
           messageIndex,
           item,
           content: {
             kind: 'worked_group_header',
+            segmentKey: segment.key,
             expanded: isWorkedGroupExpanded,
-            durationMs: resolveSessionHistoryDurationMs(message),
+            // The turn's duration covers ALL its segments, so only the last one
+            // may claim it; earlier regions fall back to "Finished working".
+            durationMs: isLastSegment ? resolveSessionHistoryDurationMs(message) : null,
           },
           isLastRowForMessage: false,
         });
@@ -946,39 +1005,32 @@ export const buildChatVirtualRows = ({
         }
       };
 
-      const insertionBlockIndex = firstWorkBlockIndex === -1 ? 0 : firstWorkBlockIndex;
+      const insertionBlockIndex =
+        segment.firstWorkBlockIndex === -1 ? segmentStart : segment.firstWorkBlockIndex;
       let didInsertWorkedGroup = false;
-      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
         const block = blocks[blockIndex];
         if (!block) continue;
         if (!didInsertWorkedGroup && blockIndex === insertionBlockIndex) {
           insertWorkedGroup();
           didInsertWorkedGroup = true;
         }
-        if (!workBlockKeys.has(block.key)) {
+        if (!segment.workBlockKeys.has(block.key)) {
           appendBlockRows(assistantRows, block, blockIndex, false);
         }
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
       }
-    } else {
-      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
-        const block = blocks[blockIndex];
-        if (block) appendBlockRows(assistantRows, block, blockIndex, false);
-      }
-      if (subagentTasks.length > 0) {
-        appendSubagentTasksRow(assistantRows, false);
-      }
     }
 
-    const showDurationInFooter = !shouldUseWorkedGroup;
+    const showDurationInFooter = !anySegmentUsesWorkedGroup;
     if (
       shouldRenderAssistantFooter({
         message,
         renderEntries: entries,
         fileDiffs,
-        assistantActions: isLastAssistantMessage ? assistantActions : undefined,
+        assistantActions: scopedAssistantActions,
         showDuration: showDurationInFooter,
       })
     ) {
@@ -999,7 +1051,7 @@ export const buildChatVirtualRows = ({
       messageIndex,
       isLastAssistantMessage,
       fileDiffs,
-      lastAssistantActions,
+      scopedAssistantActions,
       activeSearchBlockId,
       expansionVersion,
     });
@@ -1039,6 +1091,7 @@ export const SessionChatStreamView = forwardRef<
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
       assistantActions,
+      assistantActionsMessageId = null,
       onForkLastAssistant,
       forkingAssistantMessageId,
       agentActivityLabel = null,
@@ -1090,14 +1143,17 @@ export const SessionChatStreamView = forwardRef<
       []
     );
     const handleAssistantWorkedGroupExpandedChange = useCallback(
-      (messageId: string, expanded: boolean) => {
+      (messageId: string, segmentKey: string, expanded: boolean) => {
         const cached = getExpandState(messageId);
         setExpandState(messageId, {
           ...cached,
-          groupExpanded: expanded,
+          expandedWorkedGroups: {
+            ...cached.expandedWorkedGroups,
+            [segmentKey]: expanded,
+          },
         });
         if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:worked-header`;
+          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${segmentKey}:worked-header`;
           groupExpansionScrollTokenRef.current += 1;
           groupExpansionAutoScrollSuppressedRef.current = true;
         }
@@ -1121,12 +1177,14 @@ export const SessionChatStreamView = forwardRef<
         lastAssistantMessageId,
         messageFileDiffEntriesByTurn,
         assistantActions,
+        assistantActionsMessageId,
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
       });
     }, [
       activeSearchBlockId,
       assistantActions,
+      assistantActionsMessageId,
       assistantExpansionVersion,
       items,
       lastAssistantMessageId,
@@ -1343,7 +1401,6 @@ export const SessionChatStreamView = forwardRef<
                   );
                 }
 
-                const isLastAssistantMessage = row.item.message.id === lastAssistantMessageId;
                 const canForkAssistantMessage =
                   row.item.message.finished === true &&
                   (row.item.message.id === lastCompletedAssistantMessageId ||
@@ -1358,7 +1415,11 @@ export const SessionChatStreamView = forwardRef<
                     key={row.key}
                     row={row}
                     fileDiffOverride={fileDiffOverride}
-                    assistantActions={isLastAssistantMessage ? assistantActions : undefined}
+                    assistantActions={resolveAssistantMessageActions(
+                      row.item.message.id,
+                      assistantActionsMessageId,
+                      assistantActions
+                    )}
                     onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
                     isForking={forkingAssistantMessageId === row.item.message.id}
                     onFileDiffClick={onFileDiffClick}
@@ -2523,13 +2584,22 @@ const WorkedGroupHeader = ({
   onExpandedChange: (expanded: boolean) => void;
 }) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const durationUnitLabels: DurationUnitLabels = {
     hour: t('time.unitShort.hour', 'h'),
     minute: t('time.unitShort.minute', 'm'),
     second: t('time.unitShort.second', 's'),
   };
+  /* Mobile moves the turn duration to the footer action bar, where it also
+     keeps the copy button clear of the session drawer's left-edge back-swipe
+     strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
+     so keeping it here too would print the same "Worked for 12s" twice, a few
+     rows apart. The header falls back to its existing no-duration copy. */
+  const effectiveDurationMs = isMobile ? null : durationMs;
   const durationLabel =
-    durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
+    effectiveDurationMs === null
+      ? ''
+      : formatDurationCompact(effectiveDurationMs, durationUnitLabels);
   const label = durationLabel
     ? t('sessions.workedFor', {
         duration: durationLabel,
@@ -2698,6 +2768,19 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   );
 });
 
+/**
+ * Width reserved before the mobile assistant-turn action buttons, so the copy
+ * button always clears the session drawer's left-edge back-swipe strip
+ * (`EDGE_ZONE_PX` in `../mobile/mobile-edge-back-swipe`). The turn duration
+ * renders inside it; the reserved width is what makes the guarantee hold even
+ * when the duration is unknown.
+ *
+ * Kept as a local number rather than importing `EDGE_ZONE_PX`, which would pull
+ * the gesture module into the conversation renderer's import graph.
+ * `tests/assistant-turn-action-inset.test.ts` asserts the two stay in sync.
+ */
+export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
+
 const AssistantTurnFooter = ({
   message,
   sessionId,
@@ -2747,10 +2830,21 @@ const AssistantTurnFooter = ({
         locale: toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
       });
   const hasTurnConfigInfo = hasAssistantTurnConfigInfo(message);
+  /* Mobile shows the duration here for EVERY finished turn, ignoring
+     `showDuration`: `WorkedGroupHeader` drops it on mobile (it would otherwise
+     print the identical `resolveSessionHistoryDurationMs` value twice per turn),
+     so this footer is the single place the turn duration appears. */
+  const mobileDurationLabel =
+    isMobile && durationLabel
+      ? t('sessions.workedFor', {
+          duration: durationLabel,
+          defaultValue: 'Worked for {{duration}}',
+        })
+      : '';
   const hasActionBarContent =
     hasCopyableText ||
     completionTimestampLabel.length > 0 ||
-    (showDuration && durationLabel.length > 0 && !isMobile) ||
+    (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined;
 
@@ -2795,14 +2889,33 @@ const AssistantTurnFooter = ({
           )}
           data-assistant-turn-actions
         >
+          {/* Mobile leads with the turn duration, and that is load-bearing: the
+             native session drawer owns a left-edge back-swipe strip, and no row
+             inside the conversation `VList` can paint above it (virtua sets
+             `contain: strict`, so the list is its own stacking context and the
+             composer's `z-40` trick does not reach here). A leading copy button
+             lands inside that strip and is all but untappable, so this label is
+             what pushes the cluster clear of it. The reserved min-width holds
+             even when the duration is unknown and the text is empty.
+             Desktop keeps the duration AFTER the buttons (see below). */}
+          {isMobile ? (
+            <span
+              className="shrink-0 tabular-nums"
+              style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
+            >
+              {mobileDurationLabel}
+            </span>
+          ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
-             interior padding would push the glyph 7px right of the answer text
-             above. Pull the cluster back by that padding so the first glyph sits
-             on the text's left edge (and the last one keeps the row gap to the
+             interior padding would push the glyph 7px inside the answer text
+             above. Pull the cluster back by that padding so the outermost glyph
+             sits on the text's edge (and the inner one keeps the row gap to the
              timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. */}
+             render, the timestamp must stay on the plain gutter. Mobile pulls
+             only the trailing edge — its leading glyph aligns to the duration
+             label, not to the answer text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork ? (
-            <div className="-mx-[7px] flex items-center gap-0.5">
+            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
               {hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
@@ -2935,7 +3048,7 @@ interface AssistantChatItemProps {
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   onGroupExpandedChange: (messageId: string, groupKey: string, expanded: boolean) => void;
-  onWorkedGroupExpandedChange: (messageId: string, expanded: boolean) => void;
+  onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
   conversationFontSize: ConversationFontSize;
@@ -2959,6 +3072,7 @@ const areAssistantVirtualContentsEqual = (
     case 'worked_group_header':
       return (
         b.kind === 'worked_group_header' &&
+        a.segmentKey === b.segmentKey &&
         a.expanded === b.expanded &&
         a.durationMs === b.durationMs
       );
@@ -3063,7 +3177,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
           <WorkedGroupHeader
             durationMs={content.durationMs}
             expanded={content.expanded}
-            onExpandedChange={(expanded) => onWorkedGroupExpandedChange(message.id, expanded)}
+            onExpandedChange={(expanded) =>
+              onWorkedGroupExpandedChange(message.id, content.segmentKey, expanded)
+            }
           />
         );
       case 'content': {
@@ -3607,6 +3723,7 @@ const ImagePreviewDialog = ({
       entries.map((entry) => ({
         key: entry.key,
         src: blobUrls.get(entry.key),
+        fileName: entry.fileName,
       })),
     [entries, blobUrls]
   );
@@ -5262,6 +5379,7 @@ const PermissionRequestBlock = ({
 }) => {
   const permission = toolCall.permissionRequest;
   const { respondToPermission, isReady } = usePermissionResponse();
+  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
   const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
   const askQuestionMeta = useMemo(
@@ -5304,6 +5422,7 @@ const PermissionRequestBlock = ({
         outcome: 'selected',
         optionId,
       });
+      notifyPlanExitApproved(toolCall, permission.options, optionId);
     } catch (error) {
       console.error('Failed to respond to permission request:', error);
       setPendingOptionId(null);

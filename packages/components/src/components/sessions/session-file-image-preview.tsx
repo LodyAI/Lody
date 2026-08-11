@@ -64,7 +64,7 @@ export const SessionFileImagePreview = memo(function SessionFileImagePreview({
   }, [bytes, svgText, mimeType]);
 
   const images = useMemo(
-    () => (objectUrl ? [{ key: path, src: objectUrl }] : []),
+    () => (objectUrl ? [{ key: path, src: objectUrl, fileName: path }] : []),
     [objectUrl, path]
   );
   const handleClose = useCallback(() => setViewerOpen(false), []);

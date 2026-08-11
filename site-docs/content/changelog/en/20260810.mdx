@@ -1,0 +1,29 @@
+---
+title: '20260810'
+version: 0.77.0
+date: 2026-08-10
+description: Added support for pasting and dragging files into chat, in-app Agent reauthentication, clearer diagnostics, and major performance and reliability improvements.
+---
+
+### ✨ New
+
+- Added support for pasting files into the composer and uploading them via drag and drop.
+- Both images in chat and standalone image files can now be opened, zoomed, and panned. On desktop, they can also be copied or saved from the context menu.
+- Agents can now be reauthenticated within Lody when their authentication expires, without recreating the session.
+- Agent errors can now be expanded to show full details, with one-click copying of diagnostic information. Error details are also fully accessible on mobile.
+- Improved workspace invitations, join approvals, and private-resource sharing flows, with clearer messages when no machines or projects are available to share.
+- Lody now opens a local project automatically after it is imported.
+- Billing settings are now accessible on mobile web.
+
+### 🐛 Fixes and Improvements
+
+- Significantly reduced main-thread work when scrolling the file tree or switching sessions, making large projects, session switching, and reopening the right sidebar smoother.
+- Reduced CPU and memory pressure from background sync, persistence, and reconnection. Network instability or a problem in a single sync room no longer triggers a high-frequency reconnection storm across the entire workspace.
+- Fixed occasional sync failures and delayed Agent replies after local sessions had been idle, as well as branches being lost when sessions were restored.
+- Fixed steering messages that could remain stuck after failing to reach a running Agent. If a message cannot be inserted immediately, it is now queued for the next regular turn.
+- Fixed Git operations using credentials from the wrong account in multi-workspace environments, as well as older sessions failing to restore when their local and remote branches shared the same name.
+- The Plan Mode toggle now works again on mobile.
+- Fixed the message copy button not responding.
+- Phones now continue to use the mobile layout in landscape orientation, and the web app no longer attempts to open the native app without user interaction.
+- Fixed dropdown errors in the mobile drawer, clipped statistics, truncated Agent names, and overly long project paths overflowing dialogs.
+- The app's crash page now displays a readable error and lets users copy the report. If recovery repeatedly fails, users can clear local data and sign in again after confirming the action.

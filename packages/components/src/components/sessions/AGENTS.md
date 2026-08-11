@@ -246,6 +246,20 @@ Session conversation page chain:
   explicit agent selection/machine scope rather than reading `SessionMeta`.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
+  The selected mode is applied per TURN (it becomes the user entry's
+  `inputConfig.modeId`; `resolveSessionConversationConfig` reads the latest turn
+  back as the preference). So approving "Yes, implement this plan" — which only
+  switches the mode of the running ACP turn — must ALSO drop the selector out of
+  plan, or the next send quietly plans again. Driven from the CLICK
+  (`hooks/use-plan-mode-exit-approval.ts` → `atoms/plan-mode-exit.ts`, read by
+  the composer), never from the resolved outcome in history: this selection is
+  per-device local state, so a history-derived signal would unset plan mode for
+  a teammate who just armed it, and would fire again for an OLD approval
+  replaying as the session doc syncs. Every interactive permission surface must
+  call the notifier — there are two (`floating-permission-request.tsx` and the
+  inline card in `../ai-gui/view.tsx`). It exits to the agent's default non-plan
+  mode and deliberately does not infer `acceptEdits` from an `allow_always`
+  answer: that consent was about this plan, not every later turn.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to
@@ -406,7 +420,14 @@ labelClassName`) so the stage diffstat never clips. Wired from
   content appears instantly. Radix gotcha: popover anchors use PopoverAnchor (not Trigger) and
   must preventDefault onPointerDownOutside when the target is the anchor,
   or dismiss + click-toggle cancel out. GoalChip's popover reuses
-  `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`;
+  `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`.
+  Goal controls are transport-gated: the current `/goal …` prompt bridge is
+  Codex-only, so provider-neutral snapshots remain read-only until their advertised
+  `_session/goal` method is routed through the session control plane; Stop must never
+  synthesize `pause` for those providers. An `active` goal is persistent session state,
+  not proof that an ACP prompt is running: current busy/running UI, message queue routing,
+  and completion prompts must use live turn presence only. Active goal state may still
+  gate destructive history rewrites and expose an explicit Codex Pause control.
   ScheduleChip reuses `useResolvedScheduledTasks`/`ScheduledTaskList` from
   `scheduled-tasks-panel.tsx` (same adaptive countdown clock, cannot drift).
   The message queue intentionally stays OUT of the bar. The bar renders on
@@ -491,6 +512,16 @@ labelClassName`) so the stage diffstat never clips. Wired from
 - `session-detail.tsx` owns session-switch local UI reset. Keep the reset in the
   render-phase `localStateSessionId !== sessionId` branch; do not add a second
   `useEffect([sessionId])` reset that replays the same state updates.
+- **A RESTORED side-panel state must not animate.** The desktop panel animates
+  `flex-grow`/`min-width`, so one 220ms expand runs style → layout → paint →
+  compositing for the whole detail tree every frame — measured at ~400ms of
+  near-saturated main thread per session switch. Any code path that sets
+  `isSidebarOpen` from persisted/URL state rather than from a user action must
+  bump `sidebarRestoreSeq` in the same commit (today: the session-switch reset
+  branch and the `?pr=` deep-link effect); `DesktopSessionDetailLayout` then
+  applies it in one frame and re-arms the transition on the next rAF. User
+  toggles (`handleToggleSidebar`, `handleOpenPrTab`, viewer/browser opens) still
+  animate and must NOT bump it.
 - Branch UI shortcut: "current branch" copy uses `SessionMeta.branchName` only.
   `SessionMeta.baseBranch` / `project.branch` are start/base refs; they may be
   shown as base fallback, but must not be copied or labeled as current. The
@@ -504,6 +535,18 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   `session-file-content-view.tsx`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `specs/code-collab-v2.md`.
+- **File tree: ONE row renderer** (`VirtualFileTree` in `components/file-tree-view.tsx`)
+  and ONE virtualization gate, counting VISIBLE rows. A second tree-wide count
+  used to swap in Radix `TreeView`, so a lazily growing tree thrashed between two
+  row implementations — do not reintroduce either. An empty virtual range renders
+  NO rows (never `rows.map`) and keeps the total-size spacer: the ScrollArea
+  viewport is an ANCESTOR ref, so it is still null when TanStack reads
+  `getScrollElement()`, making the first range always empty — a full-render
+  fallback there mounted the whole tree. Re-`measure()` on viewport attach/resize
+  (as `shared/option-selector.tsx` does). Rows are `memo`'d against per-frame
+  scroll re-renders, which needs `pruneExpandedFileTreeIds` to return its input
+  Set on a no-op prune (watcher ticks churn `data`) and icon factories to cache by
+  resolved icon name. Coverage: `tests/file-tree-virtual-rows.test.tsx`.
 - **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
   panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
   over a network; in the local Electron bundle a lazy `import()` adds no benefit

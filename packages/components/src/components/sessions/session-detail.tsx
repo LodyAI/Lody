@@ -33,7 +33,6 @@ import {
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   getAcpCapabilityCacheEntryAuthority,
-  isSessionGoalWorking,
   resolveProjectGitHubRepo,
   type AcpConfigOptionValue,
   type CommentReferencePayload,
@@ -44,7 +43,6 @@ import {
   type ProjectRef,
   type SessionId,
   type SessionInputBlock,
-  type SessionLegacyMetaFields,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
@@ -595,6 +593,14 @@ const SessionDetail = ({
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
+  /* Bumped whenever `isSidebarOpen` changes because side-panel state was
+     RESTORED (session switch, `?pr=` deep link) rather than toggled by the
+     user, so the desktop layout snaps the panel to its target width instead of
+     animating a transition nobody asked for. See
+     DesktopSessionDetailLayout.sidebarRestoreSeq. */
+  const [sidebarRestoreSeq, setSidebarRestoreSeq] = useState(0);
+  /* The `?pr=` restore below applies once per (session, PR number). */
+  const restoredPrSidebarRef = useRef<number | null>(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab | null>(
     () => initialTabState.sidePanel.tab
   );
@@ -827,7 +833,9 @@ const SessionDetail = ({
     pendingInitialTurnRef.current.clear();
     sendingDraftIdsRef.current.clear();
     desktopTabFocusRegionRef.current = 'conversation';
+    restoredPrSidebarRef.current = null;
     setLocalStateSessionId(sessionId);
+    setSidebarRestoreSeq((seq) => seq + 1);
     setIsSidebarOpen(nextInitialTabState.sidePanel.open);
     setActiveSidebarTab(nextInitialTabState.sidePanel.tab);
     setActiveSideSessionId(nextInitialTabState.sidePanel.sideSessionId);
@@ -1334,11 +1342,9 @@ const SessionDetail = ({
       typeof activeSession.lastReadAt === 'number' ? activeSession.lastReadAt : null;
     const hasUnread = lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
     const isWaiting = activeSessionLiveStatus?.type === 'requestPermission';
-    const legacyActiveSession = activeSession as SessionLegacyMetaFields;
-    // CLI-reported presence (plus goal state) is the fact source for
-    // "working"; meta dispatch pointers are CLI mechanics and can be stale.
-    const isWorking =
-      activeSessionLiveStatus != null || isSessionGoalWorking(legacyActiveSession.latestGoal);
+    // CLI-reported presence is the fact source for "working"; persistent goal
+    // state and meta dispatch pointers do not imply a prompt is running.
+    const isWorking = activeSessionLiveStatus != null;
     if (isWaiting) return 'waiting';
     if (isWorking) return 'working';
     if (hasUnread) return 'unread';
@@ -2289,12 +2295,26 @@ const SessionDetail = ({
 
   // Sync ?pr=<number> URL param into the desktop sidebar. The mobile path reads
   // `urlPrNumber` directly for its full-screen drawer.
+  //
+  // This can only run once `latestPr` has resolved from the session doc, so on
+  // a deep link it lands a commit or two AFTER the switch — the panel would
+  // otherwise animate open from whatever width the session the user just left
+  // had. It is a restore, not a user action: bump `sidebarRestoreSeq` so the
+  // layout applies it in one frame. Applied once per (session, PR number);
+  // re-running on every `latestPr` identity change would reopen a panel the
+  // user had closed.
   useEffect(() => {
     if (isMobile) return;
-    if (urlPrNumber && latestPr && repoFullName && urlPrNumber === latestPrNumber) {
-      setIsSidebarOpen(true);
-      activateSidebarTab('pr');
+    if (!urlPrNumber) {
+      restoredPrSidebarRef.current = null;
+      return;
     }
+    if (!latestPr || !repoFullName || urlPrNumber !== latestPrNumber) return;
+    if (restoredPrSidebarRef.current === urlPrNumber) return;
+    restoredPrSidebarRef.current = urlPrNumber;
+    setSidebarRestoreSeq((seq) => seq + 1);
+    setIsSidebarOpen(true);
+    activateSidebarTab('pr');
   }, [activateSidebarTab, isMobile, latestPr, latestPrNumber, repoFullName, urlPrNumber]);
 
   // When the user switches away from the PR sidebar tab (or closes the sidebar)
@@ -3814,7 +3834,6 @@ const SessionDetail = ({
           ? activeSession
           : (visibleChildSessions.find((s) => s.id === tabId) ?? null);
       const draft = meta ? null : (draftTabs.find((d) => d.id === tabId) ?? null);
-      const legacy = meta as SessionLegacyMetaFields | null;
       const lastMessageAt = typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null;
       const lastReadAt = typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null;
       return {
@@ -3825,9 +3844,7 @@ const SessionDetail = ({
           t('sessions.tabs.newTab', 'New Tab'),
         active: conversationTabActive && tabId === activeTabSessionId,
         main: tabId === sessionId,
-        running:
-          meta != null &&
-          (conversationWorkingMap[tabId] === true || isSessionGoalWorking(legacy?.latestGoal)),
+        running: meta != null && conversationWorkingMap[tabId] === true,
         unread:
           meta != null &&
           lastMessageAt !== null &&
@@ -5312,6 +5329,7 @@ const SessionDetail = ({
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
         sidebarMinWidthRequest={prSidebarWidthRequest}
+        sidebarRestoreSeq={sidebarRestoreSeq}
       />
       {/* These dialogs live at the desktop root too (the mobile branch renders its own
           copies) so the `session.renameCurrent` / `session.archiveCurrent` keyboard

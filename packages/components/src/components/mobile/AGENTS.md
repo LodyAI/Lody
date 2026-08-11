@@ -50,9 +50,15 @@ Two families of swipe-back, split by how the surface animates:
   That `z-40` trick does NOT transfer to anything inside the message list:
   virtua's `VList` sets `contain: strict`, so the list is its own stacking
   context and no row can paint above the strip. A left-edge control in a row can
-  only be rescued by insetting it past `EDGE_ZONE_PX`. Known-unfixed case: the
-  assistant turn action bar's copy button (`data-assistant-turn-actions` in
-  `../ai-gui/view.tsx`) sits at x=24..52, so only its rightmost 4px is tappable.
+  only be rescued by insetting it past `EDGE_ZONE_PX`. The assistant turn action
+  bar (`data-assistant-turn-actions` in `../ai-gui/view.tsx`) does that with a
+  leading turn-duration label reserving
+  `MOBILE_TURN_ACTION_LEADING_INSET_PX` (>= `EDGE_ZONE_PX`, pinned by
+  `tests/assistant-turn-action-inset.test.ts`); without it the copy button sat
+  at x=24..52 with only ~4px tappable. That label is load-bearing layout, not
+  decoration — the reserved width must survive an empty/unknown duration, and
+  `WorkedGroupHeader` drops its own duration on mobile so the same value is not
+  printed twice. Do not put another control ahead of it.
   Full-screen right drawers need `border-l-0!`; plain `border-0` loses to
   Vaul UI's `data-[vaul-drawer-direction=right]:border-l` specificity.
 
@@ -69,7 +75,8 @@ Two families of swipe-back, split by how the surface animates:
   `mobile-chat-landing-screen.tsx`, `mobile-archive-screen.tsx`.
 - Home dock tabs: `mobile-home-screen.tsx` `workspaceTabSpecs` builds
   Inbox / Chat / Tasks / Projects. Inbox only renders when the caller passes
-  `showInboxTab` (multi-member workspaces); Tasks only renders when the caller
+  `showInboxTab` (multi-member workspace AND the developer-mode Inbox beta gate);
+  Tasks only renders when the caller
   passes `showTasksTab` (Tasks beta gate — see
   `../tasks/AGENTS.md`); its body is the shared `TasksListBody mobile
 embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`

@@ -13,7 +13,7 @@ import type {
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
 
-import { AgentClient } from '../src/agent/agent-client';
+import { AgentClient, AgentSteerNotDeliveredError } from '../src/agent/agent-client';
 import { loadEnv } from '../src/utils/const';
 import type { Logger } from '../src/utils/logger';
 
@@ -408,6 +408,103 @@ describe('AgentClient plan mode permission restoration', () => {
       await postApplicationUpdate;
       expect(notificationCompleted).toBe(true);
       expect(onUpdateMessage).toHaveBeenCalledOnce();
+    });
+
+    /** Wire an acknowledged-steer-capable Codex client around one steer request. */
+    const createSteerClient = (
+      request: () => Promise<unknown>,
+      completion: Promise<never> = new Promise(() => {})
+    ) => {
+      const { client } = createTestClient({ agentType: 'codex' });
+      const requestSpy = vi.fn(request);
+      // @ts-expect-error - focused protocol-boundary setup
+      client.connection = { request: requestSpy };
+      // @ts-expect-error - focused session-identity setup
+      client.acpSessionId = 'acp-test' as ACPSessionId;
+      // @ts-expect-error - focused capability-negotiation setup
+      client.acknowledgedSteerCapability = {
+        provider: 'codex',
+        requestMethod: '_session/steering',
+        appliedNotificationMethod: 'codex/steerApplied',
+        upstreamTurn: 'same',
+        configPolicy: 'active',
+      };
+      // @ts-expect-error - the steer rides the turn's own prompt completion
+      client.activePromptCompletion = {
+        sessionId: 'acp-test' as ACPSessionId,
+        promise: completion,
+      };
+      return { client, request: requestSpy };
+    };
+
+    it('reports an acknowledged steer the agent refused as not delivered', async () => {
+      // Codex answers `No active Codex turn to steer` once the turn the guide
+      // was aimed at has ended — inject-or-refuse, so nothing was taken.
+      const { client, request } = createSteerClient(async () => {
+        throw Object.assign(new Error('Invalid request: No active Codex turn to steer'), {
+          code: -32600,
+        });
+      });
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      expect(request).toHaveBeenCalledWith(
+        '_session/steering',
+        expect.objectContaining({ sessionId: 'acp-test', steerId: expect.any(String) })
+      );
+    });
+
+    it('keeps a steer whose request died in transport ambiguous', async () => {
+      // The frame may already have reached the agent, so re-sending this user
+      // turn could deliver the same message twice. Only the agent's own
+      // `invalid request` answer proves it declined.
+      const { client } = createSteerClient(async () => {
+        throw new Error('ACP connection closed');
+      });
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      const error = await steerRun.applied.then(
+        () => null,
+        (reason: unknown) => reason
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+    });
+
+    it('lets the refusal win when the steered turn ends before the agent answers', async () => {
+      // The Codex adapter drains session notifications before it refuses, so the
+      // upstream turn's own response routinely lands first. Rejecting on that
+      // response alone would downgrade a provable refusal to an ambiguous
+      // failure and strand the user's message.
+      let refuse!: (error: unknown) => void;
+      let completeTurn!: () => void;
+      const completion = new Promise<never>((resolve) => {
+        completeTurn = () => resolve(undefined as never);
+      });
+      const { client } = createSteerClient(
+        () =>
+          new Promise((_, reject) => {
+            refuse = reject;
+          }),
+        completion
+      );
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+      completeTurn();
+      await Promise.resolve();
+      refuse(
+        Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
+      );
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
     });
 
     it('handles rate limit extension notifications', async () => {
@@ -998,11 +1095,11 @@ describe('AgentClient plan mode permission restoration', () => {
         setSessionConfigOption: setSessionConfigOptionSpy,
       };
 
-      await client.setSessionConfigOption('acp-test' as ACPSessionId, 'fast_mode', true);
+      await client.setSessionConfigOption('acp-test' as ACPSessionId, 'fast-mode', true);
 
       expect(setSessionConfigOptionSpy).toHaveBeenCalledWith({
         sessionId: 'acp-test',
-        configId: 'fast_mode',
+        configId: 'fast-mode',
         type: 'boolean',
         value: true,
       });
@@ -1143,7 +1240,7 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
   });
 });
 
-describe('AgentClient Codex goal session info', () => {
+describe('AgentClient goal session info', () => {
   it('shows a retry activity until Codex resumes streaming', async () => {
     const { client, onUpdateMessage } = createTestClient();
 
@@ -1181,7 +1278,79 @@ describe('AgentClient Codex goal session info', () => {
     ]);
   });
 
-  it('normalizes Codex goal metadata into sparse goal message content', async () => {
+  it('normalizes provider-neutral goal metadata for non-Codex agents', async () => {
+    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
+      agentType: 'claude',
+    });
+
+    await client.sessionUpdate({
+      sessionId: 'acp-test',
+      update: {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          goal: {
+            objective: 'ship the release',
+            status: 'limited',
+            tokenBudget: 42_000,
+            iterations: 7,
+            lastReason: 'waiting for review',
+            tokensUsed: 12_000,
+            timeUsedSeconds: 90,
+            createdAt: 100,
+            updatedAt: 200,
+            controlMethod: '_session/goal',
+          },
+        },
+      },
+    } as unknown as SessionNotification);
+
+    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
+      type: 'goal',
+      threadId: 'acp-test',
+      objective: 'ship the release',
+      status: 'blocked',
+      tokenBudget: 42_000,
+      tokensUsed: 12_000,
+      timeUsedSeconds: 90,
+      createdAt: 100,
+      updatedAt: 200,
+    });
+    expect(onUpdateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers valid provider-neutral metadata over a legacy Codex duplicate', async () => {
+    const { client, onThreadGoalUpdated } = createTestClient();
+
+    await client.sessionUpdate({
+      sessionId: 'acp-test',
+      update: {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          goal: {
+            objective: 'neutral objective',
+            status: 'active',
+            controlMethod: '_session/goal',
+          },
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'paused',
+            },
+          },
+        },
+      },
+    } as unknown as SessionNotification);
+
+    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
+      type: 'goal',
+      threadId: 'acp-test',
+      objective: 'neutral objective',
+      status: 'active',
+      tokenBudget: null,
+    });
+  });
+
+  it('keeps parsing legacy Codex goal metadata', async () => {
     const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient();
 
     await client.sessionUpdate({
@@ -1210,28 +1379,50 @@ describe('AgentClient Codex goal session info', () => {
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('handles a null Codex goal as cleared', async () => {
-    const { client, onThreadGoalCleared } = createTestClient();
+  it('handles a null provider-neutral goal as cleared', async () => {
+    const { client, onThreadGoalCleared } = createTestClient({ agentType: 'claude' });
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { codex: { goal: null } },
+        _meta: {
+          goal: null,
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'active',
+            },
+          },
+        },
       },
-    });
+    } as unknown as SessionNotification);
 
     expect(onThreadGoalCleared).toHaveBeenCalledWith('acp-test');
   });
 
-  it('ignores invalid Codex goal metadata without breaking the session stream', async () => {
-    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient();
+  it('ignores invalid provider-neutral goal metadata without breaking the session stream', async () => {
+    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
+      agentType: 'claude',
+    });
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { codex: { goal: { objective: 42, status: 'active' } } },
+        _meta: {
+          goal: {
+            objective: 'neutral objective',
+            status: 'active',
+            controlMethod: '_wrong/goal',
+          },
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'active',
+            },
+          },
+        },
       },
     } as unknown as SessionNotification);
 

@@ -51,13 +51,32 @@ export function MobileProjectSettings({
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
+  initialMachineId,
+  initialProjectKey,
 }: ProjectSettingsViewProps) {
   const { t } = useTranslation();
   const onlineMachineIds = useOnlineMachineIds();
 
-  const totalProjects = sections.reduce((sum, section) => sum + section.rows.length, 0);
-  const totalGithubProjects = githubSections.reduce((sum, section) => sum + section.rows.length, 0);
-  const useMachineHeadings = sections.length > 1;
+  const visibleSections = initialMachineId
+    ? sections.filter((section) => section.machineId === initialMachineId)
+    : sections;
+  const orderedSections = initialProjectKey
+    ? visibleSections.map((section) => ({
+        ...section,
+        rows: [...section.rows].sort((left, right) => {
+          if (left.key === initialProjectKey) return -1;
+          if (right.key === initialProjectKey) return 1;
+          return 0;
+        }),
+      }))
+    : visibleSections;
+  const visibleGithubSections = initialMachineId ? [] : githubSections;
+  const totalProjects = orderedSections.reduce((sum, section) => sum + section.rows.length, 0);
+  const totalGithubProjects = visibleGithubSections.reduce(
+    (sum, section) => sum + section.rows.length,
+    0
+  );
+  const useMachineHeadings = orderedSections.length > 1;
   const fallbackTitle = t('workspace.projects.title', 'Projects');
 
   if ((isLoading || githubProjectsLoading) && totalProjects + totalGithubProjects === 0) {
@@ -88,7 +107,7 @@ export function MobileProjectSettings({
 
   return (
     <TooltipProvider delayDuration={200}>
-      {sections.map((section) => (
+      {orderedSections.map((section) => (
         <MobileSettingsSection
           key={section.machineId}
           title={
@@ -118,7 +137,7 @@ export function MobileProjectSettings({
           ))}
         </MobileSettingsSection>
       ))}
-      {githubSections.map((section) => (
+      {visibleGithubSections.map((section) => (
         <MobileSettingsSection key={section.owner} title={`GitHub · ${section.owner}`}>
           {section.rows.map((row, rowIndex) => (
             <div key={row.key} className={cn(rowIndex > 0 && 'border-t border-border/40')}>

@@ -36,7 +36,12 @@ import {
   type WorktreeSetupShell,
 } from '@lody/shared';
 import { useAtomValue } from 'jotai';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import {
+  currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
+  settingsSelectedMachineIdAtom,
+  settingsSelectedProjectKeyAtom,
+} from '@/atoms';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
@@ -147,6 +152,8 @@ export type ProjectSettingsViewProps = {
   githubSections: GithubProjectSettingsSection[];
   isLoading: boolean;
   githubProjectsLoading: boolean;
+  initialMachineId?: MachineId | null;
+  initialProjectKey?: string | null;
   onSharedWithTeamChange?: (row: ProjectSettingsRow, sharedWithTeam: boolean) => Promise<void>;
   onSyncHistory?: (row: ProjectSettingsRow, provider: LocalProjectHistoryProvider) => Promise<void>;
   onImportHistory?: (
@@ -279,9 +286,21 @@ export function historyStateKey(projectKey: string, provider: LocalProjectHistor
   return `${getLocalProjectHistoryProviderKey(provider)}:${projectKey}`;
 }
 
-export function ProjectSettingsComponent() {
+export function ProjectSettingsComponent({
+  initialMachineId,
+  initialProjectKey,
+}: {
+  initialMachineId?: MachineId | null;
+  initialProjectKey?: string | null;
+} = {}) {
   const { openSettings } = useOpenSettings();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const modalMachineTarget = useAtomValue(settingsSelectedMachineIdAtom);
+  const modalProjectTarget = useAtomValue(settingsSelectedProjectKeyAtom);
+  const resolvedInitialMachineId =
+    initialMachineId !== undefined ? initialMachineId : modalMachineTarget;
+  const resolvedInitialProjectKey =
+    initialProjectKey !== undefined ? initialProjectKey : modalProjectTarget;
   const [addLocalProjectDialogOpen, setAddLocalProjectDialogOpen] = useState(false);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
@@ -369,6 +388,8 @@ export function ProjectSettingsComponent() {
         githubSections={githubSections}
         isLoading={isLoading}
         githubProjectsLoading={workspaceReposLoading}
+        initialMachineId={resolvedInitialMachineId}
+        initialProjectKey={resolvedInitialProjectKey}
         onSharedWithTeamChange={onSharedWithTeamChange}
         onSyncHistory={onSyncHistory}
         onImportHistory={onImportHistory}
@@ -410,6 +431,8 @@ function ProjectSettingsDesktop({
   onGithubWorktreeCleanupChange,
   onAddLocalProject,
   onAddGitHubProject,
+  initialMachineId,
+  initialProjectKey,
 }: ProjectSettingsViewProps) {
   const { t } = useTranslation();
   const onlineMachineIds = useOnlineMachineIds();
@@ -440,7 +463,9 @@ function ProjectSettingsDesktop({
     return list;
   }, [sections, githubSections, onlineMachineIds, t]);
 
-  const [selectedPillId, setSelectedPillId] = useState<string | null>(null);
+  const [selectedPillId, setSelectedPillId] = useState<string | null>(
+    () => initialMachineId ?? null
+  );
   const resolvedPillId =
     selectedPillId && pills.some((pill) => pill.id === selectedPillId)
       ? selectedPillId
@@ -457,7 +482,9 @@ function ProjectSettingsDesktop({
     return (section?.rows ?? []).map((row) => ({ key: row.key, kind: 'local' as const, row }));
   }, [resolvedPillId, sections, githubSections]);
 
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(
+    () => initialProjectKey ?? null
+  );
   const selectedProject =
     currentSelections.find((selection) => selection.key === selectedProjectKey) ??
     currentSelections[0] ??

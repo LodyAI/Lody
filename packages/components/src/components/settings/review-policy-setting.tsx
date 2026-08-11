@@ -292,8 +292,8 @@ function ReviewerMachineRow({
                 {configured
                   ? t('settings.review.configured', 'Configured')
                   : reviewerConfig
-                    ? t('settings.review.agentRemoved', 'Reviewer unavailable')
-                    : t('settings.review.notConfigured', 'Not configured')}
+                  ? t('settings.review.agentRemoved', 'Reviewer unavailable')
+                  : t('settings.review.notConfigured', 'Not configured')}
               </span>
 
               {reviewerConfig ? (
@@ -701,7 +701,7 @@ export function ReviewPolicySection() {
       standalone={isMobile}
       onChange={persistReviewerConfig}
       onDelete={deleteReviewerConfig}
-      onOpenAgentSettings={() => openSettings('agent-config')}
+      onOpenAgentSettings={() => openSettings('agents')}
     />
   );
 

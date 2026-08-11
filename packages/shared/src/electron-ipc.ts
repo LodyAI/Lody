@@ -495,6 +495,85 @@ export type SendSessionFileLocal = (
   input: SendSessionFileLocalInput
 ) => Promise<SendSessionFileLocalResult>;
 
+/* ── Image preview context menu ──────────────────────────────────────────────
+ *
+ * The previewed image only exists in the renderer (a `blob:` URL over bytes the
+ * session store decrypted, or a Code Collab file read), so the main process can
+ * neither download nor decode it from a URL. The split is therefore: main owns
+ * the native menu, the clipboard, and the save dialog; the renderer owns the
+ * bytes and hands them over per action, only after the user picked one.
+ */
+
+/** 64 MiB. Well past any real screenshot, small enough to bound one IPC copy. */
+export const IMAGE_EXPORT_MAX_BYTES = 64 * 1024 * 1024;
+
+export const IMAGE_PREVIEW_MENU_ACTIONS = ['copy', 'save'] as const;
+
+export type ImagePreviewMenuAction = (typeof IMAGE_PREVIEW_MENU_ACTIONS)[number];
+
+/**
+ * Labels come from the renderer because that is where i18n lives; the main
+ * process only decides that they render as a native menu.
+ */
+export const ShowImagePreviewMenuInputSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            action: z.enum(IMAGE_PREVIEW_MENU_ACTIONS),
+            label: z.string().trim().min(1).max(120),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(IMAGE_PREVIEW_MENU_ACTIONS.length),
+  })
+  .strict();
+
+export type ShowImagePreviewMenuInput = z.infer<typeof ShowImagePreviewMenuInputSchema>;
+
+/** `null` when the menu closed without a selection. */
+export type ShowImagePreviewMenuResult = { action: ImagePreviewMenuAction | null };
+
+const ImageExportBytesSchema = z
+  .instanceof(ArrayBuffer)
+  .refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= IMAGE_EXPORT_MAX_BYTES, {
+    message: 'image bytes out of range',
+  });
+
+/**
+ * PNG specifically: it is the one raster encoding every desktop clipboard
+ * accepts, so the renderer re-encodes whatever the source format was rather
+ * than making the main process guess at a decoder.
+ */
+export const CopyImageToClipboardInputSchema = z
+  .object({ pngBytes: ImageExportBytesSchema })
+  .strict();
+
+export type CopyImageToClipboardInput = z.infer<typeof CopyImageToClipboardInputSchema>;
+
+export type CopyImageToClipboardResult = { copied: boolean; error?: string };
+
+/**
+ * `bytes` stays in the ORIGINAL encoding so a save round-trips the file the user
+ * is looking at; `fileName` is only a save-dialog default and the main process
+ * reduces it to a base name.
+ */
+export const SaveImageFileInputSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(255),
+    bytes: ImageExportBytesSchema,
+  })
+  .strict();
+
+export type SaveImageFileInput = z.infer<typeof SaveImageFileInputSchema>;
+
+export type SaveImageFileResult =
+  | { saved: true; path: string }
+  | { saved: false; canceled: true }
+  | { saved: false; canceled?: false; error: string };
+
 /* ── Global (OS-level) shortcuts ─────────────────────────────────────────────
  *
  * These are registered in the Electron main process via `globalShortcut` (they fire

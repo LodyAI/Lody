@@ -22,6 +22,9 @@ export type LandingCtaCopy = {
   allPlatformsHref: string;
   webApp: string;
   webAppHref: string;
+  /** Low-key "book a call with the founder" link in the secondary row. */
+  bookCall: string;
+  bookCallHref: string;
   labels: PlatformDownloadLabels;
 };
 
@@ -51,6 +54,14 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
         <p className="uw-cta__lead">{copy.lead}</p>
 
         <div className="uw-cta__actions">
+          <a
+            className="uw-cta__book-call underwater-btn underwater-btn--ghost"
+            href={copy.bookCallHref}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {copy.bookCall}
+          </a>
           <a
             className="uw-cta__primary underwater-btn underwater-btn--primary"
             href={primary.href}

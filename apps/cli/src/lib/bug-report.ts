@@ -1,12 +1,12 @@
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import { z } from 'zod';
 import type { MachineBugReportResponse, MachineId, WorkspaceId } from '@lody/shared';
 import { LODY_LOG_DIR } from '../utils/log-retention';
+import { listDailyLogFiles, readDailyLogFile } from '../utils/log-files';
 import type { MachineAccessCheckResult } from './workspace';
 
-// Convex HTTP actions cap the request body at 20 MiB. Two daily logs can reach
-// 20 MB each, so only the tail of each file is shipped.
+// Convex HTTP actions cap the request body at 20 MiB. A single day can span
+// several 20 MB rotations, so this is the budget for each day as a whole and
+// buys that day's most recent output.
 const LOG_TAIL_MAX_BYTES = 4 * 1024 * 1024;
 const TRUNCATION_MARKER = '...[truncated: only the tail of this log file is included]\n';
 
@@ -47,25 +47,41 @@ export const mergeBugReportLogs = (parts: BugReportLogPart[]): string =>
     .join('\n\n');
 
 /**
- * Read the machine's daily CLI logs for today and yesterday (winston
- * DailyRotateFile names them `<YYYY-MM-DD>.log` in local time). Missing files
- * are skipped — a fresh install may not have yesterday's log.
+ * Read the machine's CLI logs for today and yesterday (winston DailyRotateFile
+ * dates them in local time). A day is NOT one file: once it exceeds the
+ * transport's `maxSize` it rolls to `<date>.log.1`, `<date>.log.2`, … and
+ * gzips the file it rolled away from, so reading `<date>.log` alone finds
+ * nothing on exactly the busy machines whose logs matter most.
+ *
+ * Each day is walked newest rotation first so its byte budget buys the most
+ * recent output, then emitted oldest first. Missing days are skipped — a fresh
+ * install may not have yesterday's log.
  */
 export const collectBugReportLogs = async (
   now: Date = new Date(),
   logDir: string = LODY_LOG_DIR
 ): Promise<BugReportLogPart[]> => {
   const dates = [new Date(now.getTime() - 24 * 60 * 60 * 1000), now];
+  const available = listDailyLogFiles(logDir);
   const parts: BugReportLogPart[] = [];
   for (const date of dates) {
-    const fileName = `${formatBugReportLogDate(date)}.log`;
-    try {
-      const raw = await fs.readFile(path.join(logDir, fileName), 'utf8');
-      const { text, truncated } = tailOfLog(raw, LOG_TAIL_MAX_BYTES);
-      parts.push({ fileName, content: text, truncated });
-    } catch {
-      // Skip unreadable/missing daily logs.
+    const day = formatBugReportLogDate(date);
+    const dayParts: BugReportLogPart[] = [];
+    let remaining = LOG_TAIL_MAX_BYTES;
+    for (const file of available.filter((candidate) => candidate.date === day)) {
+      if (remaining <= 0) break;
+      let raw: string;
+      try {
+        raw = await readDailyLogFile(file);
+      } catch {
+        // Skip unreadable rotations.
+        continue;
+      }
+      const { text, truncated } = tailOfLog(raw, remaining);
+      remaining -= Buffer.byteLength(text, 'utf8');
+      dayParts.push({ fileName: file.name, content: text, truncated });
     }
+    parts.push(...dayParts.reverse());
   }
   return parts;
 };

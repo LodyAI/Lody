@@ -1,73 +1,112 @@
 ---
 title: Quick Start
-description: Install the prerequisites for Lody, start the CLI, connect GitHub, and finish the initial setup.
+description: Install and set up Lody, from the desktop app or the CLI, then connect GitHub and configure your agents.
 ---
+
+import { MonitorDown, TabletSmartphone, Compass } from 'lucide-react';
 
 # Quick Start
 
-## Sign In
+Lody runs everywhere you work: native apps for macOS, Windows, and Linux, mobile apps for iOS and
+Android, any browser, and a CLI you can run on a remote server.
 
-Lody supports the following sign-in methods on the sign-in page:
+<Cards>
+  <Card href="/download" title="Download the desktop app" icon={<MonitorDown />}>macOS, Windows, Linux</Card>
+  <Card href="/download" title="Download the mobile app" icon={<TabletSmartphone />}>iOS, Android</Card>
+  <Card href="/login" icon={<Compass />} title="Sign in to Lody">
+    Open Lody in your browser
+  </Card>
+</Cards>
 
-- **GitHub**
-- **Google**
-- **Apple**
-- **Discord**
-- **Email + Password**
+## Start from the Desktop App
 
-Pick whichever account you want to use. You can always link GitHub separately from
-**Settings → GitHub** even if you signed in another way.
+- Download the installer for your platform from the [download page](/download) and install it.
+- On first launch, Lody opens your browser to sign up or sign in.
+- The desktop app also starts Lody's local [CLI daemon](/docs/cli#daemon-mode) on your machine. The
+  CLI is the process where agents actually run.
 
-For headless machines (CI runners, remote servers, containers) use a CLI token with
-`lody login --auth <token>` or `lody start --auth <token>`. See
-[Non-Interactive Login with `--auth`](/docs/cli#non-interactive-login-with-auth).
+## Start from the CLI
 
-## Prerequisites
+### Prerequisites
 
 - Node.js 18 or later
-- Git installed and configured
-- Install the [GitHub CLI](https://cli.github.com/)
-  - macOS: `brew install gh`
-  - Linux: [Installation instructions](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
 
-### Network Requirements
+### Start
 
-The CLI needs access to the following services:
-
-- Your Coding Agent (Claude Code / Codex)
-- GitHub (for cloning repositories)
-- npm registry
-
-## Start
-
-```bash
-# Recommended: run in the background
+```bash tab="Daemon (recommended)"
+npx lody login
 npx lody daemon start
-
-# Temporary foreground mode for debugging
+```
+```bash tab="Foreground"
+npx lody login
 npx lody start
 ```
 
-`npx lody daemon start` starts the Lody CLI in the background and brings it back if it exits
-unexpectedly. The CLI detects Claude Code and Codex installed on your current machine, then creates
-a default [Agent Config](/docs/agents) so you can pick the corresponding CLI type in the chat UI.
+`npx lody login` uses a device code flow and opens the sign-in page in your browser; on a headless
+machine it prints the sign-in link instead. Once you finish signing in, the CLI picks up your
+account automatically.
 
-Use `npx lody start` when you want foreground logs in the current terminal or need to debug startup.
+`npx lody daemon start` runs the Lody CLI in the background and brings it back if it exits
+unexpectedly. If you cannot reach a browser at all, start the daemon directly with
+`npx lody daemon start --auth <cli_token>`. You can view and generate a `cli_token` in the desktop
+app under **Settings** -> **Account** -> **CLI Token**.
 
-## Use the Desktop App as a Remote Control
-
+<Callout title="Using the desktop app purely as a remote control">
 The desktop app starts its bundled local CLI by default so it can run agents on this computer. If
-you only want to control agents on another machine, open **Settings** -> **General** -> **Startup**
+you only want to control agents on other machines, open **Settings** -> **General** -> **Startup**
 and turn off **Run local agent**.
 
-Turning it off stops the automatically managed CLI and keeps it disabled on the next launch. It
-does not disconnect agents running on other machines.
+Once it is off, the desktop app stops managing that CLI and keeps it off on the next launch. Agents
+running on other machines are unaffected.
+</Callout>
 
-## Connect Your GitHub Repository
+## Add a Project
 
-In the web app, click **Settings** -> **GitHub** -> **Manage** to authorize GitHub access. After
-the redirect back to Lody, add the repositories you need to your workspace.
-[Learn more](/docs/github)
+### Add a Local Project
+
+<Accordions type="single">
+  <Accordion title="From the desktop app">
+  Use the button in the top-right corner of **Settings** -> **Projects**. Pick the machine you want,
+  and Lody lists its directories so you can choose one as the project root.
+  </Accordion>
+  <Accordion title="From the mobile app">
+  Use the button in the top-right corner of **Projects**. Pick the machine you want, and Lody lists
+  its directories so you can choose one as the project root.
+  </Accordion>
+  <Accordion title="From the CLI">
+  Run `npx lody project add <path>`, where `<path>` is the project root directory.
+  </Accordion>
+</Accordions>
+
+### Connect Your GitHub Repository
+
+In the web app, click **Settings** in the bottom-left corner, then **GitHub Integration** ->
+**Manage** to authorize access to your GitHub repositories. Lody redirects you back afterwards so
+you can pick the repositories to add to your workspace. [Learn more](/docs/github)
+
+## Configure Agents
+
+Lody works with many agents, including Claude Code, Codex, Grok, OpenCode, Kimi, custom ACP agents,
+and any CLI listed in the
+[ACP Registry](https://agentclientprotocol.com/get-started/registry). Add and configure them under
+**Settings** -> **Agents** in the desktop or mobile app.
+
+[Claude Code and Codex](/docs/claude-codex-capabilities) are maintained by Lody directly, so they
+support capabilities beyond what the ACP protocol covers. More first-class agents will follow.
+
+### FAQ
+
+<Accordions>
+  <Accordion title="The agent I want isn't listed">
+     You can bring your own ACP agent. Go to **Settings** -> **Agents** in the desktop or mobile
+     app, choose **Custom Agent**, and fill in the launch command and arguments.
+  </Accordion>
+  <Accordion title="I picked an agent but the newest model is missing">
+      Lody refreshes each agent's configuration when the app starts and when a conversation begins.
+      If a model you expect is missing, try the refresh button in the agent's configuration. For a
+      model that was just released, you may need to wait for Lody to add support.
+  </Accordion>
+</Accordions>
 
 ## File Locations
 
@@ -76,7 +115,7 @@ the redirect back to Lody, add the repositories you need to your workspace.
 | Repositories | `~/.lody/repos` |
 | Log files    | `~/.lody/logs`  |
 
-## Reset the Local Cache
+## Still Failing to Connect? Reset the Local Cache
 
 If the app shows stale data or fails to load after a version update, open **Settings** ->
 **Cache & storage** and use **Clear local cache**. It deletes Lody's local cache for all workspaces
@@ -86,7 +125,10 @@ on the Settings page.
 
 ## Next Steps
 
+🎉 That covers the basic setup. From here you can explore more of what Lody does:
+
 - [CLI Commands](/docs/cli) - See all `lody` commands and options
 - [Learn about Worktrees](/docs/worktrees) - Understand how Lody isolates tasks
 - [Configure Agents](/docs/agents) - Set up Claude Code, Codex, or Claude-compatible endpoints
 - [Mobile Access](/docs/mobile) - Review and approve changes from your phone
+</content>

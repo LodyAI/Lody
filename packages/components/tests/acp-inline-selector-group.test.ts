@@ -32,6 +32,19 @@ const makeSelector = (
   };
 };
 
+/* Codex's one and only plan-mode shape: a select over `default` / `plan`. */
+const makeCollaborationModeSelector = (): AcpConfigOptionSelector => ({
+  configId: 'collaboration_mode',
+  label: 'Collaboration mode',
+  category: 'collaboration_mode',
+  type: 'select',
+  currentValue: 'default',
+  options: [
+    { value: 'default', label: 'Default' },
+    { value: 'plan', label: 'Plan' },
+  ],
+});
+
 const makeOnOffSelector = (configId: string, label: string): AcpConfigOptionSelector => ({
   configId,
   label,
@@ -61,7 +74,7 @@ describe('orderAcpConfigOptionSelectors', () => {
       makeSelector('reasoning_effort', 'Think level', 'thought_level'),
       makeSelector('mode', 'Mode', 'mode'),
       makeSelector('fast-mode', 'Fast Mode', undefined, 'boolean'),
-      makeSelector('plan-mode', 'Plan Mode'),
+      makeCollaborationModeSelector(),
       makeSelector('safe_mode', 'Safe Mode', undefined, 'boolean'),
       makeSelector('temperature', 'Temperature'),
     ];
@@ -70,7 +83,7 @@ describe('orderAcpConfigOptionSelectors', () => {
       model: ['model'],
       thought: ['reasoning_effort'],
       fastMode: ['fast-mode'],
-      planMode: ['plan-mode'],
+      planMode: ['collaboration_mode'],
       mode: ['mode'],
       boolean: ['safe_mode'],
       other: ['verbosity', 'temperature'],
@@ -97,14 +110,13 @@ describe('orderAcpConfigOptionSelectors', () => {
   it('routes on/off select fast options into the fast mode bucket', () => {
     const selectors = [
       makeOnOffSelector('fast', 'Fast'),
-      makeOnOffSelector('fast_mode', 'Fast Mode'),
       makeSelector('temperature', 'Temperature'),
     ];
 
     expect(mapIds(orderAcpConfigOptionSelectors(selectors))).toEqual({
       model: [],
       thought: [],
-      fastMode: ['fast', 'fast_mode'],
+      fastMode: ['fast'],
       planMode: [],
       mode: [],
       boolean: [],

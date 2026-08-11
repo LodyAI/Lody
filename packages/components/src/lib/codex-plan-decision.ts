@@ -9,9 +9,6 @@ import {
   CODEX_COLLABORATION_MODE_CONFIG_ID,
   CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
   CODEX_COLLABORATION_MODE_PLAN_VALUE,
-  CODEX_PLAN_MODE_CONFIG_ID,
-  CONFIG_OPTION_OFF_VALUE,
-  CONFIG_OPTION_ON_VALUE,
 } from '@/components/shared/acp-selector-options';
 
 export type CompletedCodexProposedPlan = {
@@ -20,28 +17,44 @@ export type CompletedCodexProposedPlan = {
   turnId: string;
 };
 
+export function shouldShowCodexProposedPlanDecision({
+  plan,
+  dismissed,
+  pending,
+  isCodexSession,
+  isSessionIdle,
+  isSessionActive,
+  isAgentBusy,
+}: {
+  plan: CompletedCodexProposedPlan | null;
+  dismissed: boolean;
+  pending: boolean;
+  isCodexSession: boolean;
+  isSessionIdle: boolean;
+  isSessionActive: boolean;
+  isAgentBusy: boolean;
+}): boolean {
+  return (
+    plan !== null &&
+    !dismissed &&
+    (pending || (isCodexSession && isSessionIdle && !isSessionActive && !isAgentBusy))
+  );
+}
+
 export function isCodexPlanModeEnabled(
   configOptionValues: Record<string, AcpConfigOptionValue>
 ): boolean {
   return (
-    configOptionValues[CODEX_COLLABORATION_MODE_CONFIG_ID] ===
-      CODEX_COLLABORATION_MODE_PLAN_VALUE ||
-    configOptionValues[CODEX_PLAN_MODE_CONFIG_ID] === CONFIG_OPTION_ON_VALUE
+    configOptionValues[CODEX_COLLABORATION_MODE_CONFIG_ID] === CODEX_COLLABORATION_MODE_PLAN_VALUE
   );
 }
 
 export function disableCodexPlanMode(
   configOptionValues: Record<string, AcpConfigOptionValue>
 ): Record<string, AcpConfigOptionValue> {
-  if (CODEX_COLLABORATION_MODE_CONFIG_ID in configOptionValues) {
-    return {
-      ...configOptionValues,
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
-    };
-  }
   return {
     ...configOptionValues,
-    [CODEX_PLAN_MODE_CONFIG_ID]: CONFIG_OPTION_OFF_VALUE,
+    [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
   };
 }
 

@@ -1,24 +1,18 @@
-import type { StorybookConfig } from '@storybook/react-vite';
-import tailwindcss from '@tailwindcss/vite';
-import { loadEnv } from 'vite';
-import { join, dirname, resolve } from 'path';
-import { createRequire } from 'node:module';
-import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
+const tailwindcss = require('@tailwindcss/vite').default;
+const { loadEnv } = require('vite');
+const { resolve } = require('node:path');
+const wasm = require('vite-plugin-wasm').default;
+const topLevelAwait = require('../vite-top-level-await-fixed.cjs');
+const { loroCrdtWasmUrlWorkaround } = require('../vite-wasm-workarounds.ts');
+const {
+  requirePreviewPublicBaseDomain,
+} = require('../../../scripts/preview-public-base-domain.mjs');
 
-const require = createRequire(__filename);
-
-/**
- * This function is used to resolve the absolute path of a package.
- * It is needed in projects that use Yarn PnP or are set up within a monorepo.
- */
-function getAbsolutePath(value: string): string {
-  return dirname(require.resolve(join(value, 'package.json')));
-}
-
-const config: StorybookConfig = {
+/** @type {import('@storybook/react-vite').StorybookConfig} */
+const config = {
   stories: ['../src/stories/**/*.mdx', '../src/stories/**/*.stories.@(js|jsx|ts|tsx)'],
   framework: {
-    name: getAbsolutePath('@storybook/react-vite'),
+    name: '@storybook/react-vite',
     options: {},
   },
   async viteFinal(viteConfig) {
@@ -43,6 +37,7 @@ const config: StorybookConfig = {
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),
       format: 'es',
+      plugins: () => [loroCrdtWasmUrlWorkaround(), wasm(), topLevelAwait()],
     };
 
     if (process.env.STORYBOOK_DEBUG_PLUGINS === '1') {
@@ -50,7 +45,7 @@ const config: StorybookConfig = {
       console.log(
         'storybook vite plugins:',
         (viteConfig.plugins ?? [])
-          .map((p) => ('name' in p ? String(p.name) : ''))
+          .map((plugin) => ('name' in plugin ? String(plugin.name) : ''))
           .filter(Boolean)
           .sort()
       );
@@ -59,4 +54,4 @@ const config: StorybookConfig = {
   },
 };
 
-export default config;
+module.exports = config;

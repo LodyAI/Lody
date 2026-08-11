@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import type {
   CheckForElectronUpdateResult,
+  CopyImageToClipboardInput,
+  CopyImageToClipboardResult,
   ElectronCliState,
   ElectronAuthCallbackInput,
   ElectronAuthCallbackSession,
@@ -18,9 +20,13 @@ import type {
   LaunchLocalPathResult,
   OpenExternalUrlResult,
   QuitAndInstallElectronUpdateResult,
+  SaveImageFileInput,
+  SaveImageFileResult,
   SendLocalProjectControlResult,
   SendSessionFileLocalInput,
   SendSessionFileLocalResult,
+  ShowImagePreviewMenuInput,
+  ShowImagePreviewMenuResult,
   RestartCliResult,
   TerminateCliResult
 } from '@lody/shared/electron-ipc'
@@ -359,6 +365,19 @@ const api = {
   },
   selectLocalProjectDirectory: async () => {
     return await ipcRenderer.invoke('lodyLocalProjects:selectDirectory')
+  },
+  imagePreview: {
+    showMenu: async (input: ShowImagePreviewMenuInput): Promise<ShowImagePreviewMenuResult> => {
+      return await ipcRenderer.invoke('lodyImage:showPreviewMenu', input)
+    },
+    copyToClipboard: async (
+      input: CopyImageToClipboardInput
+    ): Promise<CopyImageToClipboardResult> => {
+      return await ipcRenderer.invoke('lodyImage:copyToClipboard', input)
+    },
+    saveAs: async (input: SaveImageFileInput): Promise<SaveImageFileResult> => {
+      return await ipcRenderer.invoke('lodyImage:saveAs', input)
+    }
   },
   getLocalProjectGitState: async (workspaceId: string, localProjectId: string) => {
     return await ipcRenderer.invoke('lodyLocalProjects:getGitState', workspaceId, localProjectId)

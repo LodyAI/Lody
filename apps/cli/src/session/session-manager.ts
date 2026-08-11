@@ -62,7 +62,11 @@ import {
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
-import { GitCredentialBroker, LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
+import {
+  GitCredentialBroker,
+  LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
+  LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
+} from '@/lib/git-credential-broker';
 import type { CloudGithubTokenManager, CloudPort } from '@lody/platform';
 import { isDevEnv } from '@/utils/runtime-env';
 import {
@@ -81,9 +85,11 @@ import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/
 import { UsageData, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
+  GitCredentialBrokerAuth,
   WorktreeInfo,
   WorktreeManager,
   WorktreeManagerConfig,
+  WorktreeManagerSource,
 } from './worktree/worktree-manager';
 import { readLocalProjectWorktreeSetup } from './worktree/worktree-setup-config-store';
 import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-history';
@@ -92,7 +98,7 @@ import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-pat
 import {
   normalizeLocalProjectRootPath,
   parseLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectBranchAtRootPath,
+  resolveLocalProjectLegacyBaseBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { ensureDefaultSessionWorkdir, getDefaultSessionWorkdir, Session } from './session';
 import {
@@ -441,6 +447,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly cloudPort: CloudPort;
   private detachPreparationRecovery: (() => void) | null = null;
   private preparationRecoveryChain: Promise<void> = Promise.resolve();
+  /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
+  private preparationRecoveryQueued = false;
   private preparationRecoveryGeneration = 0;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
@@ -741,26 +749,37 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private enqueueSpeculativeWorktreeRecovery(reason: string): void {
+    // Bound a burst to one running + one queued pass. This is an O(sessions)
+    // filesystem sweep on a recovery signal, and without a latch every
+    // transport edge appended another full pass to the chain — the dispatch
+    // bootstrap scan has had this latch all along, this one was missing it.
+    if (this.preparationRecoveryQueued) {
+      return;
+    }
+    this.preparationRecoveryQueued = true;
     this.preparationRecoveryChain = this.preparationRecoveryChain
-      .then(
-        async () =>
-          await recoverStaleSpeculativeWorktrees({
-            workspaceId: this.workspaceId,
-            machineId: this.machineId,
-            logger: this.logger,
-            isActiveSession: (sessionId) =>
-              this.preparationService.getState(sessionId) !== null ||
-              this.pendingSessionCreates.has(sessionId) ||
-              this.sessions.has(sessionId),
-            isDurableSession: async (sessionId) => {
-              const record = await this.workspaceDocument.repo.getDocMeta(
-                getSessionRoomId(sessionId)
-              );
-              return !!record?.meta && !isLoroRepoDocDeleted(record);
-            },
-          })
-      )
+      .then(async () => {
+        // Released before the sweep runs, so a signal arriving DURING it still
+        // gets its own follow-up pass and nothing is silently skipped.
+        this.preparationRecoveryQueued = false;
+        await recoverStaleSpeculativeWorktrees({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          logger: this.logger,
+          isActiveSession: (sessionId) =>
+            this.preparationService.getState(sessionId) !== null ||
+            this.pendingSessionCreates.has(sessionId) ||
+            this.sessions.has(sessionId),
+          isDurableSession: async (sessionId) => {
+            const record = await this.workspaceDocument.repo.getDocMeta(
+              getSessionRoomId(sessionId)
+            );
+            return !!record?.meta && !isLoroRepoDocDeleted(record);
+          },
+        });
+      })
       .catch((error: unknown) => {
+        this.preparationRecoveryQueued = false;
         this.logger.debug(
           `Failed speculative worktree recovery (${reason}): ${formatErrorMessage(error)}`
         );
@@ -1010,6 +1029,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 managerConfig: worktreeTarget.managerConfig,
                 baseBranch: config.branch,
                 restoreBranchName: config.restoreBranchName,
+                resolveBrokerAuth: () =>
+                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
                 logger: this.logger,
               })
             : Promise.resolve(null);
@@ -1449,10 +1470,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const credentialHelperValue = buildCredentialHelperValueForHost(repoId);
     const brokerUrl = brokerEnv.url;
 
+    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
+
     config.env = {
       ...sessionEnv,
       LODY_GIT_CRED_BROKER_URL: brokerUrl,
       LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
+      // Keeps the helper's connection-refused fallback inside this workspace instead
+      // of landing on the shared, last-writer-wins broker.json.
+      ...(brokerStateFilePath
+        ? { [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath }
+        : {}),
       LODY_GITHUB_REPO_FULL_NAME: githubRepo,
       GIT_TERMINAL_PROMPT: '0',
       // Use credential helper for all git invocations inside the ACP process tree.
@@ -1565,10 +1593,39 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!this.gitCredentialBroker) {
       this.gitCredentialBroker = new GitCredentialBroker({
         tokenManager,
+        workspaceId: this.workspaceId,
         logger: this.logger,
       });
     }
     return await this.gitCredentialBroker.ensureStarted();
+  }
+
+  /**
+   * Broker coordinates for host-side git run on behalf of THIS workspace.
+   *
+   * Host git must be handed these explicitly. `GitCredentialBroker.ensureStarted()`
+   * publishes `LODY_GIT_CRED_BROKER_*` into the process environment, and a fleet
+   * process runs one broker per workspace, so the ambient value belongs to whichever
+   * workspace started or recovered its broker last — not to this session.
+   *
+   * Only GitHub sources need it; local worktree sources never authenticate to a
+   * remote, and asking for it would start a broker they do not use.
+   */
+  private async resolveHostGitBrokerAuth(
+    source: WorktreeManagerSource | undefined
+  ): Promise<GitCredentialBrokerAuth | undefined> {
+    if (source && source.kind !== 'github') {
+      return undefined;
+    }
+    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
+    if (!brokerEnv) {
+      return undefined;
+    }
+    return {
+      workspaceId: this.workspaceId,
+      url: brokerEnv.url,
+      token: brokerEnv.token,
+    };
   }
 
   private async resolveSharedWorkdir(
@@ -1672,7 +1729,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Shared parent worktree missing for ${config.parentSessionId}; creating it now`
       );
-      await worktreeManager.ensureRepo();
+      await worktreeManager.ensureRepo({
+        brokerAuth: await this.resolveHostGitBrokerAuth({
+          kind: 'github',
+          repoUrl: config.githubRepoUrl,
+        }),
+      });
       const sharedWorktree = await worktreeManager.createWorktree(
         config.parentSessionId,
         parentMeta?.baseBranch?.trim() || config.branch,
@@ -1733,10 +1795,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     storedBaseBranch: string | undefined;
     fallbackBranch: string | undefined;
   }): Promise<string> {
-    // Older session metadata stored the local selector directly in
-    // baseBranch. Worktree mode never checks out a remote tracking branch in
-    // the project root, so ordinary selector resolution preserves an existing
-    // local base while still resolving a remote-only selector exactly.
+    // Older session metadata stored a bare branch name directly in baseBranch,
+    // which was handed to `git worktree add` and therefore meant the local
+    // branch whenever one existed. Worktree mode never checks out a remote
+    // tracking branch in the project root, so the legacy resolver keeps that
+    // local-first precedence here instead of recovering an upstream.
     const selector = options.project.branch?.trim();
     const storedBaseBranch = options.storedBaseBranch?.trim();
     const fallbackBranch = options.fallbackBranch?.trim();
@@ -1747,7 +1810,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return (
         await (existingRef.startsWith('refs/')
           ? parseLocalProjectBranchRefAtRootPath(options.originalRootPath, existingRef)
-          : resolveLocalProjectBranchAtRootPath(options.originalRootPath, existingRef))
+          : resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, existingRef, {
+              useWorktree: true,
+            }))
       ).refName;
     }
     if (storedBaseBranch && storedBaseBranch !== selector) {
@@ -1756,7 +1821,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ).refName;
     }
 
-    return (await resolveLocalProjectBranchAtRootPath(options.originalRootPath, selector)).refName;
+    return (
+      await resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, selector, {
+        useWorktree: true,
+      })
+    ).refName;
   }
 
   private async resolveWorktreeSetupConfig(config: SessionConfig) {
@@ -1812,7 +1881,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const worktreeInfo =
         preparedWorktree ??
         (await (async () => {
-          await worktreeManager.ensureRepo();
+          await worktreeManager.ensureRepo({
+            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
+          });
           return await worktreeManager.createWorktree(
             config.sessionId!,
             config.branch,

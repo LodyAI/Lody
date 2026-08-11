@@ -130,24 +130,21 @@ function SessionRowIndicator({
   if (isWaitingPermission) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
-    // Animate an HTML wrapper so the active spinner stays on the compositor;
-    // keeping will-change inside this branch avoids layers on idle rows.
     icon = (
-      <span
+      <Loader2
         data-session-working-spinner=""
-        className="flex h-3 w-3 shrink-0 origin-center animate-spin items-center justify-center text-primary will-change-transform"
-      >
-        <Loader2 className="h-3 w-3" />
-      </span>
+        className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
+      />
     );
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }
 
-  // 14px box with a 1px upward nudge. Its center matches the 14px machine,
-  // folder, and repo icons used by the group rows above it.
   return (
-    <div className="relative -top-px flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+    <div
+      data-session-row-indicator=""
+      className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+    >
       {icon}
     </div>
   );

@@ -24,7 +24,10 @@ import {
 } from '@lody/shared';
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import { AcpAuthenticationRequiredError } from '../src/agent/agent-client';
+import {
+  AcpAuthenticationRequiredError,
+  AgentSteerNotDeliveredError,
+} from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 
@@ -661,7 +664,13 @@ describe('SessionExecutionService', () => {
   });
 
   it('rejects a Codex steer whose requested configuration differs from the active turn', async () => {
-    const deps = createBaseDeps({});
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
     const service = new SessionExecutionService(deps);
     const sessionId = 'session-codex-steer-config' as SessionId;
     const findSteerConfigMismatch = vi.fn(() => 'model requested gpt-next, active gpt-current');
@@ -718,9 +727,260 @@ describe('SessionExecutionService', () => {
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'busy' });
     expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
+    // Neither guide reached Codex, so both are handed back to dispatch instead
+    // of being stranded in `pending_apply`.
+    const dispatchPointerWrites = upsertDocMeta.mock.calls.filter(
+      (call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId !== undefined
+    );
+    expect(
+      dispatchPointerWrites.map((call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId)
+    ).toEqual(['user-2', 'user-3']);
   });
 
-  it('skips completion notifications while a Codex goal remains active', async () => {
+  it('queues a steer the agent refused as the next ordinary turn', async () => {
+    let history: SessionHistoryInput[] = [
+      { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: { prompt: 'do it differently' },
+      } as SessionHistoryInput,
+    ];
+    const sessionDoc = {
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-refused' as SessionId;
+    // The agent answered the acknowledged steer request with a refusal, which
+    // is proof the prompt never joined the live turn.
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: Promise.reject(
+        new AgentSteerNotDeliveredError(
+          'Agent refused the acknowledged steer request _session/steering: No active Codex turn to steer'
+        )
+      ),
+    }));
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'codex',
+            appliedNotificationMethod: 'codex/steerApplied',
+            upstreamTurn: 'same',
+            configPolicy: 'active',
+          })),
+          findSteerConfigMismatch: vi.fn(() => null),
+          steerPrompt,
+        },
+        acpSessionId: 'acp-steer-refused' as ACPSessionId,
+      },
+      promptInFlight: true,
+      activePromptRun: { turnId: 'assistant:user-1' },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+
+    expect(steerPrompt).toHaveBeenCalledOnce();
+    // Durable source: the entry becomes dispatchable, so the watcher runs it
+    // once the active turn ends (and again after a daemon restart).
+    expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+      status: 'pending',
+      read: false,
+    });
+    expect(history.find((entry) => entry.id === 'user-1')).toMatchObject({ status: 'handled' });
+    // The load-bearing half: `sessionNeedsActiveWatch` reads meta only, so a
+    // history-only entry would be dropped the moment the session goes idle.
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2' })
+    );
+    // Ownership never moved: the refused steer must not seal the running turn.
+    expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
+    expect(deps.beginConversationTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not requeue an undelivered steer whose turn already left the pending state', async () => {
+    let history: SessionHistoryInput[] = [
+      { id: 'user-2', role: 'user', status: 'processing', read: true } as SessionHistoryInput,
+    ];
+    const sessionDoc = {
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-duplicate' as SessionId;
+
+    // No runtime at all: a duplicate steer request landing after the turn it
+    // targeted already ran.
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+    expect(history[0]).toMatchObject({ status: 'processing' });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('keeps a later dispatch pointer when an earlier turn takes ownership', async () => {
+    // Two refused steers requeue as `user-2` then `user-3`, so the pointer names
+    // `user-3` while dispatch starts the older `user-2`. Demoting it here would
+    // make `user-2`'s completion write `latestUserMsgId === lastHandledUserMsgId`
+    // and hide `user-3` from `sessionNeedsActiveWatch` — meta-only — for good.
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({ meta: { latestUserMsgId: 'user-3' } })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionDoc = { updateHistory: vi.fn(async () => {}) };
+    const setDispatchProcessing = (
+      service as unknown as {
+        setDispatchProcessing: (
+          sessionId: SessionId,
+          doc: unknown,
+          userTurnId: string
+        ) => Promise<void>;
+      }
+    ).setDispatchProcessing.bind(service);
+
+    await setDispatchProcessing('session-pointer' as SessionId, sessionDoc, 'user-2');
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-3', processingUserMsgId: 'user-2' })
+    );
+
+    // The ordinary case is unchanged: with nothing newer outstanding the turn
+    // taking ownership owns the pointer too.
+    const plainDeps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    upsertDocMeta.mockClear();
+    await (
+      new SessionExecutionService(plainDeps) as unknown as {
+        setDispatchProcessing: (
+          sessionId: SessionId,
+          doc: unknown,
+          userTurnId: string
+        ) => Promise<void>;
+      }
+    ).setDispatchProcessing('session-pointer' as SessionId, sessionDoc, 'user-2');
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2', processingUserMsgId: 'user-2' })
+    );
+  });
+
+  it('keeps a steer that failed after submission out of the dispatch queue', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-ambiguous' as SessionId;
+    // A plain failure after submission is ambiguous — the provider may already
+    // have committed the steer, so re-sending it would duplicate the message.
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: Promise.reject(new Error('Steer steer-1 completed before application')),
+    }));
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'claudeCode',
+            appliedNotificationMethod: 'claude/steerApplied',
+            upstreamTurn: 'handoff',
+            configPolicy: 'apply',
+          })),
+          steerPrompt,
+        },
+        acpSessionId: 'acp-steer-ambiguous' as ACPSessionId,
+      },
+      promptInFlight: true,
+      activePromptRun: { turnId: 'assistant:user-1' },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'error' });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('notifies when a prompt completes while a persistent goal remains active', async () => {
     let history: Array<Record<string, unknown>> = [
       {
         id: 'turn-user-1',
@@ -811,7 +1071,7 @@ describe('SessionExecutionService', () => {
 
     expect(agentClient.prompt).toHaveBeenCalled();
     expect(history[0]?.status).toBe('handled');
-    expect(notifySessionCompleted).not.toHaveBeenCalled();
+    expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a chat turn before prompt when memory pressure persists', async () => {
@@ -2146,7 +2406,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('restores a legacy worktree branch after its remote base was deleted', async () => {
+  it('resumes a worktree without resolving its deleted recorded base branch', async () => {
     const rootPath = createGitLocalProject();
     runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
@@ -2168,7 +2428,7 @@ describe('SessionExecutionService', () => {
     };
     const meta = {
       project,
-      baseBranch: 'remote-base',
+      baseBranch: 'refs/remotes/origin/remote-base',
       branchName: 'lody-session-restore',
       acpSessionId: 'acp-local-restore' as ACPSessionId,
       isWorktree: true,
@@ -2208,6 +2468,7 @@ describe('SessionExecutionService', () => {
       expect(config.workdir).toBe(rootPath);
       expect(config.branch).toBe('remote-base');
       expect(config.resume).toBe(true);
+      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('other');
       return restoredSession as unknown;
     });
     const upsertDocMeta = vi.fn(async () => {});
@@ -2265,22 +2526,18 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-restore',
       restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'remote-base' })
+      expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/remote-base' })
     );
   });
 
-  it('upgrades a legacy selector and restores its tracking branch after the remote ref is deleted', async () => {
+  it('resumes a non-worktree local project on its current dirty branch without checkout', async () => {
     const rootPath = createGitLocalProject();
     runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
     runGit(rootPath, ['update-ref', 'refs/remotes/origin/foo', remoteCommit]);
-    runGit(rootPath, ['checkout', '--track', '-b', 'origin/foo', 'refs/remotes/origin/foo']);
-    fs.writeFileSync(path.join(rootPath, 'session-change.txt'), 'session change\n', 'utf8');
-    runGit(rootPath, ['add', 'session-change.txt']);
-    runGit(rootPath, ['commit', '-m', 'session change']);
+    runGit(rootPath, ['checkout', '--track', '-b', 'session-branch', 'refs/remotes/origin/foo']);
     runGit(rootPath, ['checkout', 'main']);
-    runGit(rootPath, ['checkout', '--track', '-b', 'other', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['update-ref', '-d', 'refs/remotes/origin/foo']);
+    fs.writeFileSync(path.join(rootPath, 'README.md'), 'dirty local change\n', 'utf8');
 
     const localProjectId = 'local-project-tracking-restore' as LocalProjectId;
     const project = {
@@ -2293,7 +2550,7 @@ describe('SessionExecutionService', () => {
     let meta = {
       project,
       baseBranch: 'foo',
-      branchName: 'origin/foo',
+      branchName: 'session-branch',
       acpSessionId: 'acp-local-tracking-restore' as ACPSessionId,
       isWorktree: false,
       isArchived: false,
@@ -2330,9 +2587,12 @@ describe('SessionExecutionService', () => {
     };
     const createSession = vi.fn(async (config) => {
       expect(config.workdir).toBe(rootPath);
-      expect(config.branch).toBe('origin/foo');
-      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('origin/foo');
-      expect(fs.existsSync(path.join(rootPath, 'session-change.txt'))).toBe(true);
+      expect(config.branch).toBe('foo');
+      expect(config.resume).toBe(true);
+      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+      expect(fs.readFileSync(path.join(rootPath, 'README.md'), 'utf8')).toBe(
+        'dirty local change\n'
+      );
       return restoredSession as unknown;
     });
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
@@ -2387,65 +2647,16 @@ describe('SessionExecutionService', () => {
 
     expect(createSession).toHaveBeenCalledOnce();
     expect(sessionDoc.setBaseBranch).not.toHaveBeenCalled();
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-local-tracking-restore', {
-      baseBranch: 'refs/remotes/origin/foo',
-    });
-    expect(persistPendingChanges).toHaveBeenCalledWith('session-local-base-ref');
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      'session-session-local-tracking-restore',
+      expect.objectContaining({ baseBranch: expect.anything() })
+    );
+    expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-tracking-restore',
       restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/foo' })
+      expect.objectContaining({ preferredBaseBranch: 'foo' })
     );
-  });
-
-  it('does not restore onto another session branch when the recorded branch is missing', async () => {
-    const rootPath = createGitLocalProject();
-    runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
-    const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
-    runGit(rootPath, ['update-ref', 'refs/remotes/origin/foo', remoteCommit]);
-    runGit(rootPath, ['checkout', '--track', '-b', 'session-a', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['checkout', 'main']);
-    runGit(rootPath, ['checkout', '--track', '-b', 'session-b', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['branch', '-D', 'session-a']);
-
-    const service = new SessionExecutionService(createBaseDeps());
-    const prepareLocalProjectBranch = (
-      service as unknown as {
-        prepareLocalProjectBranch(options: {
-          project: {
-            kind: 'local';
-            localProjectId: LocalProjectId;
-            branch: string;
-            useWorktree: boolean;
-          };
-          workdir: string;
-          branch: string;
-          storedBaseBranch: string;
-          restoring: boolean;
-          restoreBranchName: string;
-        }): Promise<{ executionBranch: string; baseRef: string }>;
-      }
-    ).prepareLocalProjectBranch.bind(service);
-
-    await expect(
-      prepareLocalProjectBranch({
-        project: {
-          kind: 'local',
-          localProjectId: 'local-project-recorded-branch' as LocalProjectId,
-          branch: 'lody:branch:remote:origin:foo',
-          useWorktree: false,
-        },
-        workdir: rootPath,
-        branch: 'lody:branch:remote:origin:foo',
-        storedBaseBranch: 'refs/remotes/origin/foo',
-        restoring: true,
-        restoreBranchName: 'session-a',
-      })
-    ).rejects.toThrow(
-      'Cannot restore local project session branch session-a: ' +
-        'the branch is missing or no longer tracks refs/remotes/origin/foo'
-    );
-    expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('session-b');
   });
 
   it('releases ACP replay suppression when a restore turn is interrupted before prompt', async () => {

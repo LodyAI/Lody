@@ -24,10 +24,28 @@ context/message-flow.md.
   streams; active search blocks force their owning group open, and `scrollToIndex`
   translates history indexes to the matching virtual child row.
 - A finished assistant turn keeps its final answer/result tail visible and collapses
-  earlier progress text, activity groups, and subagent work under one `Worked for …`
+  earlier progress text, activity groups, and subagent work under a `Worked for …`
   virtual row. Keep streaming turns fully expanded. Expanding completed work must add
   sibling rows to the main `VList`; search hits inside completed work force that outer
   row and the owning activity group open.
+  - "Final answer" is not literally the LAST item (`message-copy.ts`
+    `getTextIndexBeforeTrailingNeverCollapsedItems`): the last TEXT stays visible when
+    everything after it is itself never collapsed — generated `image_group`s, and the
+    `switch_mode` "Exited Plan Mode" card.
+  - **One turn can have SEVERAL foldable regions** (`AssistantTurnRenderSegment`).
+    A plan is approved from inside a RUNNING turn, so that same turn implements it;
+    the plan-approval card cuts a segment so the approved work gets its own region
+    under the plan instead of disappearing into the plan's fold — an approved plan
+    otherwise looks like it produced nothing. The cut matches the ACP tool KIND
+    `switch_mode`, never a title: Claude's `ExitPlanMode` renders "Ready to code?"
+    and Codex's plan review renders "Implement this plan?" for the same event.
+    Everything the gate needs is
+    per-segment: `workBlockKeys`, `hasVisibleFinalContent`, the collapse rule's
+    "last item stays visible", and the expansion state
+    (`BubbleExpandState.expandedWorkedGroups`, keyed by segment). The turn duration
+    is NOT per-segment — only the last region may print "Worked for …", earlier ones
+    fall back to "Finished working". Do not collapse this back to one region per
+    message, and do not key expansion by message id alone.
 - **`Worked for …` collapse gate (`view.tsx` `shouldUseWorkedGroup`)** requires THREE
   things, not just `message.finished`: (1) the turn is finished, (2) there is foldable
   work, and (3) `hasVisibleFinalContent` — at least one render block is NOT in
@@ -52,6 +70,14 @@ context/message-flow.md.
   Do not restore a model/avatar header or reserve a desktop avatar indent. Per-turn
   model, mode, reasoning, and other run configuration lives in the footer info control
   beside Copy; the popover is the detailed configuration surface.
+- **Turn duration has one owner per layout.** Desktop: `WorkedGroupHeader` when the turn
+  folds, else the footer action bar AFTER the buttons (`showDuration` encodes which).
+  Mobile: always the footer, BEFORE the buttons, ignoring `showDuration` — and
+  `WorkedGroupHeader` suppresses its own copy there, because both read the same
+  `resolveSessionHistoryDurationMs(message)` and would otherwise print an identical
+  "Worked for 12s" twice per turn. The mobile leading slot also reserves
+  `MOBILE_TURN_ACTION_LEADING_INSET_PX` so the copy button clears the session drawer's
+  edge-back strip (see ../mobile/AGENTS.md); it is layout, not decoration.
 - Virtua positions rows with `position:absolute; top:<cumulative measured height>`;
   stale measured heights make rows overlap. Keep `shift={false}`. `bufferSize` trades
   fast-scroll blanks against the number of still-resizing rows kept mounted.

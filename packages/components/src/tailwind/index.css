@@ -50,6 +50,11 @@
   --z-popover: 80;
   --z-command-palette: 85;
   --z-tooltip: 90;
+  /* The full-screen image viewer covers every other surface, but must stay
+     under toasts — its own confirmations ("Image copied") render there.
+     react-photo-view ships z-index 2000; `zoomable-image-viewer.css` pulls it
+     back onto this scale. */
+  --z-image-viewer: 95;
   --z-toast: 100;
 }
 
@@ -692,9 +697,11 @@ pre,
       0 18px 40px -16px rgba(0, 0, 0, 0.16) !important;
   }
 
-  .dark .mobile-home-tabbar
+  .dark
+    .mobile-home-tabbar
     :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']),
-  .mobile-home-app.dark .mobile-home-tabbar
+  .mobile-home-app.dark
+    .mobile-home-tabbar
     :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']) {
     background: hsl(var(--card)) !important;
     border-color: hsl(0 0% 100% / 0.16) !important;
@@ -1483,8 +1490,7 @@ pre,
   :root {
     --tasks-menu-bg: 0 0% 100%;
     --tasks-menu-border: 220 12% 88%;
-    --tasks-menu-shadow:
-      0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.14);
+    --tasks-menu-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.14);
     --tasks-menu-item-hover: 220 14% 96%;
   }
 
@@ -1795,6 +1801,53 @@ pre,
  ---break---
  */
 
+/* Spinners must rotate about their OWN center, not orbit a point.
+   `animate-spin` is `rotate(360deg)` with the default
+   `transform-origin: 50% 50%`, and `transform-box`'s initial value is
+   `view-box` — for an SVG that percentage resolves against the nearest
+   SVG viewport rather than the element's CSS box. A root `<svg>` has a
+   CSS layout box, so `view-box` is specified to act as `border-box`
+   there and modern engines land on the box center. But nothing in the
+   markup states that intent, so any element that loses its CSS layout
+   box, is sized asymmetrically, or is rotated by an engine resolving
+   the percentage against the 24-unit `viewBox` pivots off-center — the
+   glyph then sweeps a circle around a point beside it (measured: a
+   14px icon pivoting on the viewBox center orbits with a ~14px
+   diameter, i.e. wider than the icon itself) instead of turning in
+   place. Pinning both properties states the intent once, globally.
+
+   `flex-shrink: 0` belongs here for the same reason: in a tight flex
+   row (the mobile home status pill, whose label truncates) a spinner
+   without it is compressed to a non-square box, so the rotation
+   sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
+   13.55×15.43 in the reconnecting pill before this rule.
+
+   `@layer base` keeps this below utilities, so an explicit
+   `origin-*` / `shrink` utility at a call site still wins. */
+@layer base {
+  svg.animate-spin {
+    transform-box: border-box;
+    transform-origin: 50% 50%;
+    flex-shrink: 0;
+  }
+
+  /* `SessionSyncingIndicator` animates an HTML wrapper instead of the
+     glyph. A wrapper is only equivalent while its box matches the
+     glyph's: the moment anything else lands inside it (a label, a gap)
+     its box grows, its center moves off the glyph, and the glyph
+     orbits. It must therefore stay icon-only and explicitly sized;
+     centering the origin here makes that failure mode a wobble-free
+     no-op rather than an orbit. */
+  span.animate-spin {
+    transform-box: border-box;
+    transform-origin: 50% 50%;
+  }
+}
+
+/*
+ ---break---
+ */
+
 /* Mobile drill-in transition for `MobileDrillPageLayout` (and any
    future "push" routes). Pure CSS keyframes so the slide runs on the
    compositor thread independent of main-thread work — framer-motion's
@@ -1837,6 +1890,74 @@ pre,
   .mobile-drill-in,
   .mobile-drill-out {
     animation: none;
+  }
+}
+
+/* Agent activity stays on compositor-friendly transform/opacity animations.
+   The highlighted label is a pseudo-element so React remains idle while the
+   agent is working. */
+@keyframes agent-activity-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+}
+
+@keyframes agent-activity-label-highlight {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateX(-0.08em);
+  }
+  24%,
+  42% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  58%,
+  100% {
+    opacity: 0;
+    transform: translateX(0.08em);
+  }
+}
+
+.agent-activity-dot-pulse {
+  animation: agent-activity-dot-pulse 3.5s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.agent-activity-label {
+  color: var(--agent-activity-label-base);
+}
+
+.agent-activity-label::after {
+  position: absolute;
+  inset: 0;
+  color: var(--agent-activity-label-highlight);
+  content: attr(data-highlight-label);
+  opacity: 0;
+  pointer-events: none;
+  text-shadow: var(--agent-activity-label-glow);
+  transform: translateX(-0.08em);
+  animation: agent-activity-label-highlight var(--agent-activity-label-duration) ease-in-out
+    infinite;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity-dot-pulse,
+  .agent-activity-label::after {
+    animation: none;
+  }
+
+  .agent-activity-dot-pulse {
+    opacity: 0.6;
+    transform: scale(0.85);
   }
 }
 

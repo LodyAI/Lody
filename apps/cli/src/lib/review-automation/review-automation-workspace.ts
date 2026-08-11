@@ -69,7 +69,9 @@ export function createReviewAutomationWorkspace(
     { kinds: ['doc-metadata'] }
   );
 
-  const detachReconnect = documentManager.onMetaRoomSynced(() => {
+  // Parked-work release: same reasoning as task automation, so it uses the
+  // cheap unthrottled online edge.
+  const detachReconnect = documentManager.onStreamsOnline(() => {
     if (disposed) {
       return;
     }

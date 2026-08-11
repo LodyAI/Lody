@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
-import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
+import {
+  buildChatVirtualRows,
+  resolveAssistantMessageActions,
+  type AssistantMessageAction,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
 // unchanged turns must be reference-stable across rebuilds, or the shallow-compare
@@ -68,6 +73,17 @@ const makeConversation = () => {
 };
 
 describe('buildChatVirtualRows per-turn row identity', () => {
+  it('keeps actions on their plan reply when a newer assistant reply exists', () => {
+    const actions: AssistantMessageAction[] = [
+      { id: 'implement-plan', label: 'Implement plan', onClick: () => undefined },
+    ];
+
+    expect(resolveAssistantMessageActions('plan-reply', 'plan-reply', actions)).toBe(actions);
+    expect(
+      resolveAssistantMessageActions('new-plain-reply', 'plan-reply', actions)
+    ).toBeUndefined();
+  });
+
   it('returns reference-identical rows when inputs are unchanged', () => {
     const { items } = makeConversation();
     const first = build(items);

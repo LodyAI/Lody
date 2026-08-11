@@ -1,6 +1,17 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { StatsSettingsComponent } from '@/components/settings/stats-setting';
+import { createFileRoute, Navigate } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings/stats')({
-  component: StatsSettingsComponent,
+  component: LegacyStatsSettingsRoute,
 });
+
+function LegacyStatsSettingsRoute() {
+  const { workspaceName } = Route.useParams();
+  return (
+    <Navigate
+      to="/$workspaceName/settings/ai-usage"
+      params={{ workspaceName }}
+      search={(previous) => previous}
+      replace
+    />
+  );
+}

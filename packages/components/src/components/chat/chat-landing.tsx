@@ -64,6 +64,7 @@ import {
   chatLandingSessionStateAtomFamily,
   currentWorkspaceIdAtom,
   getAllAgentConfigAtom,
+  inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
@@ -549,7 +550,7 @@ function WorkspaceChatLanding({
   const machinePairingStatus =
     observedMachinePairing === null
       ? 'expired'
-      : (observedMachinePairing?.status ?? (machinePairing ? 'pending' : null));
+      : observedMachinePairing?.status ?? (machinePairing ? 'pending' : null);
   const pairedMachineId = observedMachinePairing?.machineId as MachineId | undefined;
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);
   const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
@@ -641,11 +642,8 @@ function WorkspaceChatLanding({
   const liveSessionStatuses = useMemo(() => {
     const next = new Map<string, SessionStatus>();
     for (const session of visibleAllActiveSessions) {
-      const status = findFreshSessionPresenceState(
-        presenceStates,
-        session.id,
-        presenceNowMs
-      )?.status;
+      const status = findFreshSessionPresenceState(presenceStates, session.id, presenceNowMs)
+        ?.status;
       if (status) {
         next.set(session.id, status);
       }
@@ -1460,7 +1458,7 @@ function WorkspaceChatLanding({
       : undefined;
   const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   const selectedAgentDefaults = useMemo(
-    () => (selectedAgent ? (agentDefaultsCache.get(selectedAgent.agentId) ?? {}) : {}),
+    () => (selectedAgent ? agentDefaultsCache.get(selectedAgent.agentId) ?? {} : {}),
     [selectedAgent]
   );
   useReconcileAcpSessionConfigSelection({
@@ -1681,7 +1679,7 @@ function WorkspaceChatLanding({
         action: showProjectSharing
           ? {
               label: t('machinePairing.openDeviceSettings', 'Open device settings'),
-              onClick: () => openSettings('devices'),
+              onClick: () => openSettings('machines'),
             }
           : undefined,
       }
@@ -1986,13 +1984,13 @@ function WorkspaceChatLanding({
       project_kind: contextType,
       repo_id_hash: contextType === 'github' ? hashAnalyticsId(selectedRepo) : null,
       local_project_id:
-        contextType === 'local' ? (selectedLocalProject?.localProjectId ?? null) : null,
-      machine_id: contextType === 'local' ? (selectedLocalProject?.machineId ?? null) : null,
+        contextType === 'local' ? selectedLocalProject?.localProjectId ?? null : null,
+      machine_id: contextType === 'local' ? selectedLocalProject?.machineId ?? null : null,
       has_git_branch:
         contextType === 'local'
           ? localGitStateError
             ? null
-            : (activeLocalGitState?.git ?? null)
+            : activeLocalGitState?.git ?? null
           : true,
     });
   }, [
@@ -2538,12 +2536,12 @@ function WorkspaceChatLanding({
         workspace_id: workspaceId ?? null,
         machine_id:
           contextType === 'local'
-            ? (selectedLocalProject?.machineId ?? selectedAgent?.machineId ?? null)
-            : (selectedAgent?.machineId ?? null),
+            ? selectedLocalProject?.machineId ?? selectedAgent?.machineId ?? null
+            : selectedAgent?.machineId ?? null,
         agent_config_id: selectedAgent?.agentId ?? null,
         repo_id_hash: contextType === 'github' ? hashAnalyticsId(selectedRepo) : null,
         local_project_id:
-          contextType === 'local' ? (selectedLocalProject?.localProjectId ?? null) : null,
+          contextType === 'local' ? selectedLocalProject?.localProjectId ?? null : null,
         ...extra,
       });
     },
@@ -2589,10 +2587,10 @@ function WorkspaceChatLanding({
       contextType === 'local'
         ? selectedMachineId && isSelectedMachineValid
           ? selectedMachineId
-          : (selectedLocalProject?.machineId ?? null)
+          : selectedLocalProject?.machineId ?? null
         : selectedMachineId && isSelectedMachineValid
-          ? selectedMachineId
-          : null;
+        ? selectedMachineId
+        : null;
     if (!scopedMachineId || selectedAgent.machineId !== scopedMachineId) {
       captureSessionInputBlocked('missing_machine');
       setComposerError(t('chat.validation.missingMachine'));
@@ -2699,8 +2697,8 @@ function WorkspaceChatLanding({
         prompt: promptPayload,
         cliType: selectedConfig.cliType,
         agentType: selectedConfig.agentType,
-        modeId: modeOptions.length > 0 ? (selectedModeId ?? undefined) : undefined,
-        modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
+        modeId: modeOptions.length > 0 ? selectedModeId ?? undefined : undefined,
+        modelId: modelOptions.length > 0 ? selectedModelId ?? undefined : undefined,
         configOptionValues,
         issuePRMentions,
       });
@@ -2968,7 +2966,7 @@ function WorkspaceChatLanding({
     [localProjectMachineId, selectedMachineId, isSelectedMachineValid]
   );
   const localProjectSelectorMachineId =
-    contextType === 'local' ? (selectedMachineId ?? localProjectMachineId) : null;
+    contextType === 'local' ? selectedMachineId ?? localProjectMachineId : null;
   const localProjectSelectorEmptyText = t(
     getEmptyLocalProjectsMessageKey(Boolean(localProjectSelectorMachineId))
   );
@@ -3033,8 +3031,8 @@ function WorkspaceChatLanding({
   const worktreeUnavailableReason = loadingLocalGitState
     ? t('chat.workdir.checkingGit', 'Checking whether this project is a git repository.')
     : activeLocalGitState?.git === false
-      ? t('chat.workdir.notGitRepo', 'This local project is not a git repository.')
-      : (localGitStateError ?? undefined);
+    ? t('chat.workdir.notGitRepo', 'This local project is not a git repository.')
+    : localGitStateError ?? undefined;
 
   const topWorktreeNode =
     contextType === 'github' && selectedRepo ? (
@@ -3156,6 +3154,7 @@ function WorkspaceChatLanding({
       <div className="flex w-full min-w-0 items-center gap-2">
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
+          visibleLocalMachineId={visibleLocalMachineId}
           selectedLabel={desktopSelectedMachineLabel}
           options={desktopMachineOptions}
           onChange={handleMachineChange}
@@ -3268,8 +3267,7 @@ function WorkspaceChatLanding({
           <span className="truncate">
             {isInitialDataLoading
               ? t('chat.machineSelector.loading', 'Loading machine...')
-              : (mobileSheetSelectedMachineLabel ??
-                t('chat.machineSelector.placeholder', 'Machine'))}
+              : mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')}
           </span>
         </>
       }
@@ -3562,7 +3560,7 @@ function WorkspaceChatLanding({
   };
 
   const handleGoToAgentSettings = () => {
-    openSettings('agent-config');
+    openSettings('agents');
   };
 
   // ── Mention source ──
@@ -3582,8 +3580,8 @@ function WorkspaceChatLanding({
       selectedMachineId && isSelectedMachineValid
         ? selectedMachineId
         : contextType === 'local'
-          ? (selectedLocalProject?.machineId ?? null)
-          : null;
+        ? selectedLocalProject?.machineId ?? null
+        : null;
     return candidateMachineId === selectedAgent.machineId ? candidateMachineId : null;
   }, [
     contextType,
@@ -4179,7 +4177,7 @@ function WorkspaceChatLanding({
              without breaking the row). */
           owner:
             teamMembersByUserId != null && session.userId
-              ? (teamMembersByUserId.get(session.userId) ?? { id: session.userId })
+              ? teamMembersByUserId.get(session.userId) ?? { id: session.userId }
               : undefined,
         };
       })
@@ -4473,17 +4471,22 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Tasks beta gate (developer mode → Beta features). Drives the extra
-     dock tab on the mobile home. When the gate is off a stale 'tasks'
-     selection must render as Chat — as if the tab were never built. */
+  /* Developer-only beta gates drive the extra dock tabs on mobile home.
+     When a gate is off, a stale selection must render as Chat — as if
+     the tab were never built. Inbox also retains its team-workspace gate. */
   const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
+  const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled ? 'chat' : selectedMobileHomeTab;
+    (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
+    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
+      ? 'chat'
+      : selectedMobileHomeTab;
   useEffect(() => {
-    if (!showProjectSharing && selectedMobileHomeTab === 'inbox') {
+    if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
     }
-  }, [selectedMobileHomeTab, showProjectSharing]);
+  }, [selectedMobileHomeTab, showMobileInbox]);
   const mobileInboxItems = useMemo<MobileInboxItem[]>(
     () =>
       (inboxRows ?? [])
@@ -4519,10 +4522,10 @@ function WorkspaceChatLanding({
               updatedAt: item.updatedAt,
               unread: item.readAt === undefined,
               actionLabel:
-                sharingReviewState.actionTarget === 'devices'
+                sharingReviewState.actionTarget === 'machines'
                   ? t('inbox.sharingReview.actionDevices', 'Review devices')
                   : sharingReviewState.actionTarget === 'projects'
-                    ? t('inbox.sharingReview.action', 'Review projects')
+                  ? t('inbox.sharingReview.action', 'Review projects')
                     : undefined,
             };
           }
@@ -4571,8 +4574,8 @@ function WorkspaceChatLanding({
       if (!item) return;
       void markInboxItemRead({ itemId: item._id });
       if (item.kind === 'sharing_review') {
-        if (sharingReviewState.actionTarget === 'devices') {
-          openSettings('devices');
+        if (sharingReviewState.actionTarget === 'machines') {
+          openSettings('machines');
         } else if (sharingReviewState.actionTarget === 'projects') {
           setSelectedMobileHomeTab('projects');
         }
@@ -4812,7 +4815,7 @@ function WorkspaceChatLanding({
   const projectUrlMachineId = preSelectedMachine ? (preSelectedMachine as MachineId) : null;
   const projectUrlProjectId = preSelectedProject ? (preSelectedProject as LocalProjectId) : null;
   const projectUrlRepoFullName =
-    projectUrlMachineId && projectUrlProjectId ? null : (preSelectedRepo ?? null);
+    projectUrlMachineId && projectUrlProjectId ? null : preSelectedRepo ?? null;
   const mobileProjectContext = useMemo<MobileProjectContext | null>(() => {
     if (!isMobile) return null;
     if (projectUrlMachineId && projectUrlProjectId) {
@@ -5048,7 +5051,7 @@ function WorkspaceChatLanding({
              Same team-scope-only behavior. */
           owner:
             teamMembersByUserId != null && session.userId
-              ? (teamMembersByUserId.get(session.userId) ?? { id: session.userId })
+              ? teamMembersByUserId.get(session.userId) ?? { id: session.userId }
               : undefined,
         };
       });
@@ -5319,8 +5322,8 @@ function WorkspaceChatLanding({
               openSettings(sharingReviewState.actionTarget ?? 'projects');
             }}
           >
-            {sharingReviewState.actionTarget === 'devices'
-              ? t('inbox.sharingReview.actionDevices', 'Review devices')
+            {sharingReviewState.actionTarget === 'machines'
+              ? t('inbox.sharingReview.actionDevices', 'Review machines')
               : t('inbox.sharingReview.action', 'Review projects')}
           </button>
         ) : null}
@@ -5588,14 +5591,14 @@ function WorkspaceChatLanding({
           workspaceOptions={mobileHomeWorkspaceOptions}
           machines={mobileHomeMachines}
           inboxItems={mobileInboxItems}
-          inboxLoading={showProjectSharing && inboxRows === undefined}
+          inboxLoading={showMobileInbox && inboxRows === undefined}
           onInboxItemSelect={handleMobileInboxItemSelect}
           onInboxItemDismiss={handleMobileInboxItemDismiss}
           connectionUiState={mobileHomeConnectionUiState}
           isInitialDataLoading={isInitialDataLoading}
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
-          showInboxTab={showProjectSharing}
+          showInboxTab={showMobileInbox}
           showTasksTab={tasksFeatureEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
@@ -5935,7 +5938,7 @@ function WorkspaceChatLanding({
         status={machinePairingStatus}
         machineId={pairedMachineId}
         machineName={observedMachinePairing?.machineName}
-        command={machinePairingStatus === 'pending' ? (machinePairing?.command ?? null) : null}
+        command={machinePairingStatus === 'pending' ? machinePairing?.command ?? null : null}
         expiresAt={machinePairing?.expiresAt ?? null}
         creating={machinePairingCreating}
         createError={machinePairingCreateError}
@@ -5944,7 +5947,7 @@ function WorkspaceChatLanding({
           if (!machinePairing) return;
           await cancelMachinePairingRequest({ requestId: machinePairing.requestId });
         }}
-        onConfigureAgents={() => openSettings('agent-config')}
+        onConfigureAgents={() => openSettings('agents')}
       />
     </>
   );

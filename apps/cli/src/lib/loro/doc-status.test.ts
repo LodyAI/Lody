@@ -14,10 +14,14 @@ const createLogger = (): Logger =>
     error: vi.fn(),
   }) as unknown as Logger;
 
-const createSessionDocument = (repo: Partial<LoroRepo>): SessionDocument => {
+const createSessionDocument = (
+  repo: Partial<LoroRepo>,
+  unloadDocRoom: (docId: string) => Promise<void> = async () => {}
+): SessionDocument => {
   const doc = new SessionDocument(
     repo as LoroRepo,
     'session-status-1' as SessionId,
+    unloadDocRoom,
     createLogger()
   );
   doc.mirror = {
@@ -160,16 +164,24 @@ describe('SessionDocument status metadata', () => {
   it('resets initializing status to idle during destroy without publishing presence', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const unloadDoc = vi.fn(async () => {});
-    const doc = createSessionDocument({
-      getDocMeta: vi.fn(async () => ({
-        meta: {
-          machineId: 'machine-1',
-          status: SessionStatusFactory.initializing(),
-        },
-      })),
-      unloadDoc,
-      upsertDocMeta,
-    });
+    // Destroy must go through the injected unloader, never `repo.unloadDoc`
+    // directly: the injected one also invalidates the local data-plane room
+    // bound to the evicted `LoroDoc` instance
+    // (`LoroDocumentManager.unloadDocRoom`).
+    const unloadDocRoom = vi.fn(async () => {});
+    const doc = createSessionDocument(
+      {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            machineId: 'machine-1',
+            status: SessionStatusFactory.initializing(),
+          },
+        })),
+        unloadDoc,
+        upsertDocMeta,
+      },
+      unloadDocRoom
+    );
 
     await doc.destroy();
 
@@ -179,6 +191,7 @@ describe('SessionDocument status metadata', () => {
         status: SessionStatusFactory.idle(),
       })
     );
-    expect(unloadDoc).toHaveBeenCalledWith(doc.roomId);
+    expect(unloadDocRoom).toHaveBeenCalledWith(doc.roomId);
+    expect(unloadDoc).not.toHaveBeenCalled();
   });
 });

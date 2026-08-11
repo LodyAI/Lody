@@ -3,9 +3,7 @@ import { Plus, Loader2, X, History, Undo2, Pin, FileDiff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   getSessionLaunchConfigLegacyFields,
-  isSessionGoalWorking,
   type SessionId,
-  type SessionLegacyMetaFields,
   type SessionMeta,
 } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
@@ -182,9 +180,8 @@ function TabContent({
   isL2Focus: boolean;
   t: (key: string, fallback: string) => string;
 }) {
-  const legacy = session as SessionLegacyMetaFields;
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(session.id));
-  const isWorking = liveStatus != null || isSessionGoalWorking(legacy.latestGoal);
+  const isWorking = liveStatus != null;
   const isWaiting = liveStatus?.type === 'requestPermission';
   const label = getTabLabel(session, isParent, defaultTitle, t);
   const showClose = !isParent && onTabClose && !isEditing;

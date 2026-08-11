@@ -741,6 +741,29 @@
   transform: translateX(3px);
 }
 
+/* Low-key secondary action under the primary CTA (e.g. book a founder call) */
+.pricing-card-secondary-cta {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 0.65rem;
+  color: hsl(var(--landing-ink) / 0.6);
+  font-size: 0.8rem;
+  line-height: 1;
+  text-align: center;
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--landing-ink) / 0.25);
+  text-underline-offset: 3px;
+  transition:
+    color 160ms ease,
+    text-decoration-color 160ms ease;
+}
+
+.pricing-card-secondary-cta:hover {
+  color: hsl(var(--landing-ink));
+  text-decoration-color: hsl(var(--ocean-aqua) / 0.5);
+}
+
 /* Card features list */
 .pricing-card-features {
   position: relative;

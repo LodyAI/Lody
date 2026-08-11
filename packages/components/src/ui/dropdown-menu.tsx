@@ -101,6 +101,13 @@ const DropdownMenuTrigger = React.forwardRef<
         // Let our synthetic re-dispatch pass straight through to Radix.
         if (isSyntheticRef.current) {
           isSyntheticRef.current = false;
+          // Stop the synthetic pointerdown from bubbling to ancestor handlers.
+          // It carries no active pointer (pointerId 0), so ancestors that grab
+          // the pointer — e.g. vaul's Drawer.Content `onPress`, which calls
+          // `setPointerCapture(event.pointerId)` — crash with a NotFoundError
+          // when a trigger inside a drawer is tapped. Radix's own toggle runs
+          // on this same element and is unaffected.
+          e.stopPropagation();
           return;
         }
 

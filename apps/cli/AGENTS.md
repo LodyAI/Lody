@@ -266,6 +266,24 @@ Two things the dev build does deliberately, both load-bearing:
   is present. The shim lives in `src/lib/gh-shim-script.ts`; token fetching/caching is
   in `src/lib/github-token-manager.ts`; git HTTPS auth uses
   `src/lib/git-credential-helper-script.ts`.
+- INVARIANT: host-side git must receive its credential broker as an explicit argument
+  (`WorktreeManager.ensureRepo({ brokerAuth })`), never from ambient `process.env`.
+  A fleet process runs one `GitCredentialBroker` per workspace, each bound at
+  construction to its own workspace-scoped `GitHubTokenManager`, and every one of them
+  writes the same process-global `LODY_GIT_CRED_BROKER_*` pair plus the shared
+  `~/.lody/broker.json`. The ambient value therefore belongs to whichever workspace
+  started or recovered its broker LAST — and `ensureStarted()` early-returns once
+  started, so the correct workspace never takes the pointer back. A session in
+  workspace A then authenticates through B's token manager and fails with
+  `repo_not_linked` → `terminal prompts disabled`, while A's own prefetch succeeds.
+  Keep `brokerAuth` a per-call argument: `getWorktreeManager` caches by `repoId` alone,
+  so two workspaces sharing a repo share one manager instance. Session process trees are
+  already correct (`prepareGitHubRepoSessionConfig` injects the env explicitly); the
+  helper's connection-refused fallback is scoped by `LODY_GIT_CRED_BROKER_STATE_FILE`
+  (per-workspace `broker-<workspaceId>.json`) for the same reason. Diagnostics must
+  probe the same broker the failing command used, or they report a misroute as the
+  caller's workspace lacking the repo link.
+  Regression test: `src/session/worktree/worktree-manager-broker-auth.test.ts`.
 
 ## PR status reconciler
 

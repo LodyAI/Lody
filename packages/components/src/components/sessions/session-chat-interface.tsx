@@ -91,7 +91,7 @@ import {
   historyItemsToInputBlocks,
   hasReportedPreviewTarget,
   isSessionGoalCleared,
-  isSessionGoalWorking,
+  isSessionGoalActive,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionConversationConfig,
@@ -178,6 +178,11 @@ import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-state';
+import {
+  canPauseGoalThroughPromptBridge,
+  getPromptBridgeGoalCommands,
+  isSessionPromptBusy,
+} from './session-goal-control';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -337,6 +342,7 @@ import {
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
+import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -350,8 +356,10 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import {
   disableCodexPlanMode,
   findLatestCompletedCodexProposedPlan,
-  isCodexPlanModeEnabled,
+  shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
+import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
+import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 
 // ── Path launcher options for "Open in" split button ──
@@ -367,7 +375,6 @@ interface ActionOption {
 const ACTION_OPTIONS: ActionOption[] = [{ id: 'copy-path', label: 'Copy Path', Icon: Copy }];
 
 const EMPTY_ASSISTANT_QUICK_ACTIONS: AssistantMessageAction[] = [];
-
 const DISPATCHING_TIMEOUT_MS = 15_000;
 /** Grace before the header "Syncing" spinner appears (kills session-switch flicker). */
 const TITLE_SYNCING_INDICATOR_DELAY_MS = 400;
@@ -1067,10 +1074,17 @@ export function SessionHeaderMenu({
                   }
                   title={
                     showBaseBranchContext
-                      ? `${branchDisplayValue}\n${t('sessions.baseBranch', 'Base branch')}: ${baseBranch}`
+                      ? `${branchDisplayValue}\n${t(
+                          'sessions.baseBranch',
+                          'Base branch'
+                        )}: ${baseBranch}`
                       : branchDisplayValue
                   }
-                  aria-label={`${currentBranch ? t('sessions.copyCurrentBranch', 'Copy current branch') : t('sessions.copyBaseBranch', 'Copy base branch')}: ${branchDisplayValue}`}
+                  aria-label={`${
+                    currentBranch
+                      ? t('sessions.copyCurrentBranch', 'Copy current branch')
+                      : t('sessions.copyBaseBranch', 'Copy base branch')
+                  }: ${branchDisplayValue}`}
                 >
                   <GitBranch className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
@@ -1246,13 +1260,10 @@ export function SessionHeaderMenu({
               {sharing.visibility === 'unknown'
                 ? t('sessions.sharing.loadingAction', 'Checking sharing…')
                 : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
-                    )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
+                ? t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing')
+                : sharing.canManage
+                ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
             </DropdownMenuItem>
           ) : null}
 
@@ -1783,11 +1794,11 @@ export const SessionChatInterface = memo(
       analyticsSessionProject?.kind === 'github' ? analyticsSessionProject.repoFullName : null;
     const analyticsSessionProjectGithubRepoFullName =
       analyticsSessionProject?.kind === 'local'
-        ? (analyticsSessionProject.githubRepoFullName ?? null)
+        ? analyticsSessionProject.githubRepoFullName ?? null
         : null;
     const analyticsSessionProjectLocalProjectId =
       analyticsSessionProject?.kind === 'local'
-        ? (analyticsSessionProject.localProjectId ?? null)
+        ? analyticsSessionProject.localProjectId ?? null
         : null;
     const sessionAnalyticsProject = useMemo(
       () =>
@@ -2104,11 +2115,13 @@ export const SessionChatInterface = memo(
     const [pendingProposedPlanDecisionKey, setPendingProposedPlanDecisionKey] = useState<
       string | null
     >(null);
+    const pendingProposedPlanDecisionKeyRef = useRef<string | null>(null);
     // Reset per-session transient UI state on session change.
     useEffect(() => {
       setSendingMessageIds(new Set());
       setDismissedProposedPlanDecisionKeys(new Set());
       setPendingProposedPlanDecisionKey(null);
+      pendingProposedPlanDecisionKeyRef.current = null;
     }, [session.id]);
 
     const trackMessageSend = useCallback(
@@ -2409,7 +2422,12 @@ export const SessionChatInterface = memo(
         ),
       [legacySession.latestGoal, session.dismissedGoalThreadId, sessionHistory]
     );
-    const isGoalWorking = isSessionGoalWorking(latestGoal);
+    const isGoalActive = isSessionGoalActive(latestGoal);
+    // The existing prompt bridge is Codex-specific. Other providers may publish
+    // neutral goal snapshots, but their advertised `_session/goal` extension is
+    // not yet routed through Lody's session control plane, so keep them read-only.
+    const goalCommands = getPromptBridgeGoalCommands(session.agentType);
+    const canPauseGoal = canPauseGoalThroughPromptBridge(session.agentType);
 
     useEffect(() => {
       if (!pendingGoalCommand) {
@@ -2601,7 +2619,7 @@ export const SessionChatInterface = memo(
       if (
         session.isArchived ||
         session.autoReview ||
-        isGoalWorking ||
+        isGoalActive ||
         session.cliType !== 'builtin' ||
         (session.agentType !== 'codex' && session.agentType !== 'claude')
       ) {
@@ -2641,7 +2659,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
-      isGoalWorking,
+      isGoalActive,
       session.agentConfigId,
       session.agentType,
       session.autoReview,
@@ -2781,12 +2799,12 @@ export const SessionChatInterface = memo(
     const searchContextValue = useMemo(() => {
       const isSearchActive = isSearchOpen && normalizedSearchQuery.length > 0;
       const matchedBlockIds = isSearchActive ? Array.from(searchBlockMatches.keys()) : [];
-      const activeBlockId = isSearchActive ? (activeSearchResult?.blockId ?? null) : null;
+      const activeBlockId = isSearchActive ? activeSearchResult?.blockId ?? null : null;
       return {
         isOpen: isSearchActive,
         query: isSearchActive ? normalizedSearchQuery : '',
         activeBlockId,
-        activeResultId: isSearchActive ? (activeSearchResult?.resultId ?? null) : null,
+        activeResultId: isSearchActive ? activeSearchResult?.resultId ?? null : null,
         blockMatches: isSearchActive ? searchBlockMatches : new Map(),
         hasMatchedPrefix: (prefix: string) =>
           matchedBlockIds.some((blockId) => blockId === prefix || blockId.startsWith(`${prefix}:`)),
@@ -3123,8 +3141,13 @@ export const SessionChatInterface = memo(
     }, [markSessionRead, session.id, session.lastMessageAt, shouldMarkRead]);
 
     const isDispatching = inputActionState === 'dispatching';
-    const isAgentBusy = isDispatching || isSessionWorking || isGoalWorking;
-    const canStopAgent = (isSessionActive && activeAssistantTurnId != null) || isGoalWorking;
+    const isAgentBusy = isSessionPromptBusy({
+      isDispatching,
+      isSessionWorking,
+      isGoalActive,
+    });
+    const canStopAgent =
+      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
     const latestCompletedProposedPlan = useMemo(
       () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
       [sessionDoc?.history]
@@ -3133,17 +3156,34 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionPending =
       latestCompletedProposedPlan !== null &&
       pendingProposedPlanDecisionKey === latestCompletedProposedPlan.key;
-    const shouldShowProposedPlanDecisionPrompt =
-      latestCompletedProposedPlan !== null &&
-      !dismissedProposedPlanDecisionKeys.has(latestCompletedProposedPlan.key) &&
-      (isProposedPlanDecisionPending ||
-        (isCodexPlanSession &&
-          session.status?.type === 'idle' &&
-          !isSessionActive &&
-          !isAgentBusy &&
-          isCodexPlanModeEnabled(configOptionValues)));
+    const shouldShowProposedPlanDecisionPrompt = shouldShowCodexProposedPlanDecision({
+      plan: latestCompletedProposedPlan,
+      dismissed:
+        latestCompletedProposedPlan !== null &&
+        dismissedProposedPlanDecisionKeys.has(latestCompletedProposedPlan.key),
+      pending: isProposedPlanDecisionPending,
+      isCodexSession: isCodexPlanSession,
+      isSessionIdle: session.status?.type === 'idle',
+      isSessionActive,
+      isAgentBusy,
+    });
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
+
+    // Approving "Yes, implement this plan" switches the mode of the RUNNING
+    // turn only — the composer would still say Plan and quietly plan again on
+    // the next send. The permission cards bump this counter when THIS user
+    // approves, so the selector follows.
+    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
+    useEffect(() => {
+      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
+        return;
+      }
+      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
+      if (nextModeId) {
+        handleModeChange(nextModeId);
+      }
+    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({
@@ -3169,7 +3209,7 @@ export const SessionChatInterface = memo(
         const projectRepoFullName =
           typeof rawProject.repoFullName === 'string'
             ? rawProject.repoFullName.trim()
-            : (session.repoFullName?.trim() ?? '');
+            : session.repoFullName?.trim() ?? '';
         if (!projectRepoFullName) {
           return undefined;
         }
@@ -3194,7 +3234,7 @@ export const SessionChatInterface = memo(
             typeof rawProject.githubRepoFullName === 'string' &&
             rawProject.githubRepoFullName.trim()
               ? rawProject.githubRepoFullName.trim()
-              : (session.repoFullName?.trim() ?? undefined),
+              : session.repoFullName?.trim() ?? undefined,
           ...(branch ? { branch } : {}),
           ...(typeof rawProject.useWorktree === 'boolean'
             ? { useWorktree: rawProject.useWorktree }
@@ -3249,9 +3289,7 @@ export const SessionChatInterface = memo(
               // connection/machine problem (browser offline, machine removed or
               // offline) hands the story to the status chip instead.
               t('sessions.statusIndicator.pendingDispatch')
-            : isGoalWorking
-              ? t('sessions.statusIndicator.goal', 'Pursuing goal')
-              : null;
+            : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
 
@@ -3690,12 +3728,13 @@ export const SessionChatInterface = memo(
     }, [latestCompletedProposedPlan]);
 
     const handleExecuteProposedPlan = useCallback(async () => {
-      if (!latestCompletedProposedPlan || pendingProposedPlanDecisionKey) {
+      if (!latestCompletedProposedPlan || pendingProposedPlanDecisionKeyRef.current) {
         return;
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
       const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
+      pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
       setConfigOptionValues(nextConfigOptionValues);
 
@@ -3718,15 +3757,9 @@ export const SessionChatInterface = memo(
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
+      pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [
-      configOptionValues,
-      dispatchPrompt,
-      latestCompletedProposedPlan,
-      pendingProposedPlanDecisionKey,
-      setConfigOptionValues,
-      t,
-    ]);
+    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -3734,6 +3767,17 @@ export const SessionChatInterface = memo(
         goal: Extract<MessageContent, { type: 'goal' }> | null = latestGoal,
         options?: { showPending?: boolean }
       ): Promise<boolean> => {
+        if (!goalCommands.includes(command)) {
+          captureSessionEvent('session/goal_command_failed', {
+            command,
+            goal_thread_id: goal?.threadId ?? null,
+            error_name: 'UnsupportedGoalCommand',
+            error_message: 'Goal command is unavailable for this agent transport',
+          });
+          toast.error(t('sessions.goal.commandError', 'Failed to send goal command'));
+          return false;
+        }
+
         if (!goal) {
           toast.error(t('sessions.goal.commandError', 'Failed to send goal command'));
           return false;
@@ -3773,7 +3817,7 @@ export const SessionChatInterface = memo(
           return false;
         }
       },
-      [captureSessionEvent, dispatchPrompt, latestGoal, t]
+      [captureSessionEvent, dispatchPrompt, goalCommands, latestGoal, t]
     );
 
     const handleGoalCardCommand = useCallback(
@@ -4048,7 +4092,7 @@ export const SessionChatInterface = memo(
 
     const effectivePrStatus = activePrData
       ? derivePrStatusFromDetails(activePrData.pullRequest)
-      : (latestPr?.status ?? null);
+      : latestPr?.status ?? null;
 
     // The compact `SessionMeta.pullRequests` status (`latestPr.status`) is only
     // written by the CLI PR poller / webhook fan-out, so it can lag behind
@@ -4344,7 +4388,7 @@ export const SessionChatInterface = memo(
         return undefined;
       }
 
-      if (isSessionWorking || isGoalWorking) {
+      if (isSessionWorking) {
         setInputActionState('ready');
         return undefined;
       }
@@ -4358,7 +4402,7 @@ export const SessionChatInterface = memo(
       }, DISPATCHING_TIMEOUT_MS);
 
       return () => window.clearTimeout(timeoutId);
-    }, [captureSessionEvent, inputActionState, isGoalWorking, isSessionWorking, liveSessionStatus]);
+    }, [captureSessionEvent, inputActionState, isSessionWorking, liveSessionStatus]);
 
     useEffect(() => {
       if (hideMessageArea) return undefined;
@@ -4442,7 +4486,7 @@ export const SessionChatInterface = memo(
         return;
       }
 
-      const goalToPause = isGoalWorking ? latestGoal : null;
+      const goalToPause = isGoalActive && canPauseGoal ? latestGoal : null;
       const goalTurnId = goalToPause?.turnId?.trim() || null;
       const turnIdToCancel = activeAssistantTurnId ?? goalTurnId;
 
@@ -4494,9 +4538,10 @@ export const SessionChatInterface = memo(
       }
     }, [
       activeAssistantTurnId,
+      canPauseGoal,
       captureSessionEvent,
       handleGoalCommand,
-      isGoalWorking,
+      isGoalActive,
       latestGoal,
       requestSessionCancel,
       session.id,
@@ -5027,7 +5072,7 @@ export const SessionChatInterface = memo(
 
     const handleOpenPathLauncherSettings = useCallback(() => {
       captureSessionEvent('session/open_in_ide_manage_clicked');
-      openSettings('general');
+      openSettings('preferences');
     }, [captureSessionEvent, openSettings]);
 
     const handleCopySessionLink = useCallback(async () => {
@@ -5159,7 +5204,7 @@ export const SessionChatInterface = memo(
             initialTitle: session.title ?? '',
           });
         }}
-        onOpenReviewSettings={() => openSettings('general')}
+        onOpenReviewSettings={() => openSettings('preferences')}
         owner={ownerMenuState}
         onArchive={onArchiveSession}
         onRestore={onRestoreSession}
@@ -5305,6 +5350,7 @@ export const SessionChatInterface = memo(
                           onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                           messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                           assistantActions={assistantQuickActions}
+                          assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
                           onForkLastAssistant={onForkLastAssistant}
                           onEditLastUser={
                             editableLastUserMessageId ? handleEditLastUser : undefined
@@ -5334,9 +5380,7 @@ export const SessionChatInterface = memo(
                       and the actual grant/deny resolves on the settings page, so these must be emitted from
                       that component via onShown/onEnableClicked/onDismissed callbacks (see crossFileNeeds). */}
                   <NotificationPermissionPrompt
-                    sessionCompleted={
-                      session.status?.type === 'idle' && !isSessionWorking && !isGoalWorking
-                    }
+                    sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
                   />
 
                   {/* An active auto-review run states itself here rather than
@@ -5379,6 +5423,7 @@ export const SessionChatInterface = memo(
                   <SessionInfoBar
                     status={statusStripState}
                     goal={latestGoal}
+                    goalCommands={goalCommands}
                     goalPendingCommand={
                       pendingGoalCommand && pendingGoalCommand.threadId === latestGoal?.threadId
                         ? pendingGoalCommand.command

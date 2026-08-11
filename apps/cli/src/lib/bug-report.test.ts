@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, WorkspaceId } from '@lody/shared';
 import {
+  collectBugReportLogs,
   formatBugReportLogDate,
   mergeBugReportLogs,
   submitBugReportFromMachine,
@@ -40,6 +45,80 @@ describe('mergeBugReportLogs', () => {
 
   it('returns an empty string when there are no log files', () => {
     expect(mergeBugReportLogs([])).toBe('');
+  });
+});
+
+describe('collectBugReportLogs', () => {
+  const tempDirs: string[] = [];
+
+  const createTempLogDir = (): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-bug-report-'));
+    tempDirs.push(dir);
+    return dir;
+  };
+
+  const writeLog = (dir: string, name: string, content: string): void => {
+    fs.writeFileSync(path.join(dir, name), name.endsWith('.gz') ? zlib.gzipSync(content) : content);
+  };
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0, tempDirs.length)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const now = new Date(2026, 7, 7, 16, 54);
+
+  it('collects a day that has rolled past `<date>.log`', async () => {
+    const dir = createTempLogDir();
+    // The regression: a busy machine has no `<date>.log` at all, so the report
+    // shipped nothing for the day the user is reporting about.
+    writeLog(dir, '2026-08-07.log.gz', 'today archived\n');
+    writeLog(dir, '2026-08-07.log.1', 'today live\n');
+
+    const parts = await collectBugReportLogs(now, dir);
+
+    expect(parts.map((part) => part.fileName)).toEqual(['2026-08-07.log.gz', '2026-08-07.log.1']);
+    expect(parts.map((part) => part.content)).toEqual(['today archived\n', 'today live\n']);
+  });
+
+  it('includes yesterday before today and skips days with no files', async () => {
+    const dir = createTempLogDir();
+    writeLog(dir, '2026-08-05.log', 'two days ago\n');
+    writeLog(dir, '2026-08-06.log.gz', 'yesterday\n');
+    writeLog(dir, '2026-08-07.log', 'today\n');
+
+    const parts = await collectBugReportLogs(now, dir);
+
+    expect(parts.map((part) => part.fileName)).toEqual(['2026-08-06.log.gz', '2026-08-07.log']);
+  });
+
+  it('spends the day budget on the newest rotations first', async () => {
+    const dir = createTempLogDir();
+    writeLog(dir, '2026-08-07.log.gz', 'x'.repeat(6 * 1024 * 1024));
+    writeLog(dir, '2026-08-07.log.1', 'y'.repeat(3 * 1024 * 1024));
+
+    const parts = await collectBugReportLogs(now, dir);
+    const budget = 4 * 1024 * 1024;
+
+    // The live rotation arrives whole; the archive only fills what is left, and
+    // the day as a whole stays inside the budget the upload cap is derived from.
+    expect(parts.map((part) => part.fileName)).toEqual(['2026-08-07.log.gz', '2026-08-07.log.1']);
+    const live = parts[1];
+    expect(live?.truncated).toBe(false);
+    expect(live?.content.length).toBe(3 * 1024 * 1024);
+    const archived = parts[0];
+    expect(archived?.truncated).toBe(true);
+    expect(archived?.content.length).toBe(budget - 3 * 1024 * 1024);
+    expect(
+      parts.reduce((total, part) => total + Buffer.byteLength(part.content, 'utf8'), 0)
+    ).toBeLessThanOrEqual(budget);
+  });
+
+  it('returns nothing when the log directory is absent', async () => {
+    await expect(
+      collectBugReportLogs(now, path.join(createTempLogDir(), 'absent'))
+    ).resolves.toEqual([]);
   });
 });
 

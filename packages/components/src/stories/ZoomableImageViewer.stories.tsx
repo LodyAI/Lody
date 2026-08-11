@@ -19,16 +19,32 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+// `width`/`height` are load-bearing, not decoration: the viewer sizes a photo
+// from its INTRINSIC dimensions, and a viewBox-only SVG reports the 300x150
+// default — which would make every story exercise the small-image path.
 const svgDataUrl = (label: string, background: string, accent: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">` +
       `<rect width="1200" height="800" fill="${background}" />` +
       `<circle cx="420" cy="400" r="220" fill="${accent}" />` +
       `<text x="700" y="415" fill="#f8fafc" font-family="sans-serif" font-size="72">${label}</text>` +
       `</svg>`
   )}`;
 
+const tallSvgDataUrl = (label: string, background: string, accent: string) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1179" height="2556" viewBox="0 0 1179 2556">` +
+      `<rect width="1179" height="2556" fill="${background}" />` +
+      `<rect x="80" y="200" width="1019" height="700" rx="48" fill="${accent}" />` +
+      `<text x="80" y="1200" fill="#f8fafc" font-family="sans-serif" font-size="96">${label}</text>` +
+      `</svg>`
+  )}`;
+
 const SINGLE_IMAGE = [{ key: 'shot-1', src: svgDataUrl('screenshot', '#0f172a', '#1f6fd4') }];
+
+const PHONE_SCREENSHOT = [
+  { key: 'phone-1', src: tallSvgDataUrl('phone screenshot', '#f8fafc', '#1f6fd4') },
+];
 
 const GALLERY_IMAGES = [
   { key: 'shot-1', src: svgDataUrl('one', '#0f172a', '#1f6fd4') },
@@ -62,6 +78,15 @@ function ViewerHarness({ images }: { images: { key: string; src: string }[] }) {
 export const SingleImage: Story = {
   args: { open: true, onClose: () => {}, images: SINGLE_IMAGE, index: 0 },
   render: () => <ViewerHarness images={SINGLE_IMAGE} />,
+};
+
+/**
+ * A phone screenshot — the aspect ratio that shows whether the desktop viewer
+ * frames the photo or blows it up edge to edge against the window.
+ */
+export const TallScreenshot: Story = {
+  args: { open: true, onClose: () => {}, images: PHONE_SCREENSHOT, index: 0 },
+  render: () => <ViewerHarness images={PHONE_SCREENSHOT} />,
 };
 
 /** Multiple images: the chat gallery case, with prev/next arrows and a counter. */

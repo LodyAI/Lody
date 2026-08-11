@@ -1,5 +1,6 @@
 import {
   getSessionRoomId,
+  isDirectLocalProject,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   type ProjectRef,
@@ -212,6 +213,14 @@ export class TurnPostProcessingService {
       return null;
     }
 
+    let workspace: WorkspaceSessionContext | null = null;
+    if (project?.kind === 'local') {
+      workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+      if (isDirectLocalProject(project, workspace.ownerMeta?.isWorktree)) {
+        return null;
+      }
+    }
+
     const workdir = session.getWorkdir();
     const detected = await detectPullRequestForBranch({
       session,
@@ -225,7 +234,7 @@ export class TurnPostProcessingService {
       return null;
     }
 
-    const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+    workspace ??= await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
     if (workspace.pullRequests.some((pr) => pr.status === 'open')) {
       return detected;
     }

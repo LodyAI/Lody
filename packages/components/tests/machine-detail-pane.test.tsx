@@ -54,20 +54,28 @@ describe('MachineDetailPane revoke machine access', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  const renderPane = async (onRevokeCredentials: () => Promise<void>) => {
+  const renderPane = async (
+    onRevokeCredentials: () => Promise<void>,
+    options?: {
+      readOnly?: boolean;
+      canDelete?: boolean;
+      onDelete?: (machine: MachineViewMeta) => Promise<void>;
+    }
+  ) => {
     await act(async () => {
       root?.render(
         <TooltipProvider>
           <MachineDetailPane
             machine={machine}
+            readOnly={options?.readOnly}
             configs={[]}
             isOwn
             isLocal
             ownerName={null}
             sharedWithTeam={false}
-            canDelete={false}
+            canDelete={options?.canDelete ?? false}
             onRename={vi.fn(async () => {})}
-            onDelete={vi.fn(async () => {})}
+            onDelete={options?.onDelete ?? vi.fn(async () => {})}
             onSharedWithTeamChange={vi.fn(async () => {})}
             onAddConfig={vi.fn()}
             onEditConfig={vi.fn()}
@@ -140,5 +148,53 @@ describe('MachineDetailPane revoke machine access', () => {
       expect(onRevokeCredentials).toHaveBeenCalledTimes(1);
       expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
     });
+  });
+
+  it('keeps removal discoverable while an owned machine is online', async () => {
+    await renderPane(vi.fn(async () => {}));
+
+    const removeButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove from workspace"]'
+    );
+    expect(removeButton).not.toBeNull();
+    expect(removeButton?.disabled).toBe(true);
+  });
+
+  it('removes an offline owned machine from the current workspace after confirmation', async () => {
+    const onDelete = vi.fn(async () => {});
+    await renderPane(
+      vi.fn(async () => {}),
+      { canDelete: true, onDelete }
+    );
+
+    const removeButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove from workspace"]'
+    );
+    if (!removeButton) throw new Error('Expected the remove-from-workspace button');
+    await click(removeButton);
+
+    const dialog = findConfirmDialog();
+    expect(dialog.textContent).toContain('Remove machine from workspace?');
+    const confirmButton = Array.from(dialog.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === 'Remove'
+    );
+    if (!confirmButton) throw new Error('Expected the remove confirmation button');
+    await click(confirmButton);
+
+    await vi.waitFor(() => expect(onDelete).toHaveBeenCalledWith(machine));
+  });
+
+  it('does not expose owner mutations on the workspace Machines surface', async () => {
+    await renderPane(
+      vi.fn(async () => {}),
+      { readOnly: true }
+    );
+
+    expect(document.body.querySelector('button[aria-label="Edit machine name"]')).toBeNull();
+    expect(
+      document.body.querySelector('[aria-label="Share MacBook Pro with the team"]')
+    ).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Revoke machine access"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Remove from workspace"]')).toBeNull();
   });
 });

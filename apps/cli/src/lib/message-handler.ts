@@ -133,7 +133,7 @@ import {
   getServerNow,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isActiveSessionStatus,
-  isSessionGoalWorking,
+  isSessionGoalActive,
   resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
   type RepoId,
@@ -3639,8 +3639,7 @@ export class MessageHandler {
     try {
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const supportsStreamsRpc = !!this.machineRpcServer;
 
       const hasMeta = !!machineMeta;
@@ -4185,8 +4184,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToArchiveSessions?.[sessionId]) {
       if (!removedFlockRow) {
         this.logger.debug(`[archive] Archive request already cleared (${sessionId})`);
@@ -4736,8 +4734,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToDeleteSessions?.[sessionId]) {
       if (removedFlockRow || removedLaunchConfigRow) {
         this.logger.debug(`[delete] Delete Flock request removed (${sessionId})`);
@@ -6165,8 +6162,7 @@ export class MessageHandler {
 
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const existingName = machineMeta?.name?.trim();
       // The CLI startup name is only a bootstrap default. Settings-page renames own the
       // persisted display name, so reconnect/registration must not overwrite synced edits.
@@ -9859,15 +9855,16 @@ export class MessageHandler {
   }
 
   /**
-   * Active Codex goals run as background ACP turns. They may be idle from
-   * Lody's user-turn perspective, but killing the session kills goal progress.
+   * Persistent active goals may drive a later autonomous ACP cycle even while
+   * no prompt is running. They are not a live-presence signal, but evicting the
+   * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const historyGoal = resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory());
-    return isSessionGoalWorking(historyGoal ?? legacyMeta?.latestGoal);
+    return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 
   /**

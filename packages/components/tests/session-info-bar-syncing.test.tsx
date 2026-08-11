@@ -3,6 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 
 vi.mock('react-i18next', () => ({
@@ -22,6 +23,13 @@ const CONTEXT_LESS_PROPS = {
   pr: null,
   diffStat: null,
 } as const;
+
+const ACTIVE_GOAL: SessionGoalMessage = {
+  type: 'goal',
+  threadId: 'thread-1',
+  objective: 'Ship the ACP update',
+  status: 'active',
+};
 
 describe('SessionInfoBar syncing indicator', () => {
   let container: HTMLDivElement;
@@ -81,5 +89,47 @@ describe('SessionInfoBar syncing indicator', () => {
 
     expect(container.textContent).toContain('loro-dev/lody');
     expect(container.textContent).toContain('Syncing');
+  });
+
+  it('keeps a neutral goal read-only when no commands are supported', () => {
+    act(() => {
+      root.render(
+        <SessionInfoBar
+          {...CONTEXT_LESS_PROPS}
+          goal={ACTIVE_GOAL}
+          goalCommands={[]}
+          onGoalCommand={vi.fn()}
+        />
+      );
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Goal"]')?.click());
+
+    expect(document.body.textContent).not.toContain('Pause');
+    expect(document.body.textContent).not.toContain('Clear');
+  });
+
+  it('shows and dispatches Codex prompt-bridge goal commands', () => {
+    const onGoalCommand = vi.fn();
+    act(() => {
+      root.render(
+        <SessionInfoBar
+          {...CONTEXT_LESS_PROPS}
+          goal={ACTIVE_GOAL}
+          goalCommands={SESSION_GOAL_COMMANDS}
+          onGoalCommand={onGoalCommand}
+        />
+      );
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Goal"]')?.click());
+    const pauseButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Pause'
+    );
+    expect(pauseButton).toBeDefined();
+    expect(document.body.textContent).toContain('Clear');
+
+    act(() => pauseButton?.click());
+    expect(onGoalCommand).toHaveBeenCalledWith('pause', ACTIVE_GOAL);
   });
 });

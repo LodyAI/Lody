@@ -20,11 +20,14 @@ import type {
   ShowSessionCompletionNotificationInput
 } from '@lody/shared/electron-ipc'
 import {
+  CopyImageToClipboardInputSchema,
   ELECTRON_LOCAL_SESSION_CONTROL_RESPONSE_CHANNEL,
   ElectronAuthCallbackInputSchema,
   ElectronDevEmailPasswordSignInInputSchema,
   GLOBAL_SHORTCUT_DEFAULTS,
-  LaunchLocalPathInputSchema
+  LaunchLocalPathInputSchema,
+  SaveImageFileInputSchema,
+  ShowImagePreviewMenuInputSchema
 } from '@lody/shared/electron-ipc'
 import type {
   LocalProjectControlRequest,
@@ -47,6 +50,11 @@ import type { GlobalShortcutsService } from '../services/global-shortcuts-servic
 import type { WindowBadgeService } from '../services/window-badge-service'
 import { parseWindowBadge } from '../services/window-badge-service'
 import { launchLocalPath } from '../services/local-path-launcher-service'
+import {
+  copyImageToClipboard,
+  saveImageFile,
+  showImagePreviewMenu
+} from '../services/image-export-service'
 import { setMenuLanguage } from '../menu'
 import { isLocalPlatform, readLocalPlatformSnapshot } from '../platform'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../utils'
@@ -605,6 +613,35 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
       }
     }
   )
+
+  // Image preview right-click. Three steps rather than one: the renderer holds
+  // the bytes, so it only pays to copy them across after the user picks an
+  // action from the native menu.
+  ipcMain.handle('lodyImage:showPreviewMenu', async (event, payload: unknown) => {
+    const parsed = ShowImagePreviewMenuInputSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { action: null }
+    }
+    const window = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow()
+    return await showImagePreviewMenu(window, parsed.data)
+  })
+
+  ipcMain.handle('lodyImage:copyToClipboard', (_event, payload: unknown) => {
+    const parsed = CopyImageToClipboardInputSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { copied: false, error: 'invalid_payload' }
+    }
+    return copyImageToClipboard(parsed.data.pngBytes)
+  })
+
+  ipcMain.handle('lodyImage:saveAs', async (event, payload: unknown) => {
+    const parsed = SaveImageFileInputSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { saved: false, error: 'invalid_payload' }
+    }
+    const window = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow()
+    return await saveImageFile(window, parsed.data)
+  })
 
   ipcMain.handle('lodyLocalProjects:selectDirectory', async () => {
     const mainWindow = options.getMainWindow()
