@@ -1097,6 +1097,145 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('serves file/preview through the owner-scoped encrypted envelope', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const previewFile = vi.fn(async () => ({
+      status: 'ok' as const,
+      v: 3 as const,
+      path: 'assets/logo.png',
+      digest: `sha256:${'2'.repeat(64)}` as `sha256:${string}`,
+      kind: 'binary' as const,
+      content: { encoding: 'base64' as const, data: 'iVBO', rawBytes: 3 },
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      readonly: true,
+    }));
+    const resolveCodeCollabOwnerSessionId = vi.fn(
+      async (): Promise<SessionId> => 'session-parent' as SessionId
+    );
+
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveCodeCollabOwnerSessionId,
+      previewFile,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'req-1',
+          method: 'file/preview',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: await encryptCodeCollabV2RpcPayload('session-parent', {
+            v: 3,
+            sessionId: 'session-child',
+            path: 'assets/logo.png',
+          }),
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    await server.start();
+
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(1);
+    });
+
+    expect(previewFile).toHaveBeenCalledWith({
+      v: 3,
+      sessionId: 'session-child',
+      path: 'assets/logo.png',
+    });
+    const response = fake.appended[0]?.value as { result: unknown };
+    await expect(
+      decryptCodeCollabV2RpcPayload(
+        response.result as CodeCollabV2RpcContentEnvelope,
+        'session-parent'
+      )
+    ).resolves.toMatchObject({ status: 'ok', kind: 'binary', mimeType: 'image/png' });
+
+    server.stop();
+  });
+
+  it('rejects a file/preview request whose envelope owner is not the session owner', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const previewFile = vi.fn();
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveCodeCollabOwnerSessionId: vi.fn(
+        async (): Promise<SessionId> => 'session-parent' as SessionId
+      ),
+      previewFile,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'req-1',
+          method: 'file/preview',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: await encryptCodeCollabV2RpcPayload('session-wrong-owner', {
+            v: 3,
+            sessionId: 'session-child',
+            path: 'src/app.ts',
+          }),
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    await server.start();
+
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(1);
+    });
+
+    // The read must not run at all: swapping the session id is exactly how a
+    // client would try to read another session's workspace.
+    expect(previewFile).not.toHaveBeenCalled();
+    const response = fake.appended[0]?.value as { error: { code: string; data?: unknown } };
+    expect(response.error.code).toBe('permission_denied');
+    await expect(
+      decryptCodeCollabV2RpcPayload(
+        response.error.data as CodeCollabV2RpcContentEnvelope,
+        'session-wrong-owner'
+      )
+    ).resolves.toMatchObject({ status: 'error', v: 3, code: 'permission_denied' });
+
+    server.stop();
+  });
+
   it('decrypts Code Collab current diff requests and encrypts current diff results', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;

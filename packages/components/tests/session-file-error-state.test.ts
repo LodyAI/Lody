@@ -9,8 +9,20 @@ describe('getSessionFileErrorPresentation', () => {
       kind: 'outside-workspace',
       title: 'File is outside the workspace',
       description:
-        'For security, Lody can only read files inside this session’s workspace. Choose a file from the workspace and try again.',
+        'For security, Lody can only read files inside this session’s workspace and Lody’s own temporary directories. Choose a file from the workspace and try again.',
     });
+  });
+
+  it('prefers the outside-workspace explanation over a generic permission reason', () => {
+    // File Preview v3 reports a rejected path as `permission-denied`; "Access
+    // denied" would wrongly suggest a filesystem permission problem.
+    expect(
+      getSessionFileErrorPresentation(
+        'File is outside the workspace: preview is limited to this session’s workspace and Lody temporary directories.',
+        'permission-denied',
+        t
+      )
+    ).toMatchObject({ kind: 'outside-workspace' });
   });
 
   it('uses structured provider reasons for actionable file errors', () => {

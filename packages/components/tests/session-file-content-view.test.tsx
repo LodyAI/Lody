@@ -7,6 +7,7 @@ import {
   type CodeCollabV2OpenTextOk,
   type CodeCollabV2RefreshTextResponse,
   type CodeCollabV2SaveTextResponse,
+  type FilePreviewV3Response,
   getLodyMachinePresenceKey,
   getMachineRoomId,
   getServerNow,
@@ -236,11 +237,42 @@ function codeCollabTextResult(
   };
 }
 
+function filePreviewResult(
+  text: string,
+  digest: CodeCollabV2FileDigest
+): FilePreviewV3Response {
+  return {
+    status: 'ok',
+    v: 3,
+    path: 'src/live.ts',
+    digest,
+    kind: 'text',
+    content: {
+      encoding: 'utf8-plain',
+      text,
+      rawBytes: new TextEncoder().encode(text).byteLength,
+    },
+    format: { eol: 'lf' },
+    sizeBytes: new TextEncoder().encode(text).byteLength,
+  };
+}
+
 function createCodeCollabRuntime(
   overrides: Partial<CodeCollabSessionFileProviderRuntime> = {}
 ): CodeCollabSessionFileProviderRuntime {
   return {
     sessionId: session.id,
+    previewFile: vi.fn(async (path: string, knownDigest?: string) =>
+      knownDigest === DIGEST_1
+        ? ({
+            status: 'unchanged',
+            v: 3,
+            path,
+            digest: DIGEST_1,
+            sizeBytes: 14,
+          } satisfies FilePreviewV3Response)
+        : filePreviewResult('let value = 1;', DIGEST_1)
+    ),
     openText: vi.fn(async () => codeCollabTextResult('ok', 'let value = 1;', DIGEST_1)),
     refreshText: vi.fn(async () => ({
       status: 'up_to_date',
@@ -564,7 +596,8 @@ describe('SessionFileContentView', () => {
     );
     await flushMicrotasks();
 
-    expect(secondRuntime.openText).not.toHaveBeenCalled();
+    // A dirty editor must not be re-read at all; only the change check runs.
+    expect(secondRuntime.previewFile).not.toHaveBeenCalled();
     expect(secondRuntime.refreshText).toHaveBeenCalledWith('src/live.ts', DIGEST_1);
     expect(view.textContent).toContain('External change detected');
 
@@ -588,7 +621,7 @@ describe('SessionFileContentView', () => {
   it('refreshes clean provider text after provider rebuild', async () => {
     const firstRuntime = createCodeCollabRuntime();
     const secondRuntime = createCodeCollabRuntime({
-      refreshText: vi.fn(async () => codeCollabTextResult('updated', 'let value = 2;', DIGEST_2)),
+      previewFile: vi.fn(async () => filePreviewResult('let value = 2;', DIGEST_2)),
     });
     const firstProvider = createCodeCollabProvider(firstRuntime);
     const secondProvider = createCodeCollabProvider(secondRuntime);
@@ -611,7 +644,7 @@ describe('SessionFileContentView', () => {
     );
     await flushMicrotasks();
 
-    expect(secondRuntime.refreshText).toHaveBeenCalledWith('src/live.ts', DIGEST_1);
+    expect(secondRuntime.previewFile).toHaveBeenCalledWith('src/live.ts', DIGEST_1);
     expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
       'let value = 2;'
     );

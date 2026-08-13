@@ -66,6 +66,11 @@ import {
   CodeCollabV2RefreshTextRequestSchema,
   CodeCollabV2RpcContentEnvelopeSchema,
   CodeCollabV2SaveTextRequestSchema,
+  FilePreviewV3RequestSchema,
+  FilePreviewV3ErrorCodeSchema,
+  filePreviewV3Error,
+  type FilePreviewV3Request,
+  type FilePreviewV3Response,
 } from '@lody/shared';
 import {
   CodeCollabV2LspRpcParamsSchema,
@@ -211,6 +216,29 @@ const toCodeCollabRpcError = (
   };
 };
 
+/**
+ * Map a thrown handler error onto the File Preview v3 error shape so the client
+ * gets a typed `status: 'error'` payload instead of a bare internal error. An
+ * unrecognized code stays `transient_io`, and no raw error text is promoted to a
+ * structured code.
+ */
+const toFilePreviewRpcError = (
+  error: unknown,
+  message: string
+): { code: string; message: string; data?: unknown } => {
+  const rawCode =
+    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : undefined;
+  const parsed = rawCode ? FilePreviewV3ErrorCodeSchema.safeParse(rawCode) : undefined;
+  const code = parsed?.success ? parsed.data : 'transient_io';
+  return {
+    code,
+    message,
+    data: filePreviewV3Error(code, { message, retryable: code === 'transient_io' }),
+  };
+};
+
 const codeCollabOwnerMismatchError = (): Error & {
   code: 'permission_denied';
   toRpcError: () => CodeCollabV2Error;
@@ -337,6 +365,8 @@ type RpcServerDeps = {
   ) => Promise<SessionPrepareCancelResponse>;
   openCodeCollabText?: (args: CodeCollabV2OpenTextRequest) => Promise<CodeCollabV2OpenTextOk>;
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
+  /** File Preview v3 — a plain read; must not activate Code Collab. */
+  previewFile?: (args: FilePreviewV3Request) => Promise<FilePreviewV3Response>;
   refreshCodeCollabText?: (
     args: CodeCollabV2RefreshTextRequest
   ) => Promise<CodeCollabV2RefreshTextResponse>;
@@ -1291,6 +1321,25 @@ export class LoroStreamsMachineRpcServer {
           });
           return;
         }
+        case 'file/preview': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = FilePreviewV3RequestSchema.parse(decoded.payload);
+          // Same owner binding as Code Collab reads: the envelope's owner must be
+          // the session's real owner, so a client cannot read another session's
+          // workspace by swapping the session id.
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const response: FilePreviewV3Response = this.deps.previewFile
+            ? await this.deps.previewFile(params)
+            : filePreviewV3Error('transient_io', {
+                message: 'File preview is not available on this machine.',
+                path: params.path,
+              });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
         case 'session/preview-create': {
           if (!this.deps.createSessionPreview) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1359,7 +1408,9 @@ export class LoroStreamsMachineRpcServer {
       const message = error instanceof Error ? error.message : String(error);
       const codeCollabError = request.method.startsWith('code-collab/')
         ? toCodeCollabRpcError(error)
-        : null;
+        : request.method === 'file/preview'
+          ? toFilePreviewRpcError(error, message)
+          : null;
       await this.appendErrorResponse(
         request.replyTo,
         request.id,
@@ -1434,6 +1485,7 @@ export class LoroStreamsMachineRpcServer {
       | CodeCollabV2OpenTurnDiffResponse
       | CodeCollabV2InitDirectoryOk
       | CodeCollabV2LspUnsupported
+      | FilePreviewV3Response
       | SessionPreviewCreateResponse
       | SessionPreviewRevokeResponse
       | LocalProjectGitStateRpcResponse

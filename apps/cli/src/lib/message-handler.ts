@@ -321,6 +321,7 @@ import {
   type CodeCollabV2WorkspaceResolveOptions,
   type CodeCollabV2WorkspaceResolver,
 } from '@/lib/code-collab/code-collab-v2-service';
+import { FilePreviewService } from '@/lib/file-preview/file-preview-service';
 import {
   CodeCollabV2DiffStore,
   type CodeCollabV2DiffStoreEvent,
@@ -896,6 +897,9 @@ export class MessageHandler {
   private readonly codeCollabV2TurnRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly codeCollabV2TurnRetryFailures = new Map<string, number>();
   private codeCollabV2Service: CodeCollabV2Service;
+  // File Preview v3. Separate from Code Collab on purpose: previewing a file must
+  // not start a workspace watcher or publish a file index.
+  private filePreviewService: FilePreviewService;
 
   /**
    * Get a logger with session context. Caches loggers per session for efficiency.
@@ -3120,6 +3124,18 @@ export class MessageHandler {
         );
       },
     });
+    this.filePreviewService = new FilePreviewService({
+      resolveWorkspace: async (sessionId) => {
+        const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+        return resolved.ok
+          ? {
+              ok: true,
+              ownerSessionId: resolved.ownerSessionId,
+              workspaceRoot: resolved.workspaceRoot,
+            }
+          : { ok: false, code: resolved.code, message: resolved.message };
+      },
+    });
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
       this.handleAgentPermissionRequest(sessionId, requestId, request, agentClient?.currentModel)
     );
@@ -3482,6 +3498,7 @@ export class MessageHandler {
         cancelSessionPreparation: async (args) =>
           await this.cancelSessionPreparationWithAccessCheck(args),
         resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
+        previewFile: async (request) => await this.filePreviewService.previewFile(request),
         openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
         refreshCodeCollabText: async (request) =>
           await this.codeCollabV2Service.refreshText(request),
@@ -6607,6 +6624,9 @@ export class MessageHandler {
       case 'code-collab/lsp-references':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.lspReferences();
+      case 'file/preview':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.filePreviewService.previewFile(request.params);
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',

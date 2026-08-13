@@ -282,6 +282,11 @@ control-plane path is DEPRECATED; do not add functionality to it.
   [AGENTS.md](review-automation/AGENTS.md).
 - `code-collab/` — unified Code Collab v2 filesystem RPC service; see its own
   [AGENTS.md](code-collab/AGENTS.md).
+- `file-preview/` — the `file/preview` (File Preview v3) read path: text AND binary,
+  size-limited, path-allowlisted. **A preview must never activate Code Collab** —
+  no workspace watch, no All Changes recompute, no Flock publish. That coupling is
+  exactly what this directory was split out to remove; see its own
+  [AGENTS.md](file-preview/AGENTS.md).
 - **Session file attachments** (spec: `specs/session-files.md`): `message-handler.ts`
   has `handleSessionFileUpload` (cloud, MCP `lody_upload_files`) and local
   `handleSessionFileSendLocal`. Local bytes live in `session-file-blob-store.ts`

@@ -1223,7 +1223,7 @@
   "sessions.fileError.locked.title": "文件暂时被锁定",
   "sessions.fileError.notFound.description": "该文件可能已被移动、重命名或删除。如果它仍然存在，请从文件列表重新打开。",
   "sessions.fileError.notFound.title": "找不到该文件",
-  "sessions.fileError.outsideWorkspace.description": "出于安全考虑，Lody 只能读取当前会话工作区内的文件。请选择工作区内的文件后重试。",
+  "sessions.fileError.outsideWorkspace.description": "出于安全考虑，Lody 只能读取当前会话工作区内的文件，以及 Lody 自己的临时目录。请选择工作区内的文件后重试。",
   "sessions.fileError.outsideWorkspace.title": "该文件位于工作区之外",
   "sessions.fileError.pathCollision.description": "另一个文件使用了仅大小写不同的相同路径。请重命名其中一个文件后重试。",
   "sessions.fileError.pathCollision.title": "文件路径存在冲突",

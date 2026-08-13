@@ -59,6 +59,8 @@ import type {
   CodeCollabV2RefreshTextResponse,
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
+  FilePreviewV3Request,
+  FilePreviewV3Response,
 } from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
@@ -349,6 +351,15 @@ export type WorkspaceRuntime = {
     endpointId: string,
     options?: { timeoutMs?: number }
   ) => Promise<SessionPreviewEndpointReleaseResponse | null>;
+  /**
+   * File Preview v3: read one file from the machine. Never activates Code Collab
+   * there, and always resolves (transport failures come back as `status: 'error'`).
+   */
+  requestFilePreview: (
+    machineId: MachineId,
+    request: Omit<FilePreviewV3Request, 'v'>,
+    options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
+  ) => Promise<FilePreviewV3Response>;
   requestCodeCollabOpenText: (
     machineId: MachineId,
     request: CodeCollabV2OpenTextRequest,

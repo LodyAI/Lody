@@ -1224,7 +1224,7 @@
   "sessions.fileError.locked.title": "File is temporarily locked",
   "sessions.fileError.notFound.description": "This file may have been moved, renamed, or deleted. Open it again from the file list if it still exists.",
   "sessions.fileError.notFound.title": "File not found",
-  "sessions.fileError.outsideWorkspace.description": "For security, Lody can only read files inside this session’s workspace. Choose a file from the workspace and try again.",
+  "sessions.fileError.outsideWorkspace.description": "For security, Lody can only read files inside this session’s workspace and Lody’s own temporary directories. Choose a file from the workspace and try again.",
   "sessions.fileError.outsideWorkspace.title": "File is outside the workspace",
   "sessions.fileError.pathCollision.description": "Another file has the same path with different letter casing. Rename one of the files and try again.",
   "sessions.fileError.pathCollision.title": "File path is ambiguous",

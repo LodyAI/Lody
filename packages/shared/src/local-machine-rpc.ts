@@ -17,6 +17,7 @@ import {
   CodeCollabV2SaveTextRequestSchema,
   CodeCollabV2SaveTextResponseSchema,
 } from './code-collab';
+import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
 import {
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
@@ -97,6 +98,12 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
         character: z.number().int().nonnegative().optional(),
       })
       .strict(),
+  }).strict(),
+  // File Preview v3 over the same-machine IPC path. Params travel in the clear
+  // here because the socket never leaves the machine.
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('file/preview'),
+    params: FilePreviewV3RequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/cancel'),
@@ -193,6 +200,7 @@ export const LocalMachineRpcResultSchema = z.union([
   CodeCollabV2InitDirectoryOkSchema,
   CodeCollabV2LspUnsupportedSchema,
   CodeCollabV2ErrorSchema,
+  FilePreviewV3ResponseSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,

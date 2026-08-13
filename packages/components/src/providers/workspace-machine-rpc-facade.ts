@@ -20,6 +20,10 @@ import {
   type CodeCollabV2RefreshTextResponse,
   type CodeCollabV2SaveTextRequest,
   type CodeCollabV2SaveTextResponse,
+  type FilePreviewV3Request,
+  type FilePreviewV3Response,
+  FILE_PREVIEW_PROTOCOL_VERSION,
+  filePreviewV3Error,
   type LocalMachineRpcRequest,
   type LocalMachineRpcResult,
   type LocalProjectControlRequest,
@@ -158,6 +162,63 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?.ownerSessionId === undefined
       ? {}
       : { ownerSessionId: options.ownerSessionId.toString() };
+
+  /**
+   * File Preview v3. Its own transport wrapper (rather than `requestCodeCollab`)
+   * so a transport failure surfaces as a typed `FilePreviewV3Error` instead of a
+   * Code Collab error the preview UI would have to translate.
+   */
+  const requestFilePreview = async (
+    machineId: MachineId,
+    request: Omit<FilePreviewV3Request, 'v'>,
+    options?: CodeCollabRequestOptions
+  ): Promise<FilePreviewV3Response> => {
+    const params: FilePreviewV3Request = {
+      v: FILE_PREVIEW_PROTOCOL_VERSION,
+      sessionId: request.sessionId,
+      path: request.path,
+      ...(request.knownDigest === undefined ? {} : { knownDigest: request.knownDigest }),
+      ...(request.maxBytes === undefined ? {} : { maxBytes: request.maxBytes }),
+    };
+    try {
+      const result = await (async () => {
+        if (await canUseLocalMachineRpc(machineId)) {
+          const sender = getLocalMachineRpcSender();
+          if (!sender) throw new Error('Local Machine RPC is not available.');
+          const response = await sender({
+            machineId,
+            workspaceId,
+            method: 'file/preview',
+            params,
+            ...ownerSessionFields(options),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          });
+          if (!response.ok) throw new Error(response.error);
+          return response.result as FilePreviewV3Response | null;
+        }
+        const client = await getMachineRpcClient(machineId);
+        return await client.requestFilePreview({
+          ...params,
+          ownerSessionId: options?.ownerSessionId,
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
+      })();
+      if (result === null) {
+        return filePreviewV3Error('transient_io', {
+          message: 'File preview request timed out.',
+          path: request.path,
+          retryable: true,
+        });
+      }
+      return result;
+    } catch (error) {
+      return filePreviewV3Error('transient_io', {
+        message: error instanceof Error ? error.message : String(error),
+        path: request.path,
+        retryable: true,
+      });
+    }
+  };
 
   const requestCodeCollabOpenText = (
     machineId: MachineId,
@@ -999,6 +1060,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionDispatchTurn,
     requestSessionPrepare,
     requestSessionPrepareCancel,
+    requestFilePreview,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,

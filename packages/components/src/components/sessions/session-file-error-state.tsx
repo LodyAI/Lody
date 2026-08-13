@@ -149,11 +149,11 @@ export function getSessionFileErrorPresentation(
   reason: CodeCollabContentUnavailableReason | undefined,
   t: Translation
 ): SessionFileErrorPresentation {
-  if (reason) {
-    return providerReasonPresentation(reason, t);
-  }
-
   const normalized = message.trim().toLowerCase();
+  // The path boundary is checked BEFORE the reason mapping. File Preview v3
+  // reports a rejected path as `permission-denied` (there is no dedicated
+  // unavailable reason for it), and "Access denied" would misdescribe it — the
+  // file is readable, it is just outside what Lody may read for this session.
   if (
     normalized.includes('path escapes workspace root') ||
     normalized.includes('resolved path escapes workspace root') ||
@@ -165,10 +165,15 @@ export function getSessionFileErrorPresentation(
       title: t('sessions.fileError.outsideWorkspace.title', 'File is outside the workspace'),
       description: t(
         'sessions.fileError.outsideWorkspace.description',
-        'For security, Lody can only read files inside this session’s workspace. Choose a file from the workspace and try again.'
+        'For security, Lody can only read files inside this session’s workspace and Lody’s own temporary directories. Choose a file from the workspace and try again.'
       ),
     };
   }
+
+  if (reason) {
+    return providerReasonPresentation(reason, t);
+  }
+
   if (
     normalized.includes('file was not found') ||
     normalized.includes('file not found') ||

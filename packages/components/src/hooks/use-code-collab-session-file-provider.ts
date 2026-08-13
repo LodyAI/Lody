@@ -366,6 +366,12 @@ export function useCodeCollabSessionFileProvider(
     const requestedByUserId = options.requestedByUserId?.trim();
     return {
       sessionId,
+      previewFile: async (path, knownDigest) =>
+        await runtime.requestFilePreview(
+          machineId,
+          { sessionId, path, ...(knownDigest === undefined ? {} : { knownDigest }) },
+          { ownerSessionId }
+        ),
       openText: async (path) =>
         await runtime.requestCodeCollabOpenText(machineId, { sessionId, path }, { ownerSessionId }),
       refreshText: async (path, digest) =>

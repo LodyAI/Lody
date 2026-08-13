@@ -63,6 +63,8 @@ import type {
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
   SessionTurnInputConfig,
+  FilePreviewV3Request,
+  FilePreviewV3Response,
 } from '@lody/shared';
 import {
   AgentConfigIdSchema,
@@ -71,6 +73,10 @@ import {
   CodeCollabV2ErrorSchema,
   CodeCollabV2RpcContentEnvelopeSchema,
   CodeCollabV2RpcResponseSchema,
+  FILE_PREVIEW_PROTOCOL_VERSION,
+  FilePreviewV3ErrorCodeSchema,
+  FilePreviewV3ErrorSchema,
+  FilePreviewV3ResponseSchema,
   BuiltinRuntimeOverridesSchema,
   CustomAcpLaunchSpecSchema,
   deriveCodeCollabV2ContentKeyBytes,
@@ -179,6 +185,9 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'code-collab/init-directory',
   'code-collab/lsp-definition',
   'code-collab/lsp-references',
+  // File Preview v3. Deliberately outside the `code-collab/` namespace: it is a
+  // plain read and must never activate Code Collab on the machine.
+  'file/preview',
   'session/cancel',
   'session/live-status',
   'session/steer',
@@ -270,15 +279,14 @@ export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestS
     .strict(),
 }).strict();
 
-export const LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema =
-  BaseRpcRequestSchema.extend({
-    method: z.literal('machine/acp-capabilities-refresh-cancel'),
-    params: z
-      .object({
-        requestId: z.string().trim().min(1),
-      })
-      .strict(),
-  }).strict();
+export const LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/acp-capabilities-refresh-cancel'),
+  params: z
+    .object({
+      requestId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
 
 export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/acp-authenticate'),
@@ -395,6 +403,26 @@ export const LoroCodeCollabV2LspReferencesRpcRequestSchema = BaseRpcRequestSchem
   method: z.literal('code-collab/lsp-references'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
+
+/**
+ * File Preview v3 reuses the owner-session-scoped encrypted content envelope: the
+ * requested path and returned bytes are user content and must not sit in the
+ * clear on the Streams plane, and the envelope's owner binding is what the
+ * machine authorizes against. The envelope is transport, not Code Collab state.
+ */
+export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('file/preview'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+/**
+ * Methods whose params/results travel inside the encrypted owner-session
+ * envelope. Every encrypt, decrypt, and error-decode site must consult this —
+ * the previous `method.startsWith('code-collab/')` checks silently excluded any
+ * new method that reuses the envelope.
+ */
+export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
+  method.startsWith('code-collab/') || method === 'file/preview';
 
 export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/cancel'),
@@ -553,6 +581,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2InitDirectoryRpcRequestSchema,
   LoroCodeCollabV2LspDefinitionRpcRequestSchema,
   LoroCodeCollabV2LspReferencesRpcRequestSchema,
+  LoroFilePreviewRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
@@ -688,6 +717,7 @@ export type LoroCodeCollabV2LspDefinitionRpcRequest = z.infer<
 export type LoroCodeCollabV2LspReferencesRpcRequest = z.infer<
   typeof LoroCodeCollabV2LspReferencesRpcRequestSchema
 >;
+export type LoroFilePreviewRpcRequest = z.infer<typeof LoroFilePreviewRpcRequestSchema>;
 export type LoroSessionCancelRpcRequest = z.infer<typeof LoroSessionCancelRpcRequestSchema>;
 export type LoroSessionLiveStatusRpcRequest = z.infer<typeof LoroSessionLiveStatusRpcRequestSchema>;
 export type LoroSessionTerminateRpcRequest = z.infer<typeof LoroSessionTerminateRpcRequestSchema>;
@@ -1386,6 +1416,7 @@ export type LoroMachineRpcResult =
   | MachineUpgradeResponse
   | CodeCollabV2RpcResponse
   | CodeCollabV2Error
+  | FilePreviewV3Response
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1619,6 +1650,24 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (method === 'file/preview') {
+    const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
+    if (parsedData.success) {
+      return {
+        ...parsedData.data,
+        message: parsedData.data.message ?? error.message,
+      };
+    }
+    const parsedCode = FilePreviewV3ErrorCodeSchema.safeParse(error.code);
+    return {
+      status: 'error',
+      v: FILE_PREVIEW_PROTOCOL_VERSION,
+      code: parsedCode.success ? parsedCode.data : 'transient_io',
+      message: error.message,
+      retryable: error.code === 'request_failed' || error.code === 'machine_rpc_unavailable',
+    };
+  }
+
   if (method.startsWith('code-collab/')) {
     const parsedData = CodeCollabV2ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
@@ -1766,7 +1815,7 @@ const parseRpcSuccessResult = async (
     const parsed = SessionPrepareCancelResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionPrepareCancelResponse) : null;
   }
-  if (response.method.startsWith('code-collab/')) {
+  if (isOwnerScopedEncryptedRpcMethod(response.method)) {
     const envelope = CodeCollabV2RpcContentEnvelopeSchema.safeParse(response.result);
     if (!envelope.success) {
       return null;
@@ -1775,6 +1824,10 @@ const parseRpcSuccessResult = async (
       envelope.data,
       expectedCodeCollabOwnerSessionId
     );
+    if (response.method === 'file/preview') {
+      const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
+      return previewParsed.success ? previewParsed.data : null;
+    }
     const parsed = CodeCollabV2RpcResponseSchema.safeParse(decrypted);
     return parsed.success ? parsed.data : null;
   }
@@ -2114,7 +2167,7 @@ export class LoroStreamsRpcResponseDispatcher {
       const encryptedErrorData = CodeCollabV2RpcContentEnvelopeSchema.safeParse(error.data);
       if (
         finalPending.codeCollabOwnerSessionId !== undefined &&
-        parsed.data.method.startsWith('code-collab/') &&
+        isOwnerScopedEncryptedRpcMethod(parsed.data.method) &&
         encryptedErrorData.success
       ) {
         try {
@@ -2618,6 +2671,27 @@ export class LoroStreamsMachineRpcClient {
     })) as CodeCollabV2OpenTextOk | CodeCollabV2Error | null;
   }
 
+  /**
+   * File Preview v3. One call covers first read and revalidation, and never
+   * activates Code Collab on the machine.
+   */
+  async requestFilePreview(
+    options: Omit<FilePreviewV3Request, 'v'> & { ownerSessionId?: string; timeoutMs?: number }
+  ): Promise<FilePreviewV3Response | null> {
+    return (await this.sendRequest({
+      method: 'file/preview',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      ownerSessionId: options.ownerSessionId ?? options.sessionId,
+      params: {
+        v: FILE_PREVIEW_PROTOCOL_VERSION,
+        sessionId: options.sessionId,
+        path: options.path,
+        ...(options.knownDigest === undefined ? {} : { knownDigest: options.knownDigest }),
+        ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
+      },
+    })) as FilePreviewV3Response | null;
+  }
+
   async requestCodeCollabRefreshText(
     options: CodeCollabV2RefreshTextRequest & { ownerSessionId?: string; timeoutMs?: number }
   ): Promise<CodeCollabV2RefreshTextResponse | CodeCollabV2Error | null> {
@@ -3040,6 +3114,12 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'file/preview';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: FilePreviewV3Request;
+        }
+      | {
           method: 'session/preview-create';
           timeoutMs: number;
           params: {
@@ -3097,7 +3177,8 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/open-turn-diff' ||
       args.method === 'code-collab/init-directory' ||
       args.method === 'code-collab/lsp-definition' ||
-      args.method === 'code-collab/lsp-references'
+      args.method === 'code-collab/lsp-references' ||
+      args.method === 'file/preview'
         ? args.ownerSessionId
         : undefined;
     this.options.trace?.('machine rpc transport request start', traceContext);
@@ -3336,6 +3417,13 @@ export class LoroStreamsMachineRpcClient {
           };
           break;
         case 'code-collab/lsp-references':
+          request = {
+            ...envelope,
+            method: args.method,
+            params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
+          };
+          break;
+        case 'file/preview':
           request = {
             ...envelope,
             method: args.method,

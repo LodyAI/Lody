@@ -103,6 +103,13 @@ Machine RPC; the old session-scoped Code Collab Host RPC ingress has been remove
   `permission_denied` and must not call the file operation.
 - Session-scoped Code Collab RPC methods are not part of this transport. Add v2 work
   under the ordinary `code-collab/*` machine methods.
+- `file/preview` (File Preview v3) is a Machine RPC method OUTSIDE the `code-collab/`
+  namespace, on purpose: previewing a file must not activate Code Collab on the
+  machine. It reuses the same owner-session content envelope and the same owner
+  verification, because the requested path and returned bytes are user content and the
+  owner binding is the authorization. Every encrypt/decrypt/error-decode site must go
+  through `isOwnerScopedEncryptedRpcMethod` — the previous
+  `method.startsWith('code-collab/')` checks silently excluded any new envelope method.
 
 ## File Responsibilities
 

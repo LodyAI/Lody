@@ -94,6 +94,7 @@ export * from './workspace-slugs';
 export * from './workspace-route';
 export * from './layout';
 export * from './code-collab';
+export * from './file-preview';
 export * from './machine-flock';
 export * from './local-machine-rpc';
 export * from './local-loro-data-plane';
