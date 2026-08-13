@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
@@ -10,6 +11,7 @@ import { Provider } from 'jotai'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
+import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -37,7 +39,7 @@ const buildInfo: Record<string, string> = {
     typeof window.__LODY_PLATFORM__?.os === 'string' ? window.__LODY_PLATFORM__.os : 'unknown'
 }
 
-function reportFatalToMain(error: unknown, scope: string, copied = false): void {
+function reportFatalToMain(error: unknown, scope: RendererFatalScope, copied = false): void {
   try {
     const diag = collectBootDiagnostics(error, { buildInfo })
     window.api?.reportRendererFatalError?.({
@@ -64,7 +66,7 @@ function requestReloadViaMain(): boolean {
   return false
 }
 
-function showBootFailure(error: unknown, scope: string): void {
+function showBootFailure(error: unknown, scope: RendererFatalScope): void {
   if (bootFailureShown) return
   bootFailureShown = true
   reportFatalToMain(error, scope)
@@ -80,6 +82,29 @@ function showBootFailure(error: unknown, scope: string): void {
   })
 }
 
+function markRendererCommitted(): void {
+  if (rendererMounted) return
+  rendererMounted = true
+  try {
+    window.api?.notifyRendererMounted?.()
+  } catch (e) {
+    console.warn('[Lody] notifyRendererMounted bridge failed', e)
+  }
+}
+
+function RendererCommitSentinel(): null {
+  useLayoutEffect(() => {
+    markRendererCommitted()
+  }, [])
+  return null
+}
+
+const rendererErrorReporting = createRendererErrorReporting({
+  hasCommitted: () => rendererMounted,
+  reportFatal: reportFatalToMain,
+  showBootFailure
+})
+
 // Register global handlers BEFORE touching any module that can fail at top
 // level (createRouter, authClient init, etc.). They cover three cases:
 //   1. Synchronous throws that escape the try/catch (rare).
@@ -87,27 +112,11 @@ function showBootFailure(error: unknown, scope: string): void {
 //   3. Post-mount asynchronous errors — those only get reported to main
 //      for log persistence; the running UI is left alone.
 window.addEventListener('error', (event) => {
-  const err =
-    event.error instanceof Error
-      ? event.error
-      : new Error(typeof event.message === 'string' ? event.message : 'unknown error')
-  if (rendererMounted) {
-    reportFatalToMain(err, 'window.error')
-    return
-  }
-  showBootFailure(err, 'window.error')
+  rendererErrorReporting.onWindowError(event)
 })
 
 window.addEventListener('unhandledrejection', (event) => {
-  const reason =
-    event.reason instanceof Error
-      ? event.reason
-      : new Error(typeof event.reason === 'string' ? event.reason : String(event.reason))
-  if (rendererMounted) {
-    reportFatalToMain(reason, 'unhandledrejection')
-    return
-  }
-  showBootFailure(reason, 'unhandledrejection')
+  rendererErrorReporting.onUnhandledRejection(event)
 })
 
 try {
@@ -120,27 +129,22 @@ try {
     },
     history: isFileProtocol ? createHashHistory() : undefined
   })
-  createRoot(rootElement).render(
-    <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
-      <Provider store={jotaiStore}>
-        <RouterProvider router={router} />
-      </Provider>
-    </ErrorBoundary>
+  createRoot(rootElement, {
+    // ErrorBoundary remains the single owner of caught-error UI and PostHog.
+    // React 19 no longer rethrows render errors, so these root callbacks only
+    // restore the Electron fatal IPC path that window.error used to observe.
+    onCaughtError: (error) => rendererErrorReporting.onReactCaughtError(error),
+    onUncaughtError: (error) => rendererErrorReporting.onReactUncaughtError(error)
+  }).render(
+    <>
+      <RendererCommitSentinel />
+      <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
+        <Provider store={jotaiStore}>
+          <RouterProvider router={router} />
+        </Provider>
+      </ErrorBoundary>
+    </>
   )
-
-  // React commits its initial render in a microtask (or a scheduler task
-  // very shortly after). By the time this runs, either render() already
-  // threw — and the catch below ran — or commit is queued. Marking
-  // mounted here flips the global handlers from "take over UI" mode to
-  // "log silently" mode.
-  queueMicrotask(() => {
-    rendererMounted = true
-    try {
-      window.api?.notifyRendererMounted?.()
-    } catch (e) {
-      console.warn('[Lody] notifyRendererMounted bridge failed', e)
-    }
-  })
 } catch (error) {
-  showBootFailure(error, 'boot:synchronous')
+  rendererErrorReporting.reportSynchronousError(error)
 }

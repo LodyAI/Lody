@@ -73,7 +73,7 @@ starts now and a Task for work recorded for later.
   passing a selection, reject self-echoes while editing, flush before unmount, and key
   the editor by `taskId`.
 - Keep both meowdown stylesheets, explicit `mode="hide"`, the app theme variable mapping,
-  and the React 18 manual `handle.editor.unmount()` cleanup.
+  and the manual `handle.editor.unmount()` cleanup.
 - Selection-toolbar pointer-down handlers must preserve editor focus. Keep the popover
   hoisted above the surrounding scroll area.
 - Task images are stored as `lody-image://<imageId>` references. Comments remain a

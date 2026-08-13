@@ -11,7 +11,7 @@ import {
 export type TaskPriorityPresentation = {
   /** `null` is the "no priority" option. */
   priority: TaskPriority | null;
-  Icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+  Icon: (props: SVGProps<SVGSVGElement>) => React.JSX.Element;
   labelKey: string;
   labelFallback: string;
   className: string;
@@ -66,6 +66,4 @@ export const TASK_PRIORITY_PRESENTATION: readonly TaskPriorityPresentation[] = [
 export const getTaskPriorityPresentation = (
   priority: TaskPriority | null | undefined
 ): TaskPriorityPresentation =>
-  priority
-    ? { priority, ...PRESENTATION[priority] }
-    : { priority: null, ...NONE_PRESENTATION };
+  priority ? { priority, ...PRESENTATION[priority] } : { priority: null, ...NONE_PRESENTATION };

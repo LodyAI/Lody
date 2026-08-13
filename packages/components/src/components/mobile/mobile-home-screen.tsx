@@ -1108,7 +1108,7 @@ function ProjectsSubTabSelector({
     key: MobileProjectsSubTab;
     label: string;
     icon: ReactNode;
-    ref: RefObject<HTMLButtonElement>;
+    ref: RefObject<HTMLButtonElement | null>;
   }> = [
     {
       key: 'local',

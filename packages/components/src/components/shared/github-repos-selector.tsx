@@ -121,7 +121,7 @@ export function GitHubReposSelector({
         value: string;
         label: string;
         description?: string;
-        startContent: JSX.Element;
+        startContent: React.JSX.Element;
       }>,
     [onConnectGitRepo, repositories?.length, sortedRepositories, t]
   );

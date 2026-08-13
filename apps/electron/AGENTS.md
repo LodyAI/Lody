@@ -43,6 +43,11 @@ Root `AGENTS.md` also applies.
 
 ## Renderer and window integration
 
+- React render failures are split by owner: the root `createRoot` error callbacks
+  persist fatal IPC diagnostics, while `ErrorBoundary` owns caught-error UI and
+  PostHog reporting. De-duplicate the same error across React and window events.
+  Renderer-mounted notification must come from a committed layout-effect sentinel,
+  never a timer or microtask guess.
 - Theme changes must also update the native window color in `window-theme.ts`.
   Windows title-bar geometry must stay aligned across
   `MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`, the `h-9` drag strip in

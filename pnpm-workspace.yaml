@@ -21,8 +21,8 @@ catalog:
   '@tanstack/router-vite-plugin': ^1.127.9
   '@types/better-sqlite3': ^7.6.13
   '@types/node': ^24.10.1
-  '@types/react': ^18.3.3
-  '@types/react-dom': ^18.3.0
+  '@types/react': 19.2.17
+  '@types/react-dom': 19.2.3
   '@vitejs/plugin-react': ^4.6.0
   better-auth: 1.5.5
   better-auth-capacitor: 0.3.6
@@ -41,8 +41,8 @@ catalog:
   loro-repo: ^0.19.1
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
-  react: ^18.3.1
-  react-dom: ^18.3.1
+  react: 19.2.0
+  react-dom: 19.2.0
   typescript: ^5.9.3
   undici: ^6.26.0
   vite: ^6.0.0
