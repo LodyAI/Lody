@@ -111,6 +111,13 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     method: z.literal('file/preview'),
     params: FilePreviewV3RequestSchema,
   }).strict(),
+  // Electron's same-machine preview route. This method deliberately has no
+  // Loro Streams counterpart: the desktop user may inspect any local file,
+  // while remote requests retain File Preview v3's restricted-root policy.
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('file/preview-local'),
+    params: FilePreviewV3RequestSchema,
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/cancel'),
     params: z

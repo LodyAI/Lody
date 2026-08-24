@@ -48,6 +48,12 @@ export type FilePreviewPathResolution =
 export type FilePreviewPathPolicyOptions = {
   /** Overrides the fixed extra roots. Tests pass an empty array or a temp dir. */
   readonly extraRoots?: readonly string[];
+  /**
+   * Same-machine Electron preview only. The desktop user explicitly controls
+   * this local IPC path, so it may inspect any readable regular file. Remote
+   * File Preview v3 requests MUST leave this false and keep the root boundary.
+   */
+  readonly allowArbitraryPaths?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   /**
@@ -288,8 +294,8 @@ function resolveWorkspacePathTolerantly(
  * Order matters: containment is checked against the SYMLINK-RESOLVED target, so
  * a symlink inside the workspace pointing at `~/.ssh/id_rsa` is rejected. When
  * the target does not exist we still verify the lexical path is inside an
- * allowed root before reporting `file_not_found`, so a caller cannot use
- * not-found vs not-allowed as an existence probe outside the boundary.
+ * allowed root before reporting `file_not_found`, so a remote caller cannot
+ * use not-found vs not-allowed as an existence probe outside the boundary.
  */
 export function resolveFilePreviewPath(args: {
   readonly workspaceRoot: string;
@@ -367,6 +373,9 @@ export function resolveFilePreviewPath(args: {
     }
   }
   if (realTarget === null) {
+    if (args.options?.allowArbitraryPaths) {
+      return { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } };
+    }
     // Only reveal "missing" when EVERY spelling we were willing to look for is
     // inside an allowed root. `every`, not `some` — `some` turns the two codes
     // into an existence oracle for the whole filesystem: `" /etc/passwd"` keeps
@@ -380,7 +389,10 @@ export function resolveFilePreviewPath(args: {
       ? { ok: false, rejection: { code: 'file_not_found', message: 'File was not found.' } }
       : notAllowed;
   }
-  if (!realRoots.some((root) => isWithinRoot(root, realTarget))) {
+  if (
+    !args.options?.allowArbitraryPaths &&
+    !realRoots.some((root) => isWithinRoot(root, realTarget))
+  ) {
     return notAllowed;
   }
 

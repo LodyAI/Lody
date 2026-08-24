@@ -55,6 +55,15 @@ export type FilePreviewServiceOptions = {
   readonly extraRoots?: readonly string[];
 };
 
+export type FilePreviewRequestOptions = {
+  /**
+   * Available exclusively to the Electron same-machine IPC handler. This is
+   * intentionally transport context, not part of File Preview v3's request
+   * schema, so a Loro Streams request can never widen its readable roots.
+   */
+  readonly allowArbitraryPaths?: boolean;
+};
+
 /**
  * File Preview v3: read one file and return it.
  *
@@ -72,7 +81,10 @@ export class FilePreviewService {
     this.limits = { ...FILE_PREVIEW_V3_LIMITS, ...deps.limits };
   }
 
-  async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
+  async previewFile(
+    request: FilePreviewV3Request,
+    options: FilePreviewRequestOptions = {}
+  ): Promise<FilePreviewV3Response> {
     const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) {
       return filePreviewV3Error(workspace.code, {
@@ -86,7 +98,10 @@ export class FilePreviewService {
       workspaceRoot: workspace.workspaceRoot,
       requestedPath: request.path,
       ...(this.deps.extraRoots === undefined ? {} : { extraRoots: this.deps.extraRoots }),
-      ...(this.deps.pathPolicy === undefined ? {} : { options: this.deps.pathPolicy }),
+      options: {
+        ...this.deps.pathPolicy,
+        ...(options.allowArbitraryPaths ? { allowArbitraryPaths: true } : {}),
+      },
     });
     if (!resolution.ok) {
       return filePreviewV3Error(resolution.rejection.code, {

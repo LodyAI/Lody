@@ -22,9 +22,12 @@ save path's text reads.
 - `file-preview-service.ts` — resolves the workspace, authorizes the path, reads,
   classifies text vs binary, encodes, and answers. Never throws for a domain
   failure: every rejection is a typed `status: 'error'` response.
-- `file-preview-path-policy.ts` — the security boundary. Allowed roots are the
-  session workspace root, `os.tmpdir()`, `<LodyDataDir>/chats`, and anything in
-  `LODY_FILE_PREVIEW_EXTRA_ROOTS`.
+- `file-preview-path-policy.ts` — the security boundary. Remote `file/preview`
+  requests may read only the session workspace root, `os.tmpdir()`,
+  `<LodyDataDir>/chats`, and `LODY_FILE_PREVIEW_EXTRA_ROOTS`. The separate
+  local-only `file/preview-local` IPC method is the Electron user's explicit
+  same-machine read capability and may read any regular file; it is never added
+  to the Loro Streams RPC protocol.
 
 ## Load-bearing details
 
@@ -98,13 +101,14 @@ save path's text reads.
   workspace" — the web error surface keys its dedicated presentation off that text
   (`session-file-error-state.tsx`), because the generic `permission-denied` copy
   ("Access denied") misdescribes a policy rejection as a filesystem one.
-- **Reading is wider than writing, on purpose.** Preview serves the temp/scratch
-  roots; `code-collab/save-text` refuses everything outside the session workspace
-  (lexical check plus `assertRealPathInsideWorkspace` on the symlink-resolved path)
-  and cannot create files at all. Preview grants no write capability — do not add
-  one here. The client counterpart: an `external: true` result must be marked
-  readonly regardless of the file index, or the editor offers a Save the machine is
-  guaranteed to reject and the user loses the edit.
+- **Reading is wider than writing, on purpose.** Remote preview serves only the
+  allowlisted temp/scratch roots, while Electron's same-machine local preview can
+  inspect arbitrary paths. `code-collab/save-text` refuses everything outside the
+  session workspace (lexical check plus `assertRealPathInsideWorkspace` on the
+  symlink-resolved path) and cannot create files at all. Preview grants no write
+  capability — do not add one here. The client counterpart: an `external: true`
+  result must be marked readonly regardless of the file index, or the editor offers
+  a Save the machine is guaranteed to reject and the user loses the edit.
 
 Normative contract: `specs/file-preview-v3.md` (private repo). Schemas:
 `packages/shared/src/file-preview.ts`.

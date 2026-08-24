@@ -81,6 +81,10 @@ describe('local Machine RPC', () => {
       method: 'session/preview-endpoint-release',
       params: { sessionId: 'session-1', endpointId: 'endpoint-1' },
     },
+    {
+      method: 'file/preview-local',
+      params: { v: 3, sessionId: 'session-1', path: '/Users/me/Documents/notes.md' },
+    },
   ])('accepts $method requests', ({ method, params }) => {
     const result = safeParseLocalMachineRpcRequest(
       JSON.stringify({

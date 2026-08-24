@@ -140,8 +140,10 @@ mobile surfaces.
   events must be allowed to converge rather than treated as initial authority. Machine RPC
   also handles exact file content, save, LSP, and diff requests.
 - **Opening a file to preview it is NOT a Code Collab operation.** `openFile` goes
-  through `file/preview` (File Preview v3), which the machine answers with a plain
-  read — no workspace watch, no All Changes recompute, no Flock publish. It handles
+  through File Preview v3, which the machine answers with a plain read — no workspace
+  watch, no All Changes recompute, no Flock publish. A local Electron target uses the
+  IPC-only `file/preview-local` method and MUST NOT fall back to Streams RPC while its
+  route is unresolved; remote targets use the restricted `file/preview` method. It handles
   text and binary (PNG/JPEG/…) alike and is size-limited on the machine. So the file
   index is a HINT here, never a gate: a `binary` entry carries no `unavailableReason`
   (or the tree row goes unclickable via `canOpen` in

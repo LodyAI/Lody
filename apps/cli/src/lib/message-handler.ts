@@ -6453,6 +6453,11 @@ export class MessageHandler {
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
+      case 'file/preview-local':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.filePreviewService.previewFile(request.params, {
+          allowArbitraryPaths: true,
+        });
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',

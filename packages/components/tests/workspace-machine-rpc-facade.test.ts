@@ -12,6 +12,78 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('uses the local-only IPC preview method without creating a cloud client', async () => {
+    const sendLocalMachineRpc = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        status: 'ok' as const,
+        v: 3 as const,
+        path: '/Users/me/Documents/notes.md',
+        external: true,
+        digest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        kind: 'text' as const,
+        content: { encoding: 'utf8-plain' as const, text: '# Note\n', rawBytes: 7 },
+        format: { eol: 'lf' as const },
+        sizeBytes: 7,
+        readonly: true,
+      },
+    }));
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      api: { sendLocalMachineRpc },
+    });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local'),
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestFilePreview(localMachineId, {
+        sessionId,
+        path: '/Users/me/Documents/notes.md',
+      })
+    ).resolves.toMatchObject({ status: 'ok', external: true, readonly: true });
+    expect(sendLocalMachineRpc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        machineId: localMachineId,
+        workspaceId,
+        method: 'file/preview-local',
+        params: { v: 3, sessionId, path: '/Users/me/Documents/notes.md' },
+      })
+    );
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to a cloud preview while Electron local routing is unresolved', async () => {
+    const sendLocalMachineRpc = vi.fn();
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      api: { sendLocalMachineRpc },
+    });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => null,
+        resolvePlaneForMachine: vi.fn(async () => {
+          throw new Error('workspace_target_identity_timeout');
+        }),
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestFilePreview(localMachineId, { sessionId, path: '/tmp/local.txt' })
+    ).resolves.toMatchObject({ status: 'error', code: 'transient_io' });
+    expect(sendLocalMachineRpc).not.toHaveBeenCalled();
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('uses the local bridge for a file-index snapshot without creating a cloud client', async () => {
     const sendLocalMachineRpc = vi.fn(async () => ({
       ok: true as const,

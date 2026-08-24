@@ -278,6 +278,31 @@ describe('FilePreviewService', () => {
     expect(response).toMatchObject({ status: 'error', code: 'path_not_allowed' });
   });
 
+  it('lets the same-machine Electron preview read an arbitrary external file as readonly', async () => {
+    const workspaceRoot = await makeDir('preview-ws-');
+    const outside = await makeDir('preview-outside-');
+    const filePath = path.join(outside, 'notes.md');
+    await writeFile(filePath, '# Local note\n');
+    const service = createService({ workspaceRoot });
+
+    const response = await service.previewFile(
+      {
+        v: 3,
+        sessionId: SESSION_ID,
+        path: filePath,
+      },
+      { allowArbitraryPaths: true }
+    );
+
+    expect(response).toMatchObject({
+      status: 'ok',
+      path: filePath,
+      external: true,
+      readonly: true,
+      kind: 'text',
+    });
+  });
+
   it('reads an absolute path inside an allowed extra root and marks it external', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     const scratch = await makeDir('preview-scratch-');

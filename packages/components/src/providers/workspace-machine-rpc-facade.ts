@@ -184,13 +184,34 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     };
     try {
       const result = await (async () => {
-        if (await canUseLocalMachineRpc(machineId)) {
+        const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__;
+        if (isElectron) {
+          // A local Electron file preview must never fall through to the
+          // Streams RPC plane. Until the target router identifies the machine,
+          // returning a retryable error is safer than sending a local path to
+          // the server; once identified, remote machines still use Streams.
+          await targetRouter.resolvePlaneForMachine(machineId, {
+            timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+          });
+          const plane = targetRouter.getPlaneForMachine(machineId);
+          if (plane === null) {
+            throw new Error('Local Machine RPC routing is not available.');
+          }
+          if (plane === 'cloud') {
+            const client = await getMachineRpcClient(machineId);
+            return await client.requestFilePreview({
+              ...params,
+              ownerSessionId: options?.ownerSessionId,
+              timeoutMs: options?.timeoutMs ?? 30_000,
+            });
+          }
+
           const sender = getLocalMachineRpcSender();
           if (!sender) throw new Error('Local Machine RPC is not available.');
           const response = await sender({
             machineId,
             workspaceId,
-            method: 'file/preview',
+            method: 'file/preview-local',
             params,
             ...ownerSessionFields(options),
             timeoutMs: options?.timeoutMs ?? 30_000,
