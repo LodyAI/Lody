@@ -3015,8 +3015,27 @@ describe('SessionExecutionService', () => {
   it('checks out the requested local project branch on the target machine before creating a session', async () => {
     const rootPath = createGitLocalProject();
     const localProjectId = 'local-project-branch' as LocalProjectId;
+    const project = {
+      kind: 'local' as const,
+      localProjectId,
+      branch: 'feature/remote-local',
+    };
     const sessionDoc = {
-      getMetaState: vi.fn(async () => undefined),
+      // This is the metadata createSessionResult writes before it dispatches
+      // session/create. It identifies the project but has no ACP session yet.
+      getMetaState: vi.fn(async () => ({
+        id: 'session-local-project-branch' as SessionId,
+        machineId: 'machine-1' as MachineId,
+        createdAt: '2026-08-24T00:00:00.000Z',
+        userId: 'user-1',
+        status: SessionStatusFactory.idle(),
+        isArchived: false,
+        cliType: 'builtin' as const,
+        agentType: 'codex' as const,
+        agentConfigId: capabilityConfigId,
+        project,
+        latestUserMsgId: 'turn-local-branch',
+      })),
       getHistory: vi.fn(async () => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
@@ -3097,7 +3116,7 @@ describe('SessionExecutionService', () => {
       sessionId: 'session-local-project-branch' as SessionId,
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'local', localProjectId, branch: 'feature/remote-local' },
+      project,
       acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
       userTurnId: 'turn-local-branch',
       userId: 'user-1',
@@ -3300,7 +3319,10 @@ describe('SessionExecutionService', () => {
       branch: 'feature/remote-local',
     };
     const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ project })),
+      getMetaState: vi.fn(async () => ({
+        project,
+        acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
+      })),
       getHistory: vi.fn(async () => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),

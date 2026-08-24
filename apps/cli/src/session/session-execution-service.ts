@@ -4174,15 +4174,20 @@ export class SessionExecutionService {
       (await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId));
 
     const existingMeta = await sessionDoc.getMetaState();
-    // A legacy direct local Session can be re-initialized after its ACP session
-    // is no longer resumable. Its stored branch was only a snapshot from the
-    // original creation, so checking it out here would rewrite the user's
-    // current workspace (and fails when it has local changes). Worktree
-    // sessions still keep their explicit base branch semantics.
+    // A persisted ACP session id proves that this direct local Session has run
+    // before. It can later be re-initialized when that ACP session is no longer
+    // resumable. Its stored branch was only a snapshot from the original
+    // creation, so checking it out here would rewrite the user's current
+    // workspace (and fails when it has local changes). New sessions write their
+    // project metadata before dispatch but do not yet have an ACP session id,
+    // so they must retain an explicitly requested branch. Worktree sessions
+    // still keep their explicit base branch semantics.
+    const hasPriorAcpSession = Boolean(existingMeta?.acpSessionId?.trim());
     if (
       project?.kind === 'local' &&
       project.useWorktree !== true &&
-      existingMeta?.project?.kind === 'local'
+      existingMeta?.project?.kind === 'local' &&
+      hasPriorAcpSession
     ) {
       const { branch: _legacyBranch, ...directProject } = project;
       project = directProject;
