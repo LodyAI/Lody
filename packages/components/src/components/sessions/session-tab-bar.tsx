@@ -28,6 +28,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
@@ -278,7 +279,7 @@ function TabContent({
           onChange={(e) => setEditDraft(e.target.value)}
           onBlur={commitRename}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Enter' && !isImeComposingKeyboardEvent(e)) commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
           className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"

@@ -30,7 +30,7 @@ const childSession: SessionMeta = {
   title: 'Child session',
 };
 
-describe('SessionTabBar drag sources', () => {
+describe('SessionTabBar', () => {
   let root: Root;
   let container: HTMLDivElement;
 
@@ -46,7 +46,10 @@ describe('SessionTabBar drag sources', () => {
     vi.restoreAllMocks();
   });
 
-  async function renderTabBar(childSessions: SessionMeta[]) {
+  async function renderTabBar(
+    childSessions: SessionMeta[],
+    onTabRename?: (sessionId: SessionId, title: string) => void
+  ) {
     await act(async () => {
       root.render(
         <Provider store={createStore()}>
@@ -60,6 +63,7 @@ describe('SessionTabBar drag sources', () => {
               activeTabSessionId={parentSession.id}
               onTabSelect={vi.fn()}
               onNewTab={vi.fn()}
+              onTabRename={onTabRename}
             />
           </TooltipProvider>
         </Provider>
@@ -81,5 +85,41 @@ describe('SessionTabBar drag sources', () => {
     expect(container.querySelector<HTMLElement>('#session-tab-session-parent')?.draggable).toBe(
       true
     );
+  });
+
+  it('ignores Enter while the IME is composing an inline rename', async () => {
+    const onTabRename = vi.fn();
+    await renderTabBar([], onTabRename);
+
+    await act(async () => {
+      container
+        .querySelector<HTMLElement>('#session-tab-session-parent')
+        ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    const input = container.querySelector<HTMLInputElement>('input');
+    expect(input).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      input?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+          isComposing: true,
+        })
+      );
+    });
+
+    expect(onTabRename).not.toHaveBeenCalled();
+    expect(container.querySelector('input')).toBe(input);
+
+    await act(async () => {
+      input?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onTabRename).toHaveBeenCalledWith(parentSession.id, parentSession.title);
   });
 });
