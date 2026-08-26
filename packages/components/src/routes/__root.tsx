@@ -81,6 +81,29 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         name: 'viewport',
         content: 'width=device-width, initial-scale=1',
       },
+      {
+        title: 'Lody',
+      },
+      {
+        name: 'description',
+        content: 'Share coding agents with your team on phone and desktop.',
+      },
+      {
+         name: 'theme-color',
+         content: '#000000',
+      },
+      {
+        name: 'og:title',
+         content: 'Lody',
+      },
+      {
+        name: 'og:description',
+        content: 'Share coding agents with your team on phone and desktop.',
+      },
+      {
+        name: 'og:type',
+        content: 'website',
+      },
     ],
   }),
 });
