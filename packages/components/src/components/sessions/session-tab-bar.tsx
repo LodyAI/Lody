@@ -279,7 +279,8 @@ function TabContent({
           onChange={(e) => setEditDraft(e.target.value)}
           onBlur={commitRename}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !isImeComposingKeyboardEvent(e)) commitRename();
+            if (isImeComposingKeyboardEvent(e)) return;
+            if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
           className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
