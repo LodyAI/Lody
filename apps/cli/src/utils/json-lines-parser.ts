@@ -29,8 +29,10 @@ export class JsonLinesParser extends Transform {
           const parsed = JSON.parse(line);
           this.push(parsed);
         } catch {
-          // TODO: better parse error
-          // console.log("#### error", line);
+          this.emit(
+            'warning',
+            new Error(`Skipping malformed JSON line: ${line.slice(0, 200)}`)
+          );
         }
       }
     }
