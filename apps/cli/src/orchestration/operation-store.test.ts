@@ -90,6 +90,42 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('round-trips a frozen create dispatch config including the task tools gate', async () => {
+    const store = await makeStore();
+    try {
+      const accepted = store.accept({
+        ...baseInput(),
+        kind: 'session_create',
+        frozenContinuationConfig: {
+          agentConfigId: 'agent-1',
+          inputConfig: { cliType: 'builtin' as const, agentType: 'codex', chainDepth: 0 },
+          targetDispatchConfigs: [
+            {
+              modeId: 'default',
+              modelId: 'gpt-5',
+              configOptionValues: { fast: true },
+              taskToolsEnabled: false,
+              inheritSessionDefaults: false as const,
+            },
+          ],
+        },
+      });
+
+      expect(accepted.created).toBe(true);
+      expect(accepted.operation.frozenContinuationConfig.targetDispatchConfigs).toEqual([
+        {
+          modeId: 'default',
+          modelId: 'gpt-5',
+          configOptionValues: { fast: true },
+          taskToolsEnabled: false,
+          inheritSessionDefaults: false,
+        },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it('rejects operation id reuse with different semantic input', async () => {
     const store = await makeStore();
     try {

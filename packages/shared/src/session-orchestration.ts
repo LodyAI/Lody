@@ -128,6 +128,11 @@ export type FrozenOperationContinuationConfig = {
     modeId?: string;
     modelId?: string;
     configOptionValues?: Record<string, string | boolean>;
+    /**
+     * Frozen capability gate for the built-in Lody Task MCP tools, carried
+     * from the driving Turn so recovery keeps the same tool surface.
+     */
+    taskToolsEnabled?: boolean;
     inheritSessionDefaults?: false;
   } | null>;
 };
