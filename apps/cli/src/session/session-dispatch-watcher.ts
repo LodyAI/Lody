@@ -2192,10 +2192,11 @@ export class SessionDispatchWatcher {
     if (!isActive()) {
       return null;
     }
+    const pendingUserTurnId = getPendingUserTurnActivationId(meta);
     this.deps.logger.debug(
       `[${sessionId}] Pending user turn metadata is visible but history is missing it; waiting up to ${
         SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
-      }s for history CRDT sync`
+      }s for history CRDT sync (pendingUserMsgId=${pendingUserTurnId ?? 'unknown'})`
     );
 
     return await new Promise<SessionHistoryInput | null>((resolve) => {
@@ -2360,7 +2361,7 @@ export class SessionDispatchWatcher {
 
       timer = SessionDispatchWatcher.setUnrefTimeout(() => {
         this.deps.logger.warn(
-          `[${sessionId}] User turn did not arrive in history after ${
+          `[${sessionId}] User turn ${pendingUserTurnId ?? 'unknown'} did not arrive in history after ${
             SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
           }s; entering dispatch recovery`
         );
@@ -2374,9 +2375,11 @@ export class SessionDispatchWatcher {
           return;
         }
         this.deps.logger.warn(
-          `[${sessionId}] Still waiting for pending user turn history sync (elapsed=${
-            Date.now() - waitStartedAt
-          }ms docRoom=${sessionDoc.getDocRoomStatus() ?? 'unknown'})`
+          `[${sessionId}] Still waiting for pending user turn history sync (pendingUserMsgId=${
+            pendingUserTurnId ?? 'unknown'
+          } elapsed=${Date.now() - waitStartedAt}ms docRoom=${
+            sessionDoc.getDocRoomStatus() ?? 'unknown'
+          })`
         );
       }, SessionDispatchWatcher.HISTORY_SYNC_PROGRESS_LOG_MS);
       progressTimer.unref?.();
@@ -2499,6 +2502,9 @@ export class SessionDispatchWatcher {
     if (pendingUserMsgId) {
       recoveryPatch.lastMissingHistoryUserMsgId = pendingUserMsgId;
     }
+    this.deps.logger.warn(
+      `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
+    );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, recoveryPatch);
 
     if (this.deps.recordChatFailure) {
