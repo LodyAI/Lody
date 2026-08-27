@@ -817,15 +817,26 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   );
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
-  const projectActivityLabel =
-    projectActivity.status === 'requestPermission'
+  const projectActivityLabel = !collapsed
+    ? null
+    : projectActivity.status === 'requestPermission'
       ? t('sessions.status.requestPermission', 'Request Permission')
       : projectActivity.status === 'initializing'
         ? t('sessions.status.initializing', 'Initializing')
         : projectActivity.status === 'running'
           ? t('sessions.status.running', 'Running')
-          : null;
-  const ariaLabel = [project.name, trimmedMachineName, formattedPath, projectActivityLabel]
+          : projectActivity.hasUnreadMessages
+            ? t('sessions.unreadMessages', 'Unread messages')
+            : null;
+  const projectHasLiveActivity = projectActivity.status != null;
+  const projectIndicatorLabel =
+    collapsed &&
+    projectActivity.status !== 'requestPermission' &&
+    projectHasLiveActivity &&
+    projectActivity.hasUnreadMessages
+      ? `${projectActivityLabel} · ${t('sessions.unreadMessages', 'Unread messages')}`
+      : projectActivityLabel;
+  const ariaLabel = [project.name, trimmedMachineName, formattedPath, projectIndicatorLabel]
     .filter(Boolean)
     .join(' · ');
   const showSelectedState = isSelected && !isMobile;
@@ -899,15 +910,17 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </button>
               <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
 
-              {projectActivity.status ? (
+              {collapsed && (projectActivity.status || projectActivity.hasUnreadMessages) ? (
                 <span
-                  data-sidebar-project-activity={projectActivity.status}
+                  data-sidebar-project-activity={projectActivity.status ?? 'unread'}
                   className="flex h-5 w-5 shrink-0 items-center justify-center"
                   aria-hidden="true"
                 >
                   <SessionRowIndicator
                     isWaitingPermission={projectActivity.status === 'requestPermission'}
-                    isWorking
+                    isWorking={projectHasLiveActivity}
+                    hasUnreadMessages={projectActivity.hasUnreadMessages}
+                    showUnreadWithWorking={projectActivity.status !== 'requestPermission'}
                   />
                 </span>
               ) : null}
@@ -941,10 +954,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               ) : null}
             </div>
           </TooltipTrigger>
-          {formattedPath || trimmedMachineName || projectActivityLabel ? (
+          {formattedPath || trimmedMachineName || projectIndicatorLabel ? (
             <TooltipContent side="right" align="start" className="max-w-[420px] break-all">
               <div className="flex flex-col gap-0.5 text-xs">
-                {projectActivityLabel ? <span>{projectActivityLabel}</span> : null}
+                {projectIndicatorLabel ? <span>{projectIndicatorLabel}</span> : null}
                 {trimmedMachineName ? (
                   <span className="text-muted-foreground">{trimmedMachineName}</span>
                 ) : null}

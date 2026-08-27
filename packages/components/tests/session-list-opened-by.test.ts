@@ -183,7 +183,11 @@ describe('SessionList opened-by rendering', () => {
     vi.restoreAllMocks();
   });
 
-  function renderList(sessions: SessionListRow[], collapsed: Record<string, boolean> = {}) {
+  function renderList(
+    sessions: SessionListRow[],
+    collapsed: Record<string, boolean> = {},
+    repoCollapsed = false
+  ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
     const onSelectSession = vi.fn();
@@ -198,7 +202,7 @@ describe('SessionList opened-by rendering', () => {
           { store },
           React.createElement(SessionList, {
             sessions,
-            repos: [{ repoFullName: REPO, collapsed: false }],
+            repos: [{ repoFullName: REPO, collapsed: repoCollapsed }],
             onSelectSession,
           })
         )
@@ -207,6 +211,61 @@ describe('SessionList opened-by rendering', () => {
 
     return { onSelectSession, store };
   }
+
+  it('combines live work and an unread result only on a collapsed repository', () => {
+    renderList(
+      [
+        makeRow({ sessionId: 'running', isWorking: true, activityStatus: 'running' }),
+        makeRow({ sessionId: 'unread', hasUnreadMessages: true }),
+      ],
+      {},
+      true
+    );
+
+    const indicator = container?.querySelector('[data-sidebar-repo-activity="running"]');
+    expect(indicator?.getAttribute('aria-label')).toBe('Running · Unread messages');
+    expect(indicator?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(indicator?.querySelector('[data-session-unread-overlay]')).not.toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-id]')).toBeNull();
+  });
+
+  it('shows only the unread dot when a collapsed repository has no live work', () => {
+    renderList([makeRow({ sessionId: 'unread', hasUnreadMessages: true })], {}, true);
+
+    const indicator = container?.querySelector('[data-sidebar-repo-activity="unread"]');
+    expect(indicator?.getAttribute('aria-label')).toBe('Unread messages');
+    expect(indicator?.querySelector('[data-session-working-spinner]')).toBeNull();
+    expect(indicator?.querySelector('[data-session-row-indicator]')?.children).toHaveLength(1);
+  });
+
+  it('lets permission override unread on a collapsed repository', () => {
+    const sessions = [
+      makeRow({
+        sessionId: 'permission',
+        isWorking: true,
+        isWaitingPermission: true,
+        activityStatus: 'requestPermission',
+      }),
+      makeRow({ sessionId: 'unread', hasUnreadMessages: true }),
+    ];
+    renderList(sessions, {}, true);
+
+    const indicator = container?.querySelector('[data-sidebar-repo-activity="requestPermission"]');
+    expect(indicator?.getAttribute('aria-label')).toBe('Request Permission');
+    expect(indicator?.querySelector('[data-session-working-spinner]')).toBeNull();
+    expect(indicator?.querySelector('[data-session-unread-overlay]')).toBeNull();
+  });
+
+  it('hides repository aggregation while the individual Session rows are expanded', () => {
+    renderList([
+      makeRow({ sessionId: 'running', isWorking: true, activityStatus: 'running' }),
+      makeRow({ sessionId: 'unread', hasUnreadMessages: true }),
+    ]);
+
+    expect(container?.querySelector('[data-sidebar-repo-activity]')).toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-id="running"]')).not.toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-id="unread"]')).not.toBeNull();
+  });
 
   function depthOf(sessionId: string): string | null | undefined {
     const row = container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);

@@ -606,7 +606,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
   const showGroupHeaderIcon = group.kind === 'repo';
   const groupActivityStatus =
-    group.kind === 'repo' ? getSessionGroupActivityStatus(group.sessions) : null;
+    group.kind === 'repo' && group.collapsed ? getSessionGroupActivityStatus(group.sessions) : null;
+  const groupHasUnreadMessages =
+    group.kind === 'repo' &&
+    group.collapsed &&
+    group.sessions.some((session) => session.hasUnreadMessages);
   const groupActivityLabel =
     groupActivityStatus === 'requestPermission'
       ? t('sessions.status.requestPermission', 'Request Permission')
@@ -614,7 +618,14 @@ const SessionGroupSection = memo(function SessionGroupSection({
         ? t('sessions.status.initializing', 'Initializing')
         : groupActivityStatus === 'running'
           ? t('sessions.status.running', 'Running')
-          : null;
+          : groupHasUnreadMessages
+            ? t('sessions.unreadMessages', 'Unread messages')
+            : null;
+  const groupHasLiveActivity = groupActivityStatus != null;
+  const groupIndicatorLabel =
+    groupActivityStatus !== 'requestPermission' && groupHasLiveActivity && groupHasUnreadMessages
+      ? `${groupActivityLabel} · ${t('sessions.unreadMessages', 'Unread messages')}`
+      : groupActivityLabel;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
   const beginRename = useCallback((sessionId: string, currentTitle: string) => {
     setRenameTarget({ sessionId: sessionId as SessionId, initialTitle: currentTitle });
@@ -792,21 +803,23 @@ const SessionGroupSection = memo(function SessionGroupSection({
             />
           ) : null}
           <span className="flex-1" aria-hidden="true" />
-          {groupActivityStatus ? (
+          {groupActivityStatus || groupHasUnreadMessages ? (
             <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <span
-                  data-sidebar-repo-activity={groupActivityStatus}
+                  data-sidebar-repo-activity={groupActivityStatus ?? 'unread'}
                   className="flex h-5 w-5 shrink-0 items-center justify-center"
-                  aria-label={groupActivityLabel ?? undefined}
+                  aria-label={groupIndicatorLabel ?? undefined}
                 >
                   <SessionRowIndicator
                     isWaitingPermission={groupActivityStatus === 'requestPermission'}
-                    isWorking
+                    isWorking={groupHasLiveActivity}
+                    hasUnreadMessages={groupHasUnreadMessages}
+                    showUnreadWithWorking={groupActivityStatus !== 'requestPermission'}
                   />
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="right">{groupActivityLabel}</TooltipContent>
+              <TooltipContent side="right">{groupIndicatorLabel}</TooltipContent>
             </Tooltip>
           ) : null}
         </div>

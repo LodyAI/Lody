@@ -264,7 +264,8 @@ const demoTaskListProps: SessionListProps = {
 };
 
 function withCollapsedGitHubRepositoryActivity(
-  status: NonNullable<SessionListRow['activityStatus']>
+  status: SessionListRow['activityStatus'],
+  unreadSessionId: string | null = null
 ): SessionListProps {
   return {
     ...demoTaskListProps,
@@ -273,14 +274,23 @@ function withCollapsedGitHubRepositoryActivity(
     ),
     sessions: demoTaskListProps.sessions.map((session) => ({
       ...session,
-      activityStatus: session.sessionId === 'task-4' ? status : null,
-      isWorking: session.sessionId === 'task-4',
+      activityStatus: session.sessionId === 'task-4' ? (status ?? null) : null,
+      isWorking: session.sessionId === 'task-4' && status != null,
       isWaitingPermission: session.sessionId === 'task-4' && status === 'requestPermission',
+      hasUnreadMessages:
+        session.repoFullName === 'loro-dev/lody'
+          ? session.sessionId === unreadSessionId
+          : session.hasUnreadMessages,
     })),
   };
 }
 
 const collapsedGitHubRepositoryRunning = withCollapsedGitHubRepositoryActivity('running');
+const collapsedGitHubRepositoryRunningWithUnread = withCollapsedGitHubRepositoryActivity(
+  'running',
+  'task-5'
+);
+const collapsedGitHubRepositoryUnread = withCollapsedGitHubRepositoryActivity(null, 'task-5');
 const collapsedGitHubRepositoryInitializing = withCollapsedGitHubRepositoryActivity('initializing');
 const collapsedGitHubRepositoryPermissionRequired =
   withCollapsedGitHubRepositoryActivity('requestPermission');
@@ -873,6 +883,7 @@ const demoLocalSessions: SessionMeta[] = [
     branchName: 'feat/persistence-refactor',
     isWorktree: true,
     lastMessageAt: NOW - 3 * 60 * 60 * 1000,
+    lastReadAt: NOW - 3 * 60 * 60 * 1000,
   },
   // Independent Session opened by an agent running inside a CHILD TAB of
   // `local-sess-worktree`. Its precise opener is the Tab (`demoChildTabSession`
@@ -888,6 +899,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Opened from a child tab',
     openedBySessionId: 'local-sess-child-tab' as SessionId,
     lastMessageAt: NOW - 25 * 60 * 1000,
+    lastReadAt: NOW - 25 * 60 * 1000,
   },
   // Independent Sessions the first one opened through the `lody_session_create`
   // MCP tool: they indent under it, but keep their own lifecycle and row.
@@ -902,6 +914,7 @@ const demoLocalSessions: SessionMeta[] = [
     openedBySessionId: 'local-sess-worktree' as SessionId,
     isWorktree: true,
     lastMessageAt: NOW - 2 * 60 * 60 * 1000,
+    lastReadAt: NOW - 2 * 60 * 60 * 1000,
   },
   {
     id: 'local-sess-opened-docs' as SessionId,
@@ -913,6 +926,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Update the persistence docs',
     openedBySessionId: 'local-sess-worktree' as SessionId,
     lastMessageAt: NOW - 90 * 60 * 1000,
+    lastReadAt: NOW - 90 * 60 * 1000,
   },
   {
     id: 'local-sess-plain' as SessionId,
@@ -924,8 +938,13 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Tidy up logging output',
     isWorktree: false,
     lastMessageAt: NOW - 26 * 60 * 60 * 1000,
+    lastReadAt: NOW - 26 * 60 * 60 * 1000,
   },
 ];
+
+const demoLocalSessionsWithUnread = demoLocalSessions.map((session) =>
+  session.id === ('local-sess-plain' as SessionId) ? { ...session, lastReadAt: 0 } : session
+);
 
 /**
  * A child Tab of `local-sess-worktree`. Child Tabs are deliberately absent from
@@ -943,6 +962,7 @@ const demoChildTabSession: SessionMeta = {
   title: 'Child tab: try the alternative fix',
   parentSessionId: 'local-sess-worktree' as SessionId,
   lastMessageAt: NOW - 40 * 60 * 1000,
+  lastReadAt: NOW - 40 * 60 * 1000,
 };
 
 const demoChildSessionsByParent = buildChildSessionsByParent([demoChildTabSession]);
@@ -957,6 +977,7 @@ const demoRemoteSessions: SessionMeta[] = [
     agentType: 'claude',
     title: 'Run checks on the remote machine',
     lastMessageAt: NOW - 20 * 60 * 1000,
+    lastReadAt: NOW - 20 * 60 * 1000,
   },
 ];
 
@@ -971,6 +992,7 @@ function ProductionLikeTopContent({
   githubWorktreeCount,
   localProjectLiveSessionStatuses,
   localProjectChildSessionsByParent,
+  localProjectSessions,
   remoteProjectSessions,
   initiallyCollapseRemoteProject,
   selectedSessionId,
@@ -984,6 +1006,7 @@ function ProductionLikeTopContent({
   githubWorktreeCount: number;
   localProjectLiveSessionStatuses: ReadonlyMap<string, SessionStatus>;
   localProjectChildSessionsByParent: Map<string, SessionMeta[]>;
+  localProjectSessions: SessionMeta[];
   remoteProjectSessions: SessionMeta[];
   initiallyCollapseRemoteProject: boolean;
   selectedSessionId: string | null;
@@ -1068,7 +1091,7 @@ function ProductionLikeTopContent({
                     collapsed={collapsed}
                     isSelected={false}
                     sessionsForProject={
-                      project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
+                      project.id === ('proj-lody' as LocalProjectId) ? localProjectSessions : []
                     }
                     childSessionsByParent={localProjectChildSessionsByParent}
                     liveSessionStatuses={localProjectLiveSessionStatuses}
@@ -1166,12 +1189,14 @@ function ProductionLikeTopContent({
 function WithProjectsLayout({
   localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
   localProjectChildSessionsByParent = new Map(),
+  localProjectSessions = demoLocalSessions,
   remoteProjectSessions = [],
   initiallyCollapseRemoteProject = false,
   ...args
 }: Parameters<typeof LoroSidebar>[0] & {
   localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
   localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
+  localProjectSessions?: SessionMeta[];
   remoteProjectSessions?: SessionMeta[];
   initiallyCollapseRemoteProject?: boolean;
 }) {
@@ -1239,6 +1264,7 @@ function WithProjectsLayout({
           githubWorktreeCount={repos.length}
           localProjectLiveSessionStatuses={localProjectLiveSessionStatuses}
           localProjectChildSessionsByParent={localProjectChildSessionsByParent}
+          localProjectSessions={localProjectSessions}
           remoteProjectSessions={remoteProjectSessions}
           initiallyCollapseRemoteProject={initiallyCollapseRemoteProject}
           selectedSessionId={selectedSessionId}
@@ -1353,6 +1379,30 @@ export const CollapsedProjectRunning: Story = {
   },
 };
 
+export const CollapsedProjectRunningWithUnread: Story = {
+  name: 'Collapsed project · running + unread result',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
+      localProjectSessions={demoLocalSessionsWithUnread}
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectUnreadResult: Story = {
+  name: 'Collapsed project · unread result',
+  render: (args) => (
+    <WithProjectsLayout {...args} localProjectSessions={demoLocalSessionsWithUnread} />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
 export const CollapsedProjectPermissionRequired: Story = {
   name: 'Collapsed project · permission required',
   render: (args) => (
@@ -1424,6 +1474,24 @@ export const CollapsedGitHubRepositoryRunning: Story = {
   args: {
     ...Default.args!,
     sessionListProps: collapsedGitHubRepositoryRunning,
+  },
+};
+
+export const CollapsedGitHubRepositoryRunningWithUnread: Story = {
+  name: 'Collapsed GitHub repository · running + unread',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryRunningWithUnread,
+  },
+};
+
+export const CollapsedGitHubRepositoryUnreadResult: Story = {
+  name: 'Collapsed GitHub repository · unread result',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryUnread,
   },
 };
 

@@ -49,9 +49,11 @@ mobile surfaces.
   (`transform`/`opacity`). Do not restore canvas frame loops, React animation
   state, or timers; keep the Storybook Playwright render budgets passing.
 - Local-project and GitHub-repository sidebar rows aggregate fresh live activity across their
-  Sessions and child Tabs. Include pinned Sessions, and keep that status in its own slot so
-  collapsing a project or repository never hides active work or replaces the folder/repository
-  disclosure affordance.
+  Sessions and child Tabs. Include pinned Sessions and unread results, and keep that status in its
+  own slot so collapsing a project or repository never hides activity or replaces the
+  folder/repository disclosure affordance. Expanded groups hide the aggregate because their Session
+  rows already show the same state. When live activity and an unread completed result coexist,
+  aggregate slots use a spinner with a centered solid dot; permission requests still take priority.
 - `ZoomableImageViewer` is the one image viewer, and it presents per surface:
   full-bleed on touch, a lightbox on desktop (inset photo, translucent mask, a
   top bar that clears the native window controls). Inset the photo with a

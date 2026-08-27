@@ -243,6 +243,7 @@ export function getEffectiveSessionActivitySummary(
 
 export type EffectiveProjectActivitySummary = {
   status: ActiveSessionStatus;
+  hasUnreadMessages: boolean;
 };
 
 /** Aggregate live activity for a local-project sidebar row. */
@@ -252,15 +253,16 @@ export function getEffectiveProjectActivitySummary(
   liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
 ): EffectiveProjectActivitySummary {
   let status: EffectiveProjectActivitySummary['status'] = null;
+  let hasUnreadMessages = false;
 
   for (const session of sessions) {
     for (const candidate of [session, ...(childSessionsByParent?.get(session.id) ?? [])]) {
       status = mergeActiveSessionStatus(status, liveSessionStatuses?.get(candidate.id));
-      if (status === 'requestPermission') return { status };
+      if (!hasUnreadMessages && sessionHasUnreadMessages(candidate)) hasUnreadMessages = true;
     }
   }
 
-  return { status };
+  return { status, hasUnreadMessages };
 }
 
 type LatestPullRequestInfo = {
