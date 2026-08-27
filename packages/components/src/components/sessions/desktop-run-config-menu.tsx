@@ -34,7 +34,13 @@ import {
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
+import {
+  DEEPSEEK_DELEGATION_DISCUSSION_URL,
+  DeepSeekDelegationWarningContent,
+  shouldShowDeepSeekDelegationWarning,
+} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
+import { openExternalUrl } from '@/lib/native-browser';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   doesAgentRolePinPermissionMode,
@@ -467,6 +473,11 @@ export function DesktopRunConfigMenu({
         : null;
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
+  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
+    cliType: selectedAgentConfig?.cliType ?? fallbackAgent?.cliType,
+    agentType: selectedAgentConfig?.agentType ?? fallbackAgent?.agentType,
+    modelId: modelValue,
+  });
   const handleModelSelect = (value: string) => {
     if (modelOptions.length > 0) {
       onModelChange?.(value);
@@ -826,6 +837,25 @@ export function DesktopRunConfigMenu({
               />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+        ) : null}
+
+        {showDeepSeekDelegationWarning ? (
+          <DropdownMenuItem
+            asChild
+            className="mx-1 my-1 max-w-72 items-start gap-2 whitespace-normal border border-status-warning/30 bg-status-warning/[0.08] px-2.5 py-2 focus:bg-status-warning/[0.14]"
+          >
+            <a
+              href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                event.preventDefault();
+                void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
+              }}
+            >
+              <DeepSeekDelegationWarningContent />
+            </a>
+          </DropdownMenuItem>
         ) : null}
 
         {interactionSelector ? (

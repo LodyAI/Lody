@@ -48,6 +48,12 @@ Lody includes **DeepSeek Harness** as a built-in ACP provider. Create an Agent C
 DeepSeek Harness, and paste a DeepSeek API token. Lody stores it as `DEEPSEEK_API_KEY`; you do not
 need to install the standalone `dsh` command.
 
+> **Known delegation limitation:** When a session uses a model other than DeepSeek-V4-Pro,
+> delegated subagents may still use the session's creation-time DeepSeek-V4-Pro seed instead of the
+> model shown for the parent session, which can increase usage costs. Follow the
+> [upstream DSH discussion](https://github.com/deepseek-ai/deepseek-harness/discussions/4065) for the
+> inheritance fix.
+
 Lody follows the standard `DSH_HOME` location, so a separately installed `dsh` may share the same
 `~/.dsh/sessions` root. Harness requires one compression format per root. Lody uses upstream's
 `zstd` default for empty or compressed roots and preserves `none` for an existing raw-only root. If

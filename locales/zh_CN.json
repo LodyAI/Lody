@@ -418,6 +418,8 @@
   "chat.modeSelector.empty": "暂无可用权限模式",
   "chat.modeSelector.permissionMode": "权限模式",
   "chat.runConfig.buttonAriaLabel": "运行设置",
+  "chat.runConfig.deepseek.delegationDiscussion": "上游讨论",
+  "chat.runConfig.deepseek.delegationWarning": "由于当前 DSH 的限制，委派的子智能体可能使用会话创建时的模型（DeepSeek-V4-Pro），而不是当前模型，因此可能产生更高费用。",
   "chat.runConfig.fastLabel": "快速",
   "chat.runConfig.grok.interaction.agent.description": "需要时使用工具并进行修改",
   "chat.runConfig.grok.interaction.agent.label": "Agent",

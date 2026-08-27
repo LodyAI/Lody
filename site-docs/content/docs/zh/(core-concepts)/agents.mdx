@@ -43,6 +43,10 @@ Lody 内置 **DeepSeek Harness** ACP Provider。新建 Agent Config、选择 Dee
 DeepSeek API Token 即可；Lody 会将其保存为 `DEEPSEEK_API_KEY`，无需另外安装 standalone
 `dsh` 命令。
 
+> **已知的委派限制：** 当会话使用 DeepSeek-V4-Pro 以外的模型时，委派的子智能体可能仍会使用
+> 会话创建时写入的 DeepSeek-V4-Pro，而不是父会话界面显示的模型，因而可能产生更高费用。继承
+> 行为的修复进展请关注 [DSH 上游讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/4065)。
+
 Lody 遵循标准的 `DSH_HOME` 路径，因此单独安装的 `dsh` 可能与 Lody 共用
 `~/.dsh/sessions`。Harness 要求一个 session root 只能使用一种压缩格式：对于空 root 或已有
 压缩工件的 root，Lody 使用上游默认的 `zstd`；对于仅包含旧版未压缩工件的 root，Lody 继续使用

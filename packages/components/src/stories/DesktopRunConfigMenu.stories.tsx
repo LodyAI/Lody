@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import {
   type AgentConfigId,
   type AgentConfigMeta,
@@ -31,6 +33,21 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
 const machineId = 'machine-storybook' as MachineId;
 const codexId = 'agent-codex' as AgentConfigId;
 const grokId = 'agent-grok' as AgentConfigId;
+const deepseekId = 'agent-deepseek' as AgentConfigId;
+
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'user-storybook-run-config', name: 'Storybook user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      { id: 'workspace-storybook', name: 'Storybook Workspace', slug: null, role: 'owner' },
+    ],
+    activeWorkspaceId: 'workspace-storybook',
+  }),
+});
 
 const agents: AgentConfigMeta[] = [
   {
@@ -58,6 +75,15 @@ const agents: AgentConfigMeta[] = [
     description: 'Official Grok runtime through the Lody compatibility adapter',
     cliType: 'builtin',
     agentType: 'grok',
+    env: {},
+  },
+  {
+    id: deepseekId,
+    machineId,
+    name: 'DeepSeek Harness',
+    description: 'Built-in DeepSeek Harness runtime',
+    cliType: 'builtin',
+    agentType: 'deepseek',
     env: {},
   },
 ];
@@ -282,6 +308,46 @@ function GrokConfigShell() {
   );
 }
 
+function DeepSeekWarningShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  const [model, setModel] = useState<string | null>('deepseek-v4-flash');
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh items-end bg-background p-8">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+          <DesktopRunConfigMenu
+            agentSelection={{ agentId: deepseekId, machineId }}
+            availableAgentConfigs={agents}
+            agentLocked
+            modelOptions={[
+              {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek-V4-Flash',
+                description: 'Faster DeepSeek Harness coding model.',
+              },
+              {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek-V4-Pro',
+                description: 'More capable DeepSeek Harness coding model.',
+              },
+            ]}
+            selectedModelId={model}
+            onModelChange={setModel}
+          />
+        </div>
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-8">
@@ -295,6 +361,13 @@ const meta = {
   component: StoryShell,
   parameters: { layout: 'fullscreen' },
   globals: { theme: 'dark' },
+  decorators: [
+    (Story) => (
+      <PlatformContext.Provider value={storyPlatform}>
+        <Story />
+      </PlatformContext.Provider>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta<typeof StoryShell>;
 
@@ -306,6 +379,10 @@ export const EmptyConversationAgentPickable: Story = { args: { isEmptyConversati
 export const GrokInteractionAndPermission: Story = {
   args: { isEmptyConversation: false },
   render: () => <GrokConfigShell />,
+};
+export const DeepSeekDelegationWarning: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <DeepSeekWarningShell />,
 };
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },

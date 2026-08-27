@@ -36,6 +36,16 @@ const agentConfig: AgentConfigMeta = {
   agentType: 'codex',
   env: {},
 };
+const deepseekAgentConfig: AgentConfigMeta = {
+  ...agentConfig,
+  id: 'config-deepseek' as AgentConfigId,
+  name: 'DeepSeek Harness',
+  agentType: 'deepseek',
+};
+const deepseekModels = [
+  { value: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
+];
 
 /* A provider that publishes far more models than a list can be scanned for —
    the case the search field exists for. */
@@ -203,6 +213,56 @@ describe('composer model picker search', () => {
     expect(rows()).toHaveLength(fewModels.length);
   });
 
+  it('links the upstream delegation warning for a builtin DeepSeek non-Pro model', async () => {
+    await act(async () => {
+      root?.render(
+        createElement(DesktopRunConfigMenu, {
+          ...desktopProps,
+          agentSelection: { agentId: deepseekAgentConfig.id, machineId },
+          availableAgentConfigs: [deepseekAgentConfig],
+          modelOptions: deepseekModels,
+          selectedModelId: 'deepseek-v4-flash',
+        })
+      );
+    });
+    await act(async () => {
+      container
+        ?.querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+
+    const warning = document.querySelector<HTMLAnchorElement>(
+      'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
+    );
+    expect(warning?.textContent).toContain('delegated subagents may use');
+    expect(warning?.textContent).toContain('Upstream discussion');
+  });
+
+  it('does not warn when the builtin DeepSeek session already uses Pro', async () => {
+    await act(async () => {
+      root?.render(
+        createElement(DesktopRunConfigMenu, {
+          ...desktopProps,
+          agentSelection: { agentId: deepseekAgentConfig.id, machineId },
+          availableAgentConfigs: [deepseekAgentConfig],
+          modelOptions: deepseekModels,
+          selectedModelId: 'deepseek-v4-pro',
+        })
+      );
+    });
+    await act(async () => {
+      container
+        ?.querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+
+    expect(
+      document.querySelector(
+        'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
+      )
+    ).toBeNull();
+  });
+
   /* ── Mobile: the same rule inside the run-config sheet ── */
 
   type SheetProps = ComponentProps<typeof MobileRunConfigSheet>;
@@ -293,5 +353,32 @@ describe('composer model picker search', () => {
       selectedModelId: fewModels[0]?.value ?? null,
     });
     expect(search).toBeNull();
+  });
+
+  it('shows the linked DeepSeek delegation warning in the mobile sheet', async () => {
+    const store = createStore();
+    store.set(agentConfigMetaCacheAtom, {
+      [getAgentConfigRoomId(deepseekAgentConfig.id)]: deepseekAgentConfig,
+    });
+    await act(async () => {
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(MobileRunConfigSheet, {
+            ...mobileProps,
+            agentSelection: { agentId: deepseekAgentConfig.id, machineId },
+            modelOptions: deepseekModels,
+            selectedModelId: 'deepseek-v4-flash',
+          })
+        )
+      );
+    });
+
+    const warning = document.querySelector<HTMLAnchorElement>(
+      'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
+    );
+    expect(warning?.textContent).toContain('delegated subagents may use');
+    expect(warning?.textContent).toContain('Upstream discussion');
   });
 });

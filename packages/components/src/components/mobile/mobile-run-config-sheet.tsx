@@ -18,12 +18,18 @@ import {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
+import {
+  DEEPSEEK_DELEGATION_DISCUSSION_URL,
+  DeepSeekDelegationWarningContent,
+  shouldShowDeepSeekDelegationWarning,
+} from '@/components/shared/deepseek-delegation-warning';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import {
   AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
+import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -301,6 +307,7 @@ function MobileRunConfigSheetRows({
       value: opt.value,
       label: opt.label,
       searchText: opt.label,
+      description: opt.description,
       disabled: opt.disabled,
     }));
   }, [modelConfigSelector, modelOptions]);
@@ -317,6 +324,11 @@ function MobileRunConfigSheetRows({
     () => modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue,
     [modelPickerOptions, modelValue]
   );
+  const showDeepSeekDelegationWarning = shouldShowDeepSeekDelegationWarning({
+    cliType: selectedAgentConfig?.cliType,
+    agentType: selectedAgentConfig?.agentType,
+    modelId: modelValue,
+  });
 
   /* ── Provider-specific interaction mode (for example Grok Agent / Plan / Ask) ── */
   const interactionSelector = interactionModeSelectors[0];
@@ -558,6 +570,21 @@ function MobileRunConfigSheetRows({
             triggerContent={<span className="truncate">{modelLabel ?? modelRowLabel}</span>}
           />
         </RunConfigRow>
+      ) : null}
+
+      {showDeepSeekDelegationWarning ? (
+        <a
+          href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => {
+            event.preventDefault();
+            void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
+          }}
+          className="flex items-start gap-2 rounded-xl border border-status-warning/30 bg-status-warning/[0.08] px-3 py-2.5 active:bg-status-warning/[0.14]"
+        >
+          <DeepSeekDelegationWarningContent />
+        </a>
       ) : null}
 
       {interactionSelector && interactionOptions.length > 0 ? (

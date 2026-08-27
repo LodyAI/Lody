@@ -418,6 +418,8 @@
   "chat.modeSelector.empty": "No modes available",
   "chat.modeSelector.permissionMode": "Permission mode",
   "chat.runConfig.buttonAriaLabel": "Run configuration",
+  "chat.runConfig.deepseek.delegationDiscussion": "Upstream discussion",
+  "chat.runConfig.deepseek.delegationWarning": "Due to a current DSH limitation, delegated subagents may use the session's creation-time model (DeepSeek-V4-Pro) instead of this model, which can cost more.",
   "chat.runConfig.fastLabel": "Fast",
   "chat.runConfig.grok.interaction.agent.description": "Use tools and make changes when needed",
   "chat.runConfig.grok.interaction.agent.label": "Agent",

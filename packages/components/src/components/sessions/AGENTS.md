@@ -301,6 +301,12 @@ Session conversation page chain:
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
+  Builtin DeepSeek Harness sessions using a non-Pro model show the same linked
+  delegation-cost warning here and in `MobileRunConfigSheet`: until upstream DSH
+  fixes child-route inheritance, a delegated child may use the session's
+  creation-time DeepSeek-V4-Pro seed rather than the parent's visible model.
+  Keep the warning tied to that agent/model combination and its upstream
+  discussion rather than turning it into a global banner.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`

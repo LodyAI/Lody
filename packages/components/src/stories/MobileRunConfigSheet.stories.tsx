@@ -36,6 +36,7 @@ const codexSessionId = 'session-codex' as SessionId;
 const claudeSessionId = 'session-claude' as SessionId;
 const codexId = 'agent-codex' as AgentConfigId;
 const claudeId = 'agent-claude' as AgentConfigId;
+const deepseekId = 'agent-deepseek' as AgentConfigId;
 
 const agents: AgentConfigMeta[] = [
   {
@@ -54,6 +55,15 @@ const agents: AgentConfigMeta[] = [
     description: 'Claude Code',
     cliType: 'builtin',
     agentType: 'claude',
+    env: {},
+  },
+  {
+    id: deepseekId,
+    machineId,
+    name: 'DeepSeek Harness',
+    description: 'Built-in DeepSeek Harness runtime',
+    cliType: 'builtin',
+    agentType: 'deepseek',
     env: {},
   },
 ];
@@ -76,6 +86,14 @@ const claudeSession: SessionMeta = {
   title: 'Claude session',
   agentType: 'claude',
   agentConfigId: claudeId,
+};
+
+const deepseekSession: SessionMeta = {
+  ...codexSession,
+  id: 'session-deepseek' as SessionId,
+  title: 'DeepSeek session',
+  agentType: 'deepseek',
+  agentConfigId: deepseekId,
 };
 
 const codexModelOptions: AcpSessionSelectOption[] = [
@@ -245,6 +263,25 @@ export const Codex: Story = {
 
 export const Claude: Story = {
   args: { session: claudeSession, modelOptions: claudeModelOptions, selectors: claudeSelectors },
+};
+
+export const DeepSeekDelegationWarning: Story = {
+  args: {
+    session: deepseekSession,
+    modelOptions: [
+      {
+        value: 'deepseek-v4-flash',
+        label: 'DeepSeek-V4-Flash',
+        description: 'Faster DeepSeek Harness coding model.',
+      },
+      {
+        value: 'deepseek-v4-pro',
+        label: 'DeepSeek-V4-Pro',
+        description: 'More capable DeepSeek Harness coding model.',
+      },
+    ],
+    selectors: codexSelectors,
+  },
 };
 
 /**
