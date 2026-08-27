@@ -26,7 +26,10 @@ const validAgentHandoff = `## Agent handoff
 
 ### Instructions for reviewing agents
 
-Perform the required risk scan and report actionable findings.
+- **Review these files / flows:** Inspect the target-event workflows and body parser.
+- **Decisions to challenge:** Verify that organization membership is the right exemption boundary.
+- **Plausible failure modes:** A fork-controlled file could execute with a write token.
+- **Evidence gaps:** The workflows cannot execute until merged to the default branch.
 
 ### Authoring context
 
@@ -170,6 +173,18 @@ const incompleteContextResult = checkPullRequestBody(
 assert.ok(
   incompleteContextResult.findings.includes(
     'Shared Authoring context must fill **Risk-bearing decisions** with meaningful content.'
+  )
+);
+
+const incompleteReviewInstructionsResult = checkPullRequestBody(
+  validAgentBody.replace(
+    '- **Plausible failure modes:** A fork-controlled file could execute with a write token.',
+    '- **Plausible failure modes:** <!-- Not filled. -->'
+  )
+);
+assert.ok(
+  incompleteReviewInstructionsResult.findings.includes(
+    'Agent review instructions must fill **Plausible failure modes** with PR-specific content.'
   )
 );
 

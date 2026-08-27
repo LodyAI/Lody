@@ -18,6 +18,12 @@ const REQUIRED_AGENT_HEADINGS = [
   '### Authoring context',
   '### Sharing consent (author side)',
 ];
+const REVIEW_INSTRUCTION_FIELDS = [
+  'Review these files / flows',
+  'Decisions to challenge',
+  'Plausible failure modes',
+  'Evidence gaps',
+];
 const AUTHORING_CONTEXT_FIELDS = [
   'User goal / directives',
   'Constraints / non-goals',
@@ -83,7 +89,7 @@ function isFilledSection(section) {
   return Boolean(withoutComments) && !PLACEHOLDER_ONLY.test(withoutComments);
 }
 
-function authoringContextField(section, field) {
+function markdownField(section, field) {
   const prefix = `- **${field}:**`;
   const line = section?.split('\n').find((candidate) => candidate.trimStart().startsWith(prefix));
   if (!line) {
@@ -181,12 +187,23 @@ export function checkPullRequestBody(body) {
     if (agentHeadingCounts.get('### Authoring context') === 1) {
       const context = sectionBody(text, '### Authoring context');
       for (const field of AUTHORING_CONTEXT_FIELDS) {
-        const value = authoringContextField(context, field);
+        const value = markdownField(context, field);
         if (sharingAllowed && !isFilledSection(value)) {
           findings.push(`Shared Authoring context must fill **${field}** with meaningful content.`);
         }
         if (sharingDeclined && !isRedactedContext(value)) {
           findings.push(`Declined Authoring context must keep **${field}** empty or redacted.`);
+        }
+      }
+    }
+
+    if (agentHeadingCounts.get('### Instructions for reviewing agents') === 1) {
+      const instructions = sectionBody(text, '### Instructions for reviewing agents');
+      for (const field of REVIEW_INSTRUCTION_FIELDS) {
+        if (!isFilledSection(markdownField(instructions, field))) {
+          findings.push(
+            `Agent review instructions must fill **${field}** with PR-specific content.`
+          );
         }
       }
     }

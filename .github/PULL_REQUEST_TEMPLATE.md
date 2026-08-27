@@ -30,21 +30,18 @@ this section unchanged or mark it N/A.
 
 ### Instructions for reviewing agents
 
-You are reviewing an Agent-authored change. Treat the handoff as claims to verify, not as evidence that the change is safe.
+<!--
+Required and PR-specific. The authoring Agent writes this handoff for the
+organization owners' reviewing Agent. Do not paste a generic review checklist.
+Point to concrete files, flows, decisions, plausible failures, and missing
+evidence in this PR. Mention destructive, authority, compatibility, recovery,
+or public-boundary risks only where they are relevant to this change.
+-->
 
-1. Establish intended scope from **Problem / pressure**, **Summary**, and explicit non-goals.
-2. Trace every changed path to its affected runtime, user data, protocol, permission boundary, build artifact, or contributor workflow. Flag scope that the summary does not disclose.
-3. Perform a risk scan even when the happy path looks correct:
-   - destructive or irreversible behavior: deletion, overwrite, migration, reset, cleanup, rollback, and recovery;
-   - security and authority: authentication, permissions, auto-approval, secrets, untrusted input, and privilege expansion;
-   - compatibility: persisted data, schemas, protocols, APIs, configuration defaults, downgrade, and mixed-version behavior;
-   - reliability: partial failure, retries, concurrency, cancellation, idempotency, and silent fallback;
-   - supply chain and automation: dependency changes, generated artifacts, release behavior, workflow token permissions, and execution of fork-controlled code;
-   - public-repository boundary: private packages or services, authenticated cloud requests, telemetry, secrets, and captured user or Agent transcripts.
-4. Compare the diff with **Authoring context** when sharing was explicitly allowed. Flag hidden assumptions, omitted tradeoffs, deliberately skipped work, and medium-risk combinations that are easy to dismiss in isolation.
-5. Verify that **Test plan** covers the risky paths and observable failure/recovery behavior, not only the happy path. Identify every important claim that remains untested.
-6. Report each finding with severity, file and line, trigger, concrete impact, and the smallest safe mitigation. Do not suppress medium- or low-confidence risks; label uncertainty explicitly.
-7. If you find no issue, state which risk areas you checked and any residual coverage gaps. Do not return a bare approval.
+- **Review these files / flows:** <!-- Where should review effort concentrate, and why? -->
+- **Decisions to challenge:** <!-- Which deliberate choices need independent judgment? -->
+- **Plausible failure modes:** <!-- What medium/high-risk breakage could be hidden in this change? -->
+- **Evidence gaps:** <!-- What remains untested, uncertain, or dependent on post-merge behavior? -->
 
 ### Authoring context
 

@@ -14,6 +14,10 @@
   infer consent. Declining is allowed but must warn that maintainers may close
   or decline a contribution they cannot safely assess. Human-authored PRs do
   not need Agent context.
+- Agent review instructions are a PR-specific handoff from the authoring Agent
+  to the organization owners' reviewing Agent. Require concrete review targets,
+  decisions to challenge, plausible failures, and evidence gaps; fixed generic
+  reviewer boilerplate is not a valid substitute.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a pull request affects multiple product areas.
 - External pull request body enforcement is based on the PR author's

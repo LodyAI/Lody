@@ -69,7 +69,7 @@ jobs:
               `@${author}, this pull request body does **not** match Lody's PR template.`,
               '',
               'Please update the description using `.github/PULL_REQUEST_TEMPLATE.md` and fill every required section.',
-              'Check exactly one **Author type**. Agent-authored PRs must ask the author-side user about context sharing, check exactly one consent option, and complete the **Agent handoff** block.',
+              'Check exactly one **Author type**. Agent-authored PRs must ask the author-side user about context sharing, check exactly one consent option, and write PR-specific review instructions in the **Agent handoff** block.',
               'Context sharing may be declined, but maintainers may close or decline a contribution when the withheld context prevents a safe review.',
               '',
               '<details><summary>Checker findings</summary>',
