@@ -95,7 +95,7 @@ export function buildInvalidBodyComment({ author, findings, invalidSince }) {
     '',
     `If the body remains invalid for ${GRACE_PERIOD_DAYS} days, this PR will be closed and marked \`${EXPIRED_BODY_LABEL.name}\`. To contribute after that, open a new pull request using the current template.`,
     '',
-    'Agent-authored PRs must ask the author-side user about context sharing, check exactly one consent option, and provide concise, PR-specific review instructions. Context sharing may be declined, but maintainers may decline or close a contribution they cannot safely assess.',
+    'Every external PR must link a Lody issue and provide a complete public Context handoff with concise, PR-specific review instructions. `N/A` and redacted context are not accepted because maintainers need enough provenance, scope, and risk information to assess the contribution.',
     '',
     '<details><summary>Checker findings</summary>',
     '',

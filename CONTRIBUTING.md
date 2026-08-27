@@ -16,7 +16,7 @@ By submitting a pull request, patch, or other contribution to Lody, you agree to
 
 1. Search existing issues and pull requests to avoid duplicate work.
 2. Report reproducible problems with the [bug report form](https://github.com/LodyAI/Lody/issues/new?template=01-bug-report.yml).
-3. For substantial improvements, use the [feature request form](https://github.com/LodyAI/Lody/issues/new?template=02-feature-request.yml) to discuss the need and approach with maintainers first.
+3. For substantial improvements, use the [feature request form](https://github.com/LodyAI/Lody/issues/new?template=02-feature-request.yml) to discuss the need, scope, and approach with maintainers before implementation.
 4. Do not report security vulnerabilities in a public issue; follow the [security policy](./SECURITY.md) instead.
 
 ## Get the Code
@@ -77,9 +77,11 @@ This variable is optional. Never commit the generated data or credentials.
    docs: improve local setup guide
    ```
 
-5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. An authoring Agent must give the maintainers' reviewing Agent a concise, PR-specific review focus, decisions to challenge, and plausible failures or evidence gaps. Before publishing Agent handoff context, it must also ask the author-side user for permission and record exactly one consent answer. Context sharing may be declined, but maintainers may decline or close a contribution when withheld context prevents a safe review. For external contributors, an automated check enforces this format.
+5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Every external pull request must link the full URL of a Lody issue and fill in the problem, summary, test plan, and Context handoff. The handoff gives the maintainers' reviewing Agent concise, PR-specific review focus, decisions to challenge, plausible failures or evidence gaps, and a public summary of the authoring context. Every field is required; `N/A` and redacted answers are rejected because they do not provide enough context for a safe review.
 
 An external pull request with an invalid body is marked `status:needs-pr-body`. Fix the body within seven days to clear the status automatically. If it remains invalid beyond that grace period, the pull request is marked `status:pr-body-expired` and closed; submit a new pull request with the current template to continue contributing the change.
+
+Keep external contributions at or below 200 changed lines, counted as additions plus deletions. Larger changes are closed by default unless the pull request links the Lody issue where the design and scope were discussed first. Open the issue, wait for maintainers to agree that a pull request is appropriate, and then submit the pull request; the automation checks for the issue reference but does not decide whether maintainers approved the design. A large pull request closed under this policy is marked `status:pr-too-large` and will not be reopened, so continue through a new pull request after discussion.
 
 Pull requests are automatically labeled with one or more `scope:*` labels based on the changed paths. The [scope mapping](./.github/labeler.yml) uses each top-level key as a label name and its globs as matching paths; the [scope workflow](./.github/workflows/pr-scope.yml) creates or applies matching labels and removes configured labels that stop matching. Manually applied and unconfigured labels are left unchanged.
 

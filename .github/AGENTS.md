@@ -7,17 +7,15 @@
   event orchestration in `workflows/`. Do not duplicate the same rule across
   those layers.
 - Changes to required PR template headings must update the checker in the same
-  commit and validate representative Agent and human bodies locally.
-- External PRs identify exactly one author type. Agent-authored PRs retain the
-  complete Agent handoff block and its markers, explicitly ask the author-side
-  user about publishing context, and record exactly one consent answer. Never
-  infer consent. Declining is allowed but must warn that maintainers may close
-  or decline a contribution they cannot safely assess. Human-authored PRs do
-  not need Agent context.
-- Agent review instructions are a PR-specific handoff from the authoring Agent
-  to the organization owners' reviewing Agent. Require concise review focus,
-  decisions to challenge, and plausible failures or evidence gaps; fixed generic
-  reviewer boilerplate and long review essays are not valid substitutes.
+  commit and validate representative complete and rejected bodies locally.
+- Every external PR links a full Lody issue URL and retains the complete Context
+  handoff block and its markers. Each Authoring context field is a concise public
+  summary; `N/A` and redacted values are not accepted because maintainers need
+  enough provenance, scope, and risk information to assess the contribution.
+- Review instructions are a PR-specific handoff to the organization owners'
+  reviewing Agent. Require concise review focus, decisions to challenge, and
+  plausible failures or evidence gaps; fixed generic reviewer boilerplate and
+  long review essays are not valid substitutes.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a pull request affects multiple product areas.
 - Issue forms cover only components present in the public repository. Keep Bug
@@ -38,6 +36,10 @@
   the seven-day grace period. An invalid external PR keeps its original timer
   across edits and pushes; only a valid body clears the state. Before closing,
   the scheduled workflow must re-read and revalidate the latest body.
+- External PR size enforcement counts additions plus deletions. A change over
+  200 lines without a full Lody issue URL is labeled `status:pr-too-large` and
+  closed; reopening it closes it again, so contribution continues through a new
+  PR after issue discussion. Automation does not infer maintainer agreement.
 - PR-body comments require pull-request write permission. Immediate comment and
   label updates are best-effort feedback; the checker result alone decides the
   event-driven enforcement job. Expired PRs keep `status:pr-body-expired` and
