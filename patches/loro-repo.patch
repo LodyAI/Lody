@@ -1,0 +1,36 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 1460c6b29d66d8e6e2c594e8aab02653d5c9fef4..627d4bb447c32b18843cfb76ea69772f3ff982d5 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -3527,6 +3527,7 @@ var LoroRepo = class LoroRepo {
+-	async ready() {
+-		if (this.metaPersister) {
+-			const version = this.metaFlock.version();
+-			this.metaPersister.start(version);
+-		}
+-	}
++	async ready() {
++		await this.syncRunner.ensureMetaLiveMonitor();
++		if (this.metaPersister) {
++			const version = this.metaFlock.version();
++			this.metaPersister.start(version);
++		}
++	}
+diff --git a/dist/index.js b/dist/index.js
+index 36afa6cc081db6f3d6b5073133cf9c8f209f92c2..7e2f66756d2d742b587f920a0dd0696973e48e02 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3524,6 +3524,7 @@ var LoroRepo = class LoroRepo {
+-	async ready() {
+-		if (this.metaPersister) {
+-			const version = this.metaFlock.version();
+-			this.metaPersister.start(version);
+-		}
+-	}
++	async ready() {
++		await this.syncRunner.ensureMetaLiveMonitor();
++		if (this.metaPersister) {
++			const version = this.metaFlock.version();
++			this.metaPersister.start(version);
++		}
++	}

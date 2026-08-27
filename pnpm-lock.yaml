@@ -140,6 +140,9 @@ patchedDependencies:
   '@tanstack/router-generator@1.159.4':
     hash: 14fe630c2d7f306f8e60169e6a0116cf02de74368af213699cb449aeeecc663a
     path: patches/@tanstack__router-generator@1.159.4.patch
+  loro-repo@0.20.0:
+    hash: 74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357
+    path: patches/loro-repo.patch
   mdast-util-gfm-autolink-literal@2.0.1:
     hash: b03e2c531618296b99e716d479b68761f6ebc6c81dcd1e9359e80b71e6b5ee8e
     path: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
@@ -349,7 +352,7 @@ importers:
         version: 2.2.1(loro-crdt@1.14.1)
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.14.1)
+        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.14.1)
       ora:
         specifier: ^8.2.0
         version: 8.2.0
@@ -1085,7 +1088,7 @@ importers:
         version: 2.2.1(loro-crdt@1.14.1)(loro-mirror@2.2.1(loro-crdt@1.14.1))(react@19.2.0)
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1)
+        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1)
       loro-websocket:
         specifier: 'catalog:'
         version: 0.6.2(@loro-dev/flock@4.4.4)(loro-crdt@1.14.1)
@@ -1405,7 +1408,7 @@ importers:
         version: 24.10.12
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1)
+        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -21432,7 +21435,7 @@ snapshots:
 
   loro-protocol@0.3.0: {}
 
-  loro-repo@0.20.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1):
+  loro-repo@0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1):
     dependencies:
       '@loro-dev/flock-wasm': 0.4.3
       '@loro-dev/streams-crdt': 0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1)
@@ -21449,7 +21452,7 @@ snapshots:
       - utf-8-validate
       - yjs
 
-  loro-repo@0.20.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.14.1):
+  loro-repo@0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.14.1):
     dependencies:
       '@loro-dev/flock-wasm': 0.4.3
       '@loro-dev/streams-crdt': 0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1)

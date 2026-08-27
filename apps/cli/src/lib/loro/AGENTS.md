@@ -12,6 +12,11 @@ down. Cost per call = one Streams subscription plus the doc's full initial sync.
 
 Rules:
 
+- Renderer metadata reaches the CLI by direct import into the repo's internal
+  meta Flock even when local mode has no registered transport. Keep the
+  `loro-repo` metadata live monitor enabled from repo initialization; deferring
+  it until transport join leaves `getDocMeta` stale and prevents the session
+  dispatch watcher from seeing `latestUserMsgId`.
 - Never open docs in a loop over `listAliveRoomIds` or any other workspace-wide
   enumeration. A long-lived workspace holds thousands of historical session
   rooms; opening them all stalls startup and floods the Streams backend.

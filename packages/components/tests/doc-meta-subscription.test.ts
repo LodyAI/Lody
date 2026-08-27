@@ -235,7 +235,9 @@ describe('docMetaSubscriptionAtom', () => {
     const machineId = 'machine-1' as MachineId;
     const docId = getMachineRoomId(machineId);
 
-    await repo.syncRunner.ensureMetaLiveMonitor();
+    // Electron local-first mode imports renderer metadata directly into the
+    // CLI repo's meta Flock while no cloud transport is registered. The repo
+    // must hydrate its metadata cache and emit watch events in that state.
     await importRemoteMeta(repo, remote, () => {
       remote.getMeta().put(['e', docId], true);
       remote.getMeta().put(['m', docId], { id: machineId, name: 'dev-box', lastSeen: 1 });
@@ -276,7 +278,6 @@ describe('docMetaSubscriptionAtom', () => {
     const machineId = 'machine-2' as MachineId;
     const docId = getMachineRoomId(machineId);
 
-    await repo.syncRunner.ensureMetaLiveMonitor();
     await importRemoteMeta(repo, remote, () => {
       remote.getMeta().put(['e', docId], true);
       remote.getMeta().put(['m', docId], { id: machineId, name: 'ci-box', lastSeen: 10 });
