@@ -324,6 +324,102 @@ describe('useOrganization setActive dedupe', () => {
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
   });
 
+  it.each(['delete', 'leave'] as const)(
+    'retries the newer route after a %s fallback wins and its first restoration fails',
+    async (operation) => {
+      const deferredFallback = createDeferred<{
+        data: TestOrganization;
+        error: null;
+      }>();
+      organizationMocks[
+        operation === 'delete' ? 'deleteOrganization' : 'leaveOrganization'
+      ].mockResolvedValueOnce({
+        data: { id: 'workspace-old' },
+        error: null,
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await render('old-workspace', 0);
+
+      // Clear module-level setActive dedupe state left by an earlier test.
+      await act(async () => {
+        await latestOrganizationState!.activateOrganization('workspace-reset');
+      });
+      organizationMocks.setActive.mockClear();
+
+      let newerTargetAttempts = 0;
+      organizationMocks.setActive.mockImplementation(
+        async ({ organizationId }: { organizationId: string }) => {
+          if (organizationId === 'workspace-target') {
+            const response = await deferredFallback.promise;
+            activeOrganization = createOrganization(
+              'workspace-target',
+              'target-workspace',
+              'Target Workspace'
+            );
+            return response;
+          }
+          if (organizationId === 'workspace-new') {
+            newerTargetAttempts += 1;
+            if (newerTargetAttempts === 1) {
+              return { data: null, error: { message: 'temporary switch failure' } };
+            }
+            activeOrganization = createOrganization(
+              'workspace-new',
+              'workspace-new',
+              'New Workspace'
+            );
+          }
+          return {
+            data: createOrganization(organizationId, organizationId, organizationId),
+            error: null,
+          };
+        }
+      );
+
+      let mutation!: Promise<unknown>;
+      await act(async () => {
+        mutation =
+          operation === 'delete'
+            ? latestOrganizationState!.deleteOrganization('workspace-old')
+            : latestOrganizationState!.leaveOrganization('workspace-old');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(organizationMocks.setActive).toHaveBeenCalledWith({
+        organizationId: 'workspace-target',
+      });
+
+      activeOrganization = createOrganization('workspace-new', 'workspace-new', 'New Workspace');
+      await render('workspace-new', 1);
+      deferredFallback.resolve({
+        data: createOrganization('workspace-target', 'target-workspace', 'Target Workspace'),
+        error: null,
+      });
+      await act(async () => {
+        await mutation;
+      });
+
+      expect(newerTargetAttempts).toBe(2);
+      expect(organizationMocks.refetchActiveOrganization).toHaveBeenCalled();
+      expect(organizationMocks.setActive).toHaveBeenLastCalledWith({
+        organizationId: 'workspace-new',
+      });
+      expect(store.get(currentWorkspaceSlugAtom)).toBe('workspace-new');
+      expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
+
+      // Once the current route has restored its target, another settled render
+      // must not issue a third switch.
+      await render('workspace-new', 2);
+
+      expect(newerTargetAttempts).toBe(2);
+      expect(organizationMocks.setActive).toHaveBeenLastCalledWith({
+        organizationId: 'workspace-new',
+      });
+      expect(store.get(currentWorkspaceSlugAtom)).toBe('workspace-new');
+      expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
+    }
+  );
+
   it('keeps a newer navigation identity when leave failure publishes a late rollback', async () => {
     const deferredLeave = createDeferred<{
       data: null;
