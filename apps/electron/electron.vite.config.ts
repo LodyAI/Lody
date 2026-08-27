@@ -159,7 +159,7 @@ export default defineConfig(({ mode }) => {
         minify: true,
         cssMinify: true,
         sourcemap: false,
-        rollupOptions: {
+        rolldownOptions: {
           // Build both the main app (`index.html`) and the standalone recovery
           // page (`recovery.html`). The recovery page is loaded by the main
           // process when the main renderer fails (did-fail-load,
@@ -170,15 +170,18 @@ export default defineConfig(({ mode }) => {
             recovery: resolve(__dirname, 'src/renderer/recovery.html')
           },
           output: {
-            onlyExplicitManualChunks: true,
-            manualChunks(id) {
-              // Keep beautiful-mermaid (and elkjs) in the same guarded chunk.
-              // Rejected: letting Rollup freely hoist these deps can mix
-              // diagram-only runtime into ordinary renderer chunks.
-              if (isMermaidRuntimeDependency(id)) {
-                return 'mermaid-deps'
-              }
-              return undefined
+            codeSplitting: {
+              groups: [
+                {
+                  name: 'mermaid-deps',
+                  test(id) {
+                    // Keep beautiful-mermaid (and elkjs) in the same guarded chunk.
+                    // Rejected: letting Rolldown freely hoist these deps can mix
+                    // diagram-only runtime into ordinary renderer chunks.
+                    return isMermaidRuntimeDependency(id)
+                  }
+                }
+              ]
             }
           }
         }

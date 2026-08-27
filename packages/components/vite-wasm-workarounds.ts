@@ -1,5 +1,3 @@
-import type { Alias, PluginOption } from 'vite';
-
 export const VITEST_INLINE_WASM_DEPS = [
   'loro-repo',
   '@loro-dev/flock-wasm',
@@ -7,15 +5,15 @@ export const VITEST_INLINE_WASM_DEPS = [
   '@loro-dev/streams-crdt',
 ];
 
-// Alias[] (not AliasOptions) so callers with an existing alias array can spread it.
-export function loroCrdtBundlerAlias(): Alias[] {
+// A structural alias type keeps this helper shareable by hosts on different Vite majors.
+export function loroCrdtBundlerAlias(): Array<{ find: RegExp; replacement: string }> {
   return [{ find: /^loro-crdt$/, replacement: 'loro-crdt/bundler' }];
 }
 
-export function loroCrdtWasmUrlWorkaround(): PluginOption {
+export function loroCrdtWasmUrlWorkaround() {
   return {
     name: 'loro-wasm-url-workaround',
-    enforce: 'pre',
+    enforce: 'pre' as const,
     transform(code: string, id: string) {
       if (id.includes('/loro-crdt/browser/loro_wasm.js')) {
         throw new Error(

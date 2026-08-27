@@ -71,6 +71,9 @@ mobile surfaces.
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use
   `vite-top-level-await-fixed.ts`. Do not bypass its audited-version assertion.
+- Shared Vite config helpers consumed by host apps use narrow structural return types,
+  not types imported from this package's Vite dependency; hosts may use a different
+  Vite major and structurally compatible config data must remain shareable.
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.

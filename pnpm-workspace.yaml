@@ -90,6 +90,11 @@ packageExtensions:
     peerDependencies:
       react: '*'
 
+peerDependencyRules:
+  allowedVersions:
+    # 3.5.0's published peer metadata predates its documented Vite 8 support.
+    vite-plugin-wasm@3.5.0>vite: ^8
+
 packageManagerStrictVersion: true
 
 patchedDependencies:
