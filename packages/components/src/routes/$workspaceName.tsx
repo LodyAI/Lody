@@ -24,6 +24,7 @@ import {
   WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES,
 } from '@lody/shared';
 import { isLocalAppPlatform } from '@/lib/app-platform';
+import { WorkspaceRouteTargetProvider } from '@/providers/workspace-route-target';
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,
@@ -90,12 +91,14 @@ export const Route = createFileRoute('/$workspaceName')({
 });
 
 function WorkspaceGuardRoute() {
-  // Local (open-source) platform: no Convex access check exists. The single
-  // implicit workspace (provisioned by the CLI) is always accessible.
-  if (isLocalAppPlatform()) {
-    return <LocalWorkspaceGuardRoute />;
-  }
-  return <CloudWorkspaceGuardRoute />;
+  const { workspaceName } = Route.useParams();
+  // The URL target is available during render, before workspace atoms and
+  // runtime effects converge. Descendants use it to reject previous-scope data.
+  return (
+    <WorkspaceRouteTargetProvider slug={workspaceName}>
+      {isLocalAppPlatform() ? <LocalWorkspaceGuardRoute /> : <CloudWorkspaceGuardRoute />}
+    </WorkspaceRouteTargetProvider>
+  );
 }
 
 function LocalWorkspaceGuardRoute() {

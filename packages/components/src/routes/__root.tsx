@@ -33,9 +33,8 @@ import { toast } from 'sonner';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   authTokenAtom,
-  currentWorkspaceIdAtom,
-  currentWorkspaceSlugAtom,
   electronDeepLinkSignInInProgressAtom,
+  setWorkspaceContextAtom,
   userAtom,
 } from '@/atoms';
 import { StableSessionProvider } from '../providers/stable-session-provider';
@@ -255,8 +254,7 @@ function RootLocationEffects() {
   const electronSignInInProgress = useAtomValue(electronDeepLinkSignInInProgressAtom);
   const setUser = useSetAtom(userAtom);
   const setAuthToken = useSetAtom(authTokenAtom);
-  const setCurrentWorkspaceId = useSetAtom(currentWorkspaceIdAtom);
-  const setCurrentWorkspaceSlug = useSetAtom(currentWorkspaceSlugAtom);
+  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const authInvalidationRef = useRef(false);
 
   useEffect(() => {
@@ -327,8 +325,7 @@ function RootLocationEffects() {
 
     setUser(null);
     setAuthToken(null);
-    setCurrentWorkspaceId(null);
-    setCurrentWorkspaceSlug(null);
+    setWorkspaceContext({ slug: null, workspaceId: null });
 
     void signOutWithoutRedirect(authClient);
     toast.error(i18next.t('login.sessionExpired'));
@@ -344,8 +341,7 @@ function RootLocationEffects() {
     location.pathname,
     navigate,
     setAuthToken,
-    setCurrentWorkspaceId,
-    setCurrentWorkspaceSlug,
+    setWorkspaceContext,
     setUser,
   ]);
 

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import type { WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import {
@@ -24,6 +25,8 @@ const EMPTY_ACCESS_ROWS: LocalProjectVisibilityAccess[] = [];
 type UseVisibleLocalProjectsOptions = {
   includeMachineFlock?: boolean;
   syncMachineFlock?: boolean;
+  workspaceId?: WorkspaceId | null;
+  enabled?: boolean;
 };
 
 export function useVisibleLocalProjects(
@@ -32,16 +35,22 @@ export function useVisibleLocalProjects(
   const visibleMachineIndex = useVisibleMachineMetas({
     includeMachineFlock: options.includeMachineFlock,
     syncMachineFlock: options.syncMachineFlock,
+    workspaceId: options.workspaceId,
+    enabled: options.enabled,
   });
-  return useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex);
+  return useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex, {
+    workspaceId: options.workspaceId,
+    enabled: options.enabled,
+  });
 }
 
 export function useVisibleLocalProjectsFromMachineIndex(
   visibleMachineIndex: Pick<VisibleMachineIndex, 'machines' | 'accessByMachineId' | 'isLoading'>,
-  options: { enabled?: boolean } = {}
+  options: { enabled?: boolean; workspaceId?: WorkspaceId | null } = {}
 ): VisibleLocalProjectIndex {
   const enabled = options.enabled ?? true;
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const workspaceId = options.workspaceId === undefined ? currentWorkspaceId : options.workspaceId;
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
@@ -71,9 +80,9 @@ export function useVisibleLocalProjectsFromMachineIndex(
         rawMachines: visibleMachines,
         machineAccessByMachineId: accessByMachineId,
         convexAccessRows: rawAccessRows,
-        currentUserId,
+        currentUserId: enabled ? currentUserId : null,
         isLoading,
       }),
-    [accessByMachineId, currentUserId, isLoading, rawAccessRows, visibleMachines]
+    [accessByMachineId, currentUserId, enabled, isLoading, rawAccessRows, visibleMachines]
   );
 }

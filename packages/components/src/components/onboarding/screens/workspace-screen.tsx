@@ -4,7 +4,7 @@ import { useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Building2, Check, Loader2, Plus } from 'lucide-react';
 import type { WorkspaceId } from '@lody/shared';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from 'sonner';
 import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
@@ -355,8 +355,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
   const platform = usePlatform();
   const workspaceState = usePlatformWorkspaces();
-  const setCurrentWorkspaceId = useSetAtom(currentWorkspaceIdAtom);
-  const setCurrentWorkspaceSlug = useSetAtom(currentWorkspaceSlugAtom);
+  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
 
   const workspaces = useMemo<WorkspaceListEntry[]>(
     () =>
@@ -374,10 +373,12 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const commitWorkspaceContext = useCallback(
     (workspace: WorkspaceListEntry | null) => {
-      setCurrentWorkspaceId(workspace ? (workspace.id as WorkspaceId) : null);
-      setCurrentWorkspaceSlug(workspace?.slug || null);
+      setWorkspaceContext({
+        slug: workspace?.slug || null,
+        workspaceId: workspace ? (workspace.id as WorkspaceId) : null,
+      });
     },
-    [setCurrentWorkspaceId, setCurrentWorkspaceSlug]
+    [setWorkspaceContext]
   );
 
   const [creating, setCreating] = useState(workspaces.length === 0);

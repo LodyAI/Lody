@@ -13,7 +13,7 @@ import {
   type AgentConfigMeta,
   type SessionId,
 } from '@lody/shared';
-import { activeWorkspaceRuntimeAtom } from './runtime';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries } from '@/lib/doc-meta-batch';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
@@ -208,6 +208,16 @@ export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
 export const machineMetaCacheAtom = atom<Record<string, MachineMeta>>({});
 export const agentConfigMetaCacheAtom = atom<Record<string, AgentConfigMeta>>({});
 export const docMetaCacheReadyAtom = atom(false);
+
+export type DocMetaCacheScope = {
+  runtime: WorkspaceRuntime;
+  workspaceId: WorkspaceRuntime['workspaceId'];
+  workspaceSlug: string;
+  ready: boolean;
+};
+
+/** Identifies which runtime owns the current singleton metadata projection. */
+export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
 
 // 兼容层
 // Doc-meta atoms expose durable CRDT state only. Live signals (machine online,
@@ -500,11 +510,18 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   if (!runtime) {
     set(clearDocMetaCacheAtom);
     set(docMetaCacheReadyAtom, false);
+    set(docMetaCacheScopeAtom, null);
     return undefined;
   }
 
   let cancelled = false;
   set(docMetaCacheReadyAtom, false);
+  set(docMetaCacheScopeAtom, {
+    runtime,
+    workspaceId: runtime.workspaceId,
+    workspaceSlug: runtime.workspaceSlug,
+    ready: false,
+  });
 
   // Track active docs whose initial fetchDocMeta returned null (metadata not
   // yet synced).  When a subsequent doc-metadata patch event arrives for one of
@@ -804,6 +821,12 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
     );
     set(docMetaCacheReadyAtom, true);
+    set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: true,
+    });
   });
 
   return () => {

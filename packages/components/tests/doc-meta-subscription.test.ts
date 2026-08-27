@@ -17,6 +17,7 @@ vi.mock('@/lib/auth-bootstrap', () => ({
 import {
   archivedSessionListAtom,
   docMetaCacheReadyAtom,
+  docMetaCacheScopeAtom,
   docMetaSubscriptionAtom,
   agentConfigMetaCacheAtom,
   machineMetaCacheAtom,
@@ -172,12 +173,19 @@ describe('docMetaSubscriptionAtom', () => {
 
     const store = createStore();
     const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    const runtime = createRuntime(repo as unknown as LoroRepo);
 
     try {
-      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      store.set(runtimeAtom, runtime);
       await flush();
 
       expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+      expect(store.get(docMetaCacheScopeAtom)).toEqual({
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: true,
+      });
       expect(store.get(sessionMetaCacheAtom)[docId]?.isArchived).toBe(true);
       expect(store.get(sessionListAtom).map((session) => session.id)).not.toContain(sessionId);
       expect(store.get(archivedSessionListAtom).map((session) => session.id)).toContain(sessionId);

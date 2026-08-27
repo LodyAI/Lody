@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import type { MachineFlockRowFamily, MachineId } from '@lody/shared';
+import type { MachineFlockRowFamily, MachineId, WorkspaceId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { userAtom } from '@/atoms';
@@ -28,6 +28,8 @@ type UseVisibleMachineMetasOptions = {
   includeMachineFlock?: boolean;
   syncMachineFlock?: boolean;
   machineFlockFamilies?: readonly MachineFlockRowFamily[];
+  workspaceId?: WorkspaceId | null;
+  enabled?: boolean;
 };
 
 const DEFAULT_MACHINE_FLOCK_FAMILIES = [
@@ -48,33 +50,37 @@ export function useVisibleMachineMetas(
 ): VisibleMachineMetas {
   const includeMachineFlock = options.includeMachineFlock ?? true;
   const syncMachineFlock = options.syncMachineFlock ?? true;
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const enabled = options.enabled ?? true;
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const workspaceId = options.workspaceId === undefined ? currentWorkspaceId : options.workspaceId;
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const queriedAccessRows = useCloudQuery(
     cloudOperations.machines.listVisibleMachines,
-    workspaceId ? { workspaceId } : 'skip'
+    enabled && workspaceId ? { workspaceId } : 'skip'
   );
-  const rawAccessRows = queriedAccessRows ?? EMPTY_ACCESS_ROWS;
-  const isLoading = isAuthedWorkspaceQueryLoading({
-    workspaceId,
-    isConvexAuthLoading,
-    canQuery,
-    queryResult: queriedAccessRows,
-  });
+  const rawAccessRows = enabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
+  const isLoading =
+    !enabled ||
+    isAuthedWorkspaceQueryLoading({
+      workspaceId,
+      isConvexAuthLoading,
+      canQuery,
+      queryResult: queriedAccessRows,
+    });
 
   const baseVisibleIndex = useMemo(
     () =>
       buildVisibleMachineIndex({
         rawMachines,
         convexAccessRows: rawAccessRows,
-        currentUserId,
+        currentUserId: enabled ? currentUserId : null,
         isLoading,
       }),
-    [rawMachines, rawAccessRows, currentUserId, isLoading]
+    [enabled, rawMachines, rawAccessRows, currentUserId, isLoading]
   );
   const convexAuthorizedMachineIds = useMemo(
     () => new Set(rawAccessRows.map((row) => row.machineId as MachineId)),

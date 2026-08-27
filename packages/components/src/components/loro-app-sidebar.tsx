@@ -14,6 +14,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  type WorkspaceId,
 } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -43,8 +44,11 @@ import {
   bugReportDialogOpenAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
+  setWorkspaceContextAtom,
 } from '@/atoms';
-import { docMetaCacheReadyAtom } from '@/atoms/doc-meta';
+import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import { useWorkspaceRouteTargetSlug } from '@/providers/workspace-route-target';
+import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { taskQuickAddOpenAtom, taskQuickAddStatusAtom } from '@/atoms/tasks';
@@ -986,7 +990,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const user = useAtomValue(userAtom);
   const userId = user?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const routeTargetSlug = useWorkspaceRouteTargetSlug();
+  const workspaceSlug = routeTargetSlug ?? atomWorkspaceSlug;
+  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const connectionUiState = useAtomValue(lodyConnectionUiStateAtom);
   const setMobileDrawerOpen = useSetAtom(setMobileDrawerOpenAtom);
   const language = useAtomValue(languageAtom);
@@ -1026,7 +1033,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const { organizations, activeOrganization, switchOrganization } = useOrganization();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
+  const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const organizationsReady = Array.isArray(organizations);
   const expectedWorkspace = useMemo(() => {
     if (!organizationsReady) {
@@ -1040,22 +1047,38 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   }, [organizations, organizationsReady, workspaceSlug]);
   const expectedWorkspaceId = expectedWorkspace?.id ?? null;
   const expectedWorkspaceName = expectedWorkspace?.name ?? null;
-  const runtimeWorkspaceId = runtime?.workspaceId ?? null;
-  const { sessions, allActiveSessions } = useVisibleSessionMetas();
+  const workspaceDataScope = useMemo(
+    () =>
+      workspaceSlug
+        ? resolveWorkspaceDataScope({
+            targetSlug: workspaceSlug,
+            runtime,
+            docMetaScope,
+            organizationsReady,
+            expectedWorkspaceId,
+          })
+        : null,
+    [docMetaScope, expectedWorkspaceId, organizationsReady, runtime, workspaceSlug]
+  );
+  const workspaceDataReady = workspaceDataScope?.status === 'ready';
+  const scopedWorkspaceId = workspaceDataReady ? workspaceDataScope.workspaceId : null;
+  const { sessions, allActiveSessions } = useVisibleSessionMetas({
+    workspaceId: scopedWorkspaceId,
+    enabled: workspaceDataReady,
+  });
   useReportVisibleSessionsForEagerSync('loro-app-sidebar', sessions, allActiveSessions);
-  const sessionsListLoading =
-    Boolean(workspaceSlug) &&
-    (!docMetaCacheReady ||
-      !runtimeWorkspaceId ||
-      (organizationsReady &&
-        (expectedWorkspaceId === null || runtimeWorkspaceId !== expectedWorkspaceId)));
+  const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
     projects: visibleLocalProjectMap,
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
-  } = useSessionSharing({ includeLocalProjectDetails: true });
+  } = useSessionSharing({
+    includeLocalProjectDetails: true,
+    workspaceId: scopedWorkspaceId,
+    enabled: workspaceDataReady,
+  });
   const localMachineId = useAtomValue(localMachineIdAtom);
   const onlineMachineIds = useOnlineMachineIds();
 
@@ -1563,6 +1586,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   );
 
   const localProjectSections = useMemo(() => {
+    if (sessionsListLoading) return [];
+
     const localMachineMeta = localMachineId ? machineMetaMap.get(localMachineId) : undefined;
     const localProjects = localMachineId
       ? Array.from(visibleLocalProjectMap.values()).filter(
@@ -1636,7 +1661,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         return a.name.localeCompare(b.name);
       }),
     }));
-  }, [localMachineId, machineMetaMap, t, userId, visibleLocalProjectMap]);
+  }, [localMachineId, machineMetaMap, sessionsListLoading, t, userId, visibleLocalProjectMap]);
 
   // Build one complete, mode-independent row model first. Pinned sessions are
   // split from this model below so Workspace and Updated cannot accidentally
@@ -2186,11 +2211,15 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         return;
       }
       writePreferredWorkspaceSlug(slug);
+      setWorkspaceContext({
+        slug,
+        workspaceId: target.id as WorkspaceId,
+      });
       void switchOrganization(target.id);
       closeMobileDrawer();
       void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
     },
-    [closeMobileDrawer, organizations, router, switchOrganization]
+    [closeMobileDrawer, organizations, router, setWorkspaceContext, switchOrganization]
   );
 
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {

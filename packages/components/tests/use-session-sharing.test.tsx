@@ -148,6 +148,8 @@ describe('useSessionSharing project visibility', () => {
     expect(visibilityMocks.useVisibleLocalProjects).toHaveBeenCalledWith({
       includeMachineFlock: false,
       syncMachineFlock: false,
+      workspaceId: 'workspace-1',
+      enabled: true,
     });
 
     visibilityMocks.useVisibleLocalProjects.mockClear();
@@ -167,10 +169,14 @@ describe('useSessionSharing project visibility', () => {
     expect(results.at(-1)?.projects.get(privateProject.key)?.project.name).toBe('Private project');
     expect(visibilityMocks.useVisibleMachineMetas).toHaveBeenCalledWith({
       includeMachineFlock: false,
+      workspaceId: 'workspace-1',
+      enabled: true,
     });
     expect(visibilityMocks.useVisibleLocalProjects).toHaveBeenCalledWith({
       includeMachineFlock: true,
       syncMachineFlock: false,
+      workspaceId: 'workspace-1',
+      enabled: true,
     });
   });
 });

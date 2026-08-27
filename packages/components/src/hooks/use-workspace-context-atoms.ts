@@ -1,14 +1,11 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { useSetAtom } from 'jotai';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import { clearWorkspaceContextForSlugAtom, setWorkspaceContextAtom } from '@/atoms';
 import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import type { WorkspaceId } from '@lody/shared';
 
 /** Minimal shape of `convexApi.auth.getWorkspaceAccessBySlug`'s result we depend on. */
-type WorkspaceAccessForContext =
-  | { status?: string; organizationId?: string }
-  | null
-  | undefined;
+type WorkspaceAccessForContext = { status?: string; organizationId?: string } | null | undefined;
 
 /**
  * Establish the workspace-context atoms (`currentWorkspaceSlugAtom` +
@@ -23,27 +20,32 @@ export function useWorkspaceContextAtoms(
   workspaceSlug: string | null,
   access: WorkspaceAccessForContext
 ): void {
-  const setWorkspaceSlug = useSetAtom(currentWorkspaceSlugAtom);
-  const setWorkspaceId = useSetAtom(currentWorkspaceIdAtom);
+  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
+  const clearWorkspaceContextForSlug = useSetAtom(clearWorkspaceContextForSlugAtom);
 
-  // Optimistic, before paint — so the runtime can start booting from the cached
-  // workspace id while the access query resolves.
+  // Optimistic, before paint: publish the URL target and invalidate any id from
+  // the previous route as one observable state change. RuntimeProvider can still
+  // resolve this slug through the offline workspace cache.
   useLayoutEffect(() => {
-    setWorkspaceSlug(workspaceSlug);
-  }, [setWorkspaceSlug, workspaceSlug]);
+    setWorkspaceContext({ slug: workspaceSlug, workspaceId: null });
+  }, [setWorkspaceContext, workspaceSlug]);
 
   useEffect(() => {
     if (workspaceSlug && access?.status === 'member' && access.organizationId) {
       writePreferredWorkspaceSlug(workspaceSlug);
-      setWorkspaceId(access.organizationId as WorkspaceId);
+      setWorkspaceContext({
+        slug: workspaceSlug,
+        workspaceId: access.organizationId as WorkspaceId,
+      });
     }
-  }, [access, setWorkspaceId, workspaceSlug]);
+  }, [access, setWorkspaceContext, workspaceSlug]);
 
-  // Clear the slug when the consumer unmounts so a stale workspace runtime
-  // doesn't linger.
+  // A route cleanup may run after the next route has already published its
+  // target. Only clear the scope owned by this hook instance.
   useEffect(() => {
+    if (!workspaceSlug) return undefined;
     return () => {
-      setWorkspaceSlug(null);
+      clearWorkspaceContextForSlug(workspaceSlug);
     };
-  }, [setWorkspaceSlug]);
+  }, [clearWorkspaceContextForSlug, workspaceSlug]);
 }
