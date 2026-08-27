@@ -30,3 +30,6 @@
 - Workflows triggered by `pull_request_target` have a write-capable token. They
   must never check out the pull request head or execute files supplied by the
   pull request. Read scripts and configuration from the base commit only.
+- PR-body comments require pull-request write permission. Treat comment creation,
+  updates, and cleanup as best-effort feedback; the checker result alone decides
+  whether the enforcement job passes or fails.

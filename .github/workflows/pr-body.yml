@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: pr-body-${{ github.event.pull_request.number }}
@@ -48,6 +48,7 @@ jobs:
 
       - name: Notify author on format failure
         if: steps.validate.outputs.code != '0'
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           FINDINGS_FILE: ${{ runner.temp }}/pr-body-check.txt
@@ -102,6 +103,7 @@ jobs:
 
       - name: Clear format failure comment on success
         if: steps.validate.outputs.code == '0'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -122,5 +124,5 @@ jobs:
             }
 
       - name: Fail when the body is invalid
-        if: steps.validate.outputs.code != '0'
+        if: always() && steps.validate.outputs.code != '0'
         run: exit 1
