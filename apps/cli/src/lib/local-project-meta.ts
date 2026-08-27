@@ -10,6 +10,7 @@ import {
   type LocalProjectMeta,
   type MachineDeleteLocalProjectCommand,
   type MachineId,
+  type SessionMeta,
   type WorkspaceId,
   writeMachineFlockRowToFlock,
 } from '@lody/shared';
@@ -27,6 +28,18 @@ export function shouldApplyMachineDeleteLocalProjectCommand(
   command: Pick<MachineDeleteLocalProjectCommand, 'requestedAt'>
 ): boolean {
   return project.createdAtMs <= command.requestedAt;
+}
+
+export function shouldArchiveSessionForLocalProjectRemoval(
+  session: Pick<SessionMeta, 'isArchived' | 'machineId' | 'project'>,
+  target: { machineId: MachineId; localProjectId: LocalProjectId }
+): boolean {
+  return (
+    session.isArchived !== true &&
+    session.machineId === target.machineId &&
+    session.project?.kind === 'local' &&
+    session.project.localProjectId === target.localProjectId
+  );
 }
 
 function readLegacyMachineLocalProjects(

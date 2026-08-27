@@ -44,10 +44,9 @@ function isSessionInLocalProject(session: SessionMeta, target: RemoveLocalProjec
  * hide the project optimistically while the owning machine applies the command
  * after syncing, even if it is offline when the user confirms.
  *
- * Sessions are preserved. Once the command is committed to the local Flock doc,
- * persistence, active-session cancellation, and remote sync continue in the
- * background. The owning CLI also stops any still-active sessions when it applies
- * the command.
+ * Once the command is committed to the local Flock doc, persistence,
+ * active-session cancellation, and remote sync continue in the background. The
+ * owning CLI archives the project's sessions before removing the project.
  */
 export function useRemoveLocalProject() {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);

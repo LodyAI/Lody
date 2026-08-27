@@ -2725,6 +2725,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                     'It does not delete the folder or files on disk.'
                   )}
                 </p>
+                <p>
+                  {t(
+                    'sidebar.localProjects.remove.archiveDescription',
+                    'Conversations in this project will be archived.'
+                  )}
+                </p>
               </div>
             </DialogDescription>
           </DialogHeader>

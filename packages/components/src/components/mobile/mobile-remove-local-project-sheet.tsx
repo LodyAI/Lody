@@ -53,7 +53,7 @@ export function MobileRemoveLocalProjectSheet({
   const sentinel = String.fromCharCode(0);
   const [descBefore, descAfter = ''] = t(
     'sidebar.localProjects.remove.remoteDescription',
-    'This removes the project from Lody on {{device}}. It does not delete the folder or files on disk.',
+    'This removes the project from Lody on {{device}} and archives its conversations. It does not delete the folder or files on disk.',
     { device: sentinel }
   ).split(sentinel);
 
