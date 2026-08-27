@@ -6,6 +6,10 @@ import { pathToFileURL } from 'node:url';
 const REQUIRED_HEADINGS = ['## Author type', '## Problem / pressure', '## Summary', '## Test plan'];
 const AGENT_CHECKBOX = /- \[x\] I am an Agent/i;
 const HUMAN_CHECKBOX = /- \[x\] I am a human/i;
+const SHARING_ALLOWED_CHECKBOX =
+  /- \[x\] Author-side user explicitly allowed publishing the Authoring context above/i;
+const SHARING_DECLINED_CHECKBOX =
+  /- \[x\] Author-side user explicitly declined publishing Authoring context/i;
 const AGENT_HANDOFF_BEGIN = '<!-- agent-handoff:begin -->';
 const AGENT_HANDOFF_END = '<!-- agent-handoff:end -->';
 const REQUIRED_AGENT_HEADINGS = [
@@ -14,7 +18,16 @@ const REQUIRED_AGENT_HEADINGS = [
   '### Authoring context',
   '### Sharing consent (author side)',
 ];
+const AUTHORING_CONTEXT_FIELDS = [
+  'User goal / directives',
+  'Constraints / non-goals',
+  'Risk-bearing decisions',
+  'Destructive or irreversible behavior',
+  'Deliberately not done or tested',
+  'Unknowns / confidence',
+];
 const PLACEHOLDER_ONLY = /^(?:<!--[\s\S]*?-->|\s|N\/?A|TODO|TBD|\(optional\))*$/i;
+const REDACTED_CONTEXT = /^(?:N\/?A(?:\s*\/\s*redacted)?|redacted)$/i;
 
 function parseArgs(argv) {
   const options = {
@@ -70,6 +83,24 @@ function isFilledSection(section) {
   return Boolean(withoutComments) && !PLACEHOLDER_ONLY.test(withoutComments);
 }
 
+function authoringContextField(section, field) {
+  const prefix = `- **${field}:**`;
+  const line = section?.split('\n').find((candidate) => candidate.trimStart().startsWith(prefix));
+  if (!line) {
+    return null;
+  }
+
+  return line
+    .trimStart()
+    .slice(prefix.length)
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .trim();
+}
+
+function isRedactedContext(value) {
+  return !value || REDACTED_CONTEXT.test(value.replaceAll('`', '').trim());
+}
+
 export function checkPullRequestBody(body) {
   const text = (body ?? '').replace(/\r\n/g, '\n');
   const findings = [];
@@ -96,8 +127,10 @@ export function checkPullRequestBody(body) {
     }
   }
 
-  const agent = AGENT_CHECKBOX.test(text);
-  const human = HUMAN_CHECKBOX.test(text);
+  const authorTypeSection =
+    requiredHeadingCounts.get('## Author type') === 1 ? sectionBody(text, '## Author type') : '';
+  const agent = AGENT_CHECKBOX.test(authorTypeSection);
+  const human = HUMAN_CHECKBOX.test(authorTypeSection);
   if (!agent && !human) {
     findings.push(
       'Author type: check exactly one of "I am an Agent" or "I am a human" (`- [x] ...`).'
@@ -115,8 +148,10 @@ export function checkPullRequestBody(body) {
   }
 
   if (agent) {
+    const agentHeadingCounts = new Map();
     for (const heading of REQUIRED_AGENT_HEADINGS) {
       const count = headingCount(text, heading);
+      agentHeadingCounts.set(heading, count);
       if (count === 0) {
         findings.push(`Agent PRs must include ${heading}.`);
       } else if (count > 1) {
@@ -127,6 +162,33 @@ export function checkPullRequestBody(body) {
     }
     if (!text.includes(AGENT_HANDOFF_BEGIN) || !text.includes(AGENT_HANDOFF_END)) {
       findings.push('Agent PRs must keep <!-- agent-handoff:begin/end --> markers.');
+    }
+
+    const consentSection =
+      agentHeadingCounts.get('### Sharing consent (author side)') === 1
+        ? sectionBody(text, '### Sharing consent (author side)')
+        : '';
+    const sharingAllowed = SHARING_ALLOWED_CHECKBOX.test(consentSection);
+    const sharingDeclined = SHARING_DECLINED_CHECKBOX.test(consentSection);
+    if (!sharingAllowed && !sharingDeclined) {
+      findings.push(
+        'Agent sharing consent: ask the author-side user and check exactly one consent option.'
+      );
+    } else if (sharingAllowed && sharingDeclined) {
+      findings.push('Agent sharing consent: check only one consent option, not both.');
+    }
+
+    if (agentHeadingCounts.get('### Authoring context') === 1) {
+      const context = sectionBody(text, '### Authoring context');
+      for (const field of AUTHORING_CONTEXT_FIELDS) {
+        const value = authoringContextField(context, field);
+        if (sharingAllowed && !isFilledSection(value)) {
+          findings.push(`Shared Authoring context must fill **${field}** with meaningful content.`);
+        }
+        if (sharingDeclined && !isRedactedContext(value)) {
+          findings.push(`Declined Authoring context must keep **${field}** empty or redacted.`);
+        }
+      }
     }
   }
 

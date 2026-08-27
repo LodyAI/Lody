@@ -9,8 +9,9 @@
 - Changes to required PR template headings must update the checker and its
   regression tests in the same commit. Run `pnpm check:github-config` locally.
 - External PRs identify exactly one author type. Agent-authored PRs retain the
-  complete Agent handoff block and its markers; human-authored PRs do not need
-  Agent context.
+  complete Agent handoff block and its markers, explicitly ask the author-side
+  user about publishing context, and record exactly one consent answer. Never
+  infer consent. Human-authored PRs do not need Agent context.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a pull request affects multiple product areas.
 - External pull request body enforcement is based on the PR author's

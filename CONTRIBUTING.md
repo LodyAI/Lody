@@ -76,7 +76,7 @@ This variable is optional. Never commit the generated data or credentials.
    docs: improve local setup guide
    ```
 
-5. Open a pull request using the provided template. Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. Agent-authored pull requests must also include the Agent handoff context. For external contributors, an automated check enforces this format.
+5. Open a pull request using the provided template. Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. Before publishing Agent handoff context, the authoring Agent must ask the author-side user for permission and record exactly one consent answer. For external contributors, an automated check enforces this format.
 
 Pull requests are automatically labeled with one or more `scope:*` labels based on the changed paths. These labels describe the affected product areas; contributors do not need to select them manually.
 
