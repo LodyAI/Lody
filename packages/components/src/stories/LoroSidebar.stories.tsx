@@ -34,7 +34,9 @@ import type {
 } from '@lody/shared';
 
 const NOW = Date.now();
-const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
+const DEMO_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-worktree', { type: 'running' }],
+]);
 
 const codexHistoryProvider = {
   cliType: 'builtin',
@@ -814,8 +816,8 @@ const demoProjects: LocalProjectMeta[] = [
 
 // A couple of local-project sessions so the single-line local row is exercised:
 // one running inside a worktree (shows the FolderTree mode icon) and one plain
-// local session (no mode icon). Live status is empty in the story, so the leading
-// status slot stays empty here.
+// local session (no mode icon). The first session stays live so the collapsed
+// project row demonstrates its aggregate running indicator.
 const demoLocalSessions: SessionMeta[] = [
   {
     id: 'local-sess-worktree' as SessionId,
@@ -999,7 +1001,7 @@ function ProductionLikeTopContent({
                       project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
                     }
                     childSessionsByParent={new Map()}
-                    liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                    liveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
                     formattedPath={project.rootPath}
                     defaultSessionTitle="Untitled"
                     selectedSessionId={null}
@@ -1052,7 +1054,7 @@ function ProductionLikeTopContent({
                   isSelected={false}
                   sessionsForProject={[] as SessionMeta[]}
                   childSessionsByParent={new Map()}
-                  liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                  liveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
                   formattedPath={project.rootPath}
                   defaultSessionTitle="Untitled"
                   selectedSessionId={null}
