@@ -371,8 +371,26 @@
   position: absolute;
   left: max(0px, calc((100% - var(--site-content-width)) / 2));
   bottom: clamp(1.75rem, 5vh, 3.25rem);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
   color: hsl(var(--landing-ink-muted));
   /* Scrolls off with the hero — no dive fade. */
+}
+
+.underwater-hero__scroll-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.underwater-hero__scroll-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
 }
 
 .underwater-hero__scroll-chevron {
@@ -388,11 +406,11 @@
 @keyframes underwater-bob {
   0%,
   100% {
-    transform: rotate(45deg) translate(0, 0);
+    transform: rotate(45deg) translate(-1.5px, -1.5px);
     opacity: 0.55;
   }
   50% {
-    transform: rotate(45deg) translate(3px, 3px);
+    transform: rotate(45deg) translate(1.5px, 1.5px);
     opacity: 1;
   }
 }
