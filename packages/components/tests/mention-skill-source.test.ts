@@ -3,6 +3,7 @@ import { applyTextRewrites, type ProjectSkill, type ProjectSkillGroup } from '@l
 import {
   buildSkillMentionItems,
   buildSkillMentionRewrites,
+  getAllowedSkillMentionDirs,
   getSkillMentionToken,
   hydrateSkillMentionsFromText,
   mergeMentionSkillState,
@@ -197,6 +198,43 @@ describe('selectSkillMentionCandidates', () => {
   });
 });
 
+describe('getAllowedSkillMentionDirs', () => {
+  it.each(['custom-1234', 'unknown-agent'])(
+    'does not restrict scanned skills for unregistered agent type %s',
+    (agentType) => {
+      expect(getAllowedSkillMentionDirs({ cliType: 'custom', agentType })).toBeNull();
+    }
+  );
+
+  it('returns the registered project and global directories for a known agent', () => {
+    expect(getAllowedSkillMentionDirs({ cliType: 'claude', agentType: 'claude-code' })).toEqual(
+      new Set(['.claude/skills', '~/.claude/skills'])
+    );
+  });
+
+  it('preserves an explicitly registered empty directory set', () => {
+    expect(getAllowedSkillMentionDirs({ cliType: 'deepagents', agentType: 'deepagents' })).toEqual(
+      new Set()
+    );
+  });
+
+  it('keeps scanned candidates for a custom agent', () => {
+    const items = buildSkillMentionItems(GROUPS);
+    const allowedDirs = getAllowedSkillMentionDirs({
+      cliType: 'custom',
+      agentType: 'custom-1234',
+    });
+
+    expect(selectSkillMentionCandidates(items, '', allowedDirs).map((item) => item.token)).toEqual([
+      'claude-only',
+      'code-review',
+      'deep-research',
+      'global-only',
+      'qwen-only',
+    ]);
+  });
+});
+
 describe('hydrateSkillMentionsFromText', () => {
   it('rebuilds ranges for known $tokens only', () => {
     const known = new Set(['code-review', 'deep-research']);
@@ -219,11 +257,7 @@ describe('buildSkillMentionRewrites', () => {
   });
 
   it('expands global skill tokens to absolute skill paths when present', () => {
-    const result = expandInText(
-      'run $global-only',
-      items,
-      new Set(['~/.claude/skills'])
-    );
+    const result = expandInText('run $global-only', items, new Set(['~/.claude/skills']));
 
     expect(result).toBe(
       'run use /global-only [Skill Path](/home/user/.claude/skills/global-only/SKILL.md)'
@@ -231,11 +265,7 @@ describe('buildSkillMentionRewrites', () => {
   });
 
   it('uses the selected provider directories before resolving duplicate tokens', () => {
-    const result = expandInText(
-      'run $code-review',
-      items,
-      new Set(['.claude/skills'])
-    );
+    const result = expandInText('run $code-review', items, new Set(['.claude/skills']));
 
     expect(result).toBe('run use /code-review [Skill Path](.claude/skills/code-review/SKILL.md)');
   });

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import {
+  ACP_SKILL_DIRS_BY_AGENT_TYPE,
   compareProjectSkillScope,
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
@@ -167,6 +168,9 @@ export function getAllowedSkillMentionDirs(
   skillAgent: { cliType?: AgentConfigCliType; agentType?: string } | undefined
 ): ReadonlySet<string> | null {
   if (!skillAgent?.cliType || !skillAgent.agentType) {
+    return null;
+  }
+  if (!(skillAgent.agentType in ACP_SKILL_DIRS_BY_AGENT_TYPE)) {
     return null;
   }
   const agent = { cliType: skillAgent.cliType, agentType: skillAgent.agentType };

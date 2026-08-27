@@ -20,7 +20,9 @@ Product-level mention sources built on `src/ui/mention`.
   each filtered by the provider's `getRegisteredGlobalSkillDirs` /
   `getRegisteredSystemSkillDirs`. `~/.agents/skills` is a provider-specific
   alias, not a universal fallback: only providers with verified support register
-  it. The scanner handles flat `~/<agent>/skills/<skill>/SKILL.md` and catalog
+  it. An unregistered agent type has no mention-directory whitelist and may use
+  every scanned skill; a registered type with no directories keeps an explicit
+  empty whitelist. The scanner handles flat `~/<agent>/skills/<skill>/SKILL.md` and catalog
   `~/<agent>/skills/<category>/<skill>/SKILL.md`; paths outside the provider's
   registered roots (e.g. plugin caches) appear only once their dirs are added.
 - Before send, known `$` skill tokens are expanded in prompt text to
