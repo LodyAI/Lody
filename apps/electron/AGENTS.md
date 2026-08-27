@@ -114,9 +114,10 @@ Root `AGENTS.md` also applies.
   them into `app.asar.unpacked`, assert the DeepSeek adapter plus all four pinned
   presets, then probe CLI `--help`, node-pty loading, and a real in-memory SQLite
   database before signing.
-- Keep `better-sqlite3 >= 13.0.2`, CLI `engines.node >= 22.14.0`, the first-import
-  guard in `sqlite-runtime-support.ts`, and its tests aligned. Older Node versions can
-  segfault while loading the N-API 10 binding. Linux armv7 is unsupported.
+- Keep `better-sqlite3 >= 13.0.2`, the Node-API 10 engine range
+  (`>=22.14.0 <23 || >=23.6.0`), the first-import guard in
+  `sqlite-runtime-support.ts`, and its tests aligned. Older runtimes can segfault
+  while loading the binding. Linux armv7 is unsupported.
 - When upgrading `@lydell/node-pty`, audit package layout and Windows ConPTY binding
   names. Apply the staged asar-path repair after downloading target artifacts; a pnpm
   patch cannot cover cross-architecture packages fetched during packaging.

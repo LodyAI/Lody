@@ -39,8 +39,8 @@ Loro, Flock, session-schema, or network dependency.
 - SQLite uses WAL, `synchronous=FULL`, foreign keys, incremental auto-vacuum, gzip
   level 1 by default, and a single worker-owned connection. zstd level 1 is explicit
   opt-in only when every reader runtime supports it.
-- `better-sqlite3` requires Node >=22.14 / Node-API 10 and x64 or arm64; the SQLite
-  entry fails before loading the addon on unsupported runtimes.
+- `better-sqlite3` requires Node-API 10 (Node 22.14+, 23.6+, or later) and x64 or
+  arm64; the SQLite entry fails before loading the addon on unsupported runtimes.
 - Reads verify reconstructed snapshot SHA-256 and run selection + reconstruction in a
   short read transaction. Bounded reads check manifest `raw_size` before allocating,
   decompressing, or crossing the worker boundary. `PRAGMA application_id` owns new

@@ -101,7 +101,8 @@ after changing package scope or cloud/local composition.
 
 ## Checks and commits
 
-Use Node.js 22+ and the pnpm version pinned in `package.json`.
+Use a Node.js release with Node-API 10 (22.14+, 23.6+, or later) and the pnpm
+version pinned in `package.json`.
 
 - Install dependencies with `pnpm install`.
 - When this checkout is embedded in a parent pnpm workspace, that parent owns
