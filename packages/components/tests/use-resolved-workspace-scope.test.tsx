@@ -5,7 +5,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { WorkspaceId } from '@lody/shared';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { docMetaCacheScopeAtom } from '../src/atoms/doc-meta';
+import { runtimeAtom } from '../src/atoms/runtime';
 import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
 import {
   useResolvedWorkspaceScope,
@@ -65,6 +68,44 @@ describe('useResolvedWorkspaceScope', () => {
         createElement(
           WorkspaceRouteTargetProvider,
           { slug: 'workspace-b' },
+          createElement(ScopeProbe, {
+            onSnapshot: (value) => {
+              snapshot = value;
+            },
+          })
+        )
+      )
+    );
+
+    expect(snapshot).toEqual({ workspaceId: null, enabled: false });
+  });
+
+  it('fails closed when the authoritative id disagrees with a same-slug cached runtime', async () => {
+    const store = createStore();
+    const runtime = {
+      workspaceSlug: 'workspace-a',
+      workspaceId: 'cached-workspace-a-id' as WorkspaceId,
+    } as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: true,
+    });
+    store.set(setWorkspaceContextAtom, {
+      slug: 'workspace-a',
+      workspaceId: 'server-workspace-a-id' as WorkspaceId,
+    });
+    let snapshot: ScopeSnapshot | undefined;
+
+    await render(
+      createElement(
+        Provider,
+        { store },
+        createElement(
+          WorkspaceRouteTargetProvider,
+          { slug: 'workspace-a' },
           createElement(ScopeProbe, {
             onSnapshot: (value) => {
               snapshot = value;

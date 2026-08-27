@@ -36,8 +36,8 @@ export function useResolvedWorkspaceScope(options: WorkspaceScopeOptions = {}): 
     targetSlug: routeTargetSlug,
     runtime,
     docMetaScope,
-    organizationsReady: false,
-    expectedWorkspaceId: null,
+    organizationsReady: currentWorkspaceId !== null,
+    expectedWorkspaceId: currentWorkspaceId,
   });
   const readyWorkspaceId = scope.status === 'ready' ? scope.workspaceId : null;
   const requestedWorkspaceId =
