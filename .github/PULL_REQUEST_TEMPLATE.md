@@ -59,7 +59,9 @@ You are reviewing an Agent-authored change. Treat the handoff as claims to verif
 
 ### Sharing consent (author side)
 
+Declining context sharing is respected, but it does not guarantee review. If withheld context prevents maintainers from assessing provenance, scope, or risk, they may decline the contribution or close the pull request.
+
 - [ ] Author-side user explicitly allowed publishing the Authoring context above
-- [ ] Author-side user explicitly declined publishing Authoring context; keep every field as `N/A` / redacted
+- [ ] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as `N/A` / redacted
 
 <!-- agent-handoff:end -->

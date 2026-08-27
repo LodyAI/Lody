@@ -40,7 +40,7 @@ Perform the required risk scan and report actionable findings.
 ### Sharing consent (author side)
 
 - [x] Author-side user explicitly allowed publishing the Authoring context above
-- [ ] Author-side user explicitly declined publishing Authoring context; keep every field as \`N/A\` / redacted
+- [ ] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as \`N/A\` / redacted
 
 <!-- agent-handoff:end -->`;
 
@@ -151,8 +151,8 @@ assert.ok(
 
 const bothConsentResult = checkPullRequestBody(
   validAgentBody.replace(
-    '- [ ] Author-side user explicitly declined publishing Authoring context; keep every field as `N/A` / redacted',
-    '- [x] Author-side user explicitly declined publishing Authoring context; keep every field as `N/A` / redacted'
+    '- [ ] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as `N/A` / redacted',
+    '- [x] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as `N/A` / redacted'
   )
 );
 assert.ok(
@@ -179,8 +179,8 @@ const declinedConsentBody = validAgentBody
     '- [ ] Author-side user explicitly allowed publishing the Authoring context above'
   )
   .replace(
-    '- [ ] Author-side user explicitly declined publishing Authoring context; keep every field as `N/A` / redacted',
-    '- [x] Author-side user explicitly declined publishing Authoring context; keep every field as `N/A` / redacted'
+    '- [ ] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as `N/A` / redacted',
+    '- [x] Author-side user explicitly declined publishing Authoring context and understands that maintainers may decline or close the contribution; keep every field as `N/A` / redacted'
   )
   .replace(
     /- \*\*(?:User goal \/ directives|Constraints \/ non-goals|Risk-bearing decisions|Destructive or irreversible behavior|Deliberately not done or tested|Unknowns \/ confidence):\*\*[^\n]*/g,
