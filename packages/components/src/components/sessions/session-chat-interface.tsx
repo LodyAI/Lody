@@ -3896,11 +3896,7 @@ export const SessionChatInterface = memo(
       async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
         const accepted = await handleSendMessage(inputBlocks);
         if (accepted) {
-          // Supersede the abandoned delivery attempt. The ordinary send clears
-          // the missing-history marker, and without a terminal status the stale
-          // pending entry would become dispatchable again (duplicating the just
-          // resent content). 'canceled' is the truthful terminal state and also
-          // hides the row's not-delivered label independent of the marker.
+          // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
             await updateHistoryEntry(userTurnId, (entry) => ({
               ...entry,
