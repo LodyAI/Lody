@@ -1,0 +1,75 @@
+# Path-based impact scopes. A pull request may receive more than one label.
+'scope: cli':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'apps/cli/**'
+          - 'packages/cli-supervisor/**'
+
+'scope: desktop':
+  - changed-files:
+      - any-glob-to-any-file: 'apps/electron/**'
+
+'scope: components':
+  - changed-files:
+      - any-glob-to-any-file: 'packages/components/**'
+
+'scope: platform':
+  - changed-files:
+      - any-glob-to-any-file: 'packages/platform/**'
+
+'scope: cloud-api':
+  - changed-files:
+      - any-glob-to-any-file: 'packages/cloud-api/**'
+
+'scope: shared':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packages/shared/**'
+          - 'packages/ignore/**'
+
+'scope: streams-rpc':
+  - changed-files:
+      - any-glob-to-any-file: 'packages/loro-streams-rpc/**'
+
+'scope: code-review':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packages/code-review-helper/**'
+          - 'packages/code-review-viewer/**'
+          - 'packages/turn-diff-store/**'
+
+'scope: agent-runtime':
+  - changed-files:
+      - any-glob-to-any-file:
+          # Include both workspace files and submodule gitlink updates.
+          - 'packages/acp-extension-*'
+          - 'packages/acp-extension-*/**'
+
+'scope: docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'site-docs/**'
+          - 'README*.md'
+          - 'CONTRIBUTING.md'
+          - 'DEV.md'
+          - 'LICENSE'
+          - 'SECURITY.md'
+          - 'THIRD_PARTY_NOTICES.md'
+
+'scope: repository':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - '.gitignore'
+          - '.gitmodules'
+          - '.oxlintrc.json'
+          - '.prettierignore'
+          - '.prettierrc'
+          - 'scripts/**'
+          - 'packages/configs/**'
+          - 'patches/**'
+          - 'package.json'
+          - 'pnpm-lock.yaml'
+          - 'pnpm-workspace.yaml'
+          - 'tsconfig.json'
+          - 'tsconfig.*.json'

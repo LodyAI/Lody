@@ -1,0 +1,128 @@
+name: PR body
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: pr-body-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check PR body format
+    if: >-
+      ${{
+        github.event.pull_request.author_association != 'OWNER' &&
+        github.event.pull_request.author_association != 'MEMBER' &&
+        !endsWith(github.event.pull_request.user.login, '[bot]')
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      # This workflow has a write-capable token. Only load the trusted base
+      # commit; never check out or execute the pull request head.
+      - name: Checkout base commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Test PR body checker
+        run: node .github/scripts/check-pr-body.test.mjs
+
+      - name: Validate PR body
+        id: validate
+        continue-on-error: true
+        env:
+          FINDINGS_FILE: ${{ runner.temp }}/pr-body-check.txt
+        run: |
+          set +e
+          node .github/scripts/check-pr-body.mjs \
+            --event-file "$GITHUB_EVENT_PATH" > "$FINDINGS_FILE" 2>&1
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          cat "$FINDINGS_FILE"
+
+      - name: Notify author on format failure
+        if: steps.validate.outputs.code != '0'
+        uses: actions/github-script@v7
+        env:
+          FINDINGS_FILE: ${{ runner.temp }}/pr-body-check.txt
+        with:
+          script: |
+            const fs = require('node:fs')
+            const marker = '<!-- lody-pr-body-format-check -->'
+            const author = context.payload.pull_request.user.login
+            const findings = fs.readFileSync(process.env.FINDINGS_FILE, 'utf8')
+              .trim()
+              .split('\n')
+              .slice(0, 40)
+              .join('\n')
+            const body = [
+              marker,
+              `@${author}, this pull request body does **not** match Lody's PR template.`,
+              '',
+              'Please update the description using `.github/PULL_REQUEST_TEMPLATE.md` and fill every required section.',
+              'Check exactly one **Author type**. Agent-authored PRs must also keep and complete the **Agent handoff** block.',
+              '',
+              '<details><summary>Checker findings</summary>',
+              '',
+              '```text',
+              findings || '(no details)',
+              '```',
+              '',
+              '</details>',
+            ].join('\n')
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            })
+            const existing = comments.find(comment => comment.body?.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              })
+            }
+
+      - name: Clear format failure comment on success
+        if: steps.validate.outputs.code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- lody-pr-body-format-check -->'
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            })
+            const existing = comments.find(comment => comment.body?.includes(marker))
+            if (existing) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+              })
+            }
+
+      - name: Fail when the body is invalid
+        if: steps.validate.outputs.code != '0'
+        run: exit 1

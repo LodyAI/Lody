@@ -1,0 +1,27 @@
+name: PR scope labels
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label affected areas
+    runs-on: ubuntu-latest
+    steps:
+      # pull_request_target provides write access for fork PRs. Do not check out
+      # or execute the untrusted pull request head in this workflow.
+      - uses: actions/labeler@v6
+        with:
+          repo-token: ${{ github.token }}
+          configuration-path: '.github/labeler.yml'
+          sync-labels: true
