@@ -19,11 +19,11 @@ const REQUIRED_AGENT_HEADINGS = [
   '### Sharing consent (author side)',
 ];
 const REVIEW_INSTRUCTION_FIELDS = [
-  'Review these files / flows',
+  'Review focus',
   'Decisions to challenge',
-  'Plausible failure modes',
-  'Evidence gaps',
+  'Plausible failures / evidence gaps',
 ];
+const MAX_REVIEW_INSTRUCTIONS_LENGTH = 1_200;
 const AUTHORING_CONTEXT_FIELDS = [
   'User goal / directives',
   'Constraints / non-goals',
@@ -205,6 +205,12 @@ export function checkPullRequestBody(body) {
             `Agent review instructions must fill **${field}** with PR-specific content.`
           );
         }
+      }
+      const visibleInstructions = instructions.replace(/<!--[\s\S]*?-->/g, '').trim();
+      if (visibleInstructions.length > MAX_REVIEW_INSTRUCTIONS_LENGTH) {
+        findings.push(
+          `Agent review instructions must stay under ${MAX_REVIEW_INSTRUCTIONS_LENGTH} characters and include only the highest-value review guidance.`
+        );
       }
     }
   }

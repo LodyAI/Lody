@@ -76,7 +76,7 @@ This variable is optional. Never commit the generated data or credentials.
    docs: improve local setup guide
    ```
 
-5. Open a pull request using the provided template. Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. An authoring Agent must give the maintainers' reviewing Agent PR-specific review targets, decisions to challenge, plausible failure modes, and evidence gaps. Before publishing Agent handoff context, it must also ask the author-side user for permission and record exactly one consent answer. Context sharing may be declined, but maintainers may decline or close a contribution when withheld context prevents a safe review. For external contributors, an automated check enforces this format.
+5. Open a pull request using the provided template. Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. An authoring Agent must give the maintainers' reviewing Agent a concise, PR-specific review focus, decisions to challenge, and plausible failures or evidence gaps. Before publishing Agent handoff context, it must also ask the author-side user for permission and record exactly one consent answer. Context sharing may be declined, but maintainers may decline or close a contribution when withheld context prevents a safe review. For external contributors, an automated check enforces this format.
 
 Pull requests are automatically labeled with one or more `scope:*` labels based on the changed paths. These labels describe the affected product areas; contributors do not need to select them manually.
 

@@ -33,15 +33,13 @@ this section unchanged or mark it N/A.
 <!--
 Required and PR-specific. The authoring Agent writes this handoff for the
 organization owners' reviewing Agent. Do not paste a generic review checklist.
-Point to concrete files, flows, decisions, plausible failures, and missing
-evidence in this PR. Mention destructive, authority, compatibility, recovery,
-or public-boundary risks only where they are relevant to this change.
+Keep each item to one concise sentence and the whole section under 1,200
+characters. Include only the highest-value files, decisions, risks, and gaps.
 -->
 
-- **Review these files / flows:** <!-- Where should review effort concentrate, and why? -->
+- **Review focus:** <!-- Which concrete files or flows deserve attention, and why? -->
 - **Decisions to challenge:** <!-- Which deliberate choices need independent judgment? -->
-- **Plausible failure modes:** <!-- What medium/high-risk breakage could be hidden in this change? -->
-- **Evidence gaps:** <!-- What remains untested, uncertain, or dependent on post-merge behavior? -->
+- **Plausible failures / evidence gaps:** <!-- What material breakage or uncertainty remains? -->
 
 ### Authoring context
 

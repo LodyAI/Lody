@@ -26,10 +26,9 @@ const validAgentHandoff = `## Agent handoff
 
 ### Instructions for reviewing agents
 
-- **Review these files / flows:** Inspect the target-event workflows and body parser.
+- **Review focus:** Inspect the target-event workflows and body parser.
 - **Decisions to challenge:** Verify that organization membership is the right exemption boundary.
-- **Plausible failure modes:** A fork-controlled file could execute with a write token.
-- **Evidence gaps:** The workflows cannot execute until merged to the default branch.
+- **Plausible failures / evidence gaps:** A fork-controlled file could execute with a write token; the workflows cannot execute until merged.
 
 ### Authoring context
 
@@ -178,13 +177,22 @@ assert.ok(
 
 const incompleteReviewInstructionsResult = checkPullRequestBody(
   validAgentBody.replace(
-    '- **Plausible failure modes:** A fork-controlled file could execute with a write token.',
-    '- **Plausible failure modes:** <!-- Not filled. -->'
+    '- **Plausible failures / evidence gaps:** A fork-controlled file could execute with a write token; the workflows cannot execute until merged.',
+    '- **Plausible failures / evidence gaps:** <!-- Not filled. -->'
   )
 );
 assert.ok(
   incompleteReviewInstructionsResult.findings.includes(
-    'Agent review instructions must fill **Plausible failure modes** with PR-specific content.'
+    'Agent review instructions must fill **Plausible failures / evidence gaps** with PR-specific content.'
+  )
+);
+
+const oversizedReviewInstructionsResult = checkPullRequestBody(
+  validAgentBody.replace('Inspect the target-event workflows and body parser.', 'x'.repeat(1_201))
+);
+assert.ok(
+  oversizedReviewInstructionsResult.findings.includes(
+    'Agent review instructions must stay under 1200 characters and include only the highest-value review guidance.'
   )
 );
 
