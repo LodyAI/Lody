@@ -121,6 +121,7 @@ import {
   buildChildSessionsByParent,
   buildSessionListRows,
   buildSidebarOpenerRowResolver,
+  getEffectiveProjectActivitySummary,
   getEffectiveSessionActivitySummary,
   getEffectiveLatestMessageAt,
   getLatestPullRequestInfo,
@@ -150,6 +151,7 @@ import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
+  SessionRowIndicator,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -685,6 +687,8 @@ export type LocalProjectItemProps = {
   canNavigateProject: boolean;
   collapsed: boolean;
   isSelected: boolean;
+  /** All project Sessions, including pinned rows rendered in the separate top section. */
+  activitySessionsForProject?: SessionMeta[];
   sessionsForProject: SessionMeta[];
   /**
    * Map of parent session id -> non-archived child sessions. Used to roll up
@@ -752,6 +756,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   canNavigateProject,
   collapsed,
   isSelected,
+  activitySessionsForProject,
   sessionsForProject,
   childSessionsByParent,
   liveSessionStatuses,
@@ -801,13 +806,25 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     [childSessionsByParent, collapsedOpenedBySessionIds, resolveOpenerRowId, sessionsForProject]
   );
   const showTreeGutter = hasOpenedByTreeNesting(sessionNodes);
+  const projectActivity = useMemo(
+    () =>
+      getEffectiveProjectActivitySummary(
+        activitySessionsForProject ?? sessionsForProject,
+        childSessionsByParent,
+        liveSessionStatuses
+      ),
+    [activitySessionsForProject, childSessionsByParent, liveSessionStatuses, sessionsForProject]
+  );
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
-  const ariaLabel = formattedPath
-    ? trimmedMachineName
-      ? `${project.name} · ${trimmedMachineName} · ${formattedPath}`
-      : `${project.name} · ${formattedPath}`
-    : project.name;
+  const projectActivityLabel = projectActivity.isWaitingPermission
+    ? t('sessions.status.requestPermission', 'Request Permission')
+    : projectActivity.isWorking
+      ? t('sessions.status.running', 'Running')
+      : null;
+  const ariaLabel = [project.name, trimmedMachineName, formattedPath, projectActivityLabel]
+    .filter(Boolean)
+    .join(' · ');
   const showSelectedState = isSelected && !isMobile;
   const handleNavigate = useCallback(() => {
     if (!canNavigateProject) return;
@@ -879,6 +896,21 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </button>
               <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
 
+              {projectActivity.isWorking ? (
+                <span
+                  data-sidebar-project-activity={
+                    projectActivity.isWaitingPermission ? 'requestPermission' : 'running'
+                  }
+                  className="flex h-5 w-5 shrink-0 items-center justify-center"
+                  aria-hidden="true"
+                >
+                  <SessionRowIndicator
+                    isWaitingPermission={projectActivity.isWaitingPermission}
+                    isWorking
+                  />
+                </span>
+              ) : null}
+
               {canRemoveProject ? (
                 <div className="relative h-5 w-5 shrink-0">
                   <button
@@ -908,9 +940,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               ) : null}
             </div>
           </TooltipTrigger>
-          {formattedPath || trimmedMachineName ? (
+          {formattedPath || trimmedMachineName || projectActivityLabel ? (
             <TooltipContent side="right" align="start" className="max-w-[420px] break-all">
               <div className="flex flex-col gap-0.5 text-xs">
+                {projectActivityLabel ? <span>{projectActivityLabel}</span> : null}
                 {trimmedMachineName ? (
                   <span className="text-muted-foreground">{trimmedMachineName}</span>
                 ) : null}
@@ -1926,6 +1959,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         canNavigateProject={section.canNavigateProject}
                         collapsed={collapsed}
                         isSelected={isSelected}
+                        activitySessionsForProject={
+                          localProjectSessionsByKey.get(projectKey) ?? sessionsForProject
+                        }
                         sessionsForProject={sessionsForProject}
                         childSessionsByParent={childSessionsByParent}
                         liveSessionStatuses={liveSessionStatuses}

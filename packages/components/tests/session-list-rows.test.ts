@@ -6,6 +6,7 @@ import {
   buildChildSessionsByParent,
   buildSessionListRows,
   getEffectiveLatestMessageAt,
+  getEffectiveProjectActivitySummary,
   getEffectiveSessionActivitySummary,
 } from '../src/components/sessions/session-list-rows';
 
@@ -276,6 +277,50 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
       isWaitingPermission: false,
       hasUnreadMessages: false,
       latestMessageAt: parent.lastMessageAt,
+    });
+  });
+});
+
+describe('getEffectiveProjectActivitySummary', () => {
+  test('reports running when any project session has live activity', () => {
+    const idleSession = makeSession({ id: 'idle' });
+    const runningSession = makeSession({ id: 'running' });
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [runningSession.id, { type: 'running' }],
+    ]);
+
+    expect(
+      getEffectiveProjectActivitySummary(
+        [idleSession, runningSession],
+        new Map(),
+        liveSessionStatuses
+      )
+    ).toEqual({ isWorking: true, isWaitingPermission: false });
+  });
+
+  test('gives child-tab permission activity precedence over running', () => {
+    const runningSession = makeSession({ id: 'running' });
+    const child = makeSession({
+      id: 'permission-child',
+      parentSessionId: runningSession.id,
+    });
+    const children = buildChildSessionsByParent([runningSession, child]);
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [runningSession.id, { type: 'running' }],
+      [child.id, { type: 'requestPermission' }],
+    ]);
+
+    expect(
+      getEffectiveProjectActivitySummary([runningSession], children, liveSessionStatuses)
+    ).toEqual({ isWorking: true, isWaitingPermission: true });
+  });
+
+  test('ignores durable status without live presence', () => {
+    const session = makeSession({ id: 'stale', status: { type: 'running' } });
+
+    expect(getEffectiveProjectActivitySummary([session])).toEqual({
+      isWorking: false,
+      isWaitingPermission: false,
     });
   });
 });

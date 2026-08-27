@@ -119,7 +119,7 @@ function MaskedPrCiIcon({
  * unless it is working / unread — but the slot is always reserved so the ⋯ menu
  * button can reveal there on hover without shifting the row.
  */
-function SessionRowIndicator({
+export function SessionRowIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,

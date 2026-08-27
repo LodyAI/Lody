@@ -229,6 +229,34 @@ export function getEffectiveSessionActivitySummary(
   };
 }
 
+export type EffectiveProjectActivitySummary = Pick<
+  EffectiveSessionActivitySummary,
+  'isWorking' | 'isWaitingPermission'
+>;
+
+/** Aggregate live activity for a local-project sidebar row. */
+export function getEffectiveProjectActivitySummary(
+  sessions: SessionMeta[],
+  childSessionsByParent?: Map<string, SessionMeta[]>,
+  liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
+): EffectiveProjectActivitySummary {
+  let isWorking = false;
+
+  for (const session of sessions) {
+    const activity = getEffectiveSessionActivitySummary(
+      session,
+      childSessionsByParent,
+      liveSessionStatuses
+    );
+    if (activity.isWaitingPermission) {
+      return { isWorking: true, isWaitingPermission: true };
+    }
+    isWorking ||= activity.isWorking;
+  }
+
+  return { isWorking, isWaitingPermission: false };
+}
+
 type LatestPullRequestInfo = {
   url: string | null;
   number: number | null;
