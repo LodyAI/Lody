@@ -48,6 +48,8 @@ export interface UseStickyScrollResult {
   isSticky: boolean;
   /** Force-scroll to bottom and re-enable sticky mode. */
   scrollToBottom: () => void;
+  /** Whether the initial cached/end position has been applied to the virtualizer. */
+  initialScrollRestored: boolean;
   /** Pass to Virtua's onScroll prop. */
   handleScroll: (offset: number) => void;
 }
@@ -161,6 +163,7 @@ export function useStickyScroll({
   const scrollElementRef = useRef<HTMLDivElement | null>(null);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const initialScrollRestoredRef = useRef(false);
+  const [initialScrollRestored, setInitialScrollRestored] = useState(false);
 
   const handleWheelUp = useCallback(
     (event: WheelEvent) => {
@@ -221,6 +224,7 @@ export function useStickyScroll({
         scrollToRealBottom();
       }
       initialScrollRestoredRef.current = true;
+      setInitialScrollRestored(true);
     });
   }, [itemCount, scrollToBottomWithLock, scrollToRealBottom, stopScroll, vlistRef]);
 
@@ -276,5 +280,12 @@ export function useStickyScroll({
     suppressAutoScrollRef,
   });
 
-  return { scrollRef: setScrollRef, scrollElement, isSticky, scrollToBottom, handleScroll };
+  return {
+    scrollRef: setScrollRef,
+    scrollElement,
+    isSticky,
+    scrollToBottom,
+    initialScrollRestored,
+    handleScroll,
+  };
 }

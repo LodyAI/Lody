@@ -300,6 +300,7 @@ describe('useStickyScroll Virtua adapter', () => {
       scrollElement: fixture.scrollElement,
       itemCount: 4,
     });
+    expect(latestResult?.initialScrollRestored).toBe(false);
     await act(async () => {
       await advanceAnimationFrames();
     });
@@ -307,6 +308,7 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(vlist.scrollTo).toHaveBeenCalledWith(96);
     expect(fixture.getScrollTop()).toBe(96);
     expect(latestResult?.isSticky).toBe(false);
+    expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
   it('unsticks after a real upward user scroll and does not auto-scroll on later content changes', async () => {

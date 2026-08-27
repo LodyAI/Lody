@@ -1310,6 +1310,7 @@ export const SessionChatStreamView = forwardRef<
       scrollElement: scrollViewportElement,
       isSticky,
       scrollToBottom,
+      initialScrollRestored,
       handleScroll,
     } = useStickyScroll({
       sessionId,
@@ -1376,7 +1377,7 @@ export const SessionChatStreamView = forwardRef<
 
     const syncActiveOutlineIndex = useCallback(() => {
       const vlist = vlistRef.current;
-      if (!vlist || outlineAnchors.length === 0) {
+      if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
         setActiveOutlineIndex(-1);
         return;
       }
@@ -1393,12 +1394,12 @@ export const SessionChatStreamView = forwardRef<
         isAtEnd
       );
       setActiveOutlineIndex(next);
-    }, [leadingRowCount, outlineAnchors]);
+    }, [initialScrollRestored, leadingRowCount, outlineAnchors]);
 
-    // Read the sync through a ref so this effect keys on the ELEMENT alone.
-    // Depending on the callback would re-run it — two `getBoundingClientRect`
-    // and an observer teardown/rebuild — on every streamed delta, which is
-    // exactly the forced layout the measurement comment above rules out.
+    // Read the sync through refs so this effect only re-runs when the viewport
+    // is bound or its one-time initial position restore completes. Depending on
+    // the callback would re-run it on every streamed delta, which is exactly the
+    // forced layout the measurement comment above rules out.
     const syncActiveOutlineIndexRef = useLatestRef(syncActiveOutlineIndex);
     const measureItemOffsetDeltaRef = useLatestRef(measureItemOffsetDelta);
     useEffect(() => {
@@ -1409,7 +1410,12 @@ export const SessionChatStreamView = forwardRef<
       };
       remeasure();
       return observeResizeOnAnimationFrame(scrollViewportElement, remeasure);
-    }, [measureItemOffsetDeltaRef, scrollViewportElement, syncActiveOutlineIndexRef]);
+    }, [
+      initialScrollRestored,
+      measureItemOffsetDeltaRef,
+      scrollViewportElement,
+      syncActiveOutlineIndexRef,
+    ]);
 
     /** How far a pending jump still is from its target, in item-offset space. */
     const outlineJumpDrift = useCallback(

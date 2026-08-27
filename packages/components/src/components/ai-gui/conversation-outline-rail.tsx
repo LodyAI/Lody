@@ -66,13 +66,11 @@ import {
  */
 
 /**
- * Hovering must not flash a card while the pointer merely crosses the rail, but
- * a reader scanning several rounds should not wait each time. Same warm/grace
- * model as `session-info-hover-card.tsx`, with a shorter warmup: the ticks are
- * denser than sidebar rows, so the pointer settles on one deliberately.
+ * The rail uses a short hover-intent warmup so brushing across ticks does not
+ * flash cards, while the Popover's own presence animation supplies the visual
+ * transition once the pointer settles.
  */
-const HOVER_WARMUP_MS = 320;
-const HOVER_CLOSE_DELAY_MS = 140;
+const HOVER_WARMUP_MS = 200;
 const HOVER_WARM_WINDOW_MS = 2_500;
 
 export interface ConversationOutlineRailProps {
@@ -218,6 +216,8 @@ export function ConversationOutlineRail({
   const [pointerIndex, setPointerIndex] = useState(-1);
   /** One state, because the index and its anchor are never meaningful apart. */
   const [hoverCard, setHoverCard] = useState<{ index: number; element: HTMLElement } | null>(null);
+  /** Separate visibility from content so the close animation never fades an empty card. */
+  const [cardOpen, setCardOpen] = useState(false);
 
   const activeIndexRef = useLatestRef(activeIndex);
 
@@ -268,37 +268,17 @@ export function ConversationOutlineRail({
     return observeResizeOnAnimationFrame(strip, syncEdgeFade);
   }, [syncEdgeFade, tickCount]);
 
-  // Hover open/close timing. Refs, not state: these fire between renders and
-  // must not themselves cause one.
+  const cardOpenRef = useLatestRef(cardOpen);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastClosedAtRef = useRef(0);
 
-  const clearTimers = useCallback(() => {
-    if (openTimerRef.current !== null) {
-      clearTimeout(openTimerRef.current);
-      openTimerRef.current = null;
-    }
-    if (closeTimerRef.current !== null) {
-      clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
+  const clearOpenTimer = useCallback(() => {
+    if (openTimerRef.current === null) return;
+    clearTimeout(openTimerRef.current);
+    openTimerRef.current = null;
   }, []);
 
-  useEffect(() => clearTimers, [clearTimers]);
-
-  const closeHoverCard = useCallback(() => {
-    setHoverCard((current) => {
-      if (current) lastClosedAtRef.current = Date.now();
-      return null;
-    });
-  }, []);
-
-  const openHoverCard = useCallback((index: number, element: HTMLElement) => {
-    setHoverCard({ index, element });
-  }, []);
-
-  const isCardOpenRef = useLatestRef(hoverCard !== null);
+  useEffect(() => clearOpenTimer, [clearOpenTimer]);
 
   const handlePointerOver = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
@@ -311,35 +291,32 @@ export function ConversationOutlineRail({
       // Magnify immediately — this is direct manipulation and must not wait on
       // the card's warmup, or the rail would feel unresponsive to the cursor.
       setPointerIndex(index);
-
-      clearTimers();
-      // Read through a ref so this handler keeps one identity: it is bound to
-      // the list, and re-binding it every time a card opens or closes is churn
-      // for no behavioural gain.
+      clearOpenTimer();
       const isWarm =
-        isCardOpenRef.current || Date.now() - lastClosedAtRef.current < HOVER_WARM_WINDOW_MS;
+        cardOpenRef.current || Date.now() - lastClosedAtRef.current < HOVER_WARM_WINDOW_MS;
       if (isWarm) {
-        openHoverCard(index, element);
+        setHoverCard({ index, element });
+        setCardOpen(true);
         return;
       }
       openTimerRef.current = setTimeout(() => {
         openTimerRef.current = null;
-        openHoverCard(index, element);
+        setHoverCard({ index, element });
+        setCardOpen(true);
       }, HOVER_WARMUP_MS);
     },
-    [clearTimers, isCardOpenRef, openHoverCard]
+    [cardOpenRef, clearOpenTimer]
   );
 
   const handlePointerLeave = useCallback(() => {
-    // The swell collapses with the cursor; only the card gets a grace period,
-    // so it survives the pointer travelling from a tick onto the card itself.
+    // The swell collapses with the cursor. The card content stays in state until
+    // Radix finishes its own close animation, so the animation never fades an
+    // empty surface.
     setPointerIndex(-1);
-    clearTimers();
-    closeTimerRef.current = setTimeout(() => {
-      closeTimerRef.current = null;
-      closeHoverCard();
-    }, HOVER_CLOSE_DELAY_MS);
-  }, [clearTimers, closeHoverCard]);
+    clearOpenTimer();
+    if (cardOpenRef.current) lastClosedAtRef.current = Date.now();
+    setCardOpen(false);
+  }, [cardOpenRef, clearOpenTimer]);
 
   // Depends on the COUNT, not the array: the outline gets a new identity per
   // streamed delta, and this callback feeds the list's click/key handlers.
@@ -356,11 +333,12 @@ export function ConversationOutlineRail({
     (event: ReactMouseEvent<HTMLElement>) => {
       const index = readTickIndex(event.target);
       if (index === -1) return;
-      clearTimers();
-      closeHoverCard();
+      clearOpenTimer();
+      if (cardOpenRef.current) lastClosedAtRef.current = Date.now();
+      setCardOpen(false);
       jumpTo(index);
     },
-    [clearTimers, closeHoverCard, jumpTo]
+    [cardOpenRef, clearOpenTimer, jumpTo]
   );
 
   const focusTick = useCallback((index: number) => {
@@ -512,7 +490,7 @@ export function ConversationOutlineRail({
       {/* ONE popover for the whole rail, re-anchored to the hovered tick. A
           popover per tick would mount hundreds of Radix instances for a long
           session. */}
-      <Popover open={hoveredEntry !== null}>
+      <Popover open={cardOpen && hoveredEntry !== null}>
         <PopoverAnchor virtualRef={hoverCard ? { current: hoverCard.element } : undefined} />
         <PopoverContent
           side="right"
@@ -523,6 +501,15 @@ export function ConversationOutlineRail({
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
           className="pointer-events-none w-72 select-none p-3"
+          onAnimationEnd={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              event.currentTarget.dataset.state === 'closed' &&
+              !cardOpenRef.current
+            ) {
+              setHoverCard(null);
+            }
+          }}
         >
           {hoveredEntry === null ? null : (
             <>
