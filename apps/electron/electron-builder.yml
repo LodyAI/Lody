@@ -15,7 +15,7 @@ files:
   - '!src/*'
   - '!scripts/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.eslintcache,eslint.config.mjs,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!**/*.map'
@@ -31,7 +31,6 @@ files:
   - '!node_modules/drizzle-orm/**'
   # Exclude transitive runtime-unneeded utility/tooling libs.
   - '!node_modules/effect/**'
-  - '!node_modules/prettier/**'
   - '!node_modules/@cloudflare/workers-types/**'
   - '!node_modules/esbuild/**'
   - '!node_modules/@esbuild/**'

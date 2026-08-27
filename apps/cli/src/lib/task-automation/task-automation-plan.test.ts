@@ -57,9 +57,9 @@ describe('isTaskAutomationEligible', () => {
   });
 
   it('ignores agents that live on another machine', () => {
-    expect(
-      isTaskAutomationEligible(candidate({ agentConfigId: 'agent-elsewhere' }), input())
-    ).toBe(false);
+    expect(isTaskAutomationEligible(candidate({ agentConfigId: 'agent-elsewhere' }), input())).toBe(
+      false
+    );
   });
 
   it("refuses to run another user's task under this operator", () => {
@@ -94,7 +94,10 @@ describe('planTaskAutomation', () => {
   it('respects the user-visible order rather than discovery order', () => {
     const plan = planTaskAutomation(
       input({
-        candidates: [candidate({ taskId: 'late', order: '9' }), candidate({ taskId: 'early', order: '1' })],
+        candidates: [
+          candidate({ taskId: 'late', order: '9' }),
+          candidate({ taskId: 'early', order: '1' }),
+        ],
       })
     );
     expect(plan.start[0]?.taskId).toBe('early');
@@ -192,10 +195,10 @@ describe('collectTaskAutomationBaseline', () => {
   });
 
   it('is empty when nothing is entrusted yet', () => {
-    const baseline = collectTaskAutomationBaseline(
-      [candidate({ agentConfigId: undefined })],
-      { ownedAgentConfigIds: new Set(['agent-1']), operatorUserId: OPERATOR }
-    );
+    const baseline = collectTaskAutomationBaseline([candidate({ agentConfigId: undefined })], {
+      ownedAgentConfigIds: new Set(['agent-1']),
+      operatorUserId: OPERATOR,
+    });
     expect(baseline.size).toBe(0);
   });
 });
@@ -284,13 +287,19 @@ describe('planTaskAutomation safety invariants', () => {
     };
   };
 
-  const STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'needs_review', 'done', 'canceled'];
+  const STATUSES: TaskStatus[] = [
+    'backlog',
+    'todo',
+    'in_progress',
+    'needs_review',
+    'done',
+    'canceled',
+  ];
 
   it('never starts work the gates forbid, across randomized fleets', () => {
     for (let seed = 1; seed <= 300; seed += 1) {
       const random = makeRandom(seed);
-      const pick = <T,>(items: readonly T[]): T =>
-        items[Math.floor(random() * items.length)] as T;
+      const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
 
       const agentIds = ['a1', 'a2', 'a3'];
       const owned = new Set(agentIds.filter(() => random() < 0.7));
@@ -339,11 +348,15 @@ describe('planTaskAutomation safety invariants', () => {
           `${where}: started a task that was neither backlog nor todo`
         ).toBe(true);
         expect(entry?.ready, `${where}: started an incomplete task`).toBe(true);
-        expect(owned.has(started.agentConfigId), `${where}: started on an unowned agent`).toBe(true);
+        expect(owned.has(started.agentConfigId), `${where}: started on an unowned agent`).toBe(
+          true
+        );
         expect(online.has(started.agentConfigId), `${where}: started on an offline agent`).toBe(
           true
         );
-        expect(inFlight.has(started.agentConfigId), `${where}: started on a busy agent`).toBe(false);
+        expect(inFlight.has(started.agentConfigId), `${where}: started on a busy agent`).toBe(
+          false
+        );
         expect(baselineTaskIds.has(started.taskId), `${where}: replayed the startup backlog`).toBe(
           false
         );

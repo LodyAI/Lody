@@ -45,10 +45,7 @@ export function getLocalProjectWorktreeCleanupPath(localProjectId: LocalProjectI
 
 async function readLocalProjectWorktreeScript<
   TConfig extends WorktreeSetupScriptConfig | WorktreeCleanupScriptConfig,
->(
-  localProjectId: LocalProjectId,
-  phase: WorktreeScriptPhase
-): Promise<TConfig | null> {
+>(localProjectId: LocalProjectId, phase: WorktreeScriptPhase): Promise<TConfig | null> {
   try {
     return JSON.parse(
       await readFile(getLocalProjectWorktreeScriptPath(localProjectId, phase), 'utf8')
@@ -109,7 +106,9 @@ export async function deleteLocalProjectWorktreeSetup(
 export function isLocalProjectWorktreeConfigRequest(
   request: LocalProjectControlRequest
 ): request is LocalProjectWorktreeConfigRequest {
-  return WORKTREE_CONFIG_REQUEST_TYPES.has(request.type as LocalProjectWorktreeConfigRequest['type']);
+  return WORKTREE_CONFIG_REQUEST_TYPES.has(
+    request.type as LocalProjectWorktreeConfigRequest['type']
+  );
 }
 
 export async function handleLocalProjectWorktreeConfigRequest(

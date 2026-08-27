@@ -9,7 +9,8 @@
   "author": "LodyAI",
   "homepage": "https://github.com/loro-dev/lody-oss",
   "scripts": {
-    "format": "prettier --write .",
+    "format": "oxfmt --disable-nested-config",
+    "format:check": "oxfmt --check --disable-nested-config",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/main/reload-shortcut.test.mjs src/main/onboarding-launch-policy.test.mjs src/main/window-theme.test.mjs src/main/local-platform-snapshot.test.mjs src/main/ipc/ipc-channel-list.test.mjs src/main/services/local-path-launcher-core.test.mjs src/main/services/image-export-core.test.mjs src/main/services/public-browser-state.test.mjs src/main/services/app-updater-metadata.test.mjs src/main/services/loro-data-plane-relay.test.mjs src/renderer/renderer-csp.test.mjs src/renderer/src/auth-callback-transaction.test.mjs src/renderer/src/auth-query-generation.test.mjs src/renderer/src/renderer-error-reporting.test.mjs",
     "lint": "eslint --cache .",
     "typecheck:node": "tsgo --noEmit -p tsconfig.node.json --composite false",
@@ -49,7 +50,6 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
-    "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@lody/components": "workspace:*",
@@ -64,11 +64,12 @@
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "oxfmt": "0.65.0",
     "postcss": "^8.5.4",
-    "prettier": "^3.7.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",

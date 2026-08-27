@@ -65,17 +65,15 @@ describe('CodeCollabV2Service targeted file-index repair', () => {
     vi.useRealTimers();
   });
 
-  const createService = (
-    options: {
-      readonly publishFileIndex: (
-        publication: CodeCollabV2FileIndexPublication
-      ) => Promise<{ changed: boolean }>;
-      readonly publishFileIndexSignal?: (publication: {
-        readonly ownerSessionId: SessionId;
-        readonly updatedAtMs: number;
-      }) => Promise<void>;
-    }
-  ): CodeCollabV2Service => {
+  const createService = (options: {
+    readonly publishFileIndex: (
+      publication: CodeCollabV2FileIndexPublication
+    ) => Promise<{ changed: boolean }>;
+    readonly publishFileIndexSignal?: (publication: {
+      readonly ownerSessionId: SessionId;
+      readonly updatedAtMs: number;
+    }) => Promise<void>;
+  }): CodeCollabV2Service => {
     const service = new CodeCollabV2Service({
       resolveWorkspace: async () => ({
         ok: false,
@@ -219,9 +217,7 @@ describe('CodeCollabV2Service targeted file-index repair', () => {
 
     publishFileIndex.mockRejectedValueOnce(new Error('transport failed again'));
     state.fileTree['newer.ts'] = true;
-    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow(
-      'transport failed again'
-    );
+    await expect(publishOwner(service, OWNER_A, state)).rejects.toThrow('transport failed again');
     service.dispose();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(publishFileIndex).toHaveBeenCalledTimes(3);

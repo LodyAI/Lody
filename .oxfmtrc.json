@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "endOfLine": "lf",
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "quoteProps": "as-needed",
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    ".next/",
+    ".nuxt/",
+    ".vscode/",
+    ".idea/",
+    "*.log",
+    "*.tgz",
+    "*.tar.gz",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    ".DS_Store",
+    "coverage/",
+    "apps/electron/LICENSE.md",
+    "apps/electron/pnpm-lock.yaml",
+    "apps/electron/tsconfig.json",
+    "apps/electron/tsconfig.*.json",
+    "packages/acp-extension-*/**"
+  ],
+  "overrides": [
+    {
+      "files": ["apps/electron/**/*"],
+      "options": {
+        "semi": false,
+        "trailingComma": "none"
+      }
+    }
+  ]
+}

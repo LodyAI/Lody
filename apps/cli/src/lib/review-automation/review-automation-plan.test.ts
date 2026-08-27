@@ -373,9 +373,7 @@ describe('planReviewStep', () => {
   });
 
   it('blocks when the reviewer ends its turn without submitting', () => {
-    const action = planReviewStep(
-      facts({ state: 'reviewing', submissionForCurrentRound: false })
-    );
+    const action = planReviewStep(facts({ state: 'reviewing', submissionForCurrentRound: false }));
     expect(action).toMatchObject({ kind: 'block' });
   });
 });

@@ -1,9 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import {
-  buildSessionImageApiUrl,
-  getSessionImageDownloadApiPath,
-} from '@lody/shared';
+import { buildSessionImageApiUrl, getSessionImageDownloadApiPath } from '@lody/shared';
 import { LODY_SERVER_URL } from '@/utils/const';
 import type { ExportAttachmentRecord } from './types';
 import { ensurePathWithinBase } from './path-utils';
@@ -37,9 +34,7 @@ function resolveOutputPath(
   }
 
   const extension =
-    MIME_EXTENSION_MAP[attachment.mimeType] ||
-    path.extname(attachment.fileName ?? '').trim() ||
-    '';
+    MIME_EXTENSION_MAP[attachment.mimeType] || path.extname(attachment.fileName ?? '').trim() || '';
   const fileName = attachment.fileName?.trim()
     ? sanitizeFileStem(attachment.fileName)
     : `${sanitizeFileStem(attachment.imageId)}${extension}`;
