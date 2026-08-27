@@ -1812,7 +1812,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const performMachineAcpCapabilitiesRefreshViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
-    options: { signal?: AbortSignal } = {}
+    options: {
+      signal?: AbortSignal;
+      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+    } = {}
   ): Promise<MachineAcpCapabilitiesRefreshResponse> => {
     try {
       const client = await getMachineRpcClient(message.machineId);
@@ -1826,6 +1829,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress(progress);
+            options.onProgress?.(progress);
           }
         },
         signal: options.signal,
@@ -1857,7 +1861,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const requestMachineAcpCapabilitiesRefresh = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
-    options: { signal?: AbortSignal } = {}
+    options: {
+      signal?: AbortSignal;
+      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+    } = {}
   ): Promise<MachineAcpCapabilitiesRefreshResponse | null> => {
     const { signal } = options;
     if (signal?.aborted) return null;
@@ -1881,8 +1888,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           error: `Local session control cannot route ${message.type} to machine ${message.machineId}`,
         };
       }
-      const localResult = await requestLocalSessionControl(message);
-      if (signal?.aborted) return null;
+      const localRequest = requestLocalSessionControl(message, {
+        onProgress: (progress) => {
+          if (!signal?.aborted) options.onProgress?.(progress);
+        },
+      });
+      const localResult = signal
+        ? await waitForPromiseOrAbort(localRequest, signal)
+        : await localRequest;
+      if (!localResult || signal?.aborted) return null;
       if (!localResult.ok) {
         return {
           type: 'machine/acp-capabilities-refresh_response',
@@ -1897,6 +1911,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       for (const response of localResult.responses) {
         if (response.type === 'machine/acp-binary-progress') {
           handleMachineAcpBinaryProgress(response);
+          options.onProgress?.(response);
         }
       }
       return (
@@ -1928,7 +1943,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
     }
-    const request = performMachineAcpCapabilitiesRefreshViaRpc(message, { signal });
+    const request = performMachineAcpCapabilitiesRefreshViaRpc(message, options);
     return signal ? waitForPromiseOrAbort(request, signal) : request;
   };
 
@@ -2062,7 +2077,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const requestLocalSessionControl = async (
-    message: ClientLocalSessionControlRequest
+    message: ClientLocalSessionControlRequest,
+    options: { onProgress?: (progress: MachineAcpBinaryProgressMessage) => void } = {}
   ): Promise<LocalSessionControlRequestResult> => {
     if (typeof window === 'undefined') {
       return { ok: false, error: 'Local session control requires the Electron renderer' };
@@ -2092,6 +2108,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         const key = JSON.stringify(controlMessage);
         streamedProgressCounts.set(key, (streamedProgressCounts.get(key) ?? 0) + 1);
         handleControlMessage(controlMessage as ControlResponseMessage);
+        if (controlMessage.type === 'machine/acp-binary-progress') {
+          options.onProgress?.(controlMessage as MachineAcpBinaryProgressMessage);
+        }
       });
       if (!result.ok) {
         console.warn('createWorkspaceRuntime: local session control rejected message', {

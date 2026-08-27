@@ -16,6 +16,7 @@ export {
   ProvidersScreenView,
   type ProviderTestStatus,
 } from './screens/providers-screen';
+export type { ProviderTestActivity } from './provider-test-state';
 export {
   ProjectsScreen,
   ProjectsScreenView,
