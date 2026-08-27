@@ -1,0 +1,137 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Lody's open-source components
+title: '[Bug] '
+labels:
+  - bug
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Lody. Please provide a small, reproducible report.
+
+        This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
+
+        **Do not post security vulnerabilities or sensitive data here.** Follow the [security policy](https://github.com/LodyAI/Lody/security/policy), and redact credentials, private repository content, agent conversations, prompts, personal data, and sensitive paths from every example and log.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which open-source part of Lody is affected?
+      options:
+        - Desktop app
+        - CLI / daemon
+        - Agent runtime / ACP
+        - Session / workspace / local sync
+        - GitHub / code review
+        - Build / packaging
+        - Documentation
+        - Other open-source component
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Desktop release
+        - npm / npx CLI
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Lody version or commit
+      description: Use the desktop version, `lody --version`, or the source commit SHA.
+      placeholder: 'Example: 0.4.2 or 0123456'
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Include the OS version and CPU architecture.
+      placeholder: 'Example: macOS 15.6 arm64, Windows 11 x64, Ubuntu 24.04 x64'
+    validations:
+      required: true
+
+  - type: input
+    id: agent-runtime
+    attributes:
+      label: Agent or runtime
+      description: If relevant, include the agent, model, runtime, and version involved.
+      placeholder: 'Example: Codex CLI 0.42.0'
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect?
+      description: Describe the result you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: Provide the smallest reliable sequence, including relevant inputs or configuration with sensitive values removed.
+      placeholder: |
+        1. Start Lody with ...
+        2. Open ...
+        3. Run ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Only once
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste only the relevant excerpt. Remove credentials, private source, conversations, prompts, personal data, and sensitive paths first.
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, or other details that help explain the problem.
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true
+        - label: This report concerns an open-source component in this repository, not a hosted service, Web or mobile app, account, or billing issue.
+          required: true
+        - label: This is not a security vulnerability; security reports follow the repository's security policy.
+          required: true
+        - label: I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.
+          required: true
