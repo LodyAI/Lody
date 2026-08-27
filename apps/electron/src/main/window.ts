@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   consumePendingDeepLink,
   getMainWindow,
@@ -155,6 +156,34 @@ function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promis
     return window.loadURL(target.url)
   }
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+}
+
+function isTrustedNavigation(url: string, targets: readonly ReloadTarget[]): boolean {
+  if (!URL.canParse(url)) return false
+
+  const candidate = new URL(url)
+  candidate.hash = ''
+  candidate.search = ''
+  return targets.some((target) => {
+    if (target.type === 'url') return candidate.origin === new URL(target.url).origin
+    return candidate.href === pathToFileURL(target.filePath).href
+  })
+}
+
+function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadTarget[]): void {
+  const preventUntrustedNavigation = (event: { url: string; preventDefault: () => void }): void => {
+    if (isTrustedNavigation(event.url, targets)) return
+
+    event.preventDefault()
+    const externalUrl = normalizeExternalHttpUrl(event.url)
+    if (externalUrl) {
+      void shell.openExternal(externalUrl)
+    }
+    console.warn('[Electron] Blocked main window navigation', { url: event.url })
+  }
+
+  window.webContents.on('will-navigate', preventUntrustedNavigation)
+  window.webContents.on('will-redirect', preventUntrustedNavigation)
 }
 
 async function showUnresponsiveDialog(window: BrowserWindow): Promise<void> {
@@ -328,6 +357,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   trackMainWindowState(window)
   const mainTarget = resolveMainRendererTarget(options.initialPath)
   const recoveryTarget = resolveRecoveryTarget()
+  installNavigationGuard(window, [mainTarget, recoveryTarget])
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
 
