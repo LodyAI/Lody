@@ -17,7 +17,7 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { developerModeEnabledAtom } from '@/atoms/settings';
@@ -91,6 +91,7 @@ import {
   WorkspaceMachineExpandedSection,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+import { SettingsEmptyState, SettingsPage } from './settings-page';
 
 export type MachineAgentSettingsProps = {
   selectedMachineId: MachineId | null;
@@ -962,6 +963,10 @@ export function MachineAgentSettings({
 
   const showBanner = mode === 'agents' && migration.status === 'running';
   const hasMachines = machines.size > 0;
+  const agentsDescription = t(
+    'settings.categories.agents.description',
+    'AI agent configurations available in this workspace.'
+  );
 
   const banner = showBanner ? (
     <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
@@ -986,6 +991,28 @@ export function MachineAgentSettings({
         onInstallBinary={installBinary}
       />
     ) : null;
+
+  if (!isMobile && mode === 'agents' && isLoading && !hasMachines) {
+    return (
+      <SettingsPage title={t('settings.tabs.agents', 'Agents')} description={agentsDescription}>
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t('workspace.machines.loadingVisibility', 'Loading machines')}
+        </div>
+      </SettingsPage>
+    );
+  }
+
+  if (!isMobile && mode === 'agents' && !hasMachines) {
+    return (
+      <SettingsPage title={t('settings.tabs.agents', 'Agents')} description={agentsDescription}>
+        <SettingsEmptyState
+          icon={<Bot aria-hidden="true" />}
+          message={t('workspace.machines.empty', 'No machines connected')}
+        />
+      </SettingsPage>
+    );
+  }
 
   if (isLoading && !hasMachines) {
     return (
@@ -1127,10 +1154,7 @@ export function MachineAgentSettings({
           'settings.categories.machines.description',
           'View workspace machines and manage the machines you own.'
         )
-      : t(
-          'settings.categories.agents.description',
-          'AI agent configurations available in this workspace.'
-        );
+      : agentsDescription;
 
   const header = (
     <div className="min-w-0">
@@ -1349,9 +1373,8 @@ export function MachineAgentSettings({
   }));
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <SettingsPage title={t('settings.tabs.agents', 'Agents')} description={subtitle}>
       {banner}
-      {header}
 
       <MachinePills
         pills={machinePills}
@@ -1380,7 +1403,7 @@ export function MachineAgentSettings({
       )}
       <ReviewPolicySection />
       {dialog}
-    </div>
+    </SettingsPage>
   );
 }
 

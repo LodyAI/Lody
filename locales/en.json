@@ -2884,6 +2884,7 @@
   "workspace.projects.delete": "Delete project",
   "workspace.projects.deleteConfirmTitle": "Remove project from Lody?",
   "workspace.projects.addProjectMenu": "Add project",
+  "workspace.projects.catalogTitle": "Available projects",
   "workspace.projects.settingsSubtitle": "Local folders and GitHub repositories available in this workspace.",
   "workspace.projects.githubProjectsTitle": "GitHub Projects",
   "workspace.projects.githubRepoNotAvailable": "This repo isn't available in the current workspace.",

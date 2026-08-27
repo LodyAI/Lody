@@ -74,7 +74,7 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
-import { settingContainerClass } from '.';
+import { SettingsEmptyState, SettingsPage } from './settings-page';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
 import { useGithubProjectWorktreeSaves } from '@/hooks/use-github-project-worktree-admin';
@@ -496,7 +496,7 @@ function ProjectSettingsDesktop({
       <ProjectAddMenu
         onAddLocalProject={onAddLocalProject}
         onAddGitHubProject={onAddGitHubProject}
-        className="h-8 w-8 shrink-0 bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.1]"
+        className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       />
     ) : null;
 
@@ -513,90 +513,99 @@ function ProjectSettingsDesktop({
   };
 
   return (
-    <div className={cn(settingContainerClass, 'md:max-w-6xl')}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold text-foreground">
-            {t('settings.tabs.projects', 'Projects')}
-          </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t(
-              'workspace.projects.settingsSubtitle',
-              'Local folders and GitHub repositories available in this workspace.'
-            )}
-          </p>
-        </div>
-        {addProjectActions}
-      </div>
-
-      {isAnyLoading && totalCount === 0 ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-10 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          {t('workspace.projects.loading', 'Loading projects')}
-        </div>
-      ) : totalCount === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 px-3 py-12 text-center">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {t('workspace.projects.empty', 'No projects yet')}
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <MachinePills
-            pills={pills}
-            selectedId={resolvedPillId}
-            onSelect={(id) => {
-              setSelectedPillId(id);
-              setSelectedProjectKey(null);
-            }}
-          />
-          <div className="flex h-[calc(90vh-16rem)] min-h-[400px] min-w-0">
-            <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
-              {isGithubPill
-                ? githubSections.map((section) => (
-                    <div key={section.owner} className="mb-2">
-                      <ProjectOwnerLabel owner={section.owner} />
-                      {section.rows.map((row) => (
-                        <ProjectMasterRow
-                          key={row.key}
-                          selected={selectedProject?.key === row.key}
-                          icon={<OwnerAvatar owner={section.owner} />}
-                          title={row.name}
-                          subtitle={row.repoFullName}
-                          onClick={() => setSelectedProjectKey(row.key)}
-                        />
-                      ))}
-                    </div>
-                  ))
-                : currentSelections.map((selection) =>
-                    selection.kind === 'local' ? (
-                      <ProjectMasterRow
-                        key={selection.key}
-                        selected={selectedProject?.key === selection.key}
-                        icon={<Folder className="h-3.5 w-3.5" />}
-                        title={selection.row.project.name}
-                        subtitle={selection.row.project.rootPath}
-                        onClick={() => setSelectedProjectKey(selection.key)}
-                      />
-                    ) : null
-                  )}
-            </div>
-            <div className="min-w-0 flex-1 overflow-hidden">
-              {selectedProject ? (
-                <ProjectDetailPane selection={selectedProject} {...detailHandlers} />
-              ) : (
-                <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-                  {t('workspace.projects.selectPrompt', 'Select a project.')}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+    <SettingsPage
+      title={t('settings.tabs.projects', 'Projects')}
+      description={t(
+        'workspace.projects.settingsSubtitle',
+        'Local folders and GitHub repositories available in this workspace.'
       )}
-    </div>
+    >
+      <section className="flex flex-col">
+        <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="text-xs font-semibold text-muted-foreground">
+              {t('workspace.projects.catalogTitle', 'Available projects')}
+            </h3>
+            {totalCount > 0 ? (
+              <span className="text-xs tabular-nums text-muted-foreground/70">{totalCount}</span>
+            ) : null}
+          </div>
+          {addProjectActions}
+        </div>
+        {isAnyLoading && totalCount === 0 ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-10 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('workspace.projects.loading', 'Loading projects')}
+          </div>
+        ) : totalCount === 0 ? (
+          <SettingsEmptyState
+            icon={<FolderOpen aria-hidden="true" />}
+            message={t('workspace.projects.empty', 'No projects yet')}
+            action={
+              <ProjectAddMenu
+                onAddLocalProject={onAddLocalProject}
+                onAddGitHubProject={onAddGitHubProject}
+                size="sm"
+                variant="default"
+                label={t('workspace.projects.addProjectMenu', 'Add project')}
+              />
+            }
+          />
+        ) : (
+          <div className="flex flex-col gap-3">
+            <MachinePills
+              pills={pills}
+              selectedId={resolvedPillId}
+              onSelect={(id) => {
+                setSelectedPillId(id);
+                setSelectedProjectKey(null);
+              }}
+            />
+            <div className="flex h-[calc(90vh-16rem)] min-h-[400px] min-w-0">
+              <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
+                {isGithubPill
+                  ? githubSections.map((section) => (
+                      <div key={section.owner} className="mb-2">
+                        <ProjectOwnerLabel owner={section.owner} />
+                        {section.rows.map((row) => (
+                          <ProjectMasterRow
+                            key={row.key}
+                            selected={selectedProject?.key === row.key}
+                            icon={<OwnerAvatar owner={section.owner} />}
+                            title={row.name}
+                            subtitle={row.repoFullName}
+                            onClick={() => setSelectedProjectKey(row.key)}
+                          />
+                        ))}
+                      </div>
+                    ))
+                  : currentSelections.map((selection) =>
+                      selection.kind === 'local' ? (
+                        <ProjectMasterRow
+                          key={selection.key}
+                          selected={selectedProject?.key === selection.key}
+                          icon={<Folder className="h-3.5 w-3.5" />}
+                          title={selection.row.project.name}
+                          subtitle={selection.row.project.rootPath}
+                          onClick={() => setSelectedProjectKey(selection.key)}
+                        />
+                      ) : null
+                    )}
+              </div>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                {selectedProject ? (
+                  <ProjectDetailPane selection={selectedProject} {...detailHandlers} />
+                ) : (
+                  <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+                    {t('workspace.projects.selectPrompt', 'Select a project.')}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    </SettingsPage>
   );
 }
 
@@ -664,12 +673,14 @@ function ProjectAddMenu({
   className,
   size,
   variant,
+  label,
 }: {
   readonly onAddLocalProject?: () => void;
   readonly onAddGitHubProject?: () => void;
   readonly className?: string;
   readonly size?: ButtonProps['size'];
   readonly variant?: ButtonProps['variant'];
+  readonly label?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -683,7 +694,8 @@ function ProjectAddMenu({
           aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
           title={t('workspace.projects.addProjectMenu', 'Add project')}
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className={cn('h-3.5 w-3.5', label && 'mr-1.5')} />
+          {label}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[220px]">

@@ -36,7 +36,7 @@ import {
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { settingContainerClass } from '.';
+import { SettingsEmptyState, SettingsPage } from './settings-page';
 import {
   AgentRoleEditorDialog,
   openAgentRoleEditorForCreate,
@@ -101,13 +101,11 @@ export function AgentRolesSetting() {
   };
 
   const addLabel = t('settings.agentRoles.add');
-
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">
-        {t('settings.agentRoles.description')}
-      </p>
-
+    <SettingsPage
+      title={t('settings.tabs.agentRoles')}
+      description={t('settings.agentRoles.description')}
+    >
       <section className="flex flex-col">
         <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
           <div className="flex min-w-0 items-center gap-2">
@@ -141,14 +139,16 @@ export function AgentRolesSetting() {
         </div>
 
         {roles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <UserRoundCog className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">{t('settings.agentRoles.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={openAdd}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {addLabel}
-            </Button>
-          </div>
+          <SettingsEmptyState
+            icon={<UserRoundCog aria-hidden="true" />}
+            message={t('settings.agentRoles.empty')}
+            action={
+              <Button size="sm" onClick={openAdd}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                {addLabel}
+              </Button>
+            }
+          />
         ) : (
           <div className="space-y-3">
             {roleGroups.map((group) => (
@@ -216,7 +216,7 @@ export function AgentRolesSetting() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsPage>
   );
 }
 

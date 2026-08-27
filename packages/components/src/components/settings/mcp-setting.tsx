@@ -33,7 +33,7 @@ import { Button } from '@/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Switch } from '@/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { settingContainerClass } from '.';
+import { SettingsEmptyState, SettingsPage } from './settings-page';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 
 type EditorState = { mode: 'add' } | { mode: 'edit'; entry: WorkspaceMcpServerMeta };
@@ -124,11 +124,8 @@ export function McpSetting() {
   };
 
   const addLabel = t('settings.mcp.add');
-
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">{t('settings.mcp.description')}</p>
-
+    <SettingsPage title={t('settings.tabs.mcp')} description={t('settings.mcp.description')}>
       <section className="flex flex-col">
         <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
           <div className="flex min-w-0 items-center gap-2">
@@ -164,14 +161,16 @@ export function McpSetting() {
         </div>
 
         {servers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <Plug className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">{t('settings.mcp.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={() => openEditor({ mode: 'add' })}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {addLabel}
-            </Button>
-          </div>
+          <SettingsEmptyState
+            icon={<Plug aria-hidden="true" />}
+            message={t('settings.mcp.empty')}
+            action={
+              <Button size="sm" onClick={() => openEditor({ mode: 'add' })}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                {addLabel}
+              </Button>
+            }
+          />
         ) : (
           <div className="space-y-2">
             {servers.map((server) => (
@@ -260,7 +259,7 @@ export function McpSetting() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsPage>
   );
 }
 

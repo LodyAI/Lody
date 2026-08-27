@@ -13,5 +13,4 @@ export { AboutSettingsComponent } from './about-setting';
 export { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 export { SettingsHeader } from './settings-header';
 export { SettingsCategoryList, SettingsCategoryGrid } from './settings-category-list';
-export const settingContainerClass =
-  'space-y-3 px-4 py-2 overflow-x-hidden md:mx-auto md:max-w-4xl md:px-2';
+export { settingContainerClass } from './settings-page';

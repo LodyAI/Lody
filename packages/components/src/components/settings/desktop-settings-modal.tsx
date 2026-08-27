@@ -109,12 +109,12 @@ function SettingsModalBody() {
     { id: 'workspace', label: t('settings.sections.workspace', 'Workspace') },
     { id: 'other', label: t('settings.sections.misc', 'Other') },
   ];
-  // These tabs render their own in-content header (title + per-tab actions like
-  // "add project"), so we drop the chrome title to avoid showing it twice.
   const selfTitledTab =
-    resolvedActiveTab === 'projects' ||
     resolvedActiveTab === 'machines' ||
-    resolvedActiveTab === 'agents';
+    resolvedActiveTab === 'agents' ||
+    resolvedActiveTab === 'agent-roles' ||
+    resolvedActiveTab === 'mcp' ||
+    resolvedActiveTab === 'projects';
 
   return (
     <SettingsDataCacheProvider>
@@ -195,7 +195,7 @@ function SettingsModalBody() {
           )}
           <div className="min-h-0 flex-1">
             <ScrollArea className="h-full">
-              <div className={cn('px-6 pb-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
+              <div className={cn('px-6 pb-6', resolvedActiveTab === 'machines' ? 'pt-6' : 'pt-0')}>
                 <div className="mx-auto max-w-5xl">
                   <SettingsTabContent tabId={resolvedActiveTab} />
                 </div>

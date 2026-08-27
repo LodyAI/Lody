@@ -2884,6 +2884,7 @@
   "workspace.projects.delete": "删除项目",
   "workspace.projects.deleteConfirmTitle": "从 Lody 中删除项目？",
   "workspace.projects.addProjectMenu": "添加项目",
+  "workspace.projects.catalogTitle": "可用项目",
   "workspace.projects.settingsSubtitle": "当前工作区可用的本地文件夹和 GitHub 仓库。",
   "workspace.projects.githubProjectsTitle": "GitHub 项目",
   "workspace.projects.githubRepoNotAvailable": "此仓库在当前工作区不可用",
