@@ -22,11 +22,16 @@
   water (landing pale blue) + dark ink; dark = abyss + ice ink. Ambient field:
   `components/marketing-atmosphere.tsx` — one fixed full-screen WebGL fragment
   shader with `uTheme` (tracks `html.dark`), mid-density caustics, dpr≤1.5,
-  **capped at 30fps**, paused on hidden tab / reduced-motion; CSS gradient
-  fallback until ready. It is an expensive pass (~445 `sin()` per pixel; the four
-  `warped()` calls are ~77% of it) — the two gradient taps feeding `ridge` look
-  redundant but carry the filigree, so do not fold them into a cheaper
-  finite difference. Frame rate and dpr are the safe knobs.
+  paused on hidden tab / reduced-motion; CSS gradient fallback until ready. The
+  expensive field samples at up to 15Hz into two full-drawing-buffer textures,
+  uses GPU-query backpressure, and blends cached endpoints on display frames.
+  Software GPUs start at 8Hz sampling and 30fps presentation; GPU timing may
+  slow sampling further. Texture allocation failure retains the direct 30fps
+  renderer. It is an expensive pass (~445 `sin()` per pixel; the four `warped()`
+  calls are ~77% of it) — the two
+  gradient taps feeding `ridge` look redundant but carry the filigree, so do not
+  fold them into a cheaper finite difference. Do not lower temporal texture
+  resolution or shader quality as a performance shortcut.
   **Hosted once** via `MarketingAtmosphereHost` in `site-root-provider` (price /
   download / changelog share one GL context; off-route pauses without teardown).
   Pricing content lives in
