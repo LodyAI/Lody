@@ -15,8 +15,9 @@ By submitting a pull request, patch, or other contribution to Lody, you agree to
 ## Before You Start
 
 1. Search existing issues and pull requests to avoid duplicate work.
-2. For substantial features, please open an issue first to discuss the approach with maintainers.
-3. Do not report security vulnerabilities in a public issue; follow the [security policy](./SECURITY.md) instead.
+2. Report reproducible problems with the [bug report form](https://github.com/LodyAI/Lody/issues/new?template=01-bug-report.yml).
+3. For substantial improvements, use the [feature request form](https://github.com/LodyAI/Lody/issues/new?template=02-feature-request.yml) to discuss the need and approach with maintainers first.
+4. Do not report security vulnerabilities in a public issue; follow the [security policy](./SECURITY.md) instead.
 
 ## Get the Code
 

@@ -20,6 +20,10 @@
   reviewer boilerplate and long review essays are not valid substitutes.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a pull request affects multiple product areas.
+- Issue forms cover only components present in the public repository. Keep Bug
+  and Feature title prefixes, issue types, and existing labels aligned; route
+  product support and security reports out of public issues, and request only
+  diagnostics that contributors have checked and redacted.
 - External pull request body enforcement is based on the PR author's
   `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
   exempt; outside collaborators and prior contributors remain subject to it.

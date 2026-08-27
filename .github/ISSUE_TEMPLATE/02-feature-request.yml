@@ -1,0 +1,83 @@
+name: Feature request
+description: Propose an improvement to Lody's open-source components
+title: '[Feature Request] '
+labels:
+  - enhancement
+type: Feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape Lody. Start with the problem and desired outcome; a complete implementation design is not required.
+
+        This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which open-source part of Lody would this improve?
+      options:
+        - Desktop app
+        - CLI / daemon
+        - Agent runtime / ACP
+        - Session / workspace / local sync
+        - GitHub / code review
+        - Build / packaging
+        - Documentation
+        - Other open-source component
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow pressure
+      description: What is difficult or impossible today? Include who encounters it and how often when useful.
+      placeholder: Describe the concrete need rather than only naming a feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-outcome
+    attributes:
+      label: Desired outcome
+      description: What should become possible or easier?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: If you have an approach in mind, describe it here. This is optional.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What have you tried, and why is it insufficient?
+
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Trade-offs or non-goals
+      description: Note relevant privacy, local-first, compatibility, or cross-platform constraints.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add examples, mockups, links, or other useful context. Remove sensitive information first.
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate request.
+          required: true
+        - label: This request concerns an open-source component in this repository, not a hosted service, Web or mobile app, account, or billing issue.
+          required: true
+        - label: I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.
+          required: true
