@@ -575,3 +575,29 @@ export function getChatLandingVisibleComposerStatus<TMessage>({
   // must not take over the landing composer as status copy.
   return selectedMachineProjectStatus ?? null;
 }
+
+export type ChatLandingPreSelectionIntent = {
+  context: 'local' | 'github' | 'chat' | undefined;
+  machine: string | undefined;
+  project: string | undefined;
+  repo: string | undefined;
+  /**
+   * Nonce marking an explicit "compose here" navigation. The composer applies a
+   * URL pre-selection once per key and then lets the user steer freely, so a
+   * caller that re-asserts the target the URL ALREADY names — the sidebar's
+   * per-project new-session button, after the user cleared the composer's
+   * project — changes no search param and would otherwise be a no-op.
+   */
+  newSessionKey?: string | undefined;
+};
+
+/** Identity of one URL-driven pre-selection intent. */
+export function buildChatLandingPreSelectionKey({
+  context,
+  machine,
+  project,
+  repo,
+  newSessionKey,
+}: ChatLandingPreSelectionIntent): string {
+  return `${context}|${machine}|${project}|${repo}|${newSessionKey}`;
+}

@@ -11,6 +11,11 @@ export type ChatSearch = {
   project?: string;
   repo?: string;
   resetDraftKey?: string;
+  /**
+   * Nonce written by an explicit "compose a new session here" navigation, so a
+   * target the URL already names still reaches the composer as a fresh intent.
+   */
+  newSession?: string;
 };
 
 export const Route = createFileRoute('/$workspaceName/_auth/chat')({
@@ -24,6 +29,7 @@ export const Route = createFileRoute('/$workspaceName/_auth/chat')({
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
+    newSession: typeof search.newSession === 'string' ? search.newSession : undefined,
   }),
 });
 
@@ -61,6 +67,7 @@ function ChatRoute() {
       preSelectedProject={search.project}
       preSelectedRepo={search.repo}
       resetDraftKey={search.resetDraftKey}
+      newSessionKey={search.newSession}
     />
   );
 }

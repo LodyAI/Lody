@@ -2736,6 +2736,7 @@
   "sidebar.localProjects.empty": "暂无本地项目",
   "sidebar.localProjects.forbidden": "无法访问本地项目",
   "sidebar.localProjects.import": "导入本地项目文件夹",
+  "sidebar.localProjects.newSession": "新建会话",
   "sidebar.localProjects.pending": "已导入，等待本地代理…",
   "sidebar.localProjects.remove": "删除项目",
   "sidebar.localProjects.remove.description": "这只会从 Lody 中移除该项目。",

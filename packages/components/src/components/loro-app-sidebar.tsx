@@ -140,6 +140,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Plus,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -706,6 +707,7 @@ export type LocalProjectItemProps = {
   isMobile: boolean;
   toggleLabel: string;
   onNavigateProject: (machineId: MachineId, localProjectId: string) => void;
+  onStartProjectSession: (machineId: MachineId, localProjectId: string) => void;
   onNavigateSession: (sessionId: string, tabSessionId?: string) => void;
   onArchive: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
@@ -727,6 +729,18 @@ export type LocalProjectItemProps = {
   onToggleCollapsed: (machineId: MachineId, localProjectId: LocalProjectId) => void;
   onRequestRemoval: (info: LocalProjectRemovalRequest) => void;
 };
+
+/**
+ * Hover-revealed actions on a project row (new session, remove). Both share one
+ * geometry so the pair reads as a single cluster and neither shifts the name.
+ */
+const LOCAL_PROJECT_ROW_ACTION_CLASS = cn(
+  'absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-sm',
+  'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
+  'opacity-0 pointer-events-none',
+  'group-hover:opacity-100 group-hover:pointer-events-auto',
+  'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
+);
 
 const LOCAL_PROJECT_SELECTION_PROP_KEYS: ReadonlySet<string> = new Set(['selectedSessionId']);
 
@@ -766,6 +780,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   isMobile,
   toggleLabel,
   onNavigateProject,
+  onStartProjectSession,
   onNavigateSession,
   onArchive,
   onRenameSession,
@@ -781,6 +796,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   onRequestRemoval,
 }: LocalProjectItemProps) {
   const { t } = useTranslation();
+  const newSessionLabel = t('sidebar.localProjects.newSession', 'New session');
   // Same opened-by presentation the GitHub/Chats groups use: MCP-opened
   // independent Sessions indent under the Session that created them, and a
   // list with no such relationship keeps its previous flat geometry.
@@ -879,31 +895,46 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </button>
               <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
 
-              {canRemoveProject ? (
-                <div className="relative h-5 w-5 shrink-0">
-                  <button
-                    type="button"
-                    className={cn(
-                      'absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-sm',
-                      'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
-                      'opacity-0 pointer-events-none',
-                      'group-hover:opacity-100 group-hover:pointer-events-auto',
-                      'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-                    )}
-                    aria-label={removeProjectLabel}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onRequestRemoval({
-                        machineId,
-                        localProjectId: project.id,
-                        name: project.name,
-                        pathLabel: formattedPath,
-                      });
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+              {canNavigateProject || canRemoveProject ? (
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {canRemoveProject ? (
+                    <div className="relative h-5 w-5 shrink-0">
+                      <button
+                        type="button"
+                        className={LOCAL_PROJECT_ROW_ACTION_CLASS}
+                        aria-label={removeProjectLabel}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onRequestRemoval({
+                            machineId,
+                            localProjectId: project.id,
+                            name: project.name,
+                            pathLabel: formattedPath,
+                          });
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {canNavigateProject ? (
+                    <div className="relative h-5 w-5 shrink-0">
+                      <button
+                        type="button"
+                        className={LOCAL_PROJECT_ROW_ACTION_CLASS}
+                        aria-label={newSessionLabel}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onStartProjectSession(machineId, project.id);
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1415,6 +1446,31 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
         search: { context: 'local' as const, machine: machineId, project: localProjectId },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
+  /**
+   * The row's own click only asks to look at the project, so it navigates to
+   * the plain project URL. This button asks to COMPOSE there, which has to work
+   * even when that URL is already the current one — after clearing the
+   * composer's project, the search params alone carry no new information. The
+   * nonce is what marks this as a fresh intent for the composer to apply.
+   */
+  const handleStartProjectSession = useCallback(
+    (machineId: MachineId, localProjectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: {
+          context: 'local' as const,
+          machine: machineId,
+          project: localProjectId,
+          newSession: `s${Date.now()}`,
+        },
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
@@ -1940,6 +1996,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         isMobile={isMobile}
                         toggleLabel={toggleLabel}
                         onNavigateProject={handleNavigateToProject}
+                        onStartProjectSession={handleStartProjectSession}
                         onNavigateSession={handleNavigateToSession}
                         onArchive={handleArchiveSession}
                         onRenameSession={handleRenameSession}

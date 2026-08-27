@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
@@ -1041,5 +1042,42 @@ describe('chat landing machine online state', () => {
         isMachineOnline,
       })
     ).toBe(true);
+  });
+});
+
+describe('buildChatLandingPreSelectionKey', () => {
+  const projectIntent = {
+    context: 'local' as const,
+    machine: 'machine-1',
+    project: 'local-project-1',
+    repo: undefined,
+  };
+
+  it('is stable while the URL names the same target', () => {
+    expect(buildChatLandingPreSelectionKey(projectIntent)).toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent })
+    );
+  });
+
+  it('separates different targets', () => {
+    expect(buildChatLandingPreSelectionKey(projectIntent)).not.toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent, project: 'local-project-2' })
+    );
+  });
+
+  // The sidebar's per-project "new session" button can navigate to the project
+  // the URL already names, after the user cleared the composer's project. The
+  // search params are then unchanged, so the nonce is the only thing that marks
+  // this as a fresh intent the composer must re-apply.
+  it('treats a new session nonce for the same target as a new intent', () => {
+    expect(buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })).not.toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'b' })
+    );
+  });
+
+  it('keeps one intent stable across re-renders', () => {
+    expect(buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })).toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })
+    );
   });
 });

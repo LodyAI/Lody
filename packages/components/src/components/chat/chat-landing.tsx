@@ -335,6 +335,7 @@ import {
   useMobileHomeExcludedSetAtom,
 } from '@/atoms/mobile-home-state';
 import {
+  buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
@@ -362,6 +363,12 @@ interface ChatLandingProps {
   preSelectedMachine?: string;
   preSelectedProject?: string;
   preSelectedRepo?: string;
+  /**
+   * Nonce marking an explicit "compose a new session here" navigation. Without
+   * it, re-asserting the project the URL already names changes no search param
+   * and leaves a composer the user has since cleared untouched.
+   */
+  newSessionKey?: string;
   resetDraftKey?: string;
   resetDraftOnKeyChange?: boolean;
 }
@@ -538,6 +545,7 @@ function WorkspaceChatLanding({
   preSelectedMachine,
   preSelectedProject,
   preSelectedRepo,
+  newSessionKey,
   resetDraftKey,
   resetDraftOnKeyChange = true,
 }: ChatLandingProps) {
@@ -1396,7 +1404,13 @@ function WorkspaceChatLanding({
   }, []);
 
   // ── Apply pre-selection from search params ──
-  const preSelectionKey = `${preSelectedContext}|${preSelectedMachine}|${preSelectedProject}|${preSelectedRepo}`;
+  const preSelectionKey = buildChatLandingPreSelectionKey({
+    context: preSelectedContext,
+    machine: preSelectedMachine,
+    project: preSelectedProject,
+    repo: preSelectedRepo,
+    newSessionKey,
+  });
   useEffect(() => {
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
