@@ -11,6 +11,12 @@
 
 <!-- What changed in response to that pressure. Keep this about the change set, not the motivation. -->
 
+## Before / after
+
+| Before | After |
+| ------ | ----- |
+| ...    | ...   |
+
 ## Test plan
 
 <!-- Concrete verification: commands run, checks observed, and what was skipped. -->
