@@ -10,6 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type FocusEvent as ReactFocusEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
@@ -45,10 +46,10 @@ import {
  * neighbours taper off along a normal distribution, so the tick under the
  * cursor is unmistakable while the rail still reads as one continuous shape.
  *
- * **Where this mounts matters.** It is an absolutely-positioned OVERLAY sibling
- * of the conversation scroll viewport (alongside the top fade and the
- * scroll-to-latest button), never a row inside the Virtua list — a row would
- * scroll away, and the rail has to stay put.
+ * **Where this mounts matters.** It is an absolutely-positioned overlay of the
+ * whole conversation page, never a row inside the Virtua list — a row would
+ * scroll away. The page-level mount also keeps its centre stable when the
+ * composer changes height.
  *
  * **Two rendering rules keep it off the scroll hot path.** The conversation is
  * already a fragile render surface (see this folder's AGENTS.md), so:
@@ -79,6 +80,12 @@ export interface ConversationOutlineRailProps {
   activeIndex: number;
   /** Jump to the round at this index into `entries`. */
   onJumpToRound: (index: number) => void;
+  /**
+   * The full-page overlay that owns the rail's coordinate system. Omit this
+   * for standalone uses such as the component story, where the local pane is
+   * the intended coordinate system.
+   */
+  overlayRoot?: HTMLElement | null;
   className?: string;
 }
 
@@ -202,6 +209,7 @@ export function ConversationOutlineRail({
   entries,
   activeIndex,
   onJumpToRound,
+  overlayRoot = null,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -416,7 +424,7 @@ export function ConversationOutlineRail({
 
   if (tickCount < 2) return null;
 
-  return (
+  const rail = (
     <nav
       aria-label={t('sessions.outline.railLabel', 'Conversation outline')}
       // Low contrast at rest so the rail reads as a margin marker, not chrome;
@@ -528,6 +536,8 @@ export function ConversationOutlineRail({
       </Popover>
     </nav>
   );
+
+  return overlayRoot === null ? rail : createPortal(rail, overlayRoot);
 }
 
 export default ConversationOutlineRail;

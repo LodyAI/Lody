@@ -111,10 +111,13 @@ context/message-flow.md.
     position likewise comes from Virtua's index math (`getItemOffset` +
     `resolveActiveOutlineIndex`), and the active round is the LAST one whose
     anchor is above the viewport top, so it stays set through a long turn.
-  - **It is an overlay SIBLING of the scroll viewport**, next to the top fade and
-    the scroll-to-latest button. Not a Virtua row (it would scroll away), and not
-    a child of the viewport either — `use-sticky-scroll.ts` takes the content
-    element from that div's `firstElementChild`.
+  - **It is a page-level overlay, portalled outside the shrinking message area.**
+    It is never a Virtua row (it would scroll away) or a child of the viewport
+    (`use-sticky-scroll.ts` takes the content element from that div's
+    `firstElementChild`). Its portal root is the full session page so the rail
+    stays vertically centred when the composer changes height; do not replace
+    that with a composer-height measurement or `position: fixed`, which breaks
+    split conversation panes.
   - **Reader position must not re-render the tick list.** It never enters the
     list's props: the active round is painted by one absolutely-positioned bar
     (fixed pitch, pure arithmetic, no measurement) and `aria-current` is synced

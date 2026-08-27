@@ -104,6 +104,8 @@ export interface SessionChatStreamProps {
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
+  /** Full-page overlay that keeps the conversation outline independent of composer height. */
+  outlineOverlayRoot?: HTMLElement | null;
   suppressStickyAutoScrollRef?: React.RefObject<boolean>;
 }
 
@@ -176,6 +178,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
+      outlineOverlayRoot,
     },
     ref
   ) => {
@@ -280,6 +283,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         conversationFontSize={conversationFontSize}
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+        outlineOverlayRoot={outlineOverlayRoot}
       />
     );
   }
