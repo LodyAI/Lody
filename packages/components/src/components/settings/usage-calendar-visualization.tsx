@@ -1390,7 +1390,7 @@ function UsageHeatmap({
 
         <div ref={scrollerRef} className="scrollbar-pro min-w-0 flex-1 overflow-x-auto pb-1">
           <div
-            className="min-w-[var(--usage-heatmap-min-track-width)] @[672px]:min-w-0"
+            className="min-w-[var(--usage-heatmap-min-track-width)] px-0.5 @[672px]:min-w-0"
             style={
               {
                 '--usage-heatmap-min-track-width': `${HEATMAP_MIN_TRACK_WIDTH}px`,
