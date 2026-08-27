@@ -12,6 +12,10 @@
   handoff block and its markers. Each Authoring context field is a concise public
   summary; `N/A` and redacted values are not accepted because maintainers need
   enough provenance, scope, and risk information to assess the contribution.
+- Before opening or updating an external PR, an authoring Agent tells its
+  author-side user that Context handoff is public, an invalid body closes after
+  seven days, and an oversized PR without an Issue URL closes immediately and
+  must be resubmitted. Never claim the notice was given when it was not.
 - Review instructions are a PR-specific handoff to the organization owners'
   reviewing Agent. Require concise review focus, decisions to challenge, and
   plausible failures or evidence gaps; fixed generic reviewer boilerplate and

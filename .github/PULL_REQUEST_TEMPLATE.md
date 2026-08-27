@@ -2,6 +2,12 @@
 External contributions must link a Lody issue below. Keep the change focused:
 pull requests over 200 changed lines (additions + deletions) may be closed by
 default when the design was not discussed in the linked issue first.
+
+Authoring agents MUST explain these consequences to the author-side user before
+opening or updating the PR: Context handoff is public and cannot use N/A or
+redacted answers; an invalid body is closed after seven days; and an oversized
+PR without an Issue URL is closed immediately and must be resubmitted after
+issue discussion. Do not claim this notice was given unless it actually was.
 -->
 
 ## Related issue
