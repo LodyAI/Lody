@@ -2449,7 +2449,8 @@ export function resolveCreateCurrentSessionId(
   env: NodeJS.ProcessEnv = process.env
 ): SessionId | undefined {
   return (normalizeCliValue(options.currentSessionId) ?? normalizeCliValue(env.LODY_SESSION_ID)) as
-    SessionId | undefined;
+    | SessionId
+    | undefined;
 }
 
 export function resolveOpenedBySessionRelation(
@@ -2494,7 +2495,8 @@ async function resolveCreateContext(args: {
   }
   const parentSessionId = (parentSelector ??
     (args.options.useCurrentSessionAsParent === true ? currentSessionId : undefined)) as
-    SessionId | undefined;
+    | SessionId
+    | undefined;
   if (args.options.useCurrentSessionAsParent === true && !parentSessionId) {
     throw new Error('No current session is available for --use-current-session-as-parent.');
   }
@@ -2522,7 +2524,8 @@ async function resolveCreateContext(args: {
   // An explicit taskId wins; otherwise inherit from the session that asked for
   // this one, which is what keeps agent-spawned work on the same task.
   const taskId = (normalizeCliValue(args.options.taskId) ?? currentSession?.taskId) as
-    TaskId | undefined;
+    | TaskId
+    | undefined;
   const targetMachine = await resolveTargetMachineForCreate({
     manager: args.manager,
     workspaceId,
@@ -2720,7 +2723,8 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
 export function buildLegacyMachineRestoreQueueCleanupPatch(
   sessionId: SessionId,
   machineMeta:
-    Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | undefined
+    | Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'>
+    | undefined
 ): Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | null {
   const nextNeedToArchiveSessions = { ...(machineMeta?.needToArchiveSessions ?? {}) };
   const nextNeedToDeleteSessions = { ...(machineMeta?.needToDeleteSessions ?? {}) };
@@ -4239,7 +4243,8 @@ const sessionArchiveCommand = new Command('archive')
           );
           const machineRoomId = getMachineRoomId(session.machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            MachineLegacyMetaFields | undefined;
+            | MachineLegacyMetaFields
+            | undefined;
           await manager.repo.upsertDocMeta(machineRoomId, {
             needToArchiveSessions: {
               ...(machineMeta?.needToArchiveSessions ?? {}),
@@ -4289,7 +4294,8 @@ const sessionRestoreCommand = new Command('restore')
           const nowMs = getServerNow();
           const machineRoomId = getMachineRoomId(session.machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            MachineLegacyMetaFields | undefined;
+            | MachineLegacyMetaFields
+            | undefined;
           const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
           if (machinePatch) {
             await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
@@ -4349,7 +4355,8 @@ const sessionDeleteCommand = new Command('delete')
           const requestedAt = getServerNow();
           const machineRoomId = getMachineRoomId(machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            MachineLegacyMetaFields | undefined;
+            | MachineLegacyMetaFields
+            | undefined;
           const machineFlockHandle = await manager.repo.openFlockDoc(
             getMachineFlockDocId(workspace.id as WorkspaceId, machineId)
           );
@@ -4418,7 +4425,8 @@ const sessionDeleteCommand = new Command('delete')
           const requestedAt = getServerNow();
           const machineRoomId = getMachineRoomId(machineId);
           const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            MachineLegacyMetaFields | undefined;
+            | MachineLegacyMetaFields
+            | undefined;
           const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
           if (machinePatch) {
             await manager.repo.upsertDocMeta(machineRoomId, machinePatch);

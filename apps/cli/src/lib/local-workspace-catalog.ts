@@ -88,7 +88,9 @@ export class CatalogPermissionError extends Data.TaggedError('CatalogPermissionE
 }> {}
 
 export type LocalWorkspaceCatalogError =
-  CatalogMissingError | CatalogCorruptError | CatalogPermissionError;
+  | CatalogMissingError
+  | CatalogCorruptError
+  | CatalogPermissionError;
 
 export type CacheRemoteWorkspacesInput = {
   identity: LocalCatalogIdentity;
@@ -331,11 +333,13 @@ export function makeLocalWorkspaceCatalog(
         });
         const remoteMissing = snapshot.workspaces
           .filter((workspace) => !remoteIds.has(workspace.workspaceId))
-          .map((workspace): LocalCatalogWorkspace => ({
-            ...workspace,
-            state: 'remote_missing',
-            remoteMissingAt: workspace.remoteMissingAt ?? now,
-          }));
+          .map(
+            (workspace): LocalCatalogWorkspace => ({
+              ...workspace,
+              state: 'remote_missing',
+              remoteMissingAt: workspace.remoteMissingAt ?? now,
+            })
+          );
         return {
           ...snapshot,
           identity: input.identity,
