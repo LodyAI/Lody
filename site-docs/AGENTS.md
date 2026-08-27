@@ -115,7 +115,8 @@
   free document scroll only (no auto-spring, no Scroll chevron). Preview frame is
   `pointer-events: none` so nested chat/scroll UI cannot trap wheel/touch — only
   feature tabs are clickable. Hero is 100dvh on all breakpoints so the product
-  demo never peeks on first paint. No CSS scroll-snap. The power-section usage
+  demo never peeks on first paint. The desktop scroll hint is an icon-only
+  downward chevron with no visible label. No CSS scroll-snap. The power-section usage
   frame accepts native manual scrolling and preserves default scroll chaining so
   reaching either boundary returns the wheel/touch gesture to the document. It
   rotates ranges only when visible, so number/chart transitions do not create

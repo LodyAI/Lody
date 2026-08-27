@@ -371,21 +371,12 @@
   position: absolute;
   left: max(0px, calc((100% - var(--site-content-width)) / 2));
   bottom: clamp(1.75rem, 5vh, 3.25rem);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
   color: hsl(var(--landing-ink-muted));
   /* Scrolls off with the hero — no dive fade. */
 }
 
-.underwater-hero__scroll-label {
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  text-transform: none;
-}
-
 .underwater-hero__scroll-chevron {
+  display: block;
   width: 12px;
   height: 12px;
   border-right: 2px solid currentColor;
