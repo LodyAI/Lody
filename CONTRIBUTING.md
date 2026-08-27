@@ -24,7 +24,7 @@ The repository uses Git submodules for ACP runtimes, so clone it recursively:
 
 ```bash
 git clone --recurse-submodules https://github.com/LodyAI/lody.git
-cd lody-oss
+cd lody
 ```
 
 For an existing checkout, initialise the submodules:
