@@ -263,6 +263,28 @@ const demoTaskListProps: SessionListProps = {
   ],
 };
 
+function withCollapsedGitHubRepositoryActivity(
+  status: NonNullable<SessionListRow['activityStatus']>
+): SessionListProps {
+  return {
+    ...demoTaskListProps,
+    repos: demoTaskListProps.repos.map((repo) =>
+      repo.repoFullName === 'loro-dev/lody' ? { ...repo, collapsed: true } : repo
+    ),
+    sessions: demoTaskListProps.sessions.map((session) => ({
+      ...session,
+      activityStatus: session.sessionId === 'task-4' ? status : null,
+      isWorking: session.sessionId === 'task-4',
+      isWaitingPermission: session.sessionId === 'task-4' && status === 'requestPermission',
+    })),
+  };
+}
+
+const collapsedGitHubRepositoryRunning = withCollapsedGitHubRepositoryActivity('running');
+const collapsedGitHubRepositoryInitializing = withCollapsedGitHubRepositoryActivity('initializing');
+const collapsedGitHubRepositoryPermissionRequired =
+  withCollapsedGitHubRepositoryActivity('requestPermission');
+
 const externalHistoryTaskListProps: SessionListProps = {
   ...demoTaskListProps,
   selectedSessionId: 'task-6',
@@ -1393,6 +1415,33 @@ export const CollapsedProjectChildPermissionRequired: Story = {
   ),
   args: {
     ...Default.args!,
+  },
+};
+
+export const CollapsedGitHubRepositoryRunning: Story = {
+  name: 'Collapsed GitHub repository · running',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryRunning,
+  },
+};
+
+export const CollapsedGitHubRepositoryInitializing: Story = {
+  name: 'Collapsed GitHub repository · initializing',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryInitializing,
+  },
+};
+
+export const CollapsedGitHubRepositoryPermissionRequired: Story = {
+  name: 'Collapsed GitHub repository · permission required',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryPermissionRequired,
   },
 };
 

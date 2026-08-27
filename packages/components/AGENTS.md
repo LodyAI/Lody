@@ -48,9 +48,10 @@ mobile surfaces.
 - `AgentActivityIndicator` animations stay CSS-only and compositor-friendly
   (`transform`/`opacity`). Do not restore canvas frame loops, React animation
   state, or timers; keep the Storybook Playwright render budgets passing.
-- Local-project sidebar rows aggregate fresh live activity across their Sessions and child Tabs.
-  Include pinned Sessions, and keep that status in its own slot so collapsing a project never
-  hides active work or replaces the folder/disclosure affordance.
+- Local-project and GitHub-repository sidebar rows aggregate fresh live activity across their
+  Sessions and child Tabs. Include pinned Sessions, and keep that status in its own slot so
+  collapsing a project or repository never hides active work or replaces the folder/repository
+  disclosure affordance.
 - `ZoomableImageViewer` is the one image viewer, and it presents per surface:
   full-bleed on touch, a lightbox on desktop (inset photo, translucent mask, a
   top bar that clears the native window controls). Inset the photo with a

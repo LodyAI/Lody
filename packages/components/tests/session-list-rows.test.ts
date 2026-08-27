@@ -156,6 +156,21 @@ describe('buildSessionListRows child-time aggregation', () => {
     );
 
     expect(tasks[0]?.isWorking).toBe(true);
+    expect(tasks[0]?.activityStatus).toBe('running');
+  });
+
+  test('preserves initializing presence for repository group aggregation', () => {
+    const session = makeSession({ id: 'session', title: 'Session' });
+    const tasks = buildSessionListRows([session], {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+      liveSessionStatuses: new Map([
+        [session.id, { type: 'initializing', stage: 'managed-runtime' }],
+      ]),
+    });
+
+    expect(tasks[0]?.activityStatus).toBe('initializing');
   });
 
   test('does not treat durable running status as working without live presence', () => {
@@ -173,6 +188,7 @@ describe('buildSessionListRows child-time aggregation', () => {
     });
 
     expect(tasks[0]?.isWorking).toBe(false);
+    expect(tasks[0]?.activityStatus).toBeNull();
   });
 });
 
@@ -208,6 +224,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const activity = getEffectiveSessionActivitySummary(parent, map, liveSessionStatuses);
 
     expect(activity).toMatchObject({
+      status: 'requestPermission',
       isWorking: true,
       isWaitingPermission: true,
       hasUnreadMessages: true,
@@ -273,6 +290,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const map = buildChildSessionsByParent([parent, archivedChild]);
 
     expect(getEffectiveSessionActivitySummary(parent, map)).toEqual({
+      status: null,
       isWorking: false,
       isWaitingPermission: false,
       hasUnreadMessages: false,

@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
   buildGroups,
+  getSessionGroupActivityStatus,
   getVisibleSessionGroupRows,
   getVisibleSessionGroupTree,
   MAX_VISIBLE_SESSIONS,
@@ -66,6 +67,28 @@ function buildRepoGroup(sessions: SessionListRow[]) {
   if (!group) throw new Error('expected a repo group');
   return group;
 }
+
+describe('repository group activity', () => {
+  it('preserves initialization and prioritizes permission over running', () => {
+    expect(
+      getSessionGroupActivityStatus([
+        makeRow({ sessionId: 'initializing', isWorking: true, activityStatus: 'initializing' }),
+      ])
+    ).toBe('initializing');
+
+    expect(
+      getSessionGroupActivityStatus([
+        makeRow({ sessionId: 'running', isWorking: true, activityStatus: 'running' }),
+        makeRow({
+          sessionId: 'permission',
+          isWorking: true,
+          isWaitingPermission: true,
+          activityStatus: 'requestPermission',
+        }),
+      ])
+    ).toBe('requestPermission');
+  });
+});
 
 describe('session group opened-by tree', () => {
   it('renders opened sessions indented under their opener', () => {
