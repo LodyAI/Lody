@@ -1,18 +1,24 @@
 <!--
 External contributions must link a Lody issue below. Keep the change focused:
-pull requests over 200 changed lines (additions + deletions) may be closed by
-default when the design was not discussed in the linked issue first.
+pull requests over 200 changed lines (additions + deletions) receive a warning
+and have seven days to link the Issue where the design was discussed.
+
+Creating or linking an Issue is not permission to implement the change. Wait
+for a Lody maintainer to explicitly agree on the scope and approach before
+starting implementation or opening the PR. Automation checks only the Issue
+URL; maintainers decide whether prior agreement is sufficient.
 
 Authoring agents MUST explain these consequences to the author-side user before
-opening or updating the PR: Context handoff is public and cannot use N/A or
+implementation: a newly created Issue is not approval and work must wait for
+explicit maintainer agreement; Context handoff is public and cannot use N/A or
 redacted answers; an invalid body is closed after seven days; and an oversized
-PR without an Issue URL is closed immediately and must be resubmitted after
-issue discussion. Do not claim this notice was given unless it actually was.
+PR without an Issue URL is closed after the same seven-day grace period and
+must then be resubmitted. Do not claim notice or agreement happened unless it did.
 -->
 
 ## Related issue
 
-<!-- Required. Paste a full https://github.com/LodyAI/Lody/issues/123 URL. -->
+<!-- Required. Paste the full Lody Issue URL where maintainers agreed to this contribution. -->
 
 ## Problem / pressure
 

@@ -10,15 +10,14 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: write
 
 concurrency:
   group: external-pr-size-${{ github.event.pull_request.number || github.event_name }}
   cancel-in-progress: false
 
 jobs:
-  enforce:
-    name: Enforce external PR change limit
+  warn:
+    name: Warn on external PR change limit
     runs-on: ubuntu-latest
     steps:
       # This workflow has a write-capable token. Only load the trusted base or
@@ -51,14 +50,14 @@ jobs:
 
             for (const number of numbers) {
               try {
-                // Re-read immediately before the destructive decision so an
-                // edited body or changed diff cannot be judged from stale data.
+                // Re-read so an edited body or changed diff is never judged
+                // from stale event or schedule data.
                 const pullRequest = (await github.rest.pulls.get({
                   owner,
                   repo,
                   pull_number: number,
                 })).data
-                await policy.enforcePullRequestSize({ github, owner, repo, pullRequest })
+                await policy.reconcilePullRequestSize({ github, owner, repo, pullRequest })
               } catch (error) {
                 failures.push(`#${number}: ${error.message}`)
                 core.error(`PR #${number}: ${error.stack || error.message}`)
@@ -66,5 +65,5 @@ jobs:
             }
 
             if (failures.length > 0) {
-              core.setFailed(`External PR size enforcement failed:\n${failures.join('\n')}`)
+              core.setFailed(`External PR size warning failed:\n${failures.join('\n')}`)
             }

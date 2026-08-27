@@ -5,8 +5,8 @@ export const MAX_EXTERNAL_CHANGED_LINES = 200;
 
 export const TOO_LARGE_LABEL = Object.freeze({
   name: 'status:pr-too-large',
-  color: 'B60205',
-  description: 'External PR over 200 changed lines needs prior issue discussion',
+  color: 'FBCA04',
+  description: 'External PR over 200 changed lines needs a prior issue within seven days',
 });
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
@@ -24,7 +24,7 @@ export function exceedsExternalChangeLimit(pullRequest) {
   return changedLines(pullRequest) > MAX_EXTERNAL_CHANGED_LINES;
 }
 
-export function shouldRejectPullRequest(pullRequest) {
+export function shouldWarnPullRequestSize(pullRequest) {
   return (
     shouldEnforcePullRequest(pullRequest) &&
     exceedsExternalChangeLimit(pullRequest) &&
@@ -32,14 +32,14 @@ export function shouldRejectPullRequest(pullRequest) {
   );
 }
 
-export function buildOversizedPullRequestComment({ author, lines }) {
+export function buildOversizedPullRequestWarning({ author, lines }) {
   return [
     COMMENT_MARKER,
-    `@${author}, this pull request was closed because it changes **${lines} lines** (additions + deletions) without linking a prior Lody issue.`,
+    `@${author}, this pull request changes **${lines} lines** (additions + deletions) without linking a prior Lody issue.`,
     '',
-    `External contributions over ${MAX_EXTERNAL_CHANGED_LINES} changed lines require design discussion before implementation. Open an issue, agree on the scope and approach with maintainers, then submit a new pull request whose \`## Related issue\` section contains the full Lody issue URL.`,
+    `It is marked \`${TOO_LARGE_LABEL.name}\`. The PR-body policy gives you seven days from the first invalid-body notice to fix the description. Open an issue, wait for maintainers to explicitly agree on the scope and approach, then add its full URL to \`## Related issue\`. Creating an issue yourself is not approval.`,
     '',
-    `This pull request is marked \`${TOO_LARGE_LABEL.name}\` and will not be reopened. The automation verifies the issue reference, not whether maintainers approved the design; maintainers make that decision during review.`,
+    'The size warning clears automatically after a valid Issue URL is linked. If the PR body remains invalid for seven days, the shared expiry policy closes the PR and requires a new submission; automation verifies the URL but maintainers decide whether prior agreement is sufficient.',
   ].join('\n');
 }
 
@@ -115,7 +115,7 @@ export async function clearSizePolicyState({ github, owner, repo, pullRequest })
   }
 }
 
-export async function enforcePullRequestSize({ github, owner, repo, pullRequest }) {
+export async function reconcilePullRequestSize({ github, owner, repo, pullRequest }) {
   if (!shouldEnforcePullRequest(pullRequest)) {
     if (hasPullRequestLabel(pullRequest, TOO_LARGE_LABEL.name)) {
       await clearSizePolicyState({ github, owner, repo, pullRequest });
@@ -123,13 +123,16 @@ export async function enforcePullRequestSize({ github, owner, repo, pullRequest 
     return false;
   }
 
-  const alreadyRejected = hasPullRequestLabel(pullRequest, TOO_LARGE_LABEL.name);
-  if (!alreadyRejected && !shouldRejectPullRequest(pullRequest)) {
+  const alreadyWarned = hasPullRequestLabel(pullRequest, TOO_LARGE_LABEL.name);
+  if (!shouldWarnPullRequestSize(pullRequest)) {
+    if (alreadyWarned) {
+      await clearSizePolicyState({ github, owner, repo, pullRequest });
+    }
     return false;
   }
 
   await ensureRepositoryLabel(github, owner, repo);
-  if (!alreadyRejected) {
+  if (!alreadyWarned) {
     await github.rest.issues.addLabels({
       owner,
       repo,
@@ -138,23 +141,9 @@ export async function enforcePullRequestSize({ github, owner, repo, pullRequest 
     });
   }
 
-  try {
-    await github.rest.pulls.update({
-      owner,
-      repo,
-      pull_number: pullRequest.number,
-      state: 'closed',
-    });
-  } catch (error) {
-    if (!alreadyRejected) {
-      await removeLabel(github, owner, repo, pullRequest.number);
-    }
-    throw error;
-  }
-
   const comments = await policyComments(github, owner, repo, pullRequest.number);
   const existing = comments[0];
-  const body = buildOversizedPullRequestComment({
+  const body = buildOversizedPullRequestWarning({
     author: pullRequest.user.login,
     lines: changedLines(pullRequest),
   });

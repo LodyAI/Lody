@@ -12,6 +12,8 @@ body:
 
         Keep every required section and confirmation. Issues that bypass or remove the form are marked `status:needs-issue-body` until corrected; only repository owners and automated bots are exempt.
 
+        Opening this issue does not authorize a pull request. Wait for a Lody maintainer to explicitly agree on the scope and approach before implementing the request or opening a pull request.
+
         This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
 
   - type: dropdown
@@ -82,4 +84,6 @@ body:
         - label: This request concerns an open-source component in this repository, not a hosted service, Web or mobile app, account, or billing issue.
           required: true
         - label: I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.
+          required: true
+        - label: I will wait for a Lody maintainer to explicitly agree on the scope and approach before implementation or a pull request.
           required: true

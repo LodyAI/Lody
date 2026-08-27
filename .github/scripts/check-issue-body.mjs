@@ -18,6 +18,7 @@ const ISSUE_FORMS = [
       'This report concerns an open-source component in this repository, not a hosted service, Web or mobile app, account, or billing issue.',
       "This is not a security vulnerability; security reports follow the repository's security policy.",
       'I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.',
+      'If I plan to submit a pull request, I will wait for a Lody maintainer to explicitly agree on the scope and approach before implementation.',
     ],
   }),
   Object.freeze({
@@ -33,6 +34,7 @@ const ISSUE_FORMS = [
       'I searched the existing issues and did not find a duplicate request.',
       'This request concerns an open-source component in this repository, not a hosted service, Web or mobile app, account, or billing issue.',
       'I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.',
+      'I will wait for a Lody maintainer to explicitly agree on the scope and approach before implementation or a pull request.',
     ],
   }),
 ];

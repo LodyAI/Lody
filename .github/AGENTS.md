@@ -12,10 +12,12 @@
   handoff block and its markers. Each Authoring context field is a concise public
   summary; `N/A` and redacted values are not accepted because maintainers need
   enough provenance, scope, and risk information to assess the contribution.
-- Before opening or updating an external PR, an authoring Agent tells its
-  author-side user that Context handoff is public, an invalid body closes after
-  seven days, and an oversized PR without an Issue URL closes immediately and
-  must be resubmitted. Never claim the notice was given when it was not.
+- An authoring Agent does not treat creating an Issue as approval. It tells its
+  author-side user about the policy and waits for explicit maintainer agreement
+  on scope and approach before implementation or an external PR. It also warns
+  that Context handoff is public, invalid bodies close after seven days, and
+  oversized PRs without an Issue URL get the same grace period. Never invent
+  notice or agreement that did not happen.
 - Review instructions are a PR-specific handoff to the organization owners'
   reviewing Agent. Require concise review focus, decisions to challenge, and
   plausible failures or evidence gaps; fixed generic reviewer boilerplate and
@@ -46,8 +48,9 @@
   the scheduled workflow must re-read and revalidate the latest body.
 - External PR size enforcement counts additions plus deletions. A change over
   200 lines without a full Lody issue URL is labeled `status:pr-too-large` and
-  closed; reopening it closes it again, so contribution continues through a new
-  PR after issue discussion. Automation does not infer maintainer agreement.
+  shares the PR-body seven-day correction window; adding a valid URL clears the
+  warning, while body expiry performs the eventual closure. Automation does not
+  infer maintainer agreement.
 - PR-body comments require pull-request write permission. Immediate comment and
   label updates are best-effort feedback; the checker result alone decides the
   event-driven enforcement job. Expired PRs keep `status:pr-body-expired` and
