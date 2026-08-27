@@ -817,11 +817,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   );
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
-  const projectActivityLabel = projectActivity.isWaitingPermission
-    ? t('sessions.status.requestPermission', 'Request Permission')
-    : projectActivity.isWorking
-      ? t('sessions.status.running', 'Running')
-      : null;
+  const projectActivityLabel =
+    projectActivity.status === 'requestPermission'
+      ? t('sessions.status.requestPermission', 'Request Permission')
+      : projectActivity.status === 'initializing'
+        ? t('sessions.status.initializing', 'Initializing')
+        : projectActivity.status === 'running'
+          ? t('sessions.status.running', 'Running')
+          : null;
   const ariaLabel = [project.name, trimmedMachineName, formattedPath, projectActivityLabel]
     .filter(Boolean)
     .join(' · ');
@@ -896,16 +899,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </button>
               <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
 
-              {projectActivity.isWorking ? (
+              {projectActivity.status ? (
                 <span
-                  data-sidebar-project-activity={
-                    projectActivity.isWaitingPermission ? 'requestPermission' : 'running'
-                  }
+                  data-sidebar-project-activity={projectActivity.status}
                   className="flex h-5 w-5 shrink-0 items-center justify-center"
                   aria-hidden="true"
                 >
                   <SessionRowIndicator
-                    isWaitingPermission={projectActivity.isWaitingPermission}
+                    isWaitingPermission={projectActivity.status === 'requestPermission'}
                     isWorking
                   />
                 </span>

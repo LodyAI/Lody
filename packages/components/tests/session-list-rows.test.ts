@@ -283,19 +283,31 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
 
 describe('getEffectiveProjectActivitySummary', () => {
   test('reports running when any project session has live activity', () => {
-    const idleSession = makeSession({ id: 'idle' });
+    const initializingSession = makeSession({ id: 'initializing' });
     const runningSession = makeSession({ id: 'running' });
     const liveSessionStatuses = new Map<string, SessionStatus>([
+      [initializingSession.id, { type: 'initializing' }],
       [runningSession.id, { type: 'running' }],
     ]);
 
     expect(
       getEffectiveProjectActivitySummary(
-        [idleSession, runningSession],
+        [initializingSession, runningSession],
         new Map(),
         liveSessionStatuses
       )
-    ).toEqual({ isWorking: true, isWaitingPermission: false });
+    ).toEqual({ status: 'running' });
+  });
+
+  test('reports initializing when there is no running project session', () => {
+    const session = makeSession({ id: 'initializing' });
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [session.id, { type: 'initializing', stage: 'managed-runtime' }],
+    ]);
+
+    expect(getEffectiveProjectActivitySummary([session], new Map(), liveSessionStatuses)).toEqual({
+      status: 'initializing',
+    });
   });
 
   test('gives child-tab permission activity precedence over running', () => {
@@ -312,16 +324,13 @@ describe('getEffectiveProjectActivitySummary', () => {
 
     expect(
       getEffectiveProjectActivitySummary([runningSession], children, liveSessionStatuses)
-    ).toEqual({ isWorking: true, isWaitingPermission: true });
+    ).toEqual({ status: 'requestPermission' });
   });
 
   test('ignores durable status without live presence', () => {
     const session = makeSession({ id: 'stale', status: { type: 'running' } });
 
-    expect(getEffectiveProjectActivitySummary([session])).toEqual({
-      isWorking: false,
-      isWaitingPermission: false,
-    });
+    expect(getEffectiveProjectActivitySummary([session])).toEqual({ status: null });
   });
 });
 
