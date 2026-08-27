@@ -62,7 +62,9 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'sidebar.toggle': ['$mod+b'],
   'session.toggleCurrentPinned': ['$mod+Alt+p'],
   'session.searchCurrent': [electron('$mod+f'), web('$mod+Alt+f')],
-  'session.focusInput': ['$mod+l'],
+  // Desktop ⌘L focuses the composer. On web the browser owns ⌘L (Open Location),
+  // so leave it unbound — the hint chip follows the resolved binding.
+  'session.focusInput': [electron('$mod+l')],
   'session.toggleExplorerSidebar': ['$mod+Alt+b'],
   'session.copyCurrentBranch': ['Alt+Shift+b'],
   'session.copyUrl': ['Alt+Shift+c'],

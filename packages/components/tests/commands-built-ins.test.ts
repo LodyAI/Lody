@@ -21,7 +21,7 @@ describe('built-in commands', () => {
     expect(commands.get('session.archiveCurrent')?.title).toBe('Archive Current Chat');
     expect(commands.getDefaultKeybindingsFor('session.archiveCurrent')).toEqual(['$mod+Alt+a']);
     expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+Alt+f']);
-    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['$mod+l']);
+    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual([]);
     // ⌥N works on web too (always a new tab there); ⌘[/⌘] back/forward and the terminal
@@ -47,6 +47,7 @@ describe('built-in commands', () => {
     registerBuiltInCommands();
 
     expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+f']);
+    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['$mod+l']);
     expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual(['$mod+Shift+.']);
     expect(commands.getDefaultKeybindingsFor('session.previousTab')).toEqual(['$mod+Shift+,']);
     expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual(['$mod+Shift+[']);
