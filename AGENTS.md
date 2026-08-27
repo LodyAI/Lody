@@ -55,58 +55,58 @@ private service secrets, and the Web and mobile app sources.
   Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
   driving turn's selection into ACP startup rather than rereading session history.
 - Workspace catalog mutations (MCP servers and Agent Roles) are durable on the local
-  Flock write; an explicit upload follows. Settings resolve on local durability and neither
-  await nor report that upload: the row already exists and a joined room can carry it.
-  Never report or roll back a durable write because upload failed, or show an unactionable
-  upload banner. The CLI still reports its own sync result.
+  Flock write and shared by an explicit upload that follows it. Settings surfaces resolve
+  on durability and do not wait on or report that upload: the row already exists, the
+  joined room carries the document when a one-shot upload cannot, and a banner about it is
+  something the user can neither act on nor dismiss. What is forbidden is the opposite —
+  reporting a durable write as failed, or rolling one back, because the upload did not go
+  through. The CLI still reports its own sync result to the terminal.
 - Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private/shared split; sharing updates `visibility`. A Role stores no API key, MCP
-  selection, memory, or other secret, so apply `isSensitiveAgentRoleConfigOptionKey` on
-  read and write because every member receives workspace rows. A Role DOES pin permission
-  through legacy `runConfig.modeId` or the agent's `_permission`; this published run value
-  is not secret, and the composer hides its permission button while a Role is selected.
-  Keep pinned warning modes (full access / skip permissions) visibly marked wherever that
-  button is hidden; Role-level auto-approval policy remains out of scope. Settings and
-  mentions use `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit
-  workspace Role id without a mention-scoped authorization record.
+  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
+  A Role stores no secret — no API key, MCP selection, or memory — and
+  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
+  because a workspace row reaches every member's client. It DOES pin the permission
+  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
+  option: permission is a run-config value the agent publishes, not a secret, and a
+  Role that left it out would not be the whole configuration it claims to be. So the
+  composer drops its separate permission button while such a Role is selected. A Role
+  may therefore pin a warning-tone mode (full access / skip permissions), which every
+  surface that hides the permission control must keep visibly marked; what stays out
+  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
+  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
+  the workspace catalog without requiring a mention-scoped authorization record.
 - A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  if its machine, config, model, or mode is unavailable, keep it listed with the precise
-  reason but not mentionable. Before accepting an Operation, MCP creation resolves the
-  current `agentRoleId` row and freezes its canonical Prompt, target, revision, and dispatch
-  config so later edits/deletion cannot affect recovery or retry. `SessionMeta.agentRoleId`
-  and `agentRoleRevision` are display-only provenance.
+  when the machine, config, or a stored model/mode is unavailable the Role stays listed
+  with the precise reason and stops being mentionable. MCP creation resolves the current
+  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
+  target, Role revision, and dispatch config are frozen into the accepted Operation so a
+  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
+  `agentRoleRevision` record where a Session came from and are display-only.
 
 `pnpm check:public-boundary` is the executable repository boundary and must pass
 after changing package scope or cloud/local composition.
-
-## External contributions
-
-Before implementing an external contribution, an authoring Agent opens the matching Lody
-Issue and waits for a maintainer to explicitly agree on scope and approach. Creating or
-linking an Issue is not approval. The Agent tells its author-side user about that gate,
-public Context handoff, and the shared seven-day correction window for invalid bodies or
-oversized PRs without an Issue URL; it never invents notice or agreement.
 
 ## Project map
 
 - `apps/cli`: agent execution, local persistence, Machine RPC, Code Collab
 - `apps/electron`: desktop shell and bundled CLI lifecycle
-- `packages/components`: shared React UI
+- `packages/components`: shared React product/workspace UI
 - `packages/platform`: provider and capability contracts plus local defaults
 - `packages/cloud-api`: public optional-cloud client contract
 - `packages/shared`: schemas, protocols, and cross-runtime utilities
 - `packages/loro-streams-rpc`: public Streams RPC protocol/client
 - `packages/acp-extension-core`: shared public ACP extension contracts
 - `packages/acp-extension-kimi`: independently built Kimi runtime source and Lody ACP extensions
-- `site-docs`: documentation site
+- `site-docs`: public documentation site
 
 ## Checks and commits
 
 Use Node.js 22+ and the pnpm version pinned in `package.json`.
 
 - Install dependencies with `pnpm install`.
-- In a parent pnpm workspace, the parent owns installation; the preinstall guard
-  rejects a nested install that would mix virtual stores. Use a separate clone
+- When this checkout is embedded in a parent pnpm workspace, that parent owns
+  dependency installation. The public preinstall guard rejects a second nested
+  install because it would mix virtual-store identities. Use a separate clone
   for standalone public development.
 - The canonical desktop command is `pnpm start:local`; it rebuilds both the
   bundled CLI and local OSS renderer before launch. Root `pnpm build` builds
@@ -120,9 +120,10 @@ Use Node.js 22+ and the pnpm version pinned in `package.json`.
 
 ## Test quality
 
-Tests never depend on real sleeps, wall-clock races, network, machine load, or
-scheduler luck. Use signals, injected clocks, fake timers, and deterministic
-fixtures; assert observable behavior at the lowest realistic boundary.
+Tests must not depend on real sleeps, wall-clock races, network access, machine
+load, or scheduler luck. Use explicit signals, injected clocks, fake timers,
+and deterministic fixtures. Assert observable behavior at the lowest realistic
+boundary, not implementation details or mock call counts.
 
 ## Editing discipline
 
