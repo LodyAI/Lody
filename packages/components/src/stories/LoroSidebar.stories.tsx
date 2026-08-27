@@ -34,6 +34,7 @@ import type {
 } from '@lody/shared';
 
 const NOW = Date.now();
+const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
 const DEMO_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>([
   ['local-sess-worktree', { type: 'running' }],
 ]);
@@ -911,6 +912,7 @@ const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
 function ProductionLikeTopContent({
   chatSessions,
   githubWorktreeCount,
+  localProjectLiveSessionStatuses,
   selectedSessionId,
   onSelectSession,
   onArchiveSession,
@@ -920,6 +922,7 @@ function ProductionLikeTopContent({
 }: {
   chatSessions: SessionListRow[];
   githubWorktreeCount: number;
+  localProjectLiveSessionStatuses: ReadonlyMap<string, SessionStatus>;
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
   onArchiveSession: (id: string) => void;
@@ -1001,7 +1004,7 @@ function ProductionLikeTopContent({
                       project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
                     }
                     childSessionsByParent={new Map()}
-                    liveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
+                    liveSessionStatuses={localProjectLiveSessionStatuses}
                     formattedPath={project.rootPath}
                     defaultSessionTitle="Untitled"
                     selectedSessionId={null}
@@ -1054,7 +1057,7 @@ function ProductionLikeTopContent({
                   isSelected={false}
                   sessionsForProject={[] as SessionMeta[]}
                   childSessionsByParent={new Map()}
-                  liveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
+                  liveSessionStatuses={localProjectLiveSessionStatuses}
                   formattedPath={project.rootPath}
                   defaultSessionTitle="Untitled"
                   selectedSessionId={null}
@@ -1093,7 +1096,12 @@ function ProductionLikeTopContent({
   );
 }
 
-function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
+function WithProjectsLayout({
+  localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
+  ...args
+}: Parameters<typeof LoroSidebar>[0] & {
+  localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
+}) {
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
@@ -1156,6 +1164,7 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
         <ProductionLikeTopContent
           chatSessions={chatSessions}
           githubWorktreeCount={repos.length}
+          localProjectLiveSessionStatuses={localProjectLiveSessionStatuses}
           selectedSessionId={selectedSessionId}
           onSelectSession={setSelectedSessionId}
           onArchiveSession={archiveTask}
@@ -1253,6 +1262,16 @@ const stressTaskListProps: SessionListProps = {
 
 export const WithProjects: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectRunning: Story = {
+  name: 'Collapsed project · running',
+  render: (args) => (
+    <WithProjectsLayout {...args} localProjectLiveSessionStatuses={DEMO_LIVE_SESSION_STATUSES} />
+  ),
   args: {
     ...Default.args!,
   },
