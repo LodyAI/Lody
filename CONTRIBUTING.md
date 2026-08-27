@@ -79,6 +79,8 @@ This variable is optional. Never commit the generated data or credentials.
 
 5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Identify whether an Agent or a human authored it, then fill in the problem, summary, and test plan. An authoring Agent must give the maintainers' reviewing Agent a concise, PR-specific review focus, decisions to challenge, and plausible failures or evidence gaps. Before publishing Agent handoff context, it must also ask the author-side user for permission and record exactly one consent answer. Context sharing may be declined, but maintainers may decline or close a contribution when withheld context prevents a safe review. For external contributors, an automated check enforces this format.
 
+An external pull request with an invalid body is marked `status:needs-pr-body`. Fix the body within seven days to clear the status automatically. If it remains invalid beyond that grace period, the pull request is marked `status:pr-body-expired` and closed; submit a new pull request with the current template to continue contributing the change.
+
 Pull requests are automatically labeled with one or more `scope:*` labels based on the changed paths. The [scope mapping](./.github/labeler.yml) uses each top-level key as a label name and its globs as matching paths; the [scope workflow](./.github/workflows/pr-scope.yml) creates or applies matching labels and removes configured labels that stop matching. Manually applied and unconfigured labels are left unchanged.
 
 ## Code Guidelines

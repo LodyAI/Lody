@@ -34,6 +34,11 @@
   out all public submodules recursively, and keeps the stable `Static checks`
   and `Tests` jobs aligned with the root validation scripts so they can be used
   as required status checks.
-- PR-body comments require pull-request write permission. Treat comment creation,
-  updates, and cleanup as best-effort feedback; the checker result alone decides
-  whether the enforcement job passes or fails.
+- `scripts/pr-body-policy.mjs` owns PR-body status labels, comment markers, and
+  the seven-day grace period. An invalid external PR keeps its original timer
+  across edits and pushes; only a valid body clears the state. Before closing,
+  the scheduled workflow must re-read and revalidate the latest body.
+- PR-body comments require pull-request write permission. Immediate comment and
+  label updates are best-effort feedback; the checker result alone decides the
+  event-driven enforcement job. Expired PRs keep `status:pr-body-expired` and
+  are closed again when reopened, so a contributor must submit a new PR.
