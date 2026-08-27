@@ -1248,6 +1248,12 @@ function UsageHeatmap({
   // Roving tabindex: the grid is one tab stop, arrow keys walk days and weeks.
   const [focusIndex, setFocusIndex] = useState(() => Math.max(0, todayIndex));
 
+  // Show the newest weeks initially without overriding later user scrolling.
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth;
+  }, []);
+
   const cellLabel = useCallback(
     (cell: UsageCalendarCell) => {
       const date = formats.day.format(new Date(cell.dayStartMs));
