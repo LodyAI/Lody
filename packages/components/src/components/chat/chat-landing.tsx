@@ -66,7 +66,6 @@ import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import {
   bugReportDialogOpenAtom,
   chatLandingSessionStateAtomFamily,
-  currentWorkspaceIdAtom,
   getAllAgentConfigAtom,
   inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
@@ -100,6 +99,7 @@ import {
   useReconcileAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   getChatLandingAgentSelectionsForMachine,
   readChatLandingDefaults,
@@ -605,7 +605,7 @@ function WorkspaceChatLanding({
     controlConnectionState === 'connecting' ||
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
   const setLocalProjectSharedWithTeam = useCloudMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );

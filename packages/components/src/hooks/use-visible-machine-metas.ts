@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { MachineFlockRowFamily, MachineId, WorkspaceId } from '@lody/shared';
-import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { userAtom } from '@/atoms';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
@@ -19,6 +18,7 @@ import {
 } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { useCloudQuery } from '@lody/platform/react';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { MachineVisibilityAccess };
 
@@ -50,9 +50,7 @@ export function useVisibleMachineMetas(
 ): VisibleMachineMetas {
   const includeMachineFlock = options.includeMachineFlock ?? true;
   const syncMachineFlock = options.syncMachineFlock ?? true;
-  const enabled = options.enabled ?? true;
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const workspaceId = options.workspaceId === undefined ? currentWorkspaceId : options.workspaceId;
+  const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
@@ -97,11 +95,14 @@ export function useVisibleMachineMetas(
   const {
     rowsByMachineId: machineFlockRowsByMachineId,
     remoteSyncedMachineIds: machineFlockRemoteSyncedMachineIds,
-  } = useMachineFlockRowsByMachineIdsState(includeMachineFlock ? visibleMachineIds : [], {
-    families: options.machineFlockFamilies ?? DEFAULT_MACHINE_FLOCK_FAMILIES,
-    syncRemote: syncMachineFlock,
-    remoteMachineIds: onlineVisibleMachineIds,
-  });
+  } = useMachineFlockRowsByMachineIdsState(
+    includeMachineFlock && enabled ? visibleMachineIds : [],
+    {
+      families: options.machineFlockFamilies ?? DEFAULT_MACHINE_FLOCK_FAMILIES,
+      syncRemote: enabled && syncMachineFlock,
+      remoteMachineIds: enabled ? onlineVisibleMachineIds : [],
+    }
+  );
   const visibleMachinesWithFlockMeta = useMemo(
     () =>
       includeMachineFlock

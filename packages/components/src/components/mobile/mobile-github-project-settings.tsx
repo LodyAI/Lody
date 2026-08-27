@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtomValue } from 'jotai';
 import { ChevronRight, Loader2, Wrench } from 'lucide-react';
-import { currentWorkspaceIdAtom } from '@/atoms';
 import { useGithubProjectWorktreeAdmin } from '@/hooks/use-github-project-worktree-admin';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 
 export type MobileGithubProjectSettingsProps = {
   /** "owner/repo" — the workspace repo whose worktree scripts we're editing. */
@@ -23,7 +22,7 @@ export type MobileGithubProjectSettingsProps = {
  */
 export function MobileGithubProjectSettings({ repoFullName }: MobileGithubProjectSettingsProps) {
   const { t } = useTranslation();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
   const { rowByRepoFullName, isLoading, onWorktreeSetupChange, onWorktreeCleanupChange } =
     useGithubProjectWorktreeAdmin();
   const row = rowByRepoFullName.get(repoFullName) ?? null;

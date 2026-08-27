@@ -11,8 +11,12 @@ import {
   getCachedWorkspaceId,
 } from '@/lib/local-storage-cache';
 import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
-import { useSetAtom } from 'jotai';
-import { setWorkspaceContextAtom } from '@/atoms';
+import { useSetAtom, useStore } from 'jotai';
+import {
+  setWorkspaceContextAtRevisionAtom,
+  setWorkspaceContextAtom,
+  workspaceContextSnapshotAtom,
+} from '@/atoms';
 import { WorkspaceId } from '@lody/shared';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthClient } from '../providers/convex-provider';
@@ -225,6 +229,8 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   } = authClient.useActiveOrganization();
 
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
+  const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
+  const workspaceContextStore = useStore();
 
   const organizationsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [organizationsRetryCount, setOrganizationsRetryCount] = useState(0);
@@ -602,11 +608,12 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         activeOrganization: resolvedActiveOrganization,
       });
       let didDelete = false;
+      let transitionRevision: number | null = null;
       // Clear before the server removes membership so workspace-scoped Convex
       // subscriptions skip immediately; otherwise listVisibleMachines can run
       // with the just-deleted workspace id and throw a 403 during redirect.
       if (removalTransition.isActiveOrganization) {
-        setWorkspaceContext({ slug: null, workspaceId: null });
+        transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
         const { data, error } = await authClient.organization.delete({
@@ -627,18 +634,44 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
           }
           if (removalTransition.isActiveOrganization) {
             if (removalTransition.fallbackOrganization) {
-              try {
-                await switchOrganizationOrThrow(removalTransition.fallbackOrganization.id);
-                setWorkspaceContext({
-                  slug: removalTransition.fallbackOrganization.slug,
-                  workspaceId: removalTransition.fallbackOrganization.id as WorkspaceId,
-                });
-              } catch (switchError) {
-                console.error('Failed to switch organization after delete:', switchError);
-                setWorkspaceContext({ slug: null, workspaceId: null });
+              const fallbackOrganization = removalTransition.fallbackOrganization;
+              const transitionIsCurrent = () =>
+                transitionRevision !== null &&
+                workspaceContextStore.get(workspaceContextSnapshotAtom).revision ===
+                  transitionRevision;
+              if (transitionIsCurrent()) {
+                try {
+                  await switchOrganizationOrThrow(fallbackOrganization.id);
+                  const latestContext = workspaceContextStore.get(workspaceContextSnapshotAtom);
+                  if (latestContext.revision !== transitionRevision) {
+                    if (
+                      latestContext.workspaceId &&
+                      latestContext.workspaceId !== fallbackOrganization.id
+                    ) {
+                      await switchOrganizationOrThrow(latestContext.workspaceId);
+                    }
+                  } else {
+                    setWorkspaceContextAtRevision({
+                      revision: transitionRevision,
+                      context: {
+                        slug: fallbackOrganization.slug,
+                        workspaceId: fallbackOrganization.id as WorkspaceId,
+                      },
+                    });
+                  }
+                } catch (switchError) {
+                  console.error('Failed to switch organization after delete:', switchError);
+                  setWorkspaceContextAtRevision({
+                    revision: transitionRevision,
+                    context: { slug: null, workspaceId: null },
+                  });
+                }
               }
             } else {
-              setWorkspaceContext({ slug: null, workspaceId: null });
+              setWorkspaceContextAtRevision({
+                revision: transitionRevision,
+                context: { slug: null, workspaceId: null },
+              });
             }
           }
           // TODO: delete local workspace data
@@ -652,9 +685,12 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return data;
       } catch (err) {
         if (removalTransition.isActiveOrganization && !didDelete) {
-          setWorkspaceContext({
-            slug: removalTransition.removedSlug,
-            workspaceId: organizationId as WorkspaceId,
+          setWorkspaceContextAtRevision({
+            revision: transitionRevision,
+            context: {
+              slug: removalTransition.removedSlug,
+              workspaceId: organizationId as WorkspaceId,
+            },
           });
         }
         console.error('Failed to delete organization:', err);
@@ -671,7 +707,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       refetchOrganizations,
       resolvedActiveOrganization,
       setWorkspaceContext,
+      setWorkspaceContextAtRevision,
       switchOrganizationOrThrow,
+      workspaceContextStore,
     ]
   );
 
@@ -691,8 +729,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         activeOrganization: resolvedActiveOrganization,
       });
       let didLeave = false;
+      let transitionRevision: number | null = null;
       if (removalTransition.isActiveOrganization) {
-        setWorkspaceContext({ slug: null, workspaceId: null });
+        transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
         const { data, error } = await authClient.organization.leave({
@@ -707,18 +746,44 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
           }
           if (removalTransition.isActiveOrganization) {
             if (removalTransition.fallbackOrganization) {
-              try {
-                await switchOrganizationOrThrow(removalTransition.fallbackOrganization.id);
-                setWorkspaceContext({
-                  slug: removalTransition.fallbackOrganization.slug,
-                  workspaceId: removalTransition.fallbackOrganization.id as WorkspaceId,
-                });
-              } catch (switchError) {
-                console.error('Failed to switch organization after leave:', switchError);
-                setWorkspaceContext({ slug: null, workspaceId: null });
+              const fallbackOrganization = removalTransition.fallbackOrganization;
+              const transitionIsCurrent = () =>
+                transitionRevision !== null &&
+                workspaceContextStore.get(workspaceContextSnapshotAtom).revision ===
+                  transitionRevision;
+              if (transitionIsCurrent()) {
+                try {
+                  await switchOrganizationOrThrow(fallbackOrganization.id);
+                  const latestContext = workspaceContextStore.get(workspaceContextSnapshotAtom);
+                  if (latestContext.revision !== transitionRevision) {
+                    if (
+                      latestContext.workspaceId &&
+                      latestContext.workspaceId !== fallbackOrganization.id
+                    ) {
+                      await switchOrganizationOrThrow(latestContext.workspaceId);
+                    }
+                  } else {
+                    setWorkspaceContextAtRevision({
+                      revision: transitionRevision,
+                      context: {
+                        slug: fallbackOrganization.slug,
+                        workspaceId: fallbackOrganization.id as WorkspaceId,
+                      },
+                    });
+                  }
+                } catch (switchError) {
+                  console.error('Failed to switch organization after leave:', switchError);
+                  setWorkspaceContextAtRevision({
+                    revision: transitionRevision,
+                    context: { slug: null, workspaceId: null },
+                  });
+                }
               }
             } else {
-              setWorkspaceContext({ slug: null, workspaceId: null });
+              setWorkspaceContextAtRevision({
+                revision: transitionRevision,
+                context: { slug: null, workspaceId: null },
+              });
             }
           }
           void refetchOrganizations();
@@ -731,9 +796,12 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return data;
       } catch (err) {
         if (removalTransition.isActiveOrganization && !didLeave) {
-          setWorkspaceContext({
-            slug: removalTransition.removedSlug,
-            workspaceId: organizationId as WorkspaceId,
+          setWorkspaceContextAtRevision({
+            revision: transitionRevision,
+            context: {
+              slug: removalTransition.removedSlug,
+              workspaceId: organizationId as WorkspaceId,
+            },
           });
         }
         console.error('Failed to leave organization:', err);
@@ -750,8 +818,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       refetchOrganizations,
       resolvedActiveOrganization,
       setWorkspaceContext,
+      setWorkspaceContextAtRevision,
       switchOrganizationOrThrow,
       user,
+      workspaceContextStore,
     ]
   );
 

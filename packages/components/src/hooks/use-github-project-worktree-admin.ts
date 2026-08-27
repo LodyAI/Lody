@@ -1,9 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useAtomValue } from 'jotai';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorktreeCleanupScriptConfig, WorktreeSetupScriptConfig } from '@lody/shared';
-import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
@@ -12,6 +10,7 @@ import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from './use-convex-error-message';
 import type { SettingsWorkspaceRepoWithStatus } from '@/components/settings/settings-data-cache';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 /* Self-contained backing store for the mobile GitHub-project Settings tab.
    The desktop `/settings/projects` page reads the same repos through
@@ -45,7 +44,7 @@ export type GithubProjectWorktreeAdmin = {
 };
 
 export function useGithubProjectWorktreeSaves() {
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
   const setRepoWorktreeSetup = useCloudMutation(cloudOperations.github.setRepoWorktreeSetup);
   const setRepoWorktreeCleanup = useCloudMutation(cloudOperations.github.setRepoWorktreeCleanup);
   const getConvexErrorMessage = useConvexErrorMessage();
@@ -116,7 +115,7 @@ export function useGithubProjectWorktreeSaves() {
 }
 
 export function useGithubProjectWorktreeAdmin(): GithubProjectWorktreeAdmin {
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const repos = useCloudQuery(

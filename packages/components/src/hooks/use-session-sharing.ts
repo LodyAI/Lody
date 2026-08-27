@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
-import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
+import { userAtom } from '@/atoms';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import {
@@ -14,6 +14,7 @@ import {
 } from '@/lib/session-sharing';
 import { useAuthClient } from '../providers/convex-provider';
 import { useAppCapability } from '@/lib/app-platform';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 type UseSessionSharingOptions = {
   includeLocalProjectDetails?: boolean;
@@ -42,9 +43,9 @@ function useSessionSharingActiveOrganization(teamSharingAvailable: boolean) {
 export function useSessionSharing(options: UseSessionSharingOptions = {}) {
   const teamSharingAvailable = useAppCapability('teamSharing');
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const workspaceId = options.workspaceId === undefined ? currentWorkspaceId : options.workspaceId;
-  const enabled = options.enabled ?? true;
+  const scope = useResolvedWorkspaceScope(options);
+  const workspaceId = scope.workspaceId;
+  const enabled = scope.enabled;
   const activeOrganization = useSessionSharingActiveOrganization(teamSharingAvailable);
   const machineIndex = useVisibleMachineMetas({
     includeMachineFlock: false,

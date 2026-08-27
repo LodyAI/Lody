@@ -1,5 +1,5 @@
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { atom, useAtom, useAtomValue } from 'jotai';
+import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from '@tanstack/react-router';
 import {
@@ -12,8 +12,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
-import { currentWorkspaceIdAtom } from '@/atoms';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useCloudQuery } from '@lody/platform/react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -39,7 +39,7 @@ export function WorkspaceCheckoutPendingDialog() {
   // safety net so a stray mount can never query billing on the local platform.
   const billingAvailable = useAppCapability('billing');
   const hidesBillingUi = isMobile || isNativeAppShell() || !billingAvailable;
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
   const location = useLocation();
   const { openSettings } = useOpenSettings();
   const [dismissed, setDismissed] = useAtom(dismissedCheckoutPendingWorkspacesAtom);

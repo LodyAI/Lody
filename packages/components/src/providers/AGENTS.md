@@ -17,6 +17,8 @@
 
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
-  before reading singleton caches. Visibility hooks must receive an explicit scoped workspace
-  id and `enabled: false` during mismatch so previous-scope queries and Machine Flock work do
-  not start behind a hidden loading state.
+  before reading singleton caches. Shared visibility and sharing hooks enforce this gate by
+  default when mounted under `WorkspaceRouteTargetProvider`; scope mismatch returns an empty
+  projection and disables queries, Machine Flock, sharing, and eager-sync inputs. Provider-
+  external consumers such as `RuntimeProvider` retain their existing default behavior. Explicit
+  `workspaceId` / `enabled` options remain fenced by the route scope and cannot reopen stale work.

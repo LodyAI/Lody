@@ -56,7 +56,11 @@ import {
   useVisibleLocalProjectsFromMachineIndex,
 } from '../src/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '../src/hooks/use-visible-machine-metas';
-import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
+import {
+  useVisibleArchivedSessionMetas,
+  useVisibleSessionMetas,
+} from '../src/hooks/use-visible-session-metas';
+import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
 import {
   resolveSessionDetailVisibilityState,
   type SessionDetailPresenceState,
@@ -163,6 +167,24 @@ function VisibleSessionProbe({
   return null;
 }
 
+function RouteScopedVisibilityProbe({
+  onSnapshot,
+}: {
+  onSnapshot: (value: { activeIds: string[]; archivedIds: string[] }) => void;
+}) {
+  const { sessions } = useVisibleSessionMetas();
+  const { archivedSessions } = useVisibleArchivedSessionMetas();
+
+  useEffect(() => {
+    onSnapshot({
+      activeIds: sessions.map((session) => session.id),
+      archivedIds: archivedSessions.map((session) => session.id),
+    });
+  }, [archivedSessions, onSnapshot, sessions]);
+
+  return null;
+}
+
 function createCachedSession(userId: string): SessionMeta {
   return {
     id: 'cached-session' as SessionId,
@@ -259,6 +281,52 @@ describe('visible access hooks', () => {
   afterEach(async () => {
     await unmount();
     vi.clearAllMocks();
+  });
+
+  it('fails closed for active and archived sessions while a new route scope is not ready', async () => {
+    queryMocks.machineRows = [
+      {
+        machineId: 'shared-machine',
+        ownerUserId: 'viewer-user',
+        sharedWithTeam: false,
+        updatedAt: 1,
+      },
+    ];
+    const activeSession = createCachedSession('viewer-user');
+    const archivedSession = {
+      ...createCachedSession('viewer-user'),
+      id: 'archived-session' as SessionId,
+      isArchived: true,
+    };
+    cacheSession(activeSession);
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(activeSession.id)]: activeSession,
+      [getSessionRoomId(archivedSession.id)]: archivedSession,
+    });
+    let snapshot: { activeIds: string[]; archivedIds: string[] } | undefined;
+
+    await mount(
+      'workspace-a',
+      createElement(
+        WorkspaceRouteTargetProvider,
+        { slug: 'workspace-b' },
+        createElement(RouteScopedVisibilityProbe, {
+          onSnapshot: (value) => {
+            snapshot = value;
+          },
+        })
+      )
+    );
+
+    expect(snapshot).toEqual({ activeIds: [], archivedIds: [] });
+    const queryArgs = queryMocks.useQuery.mock.calls.map(([, args]) => args);
+    expect(queryArgs.length).toBeGreaterThan(0);
+    expect(queryArgs.every((args) => args === 'skip')).toBe(true);
+    expect(machineFlockMocks.useMachineFlockRowsByMachineIdsState).toHaveBeenCalledWith([], {
+      families: expect.any(Array),
+      syncRemote: false,
+      remoteMachineIds: [],
+    });
   });
 
   it('does not reuse machine access rows while a later mount is loading', async () => {

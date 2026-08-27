@@ -3,7 +3,6 @@ import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
@@ -17,6 +16,7 @@ import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import type { VisibleMachineIndex } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { useCloudQuery } from '@lody/platform/react';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { LocalProjectVisibilityAccess };
 
@@ -48,9 +48,7 @@ export function useVisibleLocalProjectsFromMachineIndex(
   visibleMachineIndex: Pick<VisibleMachineIndex, 'machines' | 'accessByMachineId' | 'isLoading'>,
   options: { enabled?: boolean; workspaceId?: WorkspaceId | null } = {}
 ): VisibleLocalProjectIndex {
-  const enabled = options.enabled ?? true;
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const workspaceId = options.workspaceId === undefined ? currentWorkspaceId : options.workspaceId;
+  const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;

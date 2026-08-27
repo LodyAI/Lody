@@ -1,11 +1,12 @@
 import { useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { sessionListAtom } from '@/atoms/doc-meta';
-import { userAtom, currentWorkspaceIdAtom } from '@/atoms';
+import { userAtom } from '@/atoms';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { findFreshSessionPresenceState } from '@lody/shared';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 
 type WindowBadge = { unread: number; waiting: number };
 
@@ -28,7 +29,7 @@ export function useWorkspaceBadge(): void {
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
   const user = useAtomValue(userAtom);
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
   const userId = user?.id ?? null;
 
   const badge = useMemo<WindowBadge>(() => {
@@ -37,16 +38,18 @@ export function useWorkspaceBadge(): void {
     let waiting = 0;
     for (const session of sessions) {
       if (session.userId !== userId) continue;
-      const liveStatus = findFreshSessionPresenceState(presenceStates, session.id, presenceNowMs)
-        ?.status;
+      const liveStatus = findFreshSessionPresenceState(
+        presenceStates,
+        session.id,
+        presenceNowMs
+      )?.status;
       if (liveStatus?.type === 'requestPermission') {
         waiting += 1;
         continue;
       }
       const lastMessageAt =
         typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
-      const lastReadAt =
-        typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
+      const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
       if (lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt)) {
         unread += 1;
       }

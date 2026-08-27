@@ -6,6 +6,7 @@ import {
   clearWorkspaceContextForSlugAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
+  setWorkspaceContextAtRevisionAtom,
   setWorkspaceContextAtom,
 } from '../src/atoms/workspace-context';
 
@@ -80,6 +81,54 @@ describe('workspace context atoms', () => {
     expect(store.get(workspaceIdentityAtom)).toEqual({
       slug: 'workspace-a',
       workspaceId: workspaceId('workspace-a-id'),
+    });
+  });
+
+  it('rejects a stale mutation continuation after navigation publishes a newer identity', () => {
+    const store = createStore();
+    const revision = store.set(setWorkspaceContextAtom, {
+      slug: null,
+      workspaceId: null,
+    });
+    store.set(setWorkspaceContextAtom, {
+      slug: 'workspace-b',
+      workspaceId: workspaceId('workspace-b-id'),
+    });
+
+    const published = store.set(setWorkspaceContextAtRevisionAtom, {
+      revision,
+      context: {
+        slug: 'workspace-a',
+        workspaceId: workspaceId('workspace-a-id'),
+      },
+    });
+
+    expect(published).toBe(false);
+    expect(store.get(workspaceIdentityAtom)).toEqual({
+      slug: 'workspace-b',
+      workspaceId: workspaceId('workspace-b-id'),
+    });
+  });
+
+  it('allows a mutation continuation when no newer writer has advanced the revision', () => {
+    const store = createStore();
+    const revision = store.set(setWorkspaceContextAtom, {
+      slug: null,
+      workspaceId: null,
+    });
+
+    const published = store.set(setWorkspaceContextAtRevisionAtom, {
+      revision,
+      context: {
+        slug: 'workspace-fallback',
+        workspaceId: workspaceId('workspace-fallback-id'),
+      },
+    });
+
+    expect(published).toBe(true);
+    expect(store.get(workspaceIdentityAtom)).toEqual({
+      slug: 'workspace-fallback',
+      workspaceId: workspaceId('workspace-fallback-id'),
     });
   });
 

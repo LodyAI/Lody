@@ -24,7 +24,7 @@ import {
   WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES,
 } from '@lody/shared';
 import { isLocalAppPlatform } from '@/lib/app-platform';
-import { WorkspaceRouteTargetProvider } from '@/providers/workspace-route-target';
+import { WorkspaceRouteTargetProvider } from '../providers/workspace-route-target';
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,

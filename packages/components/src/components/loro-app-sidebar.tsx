@@ -47,7 +47,7 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
-import { useWorkspaceRouteTargetSlug } from '@/providers/workspace-route-target';
+import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';

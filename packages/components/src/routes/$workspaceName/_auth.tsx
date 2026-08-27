@@ -3,7 +3,7 @@ import { lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentWorkspaceIdAtom, runtimeInitializingAtom, userAtom } from '@/atoms';
+import { runtimeInitializingAtom, userAtom } from '@/atoms';
 import { WorkspaceCheckoutPendingDialog } from '@/components/workspace-checkout-pending-dialog';
 import { ElectronSessionCompletionNotifier } from '@/components/electron-session-completion-notifier';
 import { ElectronMenuHandler } from '@/components/electron-menu-handler';
@@ -37,6 +37,7 @@ import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lody-live-activity';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
+import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
 
@@ -105,7 +106,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     error,
   } = useStableSession();
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
   const { machines: machineMetaMap } = useVisibleMachineMetas({ includeMachineFlock: false });
   const onlineMachineIdSet = useOnlineMachineIds();
   const [sessionSettled, setSessionSettled] = useState(!isPending);
@@ -336,7 +337,7 @@ function AuthedLayoutContent({
     error: organizationsError,
   } = useOrganization({ targetSlug: workspaceName });
   const user = useAtomValue(userAtom);
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
 
@@ -361,6 +362,15 @@ function AuthedLayoutContent({
   if (hasLocalToken) {
     if (orgSettled && organizations !== undefined && organizations.length === 0) {
       return <Navigate to="/workspace/create" replace />;
+    }
+
+    if (!currentWorkspaceId) {
+      return (
+        <LoadingPlaceholder
+          title={t('workspace.route.loadingTitle')}
+          description={t('workspace.route.setupLoadingDescription')}
+        />
+      );
     }
 
     return (

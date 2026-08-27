@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { allActiveSessionsAtom } from '@/atoms/doc-meta';
-import { currentWorkspaceIdAtom, iosLiveActivitiesEnabledAtom, userAtom } from '@/atoms';
+import { iosLiveActivitiesEnabledAtom, userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { useStableNow } from '@/hooks/use-stable-now';
+import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { usePlatformCapability } from '@lody/platform/react';
 import {
   buildLodyConversationsLiveActivityId,
@@ -107,7 +108,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const user = useAtomValue(userAtom);
-  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
   const { t, i18n } = useTranslation();
   const now = useStableNow(LIVE_ACTIVITY_RECHECK_INTERVAL_MS);
   const userId = user?.id ?? null;

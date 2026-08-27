@@ -6,6 +6,7 @@ import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from 
 import { filterSessionsByVisibility, type SessionListEntry } from '@/lib/session-visibility';
 import { useVisibleLocalProjects } from './use-visible-local-projects';
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 function areSetsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
   if (left === right) return true;
@@ -87,12 +88,13 @@ export function useVisibleLocalProjectKeySet(options: WorkspaceVisibilityOptions
 export function useVisibleSessionMetas(
   options: WorkspaceVisibilityOptions = {}
 ): VisibleSessionMetasResult {
+  const scope = useResolvedWorkspaceScope(options);
   const sessions = useAtomValue(sessionListAtom);
   const allActiveSessions = useAtomValue(allActiveSessionsAtom);
-  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(options);
+  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
-    useVisibleLocalProjectKeySet(options);
-  const enabled = options.enabled ?? true;
+    useVisibleLocalProjectKeySet(scope);
+  const enabled = scope.enabled;
   const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
   const currentUserId = enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
@@ -140,24 +142,37 @@ export function useVisibleSessionMetas(
   };
 }
 
-export function useVisibleArchivedSessionMetas(): VisibleArchivedSessionMetasResult {
+export function useVisibleArchivedSessionMetas(
+  options: WorkspaceVisibilityOptions = {}
+): VisibleArchivedSessionMetasResult {
+  const scope = useResolvedWorkspaceScope(options);
   const archivedSessions = useAtomValue(archivedSessionListAtom);
-  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet();
+  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
-    useVisibleLocalProjectKeySet();
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+    useVisibleLocalProjectKeySet(scope);
+  const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = scope.enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
 
   const visibleArchivedSessions = useMemo(
     () =>
-      filterSessionsByVisibility(
-        archivedSessions,
-        visibleMachineIds,
-        visibleLocalProjectKeys,
-        machineLoading,
-        currentUserId
-      ),
-    [archivedSessions, currentUserId, machineLoading, visibleLocalProjectKeys, visibleMachineIds]
+      scope.enabled
+        ? filterSessionsByVisibility(
+            archivedSessions,
+            visibleMachineIds,
+            visibleLocalProjectKeys,
+            machineLoading,
+            currentUserId
+          )
+        : [],
+    [
+      archivedSessions,
+      currentUserId,
+      machineLoading,
+      scope.enabled,
+      visibleLocalProjectKeys,
+      visibleMachineIds,
+    ]
   );
 
   return {
