@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -171,10 +172,15 @@ function SegmentedControl<Value extends string>({
 const MIN_COLUMNS_BETWEEN_MONTH_LABELS = 3;
 /** Per-week delay of the reveal sweep; 53 weeks land in roughly 0.6s. */
 const CELL_REVEAL_STAGGER_MS = 11;
-/** Floor on a day's rendered size. Columns grow past it, never below it. */
-const CELL_MIN_SIZE_PX = 11;
-const CELL_GAP_PX = 3;
-const HEATMAP_COLUMN_TEMPLATE = `repeat(${USAGE_CALENDAR_COLUMNS}, minmax(${CELL_MIN_SIZE_PX}px, 1fr))`;
+/** Floor on a day's rendered size in a compact panel. */
+const CELL_MIN_SIZE_PX = 8;
+// One additional pixel keeps a wide 53-week calendar airy without making the
+// calendar itself narrower; the tracks still consume the entire container.
+const CELL_GAP_PX = 4;
+// The compact panel keeps its own minimum track width. Once its actual container
+// is wide enough, the grid itself owns all available width instead of introducing
+// a desktop scrollbar from an unrelated fixed width.
+const HEATMAP_COLUMN_TEMPLATE = `repeat(${USAGE_CALENDAR_COLUMNS}, minmax(0, 1fr))`;
 const HEATMAP_MIN_TRACK_WIDTH =
   USAGE_CALENDAR_COLUMNS * CELL_MIN_SIZE_PX + (USAGE_CALENDAR_COLUMNS - 1) * CELL_GAP_PX;
 
@@ -1358,13 +1364,13 @@ function UsageHeatmap({
 
   return (
     <div ref={rootRef} className="relative space-y-3">
-      {/* Columns grow to fill the panel but never shrink past CELL_MIN_SIZE, so a
-          day stays a readable target. Below that the year scrolls horizontally;
-          the weekday gutter sits outside the scroller and stays pinned. */}
-      <div className="flex gap-1.5">
+      {/* Use the heatmap's real container, not the viewport, to decide whether
+          the compact mobile minimum is needed. A desktop settings panel can then
+          use every available pixel without manufacturing horizontal overflow. */}
+      <div className="@container flex gap-1.5">
         <div
           aria-hidden="true"
-          className="mt-[calc(0.625rem+0.375rem)] grid w-7 shrink-0 grid-rows-7 gap-[3px] text-[10px] leading-none text-muted-foreground"
+          className="mt-[calc(0.625rem+0.375rem)] grid w-7 shrink-0 grid-rows-7 gap-[4px] text-[10px] leading-none text-muted-foreground"
         >
           {Array.from({ length: USAGE_CALENDAR_ROWS }, (_, row) => {
             const sample = model.cells[row];
@@ -1377,9 +1383,16 @@ function UsageHeatmap({
         </div>
 
         <div ref={scrollerRef} className="scrollbar-pro min-w-0 flex-1 overflow-x-auto pb-1">
-          <div style={{ minWidth: HEATMAP_MIN_TRACK_WIDTH }}>
+          <div
+            className="min-w-[var(--usage-heatmap-min-track-width)] @[672px]:min-w-0"
+            style={
+              {
+                '--usage-heatmap-min-track-width': `${HEATMAP_MIN_TRACK_WIDTH}px`,
+              } as CSSProperties
+            }
+          >
             <div
-              className="mb-1.5 grid gap-[3px] text-[10px] leading-none text-muted-foreground"
+              className="mb-1.5 grid gap-[4px] text-[10px] leading-none text-muted-foreground"
               style={{ gridTemplateColumns: HEATMAP_COLUMN_TEMPLATE }}
             >
               {monthLabels.map(({ column, label }) => (
@@ -1396,7 +1409,7 @@ function UsageHeatmap({
             <div
               role="grid"
               aria-label={t('workspace.usage.skyline.heatmap')}
-              className="relative grid grid-rows-7 gap-[3px]"
+              className="relative grid grid-rows-7 gap-[4px]"
               style={{ gridTemplateColumns: HEATMAP_COLUMN_TEMPLATE, gridAutoFlow: 'column' }}
               onPointerLeave={clearDetail}
               onBlur={(event) => {
@@ -1420,7 +1433,7 @@ function UsageHeatmap({
                     aria-label={cellLabel(cell)}
                     aria-selected={index === detailIndex}
                     className={cn(
-                      'animate-usage-heatmap-cell aspect-square w-full rounded-[32%] outline-none',
+                      'animate-usage-heatmap-cell aspect-square w-full rounded-[20%] outline-none',
                       'transition-[filter,opacity] duration-300 motion-reduce:transition-none',
                       !cell.isFuture &&
                         'hover:brightness-110 hover:ring-1 hover:ring-foreground/40',
