@@ -17,9 +17,7 @@ declare module '@/components/mobile/mobile-new-chat-sheet' {
     showCloseButton?: boolean;
   }
 
-  export function MobileNewChatSheetContent(
-    props: MobileNewChatSheetContentProps
-  ): ReactElement;
+  export function MobileNewChatSheetContent(props: MobileNewChatSheetContentProps): ReactElement;
 }
 
 declare module '@/components/mobile/mobile-inline-picker' {
@@ -49,9 +47,7 @@ declare module '@/components/mobile/mobile-inline-picker' {
   export function MobileInlinePicker<T extends string = string>(
     props: MobileInlinePickerProps<T>
   ): ReactElement;
-  export function MobileInlinePickerCoordinator(props: {
-    children: ReactNode;
-  }): ReactElement;
+  export function MobileInlinePickerCoordinator(props: { children: ReactNode }): ReactElement;
   export function MobileInlinePickerRowSlot(props: {
     children: ReactNode;
     slotClassName?: string;
@@ -869,11 +865,7 @@ declare module '@/ui/badge' {
 }
 
 declare module '@/ui/textarea' {
-  import type {
-    ForwardRefExoticComponent,
-    RefAttributes,
-    TextareaHTMLAttributes,
-  } from 'react';
+  import type { ForwardRefExoticComponent, RefAttributes, TextareaHTMLAttributes } from 'react';
 
   export const Textarea: ForwardRefExoticComponent<
     TextareaHTMLAttributes<HTMLTextAreaElement> & RefAttributes<HTMLTextAreaElement>
@@ -996,9 +988,7 @@ declare module '@/components/sessions/desktop-session-detail-layout' {
     deleteConfirmDialog: ReactNode;
   };
 
-  export function DesktopSessionDetailLayout(
-    props: DesktopSessionDetailLayoutProps
-  ): ReactElement;
+  export function DesktopSessionDetailLayout(props: DesktopSessionDetailLayoutProps): ReactElement;
 }
 
 declare module '@/components/mobile/mobile-session-run-config' {
@@ -1243,9 +1233,7 @@ declare module '@/hooks/use-mobile' {
     children: ReactNode;
   }): ReactElement;
 
-  export function ForceDesktopLayoutProvider(props: {
-    children: ReactNode;
-  }): ReactElement;
+  export function ForceDesktopLayoutProvider(props: { children: ReactNode }): ReactElement;
 
   export function checkIsMobileDevice(): boolean;
   export function useIsMobile(): boolean;
@@ -1253,6 +1241,69 @@ declare module '@/hooks/use-mobile' {
 
 declare module '@/components/settings/settings-data-cache' {
   export type SettingsUsageRange = 'day' | 'week' | 'month' | 'total';
+
+  export type SettingsUsageTimelineBucket = {
+    bucketStartMs: number;
+    bucketLabel: string;
+    tokens: number;
+    costUSD: number;
+    byModel: Array<{ modelId: string; tokens: number; costUSD: number }>;
+    byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
+  };
+
+  export type SettingsUsageTimelineData = {
+    workspaceId: string;
+    range: SettingsUsageRange;
+    startMs: number;
+    endMs: number;
+    bucketSizeMs: number;
+    totals: {
+      tokens: number;
+      costUSD: number;
+      breakdown?: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadInputTokens: number;
+        cacheCreationInputTokens: number;
+        reasoningOutputTokens: number;
+      };
+    };
+    users?: Record<string, { name?: string; email?: string; image?: string | null }>;
+    buckets: SettingsUsageTimelineBucket[];
+  };
+
+  export type SettingsUsageCalendarData = {
+    workspaceId: string;
+    timezone: 'UTC';
+    startMs: number;
+    endMs: number;
+    days: Array<{
+      dayStartMs: number;
+      date: string;
+      tokens: number;
+      costUSD: number;
+      isFuture: boolean;
+    }>;
+  };
+
+  export type SettingsUsageDayData = {
+    workspaceId: string;
+    dayStartMs: number;
+    date: string;
+    totals: {
+      tokens: number;
+      costUSD: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadInputTokens: number;
+      cacheCreationInputTokens: number;
+      reasoningOutputTokens: number;
+      webSearchRequests: number;
+    };
+    byModel: Array<{ modelId: string; tokens: number; costUSD: number }>;
+    byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
+    users: Record<string, { name?: string; email?: string; image?: string | null }>;
+  };
 }
 
 declare module '@/components/settings/usage-stacked-area-chart' {
@@ -1281,7 +1332,12 @@ declare module '@/components/settings/usage-stacked-area-chart' {
 
 declare module '@/components/settings/stats-setting-pure' {
   import type { ReactElement } from 'react';
-  import type { SettingsUsageRange } from '@/components/settings/settings-data-cache';
+  import type {
+    SettingsUsageCalendarData,
+    SettingsUsageDayData,
+    SettingsUsageRange,
+    SettingsUsageTimelineData,
+  } from '@/components/settings/settings-data-cache';
   import type {
     StackedAreaBucket,
     StackedAreaSeriesMarkerRender,
@@ -1295,6 +1351,11 @@ declare module '@/components/settings/stats-setting-pure' {
     totals: { tokens: number; costUSD: number } | null;
     byModelBuckets: StackedAreaBucket[];
     byMemberBuckets: StackedAreaBucket[];
+    usageCalendar?: SettingsUsageCalendarData;
+    usageTimeline?: SettingsUsageTimelineData;
+    usageDay?: SettingsUsageDayData;
+    usageDayLoading?: boolean;
+    onSelectedUsageDayChange?: (dayStartMs: number | null) => void;
     workspaceId: string | null;
     loading: boolean;
     renderModelSeriesMarker?: StackedAreaSeriesMarkerRender;

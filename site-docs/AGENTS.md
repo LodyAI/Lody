@@ -91,10 +91,10 @@
   and without that force SSR can dual-load React (invalid hook / useContext null).
   Keep `next-themes` as a direct dependency (fumadocs re-exports `useTheme`
   from it; bare transitive resolution fails under pnpm).
-  Do not statically pull optional R3F views into this graph: R3F v8 carries a
-  React 18 reconciler that cannot execute under the site's React 19 SSR runtime.
-  `StatsSettingsView` keeps its optional usage calendar behind a lazy boundary,
-  so the landing still renders the real stats view without evaluating that leaf.
+  Keep the optional R3F usage calendar behind `StatsSettingsView`'s lazy boundary
+  rather than importing its leaf directly into the landing graph. The workspace
+  pins R3F 9 for React 19, and the landing may opt into the real skyline by passing
+  calendar/timeline data without moving it into the initial hydration path.
 - The marketing landing (`/`, `/home`, `/zh`, `/zh/home`) is an immersive WebGL
   "underwater point-cloud" hero. `components/landing.tsx` owns copy/nav/footer and
   mounts `components/underwater-experience.tsx`, which renders
@@ -115,7 +115,17 @@
   free document scroll only (no auto-spring, no Scroll chevron). Preview frame is
   `pointer-events: none` so nested chat/scroll UI cannot trap wheel/touch — only
   feature tabs are clickable. Hero is 100dvh on all breakpoints so the product
-  demo never peeks on first paint. No CSS scroll-snap.
+  demo never peeks on first paint. No CSS scroll-snap. The power-section usage
+  frame accepts native manual scrolling and preserves default scroll chaining so
+  reaching either boundary returns the wheel/touch gesture to the document. It
+  rotates ranges only when visible, so number/chart transitions do not create
+  permanent background work. Document scroll drives only the display-only PR
+  frame's internal progress, starting once half of the frame is visible and using
+  eased ends. The usage preview must define the complete `--chart-1` through
+  `--chart-5` palette inside its isolated theme scope; otherwise heatmap cells or
+  later donut segments resolve to transparent backgrounds. Its narrow 7-day
+  matrix also keeps dot height coupled to the final constrained width so the
+  24-column layout cannot stretch circles into capsules.
 - Demo sequencing and screenshot notes live in
   [context/landing-demos.md](context/landing-demos.md).
   Dynamic Island is **not** simulated in the play stage — real device media in

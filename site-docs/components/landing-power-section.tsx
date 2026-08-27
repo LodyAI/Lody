@@ -6,7 +6,7 @@
  * (shared sessions, private machines). Diff review stays in the play stage.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LandingPowerDemo, type PowerDemoId } from './landing-power-demos';
 
 export type PowerSectionCopy = {
@@ -47,7 +47,12 @@ function ClientPowerDemo({
   useEffect(() => setReady(true), []);
   if (!ready) {
     return (
-      <div className="uw-power__demo uw-power__demo--ssr lody-app-preview dark">
+      <div
+        className="uw-power__demo uw-power__demo--ssr lody-app-preview dark"
+        data-power-scroll-scene={id === 'pr' ? '' : undefined}
+        aria-hidden
+        inert
+      >
         <p className="uw-power__demo-ssr-title">{title}</p>
         {summary ? <p className="uw-power__demo-ssr-body">{summary}</p> : null}
       </div>
@@ -63,8 +68,73 @@ export function LandingPowerSection({
   copy: PowerSectionCopy;
   locale: 'en' | 'zh';
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return undefined;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let frame = 0;
+
+    const update = () => {
+      frame = 0;
+      const viewportHeight = window.innerHeight;
+      const scenes = section.querySelectorAll<HTMLElement>('[data-power-scroll-scene]');
+
+      scenes.forEach((scene, index) => {
+        const scrollports = scene.querySelectorAll<HTMLElement>(
+          '.uw-power__demo-inner, [data-pr-content-scroll-area] [data-radix-scroll-area-viewport]'
+        );
+        if (scrollports.length === 0) return;
+
+        const rect = scene.getBoundingClientRect();
+        // Start once half of the frame has entered, then finish while
+        // its bottom edge is still visible. Smoothstep keeps both ends calm
+        // instead of making the content track the wheel 1:1.
+        const startTop = viewportHeight - rect.height * 0.5;
+        const endTop = viewportHeight * 0.18 - rect.height;
+        const rawProgress = (startTop - rect.top) / Math.max(1, startTop - endTop);
+        const stagger = index * 0.07;
+        const linearProgress = reducedMotion.matches
+          ? 0
+          : Math.min(1, Math.max(0, (rawProgress - stagger) / (1 - stagger)));
+        const progress = linearProgress * linearProgress * (3 - 2 * linearProgress);
+
+        scrollports.forEach((scrollport) => {
+          const maxScroll = Math.max(0, scrollport.scrollHeight - scrollport.clientHeight);
+          scrollport.scrollTop = maxScroll * progress;
+        });
+      });
+    };
+
+    const requestUpdate = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+
+    const resizeObserver = new ResizeObserver(requestUpdate);
+    resizeObserver.observe(section);
+    const mutationObserver = new MutationObserver(requestUpdate);
+    mutationObserver.observe(section, { childList: true, subtree: true });
+
+    window.addEventListener('scroll', requestUpdate, { passive: true });
+    window.addEventListener('resize', requestUpdate, { passive: true });
+    reducedMotion.addEventListener('change', requestUpdate);
+    requestUpdate();
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener('scroll', requestUpdate);
+      window.removeEventListener('resize', requestUpdate);
+      reducedMotion.removeEventListener('change', requestUpdate);
+    };
+  }, []);
+
   return (
-    <section className="uw-power" aria-labelledby="uw-power-title">
+    <section ref={sectionRef} className="uw-power" aria-labelledby="uw-power-title">
       <div className="uw-power__inner">
         <header className="uw-power__header">
           {copy.eyebrow ? <p className="uw-power__eyebrow">{copy.eyebrow}</p> : null}

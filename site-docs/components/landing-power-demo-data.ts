@@ -3,7 +3,13 @@
  * Fixed timestamps / curves so SSR and client match (no Date.now / Math.random).
  */
 
-import type { SettingsUsageRange } from '@/components/settings/settings-data-cache';
+import type {
+  SettingsUsageCalendarData,
+  SettingsUsageDayData,
+  SettingsUsageRange,
+  SettingsUsageTimelineBucket,
+  SettingsUsageTimelineData,
+} from '@/components/settings/settings-data-cache';
 import type { StackedAreaBucket } from '@/components/settings/usage-stacked-area-chart';
 import type { PrTabViewData } from '@/components/sessions/pr-tab-view';
 import type {
@@ -16,8 +22,8 @@ import type {
 
 // ---- Stats (Settings → Usage) ----------------------------------------------
 //
-// Simulated 3-person eng team, one work week:
-//   - Weekdays: ~100–300M tokens per person; weekend ≈ half a light weekday
+// Simulated 3-person distributed team with deliberately irregular daily load:
+//   - Any day can be quiet or spike; there is no weekday/weekend cadence
 //   - Per-person model preferences (Codex vs Claude vs Kimi)
 //
 // Official list prices (USD / 1M tokens), short-context standard tier:
@@ -159,18 +165,14 @@ const MEMBER_MODEL_MIX: Record<
 };
 
 /**
- * Personal token totals (raw tokens). Index 0 = Mon … 6 = Sun.
- * Weekdays ~100–300M with large day-to-day swings; weekend ≈ half of a light day
- * but not flat (still some variance).
+ * Personal token totals (raw tokens). Index 0 = Mon … 6 = Sun. Values are
+ * intentionally uncorrelated with the weekday so the demo does not paint bands.
  */
 const WEEK_MEMBER_TOKENS: Record<LandingUsageMemberId, readonly number[]> = {
   // Mon      Tue       Wed       Thu       Fri       Sat         Sun
-  // Lee: big Sol push mid-week, slump Monday, partial weekend
-  u1: [168_000_000, 292_000_000, 310_000_000, 241_000_000, 175_000_000, 128_000_000, 72_000_000],
-  // Zixuan: spike Wed (Fable review day), quiet Fri, uneven weekend
-  u2: [142_000_000, 188_000_000, 285_000_000, 196_000_000, 119_000_000, 94_000_000, 51_000_000],
-  // Wibus: spikier than before; Thurs low, Tue high, weekend uneven
-  u3: [98_000_000, 172_000_000, 145_000_000, 88_000_000, 156_000_000, 71_000_000, 39_000_000],
+  u1: [168_000_000, 42_000_000, 310_000_000, 91_000_000, 275_000_000, 328_000_000, 72_000_000],
+  u2: [242_000_000, 188_000_000, 35_000_000, 296_000_000, 69_000_000, 114_000_000, 351_000_000],
+  u3: [38_000_000, 272_000_000, 145_000_000, 18_000_000, 256_000_000, 171_000_000, 239_000_000],
 };
 
 /**
@@ -285,6 +287,24 @@ function buildCanonicalWeek(): DaySlice[] {
 
 const CANONICAL_WEEK = buildCanonicalWeek();
 
+const WEEK_ACTIVITY_SCALES = [0.18, 1.85, 0.42, 2.35, 0.08, 1.1, 0.63] as const;
+
+function scaleDaySlice(source: DaySlice, factor: number): DaySlice {
+  const byMemberModel = {} as DaySlice['byMemberModel'];
+  for (const member of LANDING_USAGE_MEMBERS) {
+    const scaled = {} as Record<LandingUsageModelId, number>;
+    for (const model of LANDING_USAGE_MODELS) {
+      scaled[model.id] = Math.round((source.byMemberModel[member.id][model.id] ?? 0) * factor);
+    }
+    byMemberModel[member.id] = scaled;
+  }
+  return { label: source.label, byMemberModel };
+}
+
+const LANDING_WEEK = CANONICAL_WEEK.map((slice, index) =>
+  scaleDaySlice(slice, WEEK_ACTIVITY_SCALES[index] ?? 1)
+);
+
 function dayTotals(slice: DaySlice): {
   byModel: Record<LandingUsageModelId, number>;
   byMember: Record<LandingUsageMemberId, number>;
@@ -319,47 +339,59 @@ function costForTokens(modelId: LandingUsageModelId, tokens: number): number {
   return (tokens / 1_000_000) * model.usdPerM;
 }
 
-/**
- * Work-hour shares of a heavy day (sums ≈ 1). Peaky morning + afternoon,
- * not a smooth bell.
- */
-const HOUR_SHARES = [
-  0.03, 0.05, 0.09, 0.14, 0.07, 0.04, 0.11, 0.16, 0.13, 0.08, 0.06, 0.04,
-] as const;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const LANDING_WORKSPACE_ID = 'landing-ws';
+const LANDING_CALENDAR_START_MS = Date.UTC(2025, 7, 24);
+const LANDING_CALENDAR_TODAY_MS = Date.UTC(2026, 7, 27);
+const LANDING_CALENDAR_DAY_COUNT = 53 * 7;
+
+function hourlySlices(source: DaySlice, salt: number): DaySlice[] {
+  const weights = Array.from({ length: 24 }, (_, hour) => {
+    if (hour >= 2 && hour <= 6) return 0;
+    const activity = dayNoise(23, hour, salt);
+    if (activity < 0.18) return 0;
+    const burst = dayNoise(29, hour, salt + 5) > 0.86 ? 2.35 : 1;
+    return (0.012 + activity ** 2 * 0.2) * burst;
+  });
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+
+  return weights.map((weight, hour) => {
+    const share = totalWeight > 0 ? weight / totalWeight : 0;
+    const byMemberModel = {} as DaySlice['byMemberModel'];
+    for (const member of LANDING_USAGE_MEMBERS) {
+      const memberJitter = 0.88 + dayNoise(MEMBER_ORDINAL[member.id], hour, salt) * 0.24;
+      const scaled = {} as Record<LandingUsageModelId, number>;
+      for (const model of LANDING_USAGE_MODELS) {
+        scaled[model.id] = Math.round(
+          (source.byMemberModel[member.id][model.id] ?? 0) * share * memberJitter
+        );
+      }
+      byMemberModel[member.id] = scaled;
+    }
+    return { label: `${String(hour).padStart(2, '0')}:00`, byMemberModel };
+  });
+}
 
 function slicesForRange(range: SettingsUsageRange): DaySlice[] {
   if (range === 'week') {
-    return CANONICAL_WEEK;
+    return LANDING_WEEK;
   }
   if (range === 'day') {
-    // Typical Wednesday (heavy day) across work hours, with uneven hour factors.
-    const source = CANONICAL_WEEK[2]!;
-    return HOUR_SHARES.map((share, i) => {
-      const label = `${String(i * 2 + 8).padStart(2, '0')}:00`;
-      const hourJitter = 0.65 + dayNoise(3, i, 13) * 0.75;
-      const byMemberModel = {} as DaySlice['byMemberModel'];
-      for (const member of LANDING_USAGE_MEMBERS) {
-        const memberJitter = 0.75 + dayNoise(MEMBER_ORDINAL[member.id], i, 17) * 0.55;
-        const scaled = {} as Record<LandingUsageModelId, number>;
-        for (const model of LANDING_USAGE_MODELS) {
-          scaled[model.id] = Math.round(
-            (source.byMemberModel[member.id][model.id] ?? 0) * share * hourJitter * memberJitter
-          );
-        }
-        byMemberModel[member.id] = scaled;
-      }
-      return { label, byMemberModel };
-    });
+    return hourlySlices(CANONICAL_WEEK[3]!, 31);
   }
 
-  // month / total: repeat the week with per-day intensity noise (not a flat ramp).
-  const days = range === 'month' ? 14 : 16;
+  // Month uses its real 30-day window. All-time is compressed into 16 chart
+  // points and scaled to the same aggregate as the 53-week calendar below.
+  const days = range === 'month' ? 30 : 16;
   const out: DaySlice[] = [];
   for (let i = 0; i < days; i += 1) {
-    const weekDay = i % 7;
-    const week = Math.floor(i / 7);
-    const source = CANONICAL_WEEK[weekDay]!;
-    const intensity = 0.82 + week * 0.1 + (dayNoise(7, i, 9) - 0.5) * 0.45;
+    const sourceIndex = Math.min(6, Math.floor(dayNoise(19, i, 21) * 7));
+    const source = CANONICAL_WEEK[sourceIndex]!;
+    const activity = dayNoise(7, i, 9);
+    const quietDay = dayNoise(8, i, 15) < 0.13;
+    const inactive = quietDay || activity < 0.2;
+    const intensity = inactive ? 0 : (0.48 + activity * 1.02) * (activity > 0.88 ? 1.42 : 1);
     const daysAgo = days - 1 - i;
     const label = daysAgo === 0 ? 'Today' : `-${daysAgo}d`;
     const byMemberModel = {} as DaySlice['byMemberModel'];
@@ -376,6 +408,220 @@ function slicesForRange(range: SettingsUsageRange): DaySlice[] {
     out.push({ label, byMemberModel });
   }
   return out;
+}
+
+function memberCost(slice: DaySlice, memberId: LandingUsageMemberId): number {
+  return LANDING_USAGE_MODELS.reduce(
+    (sum, model) => sum + costForTokens(model.id, slice.byMemberModel[memberId][model.id] ?? 0),
+    0
+  );
+}
+
+function timelineBucket(slice: DaySlice, bucketStartMs: number): SettingsUsageTimelineBucket {
+  const totals = dayTotals(slice);
+  return {
+    bucketStartMs,
+    bucketLabel: slice.label,
+    tokens: totals.tokens,
+    costUSD: Math.round(totals.costUSD * 100) / 100,
+    byModel: LANDING_USAGE_MODELS.map((model) => ({
+      modelId: model.id,
+      tokens: totals.byModel[model.id] ?? 0,
+      costUSD: Math.round(costForTokens(model.id, totals.byModel[model.id] ?? 0) * 100) / 100,
+    })),
+    byUser: LANDING_USAGE_MEMBERS.map((member) => ({
+      userId: member.id,
+      tokens: totals.byMember[member.id] ?? 0,
+      costUSD: Math.round(memberCost(slice, member.id) * 100) / 100,
+    })),
+  };
+}
+
+function scaleTimelineBucket(
+  bucket: SettingsUsageTimelineBucket,
+  tokenScale: number,
+  costScale: number
+): SettingsUsageTimelineBucket {
+  return {
+    ...bucket,
+    tokens: bucket.tokens * tokenScale,
+    costUSD: bucket.costUSD * costScale,
+    byModel: bucket.byModel.map((model) => ({
+      ...model,
+      tokens: model.tokens * tokenScale,
+      costUSD: model.costUSD * costScale,
+    })),
+    byUser: bucket.byUser.map((user) => ({
+      ...user,
+      tokens: user.tokens * tokenScale,
+      costUSD: user.costUSD * costScale,
+    })),
+  };
+}
+
+function buildLandingUsageTimeline(range: SettingsUsageRange): SettingsUsageTimelineData {
+  let startMs: number;
+  let endMs: number;
+  let bucketSizeMs: number;
+  let buckets: SettingsUsageTimelineBucket[];
+
+  if (range === 'day') {
+    startMs = LANDING_CALENDAR_TODAY_MS;
+    endMs = startMs + DAY_MS;
+    bucketSizeMs = HOUR_MS;
+    buckets = hourlySlices(CANONICAL_WEEK[3]!, 31).map((slice, hour) =>
+      timelineBucket(slice, startMs + hour * HOUR_MS)
+    );
+  } else if (range === 'week') {
+    startMs = Date.UTC(2026, 7, 17);
+    endMs = startMs + 7 * DAY_MS;
+    bucketSizeMs = HOUR_MS;
+    buckets = LANDING_WEEK.flatMap((source, day) =>
+      hourlySlices(source, 41 + day).map((slice, hour) =>
+        timelineBucket(slice, startMs + day * DAY_MS + hour * HOUR_MS)
+      )
+    );
+  } else {
+    const slices = slicesForRange(range);
+    startMs =
+      range === 'month' ? LANDING_CALENDAR_TODAY_MS - 29 * DAY_MS : LANDING_CALENDAR_START_MS;
+    endMs = LANDING_CALENDAR_TODAY_MS + DAY_MS;
+    bucketSizeMs = Math.floor((endMs - startMs) / slices.length);
+    buckets = slices.map((slice, index) => timelineBucket(slice, startMs + index * bucketSizeMs));
+  }
+
+  let tokens = buckets.reduce((sum, bucket) => sum + bucket.tokens, 0);
+  let costUSD = buckets.reduce((sum, bucket) => sum + bucket.costUSD, 0);
+  if (range === 'total') {
+    const target = landingCalendarTotals();
+    const tokenScale = tokens > 0 ? target.tokens / tokens : 1;
+    const costScale = costUSD > 0 ? target.costUSD / costUSD : 1;
+    buckets = buckets.map((bucket) => scaleTimelineBucket(bucket, tokenScale, costScale));
+    tokens = target.tokens;
+    costUSD = target.costUSD;
+  }
+  const inputTokens = Math.round(tokens * 0.22);
+  const outputTokens = Math.round(tokens * 0.18);
+  const cacheReadInputTokens = Math.round(tokens * 0.45);
+  const cacheCreationInputTokens = Math.round(tokens * 0.05);
+
+  return {
+    workspaceId: LANDING_WORKSPACE_ID,
+    range,
+    startMs,
+    endMs,
+    bucketSizeMs,
+    totals: {
+      tokens,
+      costUSD: Math.round(costUSD * 100) / 100,
+      breakdown: {
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+        reasoningOutputTokens:
+          tokens - inputTokens - outputTokens - cacheReadInputTokens - cacheCreationInputTokens,
+      },
+    },
+    users: Object.fromEntries(
+      LANDING_USAGE_MEMBERS.map((member) => [member.id, { name: member.name }])
+    ),
+    buckets,
+  };
+}
+
+const LANDING_USAGE_CALENDAR: SettingsUsageCalendarData = {
+  workspaceId: LANDING_WORKSPACE_ID,
+  timezone: 'UTC',
+  startMs: LANDING_CALENDAR_START_MS,
+  endMs: LANDING_CALENDAR_START_MS + LANDING_CALENDAR_DAY_COUNT * DAY_MS,
+  days: Array.from({ length: LANDING_CALENDAR_DAY_COUNT }, (_, index) => {
+    const dayStartMs = LANDING_CALENDAR_START_MS + index * DAY_MS;
+    const isFuture = dayStartMs > LANDING_CALENDAR_TODAY_MS;
+    const sourceIndex = Math.min(6, Math.floor(dayNoise(17, index, 83) * 7));
+    const source = CANONICAL_WEEK[sourceIndex]!;
+    const sourceTotals = dayTotals(source);
+    const activity = dayNoise(9, index, 53);
+    const plannedPause = index % 43 === 7 || index % 67 === 19;
+    const active = !isFuture && !plannedPause && activity > 0.2;
+    const season = 0.86 + Math.sin(index / 23) * 0.14;
+    const baseIntensity = 0.22 + dayNoise(11, index, 59) * 1.36;
+    const spike = dayNoise(15, index, 71) > 0.88 ? 1.82 : 1;
+    const intensity = active ? season * baseIntensity * spike : 0;
+    const tokens = Math.round(sourceTotals.tokens * intensity);
+    return {
+      dayStartMs,
+      date: new Date(dayStartMs).toISOString().slice(0, 10),
+      tokens,
+      costUSD: Math.round(sourceTotals.costUSD * intensity * 100) / 100,
+      isFuture,
+    };
+  }),
+};
+
+function landingCalendarTotals() {
+  return LANDING_USAGE_CALENDAR.days.reduce(
+    (totals, day) => {
+      if (!day.isFuture) {
+        totals.tokens += day.tokens;
+        totals.costUSD += day.costUSD;
+      }
+      return totals;
+    },
+    { tokens: 0, costUSD: 0 }
+  );
+}
+
+export function buildLandingUsageDay(dayStartMs: number): SettingsUsageDayData | undefined {
+  const calendarDay = LANDING_USAGE_CALENDAR.days.find((day) => day.dayStartMs === dayStartMs);
+  if (!calendarDay || calendarDay.isFuture) return undefined;
+
+  const dayIndex = Math.round((dayStartMs - LANDING_CALENDAR_START_MS) / DAY_MS);
+  const sourceIndex = Math.min(6, Math.floor(dayNoise(17, dayIndex, 83) * 7));
+  const source = CANONICAL_WEEK[sourceIndex]!;
+  const sourceTotals = dayTotals(source);
+  const scale = sourceTotals.tokens > 0 ? calendarDay.tokens / sourceTotals.tokens : 0;
+  const inputTokens = Math.round(calendarDay.tokens * 0.22);
+  const outputTokens = Math.round(calendarDay.tokens * 0.18);
+  const cacheReadInputTokens = Math.round(calendarDay.tokens * 0.45);
+  const cacheCreationInputTokens = Math.round(calendarDay.tokens * 0.05);
+
+  return {
+    workspaceId: LANDING_WORKSPACE_ID,
+    dayStartMs,
+    date: calendarDay.date,
+    totals: {
+      tokens: calendarDay.tokens,
+      costUSD: calendarDay.costUSD,
+      inputTokens,
+      outputTokens,
+      cacheReadInputTokens,
+      cacheCreationInputTokens,
+      reasoningOutputTokens:
+        calendarDay.tokens -
+        inputTokens -
+        outputTokens -
+        cacheReadInputTokens -
+        cacheCreationInputTokens,
+      webSearchRequests: 12 + Math.round(dayNoise(13, dayIndex, 67) * 52),
+    },
+    byModel: LANDING_USAGE_MODELS.map((model) => {
+      const tokens = Math.round((sourceTotals.byModel[model.id] ?? 0) * scale);
+      return {
+        modelId: model.id,
+        tokens,
+        costUSD: Math.round(costForTokens(model.id, tokens) * 100) / 100,
+      };
+    }).sort((a, b) => b.tokens - a.tokens),
+    byUser: LANDING_USAGE_MEMBERS.map((member) => ({
+      userId: member.id,
+      tokens: Math.round((sourceTotals.byMember[member.id] ?? 0) * scale),
+      costUSD: Math.round(memberCost(source, member.id) * scale * 100) / 100,
+    })).sort((a, b) => b.tokens - a.tokens),
+    users: Object.fromEntries(
+      LANDING_USAGE_MEMBERS.map((member) => [member.id, { name: member.name }])
+    ),
+  };
 }
 
 export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
@@ -411,9 +657,21 @@ export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
     });
   }
 
+  if (range === 'total') {
+    const calendarTotals = landingCalendarTotals();
+    const tokenScale = totalTokens > 0 ? calendarTotals.tokens / totalTokens : 1;
+    for (const bucket of [...byModelBuckets, ...byMemberBuckets]) {
+      for (const value of bucket.values) value.value *= tokenScale;
+    }
+    totalTokens = calendarTotals.tokens;
+    totalCost = calendarTotals.costUSD;
+  }
+
   return {
     byModelBuckets,
     byMemberBuckets,
+    usageCalendar: LANDING_USAGE_CALENDAR,
+    usageTimeline: buildLandingUsageTimeline(range),
     totals: {
       tokens: totalTokens,
       costUSD: Math.round(totalCost * 100) / 100,
@@ -481,7 +739,9 @@ const landingPr: GitHubPullRequestDetails = {
   mergeableState: 'clean',
 };
 
-function checkRun(overrides: Partial<GitHubCheckRun> & Pick<GitHubCheckRun, 'id' | 'name'>): GitHubCheckRun {
+function checkRun(
+  overrides: Partial<GitHubCheckRun> & Pick<GitHubCheckRun, 'id' | 'name'>
+): GitHubCheckRun {
   return {
     status: 'completed',
     conclusion: 'success',
