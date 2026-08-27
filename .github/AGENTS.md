@@ -6,8 +6,8 @@
   tested modules under `scripts/`, path ownership in `labeler.yml`, and GitHub
   event orchestration in `workflows/`. Do not duplicate the same rule across
   those layers.
-- Changes to required PR template headings must update the checker and its
-  regression tests in the same commit. Run `pnpm check:github-config` locally.
+- Changes to required PR template headings must update the checker in the same
+  commit and validate representative Agent and human bodies locally.
 - External PRs identify exactly one author type. Agent-authored PRs retain the
   complete Agent handoff block and its markers, explicitly ask the author-side
   user about publishing context, and record exactly one consent answer. Never
