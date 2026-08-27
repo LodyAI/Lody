@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { win32 as pathWin32 } from 'node:path';
 import iconv from 'iconv-lite';
 
 /**
@@ -42,11 +44,42 @@ const WINDOWS_OEM_CODE_PAGES: Record<string, string> = {
   'vi-VN': 'cp1258', // Vietnamese
 };
 
+const WINDOWS_OEM_CODE_PAGES_BY_LANGUAGE: Readonly<Record<string, string>> = {
+  ar: 'cp720',
+  bg: 'cp866',
+  cs: 'cp852',
+  de: 'cp850',
+  en: 'cp437',
+  es: 'cp850',
+  fr: 'cp850',
+  he: 'cp862',
+  hu: 'cp852',
+  it: 'cp850',
+  ja: 'cp932',
+  ko: 'cp949',
+  pl: 'cp852',
+  pt: 'cp850',
+  ro: 'cp852',
+  ru: 'cp866',
+  th: 'cp874',
+  tr: 'cp857',
+  uk: 'cp866',
+  vi: 'cp1258',
+};
+
 /**
  * Default OEM code page when locale cannot be determined.
  * CP437 is the original IBM PC code page.
  */
 const DEFAULT_OEM_CODE_PAGE = 'cp437';
+const CHCP_TIMEOUT_MS = 2_000;
+const CHCP_MAX_BUFFER_BYTES = 64 * 1024;
+const CHCP_RETRY_DELAY_MS = 30_000;
+const CHCP_SUCCESS_CACHE_MS = 5 * 60_000;
+const WINDOWS_CODE_PAGE_ALIASES: Readonly<Record<number, string>> = {
+  54936: 'gb18030',
+  65001: 'utf8',
+};
 
 /**
  * Cached system locale (detected once at startup).
@@ -57,52 +90,178 @@ let cachedLocale: string | null = null;
  * Cached OEM code page for the current system.
  */
 let cachedOemCodePage: string | null = null;
+let cachedOemCodePageExpiresAt = 0;
+let nextOemCodePageProbeAt = 0;
 
 /**
- * Detects the system locale from environment variables.
- *
- * On Windows, the locale can be determined from:
- * - LANG environment variable (if set by user)
- * - LC_ALL environment variable
- * - LOCALE environment variable
- * - PowerShell's $PSCulture (not directly accessible)
- *
- * Falls back to 'en-US' if no locale can be detected.
+ * Converts environment-style locale values to canonical BCP 47 tags.
+ */
+function normalizeLocale(value: string | undefined): Intl.Locale | null {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0 || /^(?:C|POSIX)(?:[.@]|$)/i.test(trimmed)) {
+    return null;
+  }
+
+  const languageTag = trimmed.split(/[.@]/, 1)[0]?.replaceAll('_', '-');
+  if (languageTag === undefined || languageTag.length === 0) {
+    return null;
+  }
+
+  try {
+    return new Intl.Locale(languageTag);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detects the system locale from standard locale variables, then Intl.
  */
 function detectSystemLocale(): string {
   if (cachedLocale !== null) {
     return cachedLocale;
   }
 
-  // Check common environment variables for locale
-  const envLocale =
-    process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || process.env.LOCALE;
+  const candidates = [
+    process.env.LC_ALL,
+    process.env.LC_CTYPE,
+    process.env.LANG,
+    process.env.LOCALE,
+  ];
 
-  if (envLocale) {
-    // Parse locale string (e.g., "zh_CN.UTF-8" -> "zh-CN")
-    const match = envLocale.match(/^([a-z]{2})[-_]([A-Z]{2})/i);
-    if (match && match[1] && match[2]) {
-      cachedLocale = `${match[1].toLowerCase()}-${match[2].toUpperCase()}`;
+  try {
+    candidates.push(Intl.DateTimeFormat().resolvedOptions().locale);
+  } catch {
+    // Intl may be unavailable in a reduced Node.js build.
+  }
+
+  for (const candidate of candidates) {
+    const locale = normalizeLocale(candidate);
+    if (locale) {
+      cachedLocale = locale.toString();
       return cachedLocale;
     }
   }
 
-  // On Windows without LANG set, try to infer from other indicators
-  // This is a best-effort approach
-  if (process.platform === 'win32') {
-    // Check if running in a Chinese environment (common case)
-    // Windows sets some environment variables that can hint at the locale
-    const systemRoot = process.env.SystemRoot || '';
-    if (systemRoot.includes('\\Windows')) {
-      // Default to Chinese for now if on Windows without explicit locale
-      // This could be improved by checking registry or using native APIs
-      // For now, we'll use a safe default
-    }
-  }
-
-  // Default fallback
   cachedLocale = 'en-US';
   return cachedLocale;
+}
+
+/**
+ * Resolves a locale to a known Windows OEM code page.
+ */
+function resolveLocaleCodePage(localeName: string): string {
+  const locale = normalizeLocale(localeName);
+  if (!locale) {
+    return DEFAULT_OEM_CODE_PAGE;
+  }
+
+  const exactMatch = WINDOWS_OEM_CODE_PAGES[locale.baseName];
+  if (exactMatch !== undefined) {
+    return exactMatch;
+  }
+
+  if (locale.language === 'zh') {
+    return locale.script === 'Hant' || ['TW', 'HK', 'MO'].includes(locale.region ?? '')
+      ? 'cp950'
+      : 'cp936';
+  }
+
+  return WINDOWS_OEM_CODE_PAGES_BY_LANGUAGE[locale.language] ?? DEFAULT_OEM_CODE_PAGE;
+}
+
+/**
+ * Parses the final code-page-shaped number from localized chcp output.
+ */
+function parseChcpCodePage(output: Buffer): number | null {
+  const value = /^[^\r\n]*:\s*(\d{3,5})\s*$/.exec(output.toString('latin1'))?.[1];
+  if (value === undefined) {
+    return null;
+  }
+
+  const codePage = Number.parseInt(value, 10);
+  return Number.isSafeInteger(codePage) ? codePage : null;
+}
+
+function normalizeLocalWindowsDirectory(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || !/^[A-Za-z]:\\[^\\/:*?"<>|]+\\?$/.test(trimmed)) {
+    return null;
+  }
+
+  const withoutTrailingSlash = trimmed.endsWith('\\') ? trimmed.slice(0, -1) : trimmed;
+  const directoryName = pathWin32.basename(withoutTrailingSlash);
+  return directoryName === '.' || directoryName === '..' ? null : withoutTrailingSlash;
+}
+
+function resolveWindowsCommandProcessor(): string | null {
+  const configuredDirectories = [process.env.SystemRoot, process.env.WINDIR].filter(
+    (value): value is string => value !== undefined && value.trim().length > 0
+  );
+  if (configuredDirectories.length === 0) {
+    return null;
+  }
+
+  const normalizedDirectories = configuredDirectories.map(normalizeLocalWindowsDirectory);
+  if (normalizedDirectories.some((directory) => directory === null)) {
+    return null;
+  }
+
+  const windowsDirectory = normalizedDirectories[0];
+  if (windowsDirectory === undefined || windowsDirectory === null) {
+    return null;
+  }
+  if (
+    normalizedDirectories.some(
+      (directory) => directory?.toLowerCase() !== windowsDirectory.toLowerCase()
+    )
+  ) {
+    return null;
+  }
+
+  const commandProcessor = pathWin32.join(windowsDirectory, 'System32', 'cmd.exe');
+  if (process.env.ComSpec?.trim().toLowerCase() !== commandProcessor.toLowerCase()) {
+    return null;
+  }
+
+  return commandProcessor;
+}
+
+/**
+ * Probes cmd.exe for the console's active OEM code page.
+ */
+function probeWindowsOemCodePage(): string | null {
+  try {
+    const commandProcessor = resolveWindowsCommandProcessor();
+    if (commandProcessor === null) {
+      return null;
+    }
+
+    const result = spawnSync(commandProcessor, ['/d', '/s', '/c', 'chcp'], {
+      encoding: null,
+      windowsHide: true,
+      timeout: CHCP_TIMEOUT_MS,
+      maxBuffer: CHCP_MAX_BUFFER_BYTES,
+    });
+
+    if (result.error || result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+      return null;
+    }
+
+    const codePage = parseChcpCodePage(result.stdout);
+    if (codePage === null) {
+      return null;
+    }
+    const alias = WINDOWS_CODE_PAGE_ALIASES[codePage];
+    if (alias !== undefined) {
+      return iconv.encodingExists(alias) ? alias : null;
+    }
+
+    const encoding = `cp${codePage}`;
+    return iconv.encodingExists(encoding) ? encoding : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -113,13 +272,29 @@ function detectSystemLocale(): string {
  * used by GUI applications.
  */
 export function getWindowsOemCodePage(): string {
-  if (cachedOemCodePage !== null) {
+  const now = Date.now();
+  if (cachedOemCodePage !== null && now < cachedOemCodePageExpiresAt) {
     return cachedOemCodePage;
   }
 
-  const locale = detectSystemLocale();
-  cachedOemCodePage = WINDOWS_OEM_CODE_PAGES[locale] || DEFAULT_OEM_CODE_PAGE;
-  return cachedOemCodePage;
+  if (process.platform === 'win32') {
+    if (now >= nextOemCodePageProbeAt) {
+      const detectedCodePage = probeWindowsOemCodePage();
+      if (detectedCodePage !== null) {
+        cachedOemCodePage = detectedCodePage;
+        cachedOemCodePageExpiresAt = now + CHCP_SUCCESS_CACHE_MS;
+        return cachedOemCodePage;
+      }
+      nextOemCodePageProbeAt = now + CHCP_RETRY_DELAY_MS;
+    }
+
+    if (cachedOemCodePage !== null) {
+      return cachedOemCodePage;
+    }
+  }
+
+  cachedOemCodePage = null;
+  return resolveLocaleCodePage(detectSystemLocale());
 }
 
 /**
@@ -218,7 +393,7 @@ export function decodeBuffer(buffer: Buffer, forceEncoding?: string): string {
   }
 
   // If a specific encoding is forced, use it
-  if (forceEncoding) {
+  if (forceEncoding !== undefined && forceEncoding.length > 0) {
     return iconv.decode(buffer, forceEncoding);
   }
 
@@ -244,6 +419,8 @@ export function decodeBuffer(buffer: Buffer, forceEncoding?: string): string {
  */
 export function setWindowsOemCodePageForTesting(codePage: string | null): void {
   cachedOemCodePage = codePage;
+  cachedOemCodePageExpiresAt = codePage === null ? 0 : Number.POSITIVE_INFINITY;
+  nextOemCodePageProbeAt = 0;
 }
 
 /**
