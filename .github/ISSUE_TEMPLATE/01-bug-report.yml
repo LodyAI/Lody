@@ -10,6 +10,8 @@ body:
       value: |
         Thanks for helping improve Lody. Please provide a small, reproducible report.
 
+        Keep every required section and confirmation. Issues that bypass or remove the form are marked `status:needs-issue-body` until corrected; only repository owners and automated bots are exempt.
+
         This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
 
         **Do not post security vulnerabilities or sensitive data here.** Follow the [security policy](https://github.com/LodyAI/Lody/security/policy), and redact credentials, private repository content, agent conversations, prompts, personal data, and sensitive paths from every example and log.

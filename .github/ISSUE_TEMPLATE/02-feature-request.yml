@@ -10,6 +10,8 @@ body:
       value: |
         Thanks for helping shape Lody. Start with the problem and desired outcome; a complete implementation design is not required.
 
+        Keep every required section and confirmation. Issues that bypass or remove the form are marked `status:needs-issue-body` until corrected; only repository owners and automated bots are exempt.
+
         This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
 
   - type: dropdown

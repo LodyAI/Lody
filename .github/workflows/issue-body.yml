@@ -1,0 +1,62 @@
+name: Issue body
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-body-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  warn:
+    name: Check Issue Form format
+    runs-on: ubuntu-latest
+    steps:
+      # Issue content is untrusted. Load policy only from the default branch.
+      - name: Checkout trusted policy
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Reconcile issue warning
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url')
+            const checker = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/check-issue-body.mjs`
+            ).href)
+            const policy = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/issue-body-policy.mjs`
+            ).href)
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const issue = (await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: context.payload.issue.number,
+            })).data
+
+            if (!policy.shouldEnforceIssue(issue)) {
+              if (policy.hasIssueLabel(issue, policy.NEEDS_ISSUE_BODY_LABEL.name)) {
+                await policy.clearInvalidIssue({ github, owner, repo, issue })
+              }
+              core.info('Repository owner or bot issue is exempt.')
+              return
+            }
+
+            const result = checker.checkIssueBody(issue)
+            if (result.ok) {
+              await policy.clearInvalidIssue({ github, owner, repo, issue })
+              core.info(`Issue matches the ${result.form} form.`)
+              return
+            }
+
+            const findings = policy.formatIssueFindings(result)
+            await policy.markInvalidIssue({ github, owner, repo, issue, findings })
+            core.warning(findings)

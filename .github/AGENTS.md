@@ -22,6 +22,10 @@
   and Feature title prefixes, issue types, and existing labels aligned; route
   product support and security reports out of public issues, and request only
   diagnostics that contributors have checked and redacted.
+- `scripts/check-issue-body.mjs` mirrors the required rendered headings and
+  confirmations in both Issue Forms. Non-owner, non-bot issues that bypass or
+  remove them receive the warning-only `status:needs-issue-body` state; regular
+  organization members are not exempt. A valid edit clears the bot-owned state.
 - External pull request body enforcement is based on the PR author's
   `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
   exempt; outside collaborators and prior contributors remain subject to it.

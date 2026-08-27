@@ -19,6 +19,8 @@ By submitting a pull request, patch, or other contribution to Lody, you agree to
 3. For substantial improvements, use the [feature request form](https://github.com/LodyAI/Lody/issues/new?template=02-feature-request.yml) to discuss the need, scope, and approach with maintainers before implementation.
 4. Do not report security vulnerabilities in a public issue; follow the [security policy](./SECURITY.md) instead.
 
+Keep the selected Issue Form structure, required answers, confirmations, and `[Bug]` or `[Feature Request]` title prefix. Issues that do not conform are marked `status:needs-issue-body` with a warning until corrected. Only repository owners and automated bots are exempt; regular organization members must also use the forms.
+
 ## Get the Code
 
 The repository uses Git submodules for ACP runtimes, so clone it recursively:
