@@ -1,9 +1,8 @@
 import { IpcMethod, IpcService } from 'electron-ipc-decorator'
-import type { UpdaterIpcContract } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class UpdaterIpc extends IpcService implements UpdaterIpcContract {
-  static readonly groupName = 'updater'
+export class UpdaterIpc extends IpcService {
+  static override readonly groupName = 'updater'
 
   @IpcMethod()
   async getState() {

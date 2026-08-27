@@ -1,10 +1,6 @@
-import type {
-  ImagePreviewMenuAction,
-  IpcServices,
-  ShowImagePreviewMenuInput,
-} from '@lody/shared/electron-ipc';
+import type { ImagePreviewMenuAction, ShowImagePreviewMenuInput } from '@lody/shared/electron-ipc';
 import { isElectronRenderer } from '@/lib/electron';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { getIpcServices, type IpcServices } from '@/lib/electron-ipc-client';
 
 /**
  * Copy / save for the image preview's right-click menu.

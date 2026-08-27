@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type {
-  LocalProjectsIpcContract,
   SendSessionFileLocalInput,
   SendSessionFileLocalResult
 } from '@lody/shared/electron-ipc'
@@ -68,8 +67,8 @@ function isLocalProjectHistoryProvider(value: unknown): value is LocalProjectHis
   )
 }
 
-export class LocalProjectsIpc extends IpcService implements LocalProjectsIpcContract {
-  static readonly groupName = 'localProjects'
+export class LocalProjectsIpc extends IpcService {
+  static override readonly groupName = 'localProjects'
 
   @IpcMethod()
   async control(request: LocalProjectControlRequest) {
@@ -77,7 +76,9 @@ export class LocalProjectsIpc extends IpcService implements LocalProjectsIpcCont
   }
 
   @IpcMethod()
-  async sendSessionFileLocal(payload: SendSessionFileLocalInput): Promise<SendSessionFileLocalResult> {
+  async sendSessionFileLocal(
+    payload: SendSessionFileLocalInput
+  ): Promise<SendSessionFileLocalResult> {
     const input = parseSendSessionFileLocalInput(payload)
     if (!input) {
       return { ok: false, error: 'invalid_request' }
@@ -111,7 +112,8 @@ export class LocalProjectsIpc extends IpcService implements LocalProjectsIpcCont
         return { ok: false, error: result.error }
       }
       const response = result.responses.find(
-        (item): item is SessionFileSendLocalResponse => item.type === 'session/file-send-local_response'
+        (item): item is SessionFileSendLocalResponse =>
+          item.type === 'session/file-send-local_response'
       )
       if (!response) {
         return { ok: false, error: 'invalid_response' }

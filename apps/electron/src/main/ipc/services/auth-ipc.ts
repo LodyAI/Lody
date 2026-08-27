@@ -2,7 +2,6 @@ import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   ElectronAuthCallbackInputSchema,
   ElectronDevEmailPasswordSignInInputSchema,
-  type AuthIpcContract,
   type ElectronAuthCallbackInput,
   type ElectronDevEmailPasswordSignInInput
 } from '@lody/shared/electron-ipc'
@@ -14,8 +13,8 @@ function assertAuthSender(): void {
   assertMainWindowSender(event, getIpcServiceDeps().getMainWindow)
 }
 
-export class AuthIpc extends IpcService implements AuthIpcContract {
-  static readonly groupName = 'auth'
+export class AuthIpc extends IpcService {
+  static override readonly groupName = 'auth'
 
   @IpcMethod()
   async completeCallback(payload: ElectronAuthCallbackInput) {

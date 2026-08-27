@@ -1,8 +1,5 @@
 import { IpcMethod, IpcService } from 'electron-ipc-decorator'
-import type {
-  NotificationsIpcContract,
-  ShowSessionCompletionNotificationInput
-} from '@lody/shared/electron-ipc'
+import type { ShowSessionCompletionNotificationInput } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
 function isShowSessionCompletionNotificationInput(
@@ -17,8 +14,8 @@ function isShowSessionCompletionNotificationInput(
   )
 }
 
-export class NotificationsIpc extends IpcService implements NotificationsIpcContract {
-  static readonly groupName = 'notifications'
+export class NotificationsIpc extends IpcService {
+  static override readonly groupName = 'notifications'
 
   @IpcMethod()
   async getPermissionStatus() {

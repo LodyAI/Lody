@@ -3,11 +3,16 @@ import type {
   ElectronPublicBrowserState,
   IpcPushMap,
   IpcSendMap,
-  IpcServices,
   SendLocalSessionControlResult,
 } from '@lody/shared/electron-ipc';
 import type { LocalSessionControlRequest, LocalSessionControlResponse } from '@lody/shared';
 import { LocalSessionControlResponseSchema } from '@lody/shared/message-schemas';
+// This deliberately crosses from the shared renderer package into the Electron app at
+// type level only. The import is erased from every browser bundle; see both packages'
+// AGENTS.md files before changing it into a runtime dependency or duplicating the API.
+import type { ElectronIpcServices } from '../../../../apps/electron/src/main/ipc/register-services';
+
+export type IpcServices = ElectronIpcServices;
 
 export type LodyIpcInvokeBridge = {
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;

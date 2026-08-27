@@ -98,7 +98,36 @@
                 ],
                 "message": "Use the recoverable Convex query layer so refreshable auth failures cannot unmount the UI."
               }
+            ],
+            "patterns": [
+              {
+                "group": ["node:*"],
+                "message": "Components ship to browser-shaped runtimes; do not use Node built-ins."
+              }
             ]
+          }
+        ],
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "Buffer",
+            "message": "Components ship to browser-shaped runtimes; use browser APIs instead."
+          },
+          {
+            "name": "process",
+            "message": "Components ship to browser-shaped runtimes; use explicit build/runtime inputs instead."
+          },
+          {
+            "name": "__dirname",
+            "message": "Components ship to browser-shaped runtimes; do not rely on Node globals."
+          },
+          {
+            "name": "__filename",
+            "message": "Components ship to browser-shaped runtimes; do not rely on Node globals."
+          },
+          {
+            "name": "require",
+            "message": "Components ship to browser-shaped runtimes; use browser-compatible ESM imports."
           }
         ]
       }
@@ -106,7 +135,17 @@
     {
       "files": ["packages/components/src/hooks/use-recoverable-convex-query.ts"],
       "rules": {
-        "no-restricted-imports": "off"
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["node:*"],
+                "message": "Components ship to browser-shaped runtimes; do not use Node built-ins."
+              }
+            ]
+          }
+        ]
       }
     },
     {

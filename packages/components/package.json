@@ -200,6 +200,7 @@
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/router-cli": "1.159.4",
     "@tanstack/router-plugin": "catalog:",
+    "@types/node": "catalog:",
     "@types/debug": "^4.1.12",
     "@types/lodash": "^4.17.20",
     "@types/react": "catalog:",

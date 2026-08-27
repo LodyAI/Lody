@@ -16,11 +16,17 @@ Root `AGENTS.md` also applies.
 - Electron main and preload code must not import runtime values from the
   `@lody/shared` root barrel. Use a narrow subpath so Node bundles do not pull in
   renderer modules or `loro-crdt` WASM.
-- Shared Electron IPC is `IpcServices` / `IpcPushMap` / `IpcSendMap` in
-  `@lody/shared/electron-ipc`. Main groups are `IpcService` classes with
-  `@IpcMethod()`; renderer uses `getIpcServices` / `onIpcEvent` / `sendIpc`.
-  Preload exposes only `{ invoke, on, send }` with allowlists. There is no
-  `window.api`. Validate foreign input at the IPC class boundary.
+- Invoke signatures come from the `IpcService` classes and the one constructor list in
+  `register-services.ts`; every public instance method is renderer-facing and must have
+  `@IpcMethod()`. Do not restore parallel handwritten invoke contracts or per-method
+  preload lists. `packages/components` intentionally imports the inferred service type
+  across the app/package boundary with `import type`; the import is erased and must never
+  become a runtime dependency. Shared push/send maps remain in
+  `@lody/shared/electron-ipc`. Preload exposes only `{ invoke, on, send }`, permits invoke
+  channels by the service groups in `preload/ipc-invoke-policy.ts`, and keeps push/send
+  allowlists. The IPC registration test keeps that policy aligned with the registered
+  service constructors. There is no `window.api`. Validate foreign input at the IPC class
+  boundary.
 - Preload runs under the renderer CSP. Zod schemas used there must pass
   `{ jitless: true }`; do not add `unsafe-eval` to accommodate Zod's JIT path.
 

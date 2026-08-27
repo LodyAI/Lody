@@ -1,5 +1,5 @@
 import { ipcMain, type IpcMainEvent } from 'electron'
-import { createServices } from 'electron-ipc-decorator'
+import { createServices, type MergeIpcService } from 'electron-ipc-decorator'
 import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
 import { LocalLoroDataPlaneClientMessageSchema } from '@lody/shared/local-loro-data-plane'
 import { TerminalClientMessageSchema } from '@lody/shared/terminal-protocol'
@@ -19,6 +19,28 @@ import { UpdaterIpc } from './services/updater-ipc'
 import { setIpcServiceDeps, type IpcServiceDeps } from './ipc-service-deps'
 
 type TerminalFireAndForgetType = 'attach' | 'input' | 'resize' | 'close' | 'close_session'
+
+export const IPC_SERVICE_CONSTRUCTORS = [
+  AppIpc,
+  AuthIpc,
+  CliIpc,
+  ImageIpc,
+  LocalPlatformIpc,
+  LocalProjectsIpc,
+  LoroIpc,
+  MachineRpcIpc,
+  NotificationsIpc,
+  PublicBrowserIpc,
+  SessionControlIpc,
+  TerminalIpc,
+  UpdaterIpc
+] as const
+
+function createRegisteredIpcServices() {
+  return createServices(IPC_SERVICE_CONSTRUCTORS)
+}
+
+export type ElectronIpcServices = MergeIpcService<ReturnType<typeof createRegisteredIpcServices>>
 
 export function registerIpcServices(deps: IpcServiceDeps) {
   setIpcServiceDeps(deps)
@@ -73,19 +95,5 @@ export function registerIpcServices(deps: IpcServiceDeps) {
     sendTerminalFireAndForget(event, 'close_session', payload)
   })
 
-  return createServices([
-    AppIpc,
-    AuthIpc,
-    CliIpc,
-    ImageIpc,
-    LocalPlatformIpc,
-    LocalProjectsIpc,
-    LoroIpc,
-    MachineRpcIpc,
-    NotificationsIpc,
-    PublicBrowserIpc,
-    SessionControlIpc,
-    TerminalIpc,
-    UpdaterIpc
-  ])
+  return createRegisteredIpcServices()
 }

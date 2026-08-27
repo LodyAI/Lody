@@ -1,10 +1,6 @@
 import { ipcRenderer } from 'electron'
-import {
-  IPC_PUSH_CHANNELS,
-  isIpcInvokeChannel,
-  isIpcPushChannel,
-  isIpcSendChannel,
-} from '@lody/shared/electron-ipc'
+import { IPC_PUSH_CHANNELS, isIpcPushChannel, isIpcSendChannel } from '@lody/shared/electron-ipc'
+import { isIpcInvokeChannel } from './ipc-invoke-policy'
 
 const pendingDeepLinks: unknown[] = []
 const deepLinkHandlers = new Set<(payload: unknown) => void>()
@@ -49,5 +45,5 @@ export const ipcBridge = {
       throw new Error(`Blocked IPC send: ${channel}`)
     }
     ipcRenderer.send(channel, payload)
-  },
+  }
 }

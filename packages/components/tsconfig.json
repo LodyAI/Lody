@@ -1,7 +1,9 @@
 {
   "extends": "../configs/tsconfig.extend.json",
   "compilerOptions": {
+    "experimentalDecorators": true,
     "jsx": "react-jsx",
+    "types": ["node"],
     "paths": {
       "*": ["./*"],
       "react": ["./node_modules/@types/react"],

@@ -1,14 +1,13 @@
 import { clipboard } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
-import type { TerminalIpcContract } from '@lody/shared/electron-ipc'
 import {
   TerminalClientMessageSchema,
   type TerminalOpenParams
 } from '@lody/shared/terminal-protocol'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class TerminalIpc extends IpcService implements TerminalIpcContract {
-  static readonly groupName = 'terminal'
+export class TerminalIpc extends IpcService {
+  static override readonly groupName = 'terminal'
 
   @IpcMethod()
   async list(sessionIdRaw: string) {

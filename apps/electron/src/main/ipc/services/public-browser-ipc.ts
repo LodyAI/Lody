@@ -9,8 +9,7 @@ import {
   type ElectronPublicBrowserCreateInput,
   type ElectronPublicBrowserIdInput,
   type ElectronPublicBrowserNavigateInput,
-  type ElectronPublicBrowserVisibilityInput,
-  type PublicBrowserIpcContract
+  type ElectronPublicBrowserVisibilityInput
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
@@ -27,8 +26,8 @@ function assertTrustedSender(): void {
   }
 }
 
-export class PublicBrowserIpc extends IpcService implements PublicBrowserIpcContract {
-  static readonly groupName = 'publicBrowser'
+export class PublicBrowserIpc extends IpcService {
+  static override readonly groupName = 'publicBrowser'
 
   @IpcMethod()
   async create(raw: ElectronPublicBrowserCreateInput) {

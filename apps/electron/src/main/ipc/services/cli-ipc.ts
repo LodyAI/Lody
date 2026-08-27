@@ -1,9 +1,8 @@
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
-import type { CliIpcContract } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class CliIpc extends IpcService implements CliIpcContract {
-  static readonly groupName = 'cli'
+export class CliIpc extends IpcService {
+  static override readonly groupName = 'cli'
 
   @IpcMethod()
   async getOutputBacklog() {

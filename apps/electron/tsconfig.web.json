@@ -8,8 +8,10 @@
   ],
   "compilerOptions": {
     "composite": true,
+    "experimentalDecorators": true,
     "jsx": "react-jsx",
     "noImplicitReturns": false,
+    "types": ["node"],
     "paths": {
       "*": ["./*"],
       "react": ["./node_modules/@types/react"],

@@ -15,6 +15,28 @@ import type {
   LocalMachineRpcResponse as LocalMachineRpcResponseFromModule,
 } from './local-machine-rpc';
 
+export type CliOutputEvent = {
+  runId: string;
+  stream: 'stdout' | 'stderr' | 'meta';
+  chunk: string;
+};
+
+export type RendererFatalErrorReport = {
+  scope: string;
+  message: string;
+  details: string;
+  copied?: boolean;
+};
+
+export type WindowBadgeInput = { unread: number; waiting: number };
+
+export type SessionControlSendInput = {
+  requestId: string;
+  message: LocalSessionControlRequest;
+};
+
+export type NativeThemeSource = 'dark' | 'light' | 'system';
+
 export type OpenSystemNotificationSettingsResult = {
   opened: boolean;
   platform: string;
@@ -764,4 +786,4 @@ export function bindingToElectronAccelerator(binding: string | null | undefined)
   return [...modifiers, key].join('+');
 }
 
-export * from './electron-ipc-contract';
+export * from './electron-ipc-channels';

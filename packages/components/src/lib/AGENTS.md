@@ -4,6 +4,30 @@
 Package [AGENTS.md](../../AGENTS.md) applies; this file adds the rules for the
 client half of Code Collab / File Preview file surfaces.
 
+## The Electron IPC type-only edge is intentional
+
+`electron-ipc-client.ts` imports `ElectronIpcServices` from the Electron main-process
+registration module with `import type`. This resembles a package cycle because the
+Electron renderer also consumes `@lody/components`, but it is deliberately a source-type
+edge only: TypeScript erases it, browser/mobile bundles never load main-process code, and
+there is no `@lody/electron` runtime or package dependency here.
+The type checker still follows the referenced source, so the components project keeps
+`experimentalDecorators` enabled and a direct catalog-pinned `@types/node` dev dependency;
+those settings make the main service declarations parse under the same assumptions as the
+Electron node project without changing any emitted renderer code.
+The Node declarations are compiler plumbing, not permission for shared UI to use Node APIs;
+the repository lint boundary rejects `node:*` imports and common Node globals in components
+source.
+
+The alternative is a second handwritten mirror of every invoke method in a shared
+contract or platform port. That mirror previously drifted independently from
+`@IpcMethod()` registration and the preload policy. Keep the service classes plus the one
+constructor list as the invoke signature source instead. Do not replace this type-only
+edge with another invoke contract, spec, or one-for-one platform port. If a future build
+cannot erase or resolve the edge, fix that explicit type boundary or reconsider where the
+Electron-aware caller lives; never turn it into a runtime import. Push events and one-way
+sends remain platform-neutral maps in `@lody/shared/electron-ipc`.
+
 ## Where a path came from decides whether it may be rewritten
 
 `session-file-open-target.ts` owns this and is the only place that should.

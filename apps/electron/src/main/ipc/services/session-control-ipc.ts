@@ -1,14 +1,10 @@
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
-import {
-  IPC_PUSH_CHANNELS,
-  type SessionControlIpcContract,
-  type SessionControlSendInput
-} from '@lody/shared/electron-ipc'
+import { IPC_PUSH_CHANNELS, type SessionControlSendInput } from '@lody/shared/electron-ipc'
 import type { LocalSessionControlRequest } from '@lody/shared/message'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class SessionControlIpc extends IpcService implements SessionControlIpcContract {
-  static readonly groupName = 'sessionControl'
+export class SessionControlIpc extends IpcService {
+  static override readonly groupName = 'sessionControl'
 
   @IpcMethod()
   async send(payload: SessionControlSendInput) {

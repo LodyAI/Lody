@@ -1,16 +1,9 @@
-import {
-  app,
-  BrowserWindow,
-  nativeTheme,
-  shell,
-  systemPreferences
-} from 'electron'
+import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   IPC_PUSH_CHANNELS,
   LaunchLocalPathInputSchema,
-  type AppIpcContract,
   type NativeThemeSource,
   type RendererFatalErrorReport,
   type SetGlobalShortcutInput,
@@ -85,8 +78,8 @@ export function installNativeThemeWatch(): void {
   }
 }
 
-export class AppIpc extends IpcService implements AppIpcContract {
-  static readonly groupName = 'app'
+export class AppIpc extends IpcService {
+  static override readonly groupName = 'app'
 
   @IpcMethod()
   async getFullscreen() {
