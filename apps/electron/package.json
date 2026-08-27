@@ -68,7 +68,6 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
-    "oxfmt": "0.65.0",
     "postcss": "^8.5.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
