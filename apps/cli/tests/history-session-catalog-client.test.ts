@@ -260,6 +260,6 @@ describe('resolveHistoryACPProcessLaunch', () => {
     expect(historyLaunch.command).toBe(sessionLaunch.command);
     expect(historyLaunch.args).toEqual(sessionLaunch.args);
     expect(historyLaunch.command).toBe('npx');
-    expect(historyLaunch.args).toEqual(['--prefer-offline', '-y', 'amp-acp']);
+    expect(historyLaunch.args).toEqual(['--prefer-offline', '-y', 'amp-acp@0.9.0']);
   });
 });

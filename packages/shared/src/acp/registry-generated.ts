@@ -65,7 +65,7 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
         command: 'npx',
         args: [
           '-y',
-          'amp-acp'
+          'amp-acp@0.9.0'
         ],
         versionArgs: [
           '--version'

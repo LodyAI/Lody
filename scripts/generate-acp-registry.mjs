@@ -12,6 +12,7 @@ const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
   'grok-build',
 ]);
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org/';
+const AMP_ACP_VERSION = '0.9.0';
 const INTERACTIVE_CLAUDE_ACP_VERSION = '0.1.5';
 const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
   id: 'claude-p',
@@ -41,8 +42,9 @@ const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
 };
 const LOCAL_REGISTRY_AGENTS = {
   'amp-acp': {
+    version: AMP_ACP_VERSION,
     command: 'npx',
-    args: ['-y', 'amp-acp'],
+    args: ['-y', `amp-acp@${AMP_ACP_VERSION}`],
     versionArgs: ['--version'],
   },
   cursor: {
@@ -248,7 +250,7 @@ function normalizeLocalAgent(raw, id) {
   return {
     id,
     name: rawName || fallback.name,
-    version: rawVersion || fallback.version || 'local',
+    version: launcher.version || rawVersion || fallback.version || 'local',
     description:
       typeof rawRecord.description === 'string' ? rawRecord.description : fallback.description,
     icon: typeof rawRecord.icon === 'string' ? rawRecord.icon : fallback.icon,

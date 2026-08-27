@@ -312,12 +312,12 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('refreshes metadata when a registry local command uses npx', () => {
+  it('pins the Amp ACP adapter version when launching through npx', () => {
     const resolved = resolveACPSetting({ cliType: 'registry', agentType: 'amp-acp' });
 
     expect(resolved.exec).toMatchObject({
       command: 'npx',
-      args: ['--prefer-offline', '-y', 'amp-acp'],
+      args: ['--prefer-offline', '-y', 'amp-acp@0.9.0'],
     });
   });
 
