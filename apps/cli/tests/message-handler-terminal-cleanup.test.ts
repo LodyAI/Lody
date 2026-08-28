@@ -9,6 +9,8 @@ import {
   machineFlockKeys,
   SessionStatusFactory,
   type LocalProjectId,
+  type LocalProjectWorktreeCleanupResult,
+  type MachineDeleteLocalProjectCommand,
   type MachineFlockScanRow,
   type NeedToDeleteSessionQueueItem,
   type AcpSessionNotification,
@@ -43,8 +45,8 @@ type MessageHandlerInternals = {
   ) => Promise<void>;
   deleteLocalProjectResources: (
     localProjectId: LocalProjectId,
-    command: { v: 1; requestedAt: number }
-  ) => Promise<void>;
+    command: MachineDeleteLocalProjectCommand
+  ) => Promise<LocalProjectWorktreeCleanupResult | undefined>;
   deleteSessionResources: (sessionId: SessionId) => Promise<{ keptWorktreePath?: string }>;
   writeKeptWorktreePath: (
     sessionId: SessionId,
@@ -508,6 +510,86 @@ describe('MessageHandler terminal cleanup', () => {
 
       expect(fs.readFileSync(dirtyPath, 'utf8')).toBe('preserve me\n');
       expect(fs.existsSync(worktree.hostPath)).toBe(true);
+    } finally {
+      if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = originalDataDir;
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('optionally deletes clean worktrees, keeps dirty ones, and never deletes the original repo', async () => {
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-project-clean-worktrees-'));
+    const originalDataDir = process.env.LODY_DATA_DIR;
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    try {
+      process.env.LODY_DATA_DIR = path.join(testDir, 'data');
+      process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
+      const rootPath = createLocalRepo(testDir);
+      const localProjectId = 'local-project-clean-worktrees' as LocalProjectId;
+      const cleanSessionId = 'session-project-clean' as SessionId;
+      const dirtySessionId = 'session-project-dirty' as SessionId;
+      const manager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(rootPath),
+        source: { kind: 'local-shared', originalRootPath: rootPath },
+        logger: createSilentLogger(),
+      });
+      const cleanWorktree = await manager.createWorktree(cleanSessionId);
+      const dirtyWorktree = await manager.createWorktree(dirtySessionId);
+      fs.writeFileSync(path.join(dirtyWorktree.hostPath, 'dirty.txt'), 'preserve me\n', 'utf8');
+
+      const project = { kind: 'local' as const, localProjectId };
+      const { handler } = createHarness({
+        sessionId: cleanSessionId,
+        sessionMetas: [
+          {
+            id: cleanSessionId,
+            machineId: 'machine-1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            status: SessionStatusFactory.idle(),
+            project,
+            isWorktree: true,
+            branchName: cleanWorktree.branch,
+          } as SessionMeta,
+          {
+            id: dirtySessionId,
+            machineId: 'machine-1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            status: SessionStatusFactory.idle(),
+            project,
+            isWorktree: true,
+            branchName: dirtyWorktree.branch,
+          } as SessionMeta,
+        ],
+        includeLegacySessionDeleteRequest: false,
+        localProjectRootPaths: { [localProjectId]: rootPath },
+        machineFlockRows: [
+          {
+            key: machineFlockKeys.localProject(localProjectId),
+            value: {
+              id: localProjectId,
+              name: 'Project',
+              rootPath,
+              createdAtMs: 1,
+            },
+          },
+        ],
+      });
+
+      const result = await handler.deleteLocalProjectResources(localProjectId, {
+        v: 1,
+        requestedAt: 2,
+        originalRootPath: rootPath,
+        cleanupWorktrees: true,
+      });
+
+      expect(fs.existsSync(rootPath)).toBe(true);
+      expect(fs.existsSync(cleanWorktree.hostPath)).toBe(false);
+      expect(fs.existsSync(dirtyWorktree.hostPath)).toBe(true);
+      expect(result?.deleted.map((item) => item.sessionId)).toEqual([cleanSessionId]);
+      expect(result?.skippedDirty.map((item) => item.sessionId)).toEqual([dirtySessionId]);
+      expect(result?.failed).toEqual([]);
     } finally {
       if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
       else process.env.LODY_DATA_DIR = originalDataDir;

@@ -9,6 +9,8 @@ export type MobileArchiveScreenProps = {
   isMultiSelectMode: boolean;
   selectedCount: number;
   isBulkActionBusy: boolean;
+  bulkRestoreDisabled?: boolean;
+  bulkRestoreDisabledReason?: string;
   onExitMultiSelect: () => void;
   onBulkRestore: () => void;
   onRequestBulkDelete: () => void;
@@ -26,6 +28,8 @@ export function MobileArchiveScreen({
   isMultiSelectMode,
   selectedCount,
   isBulkActionBusy,
+  bulkRestoreDisabled = false,
+  bulkRestoreDisabledReason,
   onExitMultiSelect,
   onBulkRestore,
   onRequestBulkDelete,
@@ -59,7 +63,8 @@ export function MobileArchiveScreen({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={selectedCount === 0 || isBulkActionBusy}
+                disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
+                title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
                 className="gap-1.5"
               >

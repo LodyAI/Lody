@@ -11,6 +11,7 @@ import {
   type CliType,
 } from './ai';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
+import type { LocalProjectWorktreeCleanupItem, LocalProjectWorktreeCleanupResult } from './message';
 import type {
   LocalProjectId,
   LocalProjectMeta,
@@ -80,6 +81,11 @@ export type MachineDeleteLocalProjectCommand = {
   v: 1;
   requestedAt: number;
   requestedBy?: string;
+  projectName?: string;
+  originalRootPath?: string;
+  cleanupWorktrees?: true;
+  status?: 'completed';
+  cleanupResult?: LocalProjectWorktreeCleanupResult;
 };
 
 export const buildMachineArchiveSessionCommand = (options: {
@@ -146,10 +152,16 @@ export const buildMachineDeleteSessionCommand = (options: {
 export const buildMachineDeleteLocalProjectCommand = (options: {
   requestedAt: number;
   requestedBy?: string;
+  projectName?: string;
+  originalRootPath?: string;
+  cleanupWorktrees?: boolean;
 }): MachineDeleteLocalProjectCommand => ({
   v: 1,
   requestedAt: options.requestedAt,
   ...(options.requestedBy ? { requestedBy: options.requestedBy } : {}),
+  ...(options.projectName ? { projectName: options.projectName } : {}),
+  ...(options.originalRootPath ? { originalRootPath: options.originalRootPath } : {}),
+  ...(options.cleanupWorktrees ? { cleanupWorktrees: true } : {}),
 });
 
 export type AgentConfigListSummary = Pick<
@@ -1153,7 +1165,69 @@ const normalizeMachineDeleteLocalProjectCommand = (
     }
     command.requestedBy = value.requestedBy;
   }
+  if (!isMissing(value.projectName)) {
+    if (typeof value.projectName !== 'string') return undefined;
+    command.projectName = value.projectName;
+  }
+  if (!isMissing(value.originalRootPath)) {
+    if (typeof value.originalRootPath !== 'string') return undefined;
+    command.originalRootPath = value.originalRootPath;
+  }
+  if (!isMissing(value.cleanupWorktrees)) {
+    if (value.cleanupWorktrees !== true) return undefined;
+    command.cleanupWorktrees = true;
+  }
+  if (!isMissing(value.status)) {
+    if (value.status !== 'completed') return undefined;
+    command.status = 'completed';
+  }
+  if (!isMissing(value.cleanupResult)) {
+    const result = normalizeLocalProjectWorktreeCleanupResult(value.cleanupResult);
+    if (!result) return undefined;
+    command.cleanupResult = result;
+  }
   return command;
+};
+
+const normalizeLocalProjectWorktreeCleanupItem = (
+  value: unknown
+): LocalProjectWorktreeCleanupItem | undefined => {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.sessionId !== 'string') return undefined;
+  if (typeof value.title !== 'string') return undefined;
+  if (typeof value.path !== 'string') return undefined;
+  return {
+    sessionId: value.sessionId as SessionId,
+    title: value.title,
+    path: value.path,
+  };
+};
+
+const normalizeLocalProjectWorktreeCleanupResult = (
+  value: unknown
+): LocalProjectWorktreeCleanupResult | undefined => {
+  if (!isRecord(value) || typeof value.completedAt !== 'number') return undefined;
+  if (!Array.isArray(value.deleted)) return undefined;
+  if (!Array.isArray(value.skippedDirty)) return undefined;
+  if (!Array.isArray(value.failed)) return undefined;
+
+  const deleted = value.deleted.map(normalizeLocalProjectWorktreeCleanupItem);
+  const skippedDirty = value.skippedDirty.map(normalizeLocalProjectWorktreeCleanupItem);
+  const failed = value.failed.map((entry) => {
+    const item = normalizeLocalProjectWorktreeCleanupItem(entry);
+    if (!item || !isRecord(entry) || typeof entry.message !== 'string') return undefined;
+    return { ...item, message: entry.message };
+  });
+  if (deleted.includes(undefined)) return undefined;
+  if (skippedDirty.includes(undefined)) return undefined;
+  if (failed.includes(undefined)) return undefined;
+
+  return {
+    completedAt: value.completedAt,
+    deleted: deleted as LocalProjectWorktreeCleanupItem[],
+    skippedDirty: skippedDirty as LocalProjectWorktreeCleanupItem[],
+    failed: failed as Array<LocalProjectWorktreeCleanupItem & { message: string }>,
+  };
 };
 
 const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined => {

@@ -8,9 +8,11 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
 } as const;
 
+export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
@@ -41,8 +43,20 @@ export function machineSupportsProtocolCapability(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
 };
+
+/** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
+export function machineSupportsLocalProjectRemovalProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval,
+    LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon can consume a durable `providerSetup` Flock row. */
 export function machineSupportsProviderSetupProtocol(

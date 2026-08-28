@@ -179,7 +179,10 @@ describe('MessageHandler machine registration', () => {
 
     expect(registeredMeta.rpcVersion).toBe('1');
     expect(registeredMeta.name).toBe('machine-name');
-    expect(registeredMeta.protocolCapabilities).toEqual({ providerSetup: 1 });
+    expect(registeredMeta.protocolCapabilities).toEqual({
+      localProjectRemoval: 1,
+      providerSetup: 1,
+    });
 
     await handler.cleanup();
   });

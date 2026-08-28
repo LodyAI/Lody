@@ -91,6 +91,8 @@ import {
 } from '@/lib/pr-poller/pr-poller-workspace';
 import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
 import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/workspace-selector';
+import { listAliveSessionMetas } from '@/lib/command-runtime';
+import { preflightLocalProjectWorktreeRemoval } from '@/lib/local-project-removal';
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
@@ -1835,6 +1837,28 @@ export class LodyFleet {
             rootPath: existingProject.rootPath,
             workspaceIds: [message.workspaceId],
           },
+        };
+      }
+
+      if (message.type === 'local-project/removal-preflight') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        const sessions = (await listAliveSessionMetas(runtime.lody.documentManager)).map(
+          ({ meta }) => meta
+        );
+        return {
+          ok: true,
+          type: 'local-project/removal-preflight',
+          result: await preflightLocalProjectWorktreeRemoval({
+            machineId: this.machineId,
+            localProjectId: message.localProjectId,
+            originalRootPath: rootPath,
+            sessions,
+            logger: this.logger,
+          }),
         };
       }
 

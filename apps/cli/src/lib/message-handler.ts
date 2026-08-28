@@ -372,6 +372,10 @@ import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
 import {
+  cleanupLocalProjectWorktrees,
+  preflightLocalProjectWorktreeRemoval,
+} from '@/lib/local-project-removal';
+import {
   downloadSessionImageForPrompt,
   type DownloadedSessionImagePromptBlock,
 } from '@/lib/session-image-download';
@@ -4107,14 +4111,24 @@ export class MessageHandler {
 
     this.logger.debug(`[local-project] Processing ${localProjectEntries.length} delete request(s)`);
     for (const [localProjectId, command] of localProjectEntries) {
+      if (command.status === 'completed') {
+        continue;
+      }
       if (this.deleteLocalProjectInFlight.has(localProjectId)) {
         this.logger.debug(`[local-project] ${localProjectId} already in progress`);
         continue;
       }
       this.deleteLocalProjectInFlight.add(localProjectId);
       try {
-        await this.deleteLocalProjectResources(localProjectId, command);
-        await this.removeDeleteLocalProjectRequest(localProjectId);
+        const cleanupResult = await this.deleteLocalProjectResources(localProjectId, command);
+        if (command.cleanupWorktrees && cleanupResult) {
+          await this.writeMachineFlockRow({
+            key: machineFlockKeys.deleteLocalProjectCommand(localProjectId),
+            value: { ...command, status: 'completed', cleanupResult },
+          });
+        } else {
+          await this.removeDeleteLocalProjectRequest(localProjectId);
+        }
       } catch (error) {
         this.logger.error(
           `[local-project] Failed to delete ${localProjectId}: ${formatErrorMessage(error)}`
@@ -4178,20 +4192,20 @@ export class MessageHandler {
   private async deleteLocalProjectResources(
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
-  ): Promise<void> {
+  ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
     const existingProject = await resolveWorkspaceLocalProject(
       this.workspaceDocument.repo,
       this.workspaceId,
       this.machineId,
       localProjectId
     );
-    if (!existingProject) {
+    if (!existingProject && !command.cleanupWorktrees) {
       this.logger.debug(`[local-project] ${localProjectId} already removed`);
       await this.cleanupLocalProjectWorktreeSetup(localProjectId);
       return;
     }
 
-    if (!shouldApplyMachineDeleteLocalProjectCommand(existingProject, command)) {
+    if (existingProject && !shouldApplyMachineDeleteLocalProjectCommand(existingProject, command)) {
       this.logger.debug(
         `[local-project] Skipping stale delete request for ${localProjectId}; project was created after the request`
       );
@@ -4200,18 +4214,36 @@ export class MessageHandler {
 
     await this.archiveLocalProjectSessions(localProjectId);
 
-    await removeMachineLocalProject(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      localProjectId,
-      undefined,
-      { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
-    );
-    this.logger.debug(
-      `[local-project] Removed ${existingProject.name} (${existingProject.rootPath})`
-    );
+    let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
+    const originalRootPath = existingProject?.rootPath ?? command.originalRootPath;
+    if (command.cleanupWorktrees && originalRootPath) {
+      const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+        ({ meta }) => meta
+      );
+      cleanupResult = await cleanupLocalProjectWorktrees({
+        machineId: this.machineId,
+        localProjectId,
+        originalRootPath,
+        sessions,
+        logger: this.logger,
+      });
+    }
+
+    if (existingProject) {
+      await removeMachineLocalProject(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId,
+        undefined,
+        { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
+      );
+      this.logger.debug(
+        `[local-project] Removed ${existingProject.name} (${existingProject.rootPath})`
+      );
+    }
     await this.cleanupLocalProjectWorktreeSetup(localProjectId);
+    return cleanupResult;
   }
 
   private toDeleteRequestRecord(request: DeleteRequest | undefined): DeleteRequestRecord {
@@ -9344,6 +9376,23 @@ export class MessageHandler {
         return authorized.response;
       }
       const { rootPath } = authorized;
+
+      if (request.type === 'local-project/removal-preflight') {
+        const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+          ({ meta }) => meta
+        );
+        return {
+          ok: true,
+          type: 'local-project/removal-preflight',
+          result: await preflightLocalProjectWorktreeRemoval({
+            machineId: this.machineId,
+            localProjectId: request.localProjectId,
+            originalRootPath: rootPath,
+            sessions,
+            logger: this.logger,
+          }),
+        };
+      }
 
       if (isLocalProjectWorktreeConfigRequest(request)) {
         return await handleLocalProjectWorktreeConfigRequest(request);

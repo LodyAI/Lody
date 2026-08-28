@@ -84,6 +84,20 @@ describe('machine Flock helpers', () => {
       v: 1,
       requestedAt: 234,
     });
+    expect(
+      buildMachineDeleteLocalProjectCommand({
+        requestedAt: 235,
+        projectName: 'Lody',
+        originalRootPath: '/Users/developer/Code/lody',
+        cleanupWorktrees: true,
+      })
+    ).toEqual({
+      v: 1,
+      requestedAt: 235,
+      projectName: 'Lody',
+      originalRootPath: '/Users/developer/Code/lody',
+      cleanupWorktrees: true,
+    });
 
     expect(
       buildMachineDeleteSessionCommand({
@@ -356,6 +370,32 @@ describe('machine Flock helpers', () => {
 
     expect(getMachineFlockDeleteLocalProjectEntries(rows)).toEqual([[localProjectId, row.value]]);
     expect(getMachineFlockDeleteLocalProjectIds(rows)).toEqual(new Set([localProjectId]));
+  });
+
+  it('round-trips completed local project cleanup results', () => {
+    const localProjectId = 'project-delete' as LocalProjectId;
+    const sessionId = 'session-clean' as SessionId;
+    const flock = new FakeMachineFlock();
+    const key = machineFlockKeys.deleteLocalProjectCommand(localProjectId);
+    const value = {
+      v: 1 as const,
+      requestedAt: 123,
+      projectName: 'Lody',
+      originalRootPath: '/Users/developer/Code/lody',
+      cleanupWorktrees: true as const,
+      status: 'completed' as const,
+      cleanupResult: {
+        completedAt: 456,
+        deleted: [{ sessionId, title: 'Clean session', path: '/tmp/session-clean' }],
+        skippedDirty: [],
+        failed: [],
+      },
+    };
+
+    expect(writeMachineFlockRowToFlock(flock, { key, value })).toBe(true);
+    expect(getMachineFlockDeleteLocalProjectEntries(readMachineFlockRowsFromFlock(flock))).toEqual([
+      [localProjectId, value],
+    ]);
   });
 
   it('extracts ACP capability rows independently for configs sharing a provider', () => {

@@ -56,6 +56,29 @@ describe('local project control request schema', () => {
     });
   });
 
+  it('parses local-project removal preflight requests and responses', () => {
+    const request = {
+      type: 'local-project/removal-preflight',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      localProjectId: 'project-1',
+      requestedByUserId: 'user-1',
+    };
+    const response = {
+      ok: true,
+      type: 'local-project/removal-preflight',
+      result: {
+        clean: [{ sessionId: 'session-1', title: 'Clean', path: '/worktrees/session-1' }],
+        dirty: [{ sessionId: 'session-2', title: 'Dirty', path: '/worktrees/session-2' }],
+        failed: [],
+      },
+    };
+
+    expect(isLocalProjectControlRequest(request)).toBe(true);
+    expect(isLocalProjectControlResponse(response)).toBe(true);
+    expect(LocalProjectControlResponseSchema.safeParse(response).success).toBe(true);
+  });
+
   it('parses remote directory browse requests', () => {
     const roots = safeParseLocalProjectControlRequest(
       JSON.stringify({

@@ -22,6 +22,7 @@ import {
   buildMachineDeleteSessionCommand,
   getMachineRoomId,
   getMachineFlockDocId,
+  getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
   machineFlockKeys,
@@ -204,6 +205,53 @@ export class SessionCreateBillingError extends Error {
   ) {
     super(message);
     this.name = 'SessionCreateBillingError';
+  }
+}
+
+/**
+ * Restoring an archived local-project Session would make it active without a
+ * valid execution target. Keep this error public so every restore surface can
+ * explain the same recoverable action: add the project back first.
+ */
+export class ArchivedLocalProjectRestoreUnavailableError extends Error {
+  constructor() {
+    super('Re-add this local project to restore its conversations.');
+    this.name = 'ArchivedLocalProjectRestoreUnavailableError';
+  }
+}
+
+export function isArchivedLocalProjectRestoreUnavailableError(
+  error: unknown
+): error is ArchivedLocalProjectRestoreUnavailableError {
+  return error instanceof ArchivedLocalProjectRestoreUnavailableError;
+}
+
+async function assertArchivedLocalProjectCanRestore(
+  runtime: WorkspaceRuntime,
+  sessionMeta: SessionMeta
+): Promise<void> {
+  const project = sessionMeta.project;
+  if (project?.kind !== 'local') return;
+
+  const machineMeta = (await runtime.repo.getDocMeta(getMachineRoomId(sessionMeta.machineId)))
+    ?.meta as MachineLegacyMetaFields | undefined;
+  const machineFlockHandle = await runtime.repo.openFlockDoc(
+    getMachineFlockDocId(runtime.workspaceId, sessionMeta.machineId)
+  );
+  const rows = readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
+    families: ['localProject', 'deleteLocalProjectCommand'],
+  });
+  const pendingRemovalIds = getMachineFlockDeleteLocalProjectIds(rows);
+  const availableProjects = {
+    ...(machineMeta?.localProjects ?? {}),
+    ...getMachineFlockLocalProjects(rows),
+  };
+
+  if (
+    pendingRemovalIds.has(project.localProjectId) ||
+    availableProjects[project.localProjectId] === undefined
+  ) {
+    throw new ArchivedLocalProjectRestoreUnavailableError();
   }
 }
 
@@ -1199,6 +1247,7 @@ export function useSessionActions(): SessionActions {
       if (!sessionMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
+      await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
       const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
 
       for (const session of lifecycleSessions) {
