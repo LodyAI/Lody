@@ -2744,6 +2744,7 @@
   "sidebar.filter.trigger": "Filter sidebar",
   "sidebar.githubWorktrees": "GitHub Worktrees",
   "sidebar.pinned": "Pinned",
+  "sidebar.workspace.syncing": "Syncing workspace…",
   "sidebar.home": "New chat",
   "sidebar.joinCommunity": "Join community",
   "sidebar.localProjects": "Local Projects",

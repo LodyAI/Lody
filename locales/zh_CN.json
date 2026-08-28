@@ -2744,6 +2744,7 @@
   "sidebar.filter.trigger": "筛选侧边栏",
   "sidebar.githubWorktrees": "GitHub Worktrees",
   "sidebar.pinned": "已置顶",
+  "sidebar.workspace.syncing": "正在同步工作空间…",
   "sidebar.home": "新对话",
   "sidebar.joinCommunity": "加入社区",
   "sidebar.localProjects": "本地项目",

@@ -366,10 +366,15 @@ function AuthedLayoutContent({
 
     if (!currentWorkspaceId) {
       return (
-        <LoadingPlaceholder
-          title={t('workspace.route.loadingTitle')}
-          description={t('workspace.route.setupLoadingDescription')}
-        />
+        <RouteSuspense>
+          <LazyMainLayout workspaceReady={false}>
+            <LoadingPlaceholder
+              variant="content"
+              title={t('workspace.route.switchingTitle')}
+              description={t('workspace.route.switchingDescription')}
+            />
+          </LazyMainLayout>
+        </RouteSuspense>
       );
     }
 

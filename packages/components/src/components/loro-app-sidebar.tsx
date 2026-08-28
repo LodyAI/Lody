@@ -2240,6 +2240,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       planPlus: t('billing.plan.plus', 'Plus'),
       planEnterprise: t('billing.plan.enterprise', 'Enterprise'),
       pinned: t('sidebar.pinned', 'Pinned'),
+      connectionLoading: t('chat.mobileHome.connectionBanner.loading', 'Connecting…'),
+      connectionReconnecting: t('chat.mobileHome.connectionBanner.reconnecting', 'Reconnecting…'),
+      connectionOffline: t('chat.mobileHome.connectionBanner.offline', 'Offline'),
+      workspaceSyncing: t('sidebar.workspace.syncing', 'Syncing workspace…'),
       filter: filterLabels,
     };
   }, [t, filterLabels]);
@@ -2608,6 +2612,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         currentWorkspaceId={resolvedWorkspaceId}
         workspaceSwitcherEnabled={multiWorkspaceAvailable}
         connectionUiState={connectionUiState}
+        workspaceSyncing={sessionsListLoading}
         isElectron={isElectron}
         // Traffic lights auto-hide in native fullscreen — drop the reserved
         // header inset so the sidebar's first row aligns with the top bar.
