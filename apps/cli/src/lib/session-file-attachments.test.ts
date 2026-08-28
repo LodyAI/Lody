@@ -11,6 +11,7 @@ import {
   buildUnavailableAttachmentPromptText,
   computeExcludeFileContent,
   ensureAttachmentsGitExcluded,
+  formatUntrustedFileNameForPrompt,
   resolveContainedUploadPath,
   sanitizeAttachmentFileName,
 } from './session-file-attachments';
@@ -112,6 +113,18 @@ describe('buildAttachmentPromptText', () => {
     });
     expect(text).toContain('application/octet-stream');
     expect(text).toContain('10 B');
+  });
+
+  it('escapes brackets and line breaks in the display name', () => {
+    expect(formatUntrustedFileNameForPrompt('notes].md')).toBe('notes\\].md');
+    const text = buildAttachmentPromptText({
+      fileName: 'line one\nline two.log',
+      sizeBytes: 12,
+      mimeType: 'text/plain',
+      relativePath: '.lody/attachments/a1b2c3d4-line two.log',
+    });
+    expect(text).toContain('line one line two.log');
+    expect(text).not.toContain('line one\nline two.log');
   });
 });
 

@@ -198,6 +198,14 @@ const formatSizeForPrompt = (sizeBytes: number): string => {
  *
  * Pure and unit-testable.
  */
+/**
+ * Format an untrusted display name for prompt text.
+ * File names are caller-supplied and may contain brackets or line breaks.
+ */
+export const formatUntrustedFileNameForPrompt = (fileName: string): string => {
+  return fileName.replaceAll('\\', '\\\\').replaceAll(']', '\\]').replaceAll(/[\r\n]+/g, ' ');
+};
+
 export const buildAttachmentPromptText = (args: {
   fileName: string;
   sizeBytes: number;
@@ -206,7 +214,8 @@ export const buildAttachmentPromptText = (args: {
 }): string => {
   const size = formatSizeForPrompt(args.sizeBytes);
   const mime = args.mimeType.trim() || 'application/octet-stream';
-  return `[User sent a file: ${args.fileName} (${size}, ${mime})]\nSaved to: ${args.relativePath}`;
+  const fileName = formatUntrustedFileNameForPrompt(args.fileName);
+  return `[User sent a file: ${fileName} (${size}, ${mime})]\nSaved to: ${args.relativePath}`;
 };
 
 /** Prompt text for a file that could not be downloaded yet (e.g. r2 404). */
@@ -217,7 +226,8 @@ export const buildUnavailableAttachmentPromptText = (args: {
 }): string => {
   const size = formatSizeForPrompt(args.sizeBytes);
   const mime = args.mimeType.trim() || 'application/octet-stream';
-  return `[User sent a file: ${args.fileName} (${size}, ${mime})]\nThe file is not available yet and could not be downloaded; ask the user to resend it if you need its contents.`;
+  const fileName = formatUntrustedFileNameForPrompt(args.fileName);
+  return `[User sent a file: ${fileName} (${size}, ${mime})]\nThe file is not available yet and could not be downloaded; ask the user to resend it if you need its contents.`;
 };
 
 /**
