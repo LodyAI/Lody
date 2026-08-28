@@ -4202,14 +4202,14 @@ export class MessageHandler {
     if (!existingProject && !command.cleanupWorktrees) {
       this.logger.debug(`[local-project] ${localProjectId} already removed`);
       await this.cleanupLocalProjectWorktreeSetup(localProjectId);
-      return;
+      return undefined;
     }
 
     if (existingProject && !shouldApplyMachineDeleteLocalProjectCommand(existingProject, command)) {
       this.logger.debug(
         `[local-project] Skipping stale delete request for ${localProjectId}; project was created after the request`
       );
-      return;
+      return undefined;
     }
 
     await this.archiveLocalProjectSessions(localProjectId);
