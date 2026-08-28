@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe('createWorkspaceMachineRpcFacade', () => {
   it('uses the local-only IPC preview method without creating a cloud client', async () => {
-    const sendLocalMachineRpc = vi.fn(async () => ({
+    const invoke = vi.fn(async () => ({
       ok: true as const,
       result: {
         status: 'ok' as const,
@@ -30,7 +30,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     }));
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
-      api: { sendLocalMachineRpc },
+      ipc: { invoke },
     });
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
@@ -48,7 +48,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
         path: '/Users/me/Documents/notes.md',
       })
     ).resolves.toMatchObject({ status: 'ok', external: true, readonly: true });
-    expect(sendLocalMachineRpc).toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
@@ -60,10 +61,10 @@ describe('createWorkspaceMachineRpcFacade', () => {
   });
 
   it('does not fall back to a cloud preview while Electron local routing is unresolved', async () => {
-    const sendLocalMachineRpc = vi.fn();
+    const invoke = vi.fn();
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
-      api: { sendLocalMachineRpc },
+      ipc: { invoke },
     });
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
@@ -80,12 +81,12 @@ describe('createWorkspaceMachineRpcFacade', () => {
     await expect(
       facade.requestFilePreview(localMachineId, { sessionId, path: '/tmp/local.txt' })
     ).resolves.toMatchObject({ status: 'error', code: 'transient_io' });
-    expect(sendLocalMachineRpc).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
   it('uses the local bridge for a file-index snapshot without creating a cloud client', async () => {
-    const sendLocalMachineRpc = vi.fn(async () => ({
+    const invoke = vi.fn(async () => ({
       ok: true as const,
       result: {
         status: 'ok' as const,
@@ -96,7 +97,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     }));
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
-      api: { sendLocalMachineRpc },
+      ipc: { invoke },
     });
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
@@ -118,7 +119,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
       status: 'ok',
       fileIndex: { 'src/local.ts': { kind: 'file' } },
     });
-    expect(sendLocalMachineRpc).toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
@@ -131,7 +133,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
   });
 
   it('uses the local bridge without creating a cloud client for the local machine', async () => {
-    const sendLocalMachineRpc = vi.fn(async () => ({
+    const invoke = vi.fn(async () => ({
       ok: true as const,
       result: {
         type: 'session/cancel_response' as const,
@@ -141,7 +143,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     }));
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
-      api: { sendLocalMachineRpc },
+      ipc: { invoke },
     });
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
@@ -160,7 +162,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
         success: true,
       }
     );
-    expect(sendLocalMachineRpc).toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
@@ -171,10 +174,10 @@ describe('createWorkspaceMachineRpcFacade', () => {
   });
 
   it('uses the cloud Machine RPC client for a remote machine', async () => {
-    const sendLocalMachineRpc = vi.fn();
+    const invoke = vi.fn();
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
-      api: { sendLocalMachineRpc },
+      ipc: { invoke },
     });
     const requestSessionCancel = vi.fn(async () => ({
       type: 'session/cancel_response' as const,
@@ -204,6 +207,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
       turnId: 'turn-1',
       timeoutMs: 2_000,
     });
-    expect(sendLocalMachineRpc).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

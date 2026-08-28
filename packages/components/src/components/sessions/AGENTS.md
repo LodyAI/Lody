@@ -107,7 +107,9 @@ Session conversation page chain:
   (fixed panels → side chats → viewers) and every close handler must take its fallback neighbour from
   the derived `sidePanelTabIds`; hand-building a partial order per close path silently breaks
   "previous sibling" as soon as a new tab kind lands between the existing ones.
-  Opening a viewer dedupes by viewer id and expands that panel.
+  Opening a viewer dedupes by viewer id and expands that panel. Every desktop viewer activation
+  path goes through `selectSidePanelTab`, so fixed panels, side chats, and viewers remain mutually
+  exclusive even when content opens the viewer without a tab-strip click.
   `Side Chat` is the dynamic conversation-panel exception: each launch forks the mounted left-side
   conversation's latest forkable Assistant turn and may create another right-panel tab. Its durable
   child Session carries `childSessionPlacement: 'side-panel'`, so it stays out of the top child-tab
@@ -289,6 +291,10 @@ Session conversation page chain:
   wide markdown, tool output, and user content own their nested horizontal scrollers
   and must never make the whole conversation pane pan sideways.
 - `session-chat-input-area.tsx` — composer; `message-queue-display.tsx` — queued turns.
+  A queued item's Steer action uses native acknowledged steering only when the
+  authoritative ACP capability cache advertises it. Never infer steering support
+  from built-in/custom config type or agent identity; unsupported and stale cache
+  entries retain the interrupt-and-send fallback.
   Child-tab suggestions are shared by draft and persisted child sessions through
   `child-tab-empty-state.tsx`; it uses the same `px-3` + `ConversationColumn` as
   the composer, so its right edge and max width must stay aligned automatically.

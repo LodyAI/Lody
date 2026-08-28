@@ -416,6 +416,8 @@ export interface SessionChatStreamViewProps {
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
+  /** Full-page overlay that keeps the conversation outline independent of composer height. */
+  outlineOverlayRoot?: HTMLElement | null;
   /**
    * When true, prevents sticky auto-scroll from fighting programmatic scrolls
    * (e.g. during search result navigation).
@@ -1163,6 +1165,7 @@ export const SessionChatStreamView = forwardRef<
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
+      outlineOverlayRoot,
     },
     ref
   ) => {
@@ -1723,16 +1726,19 @@ export const SessionChatStreamView = forwardRef<
             {!isMobile && isScrolledFromTop ? (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
             ) : null}
-            {/* Round outline. An overlay SIBLING of the scroll viewport, never a
-                Virtua row — and never a child of the viewport either, because
-                sticky scroll takes the content element from that div's
-                `firstElementChild`. Touch has no hover, so mobile is excluded
-                rather than shipped without its preview card. */}
+            {/* Round outline. Its visual layer portals to the full-page overlay
+                when supplied, so composer growth cannot move its centre. It is
+                never a Virtua row or a child of the viewport: sticky scroll
+                takes the content element from that div's `firstElementChild`.
+                Touch has no hover, so mobile is excluded rather than shipped
+                without its preview card. */}
             {isMobile ? null : (
               <ConversationOutlineRail
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                overlayRoot={outlineOverlayRoot}
+                enableArrivalIntent
               />
             )}
             {showScrollToLatest && !isSticky && (
@@ -2713,12 +2719,7 @@ const UserMessageRowView = ({
                 unbreakable line, the content grows to its `sm:max-w-[800px]` cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
-            <div
-              className={cn(
-                'relative min-w-0 max-w-full',
-                isEditing ? 'w-full' : 'w-fit'
-              )}
-            >
+            <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
                 <Loader2 className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 animate-spin text-muted-foreground" />
               )}

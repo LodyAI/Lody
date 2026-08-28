@@ -1,10 +1,8 @@
-import type { SessionMeta } from '@lody/shared';
+import type { AcpCapabilityAuthority, AcpCapabilityCacheEntry } from '@lody/shared';
 
 export function shouldRequestNativeQueueSteer(
-  session: Pick<SessionMeta, 'cliType' | 'agentType'>
+  authority: AcpCapabilityAuthority,
+  capability: Pick<AcpCapabilityCacheEntry, 'acknowledgedSteer'> | undefined
 ): boolean {
-  return (
-    session.cliType === 'builtin' &&
-    (session.agentType === 'claude' || session.agentType === 'codex')
-  );
+  return authority === 'authoritative' && capability?.acknowledgedSteer === true;
 }

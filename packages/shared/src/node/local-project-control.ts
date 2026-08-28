@@ -269,6 +269,28 @@ function isWorkspaceIds(value: unknown): boolean {
   return isStringArray(value);
 }
 
+function isLocalProjectWorktreeCleanupItem(value: unknown, failure = false): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.sessionId === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.path === 'string' &&
+    (!failure || typeof value.message === 'string')
+  );
+}
+
+function isLocalProjectWorktreeCleanupPreflightResult(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    Array.isArray(value.clean) &&
+    value.clean.every((item) => isLocalProjectWorktreeCleanupItem(item)) &&
+    Array.isArray(value.dirty) &&
+    value.dirty.every((item) => isLocalProjectWorktreeCleanupItem(item)) &&
+    Array.isArray(value.failed) &&
+    value.failed.every((item) => isLocalProjectWorktreeCleanupItem(item, true))
+  );
+}
+
 export function isLocalProjectControlRequest(value: unknown): value is LocalProjectControlRequest {
   if (
     !isObjectRecord(value) ||
@@ -306,6 +328,14 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
 
   if (value.type === 'local-project/delete') {
     return typeof value.workspaceId === 'string' && typeof value.localProjectId === 'string';
+  }
+
+  if (value.type === 'local-project/removal-preflight') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.localProjectId === 'string' &&
+      isOptionalString(value.requestedByUserId)
+    );
   }
 
   if (value.type === 'local-project/list') {
@@ -497,6 +527,10 @@ export function isLocalProjectControlResponse(
       typeof value.result.rootPath === 'string' &&
       isWorkspaceIds(value.result.workspaceIds)
     );
+  }
+
+  if (value.type === 'local-project/removal-preflight') {
+    return isLocalProjectWorktreeCleanupPreflightResult(value.result);
   }
 
   if (value.type === 'local-project/list') {

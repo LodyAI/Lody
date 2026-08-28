@@ -2218,6 +2218,7 @@ export const SessionChatInterface = memo(
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
+    const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
     const skipNextViewportResizeAutoScrollRef = useRef(false);
     const suppressStickyAutoScrollRef = useRef(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -4939,7 +4940,13 @@ export const SessionChatInterface = memo(
       ]
     );
 
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(session);
+    const queueSteerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
+      capabilityAuthority,
+      queueSteerCapability
+    );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
         if (shouldUseNativeQueueSteer) {
@@ -5530,6 +5537,12 @@ export const SessionChatInterface = memo(
           hideMessageArea={hideMessageArea}
           {...pageDropHandlers}
         >
+          {/* The outline must centre in the whole conversation page, not only
+              the flex area left after the composer takes its height. */}
+          <div
+            ref={setOutlineOverlayRoot}
+            className="pointer-events-none absolute inset-0 @container"
+          />
           {!shouldHideHeader &&
             (headerVariant === 'toolbar' ? (
               /* Compact toolbar for the merged desktop tab row: right-side
@@ -5669,6 +5682,7 @@ export const SessionChatInterface = memo(
                           conversationFontSize={conversationFontSize}
                           skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                           suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                          outlineOverlayRoot={outlineOverlayRoot}
                         />
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>

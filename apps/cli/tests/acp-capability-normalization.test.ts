@@ -108,4 +108,13 @@ describe('ACP capability normalization', () => {
     expect(capabilities.modelReasoningEfforts).toBeUndefined();
     expect(capabilities.models.map((model) => model.modelId)).toEqual(['opus', 'sonnet']);
   });
+
+  it('preserves acknowledged steering support discovered from the live client', () => {
+    const capabilities = normalizeAcpSessionCapabilities(
+      { modes: { availableModes: [] } },
+      { acknowledgedSteer: true }
+    );
+
+    expect(capabilities.acknowledgedSteer).toBe(true);
+  });
 });

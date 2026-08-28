@@ -18,8 +18,28 @@ import { useEffect, useRef, useState } from 'react';
 
 const VERT = /* glsl */ `
 attribute vec2 aPos;
+varying vec2 vUv;
 void main() {
+  vUv = aPos * 0.5 + 0.5;
   gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`;
+
+const PRESENT_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uFrom;
+uniform sampler2D uTo;
+uniform float uMix;
+
+void main() {
+  if (uMix <= 0.0) {
+    gl_FragColor = texture2D(uFrom, vUv);
+  } else if (uMix >= 1.0) {
+    gl_FragColor = texture2D(uTo, vUv);
+  } else {
+    gl_FragColor = mix(texture2D(uFrom, vUv), texture2D(uTo, vUv), uMix);
+  }
 }
 `;
 
@@ -181,12 +201,56 @@ void main() {
 const TIME_ORIGIN = 23.6;
 
 /**
- * The field drifts slowly (its fastest time term is 0.12/s), so 30fps is visually
- * identical to vsync while halving GPU work on a 60Hz panel and quartering it on a
- * 120Hz one. `uTime` is wall-clock derived, so capping does not slow the motion.
+ * The field drifts slowly (its fastest time term is 0.12/s), so expensive samples
+ * can be sparse. Two full-resolution samples are blended on display frames: the
+ * field stays smooth without reducing the drawing-buffer resolution or shader.
  */
-const TARGET_FPS = 30;
-const MIN_FRAME_MS = 1000 / TARGET_FPS;
+const SAMPLE_FPS = 15;
+const SAMPLE_INTERVAL_MS = 1000 / SAMPLE_FPS;
+const SOFTWARE_SAMPLE_FPS = 8;
+const SOFTWARE_SAMPLE_INTERVAL_MS = 1000 / SOFTWARE_SAMPLE_FPS;
+const SLOW_PRESENT_FPS = 30;
+const SLOW_PRESENT_INTERVAL_MS = 1000 / SLOW_PRESENT_FPS;
+const SLOW_FIELD_GPU_MS = 12;
+const TARGET_FIELD_GPU_SHARE = 0.2;
+const DIRECT_FALLBACK_FPS = 30;
+const DIRECT_FALLBACK_FRAME_MS = 1000 / DIRECT_FALLBACK_FPS;
+const MIN_BLEND_MS = 1000 / 30;
+
+type TimerQuery = object;
+
+type DisjointTimerQueryExtension = {
+  TIME_ELAPSED_EXT: number;
+  GPU_DISJOINT_EXT: number;
+  QUERY_RESULT_AVAILABLE_EXT: number;
+  QUERY_RESULT_EXT: number;
+  createQueryEXT(): TimerQuery | null;
+  deleteQueryEXT(query: TimerQuery): void;
+  beginQueryEXT(target: number, query: TimerQuery): void;
+  endQueryEXT(target: number): void;
+  getQueryObjectEXT(query: TimerQuery, pname: number): unknown;
+};
+
+type TemporalTarget = {
+  texture: WebGLTexture;
+  framebuffer: WebGLFramebuffer;
+};
+
+type PendingSample = {
+  index: number;
+  submittedAt: number;
+  assumeReadyAt: number;
+  query: TimerQuery | null;
+  seed: boolean;
+  gpuDurationMs: number | null;
+};
+
+type TemporalTransition = {
+  fromIndex: number;
+  toIndex: number;
+  startedAt: number;
+  durationMs: number;
+};
 
 function isDarkTheme(): boolean {
   return document.documentElement.classList.contains('dark');
@@ -283,35 +347,61 @@ export function MarketingAtmosphere({
     }
 
     const vert = compile(gl, gl.VERTEX_SHADER, VERT);
-    const frag = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-    if (!vert || !frag) {
+    const fieldFrag = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+    if (!vert || !fieldFrag) {
       canvas.dataset.fallback = 'true';
       return undefined;
     }
-    const program = link(gl, vert, frag);
-    gl.deleteShader(vert);
-    gl.deleteShader(frag);
-    if (!program) {
+    const fieldProgram = link(gl, vert, fieldFrag);
+    gl.deleteShader(fieldFrag);
+    if (!fieldProgram) {
+      gl.deleteShader(vert);
       canvas.dataset.fallback = 'true';
       return undefined;
     }
 
+    // Temporal presentation is optional. Failure here retains the previous
+    // direct full-resolution renderer rather than losing the atmosphere.
+    const presentFrag = compile(gl, gl.FRAGMENT_SHADER, PRESENT_FRAG);
+    const presentProgram = presentFrag ? link(gl, vert, presentFrag) : null;
+    gl.deleteShader(vert);
+    if (presentFrag) gl.deleteShader(presentFrag);
+
     const buf = gl.createBuffer();
+    if (!buf) {
+      gl.deleteProgram(fieldProgram);
+      if (presentProgram) gl.deleteProgram(presentProgram);
+      canvas.dataset.fallback = 'true';
+      return undefined;
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
 
-    const aPos = gl.getAttribLocation(program, 'aPos');
-    const uRes = gl.getUniformLocation(program, 'uRes');
-    const uTime = gl.getUniformLocation(program, 'uTime');
-    const uMotion = gl.getUniformLocation(program, 'uMotion');
-    const uTheme = gl.getUniformLocation(program, 'uTheme');
+    const fieldAPos = gl.getAttribLocation(fieldProgram, 'aPos');
+    const uRes = gl.getUniformLocation(fieldProgram, 'uRes');
+    const uTime = gl.getUniformLocation(fieldProgram, 'uTime');
+    const uMotion = gl.getUniformLocation(fieldProgram, 'uMotion');
+    const uTheme = gl.getUniformLocation(fieldProgram, 'uTheme');
+    const presentAPos = presentProgram ? gl.getAttribLocation(presentProgram, 'aPos') : -1;
+    const uFrom = presentProgram ? gl.getUniformLocation(presentProgram, 'uFrom') : null;
+    const uTo = presentProgram ? gl.getUniformLocation(presentProgram, 'uTo') : null;
+    const uMix = presentProgram ? gl.getUniformLocation(presentProgram, 'uMix') : null;
 
-    gl.useProgram(program);
+    gl.useProgram(fieldProgram);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(fieldAPos);
+    gl.vertexAttribPointer(fieldAPos, 2, gl.FLOAT, false, 0, 0);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
+
+    let timerExt = gl.getExtension(
+      'EXT_disjoint_timer_query'
+    ) as DisjointTimerQueryExtension | null;
+    const rendererInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = rendererInfo
+      ? String(gl.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL)).toLowerCase()
+      : '';
+    const softwareRenderer = /swiftshader|llvmpipe|software/.test(renderer);
 
     const motionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
     let motion = motionMq.matches ? 0 : 1;
@@ -320,10 +410,22 @@ export function MarketingAtmosphere({
     let tabVisible = document.visibilityState === 'visible';
     let raf = 0;
     let running = true;
-    // Timestamp of the last GL draw; drives both the frame cap and the theme ease.
+    // Presentation follows display frames on capable GPUs. Heavy field samples
+    // are separately paced and never overlap on the GPU.
     let lastPaintAt = -1;
+    let lastDirectPaintAt = -1;
     const start = performance.now();
     const maxDpr = 1.5;
+    let temporalTargets: TemporalTarget[] = [];
+    let temporalUnavailable = !presentProgram;
+    let temporalResetNeeded = true;
+    let endpointIndex: number | null = null;
+    let pendingSample: PendingSample | null = null;
+    let transition: TemporalTransition | null = null;
+    let nextSampleAt = 0;
+    let sampleIntervalMs = softwareRenderer ? SOFTWARE_SAMPLE_INTERVAL_MS : SAMPLE_INTERVAL_MS;
+    let presentIntervalMs = softwareRenderer ? SLOW_PRESENT_INTERVAL_MS : 0;
+    let lastPresentAt = -1;
 
     const pageActive = () => activeRef.current;
 
@@ -337,6 +439,84 @@ export function MarketingAtmosphere({
       canvas.dataset.pageActive = on ? 'true' : 'false';
     };
 
+    const deletePendingQuery = () => {
+      if (pendingSample?.query && timerExt) {
+        timerExt.deleteQueryEXT(pendingSample.query);
+      }
+      pendingSample = null;
+    };
+
+    const deleteTemporalTargets = () => {
+      for (const target of temporalTargets) {
+        gl.deleteFramebuffer(target.framebuffer);
+        gl.deleteTexture(target.texture);
+      }
+      temporalTargets = [];
+    };
+
+    const resetTemporalState = () => {
+      deletePendingQuery();
+      endpointIndex = null;
+      transition = null;
+      nextSampleAt = 0;
+      lastPresentAt = -1;
+      temporalResetNeeded = true;
+    };
+
+    const allocateTemporalTargets = (width: number, height: number) => {
+      if (temporalUnavailable || !presentProgram) return false;
+      deletePendingQuery();
+      deleteTemporalTargets();
+
+      const allocated: TemporalTarget[] = [];
+      for (let index = 0; index < 2; index++) {
+        const texture = gl.createTexture();
+        const framebuffer = gl.createFramebuffer();
+        if (!texture || !framebuffer) {
+          if (texture) gl.deleteTexture(texture);
+          if (framebuffer) gl.deleteFramebuffer(framebuffer);
+          for (const target of allocated) {
+            gl.deleteFramebuffer(target.framebuffer);
+            gl.deleteTexture(target.texture);
+          }
+          temporalUnavailable = true;
+          canvas.dataset.temporal = 'false';
+          return false;
+        }
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+          gl.deleteFramebuffer(framebuffer);
+          gl.deleteTexture(texture);
+          for (const target of allocated) {
+            gl.deleteFramebuffer(target.framebuffer);
+            gl.deleteTexture(target.texture);
+          }
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          temporalUnavailable = true;
+          canvas.dataset.temporal = 'false';
+          return false;
+        }
+        allocated.push({ texture, framebuffer });
+      }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      temporalTargets = allocated;
+      temporalResetNeeded = true;
+      endpointIndex = null;
+      transition = null;
+      canvas.dataset.temporal = 'true';
+      return true;
+    };
+
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
       const w = Math.max(1, Math.floor(window.innerWidth * dpr));
@@ -345,30 +525,189 @@ export function MarketingAtmosphere({
         canvas.width = w;
         canvas.height = h;
         gl.viewport(0, 0, w, h);
+        if (!temporalUnavailable) allocateTemporalTargets(w, h);
+        else resetTemporalState();
+        return true;
+      }
+      return false;
+    };
+
+    const bindTriangle = (program: WebGLProgram, aPos: number) => {
+      gl.useProgram(program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    };
+
+    const updateTheme = (now: number) => {
+      const frames = lastPaintAt < 0 ? 1 : Math.min(8, (now - lastPaintAt) / (1000 / 60));
+      theme += (themeTarget - theme) * (1 - Math.pow(1 - 0.12, frames));
+      if (Math.abs(themeTarget - theme) < 0.002) theme = themeTarget;
+      lastPaintAt = now;
+    };
+
+    const drawField = (framebuffer: WebGLFramebuffer | null, fieldTime: number) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      bindTriangle(fieldProgram, fieldAPos);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+      gl.uniform1f(uTime, TIME_ORIGIN + fieldTime);
+      gl.uniform1f(uMotion, motion);
+      gl.uniform1f(uTheme, theme);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+
+    const beginTimedSample = (
+      index: number,
+      fieldTime: number,
+      now: number,
+      seed: boolean
+    ): PendingSample => {
+      let query: TimerQuery | null = null;
+      if (timerExt) {
+        try {
+          query = timerExt.createQueryEXT();
+          if (query) timerExt.beginQueryEXT(timerExt.TIME_ELAPSED_EXT, query);
+        } catch {
+          query = null;
+          timerExt = null;
+        }
+      }
+
+      drawField(temporalTargets[index].framebuffer, fieldTime);
+      if (query && timerExt) timerExt.endQueryEXT(timerExt.TIME_ELAPSED_EXT);
+      gl.flush();
+      return {
+        index,
+        submittedAt: now,
+        assumeReadyAt: now + sampleIntervalMs,
+        query,
+        seed,
+        gpuDurationMs: null,
+      };
+    };
+
+    const sampleReady = (sample: PendingSample, now: number) => {
+      if (!sample.query || !timerExt) return now >= sample.assumeReadyAt;
+      try {
+        const available = Boolean(
+          timerExt.getQueryObjectEXT(sample.query, timerExt.QUERY_RESULT_AVAILABLE_EXT)
+        );
+        if (!available) return false;
+        const disjoint = Boolean(gl.getParameter(timerExt.GPU_DISJOINT_EXT));
+        // Read the result before deleting it. It controls both field duty cycle
+        // and presentation pacing when the GPU cannot keep up cheaply.
+        if (!disjoint) {
+          const elapsedNs = Number(
+            timerExt.getQueryObjectEXT(sample.query, timerExt.QUERY_RESULT_EXT)
+          );
+          if (Number.isFinite(elapsedNs) && elapsedNs > 0) {
+            sample.gpuDurationMs = elapsedNs / 1_000_000;
+          }
+        }
+        timerExt.deleteQueryEXT(sample.query);
+        sample.query = null;
+        return true;
+      } catch {
+        timerExt = null;
+        sample.query = null;
+        return now >= sample.assumeReadyAt;
+      }
+    };
+
+    const present = (fromIndex: number, toIndex: number, mix: number, now: number) => {
+      if (!presentProgram) return false;
+      if (lastPresentAt >= 0 && now - lastPresentAt < presentIntervalMs - 1) {
+        return false;
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      bindTriangle(presentProgram, presentAPos);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, temporalTargets[fromIndex].texture);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, temporalTargets[toIndex].texture);
+      gl.uniform1i(uFrom, 0);
+      gl.uniform1i(uTo, 1);
+      gl.uniform1f(uMix, mix);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      lastPresentAt = now;
+      return true;
+    };
+
+    const paintTemporal = (now: number, fieldTime: number) => {
+      if (temporalResetNeeded || endpointIndex === null) {
+        deletePendingQuery();
+        transition = null;
+        endpointIndex = 0;
+        pendingSample = beginTimedSample(0, fieldTime, now, true);
+        nextSampleAt = now + sampleIntervalMs;
+        temporalResetNeeded = false;
+        present(0, 0, 0, now);
+        return;
+      }
+
+      if (pendingSample && sampleReady(pendingSample, now)) {
+        const completed = pendingSample;
+        pendingSample = null;
+        if (completed.gpuDurationMs !== null) {
+          sampleIntervalMs = Math.max(
+            softwareRenderer ? SOFTWARE_SAMPLE_INTERVAL_MS : SAMPLE_INTERVAL_MS,
+            completed.gpuDurationMs / TARGET_FIELD_GPU_SHARE
+          );
+          if (completed.gpuDurationMs >= SLOW_FIELD_GPU_MS) {
+            presentIntervalMs = SLOW_PRESENT_INTERVAL_MS;
+          }
+          nextSampleAt = Math.max(nextSampleAt, completed.submittedAt + sampleIntervalMs);
+        }
+        if (!completed.seed) {
+          const renderWaitMs = Math.max(0, now - completed.submittedAt);
+          transition = {
+            fromIndex: endpointIndex,
+            toIndex: completed.index,
+            startedAt: now,
+            durationMs: Math.max(MIN_BLEND_MS, sampleIntervalMs - renderWaitMs),
+          };
+          endpointIndex = completed.index;
+        }
+      }
+
+      if (transition) {
+        const mix = Math.min(1, Math.max(0, (now - transition.startedAt) / transition.durationMs));
+        present(transition.fromIndex, transition.toIndex, mix, now);
+        if (mix >= 1) {
+          transition = null;
+        }
+        return;
+      }
+
+      const didPresent = present(endpointIndex, endpointIndex, 0, now);
+
+      // Present the completed endpoint before queuing the next heavy pass. This
+      // gives the compositor a cheap frame ahead of the field work and keeps at
+      // most one sample in flight on slow GPUs.
+      if (didPresent && !pendingSample && now >= nextSampleAt) {
+        const freeIndex = endpointIndex === 0 ? 1 : 0;
+        pendingSample = beginTimedSample(freeIndex, fieldTime, now, false);
+        nextSampleAt = now + sampleIntervalMs;
       }
     };
 
     const paint = (now: number) => {
       if (!pageActive()) return;
       resize();
-      // Ease theme so toggle doesn't hard-cut the field. Framed against elapsed
-      // time, not frame count, so the capped loop settles over the same wall clock
-      // the uncapped 60fps loop used to.
-      const frames = lastPaintAt < 0 ? 1 : Math.min(8, (now - lastPaintAt) / (1000 / 60));
-      theme += (themeTarget - theme) * (1 - Math.pow(1 - 0.12, frames));
-      if (Math.abs(themeTarget - theme) < 0.002) theme = themeTarget;
-      lastPaintAt = now;
+      updateTheme(now);
+      const fieldTime = motion > 0 ? (now - start) * 0.001 : 0;
 
-      gl.useProgram(program);
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-      gl.uniform2f(uRes, canvas.width, canvas.height);
-      const elapsed = motion > 0 ? (now - start) * 0.001 : 0;
-      gl.uniform1f(uTime, TIME_ORIGIN + elapsed);
-      gl.uniform1f(uMotion, motion);
-      gl.uniform1f(uTheme, theme);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (motion > 0 && !temporalUnavailable && temporalTargets.length === 2) {
+        paintTemporal(now, fieldTime);
+        return;
+      }
+
+      if (now - lastDirectPaintAt >= DIRECT_FALLBACK_FRAME_MS - 1 || lastDirectPaintAt < 0) {
+        drawField(null, fieldTime);
+        lastDirectPaintAt = now;
+      }
     };
 
     const shouldLoop = () => {
@@ -379,9 +718,7 @@ export function MarketingAtmosphere({
 
     const loop = (now: number) => {
       if (!running) return;
-      // Skip draws that would land inside the frame budget. The rAF callback itself
-      // is negligible; the full-screen fragment pass is what we are rationing.
-      if (now - lastPaintAt >= MIN_FRAME_MS - 1) paint(now);
+      paint(now);
       if (shouldLoop()) {
         raf = window.requestAnimationFrame(loop);
       } else {
@@ -407,10 +744,13 @@ export function MarketingAtmosphere({
 
     const onMotion = () => {
       motion = motionMq.matches ? 0 : 1;
+      resetTemporalState();
+      lastDirectPaintAt = -1;
       kick();
     };
     const onVisibility = () => {
       tabVisible = document.visibilityState === 'visible';
+      if (tabVisible) resetTemporalState();
       kick();
     };
     const onResize = () => {
@@ -419,6 +759,7 @@ export function MarketingAtmosphere({
     const onTheme = () => {
       themeTarget = isDarkTheme() ? 0 : 1;
       syncThemeClass();
+      resetTemporalState();
       kick();
     };
 
@@ -429,7 +770,10 @@ export function MarketingAtmosphere({
     });
 
     // Poll activeRef via rAF-friendly custom event from the host (or effect below).
-    const onActiveChange = () => kick();
+    const onActiveChange = () => {
+      resetTemporalState();
+      kick();
+    };
     window.addEventListener('marketing-atmosphere-active', onActiveChange);
 
     motionMq.addEventListener('change', onMotion);
@@ -451,8 +795,11 @@ export function MarketingAtmosphere({
       window.removeEventListener('resize', onResize);
       document.documentElement.classList.remove('marketing-atmosphere-active');
       document.documentElement.classList.remove('marketing-atmosphere-light');
+      deletePendingQuery();
+      deleteTemporalTargets();
       gl.deleteBuffer(buf);
-      gl.deleteProgram(program);
+      gl.deleteProgram(fieldProgram);
+      if (presentProgram) gl.deleteProgram(presentProgram);
       // Deliberately NOT calling WEBGL_lose_context.loseContext() here. A canvas
       // hands the same context object back to every getContext() call, and a lost
       // one is never revived implicitly (restoreContext() is async). React

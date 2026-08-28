@@ -787,6 +787,25 @@ export type LocalProjectWorkspaceSummary = {
   projects: LocalProjectSummary[];
 };
 
+export type LocalProjectWorktreeCleanupItem = {
+  sessionId: SessionId;
+  title: string;
+  path: string;
+};
+
+export type LocalProjectWorktreeCleanupPreflightResult = {
+  clean: LocalProjectWorktreeCleanupItem[];
+  dirty: LocalProjectWorktreeCleanupItem[];
+  failed: Array<LocalProjectWorktreeCleanupItem & { message: string }>;
+};
+
+export type LocalProjectWorktreeCleanupResult = {
+  completedAt: number;
+  deleted: LocalProjectWorktreeCleanupItem[];
+  skippedDirty: LocalProjectWorktreeCleanupItem[];
+  failed: Array<LocalProjectWorktreeCleanupItem & { message: string }>;
+};
+
 export type LocalProjectControlRequest =
   | {
     type: 'local-project/add';
@@ -819,6 +838,13 @@ export type LocalProjectControlRequest =
     machineId: MachineId;
     workspaceId: WorkspaceId;
     localProjectId: LocalProjectId;
+  }
+  | {
+    type: 'local-project/removal-preflight';
+    machineId: MachineId;
+    workspaceId: WorkspaceId;
+    localProjectId: LocalProjectId;
+    requestedByUserId?: string;
   }
   | {
     type: 'local-project/list';
@@ -1005,6 +1031,10 @@ export type LocalProjectControlResponse =
       rootPath: string;
       workspaceIds: WorkspaceId[];
     }
+  >
+  | LocalProjectControlOkResponse<
+    'local-project/removal-preflight',
+    LocalProjectWorktreeCleanupPreflightResult
   >
   | LocalProjectControlOkResponse<
     'local-project/list',

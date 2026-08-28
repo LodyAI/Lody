@@ -454,6 +454,7 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
       sessionListProps={{
         sessions: workspaceTasks,
         repos,
+        isLoading: baseSessionListProps.isLoading,
         chatsCollapsed,
         selectedSessionId,
         onSelect: setSelectedSessionId,
@@ -603,6 +604,21 @@ export const Default: Story = {
     onLinkRepoClicked: () => {},
     onSettingsClicked: () => {},
     onRequestCollapse: () => {},
+  },
+};
+
+export const WorkspaceSyncing: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...Default.args!,
+    connectionUiState: 'online',
+    workspaceSyncing: true,
+    sessionListProps: {
+      ...demoTaskListProps,
+      sessions: [],
+      repos: [],
+      isLoading: true,
+    },
   },
 };
 

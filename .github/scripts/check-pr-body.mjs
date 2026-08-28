@@ -3,20 +3,19 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const REQUIRED_HEADINGS = ['## Author type', '## Problem / pressure', '## Summary', '## Test plan'];
-const AGENT_CHECKBOX = /- \[x\] I am an Agent/i;
-const HUMAN_CHECKBOX = /- \[x\] I am a human/i;
-const SHARING_ALLOWED_CHECKBOX =
-  /- \[x\] Author-side user explicitly allowed publishing the Authoring context above/i;
-const SHARING_DECLINED_CHECKBOX =
-  /- \[x\] Author-side user explicitly declined publishing Authoring context/i;
-const AGENT_HANDOFF_BEGIN = '<!-- agent-handoff:begin -->';
-const AGENT_HANDOFF_END = '<!-- agent-handoff:end -->';
-const REQUIRED_AGENT_HEADINGS = [
-  '## Agent handoff',
+const REQUIRED_HEADINGS = [
+  '## Related issue',
+  '## Problem / pressure',
+  '## Summary',
+  '## Test plan',
+  '## Context handoff',
+];
+const RELATED_ISSUE_PATTERN = /https:\/\/github\.com\/LodyAI\/Lody\/issues\/[1-9]\d*/i;
+const CONTEXT_HANDOFF_BEGIN = '<!-- context-handoff:begin -->';
+const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
+const REQUIRED_CONTEXT_HEADINGS = [
   '### Instructions for reviewing agents',
   '### Authoring context',
-  '### Sharing consent (author side)',
 ];
 const REVIEW_INSTRUCTION_FIELDS = [
   'Review focus',
@@ -33,7 +32,7 @@ const AUTHORING_CONTEXT_FIELDS = [
   'Unknowns / confidence',
 ];
 const PLACEHOLDER_ONLY = /^(?:<!--[\s\S]*?-->|\s|N\/?A|TODO|TBD|\(optional\))*$/i;
-const REDACTED_CONTEXT = /^(?:N\/?A(?:\s*\/\s*redacted)?|redacted)$/i;
+const WITHHELD_CONTEXT = /^(?:N\/?A\b|redacted\b)/i;
 
 function parseArgs(argv) {
   const options = {
@@ -103,8 +102,17 @@ function markdownField(section, field) {
     .trim();
 }
 
-function isRedactedContext(value) {
-  return !value || REDACTED_CONTEXT.test(value.replaceAll('`', '').trim());
+function isCompleteContext(value) {
+  const normalized = value?.replaceAll('`', '').trim() ?? '';
+  return isFilledSection(normalized) && !WITHHELD_CONTEXT.test(normalized);
+}
+
+export function hasRelatedIssueReference(body) {
+  const section = sectionBody((body ?? '').replace(/\r\n/g, '\n'), '## Related issue');
+  if (!section) {
+    return false;
+  }
+  return RELATED_ISSUE_PATTERN.test(section.replace(/<!--[\s\S]*?-->/g, ''));
 }
 
 export function checkPullRequestBody(body) {
@@ -115,8 +123,6 @@ export function checkPullRequestBody(body) {
     return {
       ok: false,
       findings: ['PR body is empty. Fill `.github/PULL_REQUEST_TEMPLATE.md`.'],
-      agent: false,
-      human: false,
     };
   }
 
@@ -133,16 +139,10 @@ export function checkPullRequestBody(body) {
     }
   }
 
-  const authorTypeSection =
-    requiredHeadingCounts.get('## Author type') === 1 ? sectionBody(text, '## Author type') : '';
-  const agent = AGENT_CHECKBOX.test(authorTypeSection);
-  const human = HUMAN_CHECKBOX.test(authorTypeSection);
-  if (!agent && !human) {
+  if (requiredHeadingCounts.get('## Related issue') === 1 && !hasRelatedIssueReference(text)) {
     findings.push(
-      'Author type: check exactly one of "I am an Agent" or "I am a human" (`- [x] ...`).'
+      '## Related issue must contain a full Lody issue URL such as https://github.com/LodyAI/Lody/issues/123.'
     );
-  } else if (agent && human) {
-    findings.push('Author type: check only one of Agent or human, not both.');
   }
 
   for (const heading of ['## Problem / pressure', '## Summary', '## Test plan']) {
@@ -153,69 +153,52 @@ export function checkPullRequestBody(body) {
     }
   }
 
-  if (agent) {
-    const agentHeadingCounts = new Map();
-    for (const heading of REQUIRED_AGENT_HEADINGS) {
-      const count = headingCount(text, heading);
-      agentHeadingCounts.set(heading, count);
-      if (count === 0) {
-        findings.push(`Agent PRs must include ${heading}.`);
-      } else if (count > 1) {
-        findings.push(
-          `Duplicate required Agent section: ${heading} appears ${count} times; each required Agent section must appear exactly once.`
-        );
-      }
-    }
-    if (!text.includes(AGENT_HANDOFF_BEGIN) || !text.includes(AGENT_HANDOFF_END)) {
-      findings.push('Agent PRs must keep <!-- agent-handoff:begin/end --> markers.');
-    }
-
-    const consentSection =
-      agentHeadingCounts.get('### Sharing consent (author side)') === 1
-        ? sectionBody(text, '### Sharing consent (author side)')
-        : '';
-    const sharingAllowed = SHARING_ALLOWED_CHECKBOX.test(consentSection);
-    const sharingDeclined = SHARING_DECLINED_CHECKBOX.test(consentSection);
-    if (!sharingAllowed && !sharingDeclined) {
+  const contextHeadingCounts = new Map();
+  for (const heading of REQUIRED_CONTEXT_HEADINGS) {
+    const count = headingCount(text, heading);
+    contextHeadingCounts.set(heading, count);
+    if (count === 0) {
+      findings.push(`Context handoff must include ${heading}.`);
+    } else if (count > 1) {
       findings.push(
-        'Agent sharing consent: ask the author-side user and check exactly one consent option.'
+        `Duplicate required Context handoff section: ${heading} appears ${count} times; each required section must appear exactly once.`
       );
-    } else if (sharingAllowed && sharingDeclined) {
-      findings.push('Agent sharing consent: check only one consent option, not both.');
     }
+  }
+  if (!text.includes(CONTEXT_HANDOFF_BEGIN) || !text.includes(CONTEXT_HANDOFF_END)) {
+    findings.push('Context handoff must keep <!-- context-handoff:begin/end --> markers.');
+  }
 
-    if (agentHeadingCounts.get('### Authoring context') === 1) {
-      const context = sectionBody(text, '### Authoring context');
-      for (const field of AUTHORING_CONTEXT_FIELDS) {
-        const value = markdownField(context, field);
-        if (sharingAllowed && !isFilledSection(value)) {
-          findings.push(`Shared Authoring context must fill **${field}** with meaningful content.`);
-        }
-        if (sharingDeclined && !isRedactedContext(value)) {
-          findings.push(`Declined Authoring context must keep **${field}** empty or redacted.`);
-        }
-      }
-    }
-
-    if (agentHeadingCounts.get('### Instructions for reviewing agents') === 1) {
-      const instructions = sectionBody(text, '### Instructions for reviewing agents');
-      for (const field of REVIEW_INSTRUCTION_FIELDS) {
-        if (!isFilledSection(markdownField(instructions, field))) {
-          findings.push(
-            `Agent review instructions must fill **${field}** with PR-specific content.`
-          );
-        }
-      }
-      const visibleInstructions = instructions.replace(/<!--[\s\S]*?-->/g, '').trim();
-      if (visibleInstructions.length > MAX_REVIEW_INSTRUCTIONS_LENGTH) {
+  if (contextHeadingCounts.get('### Authoring context') === 1) {
+    const context = sectionBody(text, '### Authoring context');
+    for (const field of AUTHORING_CONTEXT_FIELDS) {
+      const value = markdownField(context, field);
+      if (!isCompleteContext(value)) {
         findings.push(
-          `Agent review instructions must stay under ${MAX_REVIEW_INSTRUCTIONS_LENGTH} characters and include only the highest-value review guidance.`
+          `Authoring context must fill **${field}** with a meaningful public summary; N/A and redacted values are not accepted.`
         );
       }
     }
   }
 
-  return { ok: findings.length === 0, findings, agent, human };
+  if (contextHeadingCounts.get('### Instructions for reviewing agents') === 1) {
+    const instructions = sectionBody(text, '### Instructions for reviewing agents');
+    for (const field of REVIEW_INSTRUCTION_FIELDS) {
+      if (!isCompleteContext(markdownField(instructions, field))) {
+        findings.push(
+          `Review instructions must fill **${field}** with concise, PR-specific content; N/A and redacted values are not accepted.`
+        );
+      }
+    }
+    const visibleInstructions = instructions.replace(/<!--[\s\S]*?-->/g, '').trim();
+    if (visibleInstructions.length > MAX_REVIEW_INSTRUCTIONS_LENGTH) {
+      findings.push(
+        `Review instructions must stay under ${MAX_REVIEW_INSTRUCTIONS_LENGTH} characters and include only the highest-value review guidance.`
+      );
+    }
+  }
+
+  return { ok: findings.length === 0, findings };
 }
 
 function bodyFromOptions(options) {
@@ -247,9 +230,7 @@ function main() {
 
   const result = checkPullRequestBody(bodyFromOptions(options));
   if (result.ok) {
-    console.log(
-      `PR body format OK${result.agent ? ' (agent)' : ''}${result.human ? ' (human)' : ''}`
-    );
+    console.log('PR body format OK');
     return;
   }
 

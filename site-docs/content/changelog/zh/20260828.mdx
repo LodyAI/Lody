@@ -1,0 +1,26 @@
+---
+title: '20260828'
+version: 0.88.0
+date: 2026-08-28
+description: 长对话大纲新增智能悬停预判，模型服务配置与官网体验得到改善，并修复未送达消息、工作区同步、会话交互和桌面端稳定性问题。
+---
+
+版本 0.88.0
+
+### ✨ 新功能
+
+- 长对话大纲新增智能悬停预判，定位内容更顺畅，并减少误触展开（[#51](https://github.com/LodyAI/Lody/pull/51)、[#97](https://github.com/LodyAI/Lody/pull/97)、[#113](https://github.com/LodyAI/Lody/pull/113)）。
+- 模型服务配置提供更清晰的检测进度，并在选择可能产生额外费用的 DeepSeek 委派模型时显示提醒（[#66](https://github.com/LodyAI/Lody/pull/66)、[#81](https://github.com/LodyAI/Lody/pull/81)）。
+- 官网博客新增中英文 RSS、阅读时长和前后篇导航；首页演示与动态背景也更加流畅（[#84](https://github.com/LodyAI/Lody/pull/84)、[#85](https://github.com/LodyAI/Lody/pull/85)）。
+- 公开源码与贡献入口迁移至 LodyAI/Lody，并新增结构化 Issue/PR 模板、自动检查和反馈机制（[#39](https://github.com/LodyAI/Lody/pull/39)、[#63](https://github.com/LodyAI/Lody/pull/63)、[#69](https://github.com/LodyAI/Lody/pull/69)、[#80](https://github.com/LodyAI/Lody/pull/80)、[#91](https://github.com/LodyAI/Lody/pull/91)）。
+
+### 🐛 修复与改进
+
+- 未送达的消息现在会被明确标记，并支持确认后重新发送，避免消息丢失或重复执行（[#48](https://github.com/LodyAI/Lody/pull/48)、[#74](https://github.com/LodyAI/Lody/pull/74)）。
+- 改善工作区切换与同步体验，确保侧边栏内容始终属于当前工作区，并增强新旧客户端之间的数据兼容性（[#49](https://github.com/LodyAI/Lody/pull/49)、[#55](https://github.com/LodyAI/Lody/pull/55)、[#96](https://github.com/LodyAI/Lody/pull/96)、[#108](https://github.com/LodyAI/Lody/pull/108)）。
+- 修复中文翻译、任务工具配置、会话标签重命名、输入法确认、窄窗口消息编辑、排队消息和 Agent 提问兼容性问题（[#40](https://github.com/LodyAI/Lody/pull/40)、[#42](https://github.com/LodyAI/Lody/pull/42)、[#43](https://github.com/LodyAI/Lody/pull/43)、[#44](https://github.com/LodyAI/Lody/pull/44)、[#52](https://github.com/LodyAI/Lody/pull/52)、[#99](https://github.com/LodyAI/Lody/pull/99)、[#101](https://github.com/LodyAI/Lody/pull/101)）。
+- 改善桌面端稳定性，包括更轻量的 Mermaid 图表、Windows 托盘左键打开窗口、本地文件预览与会话控制，以及更安全的窗口导航（[#45](https://github.com/LodyAI/Lody/pull/45)、[#46](https://github.com/LodyAI/Lody/pull/46)、[#50](https://github.com/LodyAI/Lody/pull/50)、[#71](https://github.com/LodyAI/Lody/pull/71)、[#75](https://github.com/LodyAI/Lody/pull/75)、[#77](https://github.com/LodyAI/Lody/pull/77)）。
+- 优化使用量日历在小屏幕上的布局、最近记录和视觉细节，并修复 Markdown 有序列表编号对齐（[#53](https://github.com/LodyAI/Lody/pull/53)、[#62](https://github.com/LodyAI/Lody/pull/62)、[#78](https://github.com/LodyAI/Lody/pull/78)、[#82](https://github.com/LodyAI/Lody/pull/82)、[#83](https://github.com/LodyAI/Lody/pull/83)）。
+- 删除本地项目时会先归档相关会话；设备离线时会保留等待状态，并可安全清理 Lody 创建的工作树，同时保留未提交或清理失败的内容（[#105](https://github.com/LodyAI/Lody/pull/105)、[#119](https://github.com/LodyAI/Lody/pull/119)）。
+- 修正文档中的仓库地址、中文页面链接和 Node.js 环境要求，并更新公开包元数据（[#57](https://github.com/LodyAI/Lody/pull/57)、[#60](https://github.com/LodyAI/Lody/pull/60)、[#64](https://github.com/LodyAI/Lody/pull/64)）。
+- 感谢 [@clanzhang](https://github.com/clanzhang)、[@tommy0103](https://github.com/tommy0103)、[@lawvs](https://github.com/lawvs)、[@Innei](https://github.com/Innei)、[@hyoban](https://github.com/hyoban)、[@wibus-wee](https://github.com/wibus-wee)、[@limichange](https://github.com/limichange)、[@27Aaron](https://github.com/27Aaron)、[@hcz-czh](https://github.com/hcz-czh)、[@Pleasurecruise](https://github.com/Pleasurecruise)、[@frostming](https://github.com/frostming)、[@natsustan](https://github.com/natsustan) 和 [@zxch3n](https://github.com/zxch3n) 对本版本的公开贡献。

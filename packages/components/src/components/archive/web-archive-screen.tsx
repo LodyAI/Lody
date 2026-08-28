@@ -23,6 +23,8 @@ export type WebArchiveScreenProps = {
   isMultiSelectMode: boolean;
   selectedCount: number;
   isBulkActionBusy: boolean;
+  bulkRestoreDisabled?: boolean;
+  bulkRestoreDisabledReason?: string;
   onArchiveScopeChange: (scope: ArchiveScope) => void;
   onExitMultiSelect: () => void;
   onBulkRestore: () => void;
@@ -36,6 +38,8 @@ export function WebArchiveScreen({
   isMultiSelectMode,
   selectedCount,
   isBulkActionBusy,
+  bulkRestoreDisabled = false,
+  bulkRestoreDisabledReason,
   onArchiveScopeChange,
   onExitMultiSelect,
   onBulkRestore,
@@ -94,7 +98,8 @@ export function WebArchiveScreen({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={selectedCount === 0 || isBulkActionBusy}
+                disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
+                title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
                 className="gap-1.5"
               >

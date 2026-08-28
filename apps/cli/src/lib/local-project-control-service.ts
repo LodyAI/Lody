@@ -248,7 +248,8 @@ async function runGitCommand(rootPath: string, args: string[]): Promise<GitComma
     };
   } catch (error) {
     const withOutput = error as
-      (Error & { code?: number | string; stdout?: string; stderr?: string }) | undefined;
+      | (Error & { code?: number | string; stdout?: string; stderr?: string })
+      | undefined;
     const message = formatErrorMessage(error);
     return {
       status: typeof withOutput?.code === 'number' ? withOutput.code : null,

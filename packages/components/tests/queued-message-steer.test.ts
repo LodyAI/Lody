@@ -3,13 +3,12 @@ import { shouldRequestNativeQueueSteer } from '../src/components/sessions/messag
 
 describe('shouldRequestNativeQueueSteer', () => {
   it.each([
-    [{ cliType: 'builtin', agentType: 'claude' }, true],
-    [{ cliType: 'builtin', agentType: 'codex' }, true],
-    [{ cliType: 'builtin', agentType: 'kimi' }, false],
-    [{ cliType: 'registry', agentType: 'claude' }, false],
-    [{ cliType: 'registry', agentType: 'gemini' }, false],
-    [{ cliType: 'custom', agentType: 'custom-agent' }, false],
-  ] as const)('routes %o to native steer: %s', (session, expected) => {
-    expect(shouldRequestNativeQueueSteer(session)).toBe(expected);
+    ['authoritative', { acknowledgedSteer: true }, true],
+    ['authoritative', { acknowledgedSteer: false }, false],
+    ['authoritative', undefined, false],
+    ['provisional', { acknowledgedSteer: true }, false],
+    ['unavailable', { acknowledgedSteer: true }, false],
+  ] as const)('routes %s capability %o to native steer: %s', (authority, capability, expected) => {
+    expect(shouldRequestNativeQueueSteer(authority, capability)).toBe(expected);
   });
 });

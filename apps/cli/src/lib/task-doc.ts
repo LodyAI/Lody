@@ -98,6 +98,8 @@ const withTaskMirror = async <T>(
   const mirror = new Mirror({
     doc: handle.doc as LoroDoc,
     schema: taskDocSchema,
+    // Tolerate root keys written by peers running a newer schema version.
+    ignoreUnknownProperties: true,
     // Only creation seeds the containers. Every other path must see an absent
     // document as absent: seeding here would make `readTask` answer with a
     // placeholder meta instead of null, and TASK_NOT_FOUND would stop existing.

@@ -94,14 +94,8 @@ const toCodeCollabTransportError = (error: unknown): CodeCollabV2Error => ({
   retryable: true,
 });
 
-const getLocalMachineRpcSender = (): LocalMachineRpcSender | null => {
-  if (typeof window === 'undefined') return null;
-  const api = (window as unknown as { readonly api?: { readonly sendLocalMachineRpc?: unknown } })
-    .api;
-  return typeof api?.sendLocalMachineRpc === 'function'
-    ? (api.sendLocalMachineRpc as LocalMachineRpcSender)
-    : null;
-};
+const getLocalMachineRpcSender = (): LocalMachineRpcSender | undefined =>
+  getIpcServices()?.machineRpc.send;
 
 export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeDeps) {
   const { workspaceId, targetRouter, getMachineRpcClient } = deps;

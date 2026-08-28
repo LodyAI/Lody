@@ -107,8 +107,12 @@ import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { SessionTabBar, type ViewerTabItem } from './session-tab-bar';
 import {
   getSideChatLauncherState,
+  getSidePanelTabSelection,
   getSidePanelTabCloseFallback,
   getSidePanelTabStateAfterClose,
+  getSideSessionPanelTabId,
+  isViewerTabId,
+  parseSideSessionPanelTabId,
   SessionSidePanelEmptyState,
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
@@ -422,21 +426,12 @@ const EMPTY_LOCAL_PROJECTS: Record<LocalProjectId, LocalProjectMeta> = {};
 const MOBILE_PR_VIEWER_ID = 'mobile-viewer:pr';
 const MOBILE_BROWSER_VIEWER_ID = 'mobile-viewer:browser';
 const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
-const SIDE_SESSION_PANEL_PREFIX = 'side-session:';
 
 /* Minimum width the desktop right sidebar gets when the PR tab opens into a
    collapsed or empty panel — PR content (title + branch row + merge action +
    conversation) is unreadably cramped at the default ~25% split. Honored only
    when the window is wide enough; see DesktopSessionDetailLayout. */
 const PR_SIDEBAR_MIN_WIDTH_PX = 500;
-
-const getSideSessionPanelTabId = (sessionId: SessionId): string =>
-  `${SIDE_SESSION_PANEL_PREFIX}${sessionId}`;
-
-const parseSideSessionPanelTabId = (tabId: string): SessionId | null =>
-  tabId.startsWith(SIDE_SESSION_PANEL_PREFIX)
-    ? (tabId.slice(SIDE_SESSION_PANEL_PREFIX.length) as SessionId)
-    : null;
 
 const selectSessionDetailMeta = (meta: SessionMeta | undefined): SessionMeta | undefined => meta;
 
@@ -506,9 +501,6 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
 
   return false;
 };
-
-const isViewerTabId = (tabId: string): boolean =>
-  tabId.startsWith('file:') || tabId.startsWith('diff:');
 
 const getSortedUniqueDiffFilePaths = (filePaths: readonly string[]): string[] =>
   Array.from(new Set(filePaths.map((filePath) => filePath.trim()).filter(Boolean))).toSorted(
@@ -749,22 +741,10 @@ const SessionDetail = ({
     if (tabId !== null) {
       desktopTabFocusRegionRef.current = 'side-panel';
     }
-    if (tabId !== null && isViewerTabId(tabId)) {
-      setActiveSidebarTab(null);
-      setActiveSideSessionId(null);
-      setActiveViewerTabId(tabId);
-      return;
-    }
-    const sideSessionId = tabId === null ? null : parseSideSessionPanelTabId(tabId);
-    if (sideSessionId) {
-      setActiveSidebarTab(null);
-      setActiveSideSessionId(sideSessionId);
-      setActiveViewerTabId(null);
-      return;
-    }
-    setActiveSidebarTab(tabId as SidebarTab | null);
-    setActiveSideSessionId(null);
-    setActiveViewerTabId(null);
+    const selection = getSidePanelTabSelection(tabId);
+    setActiveSidebarTab(selection.activeSidebarTabId as SidebarTab | null);
+    setActiveSideSessionId(selection.activeSideSessionId as SessionId | null);
+    setActiveViewerTabId(selection.activeViewerTabId);
   }, []);
   const activateSidebarTab = useCallback(
     (tabId: SidebarTab) => {
@@ -2669,17 +2649,14 @@ const SessionDetail = ({
         setActiveViewerTabId(null);
         setMobileFileViewerTabId(tab.id);
         setMobileFileViewerOpen(true);
-      } else {
-        if (!isMobile) {
-          desktopTabFocusRegionRef.current = 'side-panel';
-        }
+      } else if (isMobile) {
         setActiveViewerTabId((prevActiveId) => (prevActiveId === tab.id ? prevActiveId : tab.id));
-        if (!isMobile) {
-          setIsSidebarOpen(true);
-        }
+      } else {
+        selectSidePanelTab(tab.id);
+        setIsSidebarOpen(true);
       }
     },
-    [isMobile]
+    [isMobile, selectSidePanelTab]
   );
 
   const nextFocusRequestSeq = useCallback(() => {
@@ -3322,11 +3299,10 @@ const SessionDetail = ({
   // When a viewer tab is selected, activate the viewer surface for the current session.
   const handleViewerTabSelect = useCallback(
     (tabId: string) => {
-      if (!isMobile) {
-        desktopTabFocusRegionRef.current = 'side-panel';
-      }
-      setActiveViewerTabId(tabId);
-      if (!isMobile) {
+      if (isMobile) {
+        setActiveViewerTabId(tabId);
+      } else {
+        selectSidePanelTab(tabId);
         setIsSidebarOpen(true);
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
@@ -3334,7 +3310,7 @@ const SessionDetail = ({
         viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
       });
     },
-    [captureSessionDetailEvent, isMobile]
+    [captureSessionDetailEvent, isMobile, selectSidePanelTab]
   );
 
   const handleSidebarTabSelect = useCallback(
@@ -4025,7 +4001,7 @@ const SessionDetail = ({
 
   const handleSidePanelTabClose = useCallback(
     (tabId: string) => {
-      const sideSessionId = parseSideSessionPanelTabId(tabId);
+      const sideSessionId = parseSideSessionPanelTabId(tabId) as SessionId | null;
       if (sideSessionId) {
         void handleCloseSideSession(sideSessionId);
         return;

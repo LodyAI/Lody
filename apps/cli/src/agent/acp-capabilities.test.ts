@@ -34,7 +34,9 @@ const createSilentLogger = (): Logger => ({
 function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>) {
   return {
     agentProcess: {} as never,
-    client: {} as never,
+    client: {
+      supportsAcknowledgedSteer: () => false,
+    } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
       sessionId: 'acp-session-1',
@@ -125,6 +127,18 @@ describe('fetchAcpCapabilities', () => {
       })
     );
     expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
+  });
+
+  it('preserves acknowledged steering support discovered from the live client', async () => {
+    const startupResult = createSuccessfulStartupResult();
+    startupResult.client = {
+      supportsAcknowledgedSteer: () => true,
+    } as never;
+    mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
+
+    const result = await fetchAcpCapabilities('registry', 'steering-agent', createSilentLogger());
+
+    expect(result.acknowledgedSteer).toBe(true);
   });
 
   it('uses commands from NewSessionResponse and ignores command update notifications', async () => {

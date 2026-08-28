@@ -16,11 +16,13 @@ import {
   BellRing,
   CircleHelp,
   CircleCheckBig,
+  Clock3,
   Download,
   FolderPlus,
   Folders,
   Github,
   ListTodo,
+  Loader2,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -164,6 +166,8 @@ export type MobileHomeLocalProject = {
   unreadCount?: number;
   /** Effective privacy: true when either the machine or project grant is private. */
   isPrivate?: boolean;
+  /** Durable project-removal state. Pending rows stay visible but cannot open. */
+  removalState?: 'removing' | 'waiting_for_device' | null;
 };
 
 export type MobileHomeGitHubRepository = {
@@ -293,6 +297,8 @@ export type MobileHomeScreenLabels = {
   recentProjectsHeading?: string;
   online?: string;
   offline?: string;
+  projectRemoving?: string;
+  projectRemovalWaiting?: string;
   /** Copy shown inside the pull-to-refresh indicator while the user is
      pulling down. Two states: below threshold = "pull more", at or
      past threshold = "release to refresh". Both fade in as the pull
@@ -864,6 +870,7 @@ function MobileHomeListRow({
   onClick,
   ariaLabel,
   wrapTitle = false,
+  disabled = false,
 }: {
   leading: ReactNode;
   title: ReactNode;
@@ -877,18 +884,21 @@ function MobileHomeListRow({
      line. Used by the local-projects list so long project names aren't
      clipped. */
   wrapTitle?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <li>
       <button
         type="button"
         onClick={onClick}
+        disabled={disabled}
         aria-label={ariaLabel}
         className={cn(
           'flex w-full items-center gap-3 border-b border-border/40 px-3 py-2.5 text-left text-foreground',
           'last:border-b-0',
           'transition-colors active:bg-muted/40 hover:bg-muted/30',
-          'focus-visible:outline-none focus-visible:bg-muted/40'
+          'focus-visible:outline-none focus-visible:bg-muted/40',
+          'disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent disabled:active:bg-transparent'
         )}
       >
         {leading}
@@ -2053,7 +2063,8 @@ function LocalProjectsList({
                 <MobileHomeListRow
                   key={project.id}
                   ariaLabel={project.name}
-                  onClick={() => onSelect?.(project.id)}
+                  onClick={project.removalState ? undefined : () => onSelect?.(project.id)}
+                  disabled={Boolean(project.removalState)}
                   leading={
                     <MobileInitialLetterAvatar
                       name={project.name}
@@ -2067,7 +2078,20 @@ function LocalProjectsList({
                      only carries the name + path. */
                   wrapTitle
                   titleSuffix={
-                    project.isPrivate ? (
+                    project.removalState ? (
+                      <span className="inline-flex min-w-0 items-center gap-1 text-[0.7rem] font-medium text-muted-foreground">
+                        {project.removalState === 'waiting_for_device' ? (
+                          <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                        )}
+                        <span className="truncate">
+                          {project.removalState === 'waiting_for_device'
+                            ? (labels.projectRemovalWaiting ?? 'Waiting for device…')
+                            : (labels.projectRemoving ?? 'Removing…')}
+                        </span>
+                      </span>
+                    ) : project.isPrivate ? (
                       <LockKeyhole
                         className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
                         aria-hidden="true"
@@ -2082,10 +2106,12 @@ function LocalProjectsList({
                     ) : undefined
                   }
                   trailing={
-                    <RowTrailingMeta
-                      latestMessageAt={project.latestMessageAt}
-                      unreadCount={project.unreadCount}
-                    />
+                    project.removalState ? undefined : (
+                      <RowTrailingMeta
+                        latestMessageAt={project.latestMessageAt}
+                        unreadCount={project.unreadCount}
+                      />
+                    )
                   }
                 />
               ))}

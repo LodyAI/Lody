@@ -132,7 +132,6 @@ import {
   type AcpSessionNotification,
   getServerNow,
   CODE_COLLAB_V2_TEXT_LIMITS,
-  isActiveSessionStatus,
   isSessionGoalActive,
   resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
@@ -307,7 +306,11 @@ import {
   type CreateOptions,
   type ResolvedTurnDispatchConfig,
 } from '@/commands/session';
-import { resolveWorkspaceOrThrow, type AuthContext } from '@/lib/command-runtime';
+import {
+  listAliveSessionMetas,
+  resolveWorkspaceOrThrow,
+  type AuthContext,
+} from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
 import { AutoPromptRunner } from '@/session/auto-prompt-runner';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
@@ -349,6 +352,7 @@ import {
   resolveWorkspaceLocalProjectRootPath,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
+  isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
   upsertMachineLocalProject,
 } from '@/lib/local-project-meta';
@@ -367,6 +371,10 @@ import type { MemoryPressureEvictionResult } from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
+import {
+  cleanupLocalProjectWorktrees,
+  preflightLocalProjectWorktreeRemoval,
+} from '@/lib/local-project-removal';
 import {
   downloadSessionImageForPrompt,
   type DownloadedSessionImagePromptBlock,
@@ -3928,7 +3936,10 @@ export class MessageHandler {
     void this.processDeleteLocalProjectRequests();
   }
 
-  private async archiveSessionResources(sessionId: SessionId): Promise<void> {
+  private async archiveSessionResources(
+    sessionId: SessionId,
+    options?: { preserveWorktree?: boolean }
+  ): Promise<void> {
     this.logger.debug(`[${sessionId}] Archiving session resources`);
 
     this.clearSessionActivePresence(sessionId);
@@ -3956,56 +3967,60 @@ export class MessageHandler {
       await this.sessionManager.terminateSession(sessionId, true);
     }
 
-    const cleanupTarget = this.resolveWorktreeCleanupTarget({
-      sessionMeta,
-      machineMeta: archiveMachineMeta,
-    });
-    if (cleanupTarget) {
-      const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
-      const worktreePath = worktreeManager.getWorktreeHostPath(sessionId);
-      if (fs.existsSync(worktreePath)) {
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await runWorktreeCleanup({
-          config: await resolveSessionWorktreeCleanupConfig({
-            token: this.token,
+    if (!options?.preserveWorktree) {
+      const cleanupTarget = this.resolveWorktreeCleanupTarget({
+        sessionMeta,
+        machineMeta: archiveMachineMeta,
+      });
+      if (cleanupTarget) {
+        const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
+        const worktreePath = worktreeManager.getWorktreeHostPath(sessionId);
+        if (fs.existsSync(worktreePath)) {
+          const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          await runWorktreeCleanup({
+            config: await resolveSessionWorktreeCleanupConfig({
+              token: this.token,
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              sessionId,
+              sessionMeta,
+              workspaceDocument: this.workspaceDocument,
+              logger: this.logger,
+            }),
+            sessionId,
             workspaceId: this.workspaceId,
-            machineId: this.machineId,
-            sessionId,
-            sessionMeta,
-            workspaceDocument: this.workspaceDocument,
+            workdir: worktreePath,
+            branch: cleanupTarget.branchName ?? sessionMeta?.branchName?.trim() ?? '',
+            repoFullName:
+              sessionMeta?.project?.kind === 'local' ? undefined : sessionMeta?.repoFullName,
+            localProjectId:
+              sessionMeta?.project?.kind === 'local'
+                ? sessionMeta.project.localProjectId
+                : undefined,
             logger: this.logger,
-          }),
-          sessionId,
-          workspaceId: this.workspaceId,
-          workdir: worktreePath,
-          branch: cleanupTarget.branchName ?? sessionMeta?.branchName?.trim() ?? '',
-          repoFullName:
-            sessionMeta?.project?.kind === 'local' ? undefined : sessionMeta?.repoFullName,
-          localProjectId:
-            sessionMeta?.project?.kind === 'local' ? sessionMeta.project.localProjectId : undefined,
-          logger: this.logger,
-          events: createWorktreeScriptHistoryRecorder({
-            sessionDoc,
-            sessionId,
-            phase: 'cleanup',
-            logger: this.logger,
-          }),
-        });
-      }
-      try {
-        const archiveResult = await worktreeManager.archiveWorktree(sessionId);
-        if (
-          archiveResult.branchName &&
-          archiveResult.branchName !== sessionMeta?.branchName?.trim()
-        ) {
-          await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
-            branchName: archiveResult.branchName,
-          } as Partial<SessionMeta>);
+            events: createWorktreeScriptHistoryRecorder({
+              sessionDoc,
+              sessionId,
+              phase: 'cleanup',
+              logger: this.logger,
+            }),
+          });
         }
-      } catch (error) {
-        this.logger.debug(
-          `[${sessionId}] Failed to archive worktree: ${formatErrorMessage(error)}`
-        );
+        try {
+          const archiveResult = await worktreeManager.archiveWorktree(sessionId);
+          if (
+            archiveResult.branchName &&
+            archiveResult.branchName !== sessionMeta?.branchName?.trim()
+          ) {
+            await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
+              branchName: archiveResult.branchName,
+            } as Partial<SessionMeta>);
+          }
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to archive worktree: ${formatErrorMessage(error)}`
+          );
+        }
       }
     }
 
@@ -4014,6 +4029,7 @@ export class MessageHandler {
 
     await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
       isArchived: true,
+      status: SessionStatusFactory.idle(),
     } as Partial<SessionMeta>);
     this.logger.debug(`[${sessionId}] Session meta archived`);
 
@@ -4095,14 +4111,24 @@ export class MessageHandler {
 
     this.logger.debug(`[local-project] Processing ${localProjectEntries.length} delete request(s)`);
     for (const [localProjectId, command] of localProjectEntries) {
+      if (command.status === 'completed') {
+        continue;
+      }
       if (this.deleteLocalProjectInFlight.has(localProjectId)) {
         this.logger.debug(`[local-project] ${localProjectId} already in progress`);
         continue;
       }
       this.deleteLocalProjectInFlight.add(localProjectId);
       try {
-        await this.deleteLocalProjectResources(localProjectId, command);
-        await this.removeDeleteLocalProjectRequest(localProjectId);
+        const cleanupResult = await this.deleteLocalProjectResources(localProjectId, command);
+        if (command.cleanupWorktrees && cleanupResult) {
+          await this.writeMachineFlockRow({
+            key: machineFlockKeys.deleteLocalProjectCommand(localProjectId),
+            value: { ...command, status: 'completed', cleanupResult },
+          });
+        } else {
+          await this.removeDeleteLocalProjectRequest(localProjectId);
+        }
       } catch (error) {
         this.logger.error(
           `[local-project] Failed to delete ${localProjectId}: ${formatErrorMessage(error)}`
@@ -4128,84 +4154,96 @@ export class MessageHandler {
     }
   }
 
-  private async stopActiveLocalProjectSessions(localProjectId: LocalProjectId): Promise<void> {
-    const sessionIds = [...this.workspaceDocument.sessions.keys()];
-    if (sessionIds.length === 0) return;
+  private async archiveLocalProjectSessions(localProjectId: LocalProjectId): Promise<void> {
+    const sessions = (await listAliveSessionMetas(this.workspaceDocument)).filter(({ meta }) =>
+      isSessionInLocalProjectRemovalScope(meta, {
+        machineId: this.machineId,
+        localProjectId,
+      })
+    );
+    if (sessions.length === 0) return;
 
-    let stoppedCount = 0;
-    for (const sessionId of sessionIds) {
-      try {
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        const meta = await sessionDoc.getMetaState();
-        if (!meta) continue;
-        if (meta.machineId !== this.machineId) continue;
-        if (meta.project?.kind !== 'local') continue;
-        if (meta.project.localProjectId !== localProjectId) continue;
+    const rootSessions = sessions.filter(
+      ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
+    );
+    const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
+    for (const { meta } of rootSessions) {
+      await this.archiveSessionResources(meta.id, { preserveWorktree: true });
+    }
 
-        const hasRunningProcess = this.sessionManager.hasSession(sessionId);
-        if (!hasRunningProcess && !isActiveSessionStatus(meta.status)) continue;
-
-        this.clearSessionActivePresence(sessionId);
-        this.closeSessionTerminals?.(sessionId);
-        await this.finalizeACPState(sessionId);
-        if (hasRunningProcess) {
-          await this.sessionManager.terminateSession(sessionId, true);
-        }
-        await sessionDoc.setStatus(SessionStatusFactory.idle());
-        stoppedCount += 1;
-      } catch (error) {
-        this.logger.debug(
-          `[${sessionId}] Failed to stop active session before local project removal: ${formatErrorMessage(
-            error
-          )}`
-        );
+    for (const { roomId, meta } of sessions) {
+      if (archivedRootSessionIds.has(meta.id)) continue;
+      if (this.sessionManager.hasSession(meta.id)) {
+        await this.archiveSessionResources(meta.id, { preserveWorktree: true });
+        continue;
       }
+      if (meta.isArchived === true) continue;
+      await this.workspaceDocument.repo.upsertDocMeta(roomId, {
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      } as Partial<SessionMeta>);
     }
 
-    if (stoppedCount > 0) {
-      this.logger.debug(
-        `[local-project] Stopped ${stoppedCount} active session(s) before removing ${localProjectId}`
-      );
-    }
+    this.logger.debug(
+      `[local-project] Processed ${sessions.length} session(s) before removing ${localProjectId}`
+    );
   }
 
   private async deleteLocalProjectResources(
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
-  ): Promise<void> {
+  ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
     const existingProject = await resolveWorkspaceLocalProject(
       this.workspaceDocument.repo,
       this.workspaceId,
       this.machineId,
       localProjectId
     );
-    if (!existingProject) {
+    if (!existingProject && !command.cleanupWorktrees) {
       this.logger.debug(`[local-project] ${localProjectId} already removed`);
       await this.cleanupLocalProjectWorktreeSetup(localProjectId);
-      return;
+      return undefined;
     }
 
-    if (!shouldApplyMachineDeleteLocalProjectCommand(existingProject, command)) {
+    if (existingProject && !shouldApplyMachineDeleteLocalProjectCommand(existingProject, command)) {
       this.logger.debug(
         `[local-project] Skipping stale delete request for ${localProjectId}; project was created after the request`
       );
-      return;
+      return undefined;
     }
 
-    await this.stopActiveLocalProjectSessions(localProjectId);
+    await this.archiveLocalProjectSessions(localProjectId);
 
-    await removeMachineLocalProject(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      localProjectId,
-      undefined,
-      { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
-    );
-    this.logger.debug(
-      `[local-project] Removed ${existingProject.name} (${existingProject.rootPath})`
-    );
+    let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
+    const originalRootPath = existingProject?.rootPath ?? command.originalRootPath;
+    if (command.cleanupWorktrees && originalRootPath) {
+      const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+        ({ meta }) => meta
+      );
+      cleanupResult = await cleanupLocalProjectWorktrees({
+        machineId: this.machineId,
+        localProjectId,
+        originalRootPath,
+        sessions,
+        logger: this.logger,
+      });
+    }
+
+    if (existingProject) {
+      await removeMachineLocalProject(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId,
+        undefined,
+        { sync: this.workspaceDocument, reason: 'local-project-delete-command' }
+      );
+      this.logger.debug(
+        `[local-project] Removed ${existingProject.name} (${existingProject.rootPath})`
+      );
+    }
     await this.cleanupLocalProjectWorktreeSetup(localProjectId);
+    return cleanupResult;
   }
 
   private toDeleteRequestRecord(request: DeleteRequest | undefined): DeleteRequestRecord {
@@ -8263,6 +8301,7 @@ export class MessageHandler {
     configOptions?: AcpConfigOptionSummary[];
     availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
     sessionFork: boolean;
+    acknowledgedSteer: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }> {
@@ -9337,6 +9376,23 @@ export class MessageHandler {
         return authorized.response;
       }
       const { rootPath } = authorized;
+
+      if (request.type === 'local-project/removal-preflight') {
+        const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+          ({ meta }) => meta
+        );
+        return {
+          ok: true,
+          type: 'local-project/removal-preflight',
+          result: await preflightLocalProjectWorktreeRemoval({
+            machineId: this.machineId,
+            localProjectId: request.localProjectId,
+            originalRootPath: rootPath,
+            sessions,
+            logger: this.logger,
+          }),
+        };
+      }
 
       if (isLocalProjectWorktreeConfigRequest(request)) {
         return await handleLocalProjectWorktreeConfigRequest(request);

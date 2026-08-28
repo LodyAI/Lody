@@ -71,6 +71,11 @@ export interface WorktreeInfo {
   isClean: boolean;
 }
 
+export type WorktreeInspection =
+  | { state: 'missing'; path: string }
+  | { state: 'clean' | 'dirty'; path: string; info: WorktreeInfo }
+  | { state: 'failed'; path: string; message: string };
+
 export interface ArchivedWorktreeResult {
   branchName: string | null;
   backupCommitCreated: boolean;
@@ -1428,6 +1433,27 @@ export class WorktreeManager {
     };
   }
 
+  /** Read a session worktree's current state without creating or mutating it. */
+  async inspectWorktree(sessionId: SessionId): Promise<WorktreeInspection> {
+    return withRepoLock(this.repoId, async () => {
+      assertSafeSessionId(sessionId);
+      const worktreePath = this.getWorktreeHostPath(sessionId);
+      if (!fs.existsSync(worktreePath)) {
+        return { state: 'missing', path: worktreePath };
+      }
+      try {
+        const info = await this.getWorktreeInfo(sessionId);
+        return { state: info.isClean ? 'clean' : 'dirty', path: worktreePath, info };
+      } catch (error) {
+        return {
+          state: 'failed',
+          path: worktreePath,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+  }
+
   /**
    * Remove a worktree for a session
    * @param force - If true, remove even if dirty
@@ -1559,7 +1585,10 @@ export class WorktreeManager {
       const args = ['worktree', 'remove', worktreePath];
       if (options.force) args.splice(2, 0, '--force');
       await this.runGit(args, this.getGitAdminCwd());
-    } catch {
+    } catch (error) {
+      if (!options.force) {
+        throw error;
+      }
       this.logger.debug(`[${this.repoId}] git worktree remove failed, removing directory manually`);
       fs.rmSync(worktreePath, { recursive: true, force: true });
       await this.runGit(['worktree', 'prune'], this.getGitAdminCwd());

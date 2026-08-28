@@ -281,6 +281,18 @@ mobile surfaces.
   browser/OS time zone, and describe it as the time through which the forecast is valid
   rather than promising a reset.
 - Responsive mobile UI: `src/components/mobile/AGENTS.md`.
+- A pending local-project removal is a visible lifecycle state, not an absent
+  project: keep the project and its existing Sessions discoverable while the
+  owning machine is offline or retrying, but exclude it from new-Session
+  selectors. Once the catalog row is gone, archived Sessions remain readable
+  and deletable; Restore stays unavailable until the same local project is
+  added again.
+- Local-project removal may optionally clean Lody-created Session worktrees, but
+  the option defaults off and is available only after the owning machine
+  preflights every worktree. Always state that the original project directory is
+  never deleted; list dirty worktrees and keep them by default. A completed
+  cleanup result is not pending removal and must be acknowledged visibly even
+  when some worktrees were kept or failed.
 - Session UI: `src/components/sessions/AGENTS.md`.
 - Tasks: `src/components/tasks/AGENTS.md`.
 - Commands and shortcuts: `src/lib/commands/AGENTS.md`.

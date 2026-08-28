@@ -279,7 +279,7 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 5;
+export const ACP_CAPABILITY_CACHE_VERSION = 6;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -311,6 +311,8 @@ export type AcpCapabilityCacheEntry = {
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
+  /** True only when the runtime advertised Lody's acknowledged steering extension. */
+  acknowledgedSteer?: boolean;
   /** True when this Lody machine supports durable asynchronous forks into a new worktree. */
   sessionForkWorktree?: boolean;
   fetchedAt: number;

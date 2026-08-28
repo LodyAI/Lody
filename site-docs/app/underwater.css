@@ -371,7 +371,7 @@
   position: absolute;
   left: max(0px, calc((100% - var(--site-content-width)) / 2));
   bottom: clamp(1.75rem, 5vh, 3.25rem);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.6rem;
   color: hsl(var(--landing-ink-muted));
@@ -381,11 +381,20 @@
 .underwater-hero__scroll-label {
   font-size: 0.8rem;
   font-weight: 500;
+  line-height: 18px;
   letter-spacing: -0.01em;
   text-transform: none;
 }
 
+.underwater-hero__scroll-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
 .underwater-hero__scroll-chevron {
+  display: block;
   width: 12px;
   height: 12px;
   border-right: 2px solid currentColor;
@@ -397,11 +406,11 @@
 @keyframes underwater-bob {
   0%,
   100% {
-    transform: rotate(45deg) translate(0, 0);
+    transform: rotate(45deg) translate(-1.5px, -1.5px);
     opacity: 0.55;
   }
   50% {
-    transform: rotate(45deg) translate(3px, 3px);
+    transform: rotate(45deg) translate(1.5px, 1.5px);
     opacity: 1;
   }
 }
@@ -1923,6 +1932,8 @@
   position: relative;
   height: clamp(22rem, 56vh, 32rem);
   overflow: hidden;
+  pointer-events: none;
+  user-select: none;
   border-radius: 12px;
   border: 1px solid hsl(var(--landing-border) / 0.28);
   background: hsl(var(--background));
@@ -1942,14 +1953,46 @@
 
 .uw-power__demo-inner {
   height: 100%;
-  /* Scroll so Usage "By member" and long PR threads stay reachable. */
-  overflow: auto;
+  overflow: hidden;
   padding: 0;
-  overscroll-behavior: contain;
-  /* scrollbar-pro style: transparent track, soft overlay thumb — no gutter plate. */
-  scrollbar-gutter: auto;
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  scrollbar-width: none;
+}
+
+/* Usage keeps native scrolling: once this viewport reaches either boundary,
+   the browser's default scroll chain continues on the document. */
+.uw-power__demo--manual-scroll {
+  /* The app-preview theme does not inherit the product Tailwind chart tokens.
+     Heatmap cells and every donut segment resolve through this palette. */
+  --chart-1: 210 90% 62%;
+  --chart-2: 197 85% 58%;
+  --chart-3: 261 84% 70%;
+  --chart-4: 28 88% 62%;
+  --chart-5: 154 68% 52%;
+  pointer-events: auto;
+}
+
+.uw-power__demo--manual-scroll .uw-power__demo-inner {
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+}
+
+/* The 7-day matrix has 24 columns. In this narrow preview its flex items can
+   become narrower than the inline dot size, so let height follow the final
+   constrained width instead of stretching circles into capsules. */
+.uw-power__demo--manual-scroll [role='gridcell'] > span.rounded-full {
+  aspect-ratio: 1;
+  height: auto !important;
+  max-width: 100%;
+}
+
+.uw-power__demo-inner::-webkit-scrollbar {
+  display: none;
+}
+
+/* PrTabView owns a nested Radix viewport. It is moved by the same page-scroll
+   coordinator and its scrollbar stays hidden so the frame reads as a scene. */
+.uw-power__demo [data-pr-content-scroll-area] [data-orientation='vertical'] {
+  opacity: 0;
 }
 
 /* Children fill the frame; PR uses flex+ScrollArea, Usage scrolls the inner. */
@@ -2000,29 +2043,6 @@
   font-family: var(--lody-docs-font-sans);
   font-size: 0.84rem;
   line-height: 1.45;
-}
-
-/* Overlay-style scrollbar (matches app `.scrollbar-pro`): transparent track,
-   content-box thumb so the gutter never reads as a solid vertical plate. */
-.uw-power__demo-inner::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-  background: transparent;
-}
-
-.uw-power__demo-inner::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.uw-power__demo-inner::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--muted-foreground) / 0.35);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-.uw-power__demo-inner::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--muted-foreground) / 0.5);
 }
 
 /* Underwater landing: nudge app tokens toward the deep navy stage so demos

@@ -100,7 +100,7 @@ Teams can invite members, adjust permissions, view shared sessions, see token us
 
 ## Quick Start Summary
 
-Prerequisites include Node.js 18 or later, Git, GitHub CLI, and access to the user's coding agent and package registries. Users can start the local CLI with:
+Prerequisites include Node.js 22.14 or later, Git, GitHub CLI, and access to the user's coding agent and package registries. Users can start the local CLI with:
 
 ```bash
 npx lody daemon start

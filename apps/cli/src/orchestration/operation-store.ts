@@ -572,7 +572,8 @@ export class LodyOperationStore {
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
           )
           .get(requesterSessionId, operationId, itemIndex) as
-          { claim_token: string; claimed_at_ms: number } | undefined;
+          | { claim_token: string; claimed_at_ms: number }
+          | undefined;
         const nowMs = this.now();
         if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
           return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };

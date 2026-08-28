@@ -22,11 +22,16 @@
   water (landing pale blue) + dark ink; dark = abyss + ice ink. Ambient field:
   `components/marketing-atmosphere.tsx` — one fixed full-screen WebGL fragment
   shader with `uTheme` (tracks `html.dark`), mid-density caustics, dpr≤1.5,
-  **capped at 30fps**, paused on hidden tab / reduced-motion; CSS gradient
-  fallback until ready. It is an expensive pass (~445 `sin()` per pixel; the four
-  `warped()` calls are ~77% of it) — the two gradient taps feeding `ridge` look
-  redundant but carry the filigree, so do not fold them into a cheaper
-  finite difference. Frame rate and dpr are the safe knobs.
+  paused on hidden tab / reduced-motion; CSS gradient fallback until ready. The
+  expensive field samples at up to 15Hz into two full-drawing-buffer textures,
+  uses GPU-query backpressure, and blends cached endpoints on display frames.
+  Software GPUs start at 8Hz sampling and 30fps presentation; GPU timing may
+  slow sampling further. Texture allocation failure retains the direct 30fps
+  renderer. It is an expensive pass (~445 `sin()` per pixel; the four `warped()`
+  calls are ~77% of it) — the two
+  gradient taps feeding `ridge` look redundant but carry the filigree, so do not
+  fold them into a cheaper finite difference. Do not lower temporal texture
+  resolution or shader quality as a performance shortcut.
   **Hosted once** via `MarketingAtmosphereHost` in `site-root-provider` (price /
   download / changelog share one GL context; off-route pauses without teardown).
   Pricing content lives in
@@ -91,10 +96,10 @@
   and without that force SSR can dual-load React (invalid hook / useContext null).
   Keep `next-themes` as a direct dependency (fumadocs re-exports `useTheme`
   from it; bare transitive resolution fails under pnpm).
-  Do not statically pull optional R3F views into this graph: R3F v8 carries a
-  React 18 reconciler that cannot execute under the site's React 19 SSR runtime.
-  `StatsSettingsView` keeps its optional usage calendar behind a lazy boundary,
-  so the landing still renders the real stats view without evaluating that leaf.
+  Keep the optional R3F usage calendar behind `StatsSettingsView`'s lazy boundary
+  rather than importing its leaf directly into the landing graph. The workspace
+  pins R3F 9 for React 19, and the landing may opt into the real skyline by passing
+  calendar/timeline data without moving it into the initial hydration path.
 - The marketing landing (`/`, `/home`, `/zh`, `/zh/home`) is an immersive WebGL
   "underwater point-cloud" hero. `components/landing.tsx` owns copy/nav/footer and
   mounts `components/underwater-experience.tsx`, which renders
@@ -115,7 +120,18 @@
   free document scroll only (no auto-spring, no Scroll chevron). Preview frame is
   `pointer-events: none` so nested chat/scroll UI cannot trap wheel/touch — only
   feature tabs are clickable. Hero is 100dvh on all breakpoints so the product
-  demo never peeks on first paint. No CSS scroll-snap.
+  demo never peeks on first paint. The desktop scroll hint keeps its localized
+  label and animated chevron visually centered in equal-height boxes. No CSS
+  scroll-snap. The power-section usage frame accepts native manual scrolling and preserves default scroll chaining so
+  reaching either boundary returns the wheel/touch gesture to the document. It
+  rotates ranges only when visible, so number/chart transitions do not create
+  permanent background work. Document scroll drives only the display-only PR
+  frame's internal progress, starting once half of the frame is visible and using
+  eased ends. The usage preview must define the complete `--chart-1` through
+  `--chart-5` palette inside its isolated theme scope; otherwise heatmap cells or
+  later donut segments resolve to transparent backgrounds. Its narrow 7-day
+  matrix also keeps dot height coupled to the final constrained width so the
+  24-column layout cannot stretch circles into capsules.
 - Demo sequencing and screenshot notes live in
   [context/landing-demos.md](context/landing-demos.md).
   Dynamic Island is **not** simulated in the play stage — real device media in

@@ -7,6 +7,7 @@ import {
   type MachineFlockKey,
   type MachineFlockWritableFlock,
   type MachineId,
+  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
@@ -14,6 +15,7 @@ import type { LoroRepo } from 'loro-repo';
 import {
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
+  isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
 } from './local-project-meta';
 
@@ -36,6 +38,50 @@ describe('local project meta helpers', () => {
         requestedAt: 200,
       })
     ).toBe(true);
+  });
+
+  it('matches only sessions owned by the removed machine project', () => {
+    const target = {
+      machineId: 'machine-1' as MachineId,
+      localProjectId: 'local-project-1' as LocalProjectId,
+    };
+    const session = {
+      machineId: target.machineId,
+      project: { kind: 'local', localProjectId: target.localProjectId },
+      isArchived: false,
+    } as SessionMeta;
+
+    expect(isSessionInLocalProjectRemovalScope(session, target)).toBe(true);
+    expect(isSessionInLocalProjectRemovalScope({ ...session, isArchived: true }, target)).toBe(
+      true
+    );
+    expect(
+      isSessionInLocalProjectRemovalScope(
+        { ...session, machineId: 'machine-2' as MachineId },
+        target
+      )
+    ).toBe(false);
+    expect(
+      isSessionInLocalProjectRemovalScope(
+        {
+          ...session,
+          project: {
+            kind: 'local',
+            localProjectId: 'local-project-2' as LocalProjectId,
+          },
+        },
+        target
+      )
+    ).toBe(false);
+    expect(
+      isSessionInLocalProjectRemovalScope(
+        {
+          ...session,
+          project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        },
+        target
+      )
+    ).toBe(false);
   });
 });
 

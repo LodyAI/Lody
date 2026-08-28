@@ -100,7 +100,10 @@ const MARKDOWN_BASE_CLASSNAME =
   // `list-none`, and it honors <ol start> / <li value> (mdast emits `start`).
   '[&_ol]:!my-2 [&_ol]:pl-0 [&_ol]:list-none ' +
   '[&_ol>li]:relative [&_ol>li]:pl-6 ' +
-  "[&_ol>li]:before:absolute [&_ol>li]:before:left-0 [&_ol>li]:before:w-[18px] [&_ol>li]:before:text-right [&_ol>li]:before:content-[counter(list-item)'.'] " +
+  // Keep the counter and period on one line even when the conversation uses a
+  // wide font. The 18px marker lane is intentionally narrower than some
+  // glyph pairs; wrapping here drops the period beside the following item.
+  "[&_ol>li]:before:absolute [&_ol>li]:before:left-0 [&_ol>li]:before:w-[18px] [&_ol>li]:before:whitespace-nowrap [&_ol>li]:before:text-right [&_ol>li]:before:content-[counter(list-item)'.'] " +
   // Streamdown sets `[&>p]:inline` on every <li>, collapsing loose lists into
   // single inline runs — so between-item spacing must come from the <li> box
   // itself, not the inner <p>. `mt-2` on non-first items keeps list edges

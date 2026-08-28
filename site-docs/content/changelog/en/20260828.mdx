@@ -1,0 +1,26 @@
+---
+title: '20260828'
+version: 0.88.0
+date: 2026-08-28
+description: Added predictive hover intent to the conversation outline, improved provider setup and the public site, and fixed undelivered messages, workspace syncing, conversation interactions, and desktop reliability.
+---
+
+Version 0.88.0
+
+### ✨ New
+
+- Added predictive hover intent to the conversation outline, making long conversations easier to navigate with fewer accidental openings ([#51](https://github.com/LodyAI/Lody/pull/51), [#97](https://github.com/LodyAI/Lody/pull/97), [#113](https://github.com/LodyAI/Lody/pull/113)).
+- Provider setup now shows clearer progress and warns when a DeepSeek delegation model may incur additional costs ([#66](https://github.com/LodyAI/Lody/pull/66), [#81](https://github.com/LodyAI/Lody/pull/81)).
+- The public blog now includes English and Chinese RSS feeds, reading times, and previous/next navigation; landing-page demos and the animated atmosphere are smoother too ([#84](https://github.com/LodyAI/Lody/pull/84), [#85](https://github.com/LodyAI/Lody/pull/85)).
+- Public source and contribution moved to LodyAI/Lody, with structured Issue and PR templates, automated checks, and clearer feedback for contributors ([#39](https://github.com/LodyAI/Lody/pull/39), [#63](https://github.com/LodyAI/Lody/pull/63), [#69](https://github.com/LodyAI/Lody/pull/69), [#80](https://github.com/LodyAI/Lody/pull/80), [#91](https://github.com/LodyAI/Lody/pull/91)).
+
+### 🐛 Fixes and Improvements
+
+- Undelivered messages are now clearly marked and can be resent after confirmation, preventing lost or duplicate execution ([#48](https://github.com/LodyAI/Lody/pull/48), [#74](https://github.com/LodyAI/Lody/pull/74)).
+- Improved workspace switching and syncing so sidebar content stays within the current workspace, while increasing compatibility between newer and older clients ([#49](https://github.com/LodyAI/Lody/pull/49), [#55](https://github.com/LodyAI/Lody/pull/55), [#96](https://github.com/LodyAI/Lody/pull/96), [#108](https://github.com/LodyAI/Lody/pull/108)).
+- Fixed missing Chinese translations, task-tool configuration, session-tab renaming, IME confirmation, editing in narrow message columns, queued steering, and Agent question compatibility ([#40](https://github.com/LodyAI/Lody/pull/40), [#42](https://github.com/LodyAI/Lody/pull/42), [#43](https://github.com/LodyAI/Lody/pull/43), [#44](https://github.com/LodyAI/Lody/pull/44), [#52](https://github.com/LodyAI/Lody/pull/52), [#99](https://github.com/LodyAI/Lody/pull/99), [#101](https://github.com/LodyAI/Lody/pull/101)).
+- Improved desktop reliability with lighter Mermaid diagrams, Windows tray left-click behavior, restored local file preview and session controls, and safer window navigation ([#45](https://github.com/LodyAI/Lody/pull/45), [#46](https://github.com/LodyAI/Lody/pull/46), [#50](https://github.com/LodyAI/Lody/pull/50), [#71](https://github.com/LodyAI/Lody/pull/71), [#75](https://github.com/LodyAI/Lody/pull/75), [#77](https://github.com/LodyAI/Lody/pull/77)).
+- Improved the usage calendar on smaller screens, including recent-week positioning and visual details, and fixed ordered-list marker alignment in Markdown ([#53](https://github.com/LodyAI/Lody/pull/53), [#62](https://github.com/LodyAI/Lody/pull/62), [#78](https://github.com/LodyAI/Lody/pull/78), [#82](https://github.com/LodyAI/Lody/pull/82), [#83](https://github.com/LodyAI/Lody/pull/83)).
+- Removing a local project now archives its related sessions first, remains visible while waiting for an offline device, and can safely clean up Lody-created worktrees while retaining dirty or failed ones ([#105](https://github.com/LodyAI/Lody/pull/105), [#119](https://github.com/LodyAI/Lody/pull/119)).
+- Corrected repository paths, the Chinese session-guide link, Node.js prerequisites, and public package metadata ([#57](https://github.com/LodyAI/Lody/pull/57), [#60](https://github.com/LodyAI/Lody/pull/60), [#64](https://github.com/LodyAI/Lody/pull/64)).
+- Thanks to [@clanzhang](https://github.com/clanzhang), [@tommy0103](https://github.com/tommy0103), [@lawvs](https://github.com/lawvs), [@Innei](https://github.com/Innei), [@hyoban](https://github.com/hyoban), [@wibus-wee](https://github.com/wibus-wee), [@limichange](https://github.com/limichange), [@27Aaron](https://github.com/27Aaron), [@hcz-czh](https://github.com/hcz-czh), [@Pleasurecruise](https://github.com/Pleasurecruise), [@frostming](https://github.com/frostming), [@natsustan](https://github.com/natsustan), and [@zxch3n](https://github.com/zxch3n) for their public contributions to this release.

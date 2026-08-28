@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import {
   getSideChatLauncherState,
   getSidePanelTabCloseFallback,
+  getSidePanelTabSelection,
   getSidePanelTabStateAfterClose,
   SessionSidePanelEmptyState,
   SessionSidePanelTabBar,
@@ -83,17 +84,37 @@ describe('getSidePanelTabStateAfterClose', () => {
   });
 });
 
+describe('getSidePanelTabSelection', () => {
+  it('keeps fixed panels, side chats, and viewers mutually exclusive', () => {
+    expect(getSidePanelTabSelection('side-session:forked')).toEqual({
+      activeSidebarTabId: null,
+      activeSideSessionId: 'forked',
+      activeViewerTabId: null,
+    });
+    expect(getSidePanelTabSelection('file:README.md')).toEqual({
+      activeSidebarTabId: null,
+      activeSideSessionId: null,
+      activeViewerTabId: 'file:README.md',
+    });
+    expect(getSidePanelTabSelection('files')).toEqual({
+      activeSidebarTabId: 'files',
+      activeSideSessionId: null,
+      activeViewerTabId: null,
+    });
+  });
+});
+
 describe('getSideChatLauncherState', () => {
   it('hides unsupported providers and disables an offline supported provider', () => {
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: false, machineOffline: false })
-    ).toBe('hidden');
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: true, machineOffline: true })
-    ).toBe('disabled');
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: true, machineOffline: false })
-    ).toBe('enabled');
+    expect(getSideChatLauncherState({ providerSupportsFork: false, machineOffline: false })).toBe(
+      'hidden'
+    );
+    expect(getSideChatLauncherState({ providerSupportsFork: true, machineOffline: true })).toBe(
+      'disabled'
+    );
+    expect(getSideChatLauncherState({ providerSupportsFork: true, machineOffline: false })).toBe(
+      'enabled'
+    );
   });
 });
 

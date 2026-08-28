@@ -456,7 +456,9 @@ export function UnderwaterExperience({
             <span className="underwater-hero__scroll-label">
               {locale === 'zh' ? '向下滚动' : 'Scroll'}
             </span>
-            <span className="underwater-hero__scroll-chevron" />
+            <span className="underwater-hero__scroll-icon">
+              <span className="underwater-hero__scroll-chevron" />
+            </span>
           </div>
         </div>
 

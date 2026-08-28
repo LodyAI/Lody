@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import lodyLogo from '../src/assets/lody-icon.png';
+import { LoadingPlaceholder } from '../src/components/loading-placeholder';
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { MobileHomeScreen } from '../src/components/mobile/mobile-home-screen';
 import { initI18n } from '../src/i18n';
@@ -89,6 +90,48 @@ describe('workspace identity capability boundary', () => {
 
     expect(container?.querySelector('[data-workspace-switcher-trigger]')?.tagName).toBe('BUTTON');
     expect(container?.querySelector('[data-workspace-identity]')).toBeNull();
+  });
+
+  it('keeps scoped workspace synchronization visible after the connection is online', () => {
+    render(
+      <LoroSidebar
+        {...sidebarProps}
+        connectionUiState="online"
+        workspaceSyncing
+        labels={{ workspaceSyncing: 'Syncing target workspace…' }}
+      />
+    );
+
+    const trigger = container?.querySelector('[data-workspace-switcher-trigger]');
+    expect(trigger?.getAttribute('aria-busy')).toBe('true');
+    expect(trigger?.getAttribute('data-workspace-syncing')).toBe('true');
+    const status = container?.querySelector('[data-workspace-status]');
+    expect(status?.getAttribute('data-workspace-status')).toBe('syncing');
+    expect(status?.textContent).toBe('Syncing target workspace…');
+  });
+
+  it('keeps connection failures ahead of workspace synchronization', () => {
+    render(
+      <LoroSidebar
+        {...sidebarProps}
+        connectionUiState="offline"
+        workspaceSyncing
+        labels={{ connectionOffline: 'No connection' }}
+      />
+    );
+
+    const status = container?.querySelector('[data-workspace-status]');
+    expect(status?.getAttribute('data-workspace-status')).toBe('offline');
+    expect(status?.textContent).toBe('No connection');
+  });
+
+  it('supports a content-scoped loading placeholder without taking over the viewport', () => {
+    render(<LoadingPlaceholder variant="content" title="Switching workspace" />);
+
+    const placeholder = container?.querySelector('[data-loading-placeholder-scope]');
+    expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('content');
+    expect(placeholder?.className).toContain('h-full');
+    expect(placeholder?.className).not.toContain('min-h-[100dvh]');
   });
 
   it('renders the mobile local workspace identity without a dialog trigger', () => {

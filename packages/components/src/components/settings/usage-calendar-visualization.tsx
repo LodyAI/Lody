@@ -1248,12 +1248,6 @@ function UsageHeatmap({
   // Roving tabindex: the grid is one tab stop, arrow keys walk days and weeks.
   const [focusIndex, setFocusIndex] = useState(() => Math.max(0, todayIndex));
 
-  // Show the newest weeks initially without overriding later user scrolling.
-  useLayoutEffect(() => {
-    const scroller = scrollerRef.current;
-    if (scroller) scroller.scrollLeft = scroller.scrollWidth;
-  }, []);
-
   const cellLabel = useCallback(
     (cell: UsageCalendarCell) => {
       const date = formats.day.format(new Date(cell.dayStartMs));
@@ -1388,9 +1382,17 @@ function UsageHeatmap({
           })}
         </div>
 
-        <div ref={scrollerRef} className="scrollbar-pro min-w-0 flex-1 overflow-x-auto pb-1">
+        {/* RTL gives an overflowing calendar a native right-edge origin without
+            programmatic scrolling, so mounting it does not reveal an overlay
+            scrollbar. Restore LTR on the content to preserve chronological order. */}
+        <div
+          ref={scrollerRef}
+          dir="rtl"
+          className="scrollbar-pro min-w-0 flex-1 overflow-x-auto pb-1"
+        >
           <div
-            className="min-w-[var(--usage-heatmap-min-track-width)] @[672px]:min-w-0"
+            dir="ltr"
+            className="min-w-[var(--usage-heatmap-min-track-width)] px-0.5 @[672px]:min-w-0"
             style={
               {
                 '--usage-heatmap-min-track-width': `${HEATMAP_MIN_TRACK_WIDTH}px`,
