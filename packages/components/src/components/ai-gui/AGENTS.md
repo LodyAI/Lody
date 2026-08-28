@@ -37,13 +37,14 @@
   necessarily the last item. Generated `image_group`s and the `switch_mode`
   "Exited Plan Mode" card may follow it; use
   `getTextIndexBeforeTrailingNeverCollapsedItems`.
-- One turn may contain several `AssistantTurnRenderSegment`s. A plan approval
-  inside a running turn cuts a segment so implementation stays under the plan.
-  Match ACP tool kind `switch_mode`, never a rendered title. Keep
+- One turn may contain several `AssistantTurnRenderSegment`s. Plan approval
+  cuts a segment so implementation stays below its plan. Match ACP kind
+  `switch_mode`, never titles. Claude carries the plan on that card; Codex emits
+  `proposed_plan` before it. Keep plans last within each switch-delimited segment,
+  never after later implementation. Keep
   `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility, and
-  `expandedWorkedGroups` per segment. Expansion keys include the segment; only
-  the last region may show a duration, while earlier regions say "Finished
-  working".
+  `expandedWorkedGroups` per segment. Only the last region shows duration;
+  earlier ones say "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded. `message.finished` also marks teardown and

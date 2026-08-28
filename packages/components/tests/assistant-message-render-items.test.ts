@@ -116,4 +116,97 @@ describe('buildAssistantMessageRenderItems', () => {
     expect(renderedEntry.key).toBe('assistant-1:3:0:img-agent');
     expect(findSessionImageGalleryEntryIndex(galleryEntries, renderedEntry.key)).toBe(0);
   });
+
+  it('keeps a Codex proposed plan before its approval card and implementation', () => {
+    const items = [
+      { type: 'thought', text: 'Inspect the current behavior.' },
+      {
+        type: 'proposed_plan',
+        turnId: 'plan-1',
+        markdown: '- Update the renderer',
+        status: 'completed',
+        isLatest: true,
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-review-1',
+        title: 'Implement this plan?',
+        kind: 'switch_mode',
+        status: 'completed',
+      },
+      { type: 'thought', text: 'Implement the renderer change.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'edit-1',
+        kind: 'edit',
+        status: 'completed',
+      },
+      { type: 'text', text: 'Done.' },
+    ] satisfies MessageContent[];
+
+    expect(
+      buildAssistantMessageRenderItems(items).map(({ content, itemIndex }) => ({
+        type: content.type,
+        kind: content.type === 'tool_call' ? content.kind : undefined,
+        itemIndex,
+      }))
+    ).toEqual([
+      { type: 'thought', kind: undefined, itemIndex: 0 },
+      { type: 'proposed_plan', kind: undefined, itemIndex: 1 },
+      { type: 'tool_call', kind: 'switch_mode', itemIndex: 2 },
+      { type: 'thought', kind: undefined, itemIndex: 3 },
+      { type: 'tool_call', kind: 'edit', itemIndex: 4 },
+      { type: 'text', kind: undefined, itemIndex: 5 },
+    ]);
+  });
+
+  it('orders each proposed plan within its own switch-mode segment', () => {
+    const items = [
+      {
+        type: 'proposed_plan',
+        turnId: 'plan-1',
+        markdown: '- First plan',
+        status: 'completed',
+        isLatest: false,
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-review-1',
+        kind: 'switch_mode',
+        status: 'completed',
+      },
+      { type: 'thought', text: 'Implement the first plan.' },
+      {
+        type: 'proposed_plan',
+        turnId: 'plan-2',
+        markdown: '- Revised plan',
+        status: 'completed',
+        isLatest: true,
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-review-2',
+        kind: 'switch_mode',
+        status: 'completed',
+      },
+      { type: 'text', text: 'Implemented the revised plan.' },
+    ] satisfies MessageContent[];
+
+    expect(
+      buildAssistantMessageRenderItems(items).map(({ content }) =>
+        content.type === 'proposed_plan'
+          ? `plan:${content.turnId}`
+          : content.type === 'tool_call'
+            ? `tool:${content.toolCallId}`
+            : content.type
+      )
+    ).toEqual([
+      'plan:plan-1',
+      'tool:plan-review-1',
+      'thought',
+      'plan:plan-2',
+      'tool:plan-review-2',
+      'text',
+    ]);
+  });
 });

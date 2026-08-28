@@ -8,10 +8,10 @@ import { buildChatVirtualRows } from '../src/components/ai-gui/view';
  * actually emits the virtual rows the conversation renders, so this is where
  * "an approved plan produces a visible region of its own" is provable.
  *
- * The turn shape mirrors what the bundled adapters emit. A plan is approved
- * from inside a RUNNING turn (Claude's `ExitPlanMode`, Codex's plan review,
- * both ACP kind `switch_mode`), so ONE finished assistant turn carries the
- * pre-plan exploration, the plan, and the whole implementation.
+ * A plan is approved from inside a RUNNING turn, so ONE finished assistant
+ * turn carries the pre-plan exploration, the plan, and the implementation.
+ * Claude carries its plan on the switch card; Codex emits a separate
+ * `proposed_plan` immediately before that card.
  */
 const tool = (
   toolCallId: string,
@@ -20,7 +20,7 @@ const tool = (
 ): MessageContent =>
   ({ type: 'tool_call', toolCallId, kind, status: 'completed', ...overrides }) as MessageContent;
 
-const planTurnItems: MessageContent[] = [
+const claudePlanTurnItems: MessageContent[] = [
   tool('read-1', 'read', { locations: [{ path: 'src/a.ts' }] }),
   tool('grep-1', 'search'),
   tool('plan-exit-1', 'switch_mode', {
@@ -29,6 +29,22 @@ const planTurnItems: MessageContent[] = [
     title: 'Ready to code?',
     content: [{ type: 'content', content: { type: 'text', text: '# Plan\n1. Do the thing' } }],
   } as Partial<Extract<MessageContent, { type: 'tool_call' }>>),
+  { type: 'thought', text: 'Start with the parser.' } as MessageContent,
+  tool('edit-1', 'edit', { locations: [{ path: 'src/a.ts' }] }),
+  { type: 'text', text: 'Done, changed 1 file.' } as MessageContent,
+];
+
+const codexPlanTurnItems: MessageContent[] = [
+  tool('read-1', 'read', { locations: [{ path: 'src/a.ts' }] }),
+  tool('grep-1', 'search'),
+  {
+    type: 'proposed_plan',
+    turnId: 'plan-item-1',
+    markdown: '# Plan\n1. Do the thing',
+    status: 'completed',
+    isLatest: true,
+  },
+  tool('plan-exit-1', 'switch_mode', { title: 'Implement this plan?' }),
   { type: 'thought', text: 'Start with the parser.' } as MessageContent,
   tool('edit-1', 'edit', { locations: [{ path: 'src/a.ts' }] }),
   { type: 'text', text: 'Done, changed 1 file.' } as MessageContent,
@@ -80,39 +96,44 @@ const visibleContentKinds = (rows: ReturnType<typeof buildRows>) =>
   });
 
 describe('approved plan renders its own region', () => {
-  it('gives the implementation a second collapsible region under the plan', () => {
-    const rows = buildRows(planTurnItems, true);
+  it('keeps a structured Codex plan above its approval and implementation regions', () => {
+    const rows = buildRows(codexPlanTurnItems, true);
 
-    // Two independently foldable regions, not one.
     const headers = workedHeaders(rows);
     expect(headers).toHaveLength(2);
-
-    // Only the LAST region may claim the turn duration; the plan region falls
-    // back to the "Finished working" copy.
     expect(headers[0]?.durationMs).toBeNull();
     expect(headers[1]?.durationMs).toBe(5 * 60 * 1000);
-
-    // Distinct row keys, or the VList would desync on duplicate keys.
     expect(headers[0]?.key).not.toBe(headers[1]?.key);
-
-    // Reading top to bottom: the pre-plan work folds, the plan card stays put,
-    // the implementation gets its own fold, and the answer stays visible.
     expect(visibleContentKinds(rows)).toEqual([
       'worked_group_header', // pre-plan exploration
-      'content:tool_call', // the plan / approval card
+      'content:proposed_plan', // structured Codex plan
+      'content:tool_call', // approval card
       'worked_group_header', // the approved implementation
       'content:text', // final answer
     ]);
   });
 
-  it('keeps every step visible while the turn is still streaming', () => {
-    const rows = buildRows(planTurnItems, false);
+  it('keeps a structured Codex plan above implementation while streaming', () => {
+    const rows = buildRows(codexPlanTurnItems, false);
 
     expect(workedHeaders(rows)).toHaveLength(0);
     expect(visibleContentKinds(rows)).toEqual([
       'activity_group_header',
+      'content:proposed_plan',
       'content:tool_call',
       'activity_group_header',
+      'content:text',
+    ]);
+  });
+
+  it('keeps the Claude plan card as the boundary before implementation', () => {
+    const rows = buildRows(claudePlanTurnItems, true);
+
+    expect(workedHeaders(rows)).toHaveLength(2);
+    expect(visibleContentKinds(rows)).toEqual([
+      'worked_group_header',
+      'content:tool_call',
+      'worked_group_header',
       'content:text',
     ]);
   });
