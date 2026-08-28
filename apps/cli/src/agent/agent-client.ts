@@ -826,16 +826,46 @@ export class AgentClient implements acp.Client {
         : undefined;
     const requestId = randomUUID();
     const firstQuestion = elicitation.meta.questions[0];
-    const autoResolveAtEpochSeconds =
+    const autoResolveAt =
       typeof elicitation.autoResolutionMs === 'number' &&
       Number.isFinite(elicitation.autoResolutionMs)
-        ? Math.floor((getServerNow() + Math.max(0, elicitation.autoResolutionMs)) / 1000)
+        ? getServerNow() + Math.max(0, elicitation.autoResolutionMs)
         : undefined;
+    const autoResolveAtEpochSeconds =
+      autoResolveAt === undefined ? undefined : Math.floor(autoResolveAt / 1000);
     const lodyElicitation = {
       version: 1,
       questions: elicitation.meta.questions,
       ...(autoResolveAtEpochSeconds !== undefined ? { autoResolveAtEpochSeconds } : {}),
     } satisfies LodyElicitationMeta;
+    // Permission requests live in shared history and can be answered by a
+    // renderer older than the Core metadata migration. Keep the canonical
+    // payload authoritative, but dual-write the provider alias for one mixed-
+    // version compatibility window. The response bridge likewise accepts both.
+    const legacyQuestionMeta =
+      this.options.agentConfig?.agentType === 'codex'
+        ? {
+            codex: {
+              requestUserInput: {
+                version: 1,
+                allowCustomAnswer: elicitation.meta.allowCustomAnswer,
+                questions: elicitation.meta.questions,
+                ...(autoResolveAt !== undefined ? { autoResolveAt } : {}),
+              },
+            },
+          }
+        : this.options.agentConfig?.agentType === 'claude'
+          ? {
+              claudeCode: {
+                requestType: 'askUserQuestion',
+                askUserQuestion: {
+                  version: 1,
+                  allowCustomAnswer: elicitation.meta.allowCustomAnswer,
+                  questions: elicitation.meta.questions,
+                },
+              },
+            }
+          : {};
     const syntheticRequest: acp.RequestPermissionRequest = {
       sessionId,
       toolCall: {
@@ -854,6 +884,7 @@ export class AgentClient implements acp.Client {
         lody: {
           elicitation: lodyElicitation,
         },
+        ...legacyQuestionMeta,
       },
     };
 
