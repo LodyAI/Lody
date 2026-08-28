@@ -37,6 +37,12 @@ import {
   outlineTickWidthAt,
   tickLineTopOffset,
 } from './conversation-outline-rail-geometry';
+import {
+  ArrivalIntentDetector,
+  EMPTY_ARRIVAL_INTENT_EVALUATION,
+  type ArrivalIntentEvaluation,
+  type ArrivalIntentRect,
+} from './conversation-outline-arrival-intent';
 
 /**
  * A fixed left rail of one tick per conversation round, so a reader can see
@@ -86,8 +92,49 @@ export interface ConversationOutlineRailProps {
    * the intended coordinate system.
    */
   overlayRoot?: HTMLElement | null;
+  /**
+   * Opt into the conservative arrival predictor. Removing this prop restores
+   * the fixed hover warmup with no listener or detector left running.
+   */
+  enableArrivalIntent?: boolean;
+  /** Storybook/dev instrumentation only. The rail never persists or uploads it. */
+  onArrivalIntentDebugEvent?: (event: ConversationOutlineArrivalIntentDebugEvent) => void;
   className?: string;
 }
+
+export type ConversationOutlineHoverOpenSource = 'arrival-intent' | 'warm' | 'delay';
+
+export type ConversationOutlineArrivalIntentDebugEvent =
+  | {
+      type: 'sample';
+      at: number;
+      point: { xFromTarget: number; yFromTarget: number };
+      target: { width: number; height: number };
+      evaluation: ArrivalIntentEvaluation;
+      predictionActive: boolean;
+      predictionActivated: boolean;
+      predictedUntil: number | null;
+    }
+  | {
+      type: 'tick-enter';
+      at: number;
+      index: number;
+      source: ConversationOutlineHoverOpenSource;
+      evaluation: ArrivalIntentEvaluation;
+    }
+  | {
+      type: 'card-open';
+      at: number;
+      index: number;
+      source: ConversationOutlineHoverOpenSource;
+    }
+  | {
+      type: 'rail-leave';
+      at: number;
+      cardWasOpen: boolean;
+      evaluation: ArrivalIntentEvaluation;
+    }
+  | { type: 'round-jump'; at: number; index: number };
 
 const OUTLINE_INDEX_ATTRIBUTE = 'data-outline-index';
 
@@ -210,6 +257,8 @@ export function ConversationOutlineRail({
   activeIndex,
   onJumpToRound,
   overlayRoot = null,
+  enableArrivalIntent = false,
+  onArrivalIntentDebugEvent,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -228,6 +277,9 @@ export function ConversationOutlineRail({
   const [cardOpen, setCardOpen] = useState(false);
 
   const activeIndexRef = useLatestRef(activeIndex);
+  const arrivalIntentDebugRef = useLatestRef(onArrivalIntentDebugEvent);
+  const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
+  const tickCount = entries.length;
 
   const jumpLabel = useCallback(
     (entry: ConversationOutlineEntry) =>
@@ -236,6 +288,70 @@ export function ConversationOutlineRail({
   );
 
   useActiveTickSync(listRef, activeIndex, entries);
+
+  useEffect(() => {
+    if (!enableArrivalIntent) {
+      arrivalIntentDetectorRef.current = null;
+      return undefined;
+    }
+
+    const target = scrollRef.current;
+    const ownerDocument = target?.ownerDocument;
+    const ownerWindow = ownerDocument?.defaultView;
+    if (!target || !ownerDocument || !ownerWindow) return undefined;
+
+    const detector = new ArrivalIntentDetector();
+    arrivalIntentDetectorRef.current = detector;
+    let bounds: ArrivalIntentRect = target.getBoundingClientRect();
+    let boundsReadAt = ownerWindow.performance.now();
+
+    const refreshBounds = () => {
+      bounds = target.getBoundingClientRect();
+      boundsReadAt = ownerWindow.performance.now();
+    };
+    const stopObservingResize = observeResizeOnAnimationFrame(target, refreshBounds);
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || event.buttons !== 0) {
+        detector.reset();
+        return;
+      }
+
+      const now = ownerWindow.performance.now();
+      // Split panes can move the rail without resizing it. Refresh occasionally,
+      // while ResizeObserver handles ordinary pane and viewport changes promptly.
+      if (now - boundsReadAt > 250) refreshBounds();
+      const update = detector.push({ x: event.clientX, y: event.clientY, time: now }, bounds);
+      arrivalIntentDebugRef.current?.({
+        type: 'sample',
+        at: now,
+        point: {
+          xFromTarget: event.clientX - bounds.left,
+          yFromTarget: event.clientY - bounds.top,
+        },
+        target: { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top },
+        evaluation: update.evaluation,
+        predictionActive: update.predictionActive,
+        predictionActivated: update.predictionActivated,
+        predictedUntil: update.predictedUntil,
+      });
+    };
+    const reset = () => detector.reset();
+
+    ownerDocument.addEventListener('pointermove', handlePointerMove, { passive: true });
+    ownerWindow.addEventListener('resize', refreshBounds, { passive: true });
+    ownerWindow.addEventListener('blur', reset);
+
+    return () => {
+      stopObservingResize();
+      ownerDocument.removeEventListener('pointermove', handlePointerMove);
+      ownerWindow.removeEventListener('resize', refreshBounds);
+      ownerWindow.removeEventListener('blur', reset);
+      if (arrivalIntentDetectorRef.current === detector) {
+        arrivalIntentDetectorRef.current = null;
+      }
+    };
+  }, [arrivalIntentDebugRef, enableArrivalIntent, overlayRoot, tickCount]);
 
   // Keep the active tick inside the strip when the rail itself has to scroll.
   // Computed from the fixed pitch rather than `scrollIntoView` so the
@@ -267,7 +383,6 @@ export function ConversationOutlineRail({
   // Only the tick COUNT can change which edges overflow, and `entries` takes a
   // new identity for every delta that grows a preview — so keying this on the
   // array would tear down the observer and re-measure at token rate.
-  const tickCount = entries.length;
   useEffect(() => {
     syncEdgeFade();
     const strip = scrollRef.current;
@@ -279,6 +394,7 @@ export function ConversationOutlineRail({
   const cardOpenRef = useLatestRef(cardOpen);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastClosedAtRef = useRef(0);
+  const warmBrowsingRef = useRef(false);
 
   const clearOpenTimer = useCallback(() => {
     if (openTimerRef.current === null) return;
@@ -295,25 +411,57 @@ export function ConversationOutlineRail({
       const element = readTickElement(event.target);
       const index = readTickIndexOf(element);
       if (!element || index === -1) return;
+      if (readTickElement(event.relatedTarget) === element) return;
 
       // Magnify immediately — this is direct manipulation and must not wait on
       // the card's warmup, or the rail would feel unresponsive to the cursor.
       setPointerIndex(index);
       clearOpenTimer();
+      const now = performance.now();
       const isWarm =
-        cardOpenRef.current || Date.now() - lastClosedAtRef.current < HOVER_WARM_WINDOW_MS;
-      if (isWarm) {
+        warmBrowsingRef.current &&
+        (cardOpenRef.current || Date.now() - lastClosedAtRef.current < HOVER_WARM_WINDOW_MS);
+      if (!isWarm) warmBrowsingRef.current = false;
+      const bypassWarmup =
+        !isWarm &&
+        event.pointerType === 'mouse' &&
+        (arrivalIntentDetectorRef.current?.consumePrediction(now) ?? false);
+      const source: ConversationOutlineHoverOpenSource = isWarm
+        ? 'warm'
+        : bypassWarmup
+          ? 'arrival-intent'
+          : 'delay';
+      arrivalIntentDebugRef.current?.({
+        type: 'tick-enter',
+        at: now,
+        index,
+        source,
+        evaluation:
+          arrivalIntentDetectorRef.current?.getEvaluation() ?? EMPTY_ARRIVAL_INTENT_EVALUATION,
+      });
+      if (isWarm || bypassWarmup) {
+        if (bypassWarmup) warmBrowsingRef.current = false;
         setHoverCard({ index, element });
         setCardOpen(true);
+        arrivalIntentDebugRef.current?.({ type: 'card-open', at: now, index, source });
         return;
       }
       openTimerRef.current = setTimeout(() => {
         openTimerRef.current = null;
+        // Deliberately waiting out the fixed delay is what earns the old
+        // rapid-browsing window. A predictor bypass never arms it.
+        warmBrowsingRef.current = true;
         setHoverCard({ index, element });
         setCardOpen(true);
+        arrivalIntentDebugRef.current?.({
+          type: 'card-open',
+          at: performance.now(),
+          index,
+          source: 'delay',
+        });
       }, HOVER_WARMUP_MS);
     },
-    [cardOpenRef, clearOpenTimer]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer]
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -322,9 +470,18 @@ export function ConversationOutlineRail({
     // empty surface.
     setPointerIndex(-1);
     clearOpenTimer();
-    if (cardOpenRef.current) lastClosedAtRef.current = Date.now();
+    arrivalIntentDebugRef.current?.({
+      type: 'rail-leave',
+      at: performance.now(),
+      cardWasOpen: cardOpenRef.current,
+      evaluation:
+        arrivalIntentDetectorRef.current?.getEvaluation() ?? EMPTY_ARRIVAL_INTENT_EVALUATION,
+    });
+    if (cardOpenRef.current && warmBrowsingRef.current) {
+      lastClosedAtRef.current = Date.now();
+    }
     setCardOpen(false);
-  }, [cardOpenRef, clearOpenTimer]);
+  }, [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer]);
 
   // Depends on the COUNT, not the array: the outline gets a new identity per
   // streamed delta, and this callback feeds the list's click/key handlers.
@@ -342,11 +499,18 @@ export function ConversationOutlineRail({
       const index = readTickIndex(event.target);
       if (index === -1) return;
       clearOpenTimer();
-      if (cardOpenRef.current) lastClosedAtRef.current = Date.now();
+      if (cardOpenRef.current && warmBrowsingRef.current) {
+        lastClosedAtRef.current = Date.now();
+      }
       setCardOpen(false);
+      arrivalIntentDebugRef.current?.({
+        type: 'round-jump',
+        at: performance.now(),
+        index,
+      });
       jumpTo(index);
     },
-    [cardOpenRef, clearOpenTimer, jumpTo]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo]
   );
 
   const focusTick = useCallback((index: number) => {

@@ -1738,6 +1738,7 @@ export const SessionChatStreamView = forwardRef<
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
                 overlayRoot={outlineOverlayRoot}
+                enableArrivalIntent
               />
             )}
             {showScrollToLatest && !isSticky && (
