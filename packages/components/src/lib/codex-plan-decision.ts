@@ -58,6 +58,30 @@ export function disableCodexPlanMode(
   };
 }
 
+/**
+ * Run an explicit Codex execution action with Plan disabled for that turn, and
+ * persist the same selection locally only after the dispatch was accepted.
+ * Ordinary composer sends deliberately do not use this path.
+ */
+export async function dispatchCodexExecutionPrompt({
+  configOptionValues,
+  dispatch,
+  onPlanModeDisabled,
+}: {
+  configOptionValues: Record<string, AcpConfigOptionValue>;
+  dispatch: (configOptionValuesOverride?: Record<string, AcpConfigOptionValue>) => Promise<boolean>;
+  onPlanModeDisabled: (configOptionValues: Record<string, AcpConfigOptionValue>) => void;
+}): Promise<boolean> {
+  const nextConfigOptionValues = isCodexPlanModeEnabled(configOptionValues)
+    ? disableCodexPlanMode(configOptionValues)
+    : undefined;
+  const accepted = await dispatch(nextConfigOptionValues);
+  if (accepted && nextConfigOptionValues) {
+    onPlanModeDisabled(nextConfigOptionValues);
+  }
+  return accepted;
+}
+
 export function findLatestCompletedCodexProposedPlan(
   history: SessionDoc['history'] | undefined
 ): CompletedCodexProposedPlan | null {

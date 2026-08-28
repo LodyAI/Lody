@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { consumeObservedPlanModeExitApprovals } from '../src/atoms/plan-mode-exit';
 import { isPlanExitApproval, resolveModeIdAfterPlanExit } from '../src/lib/plan-mode-exit';
 
 const PLAN_EXIT_OPTIONS = [
@@ -48,5 +49,11 @@ describe('plan mode exit', () => {
     expect(resolveModeIdAfterPlanExit(modeOptions, null)).toBe('default');
     expect(resolveModeIdAfterPlanExit([{ value: 'plan', label: 'Plan' }], 'plan')).toBeNull();
     expect(resolveModeIdAfterPlanExit([], null)).toBeNull();
+  });
+
+  it('consumes only the approvals the composer observed', () => {
+    expect(consumeObservedPlanModeExitApprovals(2, 1)).toBe(1);
+    expect(consumeObservedPlanModeExitApprovals(1, 1)).toBe(0);
+    expect(consumeObservedPlanModeExitApprovals(1, 2)).toBe(0);
   });
 });

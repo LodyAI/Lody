@@ -646,7 +646,7 @@ export class AgentClient implements acp.Client {
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
   /** Desired config retained across same-client replacement sessions. */
-  private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
+  private configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
   private legacySessionModelState: LegacySessionModelState | null = null;
   public currentModel?: ModelInfo;
@@ -917,6 +917,7 @@ export class AgentClient implements acp.Client {
 
     const notification = parseSessionNotification(params);
 
+    this.applyConfigOptionUpdateState(notification);
     this.handleGoalSessionInfoUpdate(notification);
     this.handleCodexWarningSessionInfoUpdate(notification);
     this.handleAgentSessionTitleUpdate(notification);
@@ -938,6 +939,32 @@ export class AgentClient implements acp.Client {
 
     this.options.onUpdateMessage(notification);
     return;
+  }
+
+  /**
+   * Apply the agent's full live config snapshot before forwarding it. Adapters
+   * may change configuration themselves (for example, Codex exits Plan after
+   * approval), so treating only client-initiated set_config_option responses as
+   * state would leave replacement sessions carrying stale startup values.
+   */
+  private applyConfigOptionUpdateState(notification: AcpSessionNotification): void {
+    if (notification.update.sessionUpdate !== 'config_option_update') {
+      return;
+    }
+
+    this.configOptions = filterAcpConfigOptions(notification.update.configOptions);
+    this.configOptionValues = Object.fromEntries(
+      this.configOptions.map((option) => [option.id, option.currentValue])
+    );
+
+    const modelOption = this.findConfigOptionByCategory('model');
+    if (modelOption?.type === 'select' && typeof modelOption.currentValue === 'string') {
+      this.currentModel = this.resolveModelInfo(modelOption.currentValue);
+    } else if (this.currentModel) {
+      // Other config changes can still alter the thought-level label attached
+      // to the current model.
+      this.currentModel = this.resolveModelInfo(this.currentModel.modelId);
+    }
   }
 
   private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {

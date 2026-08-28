@@ -1,5 +1,5 @@
 import type { SessionDoc } from '@lody/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CODEX_COLLABORATION_MODE_CONFIG_ID,
@@ -10,6 +10,7 @@ import {
 } from '../src/components/shared/acp-selector-options';
 import {
   disableCodexPlanMode,
+  dispatchCodexExecutionPrompt,
   findLatestCompletedCodexProposedPlan,
   isCodexPlanModeEnabled,
   shouldShowCodexProposedPlanDecision,
@@ -128,6 +129,57 @@ describe('codex plan decision helpers', () => {
         [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
       })
     ).toBe(false);
+  });
+
+  it('dispatches execution with Plan disabled and persists only an accepted transition', async () => {
+    const dispatch = vi.fn().mockResolvedValue(true);
+    const onPlanModeDisabled = vi.fn();
+    const config = {
+      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+      reasoning_effort: 'high',
+    };
+
+    await expect(
+      dispatchCodexExecutionPrompt({ configOptionValues: config, dispatch, onPlanModeDisabled })
+    ).resolves.toBe(true);
+
+    const expected = {
+      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+      reasoning_effort: 'high',
+    };
+    expect(dispatch).toHaveBeenCalledWith(expected);
+    expect(onPlanModeDisabled).toHaveBeenCalledWith(expected);
+  });
+
+  it('keeps the local Plan selection when execution dispatch is rejected', async () => {
+    const dispatch = vi.fn().mockResolvedValue(false);
+    const onPlanModeDisabled = vi.fn();
+
+    await expect(
+      dispatchCodexExecutionPrompt({
+        configOptionValues: {
+          [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+        },
+        dispatch,
+        onPlanModeDisabled,
+      })
+    ).resolves.toBe(false);
+
+    expect(onPlanModeDisabled).not.toHaveBeenCalled();
+  });
+
+  it('does not add a collaboration override when Plan is already off', async () => {
+    const dispatch = vi.fn().mockResolvedValue(true);
+    const onPlanModeDisabled = vi.fn();
+
+    await dispatchCodexExecutionPrompt({
+      configOptionValues: { reasoning_effort: 'low' },
+      dispatch,
+      onPlanModeDisabled,
+    });
+
+    expect(dispatch).toHaveBeenCalledWith(undefined);
+    expect(onPlanModeDisabled).not.toHaveBeenCalled();
   });
 
   it('keeps the completed plan decision visible after plan mode is manually disabled', () => {

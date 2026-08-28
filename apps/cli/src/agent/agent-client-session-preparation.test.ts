@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import type { SessionNotification } from '@agentclientprotocol/sdk';
 import type { Logger } from '@/utils/logger';
 
 const connectionMocks = vi.hoisted(() => ({
@@ -225,6 +226,82 @@ describe('AgentClient session preparation gate', () => {
           sessionConfig: {
             version: 1,
             configOptionValues: { permission_mode: 'ask' },
+          },
+        },
+      },
+    });
+  });
+
+  it('replaces retained config values from each agent-published full snapshot', async () => {
+    const onUpdateMessage = vi.fn();
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-codex-plan-exit' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'codex' },
+      configOptionValues: { collaboration_mode: 'plan' },
+      onUpdateMessage,
+      onRequestPermission: vi.fn(),
+    });
+    const collaborationModeOption = {
+      id: 'collaboration_mode',
+      name: 'Collaboration mode',
+      description: 'How Codex collaborates for subsequent turns',
+      category: 'collaboration_mode',
+      type: 'select' as const,
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'plan', name: 'Plan' },
+      ],
+    };
+    const modelSpecificOption = {
+      id: 'reasoning_effort',
+      name: 'Reasoning effort',
+      description: 'Reasoning level for the selected model',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: 'high',
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'high', name: 'High' },
+      ],
+    };
+
+    await client.startSession({} as never, '/workdir');
+    await client.sessionUpdate({
+      sessionId: 'acp-session-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [collaborationModeOption, modelSpecificOption],
+      },
+    } as SessionNotification);
+    await client.sessionUpdate({
+      sessionId: 'acp-session-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [collaborationModeOption],
+      },
+    } as SessionNotification);
+
+    expect(client.getConfigOptions()).toEqual([collaborationModeOption]);
+    expect(onUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ sessionUpdate: 'config_option_update' }),
+      })
+    );
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
+    await client.prepareReplacementSession();
+
+    expect(connectionMocks.newSession).toHaveBeenLastCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+      _meta: {
+        lody: {
+          sessionConfig: {
+            version: 1,
+            configOptionValues: { collaboration_mode: 'default' },
           },
         },
       },

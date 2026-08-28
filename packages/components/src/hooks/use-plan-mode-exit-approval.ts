@@ -1,9 +1,21 @@
-import { useCallback } from 'react';
-import { useSetAtom } from 'jotai';
-import type { MessageContent, SessionId } from '@lody/shared';
+import { useCallback, useEffect } from 'react';
+import { useAtom, useSetAtom } from 'jotai';
+import {
+  ACP_COLLABORATION_MODE_CONFIG_ID,
+  ACP_COLLABORATION_MODE_DEFAULT_VALUE,
+  ACP_COLLABORATION_MODE_PLAN_VALUE,
+  ACP_PLAN_PERMISSION_MODE_ID,
+  type AcpConfigOptionValue,
+  type MessageContent,
+  type SessionId,
+} from '@lody/shared';
 
-import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
-import { isPlanExitApproval } from '@/lib/plan-mode-exit';
+import {
+  consumeObservedPlanModeExitApprovals,
+  planModeExitApprovalCountAtomFamily,
+} from '@/atoms/plan-mode-exit';
+import { isPlanExitApproval, resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
+import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 
 type ToolCallContent = Extract<MessageContent, { type: 'tool_call' }>;
 type PermissionOption = NonNullable<ToolCallContent['permissionRequest']>['options'][number];
@@ -33,4 +45,86 @@ export function usePlanModeExitApprovalNotifier(sessionId: SessionId) {
     },
     [bumpApprovalCount]
   );
+}
+
+type PlanModeExitApprovalConsumerOptions = {
+  enabled: boolean;
+  selectionReady: boolean;
+  sessionId: SessionId;
+  selectedModeId: string | null;
+  modeOptions: readonly AcpSessionSelectOption[];
+  defaultModeId: string | null;
+  configOptionValues: Readonly<Record<string, AcpConfigOptionValue>>;
+  onModeChange: (modeId: string) => void;
+  onConfigOptionChange: (configId: string, value: AcpConfigOptionValue) => void;
+};
+
+/**
+ * Consume successful plan-exit approvals in the composer that owns the local
+ * run-config selection. Codex carries Plan in `collaboration_mode`; Claude
+ * carries it in the ACP permission mode. Both are local per-turn preferences,
+ * so the adapter changing the running turn does not update the next send.
+ */
+export function useConsumePlanModeExitApproval({
+  enabled,
+  selectionReady,
+  sessionId,
+  selectedModeId,
+  modeOptions,
+  defaultModeId,
+  configOptionValues,
+  onModeChange,
+  onConfigOptionChange,
+}: PlanModeExitApprovalConsumerOptions): void {
+  const [pendingApprovalCount, setPendingApprovalCount] = useAtom(
+    planModeExitApprovalCountAtomFamily(sessionId)
+  );
+
+  useEffect(() => {
+    if (!enabled || !selectionReady || pendingApprovalCount === 0) {
+      return;
+    }
+
+    const codexPlanActive =
+      configOptionValues[ACP_COLLABORATION_MODE_CONFIG_ID] === ACP_COLLABORATION_MODE_PLAN_VALUE;
+    let nextModeId: string | null = null;
+    if (selectedModeId === ACP_PLAN_PERMISSION_MODE_ID) {
+      nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
+      if (!nextModeId) {
+        // Capabilities can arrive after the durable turn selection. Keep the
+        // approval pending until a non-Plan destination is actually available.
+        return;
+      }
+    }
+
+    if (codexPlanActive) {
+      onConfigOptionChange(ACP_COLLABORATION_MODE_CONFIG_ID, ACP_COLLABORATION_MODE_DEFAULT_VALUE);
+    }
+    if (nextModeId) {
+      onModeChange(nextModeId);
+    }
+
+    if (codexPlanActive || nextModeId) {
+      // Observe the reconciled non-Plan selection on the next render before
+      // consuming. If either callback is a no-op, the approval stays pending.
+      return;
+    }
+
+    // Consume exactly the revision this effect observed. If another approval
+    // arrives while the handlers above run, its increment remains pending.
+    setPendingApprovalCount((current) =>
+      consumeObservedPlanModeExitApprovals(current, pendingApprovalCount)
+    );
+  }, [
+    configOptionValues,
+    defaultModeId,
+    enabled,
+    modeOptions,
+    onConfigOptionChange,
+    onModeChange,
+    pendingApprovalCount,
+    selectionReady,
+    selectedModeId,
+    setPendingApprovalCount,
+  ]);
 }

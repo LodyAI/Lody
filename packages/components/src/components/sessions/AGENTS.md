@@ -443,20 +443,31 @@ Session conversation page chain:
   replaying its values. `buildRecentRunConfigItems` drops a Role entry whose
   Role is not in the passed `agentRoles` — a Role never falls back, so a deleted
   or unavailable one must not quietly re-run as loose values.
-  The selected mode is applied per TURN (it becomes the user entry's
-  `inputConfig.modeId`; `resolveSessionConversationConfig` reads the latest turn
-  back as the preference). So approving "Yes, implement this plan" — which only
-  switches the mode of the running ACP turn — must ALSO drop the selector out of
-  plan, or the next send quietly plans again. Driven from the CLICK
+  Plan is applied per TURN: Claude carries it in the user entry's
+  `inputConfig.modeId`, while Codex carries it in
+  `inputConfig.configOptionValues.collaboration_mode`;
+  `resolveSessionConversationConfig` reads the latest turn back as the
+  preference. So approving "Yes, implement this plan" — which only switches the
+  running ACP turn — must ALSO drop the local selector/config out of plan, or
+  the next send quietly plans again. Driven from the CLICK
   (`hooks/use-plan-mode-exit-approval.ts` → `atoms/plan-mode-exit.ts`, read by
   the composer), never from the resolved outcome in history: this selection is
   per-device local state, so a history-derived signal would unset plan mode for
   a teammate who just armed it, and would fire again for an OLD approval
-  replaying as the session doc syncs. Every interactive permission surface must
-  call the notifier — there are two (`floating-permission-request.tsx` and the
-  inline card in `../ai-gui/view.tsx`). It exits to the agent's default non-plan
-  mode and deliberately does not infer `acceptEdits` from an `allow_always`
+  replaying as the session doc syncs. The pending click is consumed exactly once
+  by the `SessionChatInterface` that owns the composer, only after its selection
+  has reconciled and a non-Plan state is observed; the desktop's duplicate
+  header-only instance must not claim it. Every interactive permission surface
+  must call the notifier — there are two (`floating-permission-request.tsx` and
+  the inline card in `../ai-gui/view.tsx`). Codex exits to
+  `collaboration_mode=default`; mode-based agents exit to their default non-plan
+  mode and deliberately do not infer `acceptEdits` from an `allow_always`
   answer: that consent was about this plan, not every later turn.
+  Explicit execution entry points (Implement plan, Create PR/Draft PR, Commit &
+  Push, Resolve Conflicts, Fix CI, and Fix review finding) dispatch Codex with
+  `collaboration_mode=default` and retain that local selection only after the
+  turn is accepted. Manual messages, Continue discussing, and generic quick
+  messages preserve the user's current Plan choice; do not disable it globally.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to

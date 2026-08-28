@@ -376,7 +376,6 @@ import {
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
-import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -388,12 +387,11 @@ import {
 } from '@/lib/session-workspace-path';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
-  disableCodexPlanMode,
+  dispatchCodexExecutionPrompt,
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
-import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
-import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
+import { useConsumePlanModeExitApproval } from '@/hooks/use-plan-mode-exit-approval';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 
@@ -2030,6 +2028,7 @@ export const SessionChatInterface = memo(
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
+      state: sessionConfigSelectionState,
       selectedModeId,
       selectedModelId,
       configOptionValues,
@@ -2389,6 +2388,7 @@ export const SessionChatInterface = memo(
     const sessionConversationConfigRevision = `${session.id}:${
       sessionConversationConfig.sourceConfigKey ?? ''
     }`;
+    const sessionConfigTargetKey = `${session.id}:${session.cliType}:${session.agentType}`;
     const sessionConfigPreferences = useMemo(
       () => ({
         modeId: sessionConversationConfig.modeId,
@@ -2421,7 +2421,7 @@ export const SessionChatInterface = memo(
     );
     useReconcileAcpSessionConfigSelection({
       enabled: !hideMessageArea && sessionDocReady,
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
+      targetKey: sessionConfigTargetKey,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
       selectorOptions: sessionSelectorOptions,
@@ -3334,20 +3334,22 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
 
-    // Approving "Yes, implement this plan" switches the mode of the RUNNING
-    // turn only — the composer would still say Plan and quietly plan again on
-    // the next send. The permission cards bump this counter when THIS user
-    // approves, so the selector follows.
-    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
-    useEffect(() => {
-      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
-        return;
-      }
-      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
-      if (nextModeId) {
-        handleModeChange(nextModeId);
-      }
-    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
+    // Approving "Yes, implement this plan" changes only the RUNNING ACP turn.
+    // Consume the local approval in the instance that owns the composer (the
+    // desktop header mounts a second, header-only instance for the same session).
+    useConsumePlanModeExitApproval({
+      enabled: !hideMessageArea,
+      selectionReady:
+        sessionConfigSelectionState.targetKey === sessionConfigTargetKey &&
+        sessionConfigSelectionState.preferenceRevision === sessionConversationConfigRevision,
+      sessionId: session.id,
+      selectedModeId,
+      modeOptions,
+      defaultModeId,
+      configOptionValues,
+      onModeChange: handleModeChange,
+      onConfigOptionChange: handleConfigOptionChange,
+    });
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({
@@ -3881,6 +3883,26 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    const dispatchExecutionPrompt = useCallback(
+      async (
+        prompt: string,
+        options?: Omit<DispatchInputBlocksOptions, 'configOptionValuesOverride'>
+      ): Promise<boolean> => {
+        if (!isCodexPlanSession) {
+          return await dispatchPrompt(prompt, options);
+        }
+        return await dispatchCodexExecutionPrompt({
+          configOptionValues,
+          dispatch: (configOptionValuesOverride) =>
+            configOptionValuesOverride
+              ? dispatchPrompt(prompt, { ...options, configOptionValuesOverride })
+              : dispatchPrompt(prompt, options),
+          onPlanModeDisabled: setConfigOptionValues,
+        });
+      },
+      [configOptionValues, dispatchPrompt, isCodexPlanSession, setConfigOptionValues]
+    );
+
     const handleSendMessage = useCallback(
       async (inputBlocks: SessionInputBlock[]): Promise<boolean> => {
         return await dispatchInputBlocks(inputBlocks);
@@ -3938,17 +3960,12 @@ export const SessionChatInterface = memo(
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
-      const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
       pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
-      setConfigOptionValues(nextConfigOptionValues);
 
-      const accepted = await dispatchPrompt(
+      const accepted = await dispatchExecutionPrompt(
         t('sessions.proposedPlanDecision.executePrompt', 'Implement the plan'),
-        {
-          forceDirect: true,
-          configOptionValuesOverride: nextConfigOptionValues,
-        }
+        { forceDirect: true }
       );
 
       if (accepted) {
@@ -3958,13 +3975,12 @@ export const SessionChatInterface = memo(
           return next;
         });
       } else {
-        setConfigOptionValues(configOptionValues);
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
       pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
+    }, [dispatchExecutionPrompt, latestCompletedProposedPlan, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -4160,8 +4176,14 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createPrPrompt);
-    }, [captureSessionEvent, createPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchExecutionPrompt(createPrPrompt);
+    }, [
+      captureSessionEvent,
+      createPrPrompt,
+      dispatchExecutionPrompt,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCreateDraftPr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4169,8 +4191,14 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createDraftPrPrompt);
-    }, [captureSessionEvent, createDraftPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchExecutionPrompt(createDraftPrPrompt);
+    }, [
+      captureSessionEvent,
+      createDraftPrPrompt,
+      dispatchExecutionPrompt,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCommitAndPush = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4178,8 +4206,14 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(commitAndPushPrompt);
-    }, [captureSessionEvent, commitAndPushPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchExecutionPrompt(commitAndPushPrompt);
+    }, [
+      captureSessionEvent,
+      commitAndPushPrompt,
+      dispatchExecutionPrompt,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleResolveConflicts = useCallback(async () => {
       if (isResolvingConflicts || !latestPr?.url) return;
@@ -4190,7 +4224,7 @@ export const SessionChatInterface = memo(
         workspace_dirty: workspaceDirty,
       });
       try {
-        await dispatchPrompt(
+        await dispatchExecutionPrompt(
           buildResolvePrConflictsPrompt({
             repoFullName: latestPrRepoFullName,
             prNumber: latestPrNumber,
@@ -4202,7 +4236,7 @@ export const SessionChatInterface = memo(
       }
     }, [
       captureSessionEvent,
-      dispatchPrompt,
+      dispatchExecutionPrompt,
       isResolvingConflicts,
       latestPr,
       latestPrNumber,
@@ -4233,7 +4267,7 @@ export const SessionChatInterface = memo(
           toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
           return;
         }
-        const accepted = await dispatchPrompt(prompt);
+        const accepted = await dispatchExecutionPrompt(prompt);
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
@@ -4246,7 +4280,7 @@ export const SessionChatInterface = memo(
       }
     }, [
       captureSessionEvent,
-      dispatchPrompt,
+      dispatchExecutionPrompt,
       isPrActionPending,
       latestPrRepoFullName,
       refreshActivePrCheckRuns,
@@ -5723,7 +5757,7 @@ export const SessionChatInterface = memo(
                           void autoReview.resume();
                         }}
                         onFixFinding={(finding) => {
-                          void dispatchPrompt(
+                          void dispatchExecutionPrompt(
                             buildAuthorFixPrompt([finding], {
                               // Same reason as the engine's own dispatch: with a
                               // PR open, a committed-but-unpushed fix is invisible
