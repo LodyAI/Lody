@@ -352,7 +352,7 @@ import {
   resolveWorkspaceLocalProjectRootPath,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
-  shouldArchiveSessionForLocalProjectRemoval,
+  isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
   upsertMachineLocalProject,
 } from '@/lib/local-project-meta';
@@ -4142,24 +4142,28 @@ export class MessageHandler {
 
   private async archiveLocalProjectSessions(localProjectId: LocalProjectId): Promise<void> {
     const sessions = (await listAliveSessionMetas(this.workspaceDocument)).filter(({ meta }) =>
-      shouldArchiveSessionForLocalProjectRemoval(meta, {
+      isSessionInLocalProjectRemovalScope(meta, {
         machineId: this.machineId,
         localProjectId,
       })
     );
     if (sessions.length === 0) return;
 
-    const rootSessions = sessions.filter(({ meta }) => !meta.parentSessionId);
+    const rootSessions = sessions.filter(
+      ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
+    );
+    const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
     for (const { meta } of rootSessions) {
       await this.archiveSessionResources(meta.id, { preserveWorktree: true });
     }
 
     for (const { roomId, meta } of sessions) {
-      if (!meta.parentSessionId) continue;
+      if (archivedRootSessionIds.has(meta.id)) continue;
       if (this.sessionManager.hasSession(meta.id)) {
         await this.archiveSessionResources(meta.id, { preserveWorktree: true });
         continue;
       }
+      if (meta.isArchived === true) continue;
       await this.workspaceDocument.repo.upsertDocMeta(roomId, {
         isArchived: true,
         status: SessionStatusFactory.idle(),
@@ -4167,7 +4171,7 @@ export class MessageHandler {
     }
 
     this.logger.debug(
-      `[local-project] Archived ${sessions.length} session(s) before removing ${localProjectId}`
+      `[local-project] Processed ${sessions.length} session(s) before removing ${localProjectId}`
     );
   }
 

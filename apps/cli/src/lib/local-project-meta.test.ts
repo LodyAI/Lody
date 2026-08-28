@@ -15,7 +15,7 @@ import type { LoroRepo } from 'loro-repo';
 import {
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
-  shouldArchiveSessionForLocalProjectRemoval,
+  isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
 } from './local-project-meta';
 
@@ -40,7 +40,7 @@ describe('local project meta helpers', () => {
     ).toBe(true);
   });
 
-  it('archives only unarchived sessions owned by the removed machine project', () => {
+  it('matches only sessions owned by the removed machine project', () => {
     const target = {
       machineId: 'machine-1' as MachineId,
       localProjectId: 'local-project-1' as LocalProjectId,
@@ -51,18 +51,18 @@ describe('local project meta helpers', () => {
       isArchived: false,
     } as SessionMeta;
 
-    expect(shouldArchiveSessionForLocalProjectRemoval(session, target)).toBe(true);
+    expect(isSessionInLocalProjectRemovalScope(session, target)).toBe(true);
+    expect(isSessionInLocalProjectRemovalScope({ ...session, isArchived: true }, target)).toBe(
+      true
+    );
     expect(
-      shouldArchiveSessionForLocalProjectRemoval({ ...session, isArchived: true }, target)
-    ).toBe(false);
-    expect(
-      shouldArchiveSessionForLocalProjectRemoval(
+      isSessionInLocalProjectRemovalScope(
         { ...session, machineId: 'machine-2' as MachineId },
         target
       )
     ).toBe(false);
     expect(
-      shouldArchiveSessionForLocalProjectRemoval(
+      isSessionInLocalProjectRemovalScope(
         {
           ...session,
           project: {
@@ -74,7 +74,7 @@ describe('local project meta helpers', () => {
       )
     ).toBe(false);
     expect(
-      shouldArchiveSessionForLocalProjectRemoval(
+      isSessionInLocalProjectRemovalScope(
         {
           ...session,
           project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },

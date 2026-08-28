@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -13,11 +16,14 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
+import { getWorktreeManager } from '../src/session/worktree/worktree-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { createLocalRepo } from './worktree-manager-test-helpers';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -39,7 +45,6 @@ type MessageHandlerInternals = {
     localProjectId: LocalProjectId,
     command: { v: 1; requestedAt: number }
   ) => Promise<void>;
-  resolveWorktreeCleanupTarget: (...args: unknown[]) => unknown;
   deleteSessionResources: (sessionId: SessionId) => Promise<{ keptWorktreePath?: string }>;
   writeKeptWorktreePath: (
     sessionId: SessionId,
@@ -69,6 +74,7 @@ function createHarness(options?: {
   sessionMetas?: SessionMeta[];
   activeSessionIds?: SessionId[];
   includeLegacySessionDeleteRequest?: boolean;
+  localProjectRootPaths?: Record<LocalProjectId, string>;
 }) {
   const sessionId = options?.sessionId ?? ('session-1' as SessionId);
   const childSessionIds = options?.childSessionIds ?? [];
@@ -123,6 +129,12 @@ function createHarness(options?: {
             needToArchiveSessions: {},
             needToDeleteSessions:
               options?.includeLegacySessionDeleteRequest === false ? {} : { [sessionId]: true },
+            localProjects: Object.fromEntries(
+              Object.entries(options?.localProjectRootPaths ?? {}).map(([id, rootPath]) => [
+                id,
+                { id, name: 'Project', rootPath, createdAtMs: 1 },
+              ])
+            ),
           },
         };
       }
@@ -202,6 +214,8 @@ function createHarness(options?: {
     repo,
     events,
     machineFlockRows,
+    getSessionMeta: (id: SessionId) => sessionMetas.get(getSessionRoomId(id)),
+    isSessionActive: (id: SessionId) => activeSessionIds.has(id),
     flockSet,
     flockCommit,
   };
@@ -325,7 +339,7 @@ describe('MessageHandler terminal cleanup', () => {
     expect(handler.store.has(sessionId)).toBe(false);
   });
 
-  it('archives root and child sessions before removing their local project without touching worktrees', async () => {
+  it('archives root and child sessions before removing their local project', async () => {
     const localProjectId = 'local-project-remove' as LocalProjectId;
     const rootSessionId = 'session-project-root' as SessionId;
     const childSessionId = 'session-project-child' as SessionId;
@@ -354,7 +368,7 @@ describe('MessageHandler terminal cleanup', () => {
       },
     ] as SessionMeta[];
     const localProjectKey = machineFlockKeys.localProject(localProjectId);
-    const { handler, repo, sessionManager, events, machineFlockRows } = createHarness({
+    const { handler, events, machineFlockRows, getSessionMeta, isSessionActive } = createHarness({
       sessionId: rootSessionId,
       childSessionIds: [childSessionId],
       sessionMetas,
@@ -372,25 +386,18 @@ describe('MessageHandler terminal cleanup', () => {
         },
       ],
     });
-    const resolveWorktreeCleanupTarget = vi.fn(() => {
-      throw new Error('project removal must not resolve worktree cleanup');
-    });
-    handler.resolveWorktreeCleanupTarget = resolveWorktreeCleanupTarget;
-
     await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
 
-    const archivedPatch = {
+    expect(getSessionMeta(rootSessionId)).toMatchObject({
       isArchived: true,
       status: SessionStatusFactory.idle(),
-    };
-    expect(repo.upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(rootSessionId), archivedPatch);
-    expect(repo.upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(childSessionId),
-      archivedPatch
-    );
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(rootSessionId, true);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(childSessionId, true);
-    expect(resolveWorktreeCleanupTarget).not.toHaveBeenCalled();
+    });
+    expect(getSessionMeta(childSessionId)).toMatchObject({
+      isArchived: true,
+      status: SessionStatusFactory.idle(),
+    });
+    expect(isSessionActive(rootSessionId)).toBe(false);
+    expect(isSessionActive(childSessionId)).toBe(false);
 
     const projectDeleteEvent = `flock-delete:${JSON.stringify(localProjectKey)}`;
     const projectDeleteIndex = events.indexOf(projectDeleteEvent);
@@ -404,11 +411,11 @@ describe('MessageHandler terminal cleanup', () => {
     expect(machineFlockRows).not.toContainEqual(expect.objectContaining({ key: localProjectKey }));
   });
 
-  it('stops an active child session whose parent is already archived', async () => {
+  it('stops an archived active child session whose parent is already archived', async () => {
     const localProjectId = 'local-project-orphan-child' as LocalProjectId;
     const childSessionId = 'session-project-orphan-child' as SessionId;
     const localProjectKey = machineFlockKeys.localProject(localProjectId);
-    const { handler, repo, sessionManager } = createHarness({
+    const { handler, getSessionMeta, isSessionActive } = createHarness({
       sessionId: childSessionId,
       sessionMetas: [
         {
@@ -419,6 +426,7 @@ describe('MessageHandler terminal cleanup', () => {
           cliType: 'codex',
           agentType: 'codex',
           status: SessionStatusFactory.running(),
+          isArchived: true,
           project: { kind: 'local', localProjectId },
           parentSessionId: 'session-project-archived-parent' as SessionId,
         } as SessionMeta,
@@ -437,17 +445,76 @@ describe('MessageHandler terminal cleanup', () => {
         },
       ],
     });
-    const resolveWorktreeCleanupTarget = vi.fn();
-    handler.resolveWorktreeCleanupTarget = resolveWorktreeCleanupTarget;
-
     await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
 
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(childSessionId, true);
-    expect(repo.upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(childSessionId), {
+    expect(isSessionActive(childSessionId)).toBe(false);
+    expect(getSessionMeta(childSessionId)).toMatchObject({
       isArchived: true,
       status: SessionStatusFactory.idle(),
     });
-    expect(resolveWorktreeCleanupTarget).not.toHaveBeenCalled();
+  });
+
+  it('leaves a dirty session worktree untouched when removing its local project', async () => {
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-project-removal-worktree-'));
+    const originalDataDir = process.env.LODY_DATA_DIR;
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    try {
+      process.env.LODY_DATA_DIR = path.join(testDir, 'data');
+      process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
+      const rootPath = createLocalRepo(testDir);
+      const localProjectId = 'local-project-worktree' as LocalProjectId;
+      const sessionId = 'session-project-worktree' as SessionId;
+      const manager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(rootPath),
+        source: { kind: 'local-shared', originalRootPath: rootPath },
+        logger: createSilentLogger(),
+      });
+      const worktree = await manager.createWorktree(sessionId);
+      const dirtyPath = path.join(worktree.hostPath, 'dirty.txt');
+      fs.writeFileSync(dirtyPath, 'preserve me\n', 'utf8');
+
+      const { handler } = createHarness({
+        sessionId,
+        sessionMetas: [
+          {
+            id: sessionId,
+            machineId: 'machine-1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            userId: 'user-1',
+            cliType: 'codex',
+            agentType: 'codex',
+            status: SessionStatusFactory.idle(),
+            project: { kind: 'local', localProjectId },
+            isWorktree: true,
+            branchName: worktree.branch,
+          } as SessionMeta,
+        ],
+        includeLegacySessionDeleteRequest: false,
+        localProjectRootPaths: { [localProjectId]: rootPath },
+        machineFlockRows: [
+          {
+            key: machineFlockKeys.localProject(localProjectId),
+            value: {
+              id: localProjectId,
+              name: 'Project',
+              rootPath,
+              createdAtMs: 1,
+            },
+          },
+        ],
+      });
+
+      await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
+
+      expect(fs.readFileSync(dirtyPath, 'utf8')).toBe('preserve me\n');
+      expect(fs.existsSync(worktree.hostPath)).toBe(true);
+    } finally {
+      if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = originalDataDir;
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps the project and delete command when session archival fails, then retries', async () => {

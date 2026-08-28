@@ -30,12 +30,11 @@ export function shouldApplyMachineDeleteLocalProjectCommand(
   return project.createdAtMs <= command.requestedAt;
 }
 
-export function shouldArchiveSessionForLocalProjectRemoval(
-  session: Pick<SessionMeta, 'isArchived' | 'machineId' | 'project'>,
+export function isSessionInLocalProjectRemovalScope(
+  session: Pick<SessionMeta, 'machineId' | 'project'>,
   target: { machineId: MachineId; localProjectId: LocalProjectId }
 ): boolean {
   return (
-    session.isArchived !== true &&
     session.machineId === target.machineId &&
     session.project?.kind === 'local' &&
     session.project.localProjectId === target.localProjectId
