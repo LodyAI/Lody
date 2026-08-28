@@ -1389,6 +1389,11 @@ export class MessageHandler {
         this.logger.debug(
           `[${sessionId}] Failed to upload Codex generated image (callId=${callId} path=${savedPath ?? 'none'}): ${formatErrorMessage(error)}`
         );
+        void this.recordAgentWarning(sessionId, {
+          message:
+            'Codex generated an image, but it could not be attached to the conversation.',
+          source: 'imageGeneration',
+        });
         if (isTerminal) {
           state.imageGenerationTurnIds.delete(callId);
         }

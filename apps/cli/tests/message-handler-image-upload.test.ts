@@ -331,6 +331,69 @@ describe('MessageHandler image upload flow', () => {
     expect(harness.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
   });
 
+  it('records a user-visible warning when a Codex generated image cannot be uploaded', async () => {
+    const harness = createHarness();
+    handlers.push(harness.handler);
+
+    const sessionId = 'session-1' as SessionId;
+    const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
+      sessionId
+    );
+    await (
+      harness.host.createAssistantEntryForTurn as (
+        sessionId: SessionId,
+        sessionDoc: TestHarness['sessionDoc'],
+        turnId: string,
+        modelInfo: undefined
+      ) => Promise<void>
+    )(sessionId, harness.sessionDoc, turnId, undefined);
+
+    (harness.host.handleImageGenerationBegin as (sessionId: SessionId, event: unknown) => void)(
+      sessionId,
+      {
+        acpSessionId: 'acp-1',
+        callId: 'ig-fail',
+      }
+    );
+
+    vi.spyOn(harness.host, 'validateSessionImageUploadPath').mockRejectedValue(
+      new Error('cloud_attachment_upload_unavailable')
+    );
+
+    (harness.host.handleImageGenerationEnd as (sessionId: SessionId, event: unknown) => void)(
+      sessionId,
+      {
+        acpSessionId: 'acp-1',
+        callId: 'ig-fail',
+        status: 'completed',
+        savedPath: '/tmp/codex-image.png',
+      }
+    );
+    await (harness.host.flushCodexGeneratedImageUploads as (sessionId: SessionId) => Promise<void>)(
+      sessionId
+    );
+
+    await vi.waitFor(() => {
+      expect(
+        harness.history.some((entry) =>
+          (entry.items as MessageContent[] | undefined)?.some(
+            (item) =>
+              item?.type === 'system_notice' &&
+              item.name === 'agent_warning' &&
+              (item.meta as { message?: string } | undefined)?.message?.includes(
+                'could not be attached'
+              )
+          )
+        )
+      ).toBe(true);
+    });
+    expect(
+      harness.history.some((entry) =>
+        (entry.items as MessageContent[] | undefined)?.some((item) => item?.type === 'image_group')
+      )
+    ).toBe(false);
+  });
+
   it('uploads completed-only Codex inline images without persisting base64', async () => {
     const harness = createHarness();
     handlers.push(harness.handler);
