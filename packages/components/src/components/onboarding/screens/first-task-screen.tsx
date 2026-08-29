@@ -15,30 +15,33 @@ import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import type { DesktopOnboardingProjectSelection } from '@/atoms/onboarding';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { buildAgentPrompt } from '@/lib';
 import { cn } from '@/lib/utils';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { Textarea } from '@/ui/textarea';
+import { getFirstTaskPrimaryAction } from '../first-task-primary-action';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 
 export function FirstTaskScreen({
   agentConfigId,
   project,
   onBack,
+  onContinue,
   onSessionStarted,
 }: {
   agentConfigId: string;
   project: DesktopOnboardingProjectSelection;
   onBack: () => void;
+  onContinue: () => void;
   onSessionStarted: (input: { sessionId: string; workspaceSlug: string }) => void;
 }) {
   const { t } = useTranslation();
   const user = useAtomValue(userAtom);
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const resolvedWorkspaceSlug = workspaceSlug ?? runtime?.workspaceSlug ?? null;
   const configs = useAtomValue(getAllAgentConfigAtom);
   const { startSession, requestSessionDispatch } = useSessionActions();
   const config: AgentConfigMeta | null = useMemo(
@@ -56,19 +59,33 @@ export function FirstTaskScreen({
   const [prompt, setPrompt] = useState(seedPrompts[0] ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canRun =
+  const canStartFirstTask =
     project.kind === 'local' &&
     config !== null &&
     config.machineId === project.machineId &&
     runtime !== null &&
     user !== null &&
-    workspaceId !== null &&
-    workspaceSlug !== null &&
-    !submitting &&
-    prompt.trim().length > 0;
+    resolvedWorkspaceSlug !== null;
+  const hasPrompt = prompt.trim().length > 0;
+  const canCreateSession = canStartFirstTask && hasPrompt;
+  const primaryAction = getFirstTaskPrimaryAction({
+    canStartFirstTask,
+    hasPrompt,
+    submitting,
+    startFailed: error !== null,
+  });
 
   const handleSubmit = useCallback(() => {
-    if (!canRun || project.kind !== 'local' || !config || !user || !workspaceSlug) return;
+    if (
+      !canCreateSession ||
+      submitting ||
+      project.kind !== 'local' ||
+      !config ||
+      !user ||
+      !resolvedWorkspaceSlug
+    ) {
+      return;
+    }
     const trimmedPrompt = prompt.trim();
     setSubmitting(true);
     setError(null);
@@ -104,43 +121,60 @@ export function FirstTaskScreen({
           },
           entry
         );
-        await requestSessionDispatch(result.sessionId, result.historyEntry.id, {
+        // The Session and its first turn are already durable. Dispatch is only
+        // acceleration; normal recovery can pick up the pointer if this request
+        // fails, so it must not turn a successful first Session into a failure.
+        void requestSessionDispatch(result.sessionId, result.historyEntry.id, {
           inputConfig: result.historyEntry.inputConfig,
           machineId: project.machineId,
+        }).catch((dispatchError: unknown) => {
+          console.error('Failed to accelerate the first onboarding session', dispatchError);
         });
-        onSessionStarted({ sessionId: result.sessionId, workspaceSlug });
+        onSessionStarted({ sessionId: result.sessionId, workspaceSlug: resolvedWorkspaceSlug });
       } catch (submitError) {
         console.error('Failed to start the first onboarding session', submitError);
         setError(
           t(
             'onboarding.firstTask.startFailed',
-            'The session could not start. Check the agent and try again.'
+            'The session could not start. Enter Lody and finish setup from Settings.'
           )
         );
         setSubmitting(false);
       }
     })();
   }, [
-    canRun,
+    canCreateSession,
     config,
     onSessionStarted,
     project,
     prompt,
     requestSessionDispatch,
+    resolvedWorkspaceSlug,
     startSession,
+    submitting,
     t,
     user,
-    workspaceSlug,
   ]);
 
   return (
     <OnboardingShell
       stepKey="firstTask"
-      title={t('onboarding.firstTask.title', 'Start your first session')}
-      description={t(
-        'onboarding.firstTask.description',
-        'This creates a real session against the project and agent you selected.'
-      )}
+      title={
+        primaryAction.kind === 'run'
+          ? t('onboarding.firstTask.title', 'Start your first session')
+          : t('onboarding.firstTask.continueTitle', 'Continue to Lody')
+      }
+      description={
+        primaryAction.kind === 'run'
+          ? t(
+              'onboarding.firstTask.description',
+              'This creates a real session against the project and agent you selected.'
+            )
+          : t(
+              'onboarding.firstTask.continueDescription',
+              'Your first task is not ready yet. You can finish setup later from Settings.'
+            )
+      }
       previewIdentity={{
         projectName: project.name,
         ...(config
@@ -161,10 +195,14 @@ export function FirstTaskScreen({
       primaryAction={
         <OnboardingNextButton
           finish
-          onClick={handleSubmit}
-          disabled={!canRun}
-          loading={submitting}
-          label={t('onboarding.firstTask.run', 'Run first task')}
+          onClick={primaryAction.kind === 'run' ? handleSubmit : onContinue}
+          disabled={primaryAction.disabled}
+          loading={primaryAction.loading}
+          label={
+            primaryAction.kind === 'run'
+              ? t('onboarding.firstTask.run', 'Run first task')
+              : t('onboarding.firstTask.enter', 'Enter Lody')
+          }
         />
       }
     >

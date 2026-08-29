@@ -3,9 +3,11 @@ import { CheckCircle2 } from 'lucide-react';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 
 export function SummaryScreen({
+  hasAgent,
   onBack,
   onComplete,
 }: {
+  hasAgent: boolean;
   onBack: () => void;
   onComplete: () => void;
 }) {
@@ -13,17 +15,32 @@ export function SummaryScreen({
   return (
     <OnboardingShell
       stepKey="summary"
-      title={t('onboarding.summary.title', 'Lody is ready')}
-      description={t(
-        'onboarding.summary.description',
-        'You can add providers and projects later from Settings.'
-      )}
+      title={
+        hasAgent
+          ? t('onboarding.summary.title', 'Lody is ready')
+          : t('onboarding.summary.exploreTitle', 'Explore Lody')
+      }
+      description={
+        hasAgent
+          ? t(
+              'onboarding.summary.description',
+              'You can add providers and projects later from Settings.'
+            )
+          : t(
+              'onboarding.summary.exploreDescription',
+              'Enter Lody now and connect a coding agent from Settings when you are ready.'
+            )
+      }
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <OnboardingNextButton
           finish
           onClick={onComplete}
-          label={t('onboarding.summary.open', 'Open Lody')}
+          label={
+            hasAgent
+              ? t('onboarding.summary.open', 'Open Lody')
+              : t('onboarding.summary.enter', 'Enter Lody')
+          }
         />
       }
     >

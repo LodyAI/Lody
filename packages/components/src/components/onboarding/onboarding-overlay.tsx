@@ -135,12 +135,14 @@ export function OnboardingOverlay({
           agentConfigId={draft.agentConfigId}
           project={draft.project}
           onBack={() => advanceTo('projects')}
+          onContinue={() => onCompleted({})}
           onSessionStarted={onCompleted}
         />
       ) : null,
     summary: (
       <SummaryScreen
         key="summary"
+        hasAgent={draft.agentConfigId !== null}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => onCompleted({})}
       />
