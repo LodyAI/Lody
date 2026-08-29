@@ -217,4 +217,10 @@ arrive: context/message-flow.md "Upstream".
   branch-name work reuses one in-flight result. The shared
   `usesAcpProvidedSessionTitle()` predicate hides obsolete provider title
   settings only for Claude. Other providers use `title-generator.ts` /
-  `response-utils.ts` for session titles.
+  `response-utils.ts` for session titles. Title-generation config values are
+  sparse explicit overrides: an absent model keeps the ACP session's provider
+  default, because ACP option ordering carries no cost or preference semantics.
+  Runtime defaults may lower only recognized permission and reasoning values;
+  unknown vocabularies stay provider-owned. An unavailable persisted override
+  remains stored for UI compatibility, but it must not suppress a recognized
+  safe runtime default for the same option.

@@ -2391,6 +2391,8 @@
   "settings.agent.dialog.testCapabilitiesShort": "测试",
   "settings.agent.dialog.title.create": "新建 Provider",
   "settings.agent.dialog.title.edit": "编辑 {{name}}",
+  "settings.agent.dialog.titleGenerationAutomaticValue": "自动（{{value}}）",
+  "settings.agent.dialog.titleGenerationUnavailableValue": "不可用（{{value}}）",
   "settings.agent.machineTabs.filter.label": "过滤机器",
   "settings.agent.machineTabs.filter.mine": "我的机器",
   "settings.agent.machineTabs.filter.noMatch": "没有机器符合这些筛选条件。",

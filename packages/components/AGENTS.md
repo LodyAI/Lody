@@ -244,7 +244,10 @@ mobile surfaces.
   raw HTML off. The website is only the no-notes fallback, through `getChangelogUrl`
   and `openExternalUrl`, never a hardcoded link.
 - Agent configuration: `settings/agent-config-dialog.tsx` and
-  `settings/env-vars-textarea.tsx`.
+  `settings/env-vars-textarea.tsx`. Title-generation config is a sparse set of
+  explicit overrides. Automatic values are display-only and an unrelated Save
+  must not persist them or rewrite an unavailable legacy selection; selecting
+  Automatic removes that key.
 - Codex reset forecast: `components/codex-reset/` + `lib/codex-reset-forecast*.ts`.
   A public unauthenticated GET to the third-party `codex-resets.com`, cached in ONE
   module-level store (`lib/codex-reset-forecast-store.ts`) that every surface shares.

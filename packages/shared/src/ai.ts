@@ -966,25 +966,43 @@ export function getBuiltinTitleGenerationDefaults(
   return undefined;
 }
 
-const leastPermissionModeRank = (value: string, name: string): number => {
-  const normalized = `${value} ${name}`.toLowerCase().replace(/[\s_-]+/g, '-');
-  if (normalized.includes('read-only') || normalized.includes('readonly')) return 0;
-  if (normalized.includes('ask')) return 1;
-  if (normalized.includes('plan')) return 2;
-  if (normalized.includes('auto') || normalized.includes('default')) return 3;
-  return 50;
+const normalizeTitleConfigAlias = (candidate: string): string =>
+  candidate
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
+
+const rankExactAlias = (
+  value: string,
+  name: string,
+  rankedAliases: ReadonlyArray<ReadonlySet<string>>
+): number => {
+  const aliases = [normalizeTitleConfigAlias(value), normalizeTitleConfigAlias(name)];
+  const rank = rankedAliases.findIndex((ranked) => aliases.some((alias) => ranked.has(alias)));
+  return rank === -1 ? 50 : rank;
 };
 
-const reasoningEffortRank = (value: string, name: string): number => {
-  const normalized = `${value} ${name}`.toLowerCase().replace(/[\s_-]+/g, '-');
-  if (normalized.includes('none')) return 0;
-  if (normalized.includes('minimal')) return 1;
-  if (normalized.includes('low')) return 2;
-  if (normalized.includes('medium')) return 3;
-  if (normalized.includes('xhigh') || normalized.includes('extra-high')) return 5;
-  if (normalized.includes('high')) return 4;
-  return 50;
-};
+const PERMISSION_MODE_ALIASES = [
+  new Set(['read-only', 'readonly']),
+  new Set(['ask', 'ask-first', 'ask-before-edits', 'ask-before-tools']),
+  new Set(['plan', 'planning']),
+  new Set(['auto', 'default']),
+] as const;
+
+const REASONING_EFFORT_ALIASES = [
+  new Set(['none', 'off', 'disabled']),
+  new Set(['minimal']),
+  new Set(['low']),
+  new Set(['medium']),
+  new Set(['high']),
+  new Set(['xhigh', 'x-high', 'extra-high']),
+] as const;
+
+const leastPermissionModeRank = (value: string, name: string): number =>
+  rankExactAlias(value, name, PERMISSION_MODE_ALIASES);
+
+const reasoningEffortRank = (value: string, name: string): number =>
+  rankExactAlias(value, name, REASONING_EFFORT_ALIASES);
 
 const selectByLowestRank = (
   options: AcpConfigOptionValueSummary[],
@@ -994,7 +1012,7 @@ const selectByLowestRank = (
   let selectedRank = Number.POSITIVE_INFINITY;
   for (const option of options) {
     const optionRank = rank(option.value, option.name);
-    if (optionRank < selectedRank) {
+    if (optionRank < 50 && optionRank < selectedRank) {
       selected = option;
       selectedRank = optionRank;
     }
@@ -1003,11 +1021,11 @@ const selectByLowestRank = (
 };
 
 /**
- * Computes runtime title-generation configOptionValues from current ACP capabilities.
+ * Computes sparse runtime title-generation overrides from current ACP capabilities.
  *
- * These are not agent-specific hardcoded defaults. When the user has not configured title
- * generation, choose the least-privileged mode, the last listed model, and the smallest
- * reasoning effort from the agent's current configOptions.
+ * Model ordering has no ACP-defined meaning, so an unconfigured model stays at the provider's
+ * current value. Recognized mode and reasoning options may be reduced for this isolated,
+ * terminal-disabled housekeeping session. Unknown vocabularies are left unchanged.
  */
 export function computeTitleGenerationDefaults(
   _cliType: AgentConfigCliType,
@@ -1021,13 +1039,17 @@ export function computeTitleGenerationDefaults(
     }
 
     if (opt.category === 'model') {
-      const lastOption = opt.options.length > 0 ? opt.options[opt.options.length - 1] : undefined;
-      defaults[opt.id] = lastOption?.value ?? opt.currentValue;
+      continue;
     } else if (opt.category === 'mode') {
-      defaults[opt.id] =
-        selectByLowestRank(opt.options, leastPermissionModeRank) ?? opt.currentValue;
+      const mode = selectByLowestRank(opt.options, leastPermissionModeRank);
+      if (mode !== undefined) {
+        defaults[opt.id] = mode;
+      }
     } else if (opt.id === 'reasoning_effort' || opt.category === 'thought_level') {
-      defaults[opt.id] = selectByLowestRank(opt.options, reasoningEffortRank) ?? opt.currentValue;
+      const reasoningEffort = selectByLowestRank(opt.options, reasoningEffortRank);
+      if (reasoningEffort !== undefined) {
+        defaults[opt.id] = reasoningEffort;
+      }
     }
   }
   return defaults;
