@@ -461,6 +461,7 @@ export const DraftSessionChatInterface = memo(
             isAgentBusy={false}
             isDark={isDark}
             isEmptyConversation={true}
+            commandsEnabled={commandsEnabled}
             selectedModeId={selectedModeId}
             selectedModelId={selectedModelId}
             modeOptions={modeOptions}

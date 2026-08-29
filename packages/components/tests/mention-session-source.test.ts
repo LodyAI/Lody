@@ -7,6 +7,9 @@ import {
   buildSessionMentionItems,
   buildSessionMentionSlug,
   buildSessionMentionRewrites,
+  filterSessionMentionItemsByProject,
+  getMentionSourceProjectKey,
+  getSessionMentionProjectKey,
   hydrateSessionMentionsFromText,
   rememberSessionMentionSlugs,
   resolveSessionMentionIds,
@@ -91,6 +94,96 @@ describe('buildSessionMentionItems', () => {
   });
 });
 
+describe('session mention project scope', () => {
+  it('includes the machine in a local project identity', () => {
+    const first = session({
+      id: 'first',
+      machineId: 'machine-a',
+      project: { kind: 'local', localProjectId: 'project-1' },
+    });
+    const second = session({
+      id: 'second',
+      machineId: 'machine-b',
+      project: { kind: 'local', localProjectId: 'project-1' },
+    });
+
+    expect(getSessionMentionProjectKey(first)).toBe('local:machine-a:project-1');
+    expect(getSessionMentionProjectKey(second)).toBe('local:machine-b:project-1');
+    expect(
+      getMentionSourceProjectKey({
+        kind: 'local',
+        machineId: 'machine-a',
+        workspaceId: 'workspace-1',
+        localProjectId: 'project-1',
+      })
+    ).toBe('local:machine-a:project-1');
+    expect(
+      getMentionSourceProjectKey({
+        kind: 'provider',
+        localProject: { machineId: 'machine-a', localProjectId: 'project-1' },
+        githubRepoFullName: 'lodyai/lody',
+      })
+    ).toBe('local:machine-a:project-1');
+  });
+
+  it('normalizes GitHub repos and prefers the structured project', () => {
+    expect(
+      getSessionMentionProjectKey(
+        session({
+          id: 'structured',
+          project: { kind: 'github', repoFullName: ' LodyAI/Lody ', branch: 'main' },
+          repoFullName: 'legacy/wrong',
+        })
+      )
+    ).toBe('github:lodyai/lody');
+    expect(getMentionSourceProjectKey({ kind: 'github', repoFullName: ' lodyai/LODY ' })).toBe(
+      'github:lodyai/lody'
+    );
+  });
+
+  it('falls back to the legacy repo and groups projectless chats together', () => {
+    expect(getSessionMentionProjectKey(session({ id: 'legacy', repoFullName: ' Org/Repo ' }))).toBe(
+      'github:org/repo'
+    );
+    expect(getSessionMentionProjectKey(session({ id: 'chat' }))).toBe('chat');
+    expect(getMentionSourceProjectKey(undefined)).toBe('chat');
+  });
+
+  it('filters only current-project candidates and keeps all scope recency order', () => {
+    const items = buildSessionMentionItems(
+      [
+        session({
+          id: 'local-a',
+          machineId: 'm1',
+          lastMessageAt: 40,
+          project: { kind: 'local', localProjectId: 'p1' },
+        }),
+        session({
+          id: 'local-other-machine',
+          machineId: 'm2',
+          lastMessageAt: 30,
+          project: { kind: 'local', localProjectId: 'p1' },
+        }),
+        session({ id: 'github', lastMessageAt: 20, repoFullName: 'org/repo' }),
+        session({ id: 'chat', lastMessageAt: 10 }),
+      ],
+      null
+    );
+
+    expect(
+      filterSessionMentionItemsByProject(items, 'local:m1:p1', 'current').map(
+        (item) => item.sessionId
+      )
+    ).toEqual(['local-a']);
+    expect(
+      filterSessionMentionItemsByProject(items, 'local:m1:p1', 'all').map((item) => item.sessionId)
+    ).toEqual(['local-a', 'local-other-machine', 'github', 'chat']);
+    expect(
+      filterSessionMentionItemsByProject(items, 'chat', 'current').map((item) => item.sessionId)
+    ).toEqual(['chat']);
+  });
+});
+
 describe('buildSessionMentionRewrites', () => {
   const range = (start: number, end: number, value = 'ses_7f3ac91b') => ({
     start,
@@ -117,9 +210,9 @@ describe('buildSessionMentionRewrites', () => {
 
   it('ignores ranges of other kinds', () => {
     const text = 'look at @src/a.ts';
-    expect(buildSessionMentionRewrites(text, [{ start: 8, end: 17, kind: 'file', value: 'a' }])).toEqual(
-      []
-    );
+    expect(
+      buildSessionMentionRewrites(text, [{ start: 8, end: 17, kind: 'file', value: 'a' }])
+    ).toEqual([]);
   });
 
   it('expands every range', () => {

@@ -48,6 +48,8 @@ export type MentionProjectSource =
       provider?: FileWorkspaceProvider | null;
       providerPending?: boolean;
       providerMessage?: string;
+      /** Project identity retained when a live provider serves a local Session workspace. */
+      localProject?: { machineId: MachineId; localProjectId: LocalProjectId };
       githubRepoFullName?: string;
       isPublic?: boolean;
     };

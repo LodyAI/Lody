@@ -34,6 +34,11 @@ describe('built-in commands', () => {
     expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
     // Cyclers with no default binding stay rebindable from the settings page.
     expect(commands.getDefaultKeybindingsFor('session.cycleProvider')).toEqual([]);
+    expect(commands.getDefaultKeybindingsFor('mention.toggleSessionProjectScope')).toEqual([]);
+    expect(commands.get('mention.toggleSessionProjectScope')?.title).toBe(
+      'Toggle Session Mention Project Scope'
+    );
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
     expect(commands.execute('session.archiveCurrent')).toBe(false);
   });
 

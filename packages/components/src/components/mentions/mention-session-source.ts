@@ -9,6 +9,8 @@ import type { TextRewrite } from '@lody/shared';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import { getEffectiveLatestMessageAt } from '@/components/sessions/session-list-rows';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
+import { resolveSessionRepoFullName } from '@/lib/session-repo';
+import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 
 /**
  * Session mention — the one type whose displayed text is not what the agent
@@ -39,8 +41,12 @@ export type SessionMentionItem = {
   title: string;
   /** Recency key used for ordering. */
   activityAt: number;
-  projectLabel?: string;
+  /** Internal identity used only to derive the menu's current-project candidates. */
+  projectKey: SessionMentionProjectKey;
 };
+
+export type SessionMentionProjectKey = `local:${string}:${string}` | `github:${string}` | 'chat';
+export type SessionMentionProjectScope = 'current' | 'all';
 
 function normalizeTitle(title: string | undefined): string {
   return (title ?? '').trim();
@@ -66,13 +72,46 @@ export function buildSessionMentionSlug(title: string | undefined, sessionId: st
   return Array.from(normalized).slice(0, MAX_SLUG_LENGTH).join('');
 }
 
-/** Repo the session belongs to, or nothing — `project.kind` is not a label. */
-function getProjectLabel(session: SessionMeta): string | undefined {
-  const project = session.project;
-  if (project?.kind === 'local') {
-    return project.githubRepoFullName ?? session.repoFullName ?? undefined;
+function githubProjectKey(repoFullName: string | undefined): SessionMentionProjectKey {
+  const normalized = repoFullName?.trim().toLowerCase();
+  return normalized ? `github:${normalized}` : 'chat';
+}
+
+/** Stable project identity for grouping session candidates. */
+export function getSessionMentionProjectKey(
+  session: Pick<SessionMeta, 'machineId' | 'project' | 'repoFullName'>
+): SessionMentionProjectKey {
+  if (session.project?.kind === 'local') {
+    return `local:${session.machineId}:${session.project.localProjectId}`;
   }
-  return session.repoFullName ?? undefined;
+  return githubProjectKey(resolveSessionRepoFullName(session));
+}
+
+/** Project identity of the composer, including landing composers without a Session yet. */
+export function getMentionSourceProjectKey(
+  source: MentionProjectSource | undefined
+): SessionMentionProjectKey {
+  if (source?.kind === 'local') {
+    return `local:${source.machineId}:${source.localProjectId}`;
+  }
+  if (source?.kind === 'github') return githubProjectKey(source.repoFullName);
+  if (source?.kind === 'provider') {
+    return source.localProject
+      ? `local:${source.localProject.machineId}:${source.localProject.localProjectId}`
+      : githubProjectKey(source.githubRepoFullName);
+  }
+  return 'chat';
+}
+
+/** Filter only the menu candidates; callers retain the complete item list for addressing. */
+export function filterSessionMentionItemsByProject(
+  items: readonly SessionMentionItem[],
+  currentProjectKey: SessionMentionProjectKey,
+  scope: SessionMentionProjectScope
+): SessionMentionItem[] {
+  return scope === 'all'
+    ? [...items]
+    : items.filter((item) => item.projectKey === currentProjectKey);
 }
 
 /**
@@ -111,7 +150,7 @@ export function buildSessionMentionItems(
       sessionId: session.id,
       title: normalizeTitle(session.title),
       activityAt,
-      projectLabel: getProjectLabel(session),
+      projectKey: getSessionMentionProjectKey(session),
     });
   }
   return items;

@@ -403,6 +403,8 @@ export interface SessionChatInputAreaProps {
   isRepoPublic?: boolean;
   /** Available slash commands from the ACP agent. */
   availableCommands?: AcpCommandSummary[];
+  /** False while this retained composer is hidden behind another session tab. */
+  commandsEnabled?: boolean;
   freeTurnLimitNotice?: {
     current: number;
     limit: number;
@@ -474,6 +476,7 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       isRepoPublic,
       availableCommands,
+      commandsEnabled = true,
       freeTurnLimitNotice,
       queueDisplay,
       mcp,
@@ -1949,6 +1952,13 @@ export const SessionChatInputArea = memo(
           provider: codeCollabMentionFiles.provider,
           providerPending: codeCollabMentionFilesPending,
           providerMessage: codeCollabMentionFiles.message,
+          localProject:
+            session.project?.kind === 'local'
+              ? {
+                  machineId: session.machineId,
+                  localProjectId: session.project.localProjectId,
+                }
+              : undefined,
           githubRepoFullName: repoFullName || undefined,
           isPublic: isRepoPublic,
         };
@@ -2315,6 +2325,7 @@ export const SessionChatInputArea = memo(
         variant="session"
         mentionSource={isArchived ? undefined : mentionSource}
         availableCommands={isArchived ? undefined : availableCommands}
+        commandsEnabled={commandsEnabled}
         skillAgent={skillAgent}
         currentSessionId={session.id}
         promptRef={textareaRef}

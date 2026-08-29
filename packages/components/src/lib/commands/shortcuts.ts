@@ -29,6 +29,7 @@ export type ShortcutCommandId =
   | 'session.cycleProvider'
   | 'session.cycleModel'
   | 'session.cycleThinkEffort'
+  | 'mention.toggleSessionProjectScope'
   | 'tasks.quickAdd'
   | 'tasks.open';
 
@@ -90,6 +91,7 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.cycleProvider': [],
   'session.cycleModel': [],
   'session.cycleThinkEffort': [],
+  'mention.toggleSessionProjectScope': [],
   'tasks.quickAdd': ['$mod+Alt+t'],
   'tasks.open': [],
 };

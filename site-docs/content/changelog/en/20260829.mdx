@@ -1,0 +1,22 @@
+---
+title: '20260829'
+version: 0.88.1
+date: 2026-08-29
+description: Added project-scoped session mentions and required machine selection before choosing an Agent, and fixed child-tab message delivery, overlapping panels, onboarding data isolation, terminal environment leakage, and missing translations.
+---
+
+Version 0.88.1
+
+### ✨ New
+
+- Session results in the `@` mention menu now default to the current project, with a temporary switch to all projects when needed, making relevant sessions easier to find ([#109](https://github.com/LodyAI/Lody/pull/109)).
+- Desktop now requires selecting a machine before an Agent can be chosen, with clearer guidance throughout the flow ([#151](https://github.com/LodyAI/Lody/pull/151)).
+
+### 🐛 Fixes and Improvements
+
+- Fixed an issue where the first message in a child tab could be dropped, remain stuck on "Syncing," or prevent the tab from closing ([#141](https://github.com/LodyAI/Lody/pull/141)).
+- Fixed overlap between side conversations and file or diff previews ([#135](https://github.com/LodyAI/Lody/pull/135)).
+- Improved data isolation in the desktop onboarding tour so the demo cannot accidentally access real workspace data ([#136](https://github.com/LodyAI/Lody/pull/136)).
+- Project terminals no longer inherit internal environment variables used by Electron startup and the credential proxy ([#122](https://github.com/LodyAI/Lody/pull/122)).
+- Completed English and Chinese translations for target status, task saving, and Windows Git diagnostics, and restored the missing Agent name ([#59](https://github.com/LodyAI/Lody/pull/59)).
+- Thanks to [@27Aaron](https://github.com/27Aaron), [@ImSingee](https://github.com/ImSingee), and [@natsustan](https://github.com/natsustan) for their public contributions to this release.

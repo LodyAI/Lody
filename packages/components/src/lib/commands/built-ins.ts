@@ -182,6 +182,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     title: 'Cycle Thinking Effort',
     category: 'Session',
   },
+  {
+    id: 'mention.toggleSessionProjectScope',
+    titleKey: 'commands.mention.toggleSessionProjectScope',
+    title: 'Toggle Session Mention Project Scope',
+    category: 'Editor',
+  },
 ];
 
 /**

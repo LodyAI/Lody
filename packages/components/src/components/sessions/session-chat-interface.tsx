@@ -5805,6 +5805,7 @@ export const SessionChatInterface = memo(
                       configOptionValues={configOptionValues}
                       isRepoPublic={isRepoPublic}
                       availableCommands={availableCommands}
+                      commandsEnabled={isVisible}
                       freeTurnLimitNotice={freeSessionTurnNotice}
                       queueDisplay={
                         messageQueue.length > 0 ? (

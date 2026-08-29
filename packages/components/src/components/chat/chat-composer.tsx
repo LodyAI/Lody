@@ -101,6 +101,8 @@ export interface ChatComposerProps {
   variant?: ChatComposerVariant;
   mentionSource?: MentionProjectSource;
   availableCommands?: AcpCommandSummary[];
+  /** False while this retained composer is not the active command surface. */
+  commandsEnabled?: boolean;
   /** Selected ACP provider — filters the `$` skill mention to that provider's
      skill directories. `machineId` is the machine the chat runs on; it lets the
      `$` menu surface that machine's global skills even for GitHub / plain-agent
@@ -230,6 +232,7 @@ export function ChatComposer({
   variant = 'landing',
   mentionSource,
   availableCommands,
+  commandsEnabled = true,
   skillAgent,
   currentSessionId,
   promptId,
@@ -872,6 +875,7 @@ export function ChatComposer({
                 ref={promptRef}
                 mentionSource={mentionSource}
                 availableCommands={availableCommands}
+                commandsEnabled={commandsEnabled}
                 skillAgent={skillAgent}
                 currentSessionId={currentSessionId}
                 value={promptValue}
@@ -973,6 +977,7 @@ export function ChatComposer({
               ref={promptRef}
               mentionSource={mentionSource}
               availableCommands={availableCommands}
+              commandsEnabled={commandsEnabled}
               skillAgent={skillAgent}
               currentSessionId={currentSessionId}
               value={promptValue}
