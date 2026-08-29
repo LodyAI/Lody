@@ -454,10 +454,14 @@ Session conversation page chain:
   the composer), never from the resolved outcome in history: this selection is
   per-device local state, so a history-derived signal would unset plan mode for
   a teammate who just armed it, and would fire again for an OLD approval
-  replaying as the session doc syncs. The pending click is consumed exactly once
-  by the `SessionChatInterface` that owns the composer, only after its selection
-  has reconciled and a non-Plan state is observed; the desktop's duplicate
-  header-only instance must not claim it. Every interactive permission surface
+  replaying as the session doc syncs. The pending click survives composer
+  remounts in tab-local, session-scoped state: after selection reconciliation,
+  the `SessionChatInterface` that owns the composer keeps reapplying the exit
+  until a non-Plan user turn is accepted and carries that choice durably, or
+  until the user explicitly re-arms Plan. Capture the approval revision when a
+  dispatch starts and consume only through that revision, so an approval raised
+  while it is in flight stays pending; the desktop's duplicate header-only
+  instance must not claim or clear it. Every interactive permission surface
   must call the notifier — there are two (`floating-permission-request.tsx` and
   the inline card in `../ai-gui/view.tsx`). Codex exits to
   `collaboration_mode=default`; mode-based agents exit to their default non-plan

@@ -391,7 +391,7 @@ import {
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
-import { useConsumePlanModeExitApproval } from '@/hooks/use-plan-mode-exit-approval';
+import { usePlanModeExitOverride } from '@/hooks/use-plan-mode-exit-approval';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 
@@ -2428,6 +2428,28 @@ export const SessionChatInterface = memo(
       dispatch: dispatchSessionConfigSelection,
     });
 
+    // Approving "Yes, implement this plan" changes only the RUNNING ACP turn.
+    // Keep a tab-local next-turn override in the instance that owns the
+    // composer (the desktop header mounts a second, header-only instance for
+    // the same session) until a non-Plan user turn makes it durable.
+    const {
+      onUserModeChange: handleUserModeChange,
+      onUserConfigOptionChange: handleUserConfigOptionChange,
+      acknowledgeAcceptedTurn: acknowledgePlanModeExitAcceptedTurn,
+    } = usePlanModeExitOverride({
+      enabled: !hideMessageArea,
+      selectionReady:
+        sessionConfigSelectionState.targetKey === sessionConfigTargetKey &&
+        sessionConfigSelectionState.preferenceRevision === sessionConversationConfigRevision,
+      sessionId: session.id,
+      selectedModeId,
+      modeOptions,
+      defaultModeId,
+      configOptionValues,
+      onModeChange: handleModeChange,
+      onConfigOptionChange: handleConfigOptionChange,
+    });
+
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
     const statusStripState = useMemo(
@@ -2463,7 +2485,7 @@ export const SessionChatInterface = memo(
         : {
             values: modeOptions.map((option) => option.value),
             current: selectedModeId,
-            onSelect: handleModeChange,
+            onSelect: handleUserModeChange,
           },
       model: hideMessageArea
         ? null
@@ -2480,7 +2502,8 @@ export const SessionChatInterface = memo(
                 typeof thinkEffortCurrent === 'string'
                   ? thinkEffortCurrent
                   : thinkEffortSelector.currentValue,
-              onSelect: (value) => handleConfigOptionChange(thinkEffortSelector.configId, value),
+              onSelect: (value) =>
+                handleUserConfigOptionChange(thinkEffortSelector.configId, value),
             }
           : null,
       provider: null,
@@ -3334,22 +3357,6 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
 
-    // Approving "Yes, implement this plan" changes only the RUNNING ACP turn.
-    // Consume the local approval in the instance that owns the composer (the
-    // desktop header mounts a second, header-only instance for the same session).
-    useConsumePlanModeExitApproval({
-      enabled: !hideMessageArea,
-      selectionReady:
-        sessionConfigSelectionState.targetKey === sessionConfigTargetKey &&
-        sessionConfigSelectionState.preferenceRevision === sessionConversationConfigRevision,
-      sessionId: session.id,
-      selectedModeId,
-      modeOptions,
-      defaultModeId,
-      configOptionValues,
-      onModeChange: handleModeChange,
-      onConfigOptionChange: handleConfigOptionChange,
-    });
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({
@@ -3759,6 +3766,15 @@ export const SessionChatInterface = memo(
         const turnModelId =
           options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
+        const acknowledgeAcceptedTurn = (accepted: boolean): boolean => {
+          if (accepted) {
+            acknowledgePlanModeExitAcceptedTurn({
+              modeId: turnModeId,
+              configOptionValues: turnConfigOptionValues,
+            });
+          }
+          return accepted;
+        };
         const forceDirect = options?.forceDirect === true;
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
@@ -3810,7 +3826,7 @@ export const SessionChatInterface = memo(
               queue_reason: submitRoute.reason,
             }
           );
-          return accepted;
+          return acknowledgeAcceptedTurn(accepted);
         }
 
         if (submitRoute.type === 'guide' && activeAssistantTurnId) {
@@ -3829,7 +3845,7 @@ export const SessionChatInterface = memo(
               duration_ms: getDurationSinceMs(startedAtMs),
             }
           );
-          return accepted;
+          return acknowledgeAcceptedTurn(accepted);
         }
 
         if (directDispatchInFlightRef.current) {
@@ -3858,9 +3874,10 @@ export const SessionChatInterface = memo(
           directDispatchInFlightRef.current = false;
           setInputActionState('ready');
         }
-        return accepted;
+        return acknowledgeAcceptedTurn(accepted);
       },
       [
+        acknowledgePlanModeExitAcceptedTurn,
         captureSessionEvent,
         configOptionValues,
         directDispatchInputBlocks,
@@ -5880,9 +5897,9 @@ export const SessionChatInterface = memo(
                       }
                       mcp={mcpSelection.menu}
                       skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
-                      onModeChange={handleModeChange}
+                      onModeChange={handleUserModeChange}
                       onModelChange={handleModelChange}
-                      onConfigOptionChange={handleConfigOptionChange}
+                      onConfigOptionChange={handleUserConfigOptionChange}
                       onSendMessage={handleSendMessage}
                       onStop={() => {
                         void handleStop();

@@ -11,8 +11,10 @@ import {
 } from '@lody/shared';
 
 import {
-  consumeObservedPlanModeExitApprovals,
-  planModeExitApprovalCountAtomFamily,
+  consumePlanModeExitApprovalsThrough,
+  hasPendingPlanModeExitApproval,
+  planModeExitApprovalStateAtomFamily,
+  raisePlanModeExitApproval,
 } from '@/atoms/plan-mode-exit';
 import { isPlanExitApproval, resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -30,7 +32,7 @@ type PermissionOption = NonNullable<ToolCallContent['permissionRequest']>['optio
  * (the floating card and the inline card inside the transcript).
  */
 export function usePlanModeExitApprovalNotifier(sessionId: SessionId) {
-  const bumpApprovalCount = useSetAtom(planModeExitApprovalCountAtomFamily(sessionId));
+  const raiseApproval = useSetAtom(planModeExitApprovalStateAtomFamily(sessionId));
 
   return useCallback(
     (
@@ -41,13 +43,13 @@ export function usePlanModeExitApprovalNotifier(sessionId: SessionId) {
       if (!isPlanExitApproval(toolCall, options, selectedOptionId)) {
         return;
       }
-      bumpApprovalCount((count) => count + 1);
+      raiseApproval(raisePlanModeExitApproval);
     },
-    [bumpApprovalCount]
+    [raiseApproval]
   );
 }
 
-type PlanModeExitApprovalConsumerOptions = {
+type PlanModeExitOverrideOptions = {
   enabled: boolean;
   selectionReady: boolean;
   sessionId: SessionId;
@@ -59,13 +61,26 @@ type PlanModeExitApprovalConsumerOptions = {
   onConfigOptionChange: (configId: string, value: AcpConfigOptionValue) => void;
 };
 
+type AcceptedTurnSelection = {
+  modeId: string | null;
+  configOptionValues: Readonly<Record<string, AcpConfigOptionValue>>;
+};
+
+export type PlanModeExitOverrideController = {
+  onUserModeChange: (modeId: string) => void;
+  onUserConfigOptionChange: (configId: string, value: AcpConfigOptionValue) => void;
+  acknowledgeAcceptedTurn: (selection: AcceptedTurnSelection) => void;
+};
+
 /**
- * Consume successful plan-exit approvals in the composer that owns the local
- * run-config selection. Codex carries Plan in `collaboration_mode`; Claude
- * carries it in the ACP permission mode. Both are local per-turn preferences,
- * so the adapter changing the running turn does not update the next send.
+ * Keep successful plan-exit approvals active in the composer that owns the
+ * local run-config selection. Codex carries Plan in `collaboration_mode`;
+ * Claude carries it in the ACP permission mode. Both are local per-turn
+ * preferences, so the adapter changing the running turn does not update the
+ * next send and a composer remount can otherwise restore the last durable Plan
+ * turn.
  */
-export function useConsumePlanModeExitApproval({
+export function usePlanModeExitOverride({
   enabled,
   selectionReady,
   sessionId,
@@ -75,13 +90,66 @@ export function useConsumePlanModeExitApproval({
   configOptionValues,
   onModeChange,
   onConfigOptionChange,
-}: PlanModeExitApprovalConsumerOptions): void {
-  const [pendingApprovalCount, setPendingApprovalCount] = useAtom(
-    planModeExitApprovalCountAtomFamily(sessionId)
+}: PlanModeExitOverrideOptions): PlanModeExitOverrideController {
+  const [approvalState, setApprovalState] = useAtom(planModeExitApprovalStateAtomFamily(sessionId));
+  const approvalPending = hasPendingPlanModeExitApproval(approvalState);
+  const observedApprovalRevision = approvalState.latestRevision;
+
+  const onUserModeChange = useCallback(
+    (modeId: string) => {
+      if (enabled && modeId === ACP_PLAN_PERMISSION_MODE_ID) {
+        // A newer explicit user choice wins over the retained exit approval.
+        setApprovalState((current) =>
+          consumePlanModeExitApprovalsThrough(current, current.latestRevision)
+        );
+      }
+      onModeChange(modeId);
+    },
+    [enabled, onModeChange, setApprovalState]
+  );
+
+  const onUserConfigOptionChange = useCallback(
+    (configId: string, value: AcpConfigOptionValue) => {
+      if (
+        enabled &&
+        configId === ACP_COLLABORATION_MODE_CONFIG_ID &&
+        value === ACP_COLLABORATION_MODE_PLAN_VALUE
+      ) {
+        // Clear before selecting Plan so the override effect cannot undo the
+        // user's re-arm on the following render.
+        setApprovalState((current) =>
+          consumePlanModeExitApprovalsThrough(current, current.latestRevision)
+        );
+      }
+      onConfigOptionChange(configId, value);
+    },
+    [enabled, onConfigOptionChange, setApprovalState]
+  );
+
+  const acknowledgeAcceptedTurn = useCallback(
+    ({ modeId, configOptionValues: acceptedConfigOptionValues }: AcceptedTurnSelection) => {
+      if (
+        !enabled ||
+        !approvalPending ||
+        modeId === ACP_PLAN_PERMISSION_MODE_ID ||
+        acceptedConfigOptionValues[ACP_COLLABORATION_MODE_CONFIG_ID] ===
+          ACP_COLLABORATION_MODE_PLAN_VALUE
+      ) {
+        return;
+      }
+
+      // The accepted non-Plan turn now carries the preference durably. Consume
+      // only the approvals observed when this dispatch started so a newer
+      // approval raised while it was in flight remains pending.
+      setApprovalState((current) =>
+        consumePlanModeExitApprovalsThrough(current, observedApprovalRevision)
+      );
+    },
+    [approvalPending, enabled, observedApprovalRevision, setApprovalState]
   );
 
   useEffect(() => {
-    if (!enabled || !selectionReady || pendingApprovalCount === 0) {
+    if (!enabled || !selectionReady || !approvalPending) {
       return;
     }
 
@@ -104,17 +172,10 @@ export function useConsumePlanModeExitApproval({
       onModeChange(nextModeId);
     }
 
-    if (codexPlanActive || nextModeId) {
-      // Observe the reconciled non-Plan selection on the next render before
-      // consuming. If either callback is a no-op, the approval stays pending.
-      return;
-    }
-
-    // Consume exactly the revision this effect observed. If another approval
-    // arrives while the handlers above run, its increment remains pending.
-    setPendingApprovalCount((current) =>
-      consumeObservedPlanModeExitApprovals(current, pendingApprovalCount)
-    );
+    // Deliberately keep the approval pending after the selector becomes
+    // non-Plan. The latest durable user turn can still say Plan, so a composer
+    // remount must be able to apply the same override again. The accepted-turn
+    // callback above owns consumption.
   }, [
     configOptionValues,
     defaultModeId,
@@ -122,9 +183,10 @@ export function useConsumePlanModeExitApproval({
     modeOptions,
     onConfigOptionChange,
     onModeChange,
-    pendingApprovalCount,
+    approvalPending,
     selectionReady,
     selectedModeId,
-    setPendingApprovalCount,
   ]);
+
+  return { onUserModeChange, onUserConfigOptionChange, acknowledgeAcceptedTurn };
 }

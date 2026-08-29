@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { consumeObservedPlanModeExitApprovals } from '../src/atoms/plan-mode-exit';
+import {
+  consumePlanModeExitApprovalsThrough,
+  createPlanModeExitApprovalState,
+  hasPendingPlanModeExitApproval,
+  raisePlanModeExitApproval,
+} from '../src/atoms/plan-mode-exit';
 import { isPlanExitApproval, resolveModeIdAfterPlanExit } from '../src/lib/plan-mode-exit';
 
 const PLAN_EXIT_OPTIONS = [
@@ -51,9 +56,27 @@ describe('plan mode exit', () => {
     expect(resolveModeIdAfterPlanExit([], null)).toBeNull();
   });
 
-  it('consumes only the approvals the composer observed', () => {
-    expect(consumeObservedPlanModeExitApprovals(2, 1)).toBe(1);
-    expect(consumeObservedPlanModeExitApprovals(1, 1)).toBe(0);
-    expect(consumeObservedPlanModeExitApprovals(1, 2)).toBe(0);
+  it('consumes only the approval revisions the composer observed', () => {
+    const first = raisePlanModeExitApproval(createPlanModeExitApprovalState());
+    const second = raisePlanModeExitApproval(first);
+    const consumedFirst = consumePlanModeExitApprovalsThrough(second, first.latestRevision);
+
+    expect(consumedFirst).toEqual({ latestRevision: 2, consumedRevision: 1 });
+    expect(hasPendingPlanModeExitApproval(consumedFirst)).toBe(true);
+    expect(consumePlanModeExitApprovalsThrough(consumedFirst, second.latestRevision)).toEqual({
+      latestRevision: 2,
+      consumedRevision: 2,
+    });
+  });
+
+  it('does not let an old dispatch consume an approval raised after a re-arm', () => {
+    const dispatched = raisePlanModeExitApproval(createPlanModeExitApprovalState());
+    const rearmed = consumePlanModeExitApprovalsThrough(dispatched, dispatched.latestRevision);
+    const approvedAgain = raisePlanModeExitApproval(rearmed);
+
+    expect(consumePlanModeExitApprovalsThrough(approvedAgain, dispatched.latestRevision)).toBe(
+      approvedAgain
+    );
+    expect(hasPendingPlanModeExitApproval(approvedAgain)).toBe(true);
   });
 });
