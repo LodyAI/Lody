@@ -691,4 +691,118 @@ describe('MessageHandler permission notifications', () => {
     expect(notifyPermissionRequested).not.toHaveBeenCalled();
     expect(sessionDoc.mirror.subscribe).not.toHaveBeenCalled();
   });
+
+  it('auto-approves tool permissions when the session run config opts out of prompts', async () => {
+    const logger = createSilentLogger();
+    const sessionId = 's-auto-approve' as SessionId;
+    const workspaceId = 'ws-auto-approve' as WorkspaceId;
+
+    let history: unknown[] = [
+      {
+        id: 'turn-auto',
+        role: 'assistant',
+        timestamp: new Date().toISOString(),
+        read: undefined,
+        userId: undefined,
+        items: [],
+        fileDiff: [],
+      },
+    ];
+    const sessionDoc = {
+      updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
+        history = updater(history);
+      }),
+      waitUntilSynced: vi.fn(async () => true),
+      setLastMessageAt: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      getMetaState: vi.fn(async () => ({ title: 'Auto session', userId: 'meta-user' })),
+      getHistory: vi.fn(async () => history),
+      mirror: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => ({ history }),
+      },
+    };
+
+    const workspaceDocument = {
+      sessions: new Map<SessionId, unknown>(),
+      repo: {
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        getDocMeta: vi.fn(async () => ({ meta: { needToArchiveSessions: {} } })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      isTransportConnected: vi.fn(() => true),
+      publishSessionPresence: vi.fn(),
+      clearSessionPresence: vi.fn(),
+    };
+
+    const sessionManager = {
+      on: vi.fn(),
+      setRequestPermissionHandler: vi.fn(),
+      hasSession: vi.fn(() => false),
+      terminateSession: vi.fn(),
+      archiveSession: vi.fn(),
+      cleanUp: vi.fn(),
+      setSessionError: vi.fn(),
+    };
+    const notifyPermissionRequested = vi.fn(async () => {});
+
+    const handler = new MessageHandler(
+      sessionManager as unknown as SessionManager,
+      workspaceDocument as unknown as LoroDocumentManager,
+      logger,
+      {
+        token: 't',
+        workspaceId,
+        workspaceSlug: 'ws-slug',
+        userId: 'device-owner',
+        machineId: 'm-1',
+        machineName: 'machine',
+        cliVersion: '0.0.0',
+        cloudPort: createTestCloudPort({
+          notifications: createNotificationPort({ notifyPermissionRequested }),
+        }),
+      }
+    );
+
+    const request: RequestPermissionRequest = {
+      sessionId,
+      options: [{ kind: 'allow_once', name: 'Allow once', optionId: 'opt1' }],
+      toolCall: { toolCallId: 'tc1', title: 'Execute shell', status: 'in_progress', kind: 'execute' },
+    };
+
+    const agentClient = {
+      getConfigOptions: () => [
+        {
+          id: 'permission_mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'always-approve',
+          name: 'Permission Mode',
+          description: '',
+          options: [],
+        },
+      ],
+    };
+
+    const host = handler as unknown as {
+      handleAgentPermissionRequest: (
+        sessionId: SessionId,
+        requestId: string,
+        request: RequestPermissionRequest,
+        model?: unknown,
+        agentClient?: typeof agentClient
+      ) => Promise<unknown>;
+    };
+
+    injectActivePresence(handler, sessionId);
+    await expect(
+      host.handleAgentPermissionRequest(sessionId, 'req-auto', request, undefined, agentClient)
+    ).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'opt1' },
+    });
+
+    expect(sessionDoc.setStatus).not.toHaveBeenCalled();
+    expect(notifyPermissionRequested).not.toHaveBeenCalled();
+    expect(sessionDoc.mirror.subscribe).not.toHaveBeenCalled();
+  });
 });

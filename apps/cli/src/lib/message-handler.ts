@@ -170,6 +170,8 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  shouldAutoApproveAcpToolPermission,
+  selectPermissionOptionId,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -3014,7 +3016,13 @@ export class MessageHandler {
       },
     });
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
-      this.handleAgentPermissionRequest(sessionId, requestId, request, agentClient?.currentModel)
+      this.handleAgentPermissionRequest(
+        sessionId,
+        requestId,
+        request,
+        agentClient?.currentModel,
+        agentClient
+      )
     );
     this.autoPromptRunner = new AutoPromptRunner({
       workspaceId: this.workspaceId,
@@ -8349,7 +8357,8 @@ export class MessageHandler {
     sessionId: SessionId,
     requestId: string,
     request: RequestPermissionRequest,
-    model?: ModelInfo
+    model?: ModelInfo,
+    agentClient?: AgentClient
   ): Promise<RequestPermissionResponse> {
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
@@ -8454,6 +8463,39 @@ export class MessageHandler {
         resolutionSource: 'unobservable',
       });
       return { outcome: { outcome: 'cancelled' } };
+    }
+
+    const configOptions = agentClient?.getConfigOptions() ?? [];
+    if (
+      shouldAutoApproveAcpToolPermission({
+        configOptions,
+        requestKind,
+      })
+    ) {
+      const optionId = selectPermissionOptionId(request.options, 'allow');
+      if (optionId) {
+        const outcome = { outcome: 'selected' as const, optionId };
+        try {
+          await updatePermissionOutcomeInHistory(doc, requestId, outcome, this.logger);
+          await doc.setLastMessageAt();
+        } catch (error) {
+          this.logger.error(
+            `[${sessionId}] Failed to auto-approve permission request ${requestId}: ${formatErrorMessage(
+              error
+            )}`
+          );
+        }
+        capturePermissionResolved('allow', {
+          resolutionSource: 'run_config_auto_approve',
+        });
+        this.logger.info(
+          `[${sessionId}] Auto-approved permission request ${requestId} from session run config`
+        );
+        return { outcome };
+      }
+      this.logger.warn(
+        `[${sessionId}] Session run config requested auto-approve but permission request ${requestId} had no allow option`
+      );
     }
 
     try {
