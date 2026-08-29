@@ -607,3 +607,104 @@ export function buildChatLandingPreSelectionKey({
 }: ChatLandingPreSelectionIntent): string {
   return `${context}|${machine}|${project}|${repo}|${projectSelectionKey}`;
 }
+
+/** Search-parameter contract of the `/$workspaceName/chat` route. */
+export type ChatLandingSearch = {
+  context?: 'local' | 'github' | 'chat';
+  machine?: string;
+  project?: string;
+  repo?: string;
+  resetDraftKey?: string;
+  /** Makes a repeated project-row selection a fresh composer intent. */
+  projectSelection?: string;
+};
+
+export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
+  return {
+    context:
+      search.context === 'local' || search.context === 'github' || search.context === 'chat'
+        ? search.context
+        : undefined,
+    machine: typeof search.machine === 'string' ? search.machine : undefined,
+    project: typeof search.project === 'string' ? search.project : undefined,
+    repo: typeof search.repo === 'string' ? search.repo : undefined,
+    resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
+    projectSelection:
+      typeof search.projectSelection === 'string' ? search.projectSelection : undefined,
+  };
+}
+
+/**
+ * `machineId:localProjectId` named by the current URL, or null. Shared by the
+ * sidebar's row highlight and by project-row activation, which uses it to pick
+ * push versus replace (see `buildChatLandingProjectSelectionNavigation`).
+ */
+export function getSelectedLocalProjectKey(
+  pathname: string,
+  workspaceSlug: string | null,
+  search?: Record<string, unknown>
+): string | null {
+  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
+  const normalizedPath =
+    workspaceSlug && pathname.startsWith(workspacePrefix)
+      ? pathname.slice(workspacePrefix.length) || '/'
+      : pathname;
+
+  const segments = normalizedPath.split('/').filter(Boolean);
+
+  // New route: /chat?context=local&machine=X&project=Y
+  if (
+    segments[0] === 'chat' &&
+    search?.context === 'local' &&
+    typeof search?.machine === 'string' &&
+    typeof search?.project === 'string'
+  ) {
+    return `${search.machine}:${search.project}`;
+  }
+
+  // Legacy route: /local/$machineId/$localProjectId
+  if (segments[0] !== 'local') return null;
+  const machineId = segments[1];
+  const localProjectId = segments[2];
+  if (!machineId || !localProjectId) return null;
+  return `${machineId}:${localProjectId}`;
+}
+
+export type ChatLandingProjectSelectionNavigation = {
+  search: {
+    context: 'local';
+    machine: string;
+    project: string;
+    projectSelection: string;
+  };
+  replace: boolean;
+};
+
+/**
+ * Navigation for one project-row activation. The nonce makes every activation
+ * a fresh composer intent, so re-activating the project the URL already names
+ * must REPLACE: pushing would stack visually identical history entries whose
+ * nonces make Back re-apply the selection instead of leaving the page.
+ */
+export function buildChatLandingProjectSelectionNavigation({
+  machineId,
+  localProjectId,
+  selectedLocalProjectKey,
+  now,
+}: {
+  machineId: string;
+  localProjectId: string;
+  /** From `getSelectedLocalProjectKey` over the current location. */
+  selectedLocalProjectKey: string | null;
+  now?: number;
+}): ChatLandingProjectSelectionNavigation {
+  return {
+    search: {
+      context: 'local',
+      machine: machineId,
+      project: localProjectId,
+      projectSelection: createChatLandingProjectSelectionKey(now),
+    },
+    replace: selectedLocalProjectKey === `${machineId}:${localProjectId}`,
+  };
+}

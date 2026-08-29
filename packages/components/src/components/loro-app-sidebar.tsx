@@ -129,7 +129,10 @@ import {
   getLatestPullRequestInfo,
   type SessionListScope,
 } from './sessions/session-list-rows';
-import { createChatLandingProjectSelectionKey } from './chat/chat-landing-derived';
+import {
+  buildChatLandingProjectSelectionNavigation,
+  getSelectedLocalProjectKey,
+} from './chat/chat-landing-derived';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   useLocalProjectRemovalResultNotifications,
@@ -472,37 +475,6 @@ function getSelectedSessionId(pathname: string, workspaceSlug: string | null): s
 
   const sessionId = segments[1];
   return sessionId ? sessionId : null;
-}
-
-function getSelectedLocalProjectKey(
-  pathname: string,
-  workspaceSlug: string | null,
-  search?: Record<string, unknown>
-): string | null {
-  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
-  const normalizedPath =
-    workspaceSlug && pathname.startsWith(workspacePrefix)
-      ? pathname.slice(workspacePrefix.length) || '/'
-      : pathname;
-
-  const segments = normalizedPath.split('/').filter(Boolean);
-
-  // New route: /chat?context=local&machine=X&project=Y
-  if (
-    segments[0] === 'chat' &&
-    search?.context === 'local' &&
-    typeof search?.machine === 'string' &&
-    typeof search?.project === 'string'
-  ) {
-    return `${search.machine}:${search.project}`;
-  }
-
-  // Legacy route: /local/$machineId/$localProjectId
-  if (segments[0] !== 'local') return null;
-  const machineId = segments[1];
-  const localProjectId = segments[2];
-  if (!machineId || !localProjectId) return null;
-  return `${machineId}:${localProjectId}`;
 }
 
 function isHomeRoute(pathname: string, workspaceSlug: string | null): boolean {
@@ -1673,18 +1645,19 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (machineId: MachineId, localProjectId: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      // Re-activating the project the URL already names replaces in place, so
+      // the fresh selection nonce never stacks history entries behind Back.
       void router.navigate({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
-        search: {
-          context: 'local' as const,
-          machine: machineId,
-          project: localProjectId,
-          projectSelection: createChatLandingProjectSelectionKey(),
-        },
+        ...buildChatLandingProjectSelectionNavigation({
+          machineId,
+          localProjectId,
+          selectedLocalProjectKey,
+        }),
       });
     },
-    [closeMobileDrawer, router, workspaceSlug]
+    [closeMobileDrawer, router, selectedLocalProjectKey, workspaceSlug]
   );
 
   const handleImportLocalProject = useCallback(async () => {

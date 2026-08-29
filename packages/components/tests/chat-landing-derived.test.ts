@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildChatLandingPreSelectionKey,
+  buildChatLandingProjectSelectionNavigation,
   compareChatLandingLocalProjectByRecency,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
@@ -18,7 +19,9 @@ import {
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
+  getSelectedLocalProjectKey,
   isChatLandingMachineReachable,
+  parseChatLandingSearch,
   shouldRetrySharingReviewConflict,
   createChatLandingProjectSelectionKey,
 } from '../src/components/chat/chat-landing-derived';
@@ -1082,5 +1085,117 @@ describe('buildChatLandingPreSelectionKey', () => {
     expect(createChatLandingProjectSelectionKey(123)).not.toBe(
       createChatLandingProjectSelectionKey(123)
     );
+  });
+});
+
+describe('parseChatLandingSearch', () => {
+  it('keeps the string search params the chat route understands', () => {
+    expect(
+      parseChatLandingSearch({
+        context: 'local',
+        machine: 'machine-1',
+        project: 'local-project-1',
+        repo: 'owner/repo',
+        resetDraftKey: 'r1',
+        projectSelection: 'p1',
+      })
+    ).toEqual({
+      context: 'local',
+      machine: 'machine-1',
+      project: 'local-project-1',
+      repo: 'owner/repo',
+      resetDraftKey: 'r1',
+      projectSelection: 'p1',
+    });
+  });
+
+  it('drops unknown contexts and non-string values', () => {
+    expect(
+      parseChatLandingSearch({
+        context: 'remote',
+        machine: 7,
+        project: null,
+        projectSelection: ['p1'],
+      })
+    ).toEqual({
+      context: undefined,
+      machine: undefined,
+      project: undefined,
+      repo: undefined,
+      resetDraftKey: undefined,
+      projectSelection: undefined,
+    });
+  });
+});
+
+describe('getSelectedLocalProjectKey', () => {
+  it('reads the chat route search under the workspace prefix', () => {
+    expect(
+      getSelectedLocalProjectKey('/acme/chat', 'acme', {
+        context: 'local',
+        machine: 'machine-1',
+        project: 'local-project-1',
+      })
+    ).toBe('machine-1:local-project-1');
+  });
+
+  it('reads the legacy local project route', () => {
+    expect(getSelectedLocalProjectKey('/acme/local/machine-1/local-project-1', 'acme')).toBe(
+      'machine-1:local-project-1'
+    );
+  });
+
+  it('names no project for other locations', () => {
+    expect(getSelectedLocalProjectKey('/acme/chat', 'acme', { context: 'github' })).toBeNull();
+    expect(getSelectedLocalProjectKey('/acme/sessions/s1', 'acme')).toBeNull();
+  });
+});
+
+describe('buildChatLandingProjectSelectionNavigation', () => {
+  const activation = {
+    machineId: 'machine-1',
+    localProjectId: 'local-project-1',
+  };
+
+  it('replaces when the URL already names the activated project', () => {
+    const navigation = buildChatLandingProjectSelectionNavigation({
+      ...activation,
+      selectedLocalProjectKey: 'machine-1:local-project-1',
+    });
+    expect(navigation.replace).toBe(true);
+    expect(navigation.search).toMatchObject({
+      context: 'local',
+      machine: 'machine-1',
+      project: 'local-project-1',
+    });
+  });
+
+  it('pushes when coming from another project or from no project', () => {
+    expect(
+      buildChatLandingProjectSelectionNavigation({
+        ...activation,
+        selectedLocalProjectKey: 'machine-1:local-project-2',
+      }).replace
+    ).toBe(false);
+    expect(
+      buildChatLandingProjectSelectionNavigation({
+        ...activation,
+        selectedLocalProjectKey: null,
+      }).replace
+    ).toBe(false);
+  });
+
+  it('carries a fresh selection nonce on every activation', () => {
+    const first = buildChatLandingProjectSelectionNavigation({
+      ...activation,
+      selectedLocalProjectKey: null,
+      now: 123,
+    });
+    const second = buildChatLandingProjectSelectionNavigation({
+      ...activation,
+      selectedLocalProjectKey: 'machine-1:local-project-1',
+      now: 123,
+    });
+    expect(second.search.projectSelection).not.toBe(first.search.projectSelection);
   });
 });

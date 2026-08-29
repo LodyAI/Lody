@@ -2,33 +2,18 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChatLanding } from '@/components/chat/chat-landing';
+import {
+  parseChatLandingSearch,
+  type ChatLandingSearch,
+} from '@/components/chat/chat-landing-derived';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { mobileWorkspaceBaseContextAtom } from '@/atoms';
 
-export type ChatSearch = {
-  context?: 'local' | 'github' | 'chat';
-  machine?: string;
-  project?: string;
-  repo?: string;
-  resetDraftKey?: string;
-  /** Makes a repeated project-row selection a fresh composer intent. */
-  projectSelection?: string;
-};
+export type ChatSearch = ChatLandingSearch;
 
 export const Route = createFileRoute('/$workspaceName/_auth/chat')({
   component: ChatRoute,
-  validateSearch: (search: Record<string, unknown>): ChatSearch => ({
-    context:
-      search.context === 'local' || search.context === 'github' || search.context === 'chat'
-        ? search.context
-        : undefined,
-    machine: typeof search.machine === 'string' ? search.machine : undefined,
-    project: typeof search.project === 'string' ? search.project : undefined,
-    repo: typeof search.repo === 'string' ? search.repo : undefined,
-    resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
-    projectSelection:
-      typeof search.projectSelection === 'string' ? search.projectSelection : undefined,
-  }),
+  validateSearch: parseChatLandingSearch,
 });
 
 function ChatRoute() {
