@@ -249,6 +249,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
+import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
 import { ensureValidBranchName } from '@/agent/branch-name-generator';
@@ -5201,6 +5202,16 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
+            group.updates.map((update) => update.notification)
+          );
+          if (runtimeConfigPatch && group.target.userTurnId) {
+            sessionDoc.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
+          } else if (runtimeConfigPatch) {
+            this.logger.debug(
+              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
+            );
+          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,

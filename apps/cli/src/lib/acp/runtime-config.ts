@@ -1,0 +1,74 @@
+import type {
+  AcpConfigOptionValue,
+  AcpSessionNotification,
+  ACPSessionId,
+  SessionAcpRuntimeConfigPatch,
+} from '@lody/shared';
+import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
+
+const readConfigOption = (
+  value: unknown
+): { id: string; category?: string; currentValue: AcpConfigOptionValue } | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const option = value as Record<string, unknown>;
+  if (
+    typeof option.id !== 'string' ||
+    (typeof option.currentValue !== 'string' && typeof option.currentValue !== 'boolean')
+  ) {
+    return null;
+  }
+  return {
+    id: option.id,
+    ...(typeof option.category === 'string' ? { category: option.category } : {}),
+    currentValue: option.currentValue,
+  };
+};
+
+export const getAcpRuntimeConfigPatch = (
+  notification: AcpSessionNotification
+): SessionAcpRuntimeConfigPatch | null => {
+  const update = notification.update;
+  if (update.sessionUpdate === 'current_mode_update') {
+    return {
+      acpSessionId: notification.sessionId as ACPSessionId,
+      modeId: update.currentModeId,
+    };
+  }
+  if (update.sessionUpdate !== 'config_option_update') {
+    return null;
+  }
+
+  const options = filterAcpConfigOptions(
+    update.configOptions.map(readConfigOption).filter((option) => option !== null)
+  );
+  const configOptionValues = Object.fromEntries(
+    options.map((option) => [option.id, option.currentValue])
+  );
+  const mode = options.find((option) => option.category === 'mode');
+  const model = options.find((option) => option.category === 'model');
+  return {
+    acpSessionId: notification.sessionId as ACPSessionId,
+    configOptionValues,
+    ...(typeof mode?.currentValue === 'string' ? { modeId: mode.currentValue } : {}),
+    ...(typeof model?.currentValue === 'string' ? { modelId: model.currentValue } : {}),
+  };
+};
+
+export const mergeAcpRuntimeConfigUpdates = (
+  notifications: readonly AcpSessionNotification[]
+): SessionAcpRuntimeConfigPatch | null => {
+  let merged: SessionAcpRuntimeConfigPatch | null = null;
+  for (const notification of notifications) {
+    const patch = getAcpRuntimeConfigPatch(notification);
+    if (!patch) continue;
+    if (merged && merged.acpSessionId === patch.acpSessionId) {
+      const previous = merged as SessionAcpRuntimeConfigPatch;
+      merged = { ...previous, ...patch };
+    } else {
+      merged = patch;
+    }
+  }
+  return merged;
+};

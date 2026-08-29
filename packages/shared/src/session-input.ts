@@ -109,6 +109,59 @@ export const resolveSessionConversationConfig = (
   return {};
 };
 
+const normalizeRuntimeConfigOptionValues = (
+  value: unknown
+): Record<string, AcpConfigOptionValue> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized: Record<string, AcpConfigOptionValue> = {};
+  for (const [configId, optionValue] of Object.entries(value)) {
+    if (typeof optionValue === 'string' || typeof optionValue === 'boolean') {
+      normalized[configId] = optionValue;
+    }
+  }
+  return normalized;
+};
+
+/**
+ * Resolves the ACP-reported shared baseline only when it is causally attached
+ * to the latest accepted Turn. A queued Turn is already frozen and always wins.
+ */
+export const resolveSessionAcpRuntimeConfig = (
+  history: readonly { id: string; role: unknown }[],
+  messageQueue: readonly unknown[] = [],
+  snapshot: unknown
+): SessionConversationConfig | null => {
+  if (messageQueue.length > 0 || !snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+  const latestUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
+  if (!latestUserTurn) {
+    return null;
+  }
+
+  const value = snapshot as Record<string, unknown>;
+  if (
+    typeof value.acpSessionId !== 'string' ||
+    typeof value.basedOnUserTurnId !== 'string' ||
+    value.basedOnUserTurnId !== latestUserTurn.id ||
+    typeof value.revision !== 'number' ||
+    !Number.isFinite(value.revision)
+  ) {
+    return null;
+  }
+
+  const hasConfigOptionValues = Object.prototype.hasOwnProperty.call(value, 'configOptionValues');
+  const configOptionValues = normalizeRuntimeConfigOptionValues(value.configOptionValues);
+  return {
+    sourceConfigKey: `runtime:${value.acpSessionId}:${value.revision}`,
+    ...(typeof value.modeId === 'string' ? { modeId: value.modeId } : {}),
+    ...(typeof value.modelId === 'string' ? { modelId: value.modelId } : {}),
+    ...(hasConfigOptionValues && configOptionValues ? { configOptionValues } : {}),
+  };
+};
+
 /**
  * The MCP selection a restart inherits. The catalog selection is durable only in
  * turn input config, so fork/restore/edit-and-resend must read it back from the

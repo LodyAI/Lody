@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
-import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useTranslation } from 'react-i18next';
 import {
@@ -301,8 +300,6 @@ function PermissionCard({
     };
   }, [permission.options]);
 
-  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
-
   const handleSelect = useCallback(
     async (optionId: string) => {
       if (isResolved || !isReady || pendingOptionId !== null) return;
@@ -312,7 +309,6 @@ function PermissionCard({
           outcome: 'selected',
           optionId,
         });
-        notifyPlanExitApproved(pending.toolCall, permission.options, optionId);
       } catch (error) {
         console.error('Failed to respond to permission request:', error);
         setPendingOptionId(null);
@@ -321,12 +317,9 @@ function PermissionCard({
     [
       isResolved,
       isReady,
-      notifyPlanExitApproved,
-      pending.toolCall,
       pendingOptionId,
       respondToPermission,
       sessionId,
-      permission.options,
       permission.requestId,
     ]
   );

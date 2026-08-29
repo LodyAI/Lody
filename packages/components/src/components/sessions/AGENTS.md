@@ -445,20 +445,16 @@ Session conversation page chain:
   replaying its values. `buildRecentRunConfigItems` drops a Role entry whose
   Role is not in the passed `agentRoles` — a Role never falls back, so a deleted
   or unavailable one must not quietly re-run as loose values.
-  The selected mode is applied per TURN (it becomes the user entry's
-  `inputConfig.modeId`; `resolveSessionConversationConfig` reads the latest turn
-  back as the preference). So approving "Yes, implement this plan" — which only
-  switches the mode of the running ACP turn — must ALSO drop the selector out of
-  plan, or the next send quietly plans again. Driven from the CLICK
-  (`hooks/use-plan-mode-exit-approval.ts` → `atoms/plan-mode-exit.ts`, read by
-  the composer), never from the resolved outcome in history: this selection is
-  per-device local state, so a history-derived signal would unset plan mode for
-  a teammate who just armed it, and would fire again for an OLD approval
-  replaying as the session doc syncs. Every interactive permission surface must
-  call the notifier — there are two (`floating-permission-request.tsx` and the
-  inline card in `../ai-gui/view.tsx`). It exits to the agent's default non-plan
-  mode and deliberately does not infer `acceptEdits` from an `allow_always`
-  answer: that consent was about this plan, not every later turn.
+  Run config has two durable authorities. A user Turn freezes what executes in
+  its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
+  or queued Turn. ACP `config_option_update`/`current_mode_update` events update
+  the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
+  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
+  an older runtime event. Apply that shared baseline only to composer fields the
+  local user has not edited; local unsent choices remain a private draft until
+  send freezes them into a Turn. Never infer runtime config from a permission
+  click or its history outcome: consent is not proof that the agent applied the
+  change, and click-local state does not synchronize collaborators.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to

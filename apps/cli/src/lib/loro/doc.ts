@@ -53,6 +53,8 @@ import {
   type SessionForkOperation,
   SessionForkOperationSchema,
   type LodyPresenceStateMap,
+  type SessionAcpRuntimeConfigPatch,
+  type SessionAcpRuntimeConfigSnapshot,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
@@ -1626,6 +1628,29 @@ type SessionDocInitialState = {
   forkOperation?: SessionForkOperation;
 };
 
+const configOptionValuesEqual = (
+  left: SessionAcpRuntimeConfigSnapshot['configOptionValues'],
+  right: SessionAcpRuntimeConfigSnapshot['configOptionValues']
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  return (
+    leftKeys.length === Object.keys(right).length &&
+    leftKeys.every((key) => left[key] === right[key])
+  );
+};
+
+const acpRuntimeConfigEqual = (
+  left: SessionAcpRuntimeConfigSnapshot,
+  right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
+): boolean =>
+  left.acpSessionId === right.acpSessionId &&
+  left.basedOnUserTurnId === right.basedOnUserTurnId &&
+  left.modeId === right.modeId &&
+  left.modelId === right.modelId &&
+  configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
+
 /**
  * Hard cap on how long a queued message can hold the head-of-queue dispatch lock
  * via `isEditing`. If the editing client never releases (hard close, crash, killed
@@ -2009,6 +2034,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
+      acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
 
@@ -2082,6 +2108,72 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       }
       return prev;
     });
+  }
+
+  applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): boolean {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
+
+    const state = this.mirror.getState();
+    const incomingTurnIndex = state.history.findIndex(
+      (entry) => entry.role === 'user' && entry.id === basedOnUserTurnId
+    );
+    let latestUserTurnIndex = -1;
+    for (let index = state.history.length - 1; index >= 0; index -= 1) {
+      if (state.history[index]?.role === 'user') {
+        latestUserTurnIndex = index;
+        break;
+      }
+    }
+    if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+      return false;
+    }
+
+    const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+    const currentTurnIndex = current
+      ? state.history.findIndex(
+          (entry) => entry.role === 'user' && entry.id === current.basedOnUserTurnId
+        )
+      : -1;
+    if (currentTurnIndex > incomingTurnIndex) {
+      return false;
+    }
+
+    const continuesCurrentSnapshot =
+      current?.acpSessionId === patch.acpSessionId &&
+      current.basedOnUserTurnId === basedOnUserTurnId;
+    const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+      ...(continuesCurrentSnapshot
+        ? {
+            ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+            ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+            ...(current.configOptionValues !== undefined
+              ? { configOptionValues: current.configOptionValues }
+              : {}),
+          }
+        : {}),
+      ...patch,
+      basedOnUserTurnId,
+    };
+    if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+      return false;
+    }
+
+    const next: SessionAcpRuntimeConfigSnapshot = {
+      ...nextWithoutRevision,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    this.mirror.setState((prev) => {
+      // Mirror exposes readonly state to callers, but setState supplies its mutable draft.
+      // @ts-expect-error mutable Mirror draft
+      prev.acpRuntimeConfig = next;
+      return prev;
+    });
+    return true;
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {

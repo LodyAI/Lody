@@ -52,6 +52,8 @@ export function useReconcileAcpSessionConfigSelection({
   targetKey,
   preferenceRevision,
   preferences,
+  runtimePreferences,
+  preserveUnsentUserEdits = false,
   selectorOptions,
   dispatch,
 }: {
@@ -59,6 +61,8 @@ export function useReconcileAcpSessionConfigSelection({
   targetKey: string | null;
   preferenceRevision: string;
   preferences: AcpSessionConfigPreferences;
+  runtimePreferences?: AcpSessionConfigPreferences | null;
+  preserveUnsentUserEdits?: boolean;
   selectorOptions: AcpSelectorOptions;
   dispatch: ReturnType<typeof useAcpSessionConfigSelectionState>['dispatch'];
 }) {
@@ -69,7 +73,24 @@ export function useReconcileAcpSessionConfigSelection({
       targetKey,
       preferenceRevision,
       preferences,
+      preserveUnsentUserEdits,
       ...selectorOptions,
     });
-  }, [dispatch, enabled, preferenceRevision, preferences, selectorOptions, targetKey]);
+    if (runtimePreferences) {
+      dispatch({
+        type: 'apply-runtime-preferences',
+        preferences: runtimePreferences,
+        ...selectorOptions,
+      });
+    }
+  }, [
+    dispatch,
+    enabled,
+    preferenceRevision,
+    preferences,
+    preserveUnsentUserEdits,
+    runtimePreferences,
+    selectorOptions,
+    targetKey,
+  ]);
 }

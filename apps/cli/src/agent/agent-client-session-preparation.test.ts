@@ -231,6 +231,63 @@ describe('AgentClient session preparation gate', () => {
     });
   });
 
+  it('carries agent-originated config updates into replacement session startup', async () => {
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-agent-config-update' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'codex' },
+      configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'high' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir');
+    await client.sessionUpdate({
+      sessionId: 'acp-session-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [
+          {
+            id: 'collaboration_mode',
+            category: 'collaboration_mode',
+            type: 'select',
+            name: 'Collaboration mode',
+            currentValue: 'default',
+            options: [],
+          },
+          {
+            id: 'reasoning_effort',
+            category: 'thought_level',
+            type: 'select',
+            name: 'Reasoning effort',
+            currentValue: 'low',
+            options: [],
+          },
+        ],
+      },
+    } as never);
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
+    await client.prepareReplacementSession();
+
+    expect(connectionMocks.newSession).toHaveBeenLastCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+      _meta: {
+        lody: {
+          sessionConfig: {
+            version: 1,
+            configOptionValues: {
+              collaboration_mode: 'default',
+              reasoning_effort: 'low',
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('loads sessions with selected config option values', async () => {
     connectionMocks.initialize.mockResolvedValue({
       agentCapabilities: { loadSession: true },

@@ -48,11 +48,20 @@ export type AcpSessionConfigSelectionAction =
       defaultModeId: string | null;
       defaultModelId: string | null;
       configOptionSelectors: AcpConfigOptionSelector[];
+      preserveUnsentUserEdits?: boolean;
     }
   | { type: 'select-mode'; value: string | null }
   | { type: 'select-model'; value: string | null }
   | { type: 'select-config-option'; configId: string; value: AcpConfigOptionValue }
-  | { type: 'replace-config-options'; values: Record<string, AcpConfigOptionValue> };
+  | { type: 'replace-config-options'; values: Record<string, AcpConfigOptionValue> }
+  | {
+      type: 'apply-runtime-preferences';
+      preferences: AcpSessionConfigPreferences;
+      capabilityAuthority: AcpCapabilityAuthority;
+      modeOptions: AcpSessionSelectOption[];
+      modelOptions: AcpSessionSelectOption[];
+      configOptionSelectors: AcpConfigOptionSelector[];
+    };
 
 const isSelectValueValid = (
   options: AcpSessionSelectOption[],
@@ -172,6 +181,76 @@ const areConfigOptionFieldsEqual = (
   );
 };
 
+const applyRuntimeSelectPreference = (
+  previous: SelectionField<string | null>,
+  value: string | null | undefined,
+  options: AcpSessionSelectOption[],
+  authority: AcpCapabilityAuthority
+): SelectionField<string | null> => {
+  if (
+    previous.origin === 'user' ||
+    !value ||
+    (authority === 'authoritative' && !isSelectValueValid(options, value))
+  ) {
+    return previous;
+  }
+  return { value, origin: 'preference' };
+};
+
+const applyRuntimeConfigPreferences = (
+  previous: Record<string, SelectionField<AcpConfigOptionValue>>,
+  preferences: AcpSessionConfigPreferences,
+  selectors: AcpConfigOptionSelector[],
+  authority: AcpCapabilityAuthority
+): Record<string, SelectionField<AcpConfigOptionValue>> => {
+  if (!preferences.configOptionValues) {
+    return previous;
+  }
+  const selectorsById = new Map(selectors.map((selector) => [selector.configId, selector]));
+  const next: Record<string, SelectionField<AcpConfigOptionValue>> = {};
+  for (const [configId, field] of Object.entries(previous)) {
+    if (field.origin === 'user') {
+      next[configId] = field;
+    }
+  }
+  for (const [configId, value] of Object.entries(preferences.configOptionValues)) {
+    if (previous[configId]?.origin === 'user') {
+      continue;
+    }
+    const selector = selectorsById.get(configId);
+    if (
+      authority === 'authoritative' &&
+      (!selector || !isConfigOptionValueValid(selector, value))
+    ) {
+      continue;
+    }
+    next[configId] = { value, origin: 'preference' };
+  }
+  return areConfigOptionFieldsEqual(previous, next) ? previous : next;
+};
+
+const preserveUnsentUserEdits = (
+  previous: AcpSessionConfigSelectionState,
+  next: AcpSessionConfigSelectionState,
+  preferences: AcpSessionConfigPreferences
+): AcpSessionConfigSelectionState => {
+  const mode =
+    previous.mode.origin === 'user' && previous.mode.value !== preferences.modeId
+      ? previous.mode
+      : next.mode;
+  const model =
+    previous.model.origin === 'user' && previous.model.value !== preferences.modelId
+      ? previous.model
+      : next.model;
+  const configOptions = { ...next.configOptions };
+  for (const [configId, field] of Object.entries(previous.configOptions)) {
+    if (field.origin === 'user' && field.value !== preferences.configOptionValues?.[configId]) {
+      configOptions[configId] = field;
+    }
+  }
+  return { ...next, mode, model, configOptions };
+};
+
 export function reduceAcpSessionConfigSelection(
   state: AcpSessionConfigSelectionState,
   action: AcpSessionConfigSelectionAction
@@ -202,6 +281,34 @@ export function reduceAcpSessionConfigSelection(
       ),
     };
   }
+  if (action.type === 'apply-runtime-preferences') {
+    if (!state.targetKey) {
+      return state;
+    }
+    const mode = applyRuntimeSelectPreference(
+      state.mode,
+      action.preferences.modeId,
+      action.modeOptions,
+      action.capabilityAuthority
+    );
+    const model = applyRuntimeSelectPreference(
+      state.model,
+      action.preferences.modelId,
+      action.modelOptions,
+      action.capabilityAuthority
+    );
+    const configOptions = applyRuntimeConfigPreferences(
+      state.configOptions,
+      action.preferences,
+      action.configOptionSelectors,
+      action.capabilityAuthority
+    );
+    return areSelectionFieldsEqual(state.mode, mode) &&
+      areSelectionFieldsEqual(state.model, model) &&
+      state.configOptions === configOptions
+      ? state
+      : { ...state, mode, model, configOptions };
+  }
 
   if (!action.targetKey) {
     const empty = createEmptyAcpSessionConfigSelectionState();
@@ -225,26 +332,29 @@ export function reduceAcpSessionConfigSelection(
         action.capabilityAuthority
       ),
     };
-    if (action.capabilityAuthority !== 'authoritative') {
-      return seeded;
-    }
-    return {
-      ...seeded,
-      mode: resolveAuthoritativeSelectField(
-        seeded.mode,
-        action.preferences.modeId,
-        action.modeOptions,
-        action.defaultModeId,
-        false
-      ),
-      model: resolveAuthoritativeSelectField(
-        seeded.model,
-        action.preferences.modelId,
-        action.modelOptions,
-        action.defaultModelId,
-        false
-      ),
-    };
+    const validated =
+      action.capabilityAuthority !== 'authoritative'
+        ? seeded
+        : {
+            ...seeded,
+            mode: resolveAuthoritativeSelectField(
+              seeded.mode,
+              action.preferences.modeId,
+              action.modeOptions,
+              action.defaultModeId,
+              false
+            ),
+            model: resolveAuthoritativeSelectField(
+              seeded.model,
+              action.preferences.modelId,
+              action.modelOptions,
+              action.defaultModelId,
+              false
+            ),
+          };
+    return action.preserveUnsentUserEdits && state.targetKey === action.targetKey
+      ? preserveUnsentUserEdits(state, validated, action.preferences)
+      : validated;
   }
 
   if (action.capabilityAuthority !== 'authoritative') {

@@ -100,6 +100,7 @@ import {
   isSessionGoalActive,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveVisibleSessionGoal,
   resolveActiveAssistantTurnId,
@@ -376,7 +377,6 @@ import {
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
-import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -392,8 +392,6 @@ import {
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
-import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
-import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 
@@ -2374,6 +2372,15 @@ export const SessionChatInterface = memo(
       () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
       [sessionDoc?.history, sessionDoc?.mq]
     );
+    const sessionRuntimeConfig = useMemo(
+      () =>
+        resolveSessionAcpRuntimeConfig(
+          sessionDoc?.history ?? [],
+          sessionDoc?.mq ?? [],
+          sessionDoc?.acpRuntimeConfig
+        ),
+      [sessionDoc?.acpRuntimeConfig, sessionDoc?.history, sessionDoc?.mq]
+    );
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
@@ -2418,6 +2425,8 @@ export const SessionChatInterface = memo(
       targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
+      runtimePreferences: sessionRuntimeConfig,
+      preserveUnsentUserEdits: true,
       selectorOptions: sessionSelectorOptions,
       dispatch: dispatchSessionConfigSelection,
     });
@@ -3328,20 +3337,6 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
 
-    // Approving "Yes, implement this plan" switches the mode of the RUNNING
-    // turn only — the composer would still say Plan and quietly plan again on
-    // the next send. The permission cards bump this counter when THIS user
-    // approves, so the selector follows.
-    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
-    useEffect(() => {
-      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
-        return;
-      }
-      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
-      if (nextModeId) {
-        handleModeChange(nextModeId);
-      }
-    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({

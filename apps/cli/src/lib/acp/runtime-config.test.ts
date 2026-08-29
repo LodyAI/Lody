@@ -1,0 +1,62 @@
+import { describe, expect, it } from 'vitest';
+import { parseSessionNotification } from '@lody/shared';
+import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from './runtime-config';
+
+describe('ACP runtime config projection', () => {
+  it('projects supported current values and derives model and mode fields', () => {
+    const notification = parseSessionNotification({
+      sessionId: 'acp-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [
+          { id: 'model', category: 'model', type: 'select', currentValue: 'gpt-5.6-sol' },
+          { id: 'permission', category: 'mode', type: 'select', currentValue: 'default' },
+          {
+            id: 'collaboration_mode',
+            category: 'collaboration_mode',
+            type: 'select',
+            currentValue: 'default',
+          },
+          { id: 'fast_mode', type: 'boolean', currentValue: true },
+          { id: 'agent', type: 'select', currentValue: 'unsupported' },
+          { id: 'malformed', type: 'select', currentValue: 42 },
+        ],
+      },
+    });
+
+    expect(getAcpRuntimeConfigPatch(notification)).toEqual({
+      acpSessionId: 'acp-1',
+      modeId: 'default',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: {
+        model: 'gpt-5.6-sol',
+        permission: 'default',
+        collaboration_mode: 'default',
+        fast_mode: true,
+      },
+    });
+  });
+
+  it('folds notifications in wire order', () => {
+    const configUpdate = parseSessionNotification({
+      sessionId: 'acp-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [
+          { id: 'permission', category: 'mode', type: 'select', currentValue: 'plan' },
+          { id: 'reasoning_effort', type: 'select', currentValue: 'low' },
+        ],
+      },
+    });
+    const modeUpdate = parseSessionNotification({
+      sessionId: 'acp-1',
+      update: { sessionUpdate: 'current_mode_update', currentModeId: 'default' },
+    });
+
+    expect(mergeAcpRuntimeConfigUpdates([configUpdate, modeUpdate])).toEqual({
+      acpSessionId: 'acp-1',
+      modeId: 'default',
+      configOptionValues: { permission: 'plan', reasoning_effort: 'low' },
+    });
+  });
+});

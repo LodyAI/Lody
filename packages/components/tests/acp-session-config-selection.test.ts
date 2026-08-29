@@ -153,4 +153,166 @@ describe('ACP session config reconciliation', () => {
       )
     ).toEqual({});
   });
+
+  it('applies the same ACP runtime baseline to independent collaborator states', () => {
+    const selectors = [
+      {
+        configId: 'collaboration_mode',
+        label: 'Collaboration mode',
+        type: 'select' as const,
+        currentValue: 'plan',
+        options: [
+          { value: 'default', label: 'Default' },
+          { value: 'plan', label: 'Plan' },
+        ],
+      },
+    ];
+    const initialAction = {
+      preferences: { configOptionValues: { collaboration_mode: 'plan' } },
+      capabilityAuthority: 'authoritative' as const,
+      configOptionSelectors: selectors,
+    };
+    const runtimeAction: AcpSessionConfigSelectionAction = {
+      type: 'apply-runtime-preferences',
+      preferences: { configOptionValues: { collaboration_mode: 'default' } },
+      capabilityAuthority: 'authoritative',
+      modeOptions: [],
+      modelOptions: [{ value: 'gpt-5.5', label: '5.5' }],
+      configOptionSelectors: selectors,
+    };
+
+    const firstClient = reduceAcpSessionConfigSelection(
+      reconcile(createEmptyAcpSessionConfigSelectionState(), initialAction),
+      runtimeAction
+    );
+    const secondClient = reduceAcpSessionConfigSelection(
+      reconcile(createEmptyAcpSessionConfigSelectionState(), initialAction),
+      runtimeAction
+    );
+
+    expect(getAcpSessionConfigOptionValues(firstClient)).toEqual({
+      collaboration_mode: 'default',
+    });
+    expect(getAcpSessionConfigOptionValues(secondClient)).toEqual({
+      collaboration_mode: 'default',
+    });
+  });
+
+  it('preserves local unsent choices while applying other runtime fields', () => {
+    const selectors = [
+      {
+        configId: 'collaboration_mode',
+        label: 'Collaboration mode',
+        type: 'select' as const,
+        currentValue: 'plan',
+        options: [
+          { value: 'default', label: 'Default' },
+          { value: 'plan', label: 'Plan' },
+        ],
+      },
+      {
+        configId: 'reasoning_effort',
+        label: 'Reasoning effort',
+        type: 'select' as const,
+        currentValue: 'low',
+        options: [
+          { value: 'low', label: 'Low' },
+          { value: 'high', label: 'High' },
+        ],
+      },
+    ];
+    const seeded = reconcile(createEmptyAcpSessionConfigSelectionState(), {
+      preferences: {
+        configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'low' },
+      },
+      capabilityAuthority: 'authoritative',
+      configOptionSelectors: selectors,
+    });
+    const locallyEdited = reduceAcpSessionConfigSelection(seeded, {
+      type: 'select-config-option',
+      configId: 'reasoning_effort',
+      value: 'high',
+    });
+    const updated = reduceAcpSessionConfigSelection(locallyEdited, {
+      type: 'apply-runtime-preferences',
+      preferences: {
+        configOptionValues: { collaboration_mode: 'default', reasoning_effort: 'low' },
+      },
+      capabilityAuthority: 'authoritative',
+      modeOptions: [],
+      modelOptions: [{ value: 'gpt-5.5', label: '5.5' }],
+      configOptionSelectors: selectors,
+    });
+
+    expect(getAcpSessionConfigOptionValues(updated)).toEqual({
+      collaboration_mode: 'default',
+      reasoning_effort: 'high',
+    });
+  });
+
+  it('acknowledges only values captured by the accepted turn', () => {
+    const selectors = [
+      {
+        configId: 'reasoning_effort',
+        label: 'Reasoning effort',
+        type: 'select' as const,
+        currentValue: 'low',
+        options: [
+          { value: 'low', label: 'Low' },
+          { value: 'high', label: 'High' },
+        ],
+      },
+    ];
+    const initial = reconcile(createEmptyAcpSessionConfigSelectionState(), {
+      preferenceRevision: 'turn-1',
+      preferences: { configOptionValues: { reasoning_effort: 'low' } },
+      capabilityAuthority: 'authoritative',
+      configOptionSelectors: selectors,
+    });
+    const editedAfterSend = reduceAcpSessionConfigSelection(initial, {
+      type: 'select-config-option',
+      configId: 'reasoning_effort',
+      value: 'high',
+    });
+
+    const lowTurnAccepted = reconcile(editedAfterSend, {
+      preferenceRevision: 'turn-2',
+      preserveUnsentUserEdits: true,
+      preferences: { configOptionValues: { reasoning_effort: 'low' } },
+      capabilityAuthority: 'authoritative',
+      configOptionSelectors: selectors,
+    });
+    expect(lowTurnAccepted.configOptions.reasoning_effort).toEqual({
+      value: 'high',
+      origin: 'user',
+    });
+
+    const highTurnAccepted = reconcile(editedAfterSend, {
+      preferenceRevision: 'turn-2',
+      preserveUnsentUserEdits: true,
+      preferences: { configOptionValues: { reasoning_effort: 'high' } },
+      capabilityAuthority: 'authoritative',
+      configOptionSelectors: selectors,
+    });
+    expect(highTurnAccepted.configOptions.reasoning_effort).toEqual({
+      value: 'high',
+      origin: 'preference',
+    });
+  });
+
+  it('removes non-user options omitted from a full runtime snapshot', () => {
+    const seeded = reconcile(createEmptyAcpSessionConfigSelectionState(), {
+      preferences: { configOptionValues: { removed_option: 'enabled' } },
+    });
+    const updated = reduceAcpSessionConfigSelection(seeded, {
+      type: 'apply-runtime-preferences',
+      preferences: { configOptionValues: {} },
+      capabilityAuthority: 'provisional',
+      modeOptions: [],
+      modelOptions: [],
+      configOptionSelectors: [],
+    });
+
+    expect(getAcpSessionConfigOptionValues(updated)).toEqual({});
+  });
 });

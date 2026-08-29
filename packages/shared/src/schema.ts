@@ -981,6 +981,38 @@ const sessionForkOperationDocSchema = schema.LoroMap(
 );
 
 /**
+ * ACP-reported runtime configuration after a Turn has started. This is shared
+ * control state, not transcript content: `basedOnUserTurnId` supplies the
+ * causal fence that prevents a late update from changing a newer Turn's
+ * composer baseline.
+ */
+export type SessionAcpRuntimeConfigSnapshot = {
+  acpSessionId: ACPSessionId;
+  basedOnUserTurnId: string;
+  revision: number;
+  modeId?: string;
+  modelId?: string;
+  configOptionValues?: Record<string, AcpConfigOptionValue>;
+};
+
+export type SessionAcpRuntimeConfigPatch = Omit<
+  SessionAcpRuntimeConfigSnapshot,
+  'basedOnUserTurnId' | 'revision'
+>;
+
+const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
+  {
+    acpSessionId: schema.String<ACPSessionId>(),
+    basedOnUserTurnId: schema.String(),
+    revision: schema.Number(),
+    modeId: schema.String({ required: false }),
+    modelId: schema.String({ required: false }),
+    configOptionValues: schema.Any({ required: false }),
+  },
+  { required: false }
+);
+
+/**
  * Root schema for a session doc.
  *
  * Synced docs outlive the builds that write them: a client on a newer schema
@@ -1001,6 +1033,7 @@ export const sessionDocSchema = schema({
   forkOperation: sessionForkOperationDocSchema,
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
+  acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 
 /**

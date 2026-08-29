@@ -917,6 +917,10 @@ export class AgentClient implements acp.Client {
 
     const notification = parseSessionNotification(params);
 
+    if (notification.update.sessionUpdate === 'config_option_update') {
+      this.applyConfigOptionsState(notification.update.configOptions, true);
+    }
+
     this.handleGoalSessionInfoUpdate(notification);
     this.handleCodexWarningSessionInfoUpdate(notification);
     this.handleAgentSessionTitleUpdate(notification);
@@ -1603,9 +1607,12 @@ export class AgentClient implements acp.Client {
     // Drop config options the current version intentionally skips (e.g. the
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
-    this.configOptions = filterAcpConfigOptions(sessionResponse.configOptions ?? []);
-    this.legacySessionModelState = readLegacySessionModelState(sessionResponse) ?? null;
     this.currentModel = undefined;
+    this.applyConfigOptionsState(
+      sessionResponse.configOptions ?? [],
+      Boolean(sessionResponse.configOptions?.length)
+    );
+    this.legacySessionModelState = readLegacySessionModelState(sessionResponse) ?? null;
     const initialModelOption = this.findConfigOptionByCategory('model');
     if (
       initialModelOption?.type === 'select' &&
@@ -1614,6 +1621,32 @@ export class AgentClient implements acp.Client {
       this.currentModel = this.resolveModelInfo(initialModelOption.currentValue);
     } else if (this.legacySessionModelState?.currentModelId) {
       this.currentModel = this.resolveModelInfo(this.legacySessionModelState.currentModelId);
+    }
+  }
+
+  private applyConfigOptionsState(
+    configOptions: readonly acp.SessionConfigOption[],
+    replaceConfigOptionValues: boolean
+  ): void {
+    this.configOptions = filterAcpConfigOptions(configOptions);
+    if (replaceConfigOptionValues) {
+      for (const configId of Object.keys(this.configOptionValues)) {
+        delete this.configOptionValues[configId];
+      }
+      for (const option of this.configOptions) {
+        if (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean') {
+          this.configOptionValues[option.id] = option.currentValue;
+        }
+      }
+    }
+
+    const modelOption = this.findConfigOptionByCategory('model');
+    if (modelOption?.type === 'select' && typeof modelOption.currentValue === 'string') {
+      this.currentModel = this.resolveModelInfo(modelOption.currentValue);
+    } else if (this.currentModel) {
+      this.currentModel = this.resolveModelInfo(this.currentModel.modelId);
+    } else {
+      this.currentModel = undefined;
     }
   }
 
@@ -2485,12 +2518,7 @@ export class AgentClient implements acp.Client {
       // The agent returns the full option list, which re-includes any filtered
       // option (e.g. `agent`); drop it again here. See BC doc entry
       // BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
-      this.configOptions = filterAcpConfigOptions(result.configOptions);
-      // Keep the thought-level label carried on currentModel in sync when the
-      // user changes the thinking level (or any config option) mid-session.
-      if (this.currentModel) {
-        this.currentModel = this.resolveModelInfo(this.currentModel.modelId);
-      }
+      this.applyConfigOptionsState(result.configOptions, result.configOptions.length > 0);
     }
 
     if (result) this.configOptionValues[configId] = value;

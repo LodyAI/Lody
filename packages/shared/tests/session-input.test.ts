@@ -10,6 +10,7 @@ import {
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
@@ -190,6 +191,50 @@ describe('session-input helpers', () => {
       modelId: 'model-b',
       configOptionValues: { approval: 'never' },
     });
+  });
+
+  it('resolves ACP runtime config only for the latest accepted user turn', () => {
+    const history = [
+      { id: 'turn-1', role: 'user' as const },
+      { id: 'assistant-1', role: 'assistant' as const },
+      { id: 'turn-2', role: 'user' as const },
+    ];
+
+    expect(
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-2',
+        basedOnUserTurnId: 'turn-2',
+        revision: 3,
+        modeId: 'default',
+        modelId: 'gpt-5.6-sol',
+        configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+      })
+    ).toEqual({
+      sourceConfigKey: 'runtime:acp-2:3',
+      modeId: 'default',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+    });
+
+    expect(
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 9,
+        modeId: 'default',
+      })
+    ).toBeNull();
+  });
+
+  it('does not let runtime state override a frozen queued turn', () => {
+    expect(
+      resolveSessionAcpRuntimeConfig([{ id: 'turn-1', role: 'user' }], [{ $cid: 'queue-1' }], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 1,
+        configOptionValues: { collaboration_mode: 'default' },
+      })
+    ).toBeNull();
   });
 
   it('resolves the frozen Task tool gate with legacy inputs disabled', () => {
