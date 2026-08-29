@@ -581,31 +581,16 @@ export type ChatLandingPreSelectionIntent = {
   machine: string | undefined;
   project: string | undefined;
   repo: string | undefined;
-  /**
-   * Nonce marking a project-row selection. The composer applies URL
-   * pre-selection once per key and then lets the user steer freely, so a
-   * repeated click on the project the URL already names needs a new identity.
-   */
-  projectSelectionKey?: string | undefined;
 };
 
-let projectSelectionSequence = 0;
-
-/** A fresh identity for every project-row activation, including same-millisecond clicks. */
-export function createChatLandingProjectSelectionKey(now = Date.now()): string {
-  projectSelectionSequence += 1;
-  return `p${now}-${projectSelectionSequence}`;
-}
-
-/** Identity of one URL-driven pre-selection intent. */
+/** Identity of one URL-named selection (pre-selection intent or mirrored state). */
 export function buildChatLandingPreSelectionKey({
   context,
   machine,
   project,
   repo,
-  projectSelectionKey,
 }: ChatLandingPreSelectionIntent): string {
-  return `${context}|${machine}|${project}|${repo}|${projectSelectionKey}`;
+  return `${context}|${machine}|${project}|${repo}`;
 }
 
 /** Search-parameter contract of the `/$workspaceName/chat` route. */
@@ -615,8 +600,6 @@ export type ChatLandingSearch = {
   project?: string;
   repo?: string;
   resetDraftKey?: string;
-  /** Makes a repeated project-row selection a fresh composer intent. */
-  projectSelection?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
@@ -629,15 +612,13 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
-    projectSelection:
-      typeof search.projectSelection === 'string' ? search.projectSelection : undefined,
   };
 }
 
 /**
  * `machineId:localProjectId` named by the current URL, or null. Shared by the
- * sidebar's row highlight and by project-row activation, which uses it to pick
- * push versus replace (see `buildChatLandingProjectSelectionNavigation`).
+ * sidebar's row highlight and by the selection-URL mirror's participation
+ * checks over the same URL contract.
  */
 export function getSelectedLocalProjectKey(
   pathname: string,
@@ -670,41 +651,66 @@ export function getSelectedLocalProjectKey(
   return `${machineId}:${localProjectId}`;
 }
 
-export type ChatLandingProjectSelectionNavigation = {
-  search: {
-    context: 'local';
-    machine: string;
-    project: string;
-    projectSelection: string;
-  };
-  replace: boolean;
+export type ChatLandingEffectiveSelection = {
+  contextType: 'local' | 'github' | 'chat';
+  machineId: string | null;
+  localProjectId: string | null;
+  repoFullName: string | null;
 };
 
 /**
- * Navigation for one project-row activation. The nonce makes every activation
- * a fresh composer intent, so re-activating the project the URL already names
- * must REPLACE: pushing would stack visually identical history entries whose
- * nonces make Back re-apply the selection instead of leaving the page.
+ * The chat-route search params that truthfully name the composer's current
+ * selection. An incomplete selection (a context with nothing chosen yet) maps
+ * to an empty search: the URL then names nothing rather than something stale.
  */
-export function buildChatLandingProjectSelectionNavigation({
+export function getChatLandingSelectionSearch({
+  contextType,
   machineId,
   localProjectId,
-  selectedLocalProjectKey,
-  now,
+  repoFullName,
+}: ChatLandingEffectiveSelection): ChatLandingSearch {
+  if (contextType === 'chat') {
+    return { context: 'chat' };
+  }
+  if (contextType === 'local' && machineId && localProjectId) {
+    return { context: 'local', machine: machineId, project: localProjectId };
+  }
+  if (contextType === 'github' && repoFullName) {
+    return { context: 'github', repo: repoFullName };
+  }
+  return {};
+}
+
+export type ChatLandingSelectionSyncDecision = 'skip' | 'arm' | 'sync';
+
+/**
+ * Whether the landing should mirror its effective selection back into the URL.
+ *
+ * Once the URL names a selection it must keep telling the truth: steering or
+ * clearing the composer selection would otherwise leave a stale project in the
+ * URL, making that project's sidebar row an identical-URL no-op. A URL that
+ * names nothing stays untouched, so restored defaults and auto-selection never
+ * rewrite a plain landing address.
+ *
+ * `arm` covers the commit in which a URL intent was just applied: the observed
+ * selection still predates the application, so mirroring would race the intent
+ * and write the stale selection back over it. The caller arms the mirror and
+ * compares again once the applied selection has rendered.
+ */
+export function getChatLandingSelectionSyncDecision({
+  urlNamesSelection,
+  intentApplied,
+  armed,
+  urlKey,
+  selectionKey,
 }: {
-  machineId: string;
-  localProjectId: string;
-  /** From `getSelectedLocalProjectKey` over the current location. */
-  selectedLocalProjectKey: string | null;
-  now?: number;
-}): ChatLandingProjectSelectionNavigation {
-  return {
-    search: {
-      context: 'local',
-      machine: machineId,
-      project: localProjectId,
-      projectSelection: createChatLandingProjectSelectionKey(now),
-    },
-    replace: selectedLocalProjectKey === `${machineId}:${localProjectId}`,
-  };
+  urlNamesSelection: boolean;
+  intentApplied: boolean;
+  armed: boolean;
+  urlKey: string;
+  selectionKey: string;
+}): ChatLandingSelectionSyncDecision {
+  if (!urlNamesSelection || !intentApplied) return 'skip';
+  if (!armed) return 'arm';
+  return selectionKey === urlKey ? 'skip' : 'sync';
 }

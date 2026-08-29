@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildChatLandingPreSelectionKey,
-  buildChatLandingProjectSelectionNavigation,
   compareChatLandingLocalProjectByRecency,
   compareChatLandingRepositoryByRecency,
+  getChatLandingSelectionSearch,
+  getChatLandingSelectionSyncDecision,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
   getChatLandingHintType,
@@ -23,7 +24,6 @@ import {
   isChatLandingMachineReachable,
   parseChatLandingSearch,
   shouldRetrySharingReviewConflict,
-  createChatLandingProjectSelectionKey,
 } from '../src/components/chat/chat-landing-derived';
 
 const onlineMachineIds = new Set(['github-runner']);
@@ -1068,24 +1068,6 @@ describe('buildChatLandingPreSelectionKey', () => {
       buildChatLandingPreSelectionKey({ ...projectIntent, project: 'local-project-2' })
     );
   });
-
-  it('treats each project-row selection for the same target as a new intent', () => {
-    expect(
-      buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })
-    ).not.toBe(buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'b' }));
-  });
-
-  it('keeps one intent stable across re-renders', () => {
-    expect(buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })).toBe(
-      buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })
-    );
-  });
-
-  it('creates distinct project selection keys inside the same millisecond', () => {
-    expect(createChatLandingProjectSelectionKey(123)).not.toBe(
-      createChatLandingProjectSelectionKey(123)
-    );
-  });
 });
 
 describe('parseChatLandingSearch', () => {
@@ -1097,7 +1079,6 @@ describe('parseChatLandingSearch', () => {
         project: 'local-project-1',
         repo: 'owner/repo',
         resetDraftKey: 'r1',
-        projectSelection: 'p1',
       })
     ).toEqual({
       context: 'local',
@@ -1105,7 +1086,6 @@ describe('parseChatLandingSearch', () => {
       project: 'local-project-1',
       repo: 'owner/repo',
       resetDraftKey: 'r1',
-      projectSelection: 'p1',
     });
   });
 
@@ -1115,7 +1095,7 @@ describe('parseChatLandingSearch', () => {
         context: 'remote',
         machine: 7,
         project: null,
-        projectSelection: ['p1'],
+        resetDraftKey: ['r1'],
       })
     ).toEqual({
       context: undefined,
@@ -1123,7 +1103,6 @@ describe('parseChatLandingSearch', () => {
       project: undefined,
       repo: undefined,
       resetDraftKey: undefined,
-      projectSelection: undefined,
     });
   });
 });
@@ -1151,51 +1130,116 @@ describe('getSelectedLocalProjectKey', () => {
   });
 });
 
-describe('buildChatLandingProjectSelectionNavigation', () => {
-  const activation = {
-    machineId: 'machine-1',
-    localProjectId: 'local-project-1',
-  };
-
-  it('replaces when the URL already names the activated project', () => {
-    const navigation = buildChatLandingProjectSelectionNavigation({
-      ...activation,
-      selectedLocalProjectKey: 'machine-1:local-project-1',
-    });
-    expect(navigation.replace).toBe(true);
-    expect(navigation.search).toMatchObject({
-      context: 'local',
-      machine: 'machine-1',
-      project: 'local-project-1',
-    });
+describe('getChatLandingSelectionSearch', () => {
+  it('names a complete local project selection', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'local',
+        machineId: 'machine-1',
+        localProjectId: 'local-project-1',
+        repoFullName: null,
+      })
+    ).toEqual({ context: 'local', machine: 'machine-1', project: 'local-project-1' });
   });
 
-  it('pushes when coming from another project or from no project', () => {
+  it('names the chats-only context', () => {
     expect(
-      buildChatLandingProjectSelectionNavigation({
-        ...activation,
-        selectedLocalProjectKey: 'machine-1:local-project-2',
-      }).replace
-    ).toBe(false);
-    expect(
-      buildChatLandingProjectSelectionNavigation({
-        ...activation,
-        selectedLocalProjectKey: null,
-      }).replace
-    ).toBe(false);
+      getChatLandingSelectionSearch({
+        contextType: 'chat',
+        machineId: 'machine-1',
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({ context: 'chat' });
   });
 
-  it('carries a fresh selection nonce on every activation', () => {
-    const first = buildChatLandingProjectSelectionNavigation({
-      ...activation,
-      selectedLocalProjectKey: null,
-      now: 123,
-    });
-    const second = buildChatLandingProjectSelectionNavigation({
-      ...activation,
-      selectedLocalProjectKey: 'machine-1:local-project-1',
-      now: 123,
-    });
-    expect(second.search.projectSelection).not.toBe(first.search.projectSelection);
+  it('names a complete github selection', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'github',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: 'owner/repo',
+      })
+    ).toEqual({ context: 'github', repo: 'owner/repo' });
+  });
+
+  it('maps incomplete selections to a URL that names nothing', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'local',
+        machineId: 'machine-1',
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({});
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'github',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({});
+  });
+});
+
+describe('getChatLandingSelectionSyncDecision', () => {
+  const drifted = { urlKey: 'url-selection', selectionKey: 'composer-selection' };
+
+  it('never touches a URL that names nothing', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: false,
+        intentApplied: true,
+        armed: true,
+      })
+    ).toBe('skip');
+  });
+
+  it('waits while the current URL intent has not been applied yet', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: false,
+        armed: true,
+      })
+    ).toBe('skip');
+  });
+
+  it('arms on the commit that applied an intent instead of racing it', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: false,
+      })
+    ).toBe('arm');
+  });
+
+  it('syncs composer drift once armed', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: true,
+      })
+    ).toBe('sync');
+  });
+
+  it('leaves a truthful URL alone', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: true,
+        urlKey: 'same-selection',
+        selectionKey: 'same-selection',
+      })
+    ).toBe('skip');
   });
 });

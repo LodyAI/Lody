@@ -345,6 +345,9 @@ import {
 import {
   buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
+  getChatLandingSelectionSearch,
+  getChatLandingSelectionSyncDecision,
+  type ChatLandingSearch,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
@@ -371,8 +374,12 @@ interface ChatLandingProps {
   preSelectedMachine?: string;
   preSelectedProject?: string;
   preSelectedRepo?: string;
-  /** Makes a repeated project-row selection a fresh composer intent. */
-  projectSelectionKey?: string;
+  /**
+   * Mirrors the composer's effective selection back into the chat-route URL
+   * (with `replace`) once the URL names a selection. Passed by the desktop
+   * chat route only; mobile keeps its base-context model.
+   */
+  onSelectionUrlSync?: (search: ChatLandingSearch) => void;
   resetDraftKey?: string;
   resetDraftOnKeyChange?: boolean;
 }
@@ -549,7 +556,7 @@ function WorkspaceChatLanding({
   preSelectedMachine,
   preSelectedProject,
   preSelectedRepo,
-  projectSelectionKey,
+  onSelectionUrlSync,
   resetDraftKey,
   resetDraftOnKeyChange = true,
 }: ChatLandingProps) {
@@ -1149,6 +1156,9 @@ function WorkspaceChatLanding({
   const fireProjectSelectedOnChange = useFireOnKeyChange();
   const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  // False while a just-applied URL intent has not rendered yet; the selection
+  // mirror must not compare against that pre-application state.
+  const selectionSyncArmedRef = useRef(false);
   const selectedLocalProjectRef = useRef<LocalProjectSelection | null>(null);
   selectedLocalProjectRef.current = selectedLocalProject;
   // `machines` is read inside fetchLocalGitState only for an offline pre-check.
@@ -1416,20 +1426,29 @@ function WorkspaceChatLanding({
     machine: preSelectedMachine,
     project: preSelectedProject,
     repo: preSelectedRepo,
-    projectSelectionKey,
   });
   useEffect(() => {
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
+    // The applied selection reaches state next render; disarm the mirror so it
+    // cannot race this intent with the still-stale selection (see the mirror
+    // effect below, which must run after this one).
+    selectionSyncArmedRef.current = false;
 
     if (preSelectedContext === 'chat') {
       setContextType('chat');
     } else if (preSelectedContext === 'local' && preSelectedMachine && preSelectedProject) {
       setContextType('local');
-      handleSelectedLocalProjectChange({
-        machineId: preSelectedMachine as MachineId,
-        localProjectId: preSelectedProject as LocalProjectId,
-      });
+      const currentProject = selectedLocalProjectRef.current;
+      if (
+        currentProject?.machineId !== preSelectedMachine ||
+        currentProject?.localProjectId !== preSelectedProject
+      ) {
+        handleSelectedLocalProjectChange({
+          machineId: preSelectedMachine as MachineId,
+          localProjectId: preSelectedProject as LocalProjectId,
+        });
+      }
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
@@ -1442,6 +1461,54 @@ function WorkspaceChatLanding({
     preSelectedRepo,
     handleSelectedLocalProjectChange,
   ]);
+
+  // ── Mirror the effective selection back into the URL ──
+  // The composer owns the selection once pre-selection is applied. When the
+  // URL names a selection, it must keep telling the truth: steering or
+  // clearing the composer would otherwise leave a stale project in the URL,
+  // and re-activating that project's sidebar row would be an identical-URL
+  // no-op. A plain /chat URL names nothing and stays plain, so restored
+  // defaults and auto-selection never rewrite the home landing's address.
+  const selectionSearch = useMemo(
+    () =>
+      getChatLandingSelectionSearch({
+        contextType,
+        machineId: selectedLocalProject?.machineId ?? null,
+        localProjectId: selectedLocalProject?.localProjectId ?? null,
+        repoFullName: selectedRepo ?? null,
+      }),
+    [contextType, selectedLocalProject, selectedRepo]
+  );
+  const urlNamesSelection =
+    preSelectedContext !== undefined ||
+    preSelectedMachine !== undefined ||
+    preSelectedProject !== undefined ||
+    preSelectedRepo !== undefined;
+  useEffect(() => {
+    if (!onSelectionUrlSync) return;
+    const selectionKey = buildChatLandingPreSelectionKey({
+      context: selectionSearch.context,
+      machine: selectionSearch.machine,
+      project: selectionSearch.project,
+      repo: selectionSearch.repo,
+    });
+    const decision = getChatLandingSelectionSyncDecision({
+      urlNamesSelection,
+      intentApplied: preSelectionAppliedRef.current === preSelectionKey,
+      armed: selectionSyncArmedRef.current,
+      urlKey: preSelectionKey,
+      selectionKey,
+    });
+    if (decision === 'arm') {
+      selectionSyncArmedRef.current = true;
+      return;
+    }
+    if (decision !== 'sync') return;
+    // The URL will soon name this state-originated selection; stamp it as
+    // already applied so the pre-selection effect does not re-apply it.
+    preSelectionAppliedRef.current = selectionKey;
+    onSelectionUrlSync(selectionSearch);
+  }, [onSelectionUrlSync, urlNamesSelection, preSelectionKey, selectionSearch]);
 
   // ── Machine-owner authorization check for local projects ──
   useEffect(() => {

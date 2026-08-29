@@ -81,6 +81,13 @@
 
 ## Invariants
 
+- The chat-route URL declares the composer's selection; it never carries one-shot
+  event nonces. Once the URL names a selection, the landing mirrors composer
+  steering back into it via the desktop route's `onSelectionUrlSync` (replace,
+  incomplete selections map to an empty search), so a sidebar project-row click
+  is either an identical-URL no-op or an ordinary search change. A plain `/chat`
+  URL stays plain: restored defaults and auto-selection never rewrite it. Mobile
+  keeps its base-context model and passes no sync callback.
 - `use-chat-landing-draft-session.ts` owns the landing's reserved session id.
   Images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)` MUST consume
   that same identity. Attachment hooks never reset it independently; reset only

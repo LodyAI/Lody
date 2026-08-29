@@ -129,10 +129,7 @@ import {
   getLatestPullRequestInfo,
   type SessionListScope,
 } from './sessions/session-list-rows';
-import {
-  buildChatLandingProjectSelectionNavigation,
-  getSelectedLocalProjectKey,
-} from './chat/chat-landing-derived';
+import { getSelectedLocalProjectKey } from './chat/chat-landing-derived';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   useLocalProjectRemovalResultNotifications,
@@ -1645,19 +1642,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (machineId: MachineId, localProjectId: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
-      // Re-activating the project the URL already names replaces in place, so
-      // the fresh selection nonce never stacks history entries behind Back.
+      // The landing mirrors composer steering back into the URL, so the URL
+      // names the live selection: a click on an already-selected project is an
+      // identical-URL no-op, and any other click is an ordinary search change
+      // the landing's pre-selection effect applies.
       void router.navigate({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
-        ...buildChatLandingProjectSelectionNavigation({
-          machineId,
-          localProjectId,
-          selectedLocalProjectKey,
-        }),
+        search: { context: 'local' as const, machine: machineId, project: localProjectId },
       });
     },
-    [closeMobileDrawer, router, selectedLocalProjectKey, workspaceSlug]
+    [closeMobileDrawer, router, workspaceSlug]
   );
 
   const handleImportLocalProject = useCallback(async () => {

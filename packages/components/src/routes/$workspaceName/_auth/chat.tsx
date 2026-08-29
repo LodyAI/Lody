@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChatLanding } from '@/components/chat/chat-landing';
 import {
@@ -19,8 +19,18 @@ export const Route = createFileRoute('/$workspaceName/_auth/chat')({
 function ChatRoute() {
   const { workspaceName } = Route.useParams();
   const search = Route.useSearch();
+  const navigate = Route.useNavigate();
   const isMobile = useIsMobile();
   const setMobileBaseContext = useSetAtom(mobileWorkspaceBaseContextAtom);
+
+  // Selection steering is an in-place correction of the current address, not
+  // a visit to a new page, so the mirror always replaces.
+  const handleSelectionUrlSync = useCallback(
+    (selectionSearch: ChatLandingSearch) => {
+      void navigate({ search: selectionSearch, replace: true });
+    },
+    [navigate]
+  );
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -50,7 +60,7 @@ function ChatRoute() {
       preSelectedProject={search.project}
       preSelectedRepo={search.repo}
       resetDraftKey={search.resetDraftKey}
-      projectSelectionKey={search.projectSelection}
+      onSelectionUrlSync={handleSelectionUrlSync}
     />
   );
 }
