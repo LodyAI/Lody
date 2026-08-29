@@ -215,7 +215,10 @@ export async function applyAcpSessionRunConfig(args: {
   );
   if (confirmedLegacyModeId) {
     runtimeConfigPatch.modeId = confirmedLegacyModeId;
-    if (agentConfigOptions.some((option) => option.id === modeConfigId)) {
+    if (
+      !isSensitiveAcpConfigOptionId(modeConfigId) &&
+      agentConfigOptions.some((option) => option.id === modeConfigId)
+    ) {
       runtimeConfigPatch.configOptionValues = {
         ...runtimeConfigPatch.configOptionValues,
         [modeConfigId]: confirmedLegacyModeId,

@@ -116,4 +116,25 @@ describe('SessionDocument ACP runtime config', () => {
       modeId: 'default',
     });
   });
+
+  it('never persists sensitive option ids even when a caller passes them directly', () => {
+    const doc = createDocument();
+
+    expect(
+      doc.applyAcpRuntimeConfigPatch('turn-1', {
+        acpSessionId: 'acp-sensitive' as never,
+        configOptionValues: {
+          api_token: 'secret-value',
+          credential: 'also-secret',
+          reasoning_effort: 'high',
+        },
+      })
+    ).toBe(true);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toEqual({
+      acpSessionId: 'acp-sensitive',
+      basedOnUserTurnId: 'turn-1',
+      revision: 1,
+      configOptionValues: { reasoning_effort: 'high' },
+    });
+  });
 });

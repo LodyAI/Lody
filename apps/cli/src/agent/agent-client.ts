@@ -1610,7 +1610,7 @@ export class AgentClient implements acp.Client {
     this.currentModel = undefined;
     this.applyConfigOptionsState(
       sessionResponse.configOptions ?? [],
-      Boolean(sessionResponse.configOptions?.length)
+      sessionResponse.configOptions !== undefined
     );
     this.legacySessionModelState = readLegacySessionModelState(sessionResponse) ?? null;
     const initialModelOption = this.findConfigOptionByCategory('model');
@@ -2514,14 +2514,16 @@ export class AgentClient implements acp.Client {
       this.options.sessionId
     );
 
-    if (result?.configOptions) {
+    if (result?.configOptions !== undefined) {
       // The agent returns the full option list, which re-includes any filtered
       // option (e.g. `agent`); drop it again here. See BC doc entry
       // BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
-      this.applyConfigOptionsState(result.configOptions, result.configOptions.length > 0);
+      this.applyConfigOptionsState(result.configOptions, true);
+    } else if (result) {
+      // Older agents may acknowledge the request without returning the full
+      // snapshot. Retain the accepted value only on that compatibility path.
+      this.configOptionValues[configId] = value;
     }
-
-    if (result) this.configOptionValues[configId] = value;
 
     this.logger.debug(
       `[${this.options.sessionId}] ACP session config option set: ${configId}=${value}`

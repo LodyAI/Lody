@@ -67,8 +67,13 @@ describe('ACP runtime config projection', () => {
   it('projects the authoritative config options returned by an ACP request', () => {
     expect(
       getAcpRuntimeConfigPatchFromOptions('acp-response' as never, [
-        { id: 'model', category: 'model', currentValue: 'canonical-model' },
-        { id: 'reasoning_effort', category: 'thought_level', currentValue: 'medium' },
+        { id: 'model', category: 'model', type: 'select', currentValue: 'canonical-model' },
+        {
+          id: 'reasoning_effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+        },
       ])
     ).toEqual({
       acpSessionId: 'acp-response',
@@ -76,6 +81,25 @@ describe('ACP runtime config projection', () => {
       configOptionValues: {
         model: 'canonical-model',
         reasoning_effort: 'medium',
+      },
+    });
+  });
+
+  it('drops sensitive ids and unsupported option types before building a durable patch', () => {
+    expect(
+      getAcpRuntimeConfigPatchFromOptions('acp-sensitive' as never, [
+        { id: 'api_token', type: 'select', currentValue: 'secret-value' },
+        { id: 'password', type: 'boolean', currentValue: true },
+        { id: 'safe_select', type: 'select', currentValue: 'visible' },
+        { id: 'safe_toggle', type: 'boolean', currentValue: false },
+        { id: 'future_object', type: 'object', currentValue: 'serialized-secret' },
+        { id: 'mismatched_boolean', type: 'boolean', currentValue: 'true' },
+      ])
+    ).toEqual({
+      acpSessionId: 'acp-sensitive',
+      configOptionValues: {
+        safe_select: 'visible',
+        safe_toggle: false,
       },
     });
   });

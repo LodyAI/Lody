@@ -1,8 +1,9 @@
-import type {
-  AcpConfigOptionValue,
-  AcpSessionNotification,
-  ACPSessionId,
-  SessionAcpRuntimeConfigPatch,
+import {
+  isSensitiveAcpConfigOptionId,
+  type AcpConfigOptionValue,
+  type AcpSessionNotification,
+  type ACPSessionId,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
 
@@ -13,9 +14,12 @@ const readConfigOption = (
     return null;
   }
   const option = value as Record<string, unknown>;
+  if (typeof option.id !== 'string' || isSensitiveAcpConfigOptionId(option.id)) {
+    return null;
+  }
   if (
-    typeof option.id !== 'string' ||
-    (typeof option.currentValue !== 'string' && typeof option.currentValue !== 'boolean')
+    (option.type !== 'select' || typeof option.currentValue !== 'string') &&
+    (option.type !== 'boolean' || typeof option.currentValue !== 'boolean')
   ) {
     return null;
   }

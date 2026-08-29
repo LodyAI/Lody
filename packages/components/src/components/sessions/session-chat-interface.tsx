@@ -388,10 +388,10 @@ import {
 } from '@/lib/session-workspace-path';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
-  disableCodexPlanMode,
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
+import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 
@@ -2028,7 +2028,6 @@ export const SessionChatInterface = memo(
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
-      replaceConfigOptions: setConfigOptionValues,
       dispatch: dispatchSessionConfigSelection,
     } = useAcpSessionConfigSelectionState();
     const {
@@ -2430,6 +2429,17 @@ export const SessionChatInterface = memo(
       selectorOptions: sessionSelectorOptions,
       dispatch: dispatchSessionConfigSelection,
     });
+    const executionTurnConfigOverrides = useMemo(
+      () =>
+        buildExecutionTurnConfigOverrides({
+          selectedModeId,
+          defaultModeId,
+          modeOptions,
+          configOptionSelectors,
+          configOptionValues,
+        }),
+      [configOptionSelectors, configOptionValues, defaultModeId, modeOptions, selectedModeId]
+    );
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
@@ -3927,16 +3937,14 @@ export const SessionChatInterface = memo(
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
-      const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
       pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
-      setConfigOptionValues(nextConfigOptionValues);
 
       const accepted = await dispatchPrompt(
         t('sessions.proposedPlanDecision.executePrompt', 'Implement the plan'),
         {
+          ...executionTurnConfigOverrides,
           forceDirect: true,
-          configOptionValuesOverride: nextConfigOptionValues,
         }
       );
 
@@ -3947,13 +3955,12 @@ export const SessionChatInterface = memo(
           return next;
         });
       } else {
-        setConfigOptionValues(configOptionValues);
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
       pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
+    }, [dispatchPrompt, executionTurnConfigOverrides, latestCompletedProposedPlan, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -4149,8 +4156,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createPrPrompt);
-    }, [captureSessionEvent, createPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCreateDraftPr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4158,8 +4172,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createDraftPrPrompt);
-    }, [captureSessionEvent, createDraftPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createDraftPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createDraftPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCommitAndPush = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4167,8 +4188,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(commitAndPushPrompt);
-    }, [captureSessionEvent, commitAndPushPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(commitAndPushPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      commitAndPushPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleResolveConflicts = useCallback(async () => {
       if (isResolvingConflicts || !latestPr?.url) return;
@@ -4184,7 +4212,8 @@ export const SessionChatInterface = memo(
             repoFullName: latestPrRepoFullName,
             prNumber: latestPrNumber,
             prUrl: latestPr.url,
-          })
+          }),
+          executionTurnConfigOverrides
         );
       } finally {
         setIsResolvingConflicts(false);
@@ -4192,6 +4221,7 @@ export const SessionChatInterface = memo(
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isResolvingConflicts,
       latestPr,
       latestPrNumber,
@@ -4222,7 +4252,7 @@ export const SessionChatInterface = memo(
           toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
           return;
         }
-        const accepted = await dispatchPrompt(prompt);
+        const accepted = await dispatchPrompt(prompt, executionTurnConfigOverrides);
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
@@ -4236,6 +4266,7 @@ export const SessionChatInterface = memo(
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isPrActionPending,
       latestPrRepoFullName,
       refreshActivePrCheckRuns,
@@ -5705,7 +5736,8 @@ export const SessionChatInterface = memo(
                               // PR open, a committed-but-unpushed fix is invisible
                               // to everything that reads the PR head.
                               hasPullRequest: hasExistingPr,
-                            })
+                            }),
+                            executionTurnConfigOverrides
                           );
                         }}
                       />

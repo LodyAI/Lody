@@ -55,6 +55,7 @@ import {
   type LodyPresenceStateMap,
   type SessionAcpRuntimeConfigPatch,
   type SessionAcpRuntimeConfigSnapshot,
+  isSensitiveAcpConfigOptionId,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
@@ -2118,6 +2119,18 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       throw new Error('SessionDocument not initialized');
     }
 
+    const durablePatch: SessionAcpRuntimeConfigPatch =
+      patch.configOptionValues === undefined
+        ? patch
+        : {
+            ...patch,
+            configOptionValues: Object.fromEntries(
+              Object.entries(patch.configOptionValues).filter(
+                ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+              )
+            ),
+          };
+
     const state = this.mirror.getState();
     const incomingTurnIndex = state.history.findIndex(
       (entry) => entry.role === 'user' && entry.id === basedOnUserTurnId
@@ -2144,7 +2157,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }
 
     const continuesCurrentSnapshot =
-      current?.acpSessionId === patch.acpSessionId &&
+      current?.acpSessionId === durablePatch.acpSessionId &&
       current.basedOnUserTurnId === basedOnUserTurnId;
     const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
       ...(continuesCurrentSnapshot
@@ -2156,7 +2169,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
               : {}),
           }
         : {}),
-      ...patch,
+      ...durablePatch,
       basedOnUserTurnId,
     };
     if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {

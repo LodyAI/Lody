@@ -454,7 +454,11 @@ Session conversation page chain:
   local user has not edited; local unsent choices remain a private draft until
   send freezes them into a Turn. Never infer runtime config from a permission
   click or its history outcome: consent is not proof that the agent applied the
-  change, and click-local state does not synchronize collaborators.
+  change, and click-local state does not synchronize collaborators. Explicit
+  execution actions (Implement Plan, Create PR, Commit & Push, conflict/CI/review
+  fixes) are different: they create a new user Turn and must freeze a supported
+  non-Plan mode into that Turn's `inputConfig`; they still must not mutate local
+  composer state as a substitute for agent-confirmed runtime projection.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to

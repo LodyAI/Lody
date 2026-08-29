@@ -28,9 +28,9 @@ describe('applyAcpSessionRunConfig', () => {
     const agentClient = {
       isCreated: () => true,
       getConfigOptions: () => [
-        { id: 'permission-mode', category: 'mode', currentValue: 'default' },
-        { id: 'engine', category: 'model', currentValue: 'model-a' },
-        { id: 'effort', category: 'thought_level', currentValue: 'high' },
+        { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'default' },
+        { id: 'engine', category: 'model', type: 'select', currentValue: 'model-a' },
+        { id: 'effort', category: 'thought_level', type: 'select', currentValue: 'high' },
       ],
       setSessionMode,
       unstable_setSessionModel: setSessionModel,

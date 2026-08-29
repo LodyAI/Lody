@@ -179,7 +179,7 @@ describe('AgentClient session preparation gate', () => {
   });
 
   it('carries successful live config changes into replacement session startup', async () => {
-    connectionMocks.setSessionConfigOption.mockResolvedValue({ configOptions: [] });
+    connectionMocks.setSessionConfigOption.mockResolvedValue({});
     const client = new AgentClient({
       logger: createLogger(),
       sessionId: 'session-grok-switch' as SessionId,
@@ -228,6 +228,29 @@ describe('AgentClient session preparation gate', () => {
           },
         },
       },
+    });
+  });
+
+  it('treats an empty set-config response as an authoritative full snapshot', async () => {
+    connectionMocks.setSessionConfigOption.mockResolvedValue({ configOptions: [] });
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-empty-config-snapshot' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'codex' },
+      configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'high' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir');
+    await client.setSessionConfigOption('acp-session-1' as never, 'collaboration_mode', 'default');
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
+    await client.prepareReplacementSession();
+    expect(connectionMocks.newSession).toHaveBeenLastCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
     });
   });
 
