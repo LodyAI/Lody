@@ -28,9 +28,9 @@ describe('applyAcpSessionRunConfig', () => {
     const agentClient = {
       isCreated: () => true,
       getConfigOptions: () => [
-        { id: 'permission-mode', category: 'mode' },
-        { id: 'engine', category: 'model' },
-        { id: 'effort', category: 'thought_level' },
+        { id: 'permission-mode', category: 'mode', currentValue: 'default' },
+        { id: 'engine', category: 'model', currentValue: 'model-a' },
+        { id: 'effort', category: 'thought_level', currentValue: 'high' },
       ],
       setSessionMode,
       unstable_setSessionModel: setSessionModel,
@@ -55,7 +55,20 @@ describe('applyAcpSessionRunConfig', () => {
         },
         logger: createLogger(),
       })
-    ).resolves.toEqual({ rejectedSelections: [], warningSelections: [] });
+    ).resolves.toEqual({
+      rejectedSelections: [],
+      warningSelections: [],
+      runtimeConfigPatch: {
+        acpSessionId: 'acp-1',
+        modeId: 'agent',
+        modelId: 'model-a',
+        configOptionValues: {
+          'permission-mode': 'agent',
+          engine: 'model-a',
+          effort: 'high',
+        },
+      },
+    });
 
     expect(setSessionMode).toHaveBeenCalledWith('acp-1', 'agent');
     expect(setSessionModel).toHaveBeenCalledWith('acp-1', 'model-a');
@@ -90,6 +103,7 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['api_token=<redacted>'],
       warningSelections: ['api_token=<redacted>'],
+      runtimeConfigPatch: { acpSessionId: 'acp-2', configOptionValues: {} },
     });
 
     expect(vi.mocked(logger.debug).mock.calls.flat().join('\n')).not.toContain('private-value');
@@ -145,6 +159,7 @@ describe('applyAcpSessionRunConfig', () => {
           'custom-option="enabled"',
         ],
         warningSelections: ['custom-option="enabled"'],
+        runtimeConfigPatch: { acpSessionId: 'acp-3', configOptionValues: {} },
       });
     }
   );
@@ -179,6 +194,7 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['model="model-a"', 'reasoning_effort="high"'],
       warningSelections: ['model="model-a"', 'reasoning_effort="high"'],
+      runtimeConfigPatch: { acpSessionId: 'acp-4', configOptionValues: {} },
     });
   });
 
@@ -208,6 +224,7 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['mode="agent-full-access"'],
       warningSelections: ['mode="agent-full-access"'],
+      runtimeConfigPatch: { acpSessionId: 'acp-5', configOptionValues: {} },
     });
   });
 });

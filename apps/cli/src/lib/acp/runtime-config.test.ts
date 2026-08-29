@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseSessionNotification } from '@lody/shared';
-import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from './runtime-config';
+import {
+  getAcpRuntimeConfigPatch,
+  getAcpRuntimeConfigPatchFromOptions,
+  mergeAcpRuntimeConfigUpdates,
+} from './runtime-config';
 
 describe('ACP runtime config projection', () => {
   it('projects supported current values and derives model and mode fields', () => {
@@ -57,6 +61,22 @@ describe('ACP runtime config projection', () => {
       acpSessionId: 'acp-1',
       modeId: 'default',
       configOptionValues: { permission: 'plan', reasoning_effort: 'low' },
+    });
+  });
+
+  it('projects the authoritative config options returned by an ACP request', () => {
+    expect(
+      getAcpRuntimeConfigPatchFromOptions('acp-response' as never, [
+        { id: 'model', category: 'model', currentValue: 'canonical-model' },
+        { id: 'reasoning_effort', category: 'thought_level', currentValue: 'medium' },
+      ])
+    ).toEqual({
+      acpSessionId: 'acp-response',
+      modelId: 'canonical-model',
+      configOptionValues: {
+        model: 'canonical-model',
+        reasoning_effort: 'medium',
+      },
     });
   });
 });

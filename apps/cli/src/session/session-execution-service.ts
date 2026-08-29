@@ -431,7 +431,11 @@ export type SessionExecutionServiceDeps = {
       acpSessionId: ACPSessionId | null;
       agentClient: unknown;
     },
-    config: ApplyModeAndModelConfig
+    config: ApplyModeAndModelConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+    }
   ) => Promise<void>;
   createAssistantEntryForTurn: (
     sessionId: SessionId,
@@ -1222,7 +1226,10 @@ export class SessionExecutionService {
         return preConfigRejection;
       }
       if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig);
+        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
+          sessionDoc,
+          basedOnUserTurnId: options.userTurnId,
+        });
       }
 
       const preSubmitRejection = await rejectBeforeProviderSubmission();
@@ -3676,10 +3683,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId, triggerReason },
               async () =>
-                await self.deps.applyAcpModeAndModel(targetSession, {
-                  ...acpSessionConfig,
-                  configOptionValues: acpSessionConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  targetSession,
+                  {
+                    ...acpSessionConfig,
+                    configOptionValues: acpSessionConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: executionUserTurnId,
+                  }
+                )
             )
           );
 
@@ -4461,10 +4475,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId },
               async () =>
-                await self.deps.applyAcpModeAndModel(session, {
-                  ...agentConfig,
-                  configOptionValues: agentConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  session,
+                  {
+                    ...agentConfig,
+                    configOptionValues: agentConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: userTurnId,
+                  }
+                )
             )
           );
 

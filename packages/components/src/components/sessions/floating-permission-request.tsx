@@ -314,14 +314,7 @@ function PermissionCard({
         setPendingOptionId(null);
       }
     },
-    [
-      isResolved,
-      isReady,
-      pendingOptionId,
-      respondToPermission,
-      sessionId,
-      permission.requestId,
-    ]
+    [isResolved, isReady, pendingOptionId, respondToPermission, sessionId, permission.requestId]
   );
 
   const handleSubmitAnswers = useCallback(

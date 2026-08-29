@@ -26,6 +26,26 @@ const readConfigOption = (
   };
 };
 
+export const getAcpRuntimeConfigPatchFromOptions = (
+  acpSessionId: ACPSessionId,
+  configOptions: readonly unknown[]
+): SessionAcpRuntimeConfigPatch => {
+  const options = filterAcpConfigOptions(
+    configOptions.map(readConfigOption).filter((option) => option !== null)
+  );
+  const configOptionValues = Object.fromEntries(
+    options.map((option) => [option.id, option.currentValue])
+  );
+  const mode = options.find((option) => option.category === 'mode');
+  const model = options.find((option) => option.category === 'model');
+  return {
+    acpSessionId,
+    configOptionValues,
+    ...(typeof mode?.currentValue === 'string' ? { modeId: mode.currentValue } : {}),
+    ...(typeof model?.currentValue === 'string' ? { modelId: model.currentValue } : {}),
+  };
+};
+
 export const getAcpRuntimeConfigPatch = (
   notification: AcpSessionNotification
 ): SessionAcpRuntimeConfigPatch | null => {
@@ -40,20 +60,10 @@ export const getAcpRuntimeConfigPatch = (
     return null;
   }
 
-  const options = filterAcpConfigOptions(
-    update.configOptions.map(readConfigOption).filter((option) => option !== null)
+  return getAcpRuntimeConfigPatchFromOptions(
+    notification.sessionId as ACPSessionId,
+    update.configOptions
   );
-  const configOptionValues = Object.fromEntries(
-    options.map((option) => [option.id, option.currentValue])
-  );
-  const mode = options.find((option) => option.category === 'mode');
-  const model = options.find((option) => option.category === 'model');
-  return {
-    acpSessionId: notification.sessionId as ACPSessionId,
-    configOptionValues,
-    ...(typeof mode?.currentValue === 'string' ? { modeId: mode.currentValue } : {}),
-    ...(typeof model?.currentValue === 'string' ? { modelId: model.currentValue } : {}),
-  };
 };
 
 export const mergeAcpRuntimeConfigUpdates = (

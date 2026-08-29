@@ -30,8 +30,12 @@ const createDocument = () => {
     schema: sessionDocSchema,
     initialState: {
       session: { id: doc.sessionId },
-      history: [historyEntry('turn-1', 'user')],
+      history: [],
     },
+  });
+  doc.mirror.setState((state) => {
+    state.history.push(historyEntry('turn-1', 'user'));
+    return state;
   });
   return doc;
 };
