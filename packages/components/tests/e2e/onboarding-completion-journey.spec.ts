@@ -18,3 +18,28 @@ test('provider skip remains an honest path into Lody', async ({ page }) => {
 
   await expect(page.getByTestId('onboarding-complete')).toBeVisible();
 });
+
+test('pending provider selects a project then finishes on the preparing summary', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const response = await page.goto(
+    '/iframe.html?id=onboarding-completionjourney--provider-pending-setup&viewMode=story'
+  );
+  expect(response?.ok()).toBeTruthy();
+
+  await expect(page.getByRole('heading', { name: 'Connect a coding agent' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole('button', { name: 'Next' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pick a project to start with' })).toBeVisible();
+  await page.getByRole('button', { name: 'Next' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Your Agent is getting ready' })).toBeVisible();
+  await expect(page.getByText('Runtime downloads continue in the background.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Run your first task' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Enter Lody' }).click();
+
+  await expect(page.getByTestId('onboarding-complete')).toBeVisible();
+});

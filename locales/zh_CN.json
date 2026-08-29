@@ -1020,6 +1020,8 @@
   "onboarding.summary.exploreDescription": "你可以先进入 Lody，准备好后再从设置中连接一个编码 Agent。",
   "onboarding.summary.exploreTitle": "探索 Lody",
   "onboarding.summary.open": "打开 Lody",
+  "onboarding.summary.preparingDescription": "Runtime 会继续在后台下载。你可以先进入 Lody，待配置完成后即可开始任务。",
+  "onboarding.summary.preparingTitle": "Agent 正在准备中",
   "onboarding.summary.title": "Lody 已准备就绪",
   "onboarding.theme.dark": "深色",
   "onboarding.theme.darkThemeHeading": "深色主题",

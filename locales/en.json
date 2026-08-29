@@ -1020,6 +1020,8 @@
   "onboarding.summary.exploreDescription": "Enter Lody now and connect a coding agent from Settings when you are ready.",
   "onboarding.summary.exploreTitle": "Explore Lody",
   "onboarding.summary.open": "Open Lody",
+  "onboarding.summary.preparingDescription": "Runtime downloads continue in the background. Enter Lody now and start once setup finishes.",
+  "onboarding.summary.preparingTitle": "Your Agent is getting ready",
   "onboarding.summary.title": "Lody is ready",
   "onboarding.theme.dark": "Dark",
   "onboarding.theme.darkThemeHeading": "Dark theme",

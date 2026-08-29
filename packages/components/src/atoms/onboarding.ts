@@ -1,5 +1,5 @@
 import { atomWithStorage } from 'jotai/utils';
-import type { LocalProjectId, MachineId } from '@lody/shared';
+import type { AgentConfigId, LocalProjectId, MachineId, ProviderSetupTask } from '@lody/shared';
 
 export type DesktopOnboardingResumePhase =
   | 'ceremony'
@@ -23,8 +23,18 @@ export type DesktopOnboardingProjectSelection =
       name: string;
     };
 
+export type DesktopOnboardingProviderSelection =
+  | {
+      kind: 'agentConfig';
+      agentConfigId: AgentConfigId;
+    }
+  | {
+      kind: 'providerSetup';
+      providerSetupId: ProviderSetupTask['id'];
+    };
+
 export interface DesktopOnboardingDraft {
-  agentConfigId: string | null;
+  provider: DesktopOnboardingProviderSelection | null;
   project: DesktopOnboardingProjectSelection | null;
 }
 
@@ -40,5 +50,5 @@ export const desktopOnboardingPhaseAtom = atomWithStorage<DesktopOnboardingResum
 
 export const desktopOnboardingDraftAtom = atomWithStorage<DesktopOnboardingDraft>(
   'lody-desktop-onboarding-draft',
-  { agentConfigId: null, project: null }
+  { provider: null, project: null }
 );
