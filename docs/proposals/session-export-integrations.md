@@ -1,6 +1,10 @@
 # Session Export and External Integrations
 
-Status: proposal
+Status: non-normative proposal
+
+This document records design goals for discussion. It is not a public API
+specification and makes no backward-compatibility promise before a versioned
+v1 contract is explicitly published.
 
 ## Summary
 
@@ -11,9 +15,10 @@ choose between scraping provider files and polling the UI-facing MCP tools.
 Neither approach gives an external consumer a durable synchronization
 contract.
 
-This proposal adds a provider-neutral, read-only session export contract first.
+This proposal suggests a provider-neutral, read-only session export direction.
 It does not add an integration for any specific third-party product. A later
-phase may add an opt-in local delivery mechanism built on the same event model.
+phase may add an opt-in local delivery mechanism built on a future, versioned
+event model.
 
 ## Why This Belongs in Lody
 
@@ -57,7 +62,7 @@ behavior.
 
 ## Proposed API Surface
 
-### Phase 1: pull-based export
+### Phase 1: pull-based export (direction only)
 
 Add a machine-readable command alongside the existing session commands:
 
@@ -66,11 +71,12 @@ lody session export <session-id> --jsonl
 lody session export <session-id> --jsonl --cursor <cursor>
 ```
 
-The exact command name is open for maintainer feedback. The important
-properties are that the output is stable, bounded, and designed for replay.
+The exact command name and response shape are open for maintainer feedback.
+The important design goals are that a future v1 output should be stable,
+bounded, and designed for replay.
 The existing human-facing `session history` command remains unchanged.
 
-An export page has this shape:
+An illustrative, non-normative export page might have this shape:
 
 ```json
 {
@@ -106,7 +112,7 @@ DTO vocabulary rather than introducing a second model. In particular,
 `SessionHistoryInput` and `SessionMeta` should remain the source of truth for
 the transcript and session metadata.
 
-Required invariants:
+Durable goals for a future v1 contract:
 
 1. `eventId` is stable for the same logical item and unique within the
    session. Consumers must be able to retry a page without creating a second
@@ -114,17 +120,19 @@ Required invariants:
 2. `sequence` is monotonic within one session export stream. It is a cursor,
    not a timestamp and not a global ordering claim.
 3. A cursor is opaque. Consumers must not parse or manufacture one.
-4. A page is complete only when `hasMore` is false. A bounded response must
-   never silently drop older items.
-5. The export is snapshot-consistent enough that a consumer can resume from a
-   watermark. If a concurrent write races the snapshot, the next page must
-   include it or the response must expose a new watermark.
-6. Deletion, archive, fork, and restore are represented as lifecycle records
-   or durable metadata, not inferred from missing messages.
+4. A bounded response must never silently drop older items.
+5. A future export contract should define how a consumer resumes across
+   concurrent local-first writes.
+6. Deletion, archive, fork, and restore should be represented as lifecycle
+   records or durable metadata, not inferred from missing messages.
+
+The event schema, cursor encoding, sequence semantics, concurrent-write
+ordering, and compatibility policy remain intentionally undecided until the
+native Harness and Session ownership model is clearer.
 
 ### Phase 2: opt-in local delivery
 
-Once the export model is stable, expose the same records through an explicitly
+Once the export model is stable and versioned, expose the same records through an explicitly
 opt-in local delivery mechanism. Candidate transports are:
 
 - a JSONL outbox under the Lody data directory;
@@ -136,7 +144,7 @@ primitive: it survives an Lody restart, gives consumers a replay boundary, and
 keeps delivery failure out of the session write path. Delivery acknowledgements
 must be owned by the consumer and must not make the Lody session unavailable.
 
-The event families should be provider-neutral:
+The eventual event families should be provider-neutral:
 
 ```text
 session.created
@@ -148,13 +156,13 @@ session.restored
 session.deleted
 ```
 
-`session.message_committed` is the durable boundary for transcript export.
+`session.message_committed` is a candidate durable boundary for transcript export.
 `session.turn_completed` is useful for consumers that want to trigger work
 after a turn, but it must not be the only way to obtain content.
 
 ## Visibility and Privacy
 
-The export follows the same visibility boundary as Lody's existing
+Any future export should follow the same visibility boundary as Lody's existing
 user-facing session history. It includes visible user and assistant content
 and excludes hidden reasoning, credentials, raw provider logs, and internal
 tool payloads. Attachments should be represented by the existing session-file
@@ -213,15 +221,15 @@ represent.
 
 ## Implementation Sequence
 
-1. Reuse existing transcript and session metadata types in a small public
+1. After the ownership model is settled, reuse existing transcript and session metadata types in a small public
    export DTO module.
-2. Add pure cursor, event identity, and page-boundary helpers with tests.
+2. Define and version cursor, event identity, and page-boundary helpers with tests.
 3. Add a read-only CLI export path and JSON/JSONL tests using synthetic data.
 4. Verify local mode, workspace access checks, archive/fork behavior, and
    Windows path handling.
 5. Add an outbox only after pull export has proven its identity and recovery
    semantics.
-6. Document the contract for external consumers without naming or requiring a
+6. Document the versioned contract for external consumers without naming or requiring a
    particular integration.
 
 ## Open Questions
