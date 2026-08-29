@@ -27,10 +27,12 @@ export type DesktopOnboardingProviderSelection =
   | {
       kind: 'agentConfig';
       agentConfigId: AgentConfigId;
+      agentName: string;
     }
   | {
       kind: 'providerSetup';
       providerSetupId: ProviderSetupTask['id'];
+      agentName: string;
     };
 
 export interface DesktopOnboardingDraft {

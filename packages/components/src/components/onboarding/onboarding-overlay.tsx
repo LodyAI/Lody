@@ -163,6 +163,8 @@ export function OnboardingOverlay({
               ? 'preparing'
               : 'missing'
         }
+        agentName={draft.provider?.agentName}
+        projectName={draft.project?.name}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => onCompleted({})}
       />

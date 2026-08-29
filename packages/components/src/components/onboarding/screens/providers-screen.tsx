@@ -66,6 +66,7 @@ import {
 import { labelForAgent } from '@/components/settings/provider-row';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { ProviderSetupRow } from '@/components/settings/provider-setup-row';
+import { ProviderProgressButton } from '@/components/settings/provider-progress-button';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import type { TourConfigurationState } from '../tour/tour-app';
@@ -237,9 +238,13 @@ export function ProvidersScreenView({
   const previewConfig = configs.find((config) => config.id === resolvedSelectedProviderId);
   const previewSetup = setups.find((setup) => setup.id === resolvedSelectedProviderId);
   const selectedProvider: DesktopOnboardingProviderSelection | null = previewConfig
-    ? { kind: 'agentConfig', agentConfigId: previewConfig.id }
+    ? { kind: 'agentConfig', agentConfigId: previewConfig.id, agentName: previewConfig.name }
     : previewSetup
-      ? { kind: 'providerSetup', providerSetupId: previewSetup.id }
+      ? {
+          kind: 'providerSetup',
+          providerSetupId: previewSetup.id,
+          agentName: previewSetup.config.name,
+        }
       : null;
   const previewStatus = previewConfig ? testStatuses[previewConfig.id] : undefined;
   const previewActivity = previewConfig ? testActivities[previewConfig.id] : undefined;
@@ -264,7 +269,7 @@ export function ProvidersScreenView({
       title={t('onboarding.providers.title', 'Connect a coding agent')}
       description={t(
         'onboarding.providers.description',
-        'Add a provider now. Runtime downloads continue in the background, and Lody asks you to sign in when ready.'
+        'Add a provider now. Lody will continue setup and let you know if anything needs your attention.'
       )}
       previewIdentity={
         previewConfig
@@ -392,35 +397,25 @@ export function ProvidersScreenView({
                         <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
                           {t('common.edit', 'Edit')}
                         </Button>
-                        {status !== 'needs-auth' ? (
-                          <Button
-                            variant={
-                              activity ? 'outline' : status === 'passed' ? 'ghost' : 'outline'
+                        {activity ? (
+                          <ProviderProgressButton
+                            percent={activityPercent}
+                            label={
+                              activityPercent !== null
+                                ? `${activityPercent}%`
+                                : t('onboarding.providers.workingAction', 'Working')
                             }
+                          />
+                        ) : status !== 'needs-auth' ? (
+                          <Button
+                            variant={status === 'passed' ? 'ghost' : 'outline'}
                             size="sm"
-                            className={cn(
-                              'relative min-w-[4.5rem] overflow-hidden',
-                              activity && 'disabled:opacity-100'
-                            )}
-                            disabled={Boolean(activity) || noLocalMachine}
+                            disabled={noLocalMachine}
                             onClick={() => onTest(config)}
                           >
-                            {activityPercent !== null ? (
-                              <span
-                                aria-hidden="true"
-                                className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
-                                style={{ width: `${activityPercent}%` }}
-                              />
-                            ) : null}
-                            <span className="relative z-10 tabular-nums">
-                              {activity
-                                ? activityPercent !== null
-                                  ? `${activityPercent}%`
-                                  : t('onboarding.providers.workingAction', 'Working')
-                                : status === 'passed'
-                                  ? t('onboarding.providers.retest', 'Re-test')
-                                  : t('onboarding.providers.test', 'Test')}
-                            </span>
+                            {status === 'passed'
+                              ? t('onboarding.providers.retest', 'Re-test')
+                              : t('onboarding.providers.test', 'Test')}
                           </Button>
                         ) : null}
                         <Button

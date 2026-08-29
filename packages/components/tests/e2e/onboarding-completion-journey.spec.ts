@@ -36,8 +36,11 @@ test('pending provider selects a project then finishes on the preparing summary'
   await expect(page.getByRole('heading', { name: 'Pick a project to start with' })).toBeVisible();
   await page.getByRole('button', { name: 'Next' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Your Agent is getting ready' })).toBeVisible();
-  await expect(page.getByText('Runtime downloads continue in the background.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ready to enter Lody' })).toBeVisible();
+  await expect(page.getByText('Your Agent setup is still in progress.')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Codex' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Lody' })).toBeVisible();
+  await expect(page.getByText('Setting up')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Run your first task' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Enter Lody' }).click();
 

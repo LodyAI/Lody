@@ -11,13 +11,13 @@ import { Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { Button } from '@/ui/button';
-import { Progress } from '@/ui/progress';
 import { cn } from '@/lib/utils';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
+import { ProviderProgressButton } from './provider-progress-button';
 
 export type ProviderSetupRowProps = {
   setup: ProviderSetupTask;
@@ -42,6 +42,10 @@ export function ProviderSetupRow({
   const runtimeProgress = useMachineAcpBinaryProgress(runtime, setup.machineId, config.agentType);
   const machineOnline = useMachineOnlineStatus(setup.machineId) === 'online';
   const supportsSetupProtocol = machineSupportsProviderSetupProtocol(machine);
+  const active =
+    setup.status === 'queued' ||
+    setup.status === 'preparing-runtime' ||
+    setup.status === 'verifying';
   const downloadPercent =
     setup.status === 'preparing-runtime' &&
     runtimeProgress?.status === 'downloading' &&
@@ -135,7 +139,19 @@ export function ProviderSetupRow({
             {labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
-        {setup.status === 'failed' ? (
+        {active ? (
+          <ProviderProgressButton
+            percent={downloadPercent}
+            label={
+              downloadPercent !== null
+                ? `${downloadPercent}%`
+                : setup.status === 'queued'
+                  ? t('onboarding.providers.waitingAction', 'Waiting')
+                  : t('onboarding.providers.workingAction', 'Working')
+            }
+            ariaLabel={statusText}
+          />
+        ) : setup.status === 'failed' ? (
           <XCircle className="h-4 w-4 shrink-0 text-status-error" />
         ) : null}
         {setup.status === 'failed' ? (
@@ -171,13 +187,6 @@ export function ProviderSetupRow({
         </Button>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">{statusText}</p>
-      {downloadPercent !== null ? (
-        <Progress
-          value={downloadPercent}
-          className="mt-2 h-1.5 bg-primary/15"
-          aria-label={t('settings.agent.setup.downloadProgress', 'Agent runtime download progress')}
-        />
-      ) : null}
       {setup.status === 'awaiting-auth' ? (
         <div className="mt-3">
           <AcpAuthenticationPanel

@@ -117,6 +117,8 @@ function PendingProviderJourney() {
     return (
       <SummaryScreen
         agentState="preparing"
+        agentName="Codex"
+        projectName="Lody"
         onBack={() => setStep('projects')}
         onComplete={() => setStep('complete')}
       />

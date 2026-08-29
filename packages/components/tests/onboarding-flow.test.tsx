@@ -305,12 +305,15 @@ describe('desktop onboarding flow', () => {
       );
     });
 
+    expect(findButton(container, 'Working').disabled).toBe(true);
+
     await act(async () => {
       findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onNext).toHaveBeenCalledWith({
       kind: 'providerSetup',
       providerSetupId: setup.id,
+      agentName: setup.config.name,
     });
   });
 
@@ -351,6 +354,7 @@ describe('desktop onboarding flow', () => {
     expect(onNext).toHaveBeenCalledWith({
       kind: 'agentConfig',
       agentConfigId: config.id,
+      agentName: config.name,
     });
   });
 
