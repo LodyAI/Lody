@@ -28,6 +28,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
 }));
 
 import { AgentClient } from './agent-client';
+import { applyAcpSessionRunConfig } from '@/session/acp-session-config-applier';
 
 function deferred<T>() {
   let resolvePromise!: (value: T) => void;
@@ -225,6 +226,66 @@ describe('AgentClient session preparation gate', () => {
           sessionConfig: {
             version: 1,
             configOptionValues: { permission_mode: 'ask' },
+          },
+        },
+      },
+    });
+  });
+
+  it('projects a legacy acknowledged value and carries the same value into replacement startup', async () => {
+    connectionMocks.newSession.mockResolvedValueOnce({
+      sessionId: 'acp-session-1',
+      configOptions: [
+        {
+          id: 'effort',
+          category: 'thought_level',
+          type: 'select',
+          name: 'Effort',
+          currentValue: 'low',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+    });
+    connectionMocks.setSessionConfigOption.mockResolvedValue({});
+    const logger = createLogger();
+    const client = new AgentClient({
+      logger,
+      sessionId: 'session-legacy-projection' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'codex' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir');
+    const result = await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-legacy-projection' as SessionId,
+        acpSessionId: 'acp-session-1' as never,
+        agentClient: client,
+      },
+      config: { configOptionValues: { effort: 'high' } },
+      logger,
+    });
+
+    expect(result.runtimeConfigPatch).toEqual({
+      acpSessionId: 'acp-session-1',
+      configOptionValues: { effort: 'high' },
+    });
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
+    await client.prepareReplacementSession();
+    expect(connectionMocks.newSession).toHaveBeenLastCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+      _meta: {
+        lody: {
+          sessionConfig: {
+            version: 1,
+            configOptionValues: { effort: 'high' },
           },
         },
       },

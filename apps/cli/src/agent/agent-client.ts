@@ -1650,6 +1650,20 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  private retainLegacyConfigOptionValue(configId: string, value: AcpConfigOptionValue): void {
+    this.configOptionValues[configId] = value;
+    this.configOptions = this.configOptions.map((option) => {
+      if (option.id !== configId) return option;
+      if (option.type === 'select' && typeof value === 'string') {
+        return { ...option, currentValue: value };
+      }
+      if (option.type === 'boolean' && typeof value === 'boolean') {
+        return { ...option, currentValue: value };
+      }
+      return option;
+    });
+  }
+
   async startSession(
     stream: acp.Stream,
     workdir: string,
@@ -2521,8 +2535,9 @@ export class AgentClient implements acp.Client {
       this.applyConfigOptionsState(result.configOptions, true);
     } else if (result) {
       // Older agents may acknowledge the request without returning the full
-      // snapshot. Retain the accepted value only on that compatibility path.
-      this.configOptionValues[configId] = value;
+      // snapshot. Keep replacement startup and runtime projection on the same
+      // accepted value for any matching option the agent already advertised.
+      this.retainLegacyConfigOptionValue(configId, value);
     }
 
     this.logger.debug(

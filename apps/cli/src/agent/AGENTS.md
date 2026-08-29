@@ -27,7 +27,10 @@ arrive: context/message-flow.md "Upstream".
   state; runtime projections must consume them as well as autonomous
   `config_option_update` notifications. Presence of `configOptions`, including an
   empty array, is an authoritative full snapshot and replaces retained startup
-  values; only an omitted field uses the legacy request-value fallback.
+  values; only an omitted field uses the legacy request-value fallback. That
+  fallback updates both replacement-session startup state and the matching
+  advertised option's effective `currentValue`, so shared runtime projection
+  cannot publish a stale value after the agent accepts a request.
   Goal snapshots use the Core `_meta.lody.goal` contract and epoch-second field names;
   convert them to the durable millisecond fields at this boundary. Normalize `limited`
   to the legacy durable `blocked` status.
