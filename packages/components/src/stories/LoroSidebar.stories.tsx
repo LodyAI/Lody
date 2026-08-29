@@ -1026,7 +1026,6 @@ function ProductionLikeTopContent({
                     isMobile={isMobile}
                     toggleLabel="Toggle"
                     onNavigateProject={() => {}}
-                    onStartProjectSession={() => {}}
                     onNavigateSession={() => {}}
                     onArchive={() => {}}
                     collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1080,7 +1079,6 @@ function ProductionLikeTopContent({
                   isMobile={isMobile}
                   toggleLabel="Toggle"
                   onNavigateProject={() => {}}
-                  onStartProjectSession={() => {}}
                   onNavigateSession={() => {}}
                   onArchive={() => {}}
                   collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}

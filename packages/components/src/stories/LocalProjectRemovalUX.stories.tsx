@@ -82,7 +82,6 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       isMobile={false}
       toggleLabel="展开或收起对话"
       onNavigateProject={() => {}}
-      onStartProjectSession={() => {}}
       onNavigateSession={() => {}}
       onArchive={() => {}}
       collapsedOpenedBySessionIds={{}}
@@ -158,7 +157,6 @@ function DesktopSidebar({
             isMobile={false}
             toggleLabel="展开或收起对话"
             onNavigateProject={() => {}}
-            onStartProjectSession={() => {}}
             onNavigateSession={() => {}}
             onArchive={() => {}}
             collapsedOpenedBySessionIds={{}}

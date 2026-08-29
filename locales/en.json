@@ -2761,7 +2761,6 @@
   "sidebar.localProjects.empty": "No local projects yet",
   "sidebar.localProjects.forbidden": "Local project is not available",
   "sidebar.localProjects.import": "Import local project folder",
-  "sidebar.localProjects.newSession": "New session",
   "sidebar.localProjects.pending": "Imported. Waiting for local agent…",
   "sidebar.localProjects.remove": "Remove project",
   "sidebar.localProjects.remove.archiveDescription": "{{count}} conversations will move to Archive.",

@@ -20,6 +20,7 @@ import {
   getSharingReviewTeamLooksEmpty,
   isChatLandingMachineReachable,
   shouldRetrySharingReviewConflict,
+  createChatLandingProjectSelectionKey,
 } from '../src/components/chat/chat-landing-derived';
 
 const onlineMachineIds = new Set(['github-runner']);
@@ -1065,19 +1066,21 @@ describe('buildChatLandingPreSelectionKey', () => {
     );
   });
 
-  // The sidebar's per-project "new session" button can navigate to the project
-  // the URL already names, after the user cleared the composer's project. The
-  // search params are then unchanged, so the nonce is the only thing that marks
-  // this as a fresh intent the composer must re-apply.
-  it('treats a new session nonce for the same target as a new intent', () => {
-    expect(buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })).not.toBe(
-      buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'b' })
-    );
+  it('treats each project-row selection for the same target as a new intent', () => {
+    expect(
+      buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })
+    ).not.toBe(buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'b' }));
   });
 
   it('keeps one intent stable across re-renders', () => {
-    expect(buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })).toBe(
-      buildChatLandingPreSelectionKey({ ...projectIntent, newSessionKey: 'a' })
+    expect(buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })).toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent, projectSelectionKey: 'a' })
+    );
+  });
+
+  it('creates distinct project selection keys inside the same millisecond', () => {
+    expect(createChatLandingProjectSelectionKey(123)).not.toBe(
+      createChatLandingProjectSelectionKey(123)
     );
   });
 });

@@ -582,14 +582,20 @@ export type ChatLandingPreSelectionIntent = {
   project: string | undefined;
   repo: string | undefined;
   /**
-   * Nonce marking an explicit "compose here" navigation. The composer applies a
-   * URL pre-selection once per key and then lets the user steer freely, so a
-   * caller that re-asserts the target the URL ALREADY names — the sidebar's
-   * per-project new-session button, after the user cleared the composer's
-   * project — changes no search param and would otherwise be a no-op.
+   * Nonce marking a project-row selection. The composer applies URL
+   * pre-selection once per key and then lets the user steer freely, so a
+   * repeated click on the project the URL already names needs a new identity.
    */
-  newSessionKey?: string | undefined;
+  projectSelectionKey?: string | undefined;
 };
+
+let projectSelectionSequence = 0;
+
+/** A fresh identity for every project-row activation, including same-millisecond clicks. */
+export function createChatLandingProjectSelectionKey(now = Date.now()): string {
+  projectSelectionSequence += 1;
+  return `p${now}-${projectSelectionSequence}`;
+}
 
 /** Identity of one URL-driven pre-selection intent. */
 export function buildChatLandingPreSelectionKey({
@@ -597,7 +603,7 @@ export function buildChatLandingPreSelectionKey({
   machine,
   project,
   repo,
-  newSessionKey,
+  projectSelectionKey,
 }: ChatLandingPreSelectionIntent): string {
-  return `${context}|${machine}|${project}|${repo}|${newSessionKey}`;
+  return `${context}|${machine}|${project}|${repo}|${projectSelectionKey}`;
 }
