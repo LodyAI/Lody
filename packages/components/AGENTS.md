@@ -173,6 +173,17 @@ mobile surfaces.
 ## Common entry points
 
 - Chat landing: `src/components/chat/chat-landing.tsx`.
+- Child-tab drafts send through the same accept unit as every other first
+  message: `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta
+  plus the first user turn together via `startSession` and only then promotes
+  the draft tab; `requestSessionDispatch` is acceleration on top of the durable
+  pointer. Never reintroduce a create-then-hand-off flow (pending-turn refs,
+  post-mount ref flushes): a promoted tab must not exist before its first
+  message is locally durable, and preserved composer text crosses the promotion
+  via the input draft cache, not a component ref. `archiveSession` falls back to
+  the rendered meta cache when the repo read lags hydration (a session the UI
+  can show must be closable), and a close failure surfaces a toast — never a
+  silent no-op.
 - Sidebar: `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, and
   `sessions/session-list-rows.ts`. Sidebar rows are sessions, not Tasks.
   EVERY desktop session row is a drag source for a session mention
@@ -275,6 +286,18 @@ mobile surfaces.
   browser/OS time zone, and describe it as the time through which the forecast is valid
   rather than promising a reset.
 - Responsive mobile UI: `src/components/mobile/AGENTS.md`.
+- A pending local-project removal is a visible lifecycle state, not an absent
+  project: keep the project and its existing Sessions discoverable while the
+  owning machine is offline or retrying, but exclude it from new-Session
+  selectors. Once the catalog row is gone, archived Sessions remain readable
+  and deletable; Restore stays unavailable until the same local project is
+  added again.
+- Local-project removal may optionally clean Lody-created Session worktrees, but
+  the option defaults off and is available only after the owning machine
+  preflights every worktree. Always state that the original project directory is
+  never deleted; list dirty worktrees and keep them by default. A completed
+  cleanup result is not pending removal and must be acknowledged visibly even
+  when some worktrees were kept or failed.
 - Session UI: `src/components/sessions/AGENTS.md`.
 - Tasks: `src/components/tasks/AGENTS.md`.
 - Commands and shortcuts: `src/lib/commands/AGENTS.md`.

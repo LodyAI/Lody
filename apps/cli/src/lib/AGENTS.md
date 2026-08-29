@@ -169,6 +169,15 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `MessageHandler.rescanMachineCommands`: a command family wired to only one of them
   fails silently, because its queue simply stops draining. Room-status recovery uses the
   shared `isRecoverableStreamsRoomStatus` ('detached' is never recoverable).
+  Removing a local project archives every unarchived Session that references that
+  machine/project before deleting the project row. Discover those Sessions through the
+  existence and metadata indexes; never open every Session document to find them. A failed
+  archive keeps the delete command queued so a later scan can retry it. Optional worktree
+  cleanup is limited to Lody-created Session worktrees for that project: inspect every
+  worktree before submission and again immediately before deletion, never force-delete or
+  backup-commit a dirty worktree, and record per-worktree deleted/kept/failed results. The
+  original project directory and its files are never deletion targets. Cleanup failures must
+  complete the project command with a visible result instead of leaving removal pending.
 - **Streams recovery has TWO signals and they must not be recombined**
   (`loro/connection-recovery.ts`). `onStreamsOnline` is cheap, unthrottled, and
   fires on every health rising edge — it RELEASES work parked while offline

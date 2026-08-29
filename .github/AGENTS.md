@@ -7,29 +7,61 @@
   event orchestration in `workflows/`. Do not duplicate the same rule across
   those layers.
 - Changes to required PR template headings must update the checker in the same
-  commit and validate representative Agent and human bodies locally.
-- External PRs identify exactly one author type. Agent-authored PRs retain the
-  complete Agent handoff block and its markers, explicitly ask the author-side
-  user about publishing context, and record exactly one consent answer. Never
-  infer consent. Declining is allowed but must warn that maintainers may close
-  or decline a contribution they cannot safely assess. Human-authored PRs do
-  not need Agent context.
-- Agent review instructions are a PR-specific handoff from the authoring Agent
-  to the organization owners' reviewing Agent. Require concise review focus,
-  decisions to challenge, and plausible failures or evidence gaps; fixed generic
-  reviewer boilerplate and long review essays are not valid substitutes.
+  commit and validate representative complete and rejected bodies locally.
+- Every external PR links a full Lody issue URL and retains the complete Context
+  handoff block and its markers. Each Authoring context field is a concise public
+  summary; `N/A` and redacted values are not accepted because maintainers need
+  enough provenance, scope, and risk information to assess the contribution.
+- An authoring Agent does not treat creating an Issue as approval. It tells its
+  author-side user about the policy and waits for explicit maintainer agreement
+  on scope and approach before implementation or an external PR. It also warns
+  that Context handoff is public, invalid bodies close after seven days, and
+  oversized PRs without an Issue URL get the same grace period. Never invent
+  notice or agreement that did not happen.
+- Review instructions are a PR-specific handoff to the organization owners'
+  reviewing Agent. Require concise review focus, decisions to challenge, and
+  plausible failures or evidence gaps; fixed generic reviewer boilerplate and
+  long review essays are not valid substitutes.
 - `labeler.yml` is the source of truth for path-based `scope:*` labels. Overlap
   is intentional when a pull request affects multiple product areas.
 - Issue forms cover only components present in the public repository. Keep Bug
   and Feature title prefixes, issue types, and existing labels aligned; route
   product support and security reports out of public issues, and request only
   diagnostics that contributors have checked and redacted.
+- `scripts/check-issue-body.mjs` mirrors the required rendered headings and
+  confirmations in both Issue Forms. Non-owner, non-bot issues that bypass or
+  remove them receive the warning-only `status:needs-issue-body` state; regular
+  organization members are not exempt. A valid edit clears the bot-owned state.
 - External pull request body enforcement is based on the PR author's
   `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
-  exempt; outside collaborators and prior contributors remain subject to it.
-- Workflows triggered by `pull_request_target` have a write-capable token. They
-  must never check out the pull request head or execute files supplied by the
-  pull request. Read scripts and configuration from the base commit only.
-- PR-body comments require pull-request write permission. Treat comment creation,
-  updates, and cleanup as best-effort feedback; the checker result alone decides
-  whether the enforcement job passes or fails.
+  exempt by default; outside collaborators and prior contributors remain subject
+  to it. Repository owners may explicitly exempt an exceptional PR with
+  `status:pr-policy-bypass`; adding or removing it immediately reconciles both
+  body and size policy state.
+- `workflows/pr-policy.yml` is the only event entry point for external PR body,
+  size, and expiry policy. The three implementation workflows remain callable
+  only through `workflow_call`; route new events through the entry point so one
+  run owns concurrency and dispatch.
+- Workflows triggered by `pull_request_target` have a write-capable token. For
+  PR events, read policy scripts and configuration from the trusted revision at
+  `github.sha`; scheduled and manual audits use
+  `github.event.repository.default_branch`. Never check out or execute the PR
+  head, and never use the possibly stale `github.event.pull_request.base.sha`.
+- Code CI runs on `pull_request` with read-only repository permissions, checks
+  out all public submodules recursively, and keeps the stable `Static checks`
+  and `Tests` jobs aligned with the root validation scripts so they can be used
+  as required status checks.
+- `scripts/pr-body-policy.mjs` owns PR-body status labels, comment markers, and
+  the shared external-PR exemption, and the seven-day grace period. An invalid
+  external PR keeps its original timer across edits and pushes; only a valid body
+  or explicit exemption clears the state. Before closing, the scheduled workflow
+  must re-read and revalidate the latest body.
+- External PR size enforcement counts additions plus deletions. A change over
+  200 lines without a full Lody issue URL is labeled `status:pr-too-large` and
+  shares the PR-body seven-day correction window; adding a valid URL clears the
+  warning, while body expiry performs the eventual closure. Automation does not
+  infer maintainer agreement.
+- PR-body comments require pull-request write permission. Immediate comment and
+  label updates are best-effort feedback; the checker result alone decides the
+  event-driven enforcement job. Expired PRs keep `status:pr-body-expired` and
+  are closed again when reopened, so a contributor must submit a new PR.

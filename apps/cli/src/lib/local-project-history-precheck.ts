@@ -26,8 +26,15 @@ export type LocalProjectSetupRequest = Extract<
   { type: LocalProjectSetupRequestType }
 >;
 
+export type LocalProjectRemovalPreflightRequest = Extract<
+  LocalProjectControlRequest,
+  { type: 'local-project/removal-preflight' }
+>;
+
 export type RemoteLocalProjectControlRequest =
-  LocalProjectHistoryRequest | LocalProjectSetupRequest;
+  | LocalProjectHistoryRequest
+  | LocalProjectSetupRequest
+  | LocalProjectRemovalPreflightRequest;
 
 export type LocalProjectHistoryPrecheckOk = {
   ok: true;
@@ -42,7 +49,8 @@ export type LocalProjectHistoryPrecheckError = {
 };
 
 export type LocalProjectHistoryPrecheckResult =
-  LocalProjectHistoryPrecheckOk | LocalProjectHistoryPrecheckError;
+  | LocalProjectHistoryPrecheckOk
+  | LocalProjectHistoryPrecheckError;
 
 const HISTORY_REQUEST_TYPES: ReadonlySet<LocalProjectHistoryRequestType> = new Set([
   'local-project/sync-history',
@@ -61,6 +69,7 @@ function isRemoteLocalProjectControlRequest(
   request: LocalProjectControlRequest
 ): request is RemoteLocalProjectControlRequest {
   return (
+    request.type === 'local-project/removal-preflight' ||
     HISTORY_REQUEST_TYPES.has(request.type as LocalProjectHistoryRequestType) ||
     SETUP_REQUEST_TYPES.has(request.type as LocalProjectSetupRequestType)
   );

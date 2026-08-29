@@ -53,8 +53,9 @@ export class WindowsTrayService {
 
     this.tray.setToolTip(this.options.productName)
     this.tray.setContextMenu(contextMenu)
+    // Left click opens the app directly; the context menu stays on right click.
     this.tray.on('click', () => {
-      this.tray?.popUpContextMenu()
+      this.options.openOrFocusMainWindow()
     })
 
     return true

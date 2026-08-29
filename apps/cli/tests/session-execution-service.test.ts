@@ -1932,6 +1932,7 @@ describe('SessionExecutionService', () => {
         ],
         availableCommands: [{ name: 'review', description: 'Review changes' }],
         sessionFork: false,
+        acknowledgedSteer: true,
       }),
       terminalManager: {} as unknown,
       getWorkdir: () => '/local/repo',
@@ -2025,7 +2026,8 @@ describe('SessionExecutionService', () => {
         expect.any(String),
         // Per-model reasoning efforts: absent for this agent, which publishes no
         // legacy `model[effort]` combination list.
-        undefined
+        undefined,
+        true
       )
     );
   });
@@ -5451,6 +5453,7 @@ describe('SessionExecutionService', () => {
       ],
       availableCommands: [{ name: 'review', description: 'Review changes' }],
       sessionFork: false,
+      acknowledgedSteer: true,
     }));
 
     const deps = createBaseDeps({
@@ -5506,6 +5509,7 @@ describe('SessionExecutionService', () => {
       'registry:codex:unknown',
       // Per-model reasoning efforts: this stub agent reports none.
       undefined,
+      true,
       { signal: expect.any(AbortSignal) }
     );
     expect(result).toEqual(

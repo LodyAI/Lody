@@ -28,7 +28,14 @@ const MobileWorkspaceStack = lazy(() =>
    at its bottom. The workspace layout therefore renders no bottom bar
    of its own. */
 
-export function MobileWorkspaceLayout({ children }: { children: ReactNode }) {
+export function MobileWorkspaceLayout({
+  children,
+  workspaceReady = true,
+}: {
+  children: ReactNode;
+  /** Do not mount the workspace-owned stack while route/runtime scope is converging. */
+  workspaceReady?: boolean;
+}) {
   // Only the pathname drives this layout (error boundary resets), so
   // search-only navigations don't re-render the whole mobile shell.
   const pathname = useLocation({ select: (l) => l.pathname });
@@ -73,7 +80,7 @@ export function MobileWorkspaceLayout({ children }: { children: ReactNode }) {
                    running on these — the most common — mobile pages.
                The stack is layered on top; since the route components render
                nothing on mobile there is no duplicate content. */}
-            {onStackRoute && workspaceName != null && (
+            {workspaceReady && onStackRoute && workspaceName != null && (
               <Suspense fallback={<div className="h-full w-full bg-background" />}>
                 <MobileWorkspaceStack workspaceName={workspaceName} />
               </Suspense>

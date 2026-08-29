@@ -89,6 +89,7 @@ export const previewVisualCommentTurnSchema = schema.LoroMap({
   comments: schema.LoroList(previewVisualCommentSchema, (item: { id: string }) => item.id),
 });
 
+/** Root schema for a preview visual comment doc; see `sessionDocSchema` on adding root fields. */
 export const previewVisualCommentDocSchema = schema({
   meta: schema.LoroMap({
     sessionId: schema.String<SessionId>(),

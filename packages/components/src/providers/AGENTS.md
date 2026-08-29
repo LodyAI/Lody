@@ -2,6 +2,14 @@
 
 `CLAUDE.md` is a symlink to this file. Parent `AGENTS.md` files also apply.
 
+## Mirrors over synced docs tolerate unknown root keys
+
+Every `new Mirror(...)` over a doc that syncs between clients must pass
+`ignoreUnknownProperties: true`. Peers on a newer schema write root keys this
+build does not declare; without the flag loro-mirror rejects the entire state
+with `Unknown property: <key>`, so the older client can never write to that doc
+again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
+
 ## Streams connection cardinality
 
 - Capability discovery and refresh must reuse the workspace runtime's existing Machine

@@ -120,7 +120,7 @@
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.14",
     "better-sqlite3": "catalog:",
-    "loro-crdt": "1.14.1",
+    "loro-crdt": "1.15.1",
     "shell-env": "^4.0.3",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"

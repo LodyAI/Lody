@@ -246,7 +246,10 @@ export type WorkspaceRuntime = {
   ) => Promise<MachineUpgradeResponse | null>;
   requestMachineAcpCapabilitiesRefresh: (
     request: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
-    options?: { signal?: AbortSignal }
+    options?: {
+      signal?: AbortSignal;
+      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+    }
   ) => Promise<MachineAcpCapabilitiesRefreshResponse | null>;
   waitForMachineAcpAuthenticateResponse: (
     machineId: MachineId,

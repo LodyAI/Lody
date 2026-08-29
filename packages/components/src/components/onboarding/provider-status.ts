@@ -5,7 +5,7 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 
-export type OnboardingProviderStatus = 'untested' | 'testing' | 'passed' | 'failed';
+export type OnboardingProviderStatus = 'untested' | 'passed' | 'failed';
 
 type ProviderStatusInput = Pick<
   AgentConfigMeta,

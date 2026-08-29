@@ -45,6 +45,7 @@ import {
   type TourIdentity,
 } from './tour-fixtures';
 import { TourBrowserPreview } from './tour-browser-preview';
+import { TourCloudBoundary } from './tour-cloud-boundary';
 
 // The app the tour is a tour OF.
 //
@@ -177,25 +178,27 @@ export function TourApp({
   const session = useMemo(() => buildTourSession(identity), [identity]);
 
   return (
-    <Provider store={store}>
-      <StableSessionContext.Provider value={stableSession as never}>
-        <TourWindow
-          identity={identity}
-          session={session}
-          tracks={tracks}
-          configurationState={configurationState}
-          permissionAnswer={permissionAnswer}
-          onPermissionAnswer={onPermissionAnswer}
-          activeSidePanelTab={activeSidePanelTab}
-          onSidePanelTabSelect={onSidePanelTabSelect}
-          selectedTaskId={selectedTaskId}
-          activeTabIndex={activeTabIndex}
-          onSelectTabIndex={onSelectTabIndex}
-          onMergePr={onMergePr}
-          className={className}
-        />
-      </StableSessionContext.Provider>
-    </Provider>
+    <TourCloudBoundary identity={identity}>
+      <Provider store={store}>
+        <StableSessionContext.Provider value={stableSession as never}>
+          <TourWindow
+            identity={identity}
+            session={session}
+            tracks={tracks}
+            configurationState={configurationState}
+            permissionAnswer={permissionAnswer}
+            onPermissionAnswer={onPermissionAnswer}
+            activeSidePanelTab={activeSidePanelTab}
+            onSidePanelTabSelect={onSidePanelTabSelect}
+            selectedTaskId={selectedTaskId}
+            activeTabIndex={activeTabIndex}
+            onSelectTabIndex={onSelectTabIndex}
+            onMergePr={onMergePr}
+            className={className}
+          />
+        </StableSessionContext.Provider>
+      </Provider>
+    </TourCloudBoundary>
   );
 }
 

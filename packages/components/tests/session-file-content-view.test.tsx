@@ -1407,7 +1407,7 @@ describe('SessionFileContentView', () => {
     Object.defineProperty(window, 'ipc', {
       configurable: true,
       value: {
-        invoke: async (channel: string, ...args: unknown[]) => {
+        invoke: async (channel: string) => {
           if (channel === 'localProjects.readSessionWorktreeFile') {
             return {
               path: 'large.html',

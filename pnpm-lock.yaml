@@ -79,14 +79,14 @@ catalogs:
       specifier: ^1.14.1
       version: 1.14.1
     loro-mirror:
-      specifier: 2.2.1
-      version: 2.2.1
+      specifier: 2.3.0
+      version: 2.3.0
     loro-mirror-jotai:
-      specifier: 2.2.1
-      version: 2.2.1
+      specifier: 2.3.0
+      version: 2.3.0
     loro-mirror-react:
-      specifier: 2.2.1
-      version: 2.2.1
+      specifier: 2.3.0
+      version: 2.3.0
     loro-repo:
       specifier: ^0.20.0
       version: 0.20.0
@@ -349,7 +349,7 @@ importers:
         version: link:../../packages/code-review-viewer
       loro-mirror:
         specifier: 'catalog:'
-        version: 2.2.1(loro-crdt@1.14.1)
+        version: 2.3.0(loro-crdt@1.14.1)
       loro-repo:
         specifier: 'catalog:'
         version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.14.1)
@@ -1082,13 +1082,13 @@ importers:
         version: 1.14.1
       loro-mirror:
         specifier: 'catalog:'
-        version: 2.2.1(loro-crdt@1.14.1)
+        version: 2.3.0(loro-crdt@1.14.1)
       loro-mirror-jotai:
         specifier: 'catalog:'
-        version: 2.2.1(jotai@2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0))(loro-crdt@1.14.1)(loro-mirror@2.2.1(loro-crdt@1.14.1))
+        version: 2.3.0(jotai@2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0))(loro-crdt@1.14.1)(loro-mirror@2.3.0(loro-crdt@1.14.1))
       loro-mirror-react:
         specifier: 'catalog:'
-        version: 2.2.1(loro-crdt@1.14.1)(loro-mirror@2.2.1(loro-crdt@1.14.1))(react@19.2.0)
+        version: 2.3.0(loro-crdt@1.14.1)(loro-mirror@2.3.0(loro-crdt@1.14.1))(react@19.2.0)
       loro-repo:
         specifier: 'catalog:'
         version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.14.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.14.1)
@@ -1398,7 +1398,7 @@ importers:
         version: 1.14.1
       loro-mirror:
         specifier: 'catalog:'
-        version: 2.2.1(loro-crdt@1.14.1)
+        version: 2.3.0(loro-crdt@1.14.1)
       zod:
         specifier: 4.3.6
         version: 4.3.6
@@ -9179,22 +9179,22 @@ packages:
   loro-crdt@1.14.1:
     resolution: {integrity: sha512-1BQ7neoQeJdCbD8gxlLHsy8tqCLYIJGrXSZic4s3t7toIsiFfks8Z0nGWvuEWr5miZ7giJx19x5ffkBaw+g9KQ==}
 
-  loro-mirror-jotai@2.2.1:
-    resolution: {integrity: sha512-iixmVFMtVKz6p2N+WcveeYk6BWeYYllTb+k7vdKCFf5nvADkN735ljHRLfP1AOUvVrmm2RxwE0P78XCoJX2/ZQ==}
+  loro-mirror-jotai@2.3.0:
+    resolution: {integrity: sha512-bgdBCheEML8oqsqEnpCVLQGHrkNwZzd2BsCq8lezhwC8cef7ugBv6hKzy7HenPqiMq+n+cng82D0Y+nJ5zwhRA==}
     peerDependencies:
       jotai: ^2.0.0
       loro-crdt: ^1.13.3
-      loro-mirror: 2.2.1
+      loro-mirror: 2.3.0
 
-  loro-mirror-react@2.2.1:
-    resolution: {integrity: sha512-Bw1OKLwk9xRVeyDPt7+JOtZyEx+1mEkfCyRyGGc06YVs5HGYnGKRiDys+TxO3Kj302RT12rTtN+RbwYQpiEsxg==}
+  loro-mirror-react@2.3.0:
+    resolution: {integrity: sha512-fX4qU/ykiFx2zxZVgiUO5GKqk6nqrmu7dfogHtd9a4D0SK2TqG0Sqyc3DUbxjX2gbj2xYgFVAr+rUpjwAEij1Q==}
     peerDependencies:
       loro-crdt: ^1.13.3
-      loro-mirror: 2.2.1
+      loro-mirror: 2.3.0
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  loro-mirror@2.2.1:
-    resolution: {integrity: sha512-wOeNqNTSdFS7S6z0j+GWlRUtgRwMG/vAS0U0MJ3egZZlJUw4tIpmQoUQ2lEtjzdddBzZBfTR33YphE+ZIXY6LA==}
+  loro-mirror@2.3.0:
+    resolution: {integrity: sha512-CVoxuh4D+JSkYQrJyIXfqnbnYnIwVFlCoRcNc1XSdWRshJZQ7tymnb5rT6AQ+XuDZHyIua0HVHjpEvHkGCTm9A==}
     peerDependencies:
       loro-crdt: ^1.13.3
 
@@ -21422,19 +21422,19 @@ snapshots:
 
   loro-crdt@1.14.1: {}
 
-  loro-mirror-jotai@2.2.1(jotai@2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0))(loro-crdt@1.14.1)(loro-mirror@2.2.1(loro-crdt@1.14.1)):
+  loro-mirror-jotai@2.3.0(jotai@2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0))(loro-crdt@1.14.1)(loro-mirror@2.3.0(loro-crdt@1.14.1)):
     dependencies:
       jotai: 2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0)
       loro-crdt: 1.14.1
-      loro-mirror: 2.2.1(loro-crdt@1.14.1)
+      loro-mirror: 2.3.0(loro-crdt@1.14.1)
 
-  loro-mirror-react@2.2.1(loro-crdt@1.14.1)(loro-mirror@2.2.1(loro-crdt@1.14.1))(react@19.2.0):
+  loro-mirror-react@2.3.0(loro-crdt@1.14.1)(loro-mirror@2.3.0(loro-crdt@1.14.1))(react@19.2.0):
     dependencies:
       loro-crdt: 1.14.1
-      loro-mirror: 2.2.1(loro-crdt@1.14.1)
+      loro-mirror: 2.3.0(loro-crdt@1.14.1)
       react: 19.2.0
 
-  loro-mirror@2.2.1(loro-crdt@1.14.1):
+  loro-mirror@2.3.0(loro-crdt@1.14.1):
     dependencies:
       immer: 10.2.0
       loro-crdt: 1.14.1

@@ -384,6 +384,113 @@ describe('SessionDispatchWatcher', () => {
     );
   });
 
+  it('keeps a stashed RPC turn while session meta is unknown and dispatches once meta syncs', async () => {
+    const startSession = vi.fn(async () => {});
+    const sessionId = 'session-rpc-before-meta' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+    };
+    // The session was just created on another client: its meta has not synced
+    // to this machine yet, but the dispatch RPC already targeted it.
+    let metaRecord: { meta: typeof sessionMeta } | undefined;
+    let metadataWatchCallback: ((event: { kind: string; docId: string }) => void) | undefined;
+
+    const sessionDoc = {
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => metaRecord?.meta),
+      getHistory: vi.fn(async () => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    };
+
+    const getDocMeta = vi.fn(async () => metaRecord);
+    const workspaceDocument = {
+      repo: {
+        getMeta: () => ({ scan: vi.fn(async () => []) }),
+        getDocMeta,
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn((callback: (event: { kind: string; docId: string }) => void) => {
+          metadataWatchCallback = callback;
+          return { unsubscribe: vi.fn() };
+        }),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession,
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await watcher.start();
+
+    await expect(
+      watcher.offerRpcTurn({
+        sessionId,
+        userTurnId: 'rpc-turn-early',
+        userId: 'user-1',
+        timestamp: new Date().toISOString(),
+        inputConfig: { prompt: 'created before meta sync' },
+      })
+    ).resolves.toBe('accepted');
+
+    // A metadata reconcile while meta is still absent must treat the session
+    // as unknown, not foreign: the stashed turn survives, nothing dispatches.
+    const reconcileReadsBefore = getDocMeta.mock.calls.length;
+    metadataWatchCallback?.({ kind: 'doc-metadata', docId: `session-${sessionId}` });
+    await vi.waitFor(
+      () => {
+        expect(getDocMeta.mock.calls.length).toBeGreaterThan(reconcileReadsBefore);
+      },
+      { timeout: 3_000 }
+    );
+    await flushMicrotasks(16);
+    expect(startSession).not.toHaveBeenCalled();
+
+    // Meta arrival fires the metadata watch again; the kept stash dispatches.
+    metaRecord = { meta: sessionMeta };
+    metadataWatchCallback?.({ kind: 'doc-metadata', docId: `session-${sessionId}` });
+    await vi.waitFor(
+      () => {
+        expect(startSession).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3_000 }
+    );
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session/create',
+        sessionId,
+        userTurnId: 'rpc-turn-early',
+        acpSessionConfig: expect.objectContaining({ prompt: 'created before meta sync' }),
+      }),
+      { dispatchSource: 'rpc' }
+    );
+    watcher.stop();
+  });
+
   it('preempts an in-flight Doc Room join when an RPC turn arrives', async () => {
     const sessionId = 'session-rpc-during-doc-join' as SessionId;
     const userTurnId = 'rpc-turn-during-doc-join';
@@ -540,6 +647,109 @@ describe('SessionDispatchWatcher', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('holds a stashed RPC turn while the missing-history marker names it, and never revives it once the turn is superseded', async () => {
+    const continueSession = vi.fn(async () => {});
+    const startSession = vi.fn(async () => {});
+    const cancelSession = vi.fn(async () => ({ success: true }));
+    const sessionId = 'session-rpc-marker-suppressed' as SessionId;
+    const userTurnId = 'turn-missing';
+    let currentMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+      latestUserMsgId: userTurnId,
+      lastMissingHistoryUserMsgId: userTurnId,
+    };
+    let currentHistory: SessionHistoryInput[] = [];
+
+    const sessionDoc = {
+      roomId: `session-${sessionId}`,
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => currentMeta),
+      getHistory: vi.fn(async () => currentHistory),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    };
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: currentMeta })),
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession,
+        startSession,
+        cancelSession,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await expect(
+      watcher.offerRpcTurn({
+        sessionId,
+        userTurnId,
+        userId: 'user-1',
+        timestamp: new Date().toISOString(),
+        inputConfig: { prompt: 'held by the marker' },
+      })
+    ).resolves.toBe('accepted');
+
+    // A duplicate RPC offer alone must not resurrect the negatively
+    // acknowledged turn: the stash keeps it, but no source may dispatch it.
+    await runMaybeHandleSession(watcher, sessionId);
+    expect(startSession).not.toHaveBeenCalled();
+    expect(continueSession).not.toHaveBeenCalled();
+    expect(watcher.hasPendingDispatch(sessionId)).toBe(true);
+
+    // The user resent the content as a NEW message: an ordinary producer send
+    // cleared the marker, and the abandoned entry was superseded to a terminal
+    // status. The stashed copy of the old turn must be dropped, never
+    // dispatched as a duplicate of the resend.
+    currentMeta = {
+      ...currentMeta,
+      latestUserMsgId: 'turn-resent',
+      lastHandledUserMsgId: 'turn-resent',
+      lastMissingHistoryUserMsgId: undefined,
+    };
+    currentHistory = [
+      {
+        id: userTurnId,
+        role: 'user',
+        timestamp: new Date().toISOString(),
+        items: [{ type: 'text', text: 'held by the marker' }],
+        fileDiff: [],
+        status: 'canceled',
+        read: true,
+      },
+    ];
+    await runMaybeHandleSession(watcher, sessionId);
+    expect(startSession).not.toHaveBeenCalled();
+    expect(continueSession).not.toHaveBeenCalled();
+    expect(watcher.hasPendingDispatch(sessionId)).toBe(false);
   });
 
   it('repairs a late-arriving entry for an already-handled fast-path turn instead of re-dispatching', async () => {

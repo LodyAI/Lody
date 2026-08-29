@@ -91,6 +91,7 @@ export async function fetchAcpCapabilities(
     return {
       ...normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
+        acknowledgedSteer: client.supportsAcknowledgedSteer(),
       }),
       capabilitySourceVersion,
     };

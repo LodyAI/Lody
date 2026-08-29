@@ -279,6 +279,19 @@ const revokeImagePreviewUrls = (images: readonly Pick<PendingImage, 'previewUrl'
   }
 };
 
+/**
+ * Seed the composer text draft for a session that has not mounted yet. The
+ * composer hydrates from this cache on mount, so callers can hand text across
+ * a tab promotion without holding a ref to the future component.
+ */
+export const setSessionChatInputTextDraft = (sessionId: SessionId, text: string): void => {
+  if (text) {
+    sessionDraftsCache.set(sessionId, text);
+  } else {
+    sessionDraftsCache.delete(sessionId);
+  }
+};
+
 export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
   const images = getSessionImageDrafts(sessionId);
   const files = getSessionFileDrafts(sessionId);
@@ -777,11 +790,7 @@ export const SessionChatInputArea = memo(
       (value: string) => {
         setUserInputState(value);
         onInputValueChange?.(value);
-        if (value) {
-          sessionDraftsCache.set(session.id, value);
-        } else {
-          sessionDraftsCache.delete(session.id);
-        }
+        setSessionChatInputTextDraft(session.id, value);
       },
       [onInputValueChange, session.id]
     );

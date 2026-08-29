@@ -120,6 +120,10 @@ export type LoroSidebarLabels = {
   planPlus: string;
   planEnterprise: string;
   pinned: string;
+  connectionLoading: string;
+  connectionReconnecting: string;
+  connectionOffline: string;
+  workspaceSyncing: string;
   filter: SidebarFilterLabels;
   updated: SidebarUpdatedSessionListLabels;
 };
@@ -139,6 +143,12 @@ export interface LoroSidebarProps {
    */
   workspaceSwitcherEnabled?: boolean;
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
+  /**
+   * The network may already be online while the target workspace runtime and
+   * metadata are still converging. Keep that scoped readiness visible in the
+   * workspace identity instead of incorrectly presenting it as ready.
+   */
+  workspaceSyncing?: boolean;
   isElectron?: boolean;
   isElectronMacOS?: boolean;
   defaultWidth?: number;
@@ -277,6 +287,10 @@ const defaultLabels: LoroSidebarLabels = {
   planPlus: 'Plus',
   planEnterprise: 'Enterprise',
   pinned: 'Pinned',
+  connectionLoading: 'Loading',
+  connectionReconnecting: 'Reconnecting',
+  connectionOffline: 'Offline',
+  workspaceSyncing: 'Syncing workspace…',
   filter: {
     triggerAriaLabel: 'Filter sidebar',
     organizeHeading: 'Organize',
@@ -405,25 +419,40 @@ function LineChangeBadge({ lineChange }: { lineChange: LoroSidebarRepoItemDelta 
   );
 }
 
+type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing';
+
 function ConnectionPill({
   state,
+  labels,
 }: {
-  state: Exclude<NonNullable<LoroSidebarProps['connectionUiState']>, 'online'>;
+  state: WorkspaceIdentityStatus;
+  labels: Pick<
+    LoroSidebarLabels,
+    'connectionLoading' | 'connectionReconnecting' | 'connectionOffline' | 'workspaceSyncing'
+  >;
 }) {
-  const isLoading = state === 'loading' || state === 'reconnecting';
-  const label = state === 'reconnecting' ? 'Reconnecting' : isLoading ? 'Loading' : 'Offline';
+  const isLoading = state !== 'offline';
+  const label =
+    state === 'syncing'
+      ? labels.workspaceSyncing
+      : state === 'reconnecting'
+        ? labels.connectionReconnecting
+        : state === 'loading'
+          ? labels.connectionLoading
+          : labels.connectionOffline;
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
         isLoading
           ? 'bg-sidebar-hover text-sidebar-foreground-muted'
           : 'bg-status-danger/[0.12] text-status-danger ring-1 ring-status-danger/20'
       )}
       aria-label={label}
+      data-workspace-status={state}
     >
       {isLoading ? (
-        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
       ) : (
         <span className="h-1.5 w-1.5 rounded-full bg-status-danger" aria-hidden />
       )}
@@ -592,6 +621,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   currentWorkspaceId,
   workspaceSwitcherEnabled = true,
   connectionUiState,
+  workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS = false,
   defaultWidth = 280,
@@ -766,6 +796,12 @@ export const LoroSidebar = memo(function LoroSidebar({
     ? (desktopFilterPlaceholder ?? <span aria-hidden="true" className="block h-5 w-5" />)
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
+  const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
+    connectionUiState && connectionUiState !== 'online'
+      ? connectionUiState
+      : workspaceSyncing
+        ? 'syncing'
+        : null;
   const workspaceIdentity = (
     <>
       <WorkspaceAvatar
@@ -778,8 +814,8 @@ export const LoroSidebar = memo(function LoroSidebar({
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
-        {connectionUiState && connectionUiState !== 'online' ? (
-          <ConnectionPill state={connectionUiState} />
+        {workspaceIdentityStatus ? (
+          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
         ) : null}
       </span>
     </>
@@ -856,6 +892,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                     type="button"
                     className={workspaceIdentityClassName}
                     data-workspace-switcher-trigger
+                    data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                    aria-busy={workspaceSyncing || undefined}
                   >
                     {workspaceIdentity}
                   </button>

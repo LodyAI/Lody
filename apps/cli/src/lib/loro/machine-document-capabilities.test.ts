@@ -64,7 +64,9 @@ describe('MachineDocument ACP capabilities', () => {
         undefined,
         [{ name: '/help', description: 'Help' }],
         false,
-        'builtin:codex:test'
+        'builtin:codex:test',
+        undefined,
+        true
       );
 
     await write();
@@ -75,6 +77,7 @@ describe('MachineDocument ACP capabilities', () => {
     expect(flush).toHaveBeenCalledTimes(1);
     expect(markDirty).toHaveBeenCalledTimes(1);
     expect(syncOnce).not.toHaveBeenCalled();
+    expect([...flock.rows.values()][0]?.value).toMatchObject({ acknowledgedSteer: true });
   });
 
   it('does not write capabilities when cancelled while opening the Machine Flock', async () => {
@@ -115,6 +118,7 @@ describe('MachineDocument ACP capabilities', () => {
       false,
       'builtin:codex:test',
       undefined,
+      false,
       { signal: controller.signal }
     );
     await openStarted;

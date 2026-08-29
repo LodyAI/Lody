@@ -5,6 +5,7 @@ import type { AgentConfigId, AgentConfigMeta, MachineId } from '@lody/shared';
 import {
   OnboardingBackdrop,
   ProvidersScreenView,
+  type ProviderTestActivity,
   type ProviderTestStatus,
 } from '@/components/onboarding';
 
@@ -62,8 +63,7 @@ const augmentConfig: AgentConfigMeta = {
 };
 
 /**
- * Simulates the test round-trip locally: when the user clicks Test we move
- * the row through `testing` → `passed` (or `failed` for the failure story).
+ * Simulates a request-scoped runtime download followed by a provider probe.
  */
 function InteractiveProvidersScreen({
   initialConfigs,
@@ -78,16 +78,38 @@ function InteractiveProvidersScreen({
   const [statuses, setStatuses] = useState<Record<string, ProviderTestStatus>>(
     initialStatuses ?? {}
   );
+  const [activities, setActivities] = useState<Record<string, ProviderTestActivity>>({});
+  const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
 
   const handleTest = useCallback(
     (config: AgentConfigMeta) => {
-      setStatuses((prev) => ({ ...prev, [config.id]: 'testing' }));
+      setActivities((prev) => ({
+        ...prev,
+        [config.id]: { phase: 'downloading-runtime', percent: 38 },
+      }));
       window.setTimeout(() => {
+        setActivities((prev) => ({
+          ...prev,
+          [config.id]: { phase: 'probing-provider' },
+        }));
+      }, 650);
+      window.setTimeout(() => {
+        setActivities((prev) => {
+          const { [config.id]: _, ...rest } = prev;
+          return rest;
+        });
         setStatuses((prev) => ({
           ...prev,
           [config.id]: forceFailure ? 'failed' : 'passed',
         }));
-      }, 900);
+        setFailureReasons((prev) => {
+          if (forceFailure) {
+            return { ...prev, [config.id]: 'The provider rejected the configured credentials.' };
+          }
+          const { [config.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }, 1_300);
     },
     [forceFailure]
   );
@@ -98,12 +120,22 @@ function InteractiveProvidersScreen({
       const { [config.id]: _, ...rest } = prev;
       return rest;
     });
+    setActivities((prev) => {
+      const { [config.id]: _, ...rest } = prev;
+      return rest;
+    });
+    setFailureReasons((prev) => {
+      const { [config.id]: _, ...rest } = prev;
+      return rest;
+    });
   }, []);
 
   return (
     <ProvidersScreenView
       configs={configs}
       testStatuses={statuses}
+      testActivities={activities}
+      failureReasons={failureReasons}
       noLocalMachine={false}
       onEdit={fn()}
       onTest={handleTest}
@@ -168,23 +200,50 @@ export const Untested: Story = {
   },
 };
 
-export const TestingInProgress: Story = {
+export const CheckingProvider: Story = {
+  args: {
+    configs: [claudeConfig, codexConfig],
+    testStatuses: {},
+    testActivities: {
+      [claudeConfig.id]: { phase: 'probing-provider' },
+    },
+    noLocalMachine: false,
+  },
+};
+
+export const DownloadingRuntime: Story = {
+  args: {
+    configs: [claudeConfig, codexConfig, kimiConfig],
+    testStatuses: {
+      [claudeConfig.id]: 'passed',
+    },
+    testActivities: {
+      [codexConfig.id]: { phase: 'downloading-runtime', percent: 64 },
+      [kimiConfig.id]: { phase: 'extracting-runtime' },
+    },
+    selectedConfigId: codexConfig.id,
+    noLocalMachine: false,
+  },
+};
+
+export const RecheckingVerified: Story = {
   args: {
     configs: [claudeConfig, codexConfig],
     testStatuses: {
-      [claudeConfig.id]: 'testing',
+      [claudeConfig.id]: 'passed',
+      [codexConfig.id]: 'passed',
     },
+    testActivities: {
+      [claudeConfig.id]: { phase: 'probing-provider' },
+    },
+    selectedConfigId: claudeConfig.id,
     noLocalMachine: false,
   },
 };
 
 export const AuthenticationRequired: Story = {
   args: {
-    configs: [
-      { ...claudeConfig, env: {} },
-      { ...codexConfig, env: {} },
-      kimiConfig,
-    ],
+    configs: [{ ...claudeConfig, env: {} }, { ...codexConfig, env: {} }, kimiConfig],
     testStatuses: {
       [claudeConfig.id]: 'needs-auth',
       [codexConfig.id]: 'needs-auth',
@@ -249,6 +308,9 @@ export const MixedStatuses: Story = {
       [claudeConfig.id]: 'passed',
       [codexConfig.id]: 'failed',
       [augmentConfig.id]: 'untested',
+    },
+    failureReasons: {
+      [codexConfig.id]: 'The OPENAI_API_KEY was rejected by the provider.',
     },
     noLocalMachine: false,
   },

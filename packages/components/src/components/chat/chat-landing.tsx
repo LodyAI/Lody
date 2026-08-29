@@ -92,7 +92,11 @@ import {
   useChatLandingKeyboardNav,
 } from '@/hooks/use-chat-landing-keyboard-nav';
 import { useFireOnKeyChange, useFireOncePerKey } from '@/hooks/use-fire-once';
-import { SessionCreateBillingError, useSessionActions } from '@/hooks/use-session-actions';
+import {
+  isArchivedLocalProjectRestoreUnavailableError,
+  SessionCreateBillingError,
+  useSessionActions,
+} from '@/hooks/use-session-actions';
 import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
 import {
   useAcpSessionConfigSelectionState,
@@ -204,6 +208,10 @@ import { isElectronRenderer } from '@/lib/electron';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
+import {
+  useLocalProjectRemovalResultNotifications,
+  usePendingLocalProjectRemovals,
+} from '@/hooks/use-remove-local-project';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import {
   useVisibleArchivedSessionMetas,
@@ -627,6 +635,9 @@ function WorkspaceChatLanding({
     machineFlockRemoteSyncedMachineIds,
     isLoading: visibleMachinesLoading,
   } = visibleMachineIndex;
+  const visibleMachineIds = useMemo(() => Array.from(machines.keys()), [machines]);
+  const pendingLocalProjectRemovals = usePendingLocalProjectRemovals(visibleMachineIds);
+  useLocalProjectRemovalResultNotifications(visibleMachineIds);
   const visibleLocalProjects = useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex);
   const {
     projects: visibleLocalProjectMap,
@@ -3401,7 +3412,7 @@ function WorkspaceChatLanding({
     [handleSelectedLocalProjectChange]
   );
   const desktopAgentMachineIds = useMemo(
-    () => (scopedMachineId ? [scopedMachineId] : undefined),
+    () => (scopedMachineId ? [scopedMachineId] : []),
     [scopedMachineId]
   );
   /* Roles offered for the machine this chat will start on. Scoped to that one
@@ -3677,6 +3688,11 @@ function WorkspaceChatLanding({
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
+          disabledReason={
+            scopedMachineId
+              ? undefined
+              : t('chat.machineSelector.selectFirst', 'Select a machine first')
+          }
           fallbackAgent={{
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
@@ -4340,11 +4356,33 @@ function WorkspaceChatLanding({
     return { latest, unread };
   }, [visibleSessions]);
   const mobileHomeLocalProjects = useMemo<MobileHomeLocalProject[]>(() => {
-    return Array.from(visibleLocalProjectMap.values())
-      .map((entry) => {
-        const latestMessageAt = localProjectActivity.latest.get(entry.key) ?? null;
-        return { entry, latestMessageAt };
-      })
+    const availableProjects = Array.from(visibleLocalProjectMap.values()).map((entry) => {
+      const latestMessageAt = localProjectActivity.latest.get(entry.key) ?? null;
+      return { entry, latestMessageAt, removalState: null };
+    });
+    const pendingProjects = Array.from(pendingLocalProjectRemovals.values()).flatMap((pending) => {
+      const machine = machines.get(pending.machineId);
+      if (!machine) return [];
+      return [
+        {
+          entry: {
+            key: pending.key,
+            machineId: pending.machineId,
+            machine,
+            project: pending.project,
+            isMachineRegistered: true,
+          },
+          latestMessageAt: localProjectActivity.latest.get(pending.key) ?? null,
+          removalState: onlineMachineIds.has(pending.machineId)
+            ? ('removing' as const)
+            : ('waiting_for_device' as const),
+        },
+      ];
+    });
+    const projectsByKey = new Map(
+      [...availableProjects, ...pendingProjects].map((project) => [project.entry.key, project])
+    );
+    return Array.from(projectsByKey.values())
       .sort((left, right) =>
         compareChatLandingLocalProjectByRecency(
           left.entry,
@@ -4352,7 +4390,7 @@ function WorkspaceChatLanding({
           localProjectActivity.latest
         )
       )
-      .map(({ entry, latestMessageAt }) => ({
+      .map(({ entry, latestMessageAt, removalState }) => ({
         id: entry.key,
         machineId: entry.machineId,
         name: entry.project.name,
@@ -4360,6 +4398,7 @@ function WorkspaceChatLanding({
         conversationCount: localProjectSessionCounts.get(entry.key) ?? 0,
         latestMessageAt,
         unreadCount: localProjectActivity.unread.get(entry.key) ?? 0,
+        removalState,
         isPrivate:
           showProjectSharing &&
           (accessByMachineId.get(entry.machineId)?.sharedWithTeam !== true ||
@@ -4369,6 +4408,9 @@ function WorkspaceChatLanding({
     accessByMachineId,
     localProjectActivity,
     localProjectSessionCounts,
+    machines,
+    onlineMachineIds,
+    pendingLocalProjectRemovals,
     showProjectSharing,
     visibleLocalProjectAccess,
     visibleLocalProjectMap,
@@ -5302,9 +5344,21 @@ function WorkspaceChatLanding({
      out of the archived list once `isArchived` flips back to false. */
   const handleMobileChatRestore = useCallback(
     (chatId: string) => {
-      void restoreSession(chatId as SessionId);
+      void restoreSession(chatId as SessionId).catch((error: unknown) => {
+        if (isArchivedLocalProjectRestoreUnavailableError(error)) {
+          toast.info(
+            t(
+              'archive.localProject.restoreUnavailable',
+              'Re-add this local project to restore its conversations.'
+            )
+          );
+          return;
+        }
+        console.error('Failed to restore archived conversation', error);
+        toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+      });
     },
-    [restoreSession]
+    [restoreSession, t]
   );
   /* Permanent delete from the mobile archive view's multi-select
      mode. Caller hands us the full id batch; we delete them in
@@ -6203,6 +6257,11 @@ function WorkspaceChatLanding({
             tasksTab: t('tasks.title', 'Tasks'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
+            projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),
+            projectRemovalWaiting: t(
+              'sidebar.localProjects.remove.waitingForDevice',
+              'Waiting for device…'
+            ),
             archiveToggleLabel: t('chat.mobileHome.archiveToggleLabel', '归档'),
             filterBarToggleLabel: t('chat.mobileHome.filterBarToggleLabel', '过滤器'),
             newChatAriaLabel: t('chat.mobileHome.newChatAriaLabel', '新建对话'),

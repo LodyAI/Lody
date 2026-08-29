@@ -22,6 +22,7 @@ import {
   buildMachineDeleteSessionCommand,
   getMachineRoomId,
   getMachineFlockDocId,
+  getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
   machineFlockKeys,
@@ -204,6 +205,53 @@ export class SessionCreateBillingError extends Error {
   ) {
     super(message);
     this.name = 'SessionCreateBillingError';
+  }
+}
+
+/**
+ * Restoring an archived local-project Session would make it active without a
+ * valid execution target. Keep this error public so every restore surface can
+ * explain the same recoverable action: add the project back first.
+ */
+export class ArchivedLocalProjectRestoreUnavailableError extends Error {
+  constructor() {
+    super('Re-add this local project to restore its conversations.');
+    this.name = 'ArchivedLocalProjectRestoreUnavailableError';
+  }
+}
+
+export function isArchivedLocalProjectRestoreUnavailableError(
+  error: unknown
+): error is ArchivedLocalProjectRestoreUnavailableError {
+  return error instanceof ArchivedLocalProjectRestoreUnavailableError;
+}
+
+async function assertArchivedLocalProjectCanRestore(
+  runtime: WorkspaceRuntime,
+  sessionMeta: SessionMeta
+): Promise<void> {
+  const project = sessionMeta.project;
+  if (project?.kind !== 'local') return;
+
+  const machineMeta = (await runtime.repo.getDocMeta(getMachineRoomId(sessionMeta.machineId)))
+    ?.meta as MachineLegacyMetaFields | undefined;
+  const machineFlockHandle = await runtime.repo.openFlockDoc(
+    getMachineFlockDocId(runtime.workspaceId, sessionMeta.machineId)
+  );
+  const rows = readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
+    families: ['localProject', 'deleteLocalProjectCommand'],
+  });
+  const pendingRemovalIds = getMachineFlockDeleteLocalProjectIds(rows);
+  const availableProjects = {
+    ...(machineMeta?.localProjects ?? {}),
+    ...getMachineFlockLocalProjects(rows),
+  };
+
+  if (
+    pendingRemovalIds.has(project.localProjectId) ||
+    availableProjects[project.localProjectId] === undefined
+  ) {
+    throw new ArchivedLocalProjectRestoreUnavailableError();
   }
 }
 
@@ -413,6 +461,74 @@ export async function touchSessionActivityMeta(
   }
 }
 
+/**
+ * Fire the `session/dispatch-turn` Machine RPC fast path for a user turn that
+ * is (or is about to be) durable. Returns a promise resolving to whether the
+ * machine accepted the offer, or null when the offer cannot be built. The RPC
+ * only accelerates dispatch — the durable `latestUserMsgId` pointer write
+ * remains recovery truth.
+ */
+function fireSessionDispatchTurnRpc(
+  runtime: WorkspaceRuntime,
+  store: ReturnType<typeof useStore>,
+  args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    machineId: MachineId | null | undefined;
+    timestamp: string | undefined;
+    inputConfig: SessionTurnInputConfig | undefined;
+    dispatchUserId: string | undefined;
+  }
+): Promise<boolean> | null {
+  const { sessionId, userTurnId, machineId, timestamp, inputConfig, dispatchUserId } = args;
+  // The Machine RPC fast path rides the facade's per-target routing: local
+  // machines go over the local socket RPC, remote machines over the cloud
+  // JSON stream.
+  if (!machineId || !timestamp || !inputConfig || !dispatchUserId) {
+    return null;
+  }
+  const rpcArgs = {
+    sessionId,
+    userTurnId,
+    userId: dispatchUserId,
+    timestamp,
+    inputConfig,
+  };
+  // Attachments ride as R2/local references, so payloads are normally
+  // small; skip the fast path for pathological sizes rather than risk an
+  // oversized stream append.
+  try {
+    if (JSON.stringify(rpcArgs).length > 256 * 1024) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return runtime
+    .requestSessionDispatchTurn(machineId, rpcArgs)
+    .then((response) => {
+      if (response?.accepted) {
+        store.set(rpcDeliveredTurnsAtom, (previous) =>
+          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
+        );
+        return true;
+      }
+      log(
+        'session dispatch-turn rpc not accepted for %s/%s: %s',
+        sessionId,
+        userTurnId,
+        response
+          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
+          : 'timeout'
+      );
+      return false;
+    })
+    .catch((error) => {
+      log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
+      return false;
+    });
+}
+
 export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
@@ -524,6 +640,12 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+      // The accept unit includes the first user message, so the meta it
+      // publishes already carries that activity. Written here, not by a
+      // follow-up touch: a close between acceptance and the first turn must
+      // never make the session look empty (empty tabs are deleted, not
+      // archived).
+      sessionMeta.lastMessageAt = getServerNow();
       const sessionRoomId = getSessionRoomId(sessionId);
       const historyEntry = { ...history, id: uuidv4() } as SessionHistory;
       const inputConfig = normalizeSessionTurnInputConfig(historyEntry.inputConfig);
@@ -699,52 +821,15 @@ export function useSessionActions(): SessionActions {
       const dispatchUserId = entry?.userId?.trim();
       let rpcAcceptedPromise: Promise<boolean> | null = null;
       const startDispatchTurnRpc = (machineId: MachineId | null | undefined): void => {
-        // The Machine RPC fast path rides the facade's per-target routing: local
-        // machines go over the local socket RPC, remote machines over the cloud
-        // JSON stream. The durable pointer write below remains recovery truth.
-        if (!machineId || !entry || !inputConfig || !dispatchUserId) {
-          return;
-        }
-        const rpcArgs = {
+        // The durable pointer write below remains recovery truth.
+        rpcAcceptedPromise = fireSessionDispatchTurnRpc(runtime, store, {
           sessionId,
           userTurnId,
-          userId: dispatchUserId,
-          timestamp: entry.timestamp,
+          machineId,
+          timestamp: entry?.timestamp,
           inputConfig,
-        };
-        // Attachments ride as R2/local references, so payloads are normally
-        // small; skip the fast path for pathological sizes rather than risk an
-        // oversized stream append.
-        try {
-          if (JSON.stringify(rpcArgs).length > 256 * 1024) {
-            return;
-          }
-        } catch {
-          return;
-        }
-        rpcAcceptedPromise = runtime
-          .requestSessionDispatchTurn(machineId, rpcArgs)
-          .then((response) => {
-            if (response?.accepted) {
-              store.set(rpcDeliveredTurnsAtom, (previous) =>
-                addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
-              );
-              return true;
-            }
-            log(
-              'session dispatch-turn rpc not accepted for %s/%s: %s',
-              sessionId,
-              userTurnId,
-              response
-                ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-                : 'timeout'
-            );
-            return false;
-          })
-          .catch((error) => {
-            log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
-            return false;
-          });
+          dispatchUserId,
+        });
       };
 
       // Local history writes are the accept boundary. Remote document sync is a
@@ -1100,9 +1185,15 @@ export function useSessionActions(): SessionActions {
       }
 
       const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
+      const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
         | undefined;
+      // The repo read is preferred (freshest lifecycle fields), but it can lag
+      // a session the UI already renders. The archive write below is an
+      // idempotent patch, so the rendered meta cache is enough to proceed — a
+      // session the UI can show must also be closable.
+      const sessionMeta =
+        repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
       if (!sessionMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
@@ -1151,7 +1242,7 @@ export function useSessionActions(): SessionActions {
         lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store, getSessionLifecycleMetas]
   );
 
   const restoreSession = useCallback(
@@ -1168,6 +1259,7 @@ export function useSessionActions(): SessionActions {
       if (!sessionMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
+      await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
       const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
 
       for (const session of lifecycleSessions) {

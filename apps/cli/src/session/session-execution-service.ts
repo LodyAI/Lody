@@ -493,6 +493,7 @@ export type SessionExecutionServiceDeps = {
     configOptions?: AcpConfigOptionSummary[];
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
+    acknowledgedSteer: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }>;
@@ -4820,7 +4821,8 @@ export class SessionExecutionService {
         availableCommands,
         capabilities.sessionFork,
         sourceVersion,
-        capabilities.modelReasoningEfforts
+        capabilities.modelReasoningEfforts,
+        capabilities.acknowledgedSteer
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -5035,6 +5037,7 @@ export class SessionExecutionService {
         configOptions,
         availableCommands,
         sessionFork,
+        acknowledgedSteer,
         modelReasoningEfforts,
         capabilitySourceVersion,
       } = await this.deps.fetchAcpCapabilities(
@@ -5073,6 +5076,7 @@ export class SessionExecutionService {
             runtimeOverrides: message.runtimeOverrides,
           }),
         modelReasoningEfforts,
+        acknowledgedSteer,
         { signal: options.signal }
       );
 

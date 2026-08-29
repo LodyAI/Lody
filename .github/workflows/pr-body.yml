@@ -1,39 +1,51 @@
-name: PR body
+name: Reusable PR body policy
 
 on:
-  pull_request_target:
-    types: [opened, edited, reopened, synchronize, ready_for_review]
+  workflow_call:
 
 permissions:
   contents: read
   issues: write
   pull-requests: write
 
-concurrency:
-  group: pr-body-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   check:
     name: Check PR body format
-    if: >-
-      ${{
-        github.event.pull_request.author_association != 'OWNER' &&
-        github.event.pull_request.author_association != 'MEMBER' &&
-        !endsWith(github.event.pull_request.user.login, '[bot]')
-      }}
     runs-on: ubuntu-latest
     steps:
-      # This workflow has a write-capable token. Only load the trusted base
-      # commit; never check out or execute the pull request head.
-      - name: Checkout base commit
-        uses: actions/checkout@v4
+      # This workflow has a write-capable token. Read policy from the trusted
+      # default-branch revision at github.sha, never the PR head or a possibly
+      # stale pull_request.base.sha.
+      - name: Checkout trusted default-branch revision
+        uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Determine whether PR policy applies
+        id: policy
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url')
+            const policy = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-body-policy.mjs`
+            ).href)
+            const pullRequest = context.payload.pull_request
+            const enforce = policy.shouldEnforcePullRequest(pullRequest)
+            core.setOutput('enforce', enforce)
+            if (!enforce) {
+              await policy.clearPullRequestPolicyState({
+                github,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pullRequest,
+              })
+            }
 
       - name: Validate PR body
         id: validate
+        if: steps.policy.outputs.enforce == 'true'
         continue-on-error: true
         env:
           FINDINGS_FILE: ${{ runner.temp }}/pr-body-check.txt
@@ -46,83 +58,48 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           cat "$FINDINGS_FILE"
 
-      - name: Notify author on format failure
-        if: steps.validate.outputs.code != '0'
+      - name: Mark invalid PR body
+        if: steps.policy.outputs.enforce == 'true' && steps.validate.outputs.code != '0'
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           FINDINGS_FILE: ${{ runner.temp }}/pr-body-check.txt
         with:
           script: |
             const fs = require('node:fs')
-            const marker = '<!-- lody-pr-body-format-check -->'
-            const author = context.payload.pull_request.user.login
+            const { pathToFileURL } = require('node:url')
+            const policy = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-body-policy.mjs`
+            ).href)
             const findings = fs.readFileSync(process.env.FINDINGS_FILE, 'utf8')
-              .trim()
-              .split('\n')
-              .slice(0, 40)
-              .join('\n')
-            const body = [
-              marker,
-              `@${author}, this pull request body does **not** match Lody's PR template.`,
-              '',
-              'Please update the description using `.github/PULL_REQUEST_TEMPLATE.md` and fill every required section.',
-              'Check exactly one **Author type**. Agent-authored PRs must ask the author-side user about context sharing, check exactly one consent option, and write PR-specific review instructions in the **Agent handoff** block.',
-              'Context sharing may be declined, but maintainers may close or decline a contribution when the withheld context prevents a safe review.',
-              '',
-              '<details><summary>Checker findings</summary>',
-              '',
-              '```text',
-              findings || '(no details)',
-              '```',
-              '',
-              '</details>',
-            ].join('\n')
-            const comments = await github.paginate(github.rest.issues.listComments, {
+            await policy.markInvalidPullRequest({
+              github,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
+              pullRequest: context.payload.pull_request,
+              findings,
             })
-            const existing = comments.find(comment => comment.body?.includes(marker))
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              })
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              })
-            }
 
-      - name: Clear format failure comment on success
-        if: steps.validate.outputs.code == '0'
+      - name: Clear invalid PR body state on success
+        if: steps.policy.outputs.enforce == 'true' && steps.validate.outputs.code == '0'
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
-            const marker = '<!-- lody-pr-body-format-check -->'
-            const comments = await github.paginate(github.rest.issues.listComments, {
+            const { pathToFileURL } = require('node:url')
+            const policy = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-body-policy.mjs`
+            ).href)
+            await policy.clearInvalidPullRequest({
+              github,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
+              pullRequest: context.payload.pull_request,
             })
-            const existing = comments.find(comment => comment.body?.includes(marker))
-            if (existing) {
-              await github.rest.issues.deleteComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-              })
-            }
 
       - name: Fail when the body is invalid
-        if: always() && steps.validate.outputs.code != '0'
+        if: >-
+          always() &&
+          steps.policy.outputs.enforce == 'true' &&
+          steps.validate.outputs.code != '0'
         run: exit 1

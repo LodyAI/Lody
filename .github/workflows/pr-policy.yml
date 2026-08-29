@@ -1,0 +1,41 @@
+name: External PR policy
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+concurrency:
+  group: external-pr-policy-${{ github.event.pull_request.number || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
+jobs:
+  body:
+    name: PR body policy
+    if: github.event_name == 'pull_request_target'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/pr-body.yml
+
+  size:
+    name: PR size policy
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/pr-size.yml
+
+  expiry:
+    name: PR body expiry policy
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      github.event.action == 'reopened'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/pr-body-expiry.yml

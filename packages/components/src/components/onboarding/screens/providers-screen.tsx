@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,12 +14,14 @@ import {
   type AgentConfigMeta,
   type CustomAcpLaunchSpec,
   type MachineId,
+  type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
 import { toast } from 'sonner';
 import { Button } from '@/ui/button';
 import { Badge } from '@/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,6 +72,11 @@ import {
   resolveInitialOnboardingProviderStatus,
   type OnboardingProviderStatus,
 } from '../provider-status';
+import {
+  createProviderTestRunRegistry,
+  providerTestActivityFromProgress,
+  type ProviderTestActivity,
+} from '../provider-test-state';
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
 
@@ -171,6 +178,10 @@ export interface ProvidersScreenViewProps {
   setups?: ProviderSetupTask[];
   /** Per-config test status, keyed by config id. */
   testStatuses: Record<string, ProviderTestStatus>;
+  /** Ephemeral request-scoped work; deliberately separate from the last result. */
+  testActivities?: Record<string, ProviderTestActivity>;
+  /** Latest failed probe detail, kept available after its toast disappears. */
+  failureReasons?: Record<string, string>;
   selectedConfigId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
@@ -201,6 +212,8 @@ export function ProvidersScreenView({
   configs,
   setups = [],
   testStatuses,
+  testActivities = {},
+  failureReasons = {},
   selectedConfigId,
   noLocalMachine,
   localMachineId = null,
@@ -222,9 +235,10 @@ export function ProvidersScreenView({
   const resolvedSelectedConfigId = selectedConfigId ?? configs[0]?.id ?? setups[0]?.id ?? null;
   const previewConfig = configs.find((config) => config.id === resolvedSelectedConfigId);
   const previewStatus = previewConfig ? testStatuses[previewConfig.id] : undefined;
+  const previewActivity = previewConfig ? testActivities[previewConfig.id] : undefined;
   const previewAgentStatus: TourConfigurationState['agentStatus'] = noLocalMachine
     ? 'missing'
-    : previewStatus === 'testing'
+    : previewActivity
       ? 'verifying'
       : previewStatus === 'needs-auth'
         ? 'awaiting-auth'
@@ -306,6 +320,8 @@ export function ProvidersScreenView({
               <AnimatePresence initial={false}>
                 {configs.map((config) => {
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
+                  const activity = testActivities[config.id];
+                  const activityPercent = getProviderTestActivityPercent(activity);
                   const selected = config.id === resolvedSelectedConfigId;
                   return (
                     <motion.div
@@ -359,7 +375,11 @@ export function ProvidersScreenView({
                         {/* Sibling of the two-line text column, so the badge
                             centres against the whole row instead of riding the
                             name's baseline. */}
-                        <ProviderStatusBadge status={status} />
+                        <ProviderStatusBadge
+                          status={status}
+                          activity={activity}
+                          failureReason={failureReasons[config.id]}
+                        />
                       </button>
                       <div className="flex shrink-0 items-center gap-1 pr-3">
                         <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
@@ -367,18 +387,33 @@ export function ProvidersScreenView({
                         </Button>
                         {status !== 'needs-auth' ? (
                           <Button
-                            variant={status === 'passed' ? 'ghost' : 'outline'}
+                            variant={
+                              activity ? 'outline' : status === 'passed' ? 'ghost' : 'outline'
+                            }
                             size="sm"
-                            disabled={status === 'testing' || noLocalMachine}
+                            className={cn(
+                              'relative min-w-[4.5rem] overflow-hidden',
+                              activity && 'disabled:opacity-100'
+                            )}
+                            disabled={Boolean(activity) || noLocalMachine}
                             onClick={() => onTest(config)}
                           >
-                            {status === 'testing' ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : status === 'passed' ? (
-                              t('onboarding.providers.retest', 'Re-test')
-                            ) : (
-                              t('onboarding.providers.test', 'Test')
-                            )}
+                            {activityPercent !== null ? (
+                              <span
+                                aria-hidden="true"
+                                className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
+                                style={{ width: `${activityPercent}%` }}
+                              />
+                            ) : null}
+                            <span className="relative z-10 tabular-nums">
+                              {activity
+                                ? activityPercent !== null
+                                  ? `${activityPercent}%`
+                                  : t('onboarding.providers.workingAction', 'Working')
+                                : status === 'passed'
+                                  ? t('onboarding.providers.retest', 'Re-test')
+                                  : t('onboarding.providers.test', 'Test')}
+                            </span>
                           </Button>
                         ) : null}
                         <Button
@@ -591,6 +626,9 @@ export function ProvidersScreen({
   const dialogOpen = dialogMode !== null;
 
   const [testStatuses, setTestStatuses] = useState<Record<string, ProviderTestStatus>>({});
+  const [testActivities, setTestActivities] = useState<Record<string, ProviderTestActivity>>({});
+  const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
+  const testRunsRef = useRef(createProviderTestRunRegistry());
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AgentConfigMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -607,10 +645,42 @@ export function ProvidersScreen({
   const setStatus = (id: AgentConfigId, status: ProviderTestStatus) =>
     setTestStatuses((prev) => ({ ...prev, [id]: status }));
 
+  const clearFailureReason = useCallback((id: AgentConfigId) => {
+    setFailureReasons((prev) => {
+      if (!(id in prev)) return prev;
+      const { [id]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+
+  const clearTestActivity = useCallback((id: AgentConfigId) => {
+    setTestActivities((prev) => {
+      if (!(id in prev)) return prev;
+      const { [id]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+
+  const invalidateTestRun = useCallback(
+    (id: AgentConfigId) => {
+      testRunsRef.current.invalidate(id);
+      clearTestActivity(id);
+    },
+    [clearTestActivity]
+  );
+
+  useEffect(
+    () => () => {
+      testRunsRef.current.invalidateAll();
+    },
+    []
+  );
+
   // Seed configs only from a past authoritative Test/Refresh. Static built-in
   // capabilities describe expected UI options, not a successful runtime probe,
   // so they must never produce a Verified badge. Don't downgrade an explicit
-  // 'failed' / 'testing' / 'passed'.
+  // 'failed' / 'passed'. A current activity is stored separately and must not
+  // erase the last known result while a re-test is in flight.
   // Depend on the cache map directly: `localMachine` identity rebuilds whenever
   // the visible-machine index recomputes, which would re-fire this effect for
   // unrelated reasons.
@@ -620,7 +690,7 @@ export function ProvidersScreen({
       let next = prev;
       for (const config of localConfigs) {
         const existing = prev[config.id];
-        if (existing === 'failed' || existing === 'testing' || existing === 'passed') continue;
+        if (existing === 'failed' || existing === 'passed') continue;
         if (resolveInitialOnboardingProviderStatus(config, acpCapabilities) === 'passed') {
           if (next === prev) next = { ...prev };
           next[config.id] = 'passed';
@@ -698,21 +768,26 @@ export function ProvidersScreen({
       customAcp?: CustomAcpLaunchSpec;
       runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
       env?: Record<string, string>;
+      signal?: AbortSignal;
+      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
     }) => {
       if (!runtime || workspaceId === null || localMachineId === null) {
         throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
       }
-      const response = await runtime.requestMachineAcpCapabilitiesRefresh({
-        type: 'machine/acp-capabilities-refresh',
-        machineId: localMachineId,
-        workspaceId,
-        configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
-        customAcp: args.customAcp,
-        runtimeOverrides: args.runtimeOverrides,
-        env: args.env,
-      });
+      const response = await runtime.requestMachineAcpCapabilitiesRefresh(
+        {
+          type: 'machine/acp-capabilities-refresh',
+          machineId: localMachineId,
+          workspaceId,
+          configId: args.configId,
+          cliType: args.cliType,
+          agentType: args.agentType,
+          customAcp: args.customAcp,
+          runtimeOverrides: args.runtimeOverrides,
+          env: args.env,
+        },
+        { signal: args.signal, onProgress: args.onProgress }
+      );
       if (!response) {
         throw new Error(
           t('agents.acpCapabilities.refreshTimeout', 'Refresh timed out, please try again')
@@ -740,7 +815,11 @@ export function ProvidersScreen({
   // pressed. This explicit Test action remains for already-created provider rows.
   const handleTest = useCallback(
     (config: AgentConfigMeta) => {
-      setStatus(config.id, 'testing');
+      const run = testRunsRef.current.start(config.id);
+      setTestActivities((prev) => ({
+        ...prev,
+        [config.id]: { phase: 'checking-runtime' },
+      }));
       void (async () => {
         try {
           const response = await refreshCapabilities({
@@ -750,20 +829,35 @@ export function ProvidersScreen({
             customAcp: config.customAcp,
             runtimeOverrides: config.runtimeOverrides,
             env: config.env,
+            signal: run.signal,
+            onProgress: (progress) => {
+              if (!testRunsRef.current.isCurrent(config.id, run)) return;
+              setTestActivities((prev) => ({
+                ...prev,
+                [config.id]: providerTestActivityFromProgress(progress),
+              }));
+            },
           });
+          if (!testRunsRef.current.finish(config.id, run)) return;
+          clearTestActivity(config.id);
+          clearFailureReason(config.id);
           setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
         } catch (error) {
+          if (!testRunsRef.current.finish(config.id, run)) return;
+          clearTestActivity(config.id);
+          const failureReason = error instanceof Error ? error.message : String(error);
+          setFailureReasons((prev) => ({ ...prev, [config.id]: failureReason }));
           setStatus(config.id, 'failed');
           toast.error(
             t('settings.agent.provider.refreshFailed', 'Failed to refresh {{agent}}', {
               agent: config.name,
             }),
-            { description: error instanceof Error ? error.message : String(error) }
+            { description: failureReason }
           );
         }
       })();
     },
-    [refreshCapabilities, t]
+    [clearFailureReason, clearTestActivity, refreshCapabilities, t]
   );
 
   const handleDialogSubmit = useCallback(
@@ -792,6 +886,7 @@ export function ProvidersScreen({
           }
           setSelectedConfigId(config.id);
         } else {
+          invalidateTestRun(dialogMode.config.id);
           await updateConfig({
             id: dialogMode.config.id,
             machineId: dialogMode.config.machineId,
@@ -808,6 +903,7 @@ export function ProvidersScreen({
           });
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.
+          clearFailureReason(dialogMode.config.id);
           setStatus(dialogMode.config.id, 'untested');
         }
       } catch (error) {
@@ -819,7 +915,16 @@ export function ProvidersScreen({
         throw error;
       }
     },
-    [createConfig, createSetup, dialogMode, localMachineId, t, updateConfig]
+    [
+      clearFailureReason,
+      createConfig,
+      createSetup,
+      dialogMode,
+      invalidateTestRun,
+      localMachineId,
+      t,
+      updateConfig,
+    ]
   );
 
   const handleRetrySetup = useCallback(
@@ -854,7 +959,9 @@ export function ProvidersScreen({
     if (!pendingDelete) return;
     try {
       setDeleting(true);
+      invalidateTestRun(pendingDelete.id);
       await deleteConfig(pendingDelete.id);
+      clearFailureReason(pendingDelete.id);
       setTestStatuses((prev) => {
         const { [pendingDelete.id]: _, ...rest } = prev;
         return rest;
@@ -875,6 +982,8 @@ export function ProvidersScreen({
         configs={localConfigs}
         setups={localSetups}
         testStatuses={testStatuses}
+        testActivities={testActivities}
+        failureReasons={failureReasons}
         selectedConfigId={selectedConfigId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
@@ -882,7 +991,10 @@ export function ProvidersScreen({
         onEdit={(config) => setDialogMode({ kind: 'edit', config })}
         onSelect={(config) => setSelectedConfigId(config.id)}
         onTest={handleTest}
-        onAuthenticated={(config) => setStatus(config.id, 'passed')}
+        onAuthenticated={(config) => {
+          clearFailureReason(config.id);
+          setStatus(config.id, 'passed');
+        }}
         onDelete={(config) => setPendingDelete(config)}
         onRetrySetup={handleRetrySetup}
         onDeleteSetup={handleDeleteSetup}
@@ -980,13 +1092,48 @@ export function ProvidersScreen({
   );
 }
 
-function ProviderStatusBadge({ status }: { status: ProviderTestStatus }) {
+function getProviderTestActivityPercent(activity?: ProviderTestActivity): number | null {
+  return activity?.phase === 'downloading-runtime' && typeof activity.percent === 'number'
+    ? Math.min(100, Math.max(0, Math.round(activity.percent)))
+    : null;
+}
+
+function ProviderStatusBadge({
+  status,
+  activity,
+  failureReason,
+}: {
+  status: ProviderTestStatus;
+  activity?: ProviderTestActivity;
+  failureReason?: string;
+}) {
   const { t } = useTranslation();
-  if (status === 'testing') {
+  if (activity) {
+    const label = (() => {
+      switch (activity.phase) {
+        case 'checking-runtime':
+          return t('onboarding.providers.activityChecking', 'Checking');
+        case 'downloading-runtime':
+          return t('onboarding.providers.activityDownloading', 'Downloading');
+        case 'verifying-runtime':
+          return t('onboarding.providers.activityVerifying', 'Verifying');
+        case 'extracting-runtime':
+          return t('onboarding.providers.activityExtracting', 'Extracting');
+        case 'installing-runtime':
+          return t('onboarding.providers.activityInstalling', 'Installing');
+        case 'probing-provider':
+          return t('onboarding.providers.activityStarting', 'Starting');
+      }
+
+      const unreachablePhase: never = activity.phase;
+      throw new Error(`Unknown provider test activity phase: ${String(unreachablePhase)}`);
+    })();
     return (
-      <Badge variant="outline" className="shrink-0 gap-1 whitespace-nowrap text-[10px]">
-        <Loader2 className="h-2.5 w-2.5 animate-spin" />
-        {t('onboarding.providers.statusTesting', 'Testing')}
+      <Badge
+        variant="outline"
+        className="shrink-0 whitespace-nowrap border-primary/35 bg-primary/8 text-[10px] text-primary"
+      >
+        {label}
       </Badge>
     );
   }
@@ -1002,14 +1149,35 @@ function ProviderStatusBadge({ status }: { status: ProviderTestStatus }) {
     );
   }
   if (status === 'failed') {
-    return (
+    const badge = (
       <Badge
         variant="outline"
+        aria-label={
+          failureReason
+            ? t('onboarding.providers.failureReasonA11y', 'Failed: {{reason}}', {
+                reason: failureReason,
+              })
+            : undefined
+        }
         className="shrink-0 gap-1 whitespace-nowrap border-destructive/40 text-[10px] text-destructive"
       >
         <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
       </Badge>
+    );
+    if (!failureReason) return badge;
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>{badge}</TooltipTrigger>
+          <TooltipContent side="top" className="max-w-80 px-3 py-2">
+            <div className="font-medium">
+              {t('onboarding.providers.failureReasonTitle', 'Why it failed')}
+            </div>
+            <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
   if (status === 'needs-auth') {

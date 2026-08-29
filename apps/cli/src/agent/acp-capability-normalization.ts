@@ -13,6 +13,7 @@ export type AcpCapabilitiesResult = {
   configOptions?: AcpConfigOptionSummary[];
   availableCommands?: AcpCommandSummary[];
   sessionFork: boolean;
+  acknowledgedSteer: boolean;
   modelReasoningEfforts?: Record<string, string[]>;
 };
 
@@ -150,7 +151,7 @@ type AcpSessionCapabilitiesResponse = {
 /** Extract cacheable capabilities from a real ACP new/load/resume session response. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
-  lifecycleCapabilities: { sessionFork?: boolean } = {}
+  lifecycleCapabilities: { sessionFork?: boolean; acknowledgedSteer?: boolean } = {}
 ): AcpCapabilitiesResult {
   const modes = (sessionResponse.modes?.availableModes ?? []).map((mode) => ({
     id: mode.id,
@@ -181,6 +182,7 @@ export function normalizeAcpSessionCapabilities(
     configOptions,
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
+    acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     ...(modelReasoningEfforts ? { modelReasoningEfforts } : {}),
   };
 }

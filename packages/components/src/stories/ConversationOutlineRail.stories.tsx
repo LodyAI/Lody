@@ -116,6 +116,54 @@ export const OverflowingConversation: Story = {
   render: () => <RailFrame entries={longConversation} initialActiveIndex={90} />,
 };
 
+/**
+ * Mirrors a tall composer consuming the lower part of a conversation page.
+ * The rail used to be mounted in the shrinking message area, so it centres
+ * visibly too high here. This is retained as an explicit visual regression
+ * state; production passes the full-page overlay root instead.
+ */
+function ComposerHeightFrame({ pageLevelOverlay }: { pageLevelOverlay: boolean }) {
+  const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
+  const activeIndex = 44;
+  return (
+    <div className="@container relative flex h-[720px] w-full flex-col overflow-hidden bg-background">
+      {pageLevelOverlay ? (
+        <div
+          ref={setOutlineOverlayRoot}
+          className="pointer-events-none absolute inset-0 @container"
+        />
+      ) : null}
+      <div className="relative min-h-0 flex-1 overflow-hidden border-b border-border/70">
+        <div className="mx-auto h-full max-w-[46rem] px-4 py-6 text-sm text-muted-foreground">
+          The message viewport shrinks as the composer grows. The outline should remain centred in
+          the page, not in this remaining area.
+        </div>
+        <ConversationOutlineRail
+          entries={longConversation}
+          activeIndex={activeIndex}
+          onJumpToRound={() => {}}
+          overlayRoot={outlineOverlayRoot}
+        />
+      </div>
+      <div className="h-[260px] shrink-0 border-t border-border bg-muted/20 p-4">
+        <div className="mx-auto h-full max-w-[46rem] rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
+          Tall composer
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const ComposerExpandedBefore: Story = {
+  args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
+  render: () => <ComposerHeightFrame pageLevelOverlay={false} />,
+};
+
+export const ComposerExpandedAfter: Story = {
+  args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
+  render: () => <ComposerHeightFrame pageLevelOverlay />,
+};
+
 /** A CJK title and a round the agent started, to check truncation and fallbacks. */
 export const MixedContent: Story = {
   args: { entries: [], activeIndex: 0, onJumpToRound: () => {} },

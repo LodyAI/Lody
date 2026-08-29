@@ -8,6 +8,7 @@ import {
   ArrowDownAZ,
   ArrowUpDown,
   ChevronDown,
+  CircleAlert,
   Clock,
   Folder,
   Github,
@@ -48,7 +49,10 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { archiveScopeAtom } from '@/atoms/sidebar-state';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import { useSessionActions } from '@/hooks/use-session-actions';
+import {
+  isArchivedLocalProjectRestoreUnavailableError,
+  useSessionActions,
+} from '@/hooks/use-session-actions';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleArchivedSessionMetas } from '@/hooks/use-visible-session-metas';
@@ -70,11 +74,16 @@ import {
 import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
 import { buildArchivedSessionTree } from '@/lib/archived-session-tree';
 
-type ArchivedSessionGroup = {
+export type ArchivedSessionGroup = {
   key: string;
   kind: 'repo' | 'chat' | 'local';
   label: string;
-  local?: { name: string; path?: string | null; title?: string | null };
+  local?: {
+    name: string;
+    path?: string | null;
+    title?: string | null;
+    available: boolean;
+  };
   sessions: SessionMeta[];
   collapsed: boolean;
 };
@@ -175,7 +184,10 @@ function sortArchivedSessions(
 function sessionMatchesArchiveQuery(
   session: SessionMeta,
   query: string,
-  localProjectLabelByKey: Map<string, { name: string; path?: string | null; title?: string | null }>
+  localProjectLabelByKey: Map<
+    string,
+    { name: string; path?: string | null; title?: string | null; available: boolean }
+  >
 ): boolean {
   if (!query) return true;
   const haystacks: string[] = [
@@ -205,7 +217,7 @@ function groupSessionsForArchive({
   sessions: SessionMeta[];
   localProjectLabelByKey: Map<
     string,
-    { name: string; path?: string | null; title?: string | null }
+    { name: string; path?: string | null; title?: string | null; available: boolean }
   >;
   groupMode: ArchiveGroupMode;
   sortMode: ArchiveSortMode;
@@ -260,7 +272,7 @@ function groupSessionsForArchive({
       key,
       kind: 'local',
       label: localLabel?.path?.trim() || localLabel?.name || 'Local project',
-      local: localLabel ?? { name: 'Local project' },
+      local: localLabel ?? { name: 'Local project', available: false },
       sessions: sortArchivedSessions(groupSessions, sortMode),
     });
   }
@@ -355,6 +367,9 @@ type ArchivedSessionItemBaseProps = {
   onDelete: (session: SessionMeta) => void;
   onNavigate: (sessionId: SessionId) => void;
   restoreLabel: string;
+  restoreAvailable: boolean;
+  restoreUnavailableLabel: string;
+  removedProjectLabel: string;
   deleteLabel: string;
   isMultiSelectMode: boolean;
   isSelected: boolean;
@@ -377,6 +392,8 @@ function DesktopArchivedSessionItem({
   onDelete,
   onNavigate,
   restoreLabel,
+  restoreAvailable,
+  restoreUnavailableLabel,
   deleteLabel,
   isMultiSelectMode,
   isSelected,
@@ -535,9 +552,11 @@ function DesktopArchivedSessionItem({
                 'inline-flex h-6 w-6 items-center justify-center rounded-sm',
                 'text-muted-foreground/70 transition-colors',
                 'hover:text-foreground hover:bg-muted/50',
+                'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
               )}
-              aria-label={restoreLabel}
+              aria-label={restoreAvailable ? restoreLabel : restoreUnavailableLabel}
+              disabled={!restoreAvailable}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -547,7 +566,9 @@ function DesktopArchivedSessionItem({
               <Undo2 className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top">{restoreLabel}</TooltipContent>
+          <TooltipContent side="top">
+            {restoreAvailable ? restoreLabel : restoreUnavailableLabel}
+          </TooltipContent>
         </Tooltip>
 
         <Tooltip delayDuration={300}>
@@ -585,6 +606,8 @@ function MobileArchivedSessionItem({
   onDelete,
   onNavigate,
   restoreLabel,
+  restoreAvailable,
+  removedProjectLabel,
   restoreActionLabel,
   deleteLabel,
   deleteActionLabel,
@@ -700,6 +723,12 @@ function MobileArchivedSessionItem({
           </div>
 
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+            {!restoreAvailable ? (
+              <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                <CircleAlert className="h-3 w-3" aria-hidden="true" />
+                {removedProjectLabel}
+              </span>
+            ) : null}
             {prUrl && PrIcon && prStatusMeta && (
               <Tooltip delayDuration={300}>
                 <TooltipTrigger asChild>
@@ -745,15 +774,19 @@ function MobileArchivedSessionItem({
       className="rounded-md"
       contentClassName="bg-background"
       actions={[
-        {
-          key: 'restore',
-          label: restoreActionLabel,
-          ariaLabel: restoreLabel,
-          icon: <Undo2 className="h-4 w-4" />,
-          hideLabel: hideActionLabels,
-          className: 'bg-muted text-foreground',
-          onClick: () => onRestore(session.id),
-        },
+        ...(restoreAvailable
+          ? [
+              {
+                key: 'restore',
+                label: restoreActionLabel,
+                ariaLabel: restoreLabel,
+                icon: <Undo2 className="h-4 w-4" />,
+                hideLabel: hideActionLabels,
+                className: 'bg-muted text-foreground',
+                onClick: () => onRestore(session.id),
+              },
+            ]
+          : []),
         {
           key: 'delete',
           label: deleteActionLabel,
@@ -770,7 +803,7 @@ function MobileArchivedSessionItem({
   );
 }
 
-type ArchivedSessionGroupSectionProps = {
+export type ArchivedSessionGroupSectionProps = {
   group: ArchivedSessionGroup;
   now: Date;
   onRestore: (sessionId: SessionId) => void;
@@ -778,6 +811,8 @@ type ArchivedSessionGroupSectionProps = {
   onNavigate: (sessionId: SessionId) => void;
   onToggleCollapse: () => void;
   restoreLabel: string;
+  restoreUnavailableLabel: string;
+  removedProjectLabel: string;
   restoreActionLabel: string;
   deleteLabel: string;
   deleteActionLabel: string;
@@ -793,7 +828,7 @@ type ArchivedSessionGroupSectionProps = {
   hideGroupHeader?: boolean;
 };
 
-function ArchivedSessionGroupSection({
+export function ArchivedSessionGroupSection({
   group,
   now,
   onRestore,
@@ -801,6 +836,8 @@ function ArchivedSessionGroupSection({
   onNavigate,
   onToggleCollapse,
   restoreLabel,
+  restoreUnavailableLabel,
+  removedProjectLabel,
   restoreActionLabel,
   deleteLabel,
   deleteActionLabel,
@@ -816,6 +853,7 @@ function ArchivedSessionGroupSection({
 }: ArchivedSessionGroupSectionProps) {
   const isChat = group.kind === 'chat';
   const isLocal = group.kind === 'local';
+  const restoreAvailable = !isLocal || group.local?.available === true;
   const HeaderIcon = isChat ? MessageCircle : isLocal ? Folder : Github;
   const label = isChat ? chatLabel : group.label;
   const groupKey = group.key;
@@ -899,6 +937,12 @@ function ArchivedSessionGroupSection({
           <span className="text-xs tabular-nums text-muted-foreground/60">
             ({group.sessions.length})
           </span>
+          {!restoreAvailable ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <CircleAlert className="h-3 w-3" aria-hidden="true" />
+              {removedProjectLabel}
+            </span>
+          ) : null}
         </button>
       ) : null}
 
@@ -915,6 +959,9 @@ function ArchivedSessionGroupSection({
                 onDelete={onDelete}
                 onNavigate={onNavigate}
                 restoreLabel={restoreLabel}
+                restoreAvailable={restoreAvailable}
+                restoreUnavailableLabel={restoreUnavailableLabel}
+                removedProjectLabel={removedProjectLabel}
                 restoreActionLabel={restoreActionLabel}
                 deleteLabel={deleteLabel}
                 deleteActionLabel={deleteActionLabel}
@@ -935,6 +982,9 @@ function ArchivedSessionGroupSection({
                 onDelete={onDelete}
                 onNavigate={onNavigate}
                 restoreLabel={restoreLabel}
+                restoreAvailable={restoreAvailable}
+                restoreUnavailableLabel={restoreUnavailableLabel}
+                removedProjectLabel={removedProjectLabel}
                 deleteLabel={deleteLabel}
                 isMultiSelectMode={isMultiSelectMode}
                 isSelected={selectedIds.has(session.id)}
@@ -984,6 +1034,12 @@ export function ArchiveView() {
   );
 
   const now = useMemo(() => new Date(), []);
+  const removedProjectLabel = t('archive.localProject.removed', 'Project removed');
+  const removedProjectGroupLabel = t('archive.localProject.removedGroup', 'Removed local project');
+  const restoreUnavailableLabel = t(
+    'archive.localProject.restoreUnavailable',
+    'Re-add this local project to restore its conversations.'
+  );
 
   // Build member lookup map for creator avatars
   const membersByUserId = useMemo(() => {
@@ -1034,7 +1090,15 @@ export function ArchiveView() {
   }, [archivedSessions, archiveScope, localMachineId, machineMetaMap, user?.id]);
 
   const localProjectLabelByKey = useMemo(() => {
-    const map = new Map<string, { name: string; path?: string | null; title?: string | null }>();
+    const map = new Map<
+      string,
+      {
+        name: string;
+        path?: string | null;
+        title?: string | null;
+        available: boolean;
+      }
+    >();
 
     for (const session of scopedArchivedSessions) {
       const project = session.project;
@@ -1049,7 +1113,7 @@ export function ArchiveView() {
         ...(machineFlockRows ? getMachineFlockLocalProjects(machineFlockRows) : {}),
       };
       const projectMeta = localProjects[project.localProjectId];
-      const name = projectMeta?.name || 'Local project';
+      const name = projectMeta?.name || removedProjectGroupLabel;
       const rootPath =
         typeof projectMeta?.rootPath === 'string' && projectMeta.rootPath.trim()
           ? projectMeta.rootPath.trim()
@@ -1059,11 +1123,27 @@ export function ArchiveView() {
         name,
         path: rootPath,
         title: rootPath,
+        available: Boolean(projectMeta),
       });
     }
 
     return map;
-  }, [scopedArchivedSessions, machineFlockRowsByMachineId, machineMetaMap]);
+  }, [
+    machineFlockRowsByMachineId,
+    machineMetaMap,
+    removedProjectGroupLabel,
+    scopedArchivedSessions,
+  ]);
+
+  const canRestoreArchivedSession = useCallback(
+    (session: SessionMeta): boolean => {
+      const project = session.project;
+      if (project?.kind !== 'local') return true;
+      const key = `local:${session.machineId}:${project.localProjectId}`;
+      return localProjectLabelByKey.get(key)?.available === true;
+    },
+    [localProjectLabelByKey]
+  );
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
@@ -1106,7 +1186,19 @@ export function ArchiveView() {
   };
 
   const handleRestore = (sessionId: SessionId) => {
-    void restoreSession(sessionId);
+    const session = scopedArchivedSessions.find((candidate) => candidate.id === sessionId);
+    if (!session || !canRestoreArchivedSession(session)) {
+      toast.info(restoreUnavailableLabel);
+      return;
+    }
+    void restoreSession(sessionId).catch((error: unknown) => {
+      if (isArchivedLocalProjectRestoreUnavailableError(error)) {
+        toast.info(restoreUnavailableLabel);
+        return;
+      }
+      console.error('Failed to restore archived conversation', error);
+      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+    });
   };
 
   const handleDelete = (session: SessionMeta) => {
@@ -1158,6 +1250,12 @@ export function ArchiveView() {
     if (selectedCount === 0) return false;
     return scopedArchivedSessions.some((s) => selectedIds.has(s.id) && s.repoFullName);
   }, [scopedArchivedSessions, selectedIds, selectedCount]);
+  const hasUnrestorableSessionInSelection = useMemo(() => {
+    if (selectedCount === 0) return false;
+    return scopedArchivedSessions.some(
+      (session) => selectedIds.has(session.id) && !canRestoreArchivedSession(session)
+    );
+  }, [canRestoreArchivedSession, scopedArchivedSessions, selectedCount, selectedIds]);
 
   const exitMultiSelect = useCallback(() => {
     setIsMultiSelectMode(false);
@@ -1209,7 +1307,7 @@ export function ArchiveView() {
   }, []);
 
   const handleBulkRestore = useCallback(async () => {
-    if (isBulkActionBusy) return;
+    if (isBulkActionBusy || hasUnrestorableSessionInSelection) return;
     const sessionIds = Array.from(selectedIds);
     if (sessionIds.length === 0) return;
 
@@ -1235,7 +1333,13 @@ export function ArchiveView() {
     } finally {
       setBulkActionInFlight(null);
     }
-  }, [isBulkActionBusy, selectedIds, restoreSession, exitMultiSelect]);
+  }, [
+    exitMultiSelect,
+    hasUnrestorableSessionInSelection,
+    isBulkActionBusy,
+    restoreSession,
+    selectedIds,
+  ]);
 
   const handleBulkDeleteConfirm = useCallback(async () => {
     if (isBulkActionBusy) return;
@@ -1480,6 +1584,8 @@ export function ArchiveView() {
               onNavigate={handleNavigateToSession}
               onToggleCollapse={() => handleToggleCollapse(group.key)}
               restoreLabel={restoreLabel}
+              restoreUnavailableLabel={restoreUnavailableLabel}
+              removedProjectLabel={removedProjectLabel}
               restoreActionLabel={restoreActionLabel}
               deleteLabel={deleteLabel}
               deleteActionLabel={deleteActionLabel}
@@ -1593,6 +1699,8 @@ export function ArchiveView() {
         isMultiSelectMode={isMultiSelectMode}
         selectedCount={selectedCount}
         isBulkActionBusy={isBulkActionBusy}
+        bulkRestoreDisabled={hasUnrestorableSessionInSelection}
+        bulkRestoreDisabledReason={restoreUnavailableLabel}
         onExitMultiSelect={exitMultiSelect}
         onBulkRestore={() => {
           void handleBulkRestore();
@@ -1612,6 +1720,8 @@ export function ArchiveView() {
       isMultiSelectMode={isMultiSelectMode}
       selectedCount={selectedCount}
       isBulkActionBusy={isBulkActionBusy}
+      bulkRestoreDisabled={hasUnrestorableSessionInSelection}
+      bulkRestoreDisabledReason={restoreUnavailableLabel}
       onArchiveScopeChange={setArchiveScope}
       onExitMultiSelect={exitMultiSelect}
       onBulkRestore={() => {

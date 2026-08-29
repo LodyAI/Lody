@@ -326,22 +326,34 @@ export function extractAskUserQuestionAnswersFromOutcome(
 ): AskUserQuestionAnswers | null {
   if (!outcome || !isRecord(outcome._meta)) return null;
 
-  const rawAnswers =
-    meta.source === 'lody'
-      ? getLodyOutcomeAnswers(outcome._meta)
-      : meta.source === 'codex'
-        ? getCodexOutcomeAnswers(outcome._meta)
-        : getClaudeOutcomeAnswers(outcome._meta);
-
-  if (!rawAnswers) return null;
+  // Permission requests are durable and may be answered by a renderer from
+  // before the Core metadata migration. Prefer the canonical response, then
+  // accept either provider-specific compatibility shape regardless of which
+  // namespace the request itself used.
+  const answerSources = [
+    { source: 'lody' as const, answers: getLodyOutcomeAnswers(outcome._meta) },
+    { source: 'codex' as const, answers: getCodexOutcomeAnswers(outcome._meta) },
+    { source: 'claude' as const, answers: getClaudeOutcomeAnswers(outcome._meta) },
+  ];
+  const answerSource = answerSources.find(({ answers }) => answers !== null);
+  if (!answerSource?.answers) return null;
 
   const result: AskUserQuestionAnswers = {};
   for (const [index, question] of meta.questions.entries()) {
     const key = getAskUserQuestionAnswerKey(meta.questions, index);
-    const raw = rawAnswers[key];
+    // Legacy Claude answers were keyed without the Core field id, normally by
+    // question text. Translate that lookup back onto the canonical answer key.
+    const sourceKey =
+      answerSource.source === 'claude'
+        ? getAskUserQuestionAnswerKey(
+            meta.questions.map(({ id: _id, ...item }) => item),
+            index
+          )
+        : key;
+    const raw = answerSource.answers[sourceKey];
     if (raw === undefined) continue;
 
-    if (meta.source === 'codex') {
+    if (answerSource.source === 'codex') {
       if (!isRecord(raw)) continue;
       const inner = raw.answers;
       if (!Array.isArray(inner)) continue;

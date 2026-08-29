@@ -87,6 +87,7 @@ import {
   useSessionActions,
   type SessionActions,
 } from '../src/hooks/use-session-actions';
+import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -639,6 +640,56 @@ describe('useSessionActions', () => {
     );
   });
 
+  it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
+    const sessionId = 'session-resend-new-turn-id' as SessionId;
+    const appendSessionTurn = vi.fn(async () => 'direct' as const);
+    const runtime = createRuntime({
+      writer: {
+        modeForMachine: () => 'direct' as const,
+        modeForSession: async () => 'direct' as const,
+        upsertDocMeta: vi.fn(async () => undefined),
+        appendSessionTurn,
+        appendSessionHistory: vi.fn(async () => undefined),
+      } as unknown as WorkspaceRuntime['writer'],
+    });
+    const actions = await renderActions(runtime);
+
+    // The undelivered entry's exact content, extracted the same way the
+    // composer-area resend bar does it.
+    const inputBlocks = buildResendInputBlocks({
+      items: [{ type: 'text', text: 'same content' }],
+      inputConfig: {
+        prompt: 'same content',
+        inputBlocks: [{ type: 'text', text: 'same content' }],
+      },
+    });
+    const payload = {
+      role: 'user',
+      userId: 'user-1',
+      items: [{ type: 'text', text: 'same content' }],
+      timestamp: '2026-07-05T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      finished: true,
+      inputConfig: {
+        inputBlocks,
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    } as unknown as Parameters<SessionActions['addSessionHistory']>[1];
+
+    const first = await actions.addSessionHistory(sessionId, payload);
+    const second = await actions.addSessionHistory(sessionId, payload);
+
+    // A resend rides the ordinary send path: identical content, brand-new id.
+    expect(second.id).not.toBe(first.id);
+    expect(appendSessionTurn).toHaveBeenCalledTimes(2);
+    const resentEntry = appendSessionTurn.mock.calls[1]?.[1] as {
+      inputConfig?: { inputBlocks?: unknown };
+    };
+    expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
+  });
+
   it('starts a session through one aggregate writer call', async () => {
     const sessionId = 'session-aggregate-start' as SessionId;
     const startSession = vi.fn(async () => 'direct' as const);
@@ -668,7 +719,14 @@ describe('useSessionActions', () => {
     expect(startSession).toHaveBeenCalledOnce();
     expect(startSession).toHaveBeenCalledWith(
       sessionId,
-      expect.objectContaining({ id: sessionId, machineId: 'machine-1' }),
+      // lastMessageAt rides the accept unit itself: the meta always carries
+      // the first message's activity, so a close racing the first turn can
+      // never mistake the session for an empty, deletable one.
+      expect.objectContaining({
+        id: sessionId,
+        machineId: 'machine-1',
+        lastMessageAt: expect.any(Number),
+      }),
       expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
       expect.objectContaining({ userTurnId: result.historyEntry.id })
     );
@@ -952,6 +1010,39 @@ describe('useSessionActions', () => {
       expect.objectContaining({
         needToArchiveSessions: { [sessionId]: true },
       })
+    );
+  });
+
+  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
+    const sessionId = 'session-archive-known-meta' as SessionId;
+    const renderedMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      createdAt: new Date().toISOString(),
+      parentSessionId: 'parent-session-1' as SessionId,
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    // The repo cannot read the doc meta yet (child session still hydrating).
+    const getDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
+    });
+
+    await actions.archiveSession(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
+    );
+
+    // A session neither the repo nor the UI knows still fails loudly.
+    await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
+      'Session metadata missing'
     );
   });
 

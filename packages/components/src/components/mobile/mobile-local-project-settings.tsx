@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
+import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
 import { ChevronRight, Loader2, Wrench } from 'lucide-react';
 import { Switch } from '@/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useRemoveLocalProject } from '@/hooks/use-remove-local-project';
+import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import {
@@ -57,6 +60,8 @@ export function MobileLocalProjectSettings({
 }: MobileLocalProjectSettingsProps) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const machineMeta = useAtomValue(getMachineMetaMapAtom).get(machineId as MachineId);
+  const onlineMachineIds = useOnlineMachineIds();
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
@@ -71,7 +76,8 @@ export function MobileLocalProjectSettings({
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
   } = useLocalProjectsAdmin();
-  const { removeLocalProject, getRemoveLocalProjectImpact } = useRemoveLocalProject();
+  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
+    useRemoveLocalProject();
   const [removeSheetOpen, setRemoveSheetOpen] = useState(false);
 
   const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
@@ -98,7 +104,7 @@ export function MobileLocalProjectSettings({
             machineId: row.machineId,
             localProjectId: row.project.id,
           })
-        : { runningSessionCount: 0 },
+        : { conversationCount: 0, runningSessionCount: 0 },
     [getRemoveLocalProjectImpact, row]
   );
 
@@ -220,17 +226,17 @@ export function MobileLocalProjectSettings({
         </MobileSettingsSection>
       ) : null}
 
-      <MobileSettingsSection>
-        {/* Removal is queued durably on the owning machine's Flock doc, so the
-            action stays available even if that machine is offline. */}
-        <button
-          type="button"
-          onClick={() => setRemoveSheetOpen(true)}
-          className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
-        >
-          {t('workspace.projects.delete', 'Delete project')}
-        </button>
-      </MobileSettingsSection>
+      {machineSupportsLocalProjectRemovalProtocol(machineMeta) ? (
+        <MobileSettingsSection>
+          <button
+            type="button"
+            onClick={() => setRemoveSheetOpen(true)}
+            className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
+          >
+            {t('workspace.projects.delete', 'Delete project')}
+          </button>
+        </MobileSettingsSection>
+      ) : null}
 
       <MobileRemoveLocalProjectSheet
         open={removeSheetOpen}
@@ -238,12 +244,29 @@ export function MobileLocalProjectSettings({
         projectName={row.project.name}
         pathLabel={projectPath}
         deviceName={row.machineName}
+        deviceOnline={onlineMachineIds.has(row.machineId)}
+        conversationCount={removeImpact.conversationCount}
         runningSessionCount={removeImpact.runningSessionCount}
-        onConfirm={async () => {
-          const removed = await removeLocalProject({
+        canCleanupWorktrees={
+          onlineMachineIds.has(row.machineId) &&
+          machineSupportsLocalProjectRemovalProtocol(machineMeta)
+        }
+        onPreflightCleanup={() =>
+          preflightLocalProjectRemoval({
             machineId: row.machineId,
             localProjectId: row.project.id,
-          });
+          })
+        }
+        onConfirm={async (options) => {
+          const removed = await removeLocalProject(
+            {
+              machineId: row.machineId,
+              localProjectId: row.project.id,
+              projectName: row.project.name,
+              originalRootPath: projectPath ?? undefined,
+            },
+            options
+          );
           if (removed) onRemoved?.();
           return removed;
         }}

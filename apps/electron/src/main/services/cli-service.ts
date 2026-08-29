@@ -658,10 +658,12 @@ export class CliService {
         this.localControlClient
           .sessionControl(message, { timeoutMs, onResponse: options.onResponse })
           .pipe(
-            Effect.map((responses): SendLocalSessionControlResult => ({
-              ok: true,
-              responses
-            })),
+            Effect.map(
+              (responses): SendLocalSessionControlResult => ({
+                ok: true,
+                responses
+              })
+            ),
             Effect.catchTag('IpcTimeoutError', () =>
               Effect.succeed({ ok: false as const, error: 'request_timeout' })
             ),

@@ -657,6 +657,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpSessionId = started.acpSessionId;
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
+          acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
         });
       } catch (error) {
         // The agent process died before startup completed (the startup monitor

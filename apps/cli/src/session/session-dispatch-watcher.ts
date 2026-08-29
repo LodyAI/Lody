@@ -339,9 +339,17 @@ const isConfigOptionValueRecord = (
  * essential: clearing either one after an awaited refresh can overwrite a newer
  * activation or processing claim from another peer.
  * The tradeoff is that a genuinely late History CRDT update after the timeout
- * will not be auto-dispatched; the UI instead asks the user to send another
- * message. That is preferred over an unbounded silent wait or repeated recovery
- * loops for a turn whose prompt payload never became readable.
+ * is never dispatched: the marker is permanent for that exact turn, and the
+ * renderer derives a visible "not delivered" label for it from the marker plus
+ * its non-terminal status (no CLI repair write, no schema change). Recovery is
+ * a fresh send — the row's "not delivered" label opens a confirmation dialog
+ * that re-sends the same content as a brand-new message (new turn id) through
+ * the ordinary producer path, whose ordinary dispatch write clears the marker
+ * as a side effect; the resend also supersedes the abandoned entry to
+ * `canceled` so the stale pending copy can never dispatch once the marker is
+ * gone. That is preferred over an unbounded silent wait, repeated recovery
+ * loops, or resurrecting a message the user may already have resent as a new
+ * turn.
  *
  * Sessions without an explicit activation signal stay metadata-only. History is
  * a turn-selection source after activation, not a startup activation index.
@@ -742,11 +750,24 @@ export class SessionDispatchWatcher {
 
   /**
    * Peek the oldest live stashed RPC turn for a session. Entries that expired
-   * or already reached a terminal state (handled/denied while stashed) are
-   * dropped instead of returned, so a denied turn cannot re-enter dispatch
-   * from the stash.
+   * or already reached a terminal state are dropped instead of returned, so a
+   * finished turn cannot re-enter dispatch from the stash. Terminal means:
+   * advanced past by `lastHandledUserMsgId`, recorded terminal in memory
+   * (handled/denied while stashed), or carrying a terminal history status —
+   * e.g. the renderer superseding an undelivered turn to `canceled` when its
+   * content is resent as a new message.
+   *
+   * An entry whose id matches `lastMissingHistoryUserMsgId` stays stashed but
+   * is never returned: the negative acknowledgement is PERMANENT for that
+   * exact turn while it stands, so no turn source may dispatch it — a
+   * duplicate RPC offer must not resurrect the turn. Recovery is a fresh send
+   * with a new turn id (the conversation's resend entry), never a revival.
    */
-  private peekStashedRpcTurn(sessionId: SessionId, meta: SessionMeta): SessionHistoryInput | null {
+  private peekStashedRpcTurn(
+    sessionId: SessionId,
+    meta: SessionMeta,
+    history: SessionHistoryInput[] = []
+  ): SessionHistoryInput | null {
     const stash = this.rpcTurnStash.get(sessionId);
     if (!stash) {
       return null;
@@ -758,9 +779,18 @@ export class SessionDispatchWatcher {
         this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(
           sessionId,
           userTurnId
-        ) !== undefined;
+        ) !== undefined ||
+        history.some(
+          (entry) =>
+            entry.id === userTurnId &&
+            entry.role === 'user' &&
+            (entry.status === 'handled' || entry.status === 'failed' || entry.status === 'canceled')
+        );
       if (stashed.expiresAtMs <= now || isTerminal) {
         stash.delete(userTurnId);
+        continue;
+      }
+      if (userTurnId === meta.lastMissingHistoryUserMsgId) {
         continue;
       }
       this.turnSourceHints.set(`${sessionId}:${userTurnId}`, 'rpc');
@@ -1106,9 +1136,8 @@ export class SessionDispatchWatcher {
       if (!isActive()) {
         return;
       }
-      const meta = isLoroRepoDocDeleted(record)
-        ? undefined
-        : (record?.meta as SessionMeta | undefined);
+      const docDeleted = isLoroRepoDocDeleted(record);
+      const meta = docDeleted ? undefined : (record?.meta as SessionMeta | undefined);
 
       phase = 'evaluate-ownership';
       const isOwned = meta?.machineId === this.deps.machineId && !meta?.isArchived;
@@ -1118,7 +1147,14 @@ export class SessionDispatchWatcher {
         this.watchedSessions.delete(sessionId);
         this.cancelCheckChains.delete(sessionId);
         this.cancelSeenTurn.delete(sessionId);
-        this.rpcTurnStash.delete(sessionId);
+        // Absent metadata is "unknown", not "foreign": a freshly created
+        // session's RPC turn can arrive before its meta syncs to this machine.
+        // Keep the TTL-bounded stash so the metadata watch dispatches it once
+        // the meta lands; only a definitive verdict — deleted doc, another
+        // machine's session, or an archived one — drops the stashed turn.
+        if (meta || docDeleted) {
+          this.rpcTurnStash.delete(sessionId);
+        }
         this.interruptAccessRetry(sessionId);
         return;
       }
@@ -2194,7 +2230,9 @@ export class SessionDispatchWatcher {
     }
     const pendingUserTurnId = getPendingUserTurnActivationId(meta);
     this.deps.logger.debug(
-      `[${sessionId}] Pending user turn metadata is visible but history is missing it; waiting up to ${
+      `[${sessionId}] Pending user turn ${
+        getPendingUserTurnActivationId(meta) ?? 'unknown'
+      } metadata is visible but history is missing it; waiting up to ${
         SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
       }s for history CRDT sync (pendingUserMsgId=${pendingUserTurnId ?? 'unknown'})`
     );
@@ -2506,6 +2544,11 @@ export class SessionDispatchWatcher {
       `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
     );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, recoveryPatch);
+    this.deps.logger.info(
+      `[${sessionId}] Recorded missing-history recovery for user turn ${
+        pendingUserMsgId ?? 'unknown'
+      }; the turn stays undispatchable until the user explicitly redelivers it`
+    );
 
     if (this.deps.recordChatFailure) {
       try {
@@ -2567,7 +2610,7 @@ export class SessionDispatchWatcher {
       this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
       return promoted;
     }
-    return this.peekStashedRpcTurn(meta.id, meta);
+    return this.peekStashedRpcTurn(meta.id, meta, history);
   }
 
   /**

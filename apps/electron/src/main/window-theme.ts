@@ -50,11 +50,7 @@ export function resolveNativeWindowTheme(shouldUseDarkColors: boolean): Resolved
 
 export type NativeWindowAppearanceTarget = {
   setBackgroundColor: (color: string) => void
-  setTitleBarOverlay?: (overlay: {
-    color: string
-    symbolColor: string
-    height: number
-  }) => void
+  setTitleBarOverlay?: (overlay: { color: string; symbolColor: string; height: number }) => void
 }
 
 export function applyResolvedWindowTheme(

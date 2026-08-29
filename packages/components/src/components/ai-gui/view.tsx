@@ -48,6 +48,7 @@ import {
   type MessageContent,
   type SessionHistoryParsed,
   type SessionId,
+  type SessionInputBlock,
   type SessionTurnInputConfig,
   type SessionMeta,
   type SessionGoalCommand,
@@ -71,6 +72,7 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom } from '@/atoms/runtime';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
+import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
@@ -154,6 +156,16 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { normalizeWorktreePath, normalizeWorktreeTitle } from '@/lib/worktree-path';
 import { Badge } from '@/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
 import {
   AgentActivityIndicator,
@@ -404,6 +416,8 @@ export interface SessionChatStreamViewProps {
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
+  /** Full-page overlay that keeps the conversation outline independent of composer height. */
+  outlineOverlayRoot?: HTMLElement | null;
   /**
    * When true, prevents sticky auto-scroll from fighting programmatic scrolls
    * (e.g. during search result navigation).
@@ -1151,6 +1165,7 @@ export const SessionChatStreamView = forwardRef<
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
+      outlineOverlayRoot,
     },
     ref
   ) => {
@@ -1711,16 +1726,19 @@ export const SessionChatStreamView = forwardRef<
             {!isMobile && isScrolledFromTop ? (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
             ) : null}
-            {/* Round outline. An overlay SIBLING of the scroll viewport, never a
-                Virtua row — and never a child of the viewport either, because
-                sticky scroll takes the content element from that div's
-                `firstElementChild`. Touch has no hover, so mobile is excluded
-                rather than shipped without its preview card. */}
+            {/* Round outline. Its visual layer portals to the full-page overlay
+                when supplied, so composer growth cannot move its centre. It is
+                never a Virtua row or a child of the viewport: sticky scroll
+                takes the content element from that div's `firstElementChild`.
+                Touch has no hover, so mobile is excluded rather than shipped
+                without its preview card. */}
             {isMobile ? null : (
               <ConversationOutlineRail
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                overlayRoot={outlineOverlayRoot}
+                enableArrivalIntent
               />
             )}
             {showScrollToLatest && !isSticky && (
@@ -1767,12 +1785,14 @@ export const MessageRowView = memo(function MessageRowView({
   user,
   onNavigateSession,
   onEdit,
+  onResendUndelivered,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   user?: SessionChatUser;
   conversationFontSize?: ConversationFontSize;
 }) {
@@ -1807,6 +1827,7 @@ export const MessageRowView = memo(function MessageRowView({
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
         onEdit={onEdit}
+        onResendUndelivered={onResendUndelivered}
       />
     );
   }
@@ -2532,6 +2553,7 @@ const UserMessageRowView = ({
   hasWideContent,
   conversationFontSize,
   onEdit,
+  onResendUndelivered,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
@@ -2540,6 +2562,7 @@ const UserMessageRowView = ({
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -2550,13 +2573,27 @@ const UserMessageRowView = ({
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
+  // Missing-history recovery negatively acknowledged this exact turn
+  // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
+  // out of every dispatch path permanently, so it renders as a terminal "not
+  // delivered" label instead of an endless "sending" one. The label is the
+  // recovery entry point: clicking it opens a confirmation dialog that resends
+  // the SAME content as a NEW message — the old turn never revives.
+  const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const isUndelivered = isUndeliveredUserTurnEntry(
+    sessionMeta?.lastMissingHistoryUserMsgId,
+    message
+  );
   const pinCtx = useSessionPin();
-  const showSendingSpinner = useIsMessageSendingVisible(message.id) && !isDelivered;
+  const showSendingSpinner =
+    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [resendDialogOpen, setResendDialogOpen] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
@@ -2583,6 +2620,33 @@ const UserMessageRowView = ({
     pinCtx.onPin(isPinned ? null : message.id);
   }, [pinCtx, isPinned, message.id]);
 
+  const handleConfirmResend = useCallback(async () => {
+    if (!onResendUndelivered || isResending) {
+      return;
+    }
+    const inputBlocks = buildResendInputBlocks(message);
+    if (inputBlocks.length === 0) {
+      return;
+    }
+    setIsResending(true);
+    try {
+      const accepted = await onResendUndelivered(message.id, inputBlocks);
+      if (!accepted) {
+        toast.error(t('sessions.resendUndelivered.failed', 'Failed to resend the message'));
+      }
+    } catch (error) {
+      console.warn('Failed to resend undelivered user turn', {
+        sessionId,
+        userTurnId: message.id,
+        error,
+      });
+      toast.error(t('sessions.resendUndelivered.failed', 'Failed to resend the message'));
+    } finally {
+      setIsResending(false);
+      setResendDialogOpen(false);
+    }
+  }, [isResending, message, onResendUndelivered, sessionId, t]);
+
   const handleSaveEdit = useCallback(async () => {
     if (!onEdit || isSavingEdit || !editText.trim()) return;
     setIsSavingEdit(true);
@@ -2608,7 +2672,24 @@ const UserMessageRowView = ({
       >
         <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isPendingApply ? (
+          {isUndelivered ? (
+            onResendUndelivered ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-sm text-destructive underline-offset-2 transition-colors hover:text-destructive/80 hover:underline"
+                aria-label={t('sessions.resendUndelivered.action', 'Resend message')}
+                onClick={() => setResendDialogOpen(true)}
+              >
+                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+              </span>
+            )
+          ) : isPendingApply ? (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <Clock3 className="h-3.5 w-3.5" strokeWidth={2} />
               {!isMobile ? t('sessions.messageStatus.pendingApply', 'Steering') : null}
@@ -2638,12 +2719,7 @@ const UserMessageRowView = ({
                 unbreakable line, the content grows to its `sm:max-w-[800px]` cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
-            <div
-              className={cn(
-                'relative min-w-0 max-w-full',
-                isEditing ? 'w-full' : 'w-fit'
-              )}
-            >
+            <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
                 <Loader2 className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 animate-spin text-muted-foreground" />
               )}
@@ -2775,7 +2851,62 @@ const UserMessageRowView = ({
           </div>
         ) : null}
       </div>
+      {onResendUndelivered ? (
+        <ResendUndeliveredDialog
+          open={resendDialogOpen}
+          onOpenChange={setResendDialogOpen}
+          isResending={isResending}
+          onConfirm={() => {
+            void handleConfirmResend();
+          }}
+        />
+      ) : null}
     </div>
+  );
+};
+
+/**
+ * Confirmation dialog behind the "Not delivered" label: resends the
+ * undelivered turn's exact content as a NEW message (the old turn is never
+ * revived). The row's label is the only entry point.
+ */
+const ResendUndeliveredDialog = ({
+  open,
+  onOpenChange,
+  isResending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isResending: boolean;
+  onConfirm: () => void;
+}) => {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t('sessions.resendUndelivered.title', 'Message not delivered')}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              'sessions.resendUndelivered.description',
+              'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isResending}>
+            {t('common.cancel', 'Cancel')}
+          </AlertDialogCancel>
+          <AlertDialogAction disabled={isResending} onClick={onConfirm}>
+            {isResending ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : null}
+            {t('sessions.resendUndelivered.action', 'Resend message')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 

@@ -1213,7 +1213,38 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     expect(request?.options.map((option) => option.optionId)).toEqual(['answer', 'cancel']);
     const parsed = parseAskUserQuestionPermissionMeta(request?._meta);
     expect(parsed?.questions[0]?.question).toBe('Which database should we use?');
+    expect(request?._meta).toMatchObject({
+      lody: { elicitation: { version: 1 } },
+      claudeCode: {
+        requestType: 'askUserQuestion',
+        askUserQuestion: {
+          questions: [expect.objectContaining({ question: 'Which database should we use?' })],
+        },
+      },
+    });
     expect(result).toEqual({ action: 'accept', content: { question_0: 'Postgres' } });
+  });
+
+  it('folds an older renderer Claude answer back into the Core form', async () => {
+    const { client, onRequestPermission } = createTestClient({ agentType: 'claude' });
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: {
+          claudeCode: {
+            askUserQuestion: {
+              answers: { 'Which database should we use?': 'Postgres' },
+            },
+          },
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+
+    await expect(client.unstable_createElicitation(askUserQuestionForm)).resolves.toEqual({
+      action: 'accept',
+      content: { question_0: 'Postgres' },
+    });
   });
 
   it('returns cancel when the user dismisses the question', async () => {
@@ -1242,15 +1273,17 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     expect(onRequestPermission).not.toHaveBeenCalled();
   });
 
-  it('bridges Codex free-text and Other fields with automatic resolution metadata', async () => {
+  it('bridges Codex fields and folds an older renderer answer into the Core form', async () => {
     const { client, onRequestPermission } = createTestClient();
     onRequestPermission.mockResolvedValueOnce({
       outcome: {
         outcome: 'selected',
         optionId: 'answer',
         _meta: {
-          lody: {
-            elicitation: { version: 1, answers: { next_step: 'Custom path' } },
+          codex: {
+            requestUserInput: {
+              answers: { next_step: { answers: ['Custom path'] } },
+            },
           },
         },
       },
@@ -1292,6 +1325,15 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     expect(parsed?.source).toBe('lody');
     expect(parsed?.autoResolveAt).toEqual(expect.any(Number));
     expect(parsed?.questions[0]?.allowCustomAnswer).toBe(true);
+    expect(request?._meta).toMatchObject({
+      lody: { elicitation: { version: 1 } },
+      codex: {
+        requestUserInput: {
+          questions: [expect.objectContaining({ id: 'next_step', question: 'What next?' })],
+          autoResolveAt: expect.any(Number),
+        },
+      },
+    });
     expect(result).toEqual({ action: 'accept', content: { next_step__other: 'Custom path' } });
   });
 });

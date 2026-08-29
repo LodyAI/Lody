@@ -87,6 +87,7 @@ export const taskTimelineEntrySchema = schema.LoroMap({
   activityData: schema.Any({ required: false }),
 });
 
+/** Root schema for a task doc; see `sessionDocSchema` on adding root fields. */
 export const taskDocSchema = schema({
   meta: taskMetaSchema,
   body: schema.LoroText(),

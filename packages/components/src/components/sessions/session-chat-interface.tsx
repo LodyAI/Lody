@@ -1819,17 +1819,11 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
 export type SessionChatInterfaceHandle = {
-  sendQuickMessage: (prompt: string) => void;
-  setInputText: (text: string) => void;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
-  dispatchInputBlocks: (
-    inputBlocks: SessionInputBlock[],
-    options?: DispatchInputBlocksOptions
-  ) => Promise<boolean>;
   copyConversationHistory: () => Promise<void>;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
@@ -2218,6 +2212,7 @@ export const SessionChatInterface = memo(
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
+    const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
     const skipNextViewportResizeAutoScrollRef = useRef(false);
     const suppressStickyAutoScrollRef = useRef(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -3887,6 +3882,37 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    // Resend a user turn the missing-history recovery negatively acknowledged:
+    // the row's "Not delivered" label opens a confirmation dialog that calls
+    // this with the turn's exact content. It rides the ordinary send path as a
+    // NEW message — the old turn is never revived.
+    const handleResendUndelivered = useCallback(
+      async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+        const accepted = await handleSendMessage(inputBlocks);
+        if (accepted) {
+          // Supersede the abandoned delivery attempt. The ordinary send clears
+          // the missing-history marker, and without a terminal status the stale
+          // pending entry would become dispatchable again (duplicating the just
+          // resent content). 'canceled' is the truthful terminal state and also
+          // hides the row's not-delivered label independent of the marker.
+          try {
+            await updateHistoryEntry(userTurnId, (entry) => ({
+              ...entry,
+              status: 'canceled',
+              read: true,
+            }));
+          } catch (error) {
+            console.warn('Failed to supersede the undelivered user turn', {
+              userTurnId,
+              error,
+            });
+          }
+        }
+        return accepted;
+      },
+      [handleSendMessage, updateHistoryEntry]
+    );
+
     const autoReview = useAutoReview(session?.id, session);
 
     const handleContinueDiscussingProposedPlan = useCallback(() => {
@@ -4572,12 +4598,6 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
-        sendQuickMessage: (prompt: string) => {
-          void dispatchPrompt(prompt);
-        },
-        setInputText: (text: string) => {
-          inputAreaRef.current?.setInputText(text);
-        },
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
@@ -4593,7 +4613,6 @@ export const SessionChatInterface = memo(
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
-        dispatchInputBlocks,
         copyConversationHistory: handleCopyConversationHistory,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
@@ -4601,13 +4620,7 @@ export const SessionChatInterface = memo(
           return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
         },
       }),
-      [
-        dispatchInputBlocks,
-        dispatchPrompt,
-        handleCopyConversationHistory,
-        lastCompletedAssistantMessageId,
-        openSearch,
-      ]
+      [handleCopyConversationHistory, lastCompletedAssistantMessageId, openSearch]
     );
 
     const [prevSessionIdForActionReset, setPrevSessionIdForActionReset] = useState(session.id);
@@ -4908,7 +4921,13 @@ export const SessionChatInterface = memo(
       ]
     );
 
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(session);
+    const queueSteerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
+      capabilityAuthority,
+      queueSteerCapability
+    );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
         if (shouldUseNativeQueueSteer) {
@@ -5499,6 +5518,12 @@ export const SessionChatInterface = memo(
           hideMessageArea={hideMessageArea}
           {...pageDropHandlers}
         >
+          {/* The outline must centre in the whole conversation page, not only
+              the flex area left after the composer takes its height. */}
+          <div
+            ref={setOutlineOverlayRoot}
+            className="pointer-events-none absolute inset-0 @container"
+          />
           {!shouldHideHeader &&
             (headerVariant === 'toolbar' ? (
               /* Compact toolbar for the merged desktop tab row: right-side
@@ -5629,6 +5654,7 @@ export const SessionChatInterface = memo(
                           onEditLastUser={
                             editableLastUserMessageId ? handleEditLastUser : undefined
                           }
+                          onResendUndelivered={handleResendUndelivered}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={
@@ -5637,6 +5663,7 @@ export const SessionChatInterface = memo(
                           conversationFontSize={conversationFontSize}
                           skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                           suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                          outlineOverlayRoot={outlineOverlayRoot}
                         />
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>

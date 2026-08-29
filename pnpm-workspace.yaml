@@ -13,7 +13,7 @@ catalog:
   '@better-auth/electron': 1.5.5
   '@convex-dev/better-auth': 0.11.2
   '@loro-dev/flock-wasm': ^0.4.3
-  '@loro-dev/loro-cli': 0.5.3
+  '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/sqlite-riverrun': 0.2.0
   '@loro-dev/streams-client': 0.7.0
   '@loro-dev/streams-crdt': 0.15.1
@@ -35,10 +35,10 @@ catalog:
   effect: 3.18.4
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
-  loro-crdt: ^1.14.1
-  loro-mirror: 2.2.1
-  loro-mirror-jotai: 2.2.1
-  loro-mirror-react: 2.2.1
+  loro-crdt: ^1.15.1
+  loro-mirror: 2.3.1
+  loro-mirror-jotai: 2.3.1
+  loro-mirror-react: 2.3.1
   loro-protocol: ^0.3.0
   loro-repo: ^0.20.0
   loro-websocket: ^0.6.2

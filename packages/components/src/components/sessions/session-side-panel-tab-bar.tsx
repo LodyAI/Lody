@@ -37,6 +37,55 @@ export type SessionSidePanelOption = Omit<SessionSidePanelTabItem, 'id' | 'kind'
   kind: 'files' | 'changes' | 'pr' | 'browser' | 'session';
 };
 
+const SIDE_SESSION_PANEL_PREFIX = 'side-session:';
+
+export const getSideSessionPanelTabId = (sessionId: string): string =>
+  `${SIDE_SESSION_PANEL_PREFIX}${sessionId}`;
+
+export const parseSideSessionPanelTabId = (tabId: string): string | null =>
+  tabId.startsWith(SIDE_SESSION_PANEL_PREFIX)
+    ? tabId.slice(SIDE_SESSION_PANEL_PREFIX.length)
+    : null;
+
+export const isViewerTabId = (tabId: string): boolean =>
+  tabId.startsWith('file:') || tabId.startsWith('diff:');
+
+export type SidePanelTabSelection = {
+  activeSidebarTabId: string | null;
+  activeSideSessionId: string | null;
+  activeViewerTabId: string | null;
+};
+
+/**
+ * Resolves the complete right-panel selection in one step. Fixed panels, side
+ * chats, and viewers share one surface, so activating one must clear the other
+ * two even when the activation came from content rather than the tab strip.
+ */
+export function getSidePanelTabSelection(tabId: string | null): SidePanelTabSelection {
+  if (tabId !== null && isViewerTabId(tabId)) {
+    return {
+      activeSidebarTabId: null,
+      activeSideSessionId: null,
+      activeViewerTabId: tabId,
+    };
+  }
+
+  const sideSessionId = tabId === null ? null : parseSideSessionPanelTabId(tabId);
+  if (sideSessionId) {
+    return {
+      activeSidebarTabId: null,
+      activeSideSessionId: sideSessionId,
+      activeViewerTabId: null,
+    };
+  }
+
+  return {
+    activeSidebarTabId: tabId,
+    activeSideSessionId: null,
+    activeViewerTabId: null,
+  };
+}
+
 export function getSideChatLauncherState(args: {
   providerSupportsFork: boolean;
   machineOffline: boolean;

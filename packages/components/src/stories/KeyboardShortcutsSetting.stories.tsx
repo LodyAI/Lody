@@ -23,7 +23,7 @@ if (typeof window !== 'undefined') {
         }
         return { ok: false, error: 'invalid' };
       }
-      if (channel === 'app.setGlobalShortcutsSuspended') return;
+      if (channel === 'app.setGlobalShortcutsSuspended') return undefined;
       throw new Error(`unexpected invoke ${channel}`);
     },
     on: () => () => {},

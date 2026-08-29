@@ -4,6 +4,7 @@ import type { CreateElicitationRequest, RequestPermissionRequest } from '@agentc
 import {
   buildAskUserQuestionElicitationResponse,
   createAskUserQuestionPermissionOutcome,
+  extractAskUserQuestionAnswersFromOutcome,
   getAskUserQuestionDisplayTitle,
   getAskUserQuestionPermissionDisplayTitle,
   getAskUserQuestionAnswerKey,
@@ -297,6 +298,68 @@ describe('AskUserQuestion permission metadata', () => {
 
     expect(getAskUserQuestionAnswerKey(questions, 0)).toBe('next_step');
     expect(getAskUserQuestionAnswerKey(questions, 1)).toBe('constraints');
+  });
+
+  it('accepts legacy Claude answers for a Core question request', () => {
+    const coreMeta = parseAskUserQuestionPermissionMeta({
+      lody: {
+        elicitation: {
+          version: 1,
+          questions: [
+            {
+              id: 'question_0',
+              question: 'Which database should we use?',
+              header: 'Database',
+              options: [{ label: 'Postgres' }],
+              multiSelect: false,
+            },
+          ],
+        },
+      },
+    })!;
+
+    expect(
+      extractAskUserQuestionAnswersFromOutcome(coreMeta, {
+        _meta: {
+          claudeCode: {
+            askUserQuestion: {
+              answers: { 'Which database should we use?': 'Postgres' },
+            },
+          },
+        },
+      })
+    ).toEqual({ question_0: 'Postgres' });
+  });
+
+  it('accepts legacy Codex answers for a Core question request', () => {
+    const coreMeta = parseAskUserQuestionPermissionMeta({
+      lody: {
+        elicitation: {
+          version: 1,
+          questions: [
+            {
+              id: 'next_step',
+              question: 'What next?',
+              header: 'Next step',
+              options: [{ label: 'Ship' }],
+              multiSelect: false,
+            },
+          ],
+        },
+      },
+    })!;
+
+    expect(
+      extractAskUserQuestionAnswersFromOutcome(coreMeta, {
+        _meta: {
+          codex: {
+            requestUserInput: {
+              answers: { next_step: { answers: ['Ship'] } },
+            },
+          },
+        },
+      })
+    ).toEqual({ next_step: 'Ship' });
   });
 });
 

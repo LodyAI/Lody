@@ -4,7 +4,14 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalProjectId, MachineId, ProviderSetupTask, WorkspaceId } from '@lody/shared';
+import type {
+  AgentConfigId,
+  AgentConfigMeta,
+  LocalProjectId,
+  MachineId,
+  ProviderSetupTask,
+  WorkspaceId,
+} from '@lody/shared';
 
 const mocks = vi.hoisted(() => ({
   createGitHubInstallState: vi.fn(),
@@ -24,9 +31,13 @@ vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   useRecoverableConvexQuery: () => [],
 }));
 
-vi.mock('../src/hooks/use-authenticated-convex', () => ({
-  useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
-}));
+vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/hooks/use-authenticated-convex')>();
+  return {
+    ...actual,
+    useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
+  };
+});
 
 vi.mock('../src/hooks/use-visible-local-projects', () => ({
   useVisibleLocalProjects: mocks.useVisibleLocalProjects,
@@ -298,5 +309,73 @@ describe('desktop onboarding flow', () => {
       findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onNext).toHaveBeenCalledWith(setup.id);
+  });
+
+  it('keeps provider activity compact in the badge and progress button', async () => {
+    const config: AgentConfigMeta = {
+      id: 'config-progress' as AgentConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    };
+
+    await act(async () => {
+      root?.render(
+        <ProvidersScreenView
+          configs={[config]}
+          testStatuses={{}}
+          testActivities={{ [config.id]: { phase: 'downloading-runtime', percent: 64 } }}
+          noLocalMachine={false}
+          onEdit={vi.fn()}
+          onTest={vi.fn()}
+          onDelete={vi.fn()}
+          onAdd={vi.fn()}
+          onBack={vi.fn()}
+          onSkip={vi.fn()}
+          onNext={vi.fn()}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Downloading');
+    expect(findButton(container, '64%').disabled).toBe(true);
+    expect(container.textContent).not.toContain('Downloading the agent runtime');
+  });
+
+  it('keeps the latest provider failure reason on the failed badge', async () => {
+    const config: AgentConfigMeta = {
+      id: 'config-failed' as AgentConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    };
+
+    await act(async () => {
+      root?.render(
+        <ProvidersScreenView
+          configs={[config]}
+          testStatuses={{ [config.id]: 'failed' }}
+          failureReasons={{ [config.id]: 'The API key was rejected.' }}
+          noLocalMachine={false}
+          onEdit={vi.fn()}
+          onTest={vi.fn()}
+          onDelete={vi.fn()}
+          onAdd={vi.fn()}
+          onBack={vi.fn()}
+          onSkip={vi.fn()}
+          onNext={vi.fn()}
+        />
+      );
+    });
+
+    expect(
+      container.querySelector('[aria-label="Failed: The API key was rejected."]')
+    ).not.toBeNull();
   });
 });

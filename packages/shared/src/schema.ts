@@ -980,6 +980,19 @@ const sessionForkOperationDocSchema = schema.LoroMap(
   { required: false }
 );
 
+/**
+ * Root schema for a session doc.
+ *
+ * Synced docs outlive the builds that write them: a client on a newer schema
+ * can add a root key that older clients do not declare. Adding an optional
+ * root field is therefore safe, but only because every Mirror over a synced
+ * doc is constructed with `ignoreUnknownProperties` — without it loro-mirror
+ * rejects the whole state with `Unknown property: <key>` and the older client
+ * can never write to that doc again. Removing or repurposing an existing root
+ * field is still a breaking change.
+ *
+ * See `packages/shared/tests/session-doc-forward-compat.test.ts`.
+ */
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),

@@ -14,6 +14,7 @@ import type {
   SessionHistory,
   SessionHistoryParsed,
   SessionId,
+  SessionInputBlock,
   WorkspaceId,
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
@@ -93,6 +94,9 @@ export interface SessionChatStreamProps {
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  /** Resends an undelivered (missing-history-acked) user turn's content as a
+   * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
+  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   forkingAssistantMessageId?: string | null;
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
@@ -100,6 +104,8 @@ export interface SessionChatStreamProps {
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
+  /** Full-page overlay that keeps the conversation outline independent of composer height. */
+  outlineOverlayRoot?: HTMLElement | null;
   suppressStickyAutoScrollRef?: React.RefObject<boolean>;
 }
 
@@ -109,6 +115,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   workspaceId,
   onNavigateSession,
   onEditLastUser,
+  onResendUndelivered,
   conversationFontSize,
 }: {
   message: SessionHistoryParsed;
@@ -116,6 +123,9 @@ const MessageRowConnected = memo(function MessageRowConnected({
   workspaceId?: WorkspaceId | null;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  /** Resends an undelivered (missing-history-acked) user turn's content as a
+   * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
+  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   conversationFontSize: ConversationFontSize;
 }) {
   const userInfo = useCloudQuery(
@@ -130,6 +140,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       user={userInfo}
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
+      onResendUndelivered={onResendUndelivered}
       conversationFontSize={conversationFontSize}
     />
   );
@@ -162,10 +173,12 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       forkingAssistantMessageId,
       onNavigateSession,
       onEditLastUser,
+      onResendUndelivered,
       onLastCompletedAssistantMessageIdChange,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
+      outlineOverlayRoot,
     },
     ref
   ) => {
@@ -226,6 +239,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             workspaceId={workspaceId}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
+            onResendUndelivered={onResendUndelivered}
             conversationFontSize={conversationFontSize}
           />
         );
@@ -235,6 +249,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         hasNavigateSession,
         lastUserMessageId,
         onEditLastUser,
+        onResendUndelivered,
         stableOnNavigateSession,
         workspaceId,
       ]
@@ -268,6 +283,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         conversationFontSize={conversationFontSize}
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+        outlineOverlayRoot={outlineOverlayRoot}
       />
     );
   }

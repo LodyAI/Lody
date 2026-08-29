@@ -1863,6 +1863,16 @@ export const LocalProjectDeleteRequestSchema = z
   })
   .strict();
 
+export const LocalProjectRemovalPreflightRequestSchema = z
+  .object({
+    type: z.literal('local-project/removal-preflight'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    localProjectId: LocalProjectIdSchema,
+    requestedByUserId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const LocalProjectListRequestSchema = z
   .object({
     type: z.literal('local-project/list'),
@@ -2056,6 +2066,7 @@ export const LocalProjectControlRequestSchema = z.discriminatedUnion('type', [
   LocalProjectListRootsRequestSchema,
   LocalProjectBrowseDirRequestSchema,
   LocalProjectDeleteRequestSchema,
+  LocalProjectRemovalPreflightRequestSchema,
   LocalProjectListRequestSchema,
   LocalProjectGitStateRequestSchema,
   LocalProjectListFilesRequestSchema,
@@ -2268,6 +2279,26 @@ const LocalProjectHistoryConflictResolveResultSchema = z
   })
   .strict();
 
+const LocalProjectWorktreeCleanupItemSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    title: z.string(),
+    path: z.string(),
+  })
+  .strict();
+
+const LocalProjectWorktreeCleanupFailureSchema = LocalProjectWorktreeCleanupItemSchema.extend({
+  message: z.string(),
+}).strict();
+
+const LocalProjectWorktreeCleanupPreflightResultSchema = z
+  .object({
+    clean: z.array(LocalProjectWorktreeCleanupItemSchema),
+    dirty: z.array(LocalProjectWorktreeCleanupItemSchema),
+    failed: z.array(LocalProjectWorktreeCleanupFailureSchema),
+  })
+  .strict();
+
 const LocalProjectControlErrorCodeSchema = z.enum([
   'invalid_request',
   'machine_mismatch',
@@ -2290,6 +2321,7 @@ const LocalProjectControlErrorResponseSchema = z
       'local-project/list-roots',
       'local-project/browse-dir',
       'local-project/delete',
+      'local-project/removal-preflight',
       'local-project/list',
       'local-project/git-state',
       'local-project/list-files',
@@ -2369,6 +2401,13 @@ export const LocalProjectControlResponseSchema = z.union([
           workspaceIds: z.array(WorkspaceIdSchema),
         })
         .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      type: z.literal('local-project/removal-preflight'),
+      result: LocalProjectWorktreeCleanupPreflightResultSchema,
     })
     .strict(),
   z

@@ -1439,6 +1439,7 @@ export class LoroDocumentManager {
     sessionFork: boolean,
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
+    acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
   ): Promise<void> {
     options.signal?.throwIfAborted();
@@ -1458,6 +1459,7 @@ export class LoroDocumentManager {
       sessionFork,
       sourceVersion,
       modelReasoningEfforts,
+      acknowledgedSteer,
       options
     );
   }
@@ -1693,6 +1695,8 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.mirror = new Mirror({
       doc: handle.doc,
       schema: sessionDocSchema,
+      // Tolerate root keys written by peers running a newer schema version.
+      ignoreUnknownProperties: true,
       // Type assertion needed because InferInputType makes plan required even though
       // schema defines it as required: false. At runtime, plan is optional on history entries.
       initialState: merged as unknown as ConstructorParameters<typeof Mirror>[0]['initialState'],
@@ -2909,6 +2913,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     configOptions: entry.configOptions,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
+    acknowledgedSteer: entry.acknowledgedSteer,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
 
@@ -2993,6 +2998,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sessionFork: boolean,
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
+    acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
   ): Promise<void> {
     options.signal?.throwIfAborted();
@@ -3017,6 +3023,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       configOptions: configOptions?.length ? configOptions : undefined,
       availableCommands: availableCommands?.length ? availableCommands : undefined,
       sessionFork,
+      acknowledgedSteer,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0

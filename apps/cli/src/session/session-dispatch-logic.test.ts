@@ -166,28 +166,78 @@ describe('findNextDispatchableUserTurn steer intent', () => {
 });
 
 describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {
+  const baseMeta = {
+    id: 'session-1',
+    machineId: 'machine-1',
+    createdAt: '2026-08-03T00:00:00.000Z',
+    userId: 'user-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    status: SessionStatusFactory.idle(),
+  } as SessionMeta;
+
+  const lateTurn = {
+    id: 'turn-missing',
+    timestamp: '2026-08-03T00:00:01.000Z',
+    role: 'user' as const,
+    items: [{ type: 'text' as const, text: 'late payload' }],
+    fileDiff: [],
+    status: 'pending' as const,
+  };
+
   it('does not resurrect a turn whose payload arrived after recovery timed out', () => {
-    const turn = {
-      id: 'turn-missing',
-      timestamp: '2026-08-03T00:00:01.000Z',
-      role: 'user' as const,
-      items: [{ type: 'text' as const, text: 'late payload' }],
-      fileDiff: [],
-      status: 'pending' as const,
-    };
     const meta = {
-      id: 'session-1',
-      machineId: 'machine-1',
-      createdAt: '2026-08-03T00:00:00.000Z',
-      userId: 'user-1',
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: SessionStatusFactory.idle(),
-      latestUserMsgId: turn.id,
-      lastMissingHistoryUserMsgId: turn.id,
+      ...baseMeta,
+      latestUserMsgId: lateTurn.id,
+      lastMissingHistoryUserMsgId: lateTurn.id,
     } as SessionMeta;
 
-    expect(findNextDispatchableUserTurn([turn], meta)).toBeNull();
+    expect(findNextDispatchableUserTurn([lateTurn], meta)).toBeNull();
+  });
+
+  it('keeps the marker-matched turn excluded while a different turn dispatches normally', () => {
+    const newerTurn = {
+      ...lateTurn,
+      id: 'turn-new',
+      timestamp: '2026-08-03T00:02:00.000Z',
+    };
+    const meta = {
+      ...baseMeta,
+      latestUserMsgId: newerTurn.id,
+      lastMissingHistoryUserMsgId: lateTurn.id,
+    } as SessionMeta;
+
+    // The negative acknowledgement names turn-missing exactly: it stays
+    // excluded, and the unrelated newer turn is unaffected.
+    expect(findNextDispatchableUserTurn([lateTurn, newerTurn], meta)).toEqual(newerTurn);
+    expect(getPendingUserTurnActivationId(meta)).toBe(newerTurn.id);
+  });
+
+  it('dispatches the exact turn once an explicit redelivery re-aims the pointer and clears the marker', () => {
+    // The deliver-now producer write: latestUserMsgId re-aimed at the old
+    // entry, marker cleared, and lastHandledUserMsgId already advanced past a
+    // different turn the user resent in between.
+    const redeliveredMeta = {
+      ...baseMeta,
+      latestUserMsgId: lateTurn.id,
+      lastHandledUserMsgId: 'turn-resent',
+    } as SessionMeta;
+
+    expect(findNextDispatchableUserTurn([lateTurn], redeliveredMeta)).toEqual(lateTurn);
+    expect(getPendingUserTurnActivationId(redeliveredMeta)).toBe(lateTurn.id);
+  });
+
+  it('does not dispatch the redelivered turn a second time once it is handled', () => {
+    const handledMeta = {
+      ...baseMeta,
+      latestUserMsgId: lateTurn.id,
+      lastHandledUserMsgId: lateTurn.id,
+    } as SessionMeta;
+
+    expect(
+      findNextDispatchableUserTurn([{ ...lateTurn, status: 'handled' as const }], handledMeta)
+    ).toBeNull();
+    expect(getPendingUserTurnActivationId(handledMeta)).toBeUndefined();
   });
 });
 
