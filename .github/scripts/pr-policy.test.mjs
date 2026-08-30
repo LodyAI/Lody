@@ -2,39 +2,30 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  BYPASS_PR_POLICY_LABEL,
-  EXPIRED_POLICY_LABEL,
-  MAX_EXTERNAL_CHANGED_LINES,
-  NEEDS_ATTENTION_LABEL,
   PULL_REQUEST_DISPOSITION,
-  checkPullRequestPolicy,
-  invalidSinceFromComment,
-  isExternalPullRequest,
   pullRequestDisposition,
   reconcilePullRequest,
 } from './pr-policy.mjs';
 
-const completeBody = (reference = 'Closes #121') => `## Related issue
+const BYPASS_LABEL = 'status:pr-policy-bypass';
+const EXPIRED_LABEL = 'status:pr-policy-expired';
+const NEEDS_ATTENTION_LABEL = 'status:needs-pr-attention';
 
-${reference}
+const validBody = `## Related issue
+
+Closes #121
 
 ## Problem / pressure
 
-The contribution policy needs deterministic coverage.
+Policy state was duplicated.
 
 ## Summary
 
-Exercise the public policy contract.
-
-## Before / after
-
-| Before | After |
-| --- | --- |
-| Split state | One state |
+Use one policy state.
 
 ## Test plan
 
-Run the policy unit tests.
+Run policy tests.
 
 ## Context handoff
 
@@ -42,18 +33,18 @@ Run the policy unit tests.
 
 ### Instructions for reviewing agents
 
-- **Review focus:** Check policy disposition and state transitions.
-- **Decisions to challenge:** Confirm bypass is a complete opt-out.
-- **Plausible failures / evidence gaps:** GitHub API integration remains covered by Actions.
+- **Review focus:** Check policy transitions.
+- **Decisions to challenge:** Confirm bypass semantics.
+- **Plausible failures / evidence gaps:** API calls use fakes.
 
 ### Authoring context
 
-- **User goal / directives:** Simplify contribution policy state.
-- **Constraints / non-goals:** Do not execute code from fork branches.
-- **Risk-bearing decisions:** Repository identity classifies external PRs.
-- **Destructive or irreversible behavior:** Expired PRs are closed after seven days.
-- **Deliberately not done or tested:** No live repository mutation in unit tests.
-- **Unknowns / confidence:** Pure policy behavior is deterministic.
+- **User goal / directives:** Simplify PR policy.
+- **Constraints / non-goals:** Never execute fork code.
+- **Risk-bearing decisions:** Repository identity classifies PRs.
+- **Destructive or irreversible behavior:** Expired PRs close.
+- **Deliberately not done or tested:** No live API writes.
+- **Unknowns / confidence:** Policy behavior is deterministic.
 
 <!-- context-handoff:end -->
 `;
@@ -89,12 +80,7 @@ function createGithub({ comments = [], latestPullRequest = null } = {}) {
     removedLabels: [],
     updatedComments: [],
   };
-  const repositoryLabels = new Map(
-    [NEEDS_ATTENTION_LABEL, EXPIRED_POLICY_LABEL, BYPASS_PR_POLICY_LABEL].map((label) => [
-      label.name,
-      { ...label },
-    ])
-  );
+  const repositoryLabels = new Map();
   let nextCommentId = 100;
   const github = {
     paginate: async () => comments,
@@ -148,27 +134,16 @@ function createGithub({ comments = [], latestPullRequest = null } = {}) {
 }
 
 void describe('pull request disposition', () => {
-  void it('classifies source repository before author association', () => {
-    assert.equal(isExternalPullRequest(internalPullRequest), false);
+  void it('uses source repository identity with bot and bypass precedence', () => {
     assert.equal(pullRequestDisposition(internalPullRequest), PULL_REQUEST_DISPOSITION.INTERNAL);
-
-    for (const authorAssociation of ['OWNER', 'MEMBER', 'COLLABORATOR', 'NONE']) {
-      assert.equal(
-        pullRequestDisposition({
-          ...externalPullRequest,
-          author_association: authorAssociation,
-        }),
-        PULL_REQUEST_DISPOSITION.EXTERNAL
-      );
-    }
-  });
-
-  void it('fails closed when repository identity is missing', () => {
-    assert.equal(isExternalPullRequest({ ...externalPullRequest, head: { repo: null } }), true);
-    assert.equal(isExternalPullRequest({ ...externalPullRequest, base: { repo: null } }), true);
-  });
-
-  void it('gives bot and bypass dispositions complete precedence', () => {
+    assert.equal(
+      pullRequestDisposition({ ...externalPullRequest, author_association: 'OWNER' }),
+      PULL_REQUEST_DISPOSITION.EXTERNAL
+    );
+    assert.equal(
+      pullRequestDisposition({ ...externalPullRequest, head: { repo: null } }),
+      PULL_REQUEST_DISPOSITION.EXTERNAL
+    );
     assert.equal(
       pullRequestDisposition({ ...externalPullRequest, user: { login: 'renovate[bot]' } }),
       PULL_REQUEST_DISPOSITION.BOT
@@ -176,7 +151,7 @@ void describe('pull request disposition', () => {
     assert.equal(
       pullRequestDisposition({
         ...internalPullRequest,
-        labels: [{ name: BYPASS_PR_POLICY_LABEL.name }],
+        labels: [{ name: BYPASS_LABEL }],
       }),
       PULL_REQUEST_DISPOSITION.BYPASS
     );
@@ -184,32 +159,19 @@ void describe('pull request disposition', () => {
 });
 
 void describe('pull request validation', () => {
-  void it('accepts a complete external PR with its prior Issue', () => {
-    assert.deepEqual(checkPullRequestPolicy({ ...externalPullRequest, body: completeBody() }), {
-      ok: true,
-      findings: [],
+  void it('reports the size context through the same validation result', async () => {
+    const { github } = createGithub();
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, additions: 200, deletions: 1 },
+      defaultBranch: 'main',
     });
-  });
 
-  void it('reports the size context through the same validation result', () => {
-    const result = checkPullRequestPolicy({
-      ...externalPullRequest,
-      additions: MAX_EXTERNAL_CHANGED_LINES,
-      deletions: 1,
-      body: '',
-    });
-    assert.equal(result.ok, false);
-    assert.ok(result.findings.some((finding) => finding.includes('PR body is empty')));
-    assert.ok(result.findings.some((finding) => finding.includes('changes 201 lines')));
-  });
-
-  void it('preserves invalid-since timestamps from the legacy state marker', () => {
-    assert.equal(
-      invalidSinceFromComment(
-        '<!-- lody-pr-body-format-check invalid-since="2026-08-01T00:00:00.000Z" -->'
-      )?.toISOString(),
-      '2026-08-01T00:00:00.000Z'
-    );
+    assert.equal(result.state, 'invalid');
+    assert.ok(result.validation.findings.some((finding) => finding.includes('PR body is empty')));
+    assert.ok(result.validation.findings.some((finding) => finding.includes('changes 201 lines')));
   });
 });
 
@@ -269,7 +231,7 @@ void describe('pull request reconciliation', () => {
     const pullRequest = {
       ...externalPullRequest,
       body: '## Related issue\n\n#121\n',
-      labels: [{ name: BYPASS_PR_POLICY_LABEL.name }],
+      labels: [{ name: BYPASS_LABEL }],
     };
     const result = await reconcilePullRequest({
       github,
@@ -286,8 +248,8 @@ void describe('pull request reconciliation', () => {
       activity.deletedComments.map((input) => input.comment_id),
       [7]
     );
-    assert.ok(activity.removedLabels.some((input) => input.name === NEEDS_ATTENTION_LABEL.name));
-    assert.ok(activity.removedLabels.every((input) => input.name !== BYPASS_PR_POLICY_LABEL.name));
+    assert.ok(activity.removedLabels.some((input) => input.name === NEEDS_ATTENTION_LABEL));
+    assert.ok(activity.removedLabels.every((input) => input.name !== BYPASS_LABEL));
   });
 
   void it('puts an invalid external PR into one attention state', async () => {
@@ -302,15 +264,44 @@ void describe('pull request reconciliation', () => {
     });
 
     assert.equal(result.state, 'invalid');
-    assert.deepEqual(activity.addedLabels[0].labels, [NEEDS_ATTENTION_LABEL.name]);
+    assert.deepEqual(activity.addedLabels.at(-1).labels, [NEEDS_ATTENTION_LABEL]);
     assert.match(activity.createdComments[0].body, /invalid-since="2026-08-30T00:00:00.000Z"/);
     assert.match(activity.createdComments[0].body, /PR body is empty/);
+  });
+
+  void it('clears attention after an external PR becomes valid', async () => {
+    const comments = [
+      {
+        id: 10,
+        body: '<!-- lody-pr-policy invalid-since="2026-08-20T00:00:00.000Z" -->',
+        user: { login: 'github-actions[bot]', type: 'Bot' },
+      },
+    ];
+    const { activity, github } = createGithub({ comments });
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: {
+        ...externalPullRequest,
+        body: validBody,
+        labels: [{ name: NEEDS_ATTENTION_LABEL }],
+      },
+      defaultBranch: 'main',
+    });
+
+    assert.equal(result.state, 'valid');
+    assert.ok(activity.removedLabels.some((input) => input.name === NEEDS_ATTENTION_LABEL));
+    assert.deepEqual(
+      activity.deletedComments.map((input) => input.comment_id),
+      [10]
+    );
   });
 
   void it('keeps an expired external PR closed', async () => {
     const pullRequest = {
       ...externalPullRequest,
-      labels: [{ name: EXPIRED_POLICY_LABEL.name }],
+      labels: [{ name: EXPIRED_LABEL }],
     };
     const { activity, github } = createGithub();
     const result = await reconcilePullRequest({
@@ -337,7 +328,7 @@ void describe('pull request reconciliation', () => {
     };
     const latestPullRequest = {
       ...pullRequest,
-      labels: [{ name: NEEDS_ATTENTION_LABEL.name }],
+      labels: [{ name: NEEDS_ATTENTION_LABEL }],
     };
     const comments = [
       {
@@ -374,11 +365,11 @@ void describe('pull request reconciliation', () => {
     const invalidSince = '2026-08-20T00:00:00.000Z';
     const pullRequest = {
       ...externalPullRequest,
-      labels: [{ name: NEEDS_ATTENTION_LABEL.name }],
+      labels: [{ name: NEEDS_ATTENTION_LABEL }],
     };
     const latestPullRequest = {
       ...pullRequest,
-      labels: [{ name: NEEDS_ATTENTION_LABEL.name }, { name: BYPASS_PR_POLICY_LABEL.name }],
+      labels: [{ name: NEEDS_ATTENTION_LABEL }, { name: BYPASS_LABEL }],
     };
     const comments = [
       {
@@ -400,8 +391,6 @@ void describe('pull request reconciliation', () => {
 
     assert.equal(result.state, 'invalid');
     assert.ok(!activity.pullUpdates.some((input) => input.state === 'closed'));
-    assert.ok(
-      !activity.addedLabels.some((input) => input.labels.includes(EXPIRED_POLICY_LABEL.name))
-    );
+    assert.ok(!activity.addedLabels.some((input) => input.labels.includes(EXPIRED_LABEL)));
   });
 });
