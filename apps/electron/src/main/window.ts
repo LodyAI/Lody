@@ -21,6 +21,7 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -349,6 +350,12 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      // Chromium's packaged locale resources are intentionally English-only.
+      // Carry Electron's OS-level preference into preload so first-run product
+      // language detection does not mistake the available .pak for user intent.
+      additionalArguments: [
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+      ],
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true
