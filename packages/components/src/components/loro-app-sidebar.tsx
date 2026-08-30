@@ -1790,6 +1790,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionId: string, tabSessionId?: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      if (selectedSessionId === sessionId && tabSessionId === undefined) return;
       void router.navigate({
         to: '/$workspaceName/sessions/$sessionId',
         params: { workspaceName: workspaceSlug, sessionId: sessionId as SessionId },
@@ -1802,7 +1803,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           : {}),
       });
     },
-    [closeMobileDrawer, router, workspaceSlug]
+    [closeMobileDrawer, router, selectedSessionId, workspaceSlug]
   );
 
   const handleNavigateToNewSession = useCallback(
