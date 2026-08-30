@@ -1395,6 +1395,8 @@ export function ProjectHistoryImportPanel({
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = getHistoryProviderLabel(state.provider);
   const catalogSessions = state.catalog?.sessions ?? [];
+  const hasSyncedCatalog = state.catalog !== null;
+  const hasCatalogSessions = catalogSessions.length > 0;
   const selectedSet = new Set(state.selectedSessionIds);
   const [conflictSessionToResolve, setConflictSessionToResolve] =
     useState<LocalProjectHistoryCatalogItem | null>(null);
@@ -1461,61 +1463,63 @@ export function ProjectHistoryImportPanel({
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col bg-tab-active text-xs">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-tab-border px-3 py-2">
-          <span className="truncate text-muted-foreground">{statusLabel}</span>
-          <div className="flex shrink-0 items-center gap-2">
-            {state.canSync && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className={historyActionButtonClass}
-                    disabled={state.isSyncing || state.isImporting}
-                    onClick={() => {
-                      void onSyncHistory?.(row, state.provider);
-                    }}
-                  >
-                    {state.isSyncing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                    <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="left">
-                  {t('workspace.projects.syncHistoryTooltip', {
-                    defaultValue: 'Sync {{provider}} history',
-                    provider: providerLabel,
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={historyActionButtonClass}
-              disabled={
-                state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
-              }
-              onClick={() => {
-                void onImportHistory?.(row, state.provider);
-              }}
-            >
-              {state.isImporting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
+        {hasCatalogSessions ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-tab-border px-3 py-2">
+            <span className="truncate text-muted-foreground">{statusLabel}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              {state.canSync && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={historyActionButtonClass}
+                      disabled={state.isSyncing || state.isImporting}
+                      onClick={() => {
+                        void onSyncHistory?.(row, state.provider);
+                      }}
+                    >
+                      {state.isSyncing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    {t('workspace.projects.syncHistoryTooltip', {
+                      defaultValue: 'Sync {{provider}} history',
+                      provider: providerLabel,
+                    })}
+                  </TooltipContent>
+                </Tooltip>
               )}
-              {t('workspace.projects.importSelectedHistory', {
-                defaultValue: 'Import',
-              })}
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={historyActionButtonClass}
+                disabled={
+                  state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
+                }
+                onClick={() => {
+                  void onImportHistory?.(row, state.provider);
+                }}
+              >
+                {state.isImporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                {t('workspace.projects.importSelectedHistory', {
+                  defaultValue: 'Import',
+                })}
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
         {state.errorMessage !== null && state.errorMessage.length > 0 ? (
           <div className="scrollbar-pro flex max-h-28 shrink-0 items-start gap-2 overflow-y-auto border-b border-tab-border bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
             <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
@@ -1544,7 +1548,7 @@ export function ProjectHistoryImportPanel({
             ) : null}
           </div>
         )}
-        {catalogSessions.length > 0 && (
+        {hasCatalogSessions && (
           <div className="shrink-0 border-b border-tab-border px-3 py-2">
             <div
               role="button"
@@ -1579,12 +1583,59 @@ export function ProjectHistoryImportPanel({
             </div>
           </div>
         )}
-        {catalogSessions.length === 0 ? (
-          <div className="px-3 py-4 text-muted-foreground">
-            {t('workspace.projects.historyEmpty', {
-              defaultValue: 'No {{provider}} conversations found',
-              provider: providerLabel,
-            })}
+        {!hasCatalogSessions ? (
+          <div className="flex min-h-44 flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-foreground/[0.06]">
+              <MessagesSquare className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="mt-3 max-w-sm">
+              <p className="font-medium text-foreground">
+                {hasSyncedCatalog
+                  ? t('workspace.projects.historyEmpty', {
+                      defaultValue: 'No {{provider}} conversations found',
+                      provider: providerLabel,
+                    })
+                  : t('workspace.projects.historyInitialSyncTitle', {
+                      defaultValue: 'Sync {{provider}} conversations',
+                      provider: providerLabel,
+                    })}
+              </p>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                {hasSyncedCatalog
+                  ? t('workspace.projects.historyEmptyHint', {
+                      defaultValue:
+                        'Start a conversation for this project in {{provider}}, then sync again.',
+                      provider: providerLabel,
+                    })
+                  : t('workspace.projects.historyInitialSyncHint', {
+                      defaultValue:
+                        "Find this project's conversations in {{provider}}, then choose which ones to import.",
+                      provider: providerLabel,
+                    })}
+              </p>
+            </div>
+            {state.canSync ? (
+              <Button
+                type="button"
+                size="sm"
+                className="mt-4"
+                disabled={state.isSyncing || state.isImporting || !onSyncHistory}
+                onClick={() => {
+                  void onSyncHistory?.(row, state.provider);
+                }}
+              >
+                {state.isSyncing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {hasSyncedCatalog
+                    ? t('workspace.projects.syncHistoryAgain', 'Sync again')
+                    : t('workspace.projects.syncHistory', 'Sync')}
+                </span>
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div className="scrollbar-pro min-h-0 flex-1 divide-y divide-tab-border overflow-y-auto overscroll-contain">

@@ -13,6 +13,7 @@ import {
   type ProjectSettingsRow,
   type GithubProjectSettingsSection,
 } from '@/components/settings/project-settings';
+import { SettingsStoryProviders } from './settings-story-shell';
 
 const machineLocal = 'machine-local' as MachineId;
 const machineRemote = 'machine-remote' as MachineId;
@@ -409,6 +410,13 @@ const meta = {
   parameters: {
     layout: 'padded',
   },
+  decorators: [
+    (Story) => (
+      <SettingsStoryProviders capabilities={['teamSharing']}>
+        <Story />
+      </SettingsStoryProviders>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta<typeof StoryWrapper>;
 
@@ -420,6 +428,39 @@ export const Default: Story = {};
 export const SingleMachine: Story = {
   args: {
     sections: [baseSections[0]!],
+  },
+};
+
+export const InitialHistorySync: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [baseSections[0]!.rows[0]!],
+      },
+    ],
+    githubSections: [],
+  },
+};
+
+export const SyncedEmptyHistory: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [
+          updateHistoryImportState(baseSections[0]!.rows[0]!, storyProviders[0]!, (state) => ({
+            ...state,
+            catalog: {
+              listed: 0,
+              lastListedAt: 0,
+              sessions: [],
+            },
+          })),
+        ],
+      },
+    ],
+    githubSections: [],
   },
 };
 
