@@ -448,6 +448,7 @@ export type GetNotificationPermissionStatusResult = {
 export type ElectronAutoLaunchStatusResult = {
   supported: boolean;
   enabled: boolean;
+  startInBackground: boolean;
   openAtLogin?: boolean;
   openAsHidden?: boolean;
   error?: string;
@@ -457,6 +458,7 @@ export type SetElectronAutoLaunchResult = {
   ok: boolean;
   supported: boolean;
   enabled: boolean;
+  startInBackground: boolean;
   error?: string;
 };
 

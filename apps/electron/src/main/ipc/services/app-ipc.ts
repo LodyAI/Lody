@@ -22,6 +22,11 @@ import {
 } from '../../renderer-recovery'
 import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
+import {
+  applyAutoLaunchSettings,
+  getStartInBackgroundEnabled,
+  setStartInBackgroundEnabled
+} from '../../auto-launch-settings'
 
 const autoLaunchSupported = process.platform === 'darwin' || process.platform === 'win32'
 
@@ -29,7 +34,8 @@ function getAutoLaunchStatus() {
   if (!autoLaunchSupported) {
     return {
       supported: false,
-      enabled: false
+      enabled: false,
+      startInBackground: false
     }
   }
   try {
@@ -38,12 +44,14 @@ function getAutoLaunchStatus() {
       supported: true,
       enabled: Boolean(settings.openAtLogin),
       openAtLogin: Boolean(settings.openAtLogin),
-      openAsHidden: Boolean(settings.openAsHidden)
+      openAsHidden: Boolean(settings.openAsHidden),
+      startInBackground: getStartInBackgroundEnabled()
     }
   } catch (error) {
     return {
       supported: true,
       enabled: false,
+      startInBackground: getStartInBackgroundEnabled(),
       error: error instanceof Error ? error.message : String(error)
     }
   }
@@ -126,6 +134,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        startInBackground: status.startInBackground,
         error: 'invalid_enabled_flag'
       }
     }
@@ -134,19 +143,18 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
+        startInBackground: false,
         error: 'unsupported_platform'
       }
     }
     try {
-      app.setLoginItemSettings({
-        openAtLogin: enabledRaw,
-        openAsHidden: enabledRaw
-      })
+      applyAutoLaunchSettings(enabledRaw, getStartInBackgroundEnabled())
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
-        enabled: status.enabled
+        enabled: status.enabled,
+        startInBackground: status.startInBackground
       }
     } catch (error) {
       const status = getAutoLaunchStatus()
@@ -154,6 +162,59 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        startInBackground: status.startInBackground,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async setAutoLaunchStartInBackground(enabledRaw: boolean) {
+    if (typeof enabledRaw !== 'boolean') {
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        startInBackground: status.startInBackground,
+        error: 'invalid_enabled_flag'
+      }
+    }
+    if (!autoLaunchSupported) {
+      return {
+        ok: false,
+        supported: false,
+        enabled: false,
+        startInBackground: false,
+        error: 'unsupported_platform'
+      }
+    }
+
+    const previous = getStartInBackgroundEnabled()
+    try {
+      const openAtLogin = Boolean(app.getLoginItemSettings().openAtLogin)
+      setStartInBackgroundEnabled(enabledRaw)
+      applyAutoLaunchSettings(openAtLogin, enabledRaw)
+      const status = getAutoLaunchStatus()
+      return {
+        ok: true,
+        supported: status.supported,
+        enabled: status.enabled,
+        startInBackground: status.startInBackground
+      }
+    } catch (error) {
+      try {
+        setStartInBackgroundEnabled(previous)
+        applyAutoLaunchSettings(Boolean(app.getLoginItemSettings().openAtLogin), previous)
+      } catch {
+        // Preserve the original failure for the renderer.
+      }
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        startInBackground: status.startInBackground,
         error: error instanceof Error ? error.message : String(error)
       }
     }

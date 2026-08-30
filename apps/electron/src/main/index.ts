@@ -33,6 +33,9 @@ import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
+import { extractDeepLinkFromArgv } from './deep-link-url'
+import { shouldStartMainWindowInBackground } from './auto-launch-policy'
+import { getAutoLaunchInvocationStatus, getStartInBackgroundEnabled } from './auto-launch-settings'
 
 // On Linux, Electron/Chromium auto-detects the keyring backend for GNOME and KDE
 // desktops, but falls back to basic-text (unencrypted) on other desktops like
@@ -229,8 +232,20 @@ if (hasSingleInstanceLock) {
       openOrFocusMainWindow: () => openOrFocusMainWindow({ icon })
     })
     const initialPath = getInitialDesktopPath()
-    openMainWindow({ icon, initialPath })
-    console.info('[Electron] Initial desktop surface selected', { initialPath })
+    const loginItemSettings = getAutoLaunchInvocationStatus()
+    const startInBackground = shouldStartMainWindowInBackground({
+      preferenceEnabled: getStartInBackgroundEnabled(),
+      wasOpenedAtLogin: loginItemSettings.wasOpenedAtLogin,
+      wasOpenedAsHidden: loginItemSettings.wasOpenedAsHidden,
+      argv: process.argv,
+      initialPath,
+      hasInitialDeepLink: Boolean(extractDeepLinkFromArgv(process.argv))
+    })
+    openMainWindow({ icon, initialPath, startInBackground })
+    console.info('[Electron] Initial desktop surface selected', {
+      initialPath,
+      startInBackground
+    })
     setWindowsTrayAvailable(windowsTrayService.start())
     cliService.autoStart(getMainWindow()?.webContents ?? undefined)
     appUpdaterService.start()

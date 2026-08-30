@@ -142,10 +142,15 @@ export function GeneralSettingsComponent() {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
   const [autoLaunchSupported, setAutoLaunchSupported] = useState(false);
   const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
+  const [startInBackground, setStartInBackground] = useState(false);
+  const [startInBackgroundLoading, setStartInBackgroundLoading] = useState(false);
   const isSwitchDisabled = isElectron
     ? !notificationSupported || isProcessing
     : !notificationSupported || !oneSignalReady || isProcessing;
-  const autoLaunchSwitchDisabled = !autoLaunchSupported || autoLaunchLoading;
+  const autoLaunchSwitchDisabled =
+    !autoLaunchSupported || autoLaunchLoading || startInBackgroundLoading;
+  const startInBackgroundSwitchDisabled =
+    !autoLaunchEnabled || autoLaunchLoading || startInBackgroundLoading;
 
   const readElectronNotificationPermission =
     useCallback(async (): Promise<ElectronNotificationPermissionStatusResult> => {
@@ -384,6 +389,7 @@ export function GeneralSettingsComponent() {
     if (!isElectron || typeof window === 'undefined' || !getAutoLaunchStatus) {
       setAutoLaunchSupported(false);
       setAutoLaunchEnabled(false);
+      setStartInBackground(false);
       return undefined;
     }
 
@@ -394,10 +400,12 @@ export function GeneralSettingsComponent() {
         if (!active) return;
         setAutoLaunchSupported(result.supported);
         setAutoLaunchEnabled(result.enabled);
+        setStartInBackground(result.startInBackground);
       } catch {
         if (!active) return;
         setAutoLaunchSupported(false);
         setAutoLaunchEnabled(false);
+        setStartInBackground(false);
       }
     };
 
@@ -633,12 +641,49 @@ export function GeneralSettingsComponent() {
         toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
       } else {
         setAutoLaunchEnabled(result.enabled);
+        setStartInBackground(result.startInBackground);
       }
     } catch {
       setAutoLaunchEnabled(previous);
       toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
     } finally {
       setAutoLaunchLoading(false);
+    }
+  };
+
+  const handleToggleStartInBackground = async (checked: boolean) => {
+    if (!isElectron || !getIpcServices()) {
+      return;
+    }
+
+    const previous = startInBackground;
+    setStartInBackground(checked);
+    setStartInBackgroundLoading(true);
+    try {
+      const result: SetElectronAutoLaunchResult =
+        await getIpcServices()!.app.setAutoLaunchStartInBackground(checked);
+      if (!result.ok) {
+        setStartInBackground(previous);
+        toast.error(
+          t(
+            'settings.general.autoLaunch.startInBackgroundToggleFailed',
+            'Failed to update background startup'
+          )
+        );
+      } else {
+        setAutoLaunchEnabled(result.enabled);
+        setStartInBackground(result.startInBackground);
+      }
+    } catch {
+      setStartInBackground(previous);
+      toast.error(
+        t(
+          'settings.general.autoLaunch.startInBackgroundToggleFailed',
+          'Failed to update background startup'
+        )
+      );
+    } finally {
+      setStartInBackgroundLoading(false);
     }
   };
 
@@ -789,6 +834,26 @@ export function GeneralSettingsComponent() {
                   disabled={autoLaunchSwitchDisabled}
                   onCheckedChange={(checked) => {
                     void handleToggleAutoLaunch(checked);
+                  }}
+                />
+              )}
+            </CompactRow>
+            <CompactRow
+              label={t('settings.general.autoLaunch.startInBackgroundLabel', 'Start in background')}
+              helper={t(
+                'settings.general.autoLaunch.startInBackgroundHelper',
+                'Keep the main window hidden when Lody starts automatically after sign-in'
+              )}
+            >
+              {startInBackgroundLoading ? (
+                <Loading size="sm" className="h-5 w-9" />
+              ) : (
+                <Switch
+                  id="auto-launch-background-toggle"
+                  checked={startInBackground}
+                  disabled={startInBackgroundSwitchDisabled}
+                  onCheckedChange={(checked) => {
+                    void handleToggleStartInBackground(checked);
                   }}
                 />
               )}

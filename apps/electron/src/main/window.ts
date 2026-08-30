@@ -40,6 +40,7 @@ import {
 type CreateMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
+  startInBackground?: boolean
   onDidFinishLoad?: () => void
 }
 
@@ -56,6 +57,7 @@ const MOUNT_WATCHDOG_TIMEOUT_MS = 20_000
 // most of those resolve on their own (GC, jank, sync layout). Only show the
 // dialog after a longer outage so we don't pester the user.
 const UNRESPONSIVE_DIALOG_DELAY_MS = 10_000
+const pendingInitialMaximize = new WeakSet<BrowserWindow>()
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
   if (meta) {
@@ -361,6 +363,9 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       contextIsolation: true
     }
   })
+  if (options.startInBackground && shouldMaximizeOnLaunch) {
+    pendingInitialMaximize.add(window)
+  }
   trackMainWindowState(window)
   const mainTarget = resolveMainRendererTarget(options.initialPath)
   const recoveryTarget = resolveRecoveryTarget()
@@ -369,7 +374,11 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   attachMainWindowDiagnostics(window, recoveryTarget)
 
   window.on('ready-to-show', () => {
+    if (options.startInBackground) {
+      return
+    }
     if (shouldMaximizeOnLaunch) {
+      pendingInitialMaximize.delete(window)
       window.maximize()
     }
     window.show()
@@ -423,11 +432,15 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 type OpenMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
+  startInBackground?: boolean
 }
 
 export function focusMainWindow(window: BrowserWindow): void {
   if (window.isMinimized()) {
     window.restore()
+  }
+  if (pendingInitialMaximize.delete(window)) {
+    window.maximize()
   }
   if (!window.isVisible()) {
     window.show()
@@ -441,6 +454,7 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   const window = createMainWindow({
     icon: options.icon,
     initialPath: options.initialPath,
+    startInBackground: options.startInBackground,
     onDidFinishLoad: () => {
       const target = windowRef
       const pendingDeepLink = consumePendingDeepLink()
