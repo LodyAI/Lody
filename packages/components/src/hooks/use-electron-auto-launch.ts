@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ElectronAutoLaunchStatusResult, SetElectronAutoLaunchResult } from '@lody/shared';
 import { toast } from 'sonner';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { getIpcServices, type IpcServices } from '@/lib/electron-ipc-client';
 
 type PendingAutoLaunchOperation = 'read' | 'enabled' | 'hide-window' | null;
+type AutoLaunchStatus = Awaited<ReturnType<IpcServices['app']['getAutoLaunchStatus']>>;
 
 export function useElectronAutoLaunch(isElectron: boolean) {
   const { t } = useTranslation();
@@ -31,7 +31,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
     let active = true;
     setPendingOperation('read');
     void getAutoLaunchStatus()
-      .then((result: ElectronAutoLaunchStatusResult) => {
+      .then((result) => {
         if (!active) return;
         setSupported(result.supported);
         setEnabled(result.enabled);
@@ -54,7 +54,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
     };
   }, [isElectron]);
 
-  const updateStateFromResult = useCallback((result: SetElectronAutoLaunchResult) => {
+  const updateStateFromResult = useCallback((result: AutoLaunchStatus) => {
     setSupported(result.supported);
     setEnabled(result.enabled);
     setHideWindowOnAutoLaunch(result.hideWindowOnAutoLaunch);
@@ -69,8 +69,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       setEnabled(checked);
       setPendingOperation('enabled');
       try {
-        const result: SetElectronAutoLaunchResult =
-          await services.app.setAutoLaunchEnabled(checked);
+        const result = await services.app.setAutoLaunchEnabled(checked);
         updateStateFromResult(result);
         if (!result.ok) {
           toast.error(
@@ -96,8 +95,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       setHideWindowOnAutoLaunch(checked);
       setPendingOperation('hide-window');
       try {
-        const result: SetElectronAutoLaunchResult =
-          await services.app.setAutoLaunchHideWindow(checked);
+        const result = await services.app.setAutoLaunchHideWindow(checked);
         updateStateFromResult(result);
         if (!result.ok) {
           toast.error(
