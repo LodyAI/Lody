@@ -1,9 +1,9 @@
 import { checkPullRequestBody, hasRelatedIssueReference } from './check-pr-body.mjs';
 import { normalizeRelatedIssueLink } from './pr-issue-link.mjs';
 
-const GRACE_PERIOD_DAYS = 7;
-const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1_000;
-const MAX_EXTERNAL_CHANGED_LINES = 200;
+export const GRACE_PERIOD_DAYS = 7;
+export const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1_000;
+export const MAX_EXTERNAL_CHANGED_LINES = 200;
 
 export const PULL_REQUEST_DISPOSITION = Object.freeze({
   BOT: 'bot',
@@ -12,19 +12,19 @@ export const PULL_REQUEST_DISPOSITION = Object.freeze({
   EXTERNAL: 'external',
 });
 
-const NEEDS_ATTENTION_LABEL = Object.freeze({
+export const NEEDS_ATTENTION_LABEL = Object.freeze({
   name: 'status:needs-pr-attention',
   color: 'FBCA04',
   description: 'External PR needs contributor attention before review',
 });
 
-const EXPIRED_POLICY_LABEL = Object.freeze({
+export const EXPIRED_POLICY_LABEL = Object.freeze({
   name: 'status:pr-policy-expired',
   color: 'B60205',
   description: 'PR closed after contribution requirements remained unmet for seven days',
 });
 
-const BYPASS_PR_POLICY_LABEL = Object.freeze({
+export const BYPASS_PR_POLICY_LABEL = Object.freeze({
   name: 'status:pr-policy-bypass',
   color: '0E8A16',
   description: 'Maintainer exempted this PR from contribution policy',
@@ -100,15 +100,15 @@ function warningMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function hasPullRequestLabel(pullRequest, name) {
+export function hasPullRequestLabel(pullRequest, name) {
   return (pullRequest.labels ?? []).some((label) => labelName(label) === name);
 }
 
-function hasManagedPullRequestPolicyState(pullRequest) {
+export function hasManagedPullRequestPolicyState(pullRequest) {
   return hasAnyPullRequestLabel(pullRequest, MANAGED_POLICY_LABELS);
 }
 
-function isExternalPullRequest(pullRequest) {
+export function isExternalPullRequest(pullRequest) {
   const baseRepositoryId = pullRequest.base?.repo?.id;
   const headRepositoryId = pullRequest.head?.repo?.id;
   return (
@@ -129,11 +129,11 @@ export function pullRequestDisposition(pullRequest) {
     : PULL_REQUEST_DISPOSITION.INTERNAL;
 }
 
-function changedLines(pullRequest) {
+export function changedLines(pullRequest) {
   return Number(pullRequest.additions ?? 0) + Number(pullRequest.deletions ?? 0);
 }
 
-function checkPullRequestPolicy(pullRequest) {
+export function checkPullRequestPolicy(pullRequest) {
   const result = checkPullRequestBody(pullRequest.body);
   const findings = [...result.findings];
   const lines = changedLines(pullRequest);
@@ -145,17 +145,17 @@ function checkPullRequestPolicy(pullRequest) {
   return { ok: findings.length === 0, findings };
 }
 
-function invalidSinceFromComment(body) {
+export function invalidSinceFromComment(body) {
   const match = body?.match(ATTENTION_SINCE_PATTERN);
   return match ? asDate(match[1]) : null;
 }
 
-function gracePeriodEndsAt(invalidSince) {
+export function gracePeriodEndsAt(invalidSince) {
   const start = asDate(invalidSince);
   return start ? new Date(start.getTime() + GRACE_PERIOD_MS) : null;
 }
 
-function isGracePeriodExpired(invalidSince, now = new Date()) {
+export function isGracePeriodExpired(invalidSince, now = new Date()) {
   const deadline = gracePeriodEndsAt(invalidSince);
   const current = asDate(now);
   return Boolean(deadline && current && current.getTime() >= deadline.getTime());
@@ -171,7 +171,7 @@ export function formatCheckerFindings(result) {
   ].join('\n');
 }
 
-function buildAttentionComment({ author, findings, invalidSince }) {
+export function buildAttentionComment({ author, findings, invalidSince }) {
   const start = asDate(invalidSince);
   if (!start) {
     throw new Error('A valid invalid-since timestamp is required.');
@@ -197,7 +197,7 @@ function buildAttentionComment({ author, findings, invalidSince }) {
   ].join('\n');
 }
 
-function buildExpiredComment({ author }) {
+export function buildExpiredComment({ author }) {
   return [
     EXPIRED_COMMENT_MARKER,
     `@${author}, this pull request was closed because it did not meet Lody's contribution requirements for ${GRACE_PERIOD_DAYS} days.`,
@@ -286,7 +286,7 @@ async function deleteComments(github, owner, repo, comments) {
   }
 }
 
-async function clearInvalidPullRequest({ github, owner, repo, pullRequest }) {
+export async function clearInvalidPullRequest({ github, owner, repo, pullRequest }) {
   await removeLabels(github, owner, repo, pullRequest.number, [
     NEEDS_ATTENTION_LABEL.name,
     ...LEGACY_ATTENTION_LABELS,
@@ -300,13 +300,13 @@ async function clearInvalidPullRequest({ github, owner, repo, pullRequest }) {
   );
 }
 
-async function clearPullRequestPolicyState({ github, owner, repo, pullRequest }) {
+export async function clearPullRequestPolicyState({ github, owner, repo, pullRequest }) {
   await removeLabels(github, owner, repo, pullRequest.number, MANAGED_POLICY_LABELS);
   const comments = await policyComments(github, owner, repo, pullRequest.number);
   await deleteComments(github, owner, repo, comments);
 }
 
-async function markInvalidPullRequest({
+export async function markInvalidPullRequest({
   github,
   owner,
   repo,
@@ -366,7 +366,7 @@ async function markInvalidPullRequest({
   return { expired: false, invalidSince };
 }
 
-async function expirePullRequest({ github, owner, repo, pullRequest, beforeClose }) {
+export async function expirePullRequest({ github, owner, repo, pullRequest, beforeClose }) {
   await ensurePolicyLabels(github, owner, repo);
   const alreadyExpired = hasPullRequestLabel(pullRequest, EXPIRED_POLICY_LABEL.name);
 
