@@ -1,10 +1,8 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  ElectronAutoLaunchStatusResult,
   GetNotificationPermissionStatusResult,
   OpenSystemNotificationSettingsResult,
-  SetElectronAutoLaunchResult,
 } from '@lody/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { Loading } from '@/ui';
@@ -45,6 +43,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { QueuedMessageBehaviorControl } from '@/components/settings/queued-message-behavior-control';
 import { useAppCapability } from '@/lib/app-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
+import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 
@@ -90,6 +89,7 @@ export function MobileGeneralSettings() {
   const clearCache = useClearCache();
   const isMobile = useIsMobile();
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
+  const autoLaunch = useElectronAutoLaunch(isElectron);
   const isNative = !isElectron && isNativeAppShell();
   const isNativeIOS = !isElectron && isNativeIOSAppShell();
   const showMobileInputSettings = isMobile || isNative;
@@ -107,18 +107,9 @@ export function MobileGeneralSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [oneSignalReady, setOneSignalReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
-  const [autoLaunchSupported, setAutoLaunchSupported] = useState(false);
-  const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
-  const [startInBackground, setStartInBackground] = useState(false);
-  const [startInBackgroundLoading, setStartInBackgroundLoading] = useState(false);
   const isSwitchDisabled = isElectron
     ? !notificationSupported || isProcessing
     : !notificationSupported || !oneSignalReady || isProcessing;
-  const autoLaunchSwitchDisabled =
-    !autoLaunchSupported || autoLaunchLoading || startInBackgroundLoading;
-  const startInBackgroundSwitchDisabled =
-    !autoLaunchEnabled || autoLaunchLoading || startInBackgroundLoading;
 
   const readElectronNotificationPermission =
     useCallback(async (): Promise<ElectronNotificationPermissionStatusResult> => {
@@ -343,40 +334,6 @@ export function MobileGeneralSettings() {
         console.error('OneSignal init failed', error);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [isElectron]);
-
-  useEffect(() => {
-    const services = getIpcServices();
-    const getAutoLaunchStatus = services
-      ? services.app.getAutoLaunchStatus.bind(services.app)
-      : undefined;
-    if (!isElectron || typeof window === 'undefined' || !getAutoLaunchStatus) {
-      setAutoLaunchSupported(false);
-      setAutoLaunchEnabled(false);
-      setStartInBackground(false);
-      return undefined;
-    }
-
-    let active = true;
-    const loadAutoLaunchStatus = async () => {
-      try {
-        const result: ElectronAutoLaunchStatusResult = await getAutoLaunchStatus();
-        if (!active) return;
-        setAutoLaunchSupported(result.supported);
-        setAutoLaunchEnabled(result.enabled);
-        setStartInBackground(result.startInBackground);
-      } catch {
-        if (!active) return;
-        setAutoLaunchSupported(false);
-        setAutoLaunchEnabled(false);
-        setStartInBackground(false);
-      }
-    };
-
-    void loadAutoLaunchStatus();
     return () => {
       active = false;
     };
@@ -619,68 +576,6 @@ export function MobileGeneralSettings() {
       ? t('settings.input.mobileKeyboardAction.send')
       : t('settings.input.mobileKeyboardAction.newline');
 
-  const handleToggleAutoLaunch = async (checked: boolean) => {
-    if (!isElectron || !getIpcServices()) {
-      return;
-    }
-
-    const previous = autoLaunchEnabled;
-    setAutoLaunchEnabled(checked);
-    setAutoLaunchLoading(true);
-    try {
-      const result: SetElectronAutoLaunchResult =
-        await getIpcServices()!.app.setAutoLaunchEnabled(checked);
-      if (!result.ok) {
-        setAutoLaunchEnabled(previous);
-        toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
-      } else {
-        setAutoLaunchEnabled(result.enabled);
-        setStartInBackground(result.startInBackground);
-      }
-    } catch {
-      setAutoLaunchEnabled(previous);
-      toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
-    } finally {
-      setAutoLaunchLoading(false);
-    }
-  };
-
-  const handleToggleStartInBackground = async (checked: boolean) => {
-    if (!isElectron || !getIpcServices()) {
-      return;
-    }
-
-    const previous = startInBackground;
-    setStartInBackground(checked);
-    setStartInBackgroundLoading(true);
-    try {
-      const result: SetElectronAutoLaunchResult =
-        await getIpcServices()!.app.setAutoLaunchStartInBackground(checked);
-      if (!result.ok) {
-        setStartInBackground(previous);
-        toast.error(
-          t(
-            'settings.general.autoLaunch.startInBackgroundToggleFailed',
-            'Failed to update background startup'
-          )
-        );
-      } else {
-        setAutoLaunchEnabled(result.enabled);
-        setStartInBackground(result.startInBackground);
-      }
-    } catch {
-      setStartInBackground(previous);
-      toast.error(
-        t(
-          'settings.general.autoLaunch.startInBackgroundToggleFailed',
-          'Failed to update background startup'
-        )
-      );
-    } finally {
-      setStartInBackgroundLoading(false);
-    }
-  };
-
   return (
     <>
       <MobileInlinePickerCoordinator>
@@ -828,35 +723,35 @@ export function MobileGeneralSettings() {
         <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
           <MobileSettingsRowGroup>
             <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
-              {autoLaunchLoading ? (
+              {autoLaunch.enabledLoading ? (
                 <Loading size="sm" className="h-5 w-9" />
               ) : (
                 <Switch
                   id="auto-launch-toggle"
-                  checked={autoLaunchEnabled}
-                  disabled={autoLaunchSwitchDisabled}
+                  checked={autoLaunch.enabled}
+                  disabled={!autoLaunch.supported || autoLaunch.loading}
                   onCheckedChange={(checked) => {
-                    void handleToggleAutoLaunch(checked);
+                    void autoLaunch.updateEnabled(checked);
                   }}
                 />
               )}
             </MobileSettingsRow>
             <MobileSettingsRow
-              label={t('settings.general.autoLaunch.startInBackgroundLabel', 'Start in background')}
+              label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
               helper={t(
-                'settings.general.autoLaunch.startInBackgroundHelper',
+                'settings.general.autoLaunch.hideWindowHelper',
                 'Keep the main window hidden when Lody starts automatically after sign-in'
               )}
             >
-              {startInBackgroundLoading ? (
+              {autoLaunch.hideWindowLoading ? (
                 <Loading size="sm" className="h-5 w-9" />
               ) : (
                 <Switch
-                  id="auto-launch-background-toggle"
-                  checked={startInBackground}
-                  disabled={startInBackgroundSwitchDisabled}
+                  id="auto-launch-hide-window-toggle"
+                  checked={autoLaunch.hideWindowOnAutoLaunch}
+                  disabled={!autoLaunch.enabled || autoLaunch.loading}
                   onCheckedChange={(checked) => {
-                    void handleToggleStartInBackground(checked);
+                    void autoLaunch.updateHideWindow(checked);
                   }}
                 />
               )}

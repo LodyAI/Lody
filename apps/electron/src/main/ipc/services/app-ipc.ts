@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
+import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
@@ -24,8 +24,9 @@ import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
 import {
   applyAutoLaunchSettings,
-  getStartInBackgroundEnabled,
-  setStartInBackgroundEnabled
+  getAutoLaunchEnabled,
+  getHideWindowOnAutoLaunchEnabled,
+  setHideWindowOnAutoLaunchEnabled
 } from '../../auto-launch-settings'
 
 const autoLaunchSupported = process.platform === 'darwin' || process.platform === 'win32'
@@ -35,23 +36,21 @@ function getAutoLaunchStatus() {
     return {
       supported: false,
       enabled: false,
-      startInBackground: false
+      hideWindowOnAutoLaunch: false
     }
   }
   try {
-    const settings = app.getLoginItemSettings()
+    const enabled = getAutoLaunchEnabled()
     return {
       supported: true,
-      enabled: Boolean(settings.openAtLogin),
-      openAtLogin: Boolean(settings.openAtLogin),
-      openAsHidden: Boolean(settings.openAsHidden),
-      startInBackground: getStartInBackgroundEnabled()
+      enabled,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled()
     }
   } catch (error) {
     return {
       supported: true,
       enabled: false,
-      startInBackground: getStartInBackgroundEnabled(),
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled(),
       error: error instanceof Error ? error.message : String(error)
     }
   }
@@ -134,7 +133,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: 'invalid_enabled_flag'
       }
     }
@@ -143,18 +142,18 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
-        startInBackground: false,
+        hideWindowOnAutoLaunch: false,
         error: 'unsupported_platform'
       }
     }
     try {
-      applyAutoLaunchSettings(enabledRaw, getStartInBackgroundEnabled())
+      applyAutoLaunchSettings(enabledRaw)
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
       }
     } catch (error) {
       const status = getAutoLaunchStatus()
@@ -162,21 +161,21 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: error instanceof Error ? error.message : String(error)
       }
     }
   }
 
   @IpcMethod()
-  async setAutoLaunchStartInBackground(enabledRaw: boolean) {
+  async setAutoLaunchHideWindow(enabledRaw: boolean) {
     if (typeof enabledRaw !== 'boolean') {
       const status = getAutoLaunchStatus()
       return {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: 'invalid_enabled_flag'
       }
     }
@@ -185,27 +184,24 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
-        startInBackground: false,
+        hideWindowOnAutoLaunch: false,
         error: 'unsupported_platform'
       }
     }
 
-    const previous = getStartInBackgroundEnabled()
+    const previous = getHideWindowOnAutoLaunchEnabled()
     try {
-      const openAtLogin = Boolean(app.getLoginItemSettings().openAtLogin)
-      setStartInBackgroundEnabled(enabledRaw)
-      applyAutoLaunchSettings(openAtLogin, enabledRaw)
+      setHideWindowOnAutoLaunchEnabled(enabledRaw)
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
       }
     } catch (error) {
       try {
-        setStartInBackgroundEnabled(previous)
-        applyAutoLaunchSettings(Boolean(app.getLoginItemSettings().openAtLogin), previous)
+        setHideWindowOnAutoLaunchEnabled(previous)
       } catch {
         // Preserve the original failure for the renderer.
       }
@@ -214,7 +210,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
-        startInBackground: status.startInBackground,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: error instanceof Error ? error.message : String(error)
       }
     }

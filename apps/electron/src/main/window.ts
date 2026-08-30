@@ -40,7 +40,7 @@ import {
 type CreateMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
-  startInBackground?: boolean
+  hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
 }
 
@@ -363,7 +363,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       contextIsolation: true
     }
   })
-  if (options.startInBackground && shouldMaximizeOnLaunch) {
+  if (options.hideWindowOnAutoLaunch && shouldMaximizeOnLaunch) {
     pendingInitialMaximize.add(window)
   }
   trackMainWindowState(window)
@@ -374,7 +374,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   attachMainWindowDiagnostics(window, recoveryTarget)
 
   window.on('ready-to-show', () => {
-    if (options.startInBackground) {
+    if (options.hideWindowOnAutoLaunch) {
       return
     }
     if (shouldMaximizeOnLaunch) {
@@ -432,7 +432,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 type OpenMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
-  startInBackground?: boolean
+  hideWindowOnAutoLaunch?: boolean
 }
 
 export function focusMainWindow(window: BrowserWindow): void {
@@ -454,7 +454,7 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   const window = createMainWindow({
     icon: options.icon,
     initialPath: options.initialPath,
-    startInBackground: options.startInBackground,
+    hideWindowOnAutoLaunch: options.hideWindowOnAutoLaunch,
     onDidFinishLoad: () => {
       const target = windowRef
       const pendingDeepLink = consumePendingDeepLink()

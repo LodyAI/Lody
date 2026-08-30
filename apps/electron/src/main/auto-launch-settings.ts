@@ -1,9 +1,15 @@
 import { app } from 'electron'
 import Conf from 'conf'
-import { BACKGROUND_AUTO_LAUNCH_ARG } from './auto-launch-policy'
+import {
+  getAutoLaunchQueryOptions,
+  getAutoLaunchRegistrationSettings,
+  resolveAutoLaunchEnabled,
+  resolveAutoLaunchInvocation,
+  type AutoLaunchPlatform
+} from './auto-launch-policy'
 
 type AutoLaunchSettingsSchema = {
-  startInBackground: boolean
+  hideWindowOnAutoLaunch: boolean
 }
 
 const normalizedConfModule = Conf as typeof Conf | { default?: typeof Conf }
@@ -20,47 +26,73 @@ const ConfConstructor: typeof Conf = resolvedConf
 const autoLaunchSettingsStore = new ConfConstructor<AutoLaunchSettingsSchema>({
   cwd: app.getPath('userData'),
   configName: 'auto-launch-settings',
-  defaults: { startInBackground: false },
+  defaults: { hideWindowOnAutoLaunch: false },
   schema: {
-    startInBackground: { type: 'boolean' }
+    hideWindowOnAutoLaunch: { type: 'boolean' }
   }
 })
 
-export function getStartInBackgroundEnabled(): boolean {
-  return autoLaunchSettingsStore.get('startInBackground')
+function getAutoLaunchPlatform(): AutoLaunchPlatform {
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    return process.platform
+  }
+  return 'linux'
 }
 
-export function setStartInBackgroundEnabled(enabled: boolean): void {
-  autoLaunchSettingsStore.set('startInBackground', enabled)
+export function getHideWindowOnAutoLaunchEnabled(): boolean {
+  return autoLaunchSettingsStore.get('hideWindowOnAutoLaunch')
 }
 
-export function getAutoLaunchInvocationStatus(): {
-  wasOpenedAtLogin: boolean
-  wasOpenedAsHidden: boolean
+export function setHideWindowOnAutoLaunchEnabled(enabled: boolean): void {
+  autoLaunchSettingsStore.set('hideWindowOnAutoLaunch', enabled)
+}
+
+export function getAutoLaunchEnabled(): boolean {
+  const platform = getAutoLaunchPlatform()
+  if (platform === 'linux') {
+    return false
+  }
+
+  const settings = app.getLoginItemSettings(getAutoLaunchQueryOptions(platform))
+  return resolveAutoLaunchEnabled(platform, settings)
+}
+
+export function getAutoLaunchInvocationStatus(argv: readonly string[] = process.argv): {
+  launchedAtLogin: boolean
 } {
-  if (process.platform !== 'darwin' && process.platform !== 'win32') {
-    return { wasOpenedAtLogin: false, wasOpenedAsHidden: false }
+  const platform = getAutoLaunchPlatform()
+  if (platform === 'linux') {
+    return { launchedAtLogin: false }
+  }
+  if (platform === 'win32') {
+    return {
+      launchedAtLogin: resolveAutoLaunchInvocation({
+        platform,
+        wasOpenedAtLogin: false,
+        argv
+      })
+    }
   }
 
   try {
-    const settings = app.getLoginItemSettings()
+    const settings = app.getLoginItemSettings(getAutoLaunchQueryOptions(platform))
     return {
-      wasOpenedAtLogin: Boolean(settings.wasOpenedAtLogin),
-      wasOpenedAsHidden: Boolean(settings.wasOpenedAsHidden)
+      launchedAtLogin: resolveAutoLaunchInvocation({
+        platform,
+        wasOpenedAtLogin: Boolean(settings.wasOpenedAtLogin),
+        argv
+      })
     }
   } catch (error) {
     console.warn('[Electron] Failed to read login launch status', error)
-    return { wasOpenedAtLogin: false, wasOpenedAsHidden: false }
+    return { launchedAtLogin: false }
   }
 }
 
-export function applyAutoLaunchSettings(openAtLogin: boolean, startInBackground: boolean): void {
-  const shouldStartInBackground = openAtLogin && startInBackground
-  app.setLoginItemSettings({
-    openAtLogin,
-    ...(process.platform === 'darwin' ? { openAsHidden: shouldStartInBackground } : {}),
-    ...(process.platform === 'win32'
-      ? { args: shouldStartInBackground ? [BACKGROUND_AUTO_LAUNCH_ARG] : [] }
-      : {})
-  })
+export function applyAutoLaunchSettings(openAtLogin: boolean): void {
+  const platform = getAutoLaunchPlatform()
+  if (platform === 'linux') {
+    return
+  }
+  app.setLoginItemSettings(getAutoLaunchRegistrationSettings(platform, openAtLogin))
 }
