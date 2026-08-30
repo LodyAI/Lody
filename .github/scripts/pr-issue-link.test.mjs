@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  hasRelatedIssueLink,
-  normalizeRelatedIssueLink,
-  reconcilePullRequestIssueLink,
-} from './pr-issue-link.mjs';
+import { hasRelatedIssueLink, normalizeRelatedIssueLink } from './pr-issue-link.mjs';
 
 const body = (reference) => `## Related issue
 
@@ -56,57 +52,8 @@ void describe('pull request issue links', () => {
     assert.equal(hasRelatedIssueLink(body('Issue 121')), false);
   });
 
-  void it('updates only human pull requests targeting the default branch', async () => {
-    const updates = [];
-    const github = {
-      rest: {
-        pulls: {
-          update: async (input) => updates.push(input),
-        },
-      },
-    };
-    const pullRequest = {
-      base: { ref: 'main' },
-      body: body('#121'),
-      number: 42,
-      user: { login: 'contributor' },
-    };
-
-    assert.equal(
-      await reconcilePullRequestIssueLink({
-        github,
-        owner: 'LodyAI',
-        repo: 'Lody',
-        pullRequest,
-        defaultBranch: 'main',
-      }),
-      true
-    );
-    assert.deepEqual(updates, [
-      {
-        owner: 'LodyAI',
-        repo: 'Lody',
-        pull_number: 42,
-        body: body('Closes #121'),
-      },
-    ]);
-
-    for (const skippedPullRequest of [
-      { ...pullRequest, base: { ref: 'release' } },
-      { ...pullRequest, user: { login: 'renovate[bot]' } },
-      { ...pullRequest, body: body('Closes #121') },
-    ]) {
-      assert.equal(
-        await reconcilePullRequestIssueLink({
-          github,
-          owner: 'LodyAI',
-          repo: 'Lody',
-          pullRequest: skippedPullRequest,
-          defaultBranch: 'main',
-        }),
-        false
-      );
-    }
-    assert.equal(updates.length, 1);
+  void it('is idempotent after adding the native closing keyword', () => {
+    const normalized = normalizeRelatedIssueLink(body('#121'));
+    assert.equal(normalizeRelatedIssueLink(normalized), normalized);
   });
 });

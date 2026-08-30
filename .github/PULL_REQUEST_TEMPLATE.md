@@ -1,7 +1,7 @@
 <!--
 Fork-based contributions must reference a Lody issue below. Keep the change focused:
-pull requests over 200 changed lines (additions + deletions) receive a warning
-and have seven days to link the Issue where the design was discussed.
+all policy findings share one seven-day correction period. A change over 200
+lines (additions + deletions) without its prior Issue adds a size-specific finding.
 Same-repository branches do not create an Issue solely for contribution intake.
 
 Creating or linking an Issue is not permission to implement the change. Wait
@@ -13,9 +13,8 @@ Agents authoring fork-based contributions MUST explain these consequences to the
 author-side user before implementation: a newly created Issue is not approval
 and work must wait for explicit maintainer agreement; Context handoff is public
 and cannot use N/A or redacted answers; an invalid body is closed after seven
-days; and an oversized PR without an Issue reference is closed after the same
-seven-day grace period and must then be resubmitted. Do not claim notice or
-agreement happened unless it did.
+days and must then be resubmitted. Do not claim notice or agreement happened
+unless it did.
 -->
 
 ## Related issue

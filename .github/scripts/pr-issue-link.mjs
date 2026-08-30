@@ -78,31 +78,3 @@ export function normalizeRelatedIssueLink(body) {
 
   return changed ? lines.join(newline) : source;
 }
-
-export async function reconcilePullRequestIssueLink({
-  github,
-  owner,
-  repo,
-  pullRequest,
-  defaultBranch,
-}) {
-  if (
-    pullRequest.base?.ref !== defaultBranch ||
-    (pullRequest.user?.login ?? '').endsWith('[bot]')
-  ) {
-    return false;
-  }
-
-  const body = normalizeRelatedIssueLink(pullRequest.body);
-  if (body === (pullRequest.body ?? '')) {
-    return false;
-  }
-
-  await github.rest.pulls.update({
-    owner,
-    repo,
-    pull_number: pullRequest.number,
-    body,
-  });
-  return true;
-}
