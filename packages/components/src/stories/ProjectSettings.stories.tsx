@@ -161,7 +161,7 @@ function StoryWrapper({
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
 
   return (
-    <div className="mx-auto max-w-4xl p-4">
+    <div className="mx-auto h-screen max-w-4xl p-4">
       <ProjectSettingsView
         sections={currentSections}
         githubSections={currentGithubSections}
@@ -407,7 +407,7 @@ const meta = {
   title: 'Settings/ProjectSettings',
   component: StoryWrapper,
   parameters: {
-    layout: 'padded',
+    layout: 'fullscreen',
   },
   tags: ['autodocs'],
 } satisfies Meta<typeof StoryWrapper>;

@@ -513,7 +513,7 @@ function ProjectSettingsDesktop({
   };
 
   return (
-    <div className={cn(settingContainerClass, 'md:max-w-6xl')}>
+    <div className={cn(settingContainerClass, 'flex h-full min-h-0 flex-col md:max-w-6xl')}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">
@@ -544,7 +544,7 @@ function ProjectSettingsDesktop({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <MachinePills
             pills={pills}
             selectedId={resolvedPillId}
@@ -553,7 +553,7 @@ function ProjectSettingsDesktop({
               setSelectedProjectKey(null);
             }}
           />
-          <div className="flex h-[calc(90vh-16rem)] min-h-[400px] min-w-0">
+          <div className="flex min-h-0 min-w-0 flex-1">
             <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
               {isGithubPill
                 ? githubSections.map((section) => (

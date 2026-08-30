@@ -129,6 +129,7 @@ function SettingsModalBody() {
     resolvedActiveTab === 'projects' ||
     resolvedActiveTab === 'machines' ||
     resolvedActiveTab === 'agents';
+  const usesInternalScrolling = resolvedActiveTab === 'projects';
 
   return (
     <SettingsDataCacheProvider>
@@ -229,13 +230,21 @@ function SettingsModalBody() {
             </header>
           )}
           <div className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
-              <div className={cn('px-6 pb-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
-                <div className="mx-auto max-w-5xl">
+            {usesInternalScrolling ? (
+              <div className="h-full px-6 pb-6 pt-6">
+                <div className="mx-auto h-full max-w-5xl">
                   <SettingsTabContent tabId={resolvedActiveTab} />
                 </div>
               </div>
-            </ScrollArea>
+            ) : (
+              <ScrollArea className="h-full">
+                <div className={cn('px-6 pb-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
+                  <div className="mx-auto max-w-5xl">
+                    <SettingsTabContent tabId={resolvedActiveTab} />
+                  </div>
+                </div>
+              </ScrollArea>
+            )}
           </div>
         </FocusScope>
       </div>
