@@ -1,5 +1,4 @@
-import { BrowserWindow, Menu, clipboard, dialog, nativeImage } from 'electron'
-import { promises as fs } from 'node:fs'
+import { BrowserWindow, Menu, clipboard, nativeImage } from 'electron'
 import type {
   CopyImageToClipboardResult,
   ImagePreviewMenuAction,
@@ -9,7 +8,7 @@ import type {
   ShowImagePreviewMenuResult
 } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
-import { buildSaveFileFilters, resolveSaveFileName } from './image-export-core'
+import { saveFileBytes } from './file-export-service'
 
 /**
  * The main-process half of the image preview's right-click menu: the native
@@ -70,24 +69,7 @@ export async function saveImageFile(
   window: BrowserWindow | null,
   input: SaveImageFileInput
 ): Promise<SaveImageFileResult> {
-  const fileName = resolveSaveFileName(input.fileName)
-  const saveDialogOptions = {
-    defaultPath: fileName,
-    filters: buildSaveFileFilters(fileName)
-  }
-
-  try {
-    const result =
-      window && !window.isDestroyed()
-        ? await dialog.showSaveDialog(window, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions)
-    if (result.canceled || !result.filePath) {
-      return { saved: false, canceled: true }
-    }
-
-    await fs.writeFile(result.filePath, Buffer.from(input.bytes))
-    return { saved: true, path: result.filePath }
-  } catch (error) {
-    return { saved: false, error: formatUnknownError(error) }
-  }
+  // Identical to any other "renderer holds the bytes" save, so it shares the one
+  // dialog + write implementation rather than keeping a second copy of it.
+  return await saveFileBytes(window, input)
 }

@@ -1,4 +1,5 @@
 import type React from 'react';
+import { FolderOpen } from 'lucide-react';
 import type { BuiltinPathLauncherId, PathLauncherOption } from '@/lib/session-path-launchers';
 import {
   AntigravityIcon,
@@ -26,6 +27,12 @@ const BUILTIN_PATH_LAUNCHER_ICONS: Record<BuiltinPathLauncherId, PathLauncherIco
   sublime: SublimeIcon,
   warp: WarpIcon,
   xcode: XcodeIcon,
+  // The file managers get a generic folder glyph rather than the OS artwork:
+  // only one of the three is ever offered on a given platform, so the icon has
+  // no brand to disambiguate — it only has to read as "a folder opens".
+  finder: FolderOpen,
+  explorer: FolderOpen,
+  'file-manager': FolderOpen,
 };
 
 /**

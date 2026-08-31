@@ -99,6 +99,14 @@ Root `AGENTS.md` also applies.
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
   menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
   under `node --test` without the `electron` runtime.
+- `services/file-export-service.ts` generalizes that same split for any bytes the
+  renderer holds and main does not: `app.saveFileAs` is the save dialog + write
+  behind the Files tree's download (a remote workspace's bytes only exist in the
+  renderer, as File Preview responses), and `saveImageFile` now delegates to it
+  rather than keeping a second copy. Its `revealLocalPath` is deliberately
+  `shell.showItemInFolder` and NOTHING else: the path arrives from the renderer,
+  and `shell.openPath` on a file would hand it to whatever application claims
+  that extension. Opening a workspace FOLDER stays a path launcher.
 - Use `pnpm --dir apps/electron preview:local` only when a smoke/E2E harness has
   already prepared and validated the OSS build artifacts. That low-level command must
   remain `--skipBuild --mode oss`.

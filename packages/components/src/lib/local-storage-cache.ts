@@ -210,6 +210,11 @@ export const builtinPathLauncherIdSchema = z.enum([
   'sublime',
   'warp',
   'xcode',
+  // The OS file manager. One id per platform because each carries its own
+  // command and its own product name; `platforms` keeps the other two hidden.
+  'finder',
+  'explorer',
+  'file-manager',
 ]);
 
 export type BuiltinPathLauncherId = z.infer<typeof builtinPathLauncherIdSchema>;

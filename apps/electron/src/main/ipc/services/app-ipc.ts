@@ -5,6 +5,8 @@ import {
   IPC_PUSH_CHANNELS,
   LaunchLocalPathInputSchema,
   PathLauncherProbeSchema,
+  RevealLocalPathInputSchema,
+  SaveFileBytesInputSchema,
   type NativeThemeSource,
   type RendererFatalErrorReport,
   type SetGlobalShortcutInput,
@@ -13,6 +15,7 @@ import {
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { setMenuLanguage } from '../../menu'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
+import { revealLocalPath, saveFileBytes } from '../../services/file-export-service'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -270,6 +273,27 @@ export class AppIpc extends IpcService {
       return { launched: false as const, error: 'invalid_payload' }
     }
     return await launchLocalPath(parsed.data)
+  }
+
+  @IpcMethod()
+  async saveFileAs(payload: unknown) {
+    const parsed = SaveFileBytesInputSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { saved: false as const, error: 'invalid_payload' }
+    }
+    const { event } = getIpcContext()
+    const window =
+      BrowserWindow.fromWebContents(event.sender) ?? getIpcServiceDeps().getMainWindow()
+    return await saveFileBytes(window, parsed.data)
+  }
+
+  @IpcMethod()
+  async revealLocalPath(payload: unknown) {
+    const parsed = RevealLocalPathInputSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { revealed: false as const, error: 'invalid_payload' }
+    }
+    return await revealLocalPath(parsed.data)
   }
 
   @IpcMethod()

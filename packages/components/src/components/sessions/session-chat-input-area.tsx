@@ -460,6 +460,12 @@ export type SessionChatInputAreaHandle = {
    * caller can leave the gesture unacknowledged instead of implying a change.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /**
+   * Mention a workspace file or folder in this draft — the Files tree's "add to
+   * conversation". Returns false when nothing was written (archived draft, file
+   * mentions unavailable, already mentioned).
+   */
+  insertFileMention: (target: { path: string; isDirectory: boolean }) => boolean;
 };
 
 export const SessionChatInputArea = memo(
@@ -1633,6 +1639,16 @@ export const SessionChatInputArea = memo(
       [isArchived]
     );
 
+    const insertFileMention = useCallback(
+      (target: { path: string; isDirectory: boolean }) => {
+        if (isArchived) {
+          return false;
+        }
+        return mentionActionsRef.current?.insertFileMention(target) ?? false;
+      },
+      [isArchived]
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -1646,6 +1662,7 @@ export const SessionChatInputArea = memo(
         toggleVisualAnnotationReference,
         handleImageDrop,
         insertSessionMention,
+        insertFileMention,
       }),
       [
         setInputText,
@@ -1655,6 +1672,7 @@ export const SessionChatInputArea = memo(
         toggleVisualAnnotationReference,
         handleImageDrop,
         insertSessionMention,
+        insertFileMention,
       ]
     );
 

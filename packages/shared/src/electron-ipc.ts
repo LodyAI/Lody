@@ -626,6 +626,58 @@ export type SaveImageFileResult =
   | { saved: false; canceled: true }
   | { saved: false; canceled?: false; error: string };
 
+/* ── Downloading a workspace file to disk ────────────────────────────────────
+ *
+ * Same split as the image export above, for the same reason: the bytes of a
+ * file that lives on a REMOTE machine only ever exist in the renderer (they
+ * arrived over File Preview v3), so main cannot read them from a path. Main
+ * owns the save dialog and the write; the renderer owns the bytes.
+ *
+ * The budget is deliberately the image one: this is a single structured clone
+ * into the main process either way, and a folder download has already built its
+ * whole zip in renderer memory before it gets here.
+ */
+
+const SaveFileBytesSchema = z
+  .instanceof(ArrayBuffer)
+  .refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= IMAGE_EXPORT_MAX_BYTES, {
+    message: 'file bytes out of range',
+  });
+
+export const SaveFileBytesInputSchema = z
+  .object({
+    /** A save-dialog default only; the main process reduces it to a base name. */
+    fileName: z.string().trim().min(1).max(255),
+    bytes: SaveFileBytesSchema,
+  })
+  .strict();
+
+export type SaveFileBytesInput = z.infer<typeof SaveFileBytesInputSchema>;
+
+export type SaveFileBytesResult =
+  | { saved: true; path: string }
+  | { saved: false; canceled: true }
+  | { saved: false; canceled?: false; error: string };
+
+/* ── Revealing a local path in the OS file manager ───────────────────────────
+ *
+ * `shell.showItemInFolder` and nothing else: it opens the file manager with the
+ * item selected and never hands the path to its default application, so this
+ * bridge cannot be turned into "run whatever the renderer names". Opening a
+ * FOLDER is a path launcher (`finder`/`explorer`/`file-manager`) instead, which
+ * already carries the probe + fallback machinery every other launcher uses.
+ */
+
+export const RevealLocalPathInputSchema = z
+  .object({
+    path: LocalPathLauncherStringSchema,
+  })
+  .strict();
+
+export type RevealLocalPathInput = z.infer<typeof RevealLocalPathInputSchema>;
+
+export type RevealLocalPathResult = { revealed: boolean; error?: string };
+
 /* ── Global (OS-level) shortcuts ─────────────────────────────────────────────
  *
  * These are registered in the Electron main process via `globalShortcut` (they fire

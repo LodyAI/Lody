@@ -136,6 +136,7 @@
     "debug": "^4.4.3",
     "effect": "catalog:",
     "emojibase-data": "^17.0.0",
+    "fflate": "^0.8.3",
     "@paper-design/shaders-react": "^0.0.77",
     "@web-kits/audio": "^0.1.0",
     "framer-motion": "^12.23.6",

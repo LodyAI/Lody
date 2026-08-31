@@ -21,6 +21,7 @@ import {
   selectSessionMentionCandidates,
   type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
+import type { MentionInsertRequest } from '@/ui/mention/index';
 import {
   selectAgentRoleMentionCandidates,
   type AgentRoleMentionItem,
@@ -355,6 +356,40 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
     title: item.token,
     iconPath: item.path,
     mono: true,
+  };
+}
+
+/**
+ * The same file mention a user would have picked from the `@` menu, written
+ * from somewhere else — today the Files tree's right-click menu.
+ *
+ * Shares `toFileCandidate`'s token convention rather than restating it: a
+ * directory's VALUE keeps its trailing slash (that is what the known-path set
+ * and `hydrateFileMentionsFromText` match on) while its committed TEXT drops it.
+ * Returns null when the draft already mentions that exact token, so the caller
+ * can leave the gesture unacknowledged instead of writing a duplicate.
+ */
+export function buildFileMentionInsertion(
+  mentions: readonly { value: string; kind?: string }[],
+  target: { readonly path: string; readonly isDirectory: boolean }
+): MentionInsertRequest | null {
+  const path = target.path.replace(/^\/+/u, '').replace(/\/+$/u, '');
+  if (!path) return null;
+  const token = target.isDirectory ? `${path}/` : path;
+  const alreadyMentioned = mentions.some(
+    (mention) => (mention.kind === 'file' || mention.kind === 'dir') && mention.value === token
+  );
+  if (alreadyMentioned) return null;
+
+  return {
+    text: `${MENTION_TRIGGER}${path}`,
+    value: token,
+    kind: target.isDirectory ? 'dir' : 'file',
+    // Appended with a separator and a trailing space, so the token stays
+    // whitespace-delimited for the hydrator that recovers it from a reloaded
+    // draft — the same shape `buildSessionMentionInsertion` uses.
+    separate: true,
+    suffix: ' ',
   };
 }
 

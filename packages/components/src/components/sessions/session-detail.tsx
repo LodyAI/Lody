@@ -2422,6 +2422,36 @@ const SessionDetail = ({
       legacyWorkspacePath: sessionMachine?.workspacePaths?.[activeSession.id],
     });
   }, [activeSession, machineDotlodyPath, resolvedLocalProjectMeta?.rootPath, sessionMachine]);
+  const handleMentionFileInChat = useCallback(
+    (target: { path: string; isDirectory: boolean }) => {
+      // The Files panel belongs to the session view, but the mention goes to the
+      // composer the user is typing in — the ACTIVE tab, same as a dropped
+      // session mention.
+      const chatRef = chatRefsMap.current.get(activeTabSessionId);
+      if (!chatRef || !('insertFileMention' in chatRef)) return false;
+      return chatRef.insertFileMention(target);
+    },
+    [activeTabSessionId]
+  );
+
+  // The file tree's right-click menu picks its actions from WHERE the files are.
+  // `activeSessionWorkspacePath` resolves on the session's OWN machine, remote
+  // included — which is why it can back Copy path either way, while reveal and
+  // open additionally require that machine to be this one.
+  const fileTreeRowMenu = useMemo(
+    () => ({
+      provider: activeSessionFileProvider,
+      workspaceRootPath: activeSessionWorkspacePath,
+      isLocalMachine: isActiveSessionLocalMachine,
+      onMentionFile: handleMentionFileInChat,
+    }),
+    [
+      activeSessionFileProvider,
+      activeSessionWorkspacePath,
+      handleMentionFileInChat,
+      isActiveSessionLocalMachine,
+    ]
+  );
 
   const handleCopyConversationHistory = useCallback(() => {
     if (activeDraftTab) {
@@ -5366,6 +5396,7 @@ const SessionDetail = ({
         // Opening a file selects its viewer tab, which unmounts this tree. Key
         // its expanded folders per session so returning to Files restores them.
         viewStateKey={`session-files:${activeSession.id}`}
+        rowMenu={fileTreeRowMenu}
       />
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer

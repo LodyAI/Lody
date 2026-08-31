@@ -109,6 +109,7 @@ import {
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { usePathLauncherPreference } from '@/hooks/use-path-launcher-preference';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
@@ -157,9 +158,6 @@ import {
   buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
-  PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT,
-  PATH_LAUNCHER_PREFERENCE_STORAGE_KEY,
-  readStoredPathLauncherPreference,
   resolveSelectedPathLauncher,
   writeStoredPathLauncherPreference,
   type PathLauncherOption,
@@ -1827,6 +1825,7 @@ export type SessionChatInterfaceHandle = {
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
   insertSessionMention: (sessionId: string) => boolean;
+  insertFileMention: (target: { path: string; isDirectory: boolean }) => boolean;
 };
 
 export type DispatchInputBlocksOptions = {
@@ -4646,6 +4645,9 @@ export const SessionChatInterface = memo(
         insertSessionMention: (sessionId: string) => {
           return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
         },
+        insertFileMention: (target) => {
+          return inputAreaRef.current?.insertFileMention(target) ?? false;
+        },
       }),
       [handleCopyConversationHistory, lastCompletedAssistantMessageId, openSearch]
     );
@@ -5223,28 +5225,9 @@ export const SessionChatInterface = memo(
       return openInIdePath;
     }, [openInIdePath]);
 
-    const [pathLauncherPreference, setPathLauncherPreference] = useState(
-      readStoredPathLauncherPreference
-    );
-    useEffect(() => {
-      if (typeof window === 'undefined') return undefined;
-
-      const refreshPreference = () => {
-        setPathLauncherPreference(readStoredPathLauncherPreference());
-      };
-      const handleStorage = (event: StorageEvent) => {
-        if (event.key === PATH_LAUNCHER_PREFERENCE_STORAGE_KEY) {
-          refreshPreference();
-        }
-      };
-
-      window.addEventListener(PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT, refreshPreference);
-      window.addEventListener('storage', handleStorage);
-      return () => {
-        window.removeEventListener(PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT, refreshPreference);
-        window.removeEventListener('storage', handleStorage);
-      };
-    }, []);
+    // Shared with the Files tree's row menu, so a change in Settings reaches
+    // both surfaces without either polling the other.
+    const pathLauncherPreference = usePathLauncherPreference();
 
     const isElectronRendererForPathLaunch =
       typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
@@ -5320,9 +5303,13 @@ export const SessionChatInterface = memo(
 
     const persistSelectedPathLauncher = useCallback(
       (launcherId: string) => {
-        const nextPreference = { ...pathLauncherPreference, selectedLauncherId: launcherId };
-        setPathLauncherPreference(nextPreference);
-        writeStoredPathLauncherPreference(nextPreference);
+        // The write dispatches the preference-changed event that
+        // `usePathLauncherPreference` listens on, so there is no local mirror to
+        // keep in step here.
+        writeStoredPathLauncherPreference({
+          ...pathLauncherPreference,
+          selectedLauncherId: launcherId,
+        });
       },
       [pathLauncherPreference]
     );

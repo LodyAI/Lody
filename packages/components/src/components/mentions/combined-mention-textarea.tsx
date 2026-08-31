@@ -44,6 +44,7 @@ import {
 } from '@/components/mentions/mention-persistence';
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
+  buildFileMentionInsertion,
   buildMentionFileIndex,
   useMentionCategories,
   type MentionCategorySources,
@@ -544,6 +545,12 @@ export type CombinedMentionTextareaHandle = {
    * unknown/archived/own session, or one the draft already mentions.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /**
+   * Append a file or directory mention — the Files tree's "add to conversation".
+   * Returns false when nothing was written: file mentions disabled for this
+   * composer, or a path the draft already mentions.
+   */
+  insertFileMention: (target: { path: string; isDirectory: boolean }) => boolean;
 };
 
 /**
@@ -555,9 +562,11 @@ export type CombinedMentionTextareaHandle = {
 function MentionActionsBridge({
   actionsRef,
   items,
+  fileMentionsEnabled,
 }: {
   actionsRef: React.Ref<CombinedMentionTextareaHandle>;
   items: readonly SessionMentionItem[];
+  fileMentionsEnabled: boolean;
 }) {
   const context = useMentionContext('MentionActionsBridge');
   const { mentions, onMentionInsert } = context;
@@ -574,8 +583,17 @@ function MentionActionsBridge({
         onMentionInsert(insertion);
         return true;
       },
+      insertFileMention: (target: { path: string; isDirectory: boolean }) => {
+        // Files have no candidate list to look the path up in (the index is
+        // built per search term), so enablement is checked explicitly here.
+        if (!fileMentionsEnabled) return false;
+        const insertion = buildFileMentionInsertion(mentions, target);
+        if (!insertion) return false;
+        onMentionInsert(insertion);
+        return true;
+      },
     }),
-    [items, mentions, onMentionInsert]
+    [fileMentionsEnabled, items, mentions, onMentionInsert]
   );
 
   return null;
@@ -982,7 +1000,11 @@ export const CombinedMentionTextarea = React.forwardRef<
           enabled={enableAgentRoleMentions}
         />
         {mentionActionsRef ? (
-          <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
+          <MentionActionsBridge
+            actionsRef={mentionActionsRef}
+            items={sessionItems}
+            fileMentionsEnabled={enableFileMentions}
+          />
         ) : null}
         {enableSkillMentions ? (
           <SkillMentionHydrator

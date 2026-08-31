@@ -55,7 +55,18 @@ const largeRepoPaths = Array.from(
   (_, index) => `packages/app/src/module-${String(index).padStart(3, '0')}.ts`
 );
 
-function FileTreeStory({ paths }: { readonly paths: readonly string[] }) {
+function FileTreeStory({
+  paths,
+  isLocalMachine,
+}: {
+  readonly paths: readonly string[];
+  /**
+   * True renders the LOCAL row menu (open in an editor + reveal in the file
+   * manager); false renders the remote one (download). Both keep the mention
+   * and copy-path entries. Right-click any row.
+   */
+  readonly isLocalMachine?: boolean;
+}) {
   const provider = useMemo(
     () =>
       createFakeSessionFileProvider({
@@ -68,12 +79,22 @@ function FileTreeStory({ paths }: { readonly paths: readonly string[] }) {
       }),
     [paths]
   );
+  const rowMenu = useMemo(
+    () => ({
+      provider,
+      workspaceRootPath: '/Users/me/project',
+      isLocalMachine: isLocalMachine ?? false,
+      onMentionFile: () => true,
+    }),
+    [isLocalMachine, provider]
+  );
 
   return (
     <FileTreeProviderView
       fileProvider={provider}
       fileProviderPending={false}
       handleOpenFile={fn()}
+      rowMenu={rowMenu}
     />
   );
 }
@@ -103,4 +124,15 @@ export const RepoRoot: Story = {
 // Scroll this one: only a viewport-sized window of rows is ever mounted.
 export const LargeVirtualizedTree: Story = {
   args: { paths: largeRepoPaths },
+};
+
+// Right-click a row: a workspace on another machine can only be downloaded.
+export const RemoteRowMenu: Story = {
+  args: { paths: repoRootPaths },
+};
+
+// The same tree whose files are on THIS machine — download would write a second
+// copy of a file the user already has, so the row reveals it instead.
+export const LocalRowMenu: Story = {
+  args: { paths: repoRootPaths, isLocalMachine: true },
 };

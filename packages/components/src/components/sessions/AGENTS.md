@@ -299,6 +299,13 @@ Session conversation page chain:
   worktree else opens a new window; its `-n`/`--new` forces a duplicate window
   every time (per editor `newWindowFlag` in `session-path-launchers.ts`). Warp is
   url-only (`warp://…new_tab`, via `shell.openExternal`).
+  The OS file manager is a launcher too (`finder`/`explorer`/`file-manager`,
+  gated per platform), running `open`/`explorer`/`xdg-open` on the workspace
+  DIRECTORY — those commands show a folder's contents, but on a file they would
+  hand it to its default application, so revealing a single file is the separate
+  `app.revealLocalPath` bridge the Files tree uses. It is listed LAST because
+  `resolveSelectedPathLauncher` falls back to the first option, and a user who
+  never picked one should still land on an editor.
   ACP selectors on existing sessions and child-tab drafts must go through
   `useSessionAcpSelectorContext()`. Session UI that reads ACP capabilities must
   use `useResolvedMachineMeta()` so machine Flock capability rows override
@@ -805,6 +812,42 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   nested folder each time the provider rebuilds the tree, because a lazy
   directory carries no children until it is initialized. Coverage:
   `tests/file-tree-view-state.test.tsx`.
+  **The row right-click menu's location-dependent pair is chosen by WHERE the
+  files are** (`components/file-tree-row-menu.tsx`, opt-in through the tree's
+  `rowMenu` prop). A workspace on another machine can only be DOWNLOADED — the
+  bytes have to reach this renderer before they can be anywhere else — while a
+  workspace on this machine is already on disk, so it reveals the item in the OS
+  file manager (plus "Open in <editor>") instead of writing a second copy. That
+  split is `isLocalMachine`, NOT `workspaceRootPath`: the path resolves on the
+  session's OWN machine, remote included, which is exactly why Copy path can
+  offer the machine-absolute path either way. Add to conversation and both copy
+  entries are location-independent. "Open in <editor>" probes rather than
+  assumes (an entry for an uninstalled editor can only fail) and runs the
+  selection through `canPathLauncherOpenFile`, which drops the file managers and
+  Warp: their commands hand a FILE to its default application instead of showing
+  it. Download reads through File Preview v3 one file at a
+  time and zips a folder in the renderer (`lib/file-tree-download.ts` plans it,
+  `lib/workspace-file-download.ts` executes it), which is where the file-count
+  and byte limits come from. Two rules keep that honest: a subtree holding a
+  directory the index has never listed REFUSES rather than shipping a zip that
+  is silently short (it asks the machine for those directories so the retry
+  works), and an archive that dropped unreadable files says so in its toast.
+  Reveal is `shell.showItemInFolder` through `app.revealLocalPath`, never
+  `shell.openPath` — the path comes from the renderer, and `openPath` on a file
+  hands it to its default application. Opening the workspace FOLDER is the
+  separate `finder`/`explorer`/`file-manager` path launcher in the header's
+  "Open in" dropdown. ONE Radix root serves the whole tree (rows are virtualized
+  and memoized per scroll frame), and its trigger must stay enabled: Radix reads
+  `disabled` from the props it rendered with, so gating it on "a row is already
+  targeted" swallows the first right-click. "Add to conversation" writes a real
+  `@path` mention into the ACTIVE tab's composer through
+  `SessionChatInterfaceHandle.insertFileMention` — the same route a dropped
+  session mention takes — and `buildFileMentionInsertion` shares
+  `toFileCandidate`'s token convention rather than restating it: a directory's
+  VALUE keeps its trailing slash (what the known-path set and the hydrator match
+  on) while its committed TEXT drops it. Coverage:
+  `tests/file-tree-row-context-menu.test.tsx`, `tests/file-tree-download.test.ts`,
+  `tests/workspace-file-download.test.ts`.
 - **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
   panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
   over a network; in the local Electron bundle a lazy `import()` adds no benefit

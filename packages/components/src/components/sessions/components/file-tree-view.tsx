@@ -1,4 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -6,6 +16,11 @@ import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'luci
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
 import { type TreeDataItem } from '@/components/tree-view';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
+import {
+  useFileTreeRowMenu,
+  type FileTreeRowMenuConfig,
+  type FileTreeRowMenuRenderer,
+} from './file-tree-row-menu';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
@@ -42,6 +57,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { runtimeAtom } from '@/atoms/runtime';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
 import { Button, ScrollArea } from '@/ui';
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/ui/context-menu';
 import {
   createFileIconComponent,
   createFolderIconComponent,
@@ -65,6 +81,10 @@ interface FileTreeViewProps {
   // unmount (the side panel swaps the Files tab out for a file/diff viewer).
   // Callers that stay mounted can omit it and keep component-local state.
   viewStateKey?: string;
+  // Enables the row right-click menu (download / reveal in the file manager).
+  // Omitted by surfaces that have neither a byte source nor a local path, which
+  // then keep the browser's own context menu.
+  rowMenu?: FileTreeRowMenuConfig;
 }
 
 type ControlledFileTreeViewProps = Omit<FileTreeViewProps, 'session' | 'autoCodeCollab'>;
@@ -204,13 +224,20 @@ function VirtualFileTree({
   data,
   viewportRef,
   viewStateKey,
+  renderRowMenu,
 }: {
   readonly data: readonly TreeDataItem[];
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   readonly viewStateKey?: string;
+  readonly renderRowMenu?: FileTreeRowMenuRenderer;
 }) {
   const [viewState, updateViewState] = useFileTreeViewState(viewStateKey);
   const selectedId = viewState.selectedId;
+  // ONE context menu for the whole tree, not one per row: rows are virtualized
+  // and memoized against every scroll frame, so a Radix root per row would put
+  // dozens of providers on the hot path. The row only reports which id was
+  // right-clicked; the event then bubbles to the trigger below, which opens.
+  const [contextMenuPath, setContextMenuPath] = useState<string | null>(null);
 
   // Prune for RENDERING only. The stored set is the user's intent and must keep
   // ids the current tree cannot resolve yet: a lazily loaded directory is empty
@@ -295,7 +322,12 @@ function VirtualFileTree({
 
   if (!shouldVirtualizeRows) {
     return (
-      <div role="tree" className="min-w-0">
+      <FileTreeContextMenuSurface
+        className="min-w-0"
+        renderRowMenu={renderRowMenu}
+        contextMenuPath={contextMenuPath}
+        onContextMenuPathChange={setContextMenuPath}
+      >
         {rows.map((row) => (
           <VirtualFileTreeRow
             key={row.item.id}
@@ -303,9 +335,10 @@ function VirtualFileTree({
             selected={selectedId === row.item.id}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            onContextMenu={renderRowMenu ? setContextMenuPath : undefined}
           />
         ))}
-      </div>
+      </FileTreeContextMenuSurface>
     );
   }
 
@@ -313,10 +346,12 @@ function VirtualFileTree({
   // scrollport the scrollable height that lets a measure pass resolve a real
   // range, instead of collapsing to zero height and never recovering.
   return (
-    <div
-      role="tree"
+    <FileTreeContextMenuSurface
       className="relative min-w-0"
       style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      renderRowMenu={renderRowMenu}
+      contextMenuPath={contextMenuPath}
+      onContextMenuPathChange={setContextMenuPath}
     >
       {virtualItems.map((virtualItem) => {
         const row = rows[virtualItem.index];
@@ -330,10 +365,63 @@ function VirtualFileTree({
             virtualSize={virtualItem.size}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            onContextMenu={renderRowMenu ? setContextMenuPath : undefined}
           />
         );
       })}
+    </FileTreeContextMenuSurface>
+  );
+}
+
+/**
+ * The `role="tree"` element, wrapped in the shared context menu when a caller
+ * supplies row actions. Without one it renders the bare tree, so a surface with
+ * no actions keeps the host's own right-click menu instead of an empty popup.
+ *
+ * The row sets `contextMenuPath` from its own `contextmenu` handler. That fires
+ * at the row and only then bubbles to the trigger, so the path is already set by
+ * the time Radix opens and the items below render for the right row.
+ */
+function FileTreeContextMenuSurface({
+  children,
+  className,
+  style,
+  renderRowMenu,
+  contextMenuPath,
+  onContextMenuPathChange,
+}: {
+  readonly children: ReactNode;
+  readonly className: string;
+  readonly style?: CSSProperties;
+  readonly renderRowMenu?: FileTreeRowMenuRenderer;
+  readonly contextMenuPath: string | null;
+  readonly onContextMenuPathChange: (path: string | null) => void;
+}) {
+  const tree = (
+    <div role="tree" className={className} style={style}>
+      {children}
     </div>
+  );
+  if (!renderRowMenu) {
+    return tree;
+  }
+
+  // The trigger stays enabled: Radix reads `disabled` from the props it was
+  // rendered with, so gating it on "a row is already targeted" would swallow the
+  // FIRST right-click — the one that sets the target. The trigger's box is
+  // exactly the rows (they are `w-full` of it and it is sized to their total
+  // height), so an open with no target is not reachable in practice.
+  return (
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) onContextMenuPathChange(null);
+      }}
+    >
+      <ContextMenuTrigger asChild>{tree}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[180px]">
+        {contextMenuPath === null ? null : renderRowMenu(contextMenuPath)}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -349,6 +437,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   virtualSize,
   onSelect,
   onToggleDirectory,
+  onContextMenu,
 }: {
   readonly row: VirtualFileTreeRowModel;
   readonly selected: boolean;
@@ -356,6 +445,8 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   readonly virtualSize?: number;
   readonly onSelect: (itemId: string) => void;
   readonly onToggleDirectory: (itemId: string) => void;
+  /** Reports which row was right-clicked to the tree's single context menu. */
+  readonly onContextMenu?: (itemId: string) => void;
 }) {
   const item = row.item;
   const disabled = item.disabled === true;
@@ -403,6 +494,17 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
         ...(virtualStart === undefined ? {} : { transform: `translateY(${virtualStart}px)` }),
       }}
       onClick={activate}
+      onContextMenu={
+        onContextMenu === undefined
+          ? undefined
+          : () => {
+              // Selecting on right-click matches every file tree the user has
+              // used, and it is what makes the acted-on row visible while the
+              // menu is open.
+              if (!disabled) onSelect(item.id);
+              onContextMenu(item.id);
+            }
+      }
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -445,6 +547,7 @@ function ControlledFileTreeView({
   fileProviderMessage,
   changedFilePaths,
   viewStateKey,
+  rowMenu,
 }: ControlledFileTreeViewProps) {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -470,6 +573,7 @@ function ControlledFileTreeView({
       : providerFileTree.state;
     return fileTreeToTreeData(tree, handleOpenFile, handleLazyDirectoryOpen);
   }, [changedFilePathSet, providerFileTree.state, handleOpenFile, handleLazyDirectoryOpen]);
+  const renderRowMenu = useFileTreeRowMenu(rowMenu, providerFileTree.state);
   const message = providerFileTree.message ?? fileProviderMessage;
 
   // Collapse the connecting/ready phases into a single "loading" surface: the
@@ -536,6 +640,7 @@ function ControlledFileTreeView({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          renderRowMenu={renderRowMenu}
         />
       </div>
     </ScrollArea>
@@ -564,6 +669,7 @@ const AutoFileTreeView = ({
   autoCodeCollab = true,
   changedFilePaths,
   viewStateKey,
+  rowMenu,
 }: FileTreeViewProps) => {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -712,6 +818,7 @@ const AutoFileTreeView = ({
     () => fileTreeToTreeData(activeFileTree, handleOpenFile, handleLazyDirectoryOpen),
     [activeFileTree, handleLazyDirectoryOpen, handleOpenFile]
   );
+  const renderRowMenu = useFileTreeRowMenu(rowMenu, activeFileTree);
   const localStatus = localProjectFileData.status;
   const localError = localProjectFileData.error;
   const localHasEntry = Boolean(localProjectFileData.entry);
@@ -855,6 +962,7 @@ const AutoFileTreeView = ({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          renderRowMenu={renderRowMenu}
         />
 
         {shouldUseLocalFileList && localListTruncated ? (

@@ -125,6 +125,7 @@ export type DraftSessionChatInterfaceHandle = {
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   insertSessionMention: (sessionId: string) => boolean;
+  insertFileMention: (target: { path: string; isDirectory: boolean }) => boolean;
 };
 
 export const DraftSessionChatInterface = memo(
@@ -591,6 +592,9 @@ export const DraftSessionChatInterface = memo(
           },
           insertSessionMention: (sessionId: string) => {
             return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+          },
+          insertFileMention: (target: { path: string; isDirectory: boolean }) => {
+            return inputAreaRef.current?.insertFileMention(target) ?? false;
           },
         }),
         []

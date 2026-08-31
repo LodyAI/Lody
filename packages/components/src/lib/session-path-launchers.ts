@@ -58,7 +58,40 @@ export const BUILTIN_PATH_LAUNCHERS: readonly BuiltinPathLauncher[] = [
     platforms: ['darwin'],
     requiresElectron: true,
   },
+  // The OS file manager, opening the workspace FOLDER. Kept last so it never
+  // becomes the implicit default for a user who has never picked a launcher —
+  // `resolveSelectedPathLauncher` falls back to the first available option.
+  // Product names, like every other label here, so they are not translated.
+  {
+    kind: 'builtin',
+    id: 'finder',
+    label: 'Finder',
+    platforms: ['darwin'],
+    requiresElectron: true,
+  },
+  {
+    kind: 'builtin',
+    id: 'explorer',
+    label: 'File Explorer',
+    platforms: ['win32'],
+    requiresElectron: true,
+  },
+  {
+    kind: 'builtin',
+    id: 'file-manager',
+    label: 'File Manager',
+    platforms: ['linux'],
+    requiresElectron: true,
+  },
 ];
+
+const FILE_MANAGER_LAUNCHER_IDS = ['finder', 'explorer', 'file-manager'] as const;
+
+type FileManagerLauncherId = (typeof FILE_MANAGER_LAUNCHER_IDS)[number];
+
+function isFileManagerLauncherId(id: BuiltinPathLauncherId): id is FileManagerLauncherId {
+  return (FILE_MANAGER_LAUNCHER_IDS as readonly string[]).includes(id);
+}
 
 export function getCustomPathLauncherOptionId(id: string): string {
   return `${CUSTOM_PATH_LAUNCHER_ID_PREFIX}${id}`;
@@ -127,6 +160,22 @@ export function resolveSelectedPathLauncher(
     ? options.find((option) => getPathLauncherId(option) === selectedLauncherId)
     : undefined;
   return preferred ?? options[0] ?? BUILTIN_PATH_LAUNCHERS[0]!;
+}
+
+/**
+ * Whether this launcher makes sense on a single FILE rather than the workspace
+ * folder.
+ *
+ * Two builtins deliberately do not: a file manager's command
+ * (`open`/`explorer`/`xdg-open`) hands a file to whatever application claims its
+ * extension instead of showing it — revealing a file is `app.revealLocalPath` —
+ * and Warp opens a terminal tab, which a file path does not describe. Custom
+ * launchers are the user's own editor command and are assumed to take a file.
+ */
+export function canPathLauncherOpenFile(launcher: PathLauncherOption): boolean {
+  if (launcher.kind === 'custom') return true;
+  return !FILE_MANAGER_LAUNCHER_IDS.includes(launcher.id as FileManagerLauncherId) &&
+    launcher.id !== 'warp';
 }
 
 export function getPathLauncherId(launcher: PathLauncherOption): string {
@@ -394,6 +443,49 @@ function buildEditorCliLauncherInput(
   };
 }
 
+/**
+ * Opening the workspace FOLDER in the OS file manager.
+ *
+ * Each platform gets the command that opens a directory window, never the one
+ * that "opens" whatever the path is: `open`/`explorer`/`xdg-open` on a
+ * directory show its contents, which is the whole point of the entry. Revealing
+ * a single FILE is a different operation and goes through the
+ * `app.revealLocalPath` bridge (`shell.showItemInFolder`) instead — the shell
+ * commands here would hand a file to its default application.
+ *
+ * Linux has no one file manager, so `xdg-open` leads and the common desktop
+ * ones follow as fallbacks (capped at 3 by `LaunchLocalPathInput`).
+ */
+function buildFileManagerLauncherInput(
+  id: FileManagerLauncherId,
+  targetPath: string,
+  label: string
+): LaunchLocalPathInput {
+  const base = { kind: 'command' as const, targetPath, label };
+  const run = (command: string) => ({ command, args: [targetPath] });
+
+  switch (id) {
+    case 'finder':
+      return {
+        ...base,
+        command: { command: '/usr/bin/open', args: [targetPath] },
+        fallbackCommands: [run('open')],
+      };
+    case 'explorer':
+      return {
+        ...base,
+        command: run('explorer'),
+        fallbackCommands: [run('C:\\Windows\\explorer.exe')],
+      };
+    case 'file-manager':
+      return {
+        ...base,
+        command: run('xdg-open'),
+        fallbackCommands: [run('nautilus'), run('dolphin'), run('thunar')],
+      };
+  }
+}
+
 export function buildPathLauncherLaunchInput(
   launcher: PathLauncherOption,
   targetPath: string,
@@ -433,6 +525,10 @@ export function buildPathLauncherLaunchInput(
       targetPath,
       label: launcher.label,
     };
+  }
+
+  if (isFileManagerLauncherId(launcher.id)) {
+    return buildFileManagerLauncherInput(launcher.id, targetPath, launcher.label);
   }
 
   if (launcher.id === 'warp') {
