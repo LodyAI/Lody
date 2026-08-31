@@ -28,7 +28,11 @@ export const CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES = {
   y: 'data-geometry-align-y',
   instance: 'data-geometry-align-instance',
   member: 'data-geometry-align-member',
+  visual: 'data-geometry-align-visual',
 } as const;
+
+/** Marks a DOM region in which repeated horizontal rails may be discovered. */
+export const CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE = 'data-geometry-discovery-scope';
 
 export type SemanticAlignmentAnchor =
   | 'inline-start'
@@ -37,7 +41,8 @@ export type SemanticAlignmentAnchor =
   | 'block-start'
   | 'block-center'
   | 'block-end'
-  | 'text-baseline';
+  | 'text-baseline'
+  | 'visual-center';
 
 export type SemanticAlignmentAxis = 'x' | 'y';
 
@@ -73,6 +78,15 @@ export const CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS = {
     name: 'sidebar.row.content-center',
     axis: 'y',
     anchor: 'block-center',
+    scope: 'instance',
+    minMembers: 2,
+    tolerance: 0.5,
+    policy: 'observe',
+  },
+  sidebarRowVisualCenter: {
+    name: 'sidebar.row.visual-center',
+    axis: 'y',
+    anchor: 'visual-center',
     scope: 'instance',
     minMembers: 2,
     tolerance: 0.5,
@@ -302,6 +316,38 @@ export type SemanticAlignmentGroupResult = Readonly<{
   measurable: boolean;
   spread: number;
   members: readonly Readonly<SemanticBaselineMemberMeasurement & { delta: number }>[];
+}>;
+
+export type AlignmentRailCandidateAnchor = 'inline-start' | 'inline-center' | 'inline-end';
+
+export type AlignmentRailCandidate = Readonly<{
+  elementId: string;
+  /** Stable row identity so nested boxes on one row cannot inflate support. */
+  rowId: string;
+  anchor: AlignmentRailCandidateAnchor;
+  coordinate: number;
+  yStart: number;
+  yEnd: number;
+}>;
+
+export type AlignmentRailDiscoveryOptions = Readonly<{
+  /** Maximum distance at which a candidate can join a possible rail. */
+  mergeTolerance?: number;
+  /** Maximum distance from the median at which a member supports the rail. */
+  inlierTolerance?: number;
+  minSupport?: number;
+  minVerticalSpan?: number;
+}>;
+
+export type DiscoveredAlignmentRail = Readonly<{
+  anchor: AlignmentRailCandidateAnchor;
+  line: number;
+  support: number;
+  sampleSize: number;
+  verticalSpan: number;
+  confidence: number;
+  members: readonly Readonly<AlignmentRailCandidate & { delta: number; outlier: boolean }>[];
+  outliers: readonly Readonly<AlignmentRailCandidate & { delta: number; outlier: true }>[];
 }>;
 
 export type ChatWorkspaceGeometryValidationOptions = Readonly<{
@@ -627,6 +673,159 @@ export function evaluateSemanticAlignmentGroup(
     aligned: measurable && spread <= group.tolerance,
     members,
   };
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((first, second) => first - second);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length === 0) return 0;
+  if (sorted.length % 2 === 1) return sorted[middle] ?? 0;
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
+}
+
+/**
+ * Discover repeated horizontal alignment rails without assigning layout intent.
+ * Candidates are clustered independently by anchor kind, then scored against
+ * the cluster median. The result is diagnostic only: callers decide whether a
+ * reviewed rail should later become an explicit semantic contract.
+ */
+export function discoverAlignmentRails(
+  candidates: readonly AlignmentRailCandidate[],
+  options: AlignmentRailDiscoveryOptions = {}
+): readonly DiscoveredAlignmentRail[] {
+  const mergeTolerance = options.mergeTolerance ?? 4;
+  const inlierTolerance = options.inlierTolerance ?? 0.5;
+  const minSupport = options.minSupport ?? 3;
+  const minVerticalSpan = options.minVerticalSpan ?? 24;
+  if (!Number.isFinite(mergeTolerance) || mergeTolerance < 0) {
+    throw new RangeError('mergeTolerance must be a finite, non-negative number');
+  }
+  if (!Number.isFinite(inlierTolerance) || inlierTolerance < 0) {
+    throw new RangeError('inlierTolerance must be a finite, non-negative number');
+  }
+  if (!Number.isInteger(minSupport) || minSupport < 2) {
+    throw new RangeError('minSupport must be an integer greater than one');
+  }
+  if (!Number.isFinite(minVerticalSpan) || minVerticalSpan < 0) {
+    throw new RangeError('minVerticalSpan must be a finite, non-negative number');
+  }
+
+  for (const candidate of candidates) {
+    if (
+      !Number.isFinite(candidate.coordinate) ||
+      !Number.isFinite(candidate.yStart) ||
+      !Number.isFinite(candidate.yEnd) ||
+      candidate.yEnd < candidate.yStart
+    ) {
+      throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
+    }
+  }
+
+  const byAnchor = new Map<AlignmentRailCandidateAnchor, AlignmentRailCandidate[]>();
+  for (const candidate of candidates) {
+    const members = byAnchor.get(candidate.anchor) ?? [];
+    members.push(candidate);
+    byAnchor.set(candidate.anchor, members);
+  }
+
+  const rails: DiscoveredAlignmentRail[] = [];
+  for (const [anchor, anchorCandidates] of byAnchor) {
+    const clusters: AlignmentRailCandidate[][] = [];
+    const ordered = [...anchorCandidates].sort(
+      (first, second) =>
+        first.yStart - second.yStart ||
+        first.coordinate - second.coordinate ||
+        first.elementId.localeCompare(second.elementId)
+    );
+
+    for (const candidate of ordered) {
+      let target: AlignmentRailCandidate[] | undefined;
+      let targetDistance = Number.POSITIVE_INFINITY;
+      for (const cluster of clusters) {
+        const distance = Math.abs(
+          candidate.coordinate - median(cluster.map((member) => member.coordinate))
+        );
+        if (distance <= mergeTolerance && distance < targetDistance) {
+          target = cluster;
+          targetDistance = distance;
+        }
+      }
+      if (!target) {
+        clusters.push([candidate]);
+        continue;
+      }
+      const existingIndex = target.findIndex((member) => member.rowId === candidate.rowId);
+      if (existingIndex < 0) {
+        target.push(candidate);
+        continue;
+      }
+      const targetLine = median(target.map((member) => member.coordinate));
+      const existing = target[existingIndex];
+      if (
+        existing &&
+        Math.abs(candidate.coordinate - targetLine) < Math.abs(existing.coordinate - targetLine)
+      ) {
+        target[existingIndex] = candidate;
+      }
+    }
+
+    for (const cluster of clusters) {
+      const initialLine = median(cluster.map((member) => member.coordinate));
+      const uniqueByRow = new Map<string, AlignmentRailCandidate>();
+      for (const candidate of cluster) {
+        const current = uniqueByRow.get(candidate.rowId);
+        if (
+          !current ||
+          Math.abs(candidate.coordinate - initialLine) < Math.abs(current.coordinate - initialLine)
+        ) {
+          uniqueByRow.set(candidate.rowId, candidate);
+        }
+      }
+      const uniqueCandidates = [...uniqueByRow.values()];
+      const line = median(uniqueCandidates.map((member) => member.coordinate));
+      const members = uniqueCandidates
+        .map((member) => {
+          const delta = Math.abs(member.coordinate - line);
+          return { ...member, delta, outlier: delta > inlierTolerance };
+        })
+        .sort(
+          (first, second) =>
+            first.yStart - second.yStart ||
+            first.coordinate - second.coordinate ||
+            first.elementId.localeCompare(second.elementId)
+        );
+      const support = members.filter((member) => !member.outlier).length;
+      const yStart = Math.min(...members.map((member) => member.yStart));
+      const yEnd = Math.max(...members.map((member) => member.yEnd));
+      const verticalSpan = members.length === 0 ? 0 : yEnd - yStart;
+      if (support < minSupport || verticalSpan < minVerticalSpan) continue;
+      const confidence =
+        (support / members.length) *
+        (minVerticalSpan === 0 ? 1 : Math.min(1, verticalSpan / minVerticalSpan));
+      const outliers = members.filter(
+        (member): member is AlignmentRailCandidate & { delta: number; outlier: true } =>
+          member.outlier
+      );
+      rails.push({
+        anchor,
+        line,
+        support,
+        sampleSize: members.length,
+        verticalSpan,
+        confidence,
+        members,
+        outliers,
+      });
+    }
+  }
+
+  return rails.sort(
+    (first, second) =>
+      second.confidence - first.confidence ||
+      second.support - first.support ||
+      first.line - second.line ||
+      first.anchor.localeCompare(second.anchor)
+  );
 }
 
 /**

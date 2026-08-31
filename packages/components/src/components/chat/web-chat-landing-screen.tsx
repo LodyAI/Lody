@@ -1,7 +1,10 @@
 import type { ReactNode, Ref } from 'react';
 import type { DropZone } from '@/hooks/use-drop-zone';
 import { cn } from '@/lib/utils';
-import { CHAT_WORKSPACE_GEOMETRY_ANCHORS } from '@/lib/chat-workspace-geometry';
+import {
+  CHAT_WORKSPACE_GEOMETRY_ANCHORS,
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+} from '@/lib/chat-workspace-geometry';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getSessionChatInputAreaShellClassName } from '@/components/sessions/session-chat-input-area';
 import { ConversationColumn } from '@/components/shared/conversation-column';
@@ -49,6 +52,7 @@ export function WebChatLandingScreen({
   return (
     <div
       data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.chatLanding}
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'main.chat-landing' }}
       className={cn(
         'relative flex h-full w-full flex-1 flex-col overflow-hidden',
         'bg-background text-foreground',

@@ -12,7 +12,10 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
-import { CHAT_WORKSPACE_GEOMETRY_ANCHORS } from '@/lib/chat-workspace-geometry';
+import {
+  CHAT_WORKSPACE_GEOMETRY_ANCHORS,
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+} from '@/lib/chat-workspace-geometry';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
@@ -840,6 +843,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   return (
     <div
       data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.sidebarCard}
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'sidebar.shell' }}
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn(

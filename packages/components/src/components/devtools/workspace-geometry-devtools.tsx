@@ -106,7 +106,7 @@ function useEnabledState(): boolean {
   return enabled;
 }
 
-function readRect(element: HTMLElement): GeometryRect {
+function readRect(element: Element): GeometryRect {
   const rect = element.getBoundingClientRect();
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
@@ -247,7 +247,7 @@ function elementUsesLineHeight(element: HTMLElement): boolean {
   );
 }
 
-function describeElement(element: HTMLElement): string {
+function describeElement(element: Element): string {
   const anchor = element.getAttribute(CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE);
   if (anchor) return `[${anchor}]`;
   if (element.id) return `${element.tagName.toLowerCase()}#${element.id}`;
@@ -386,7 +386,7 @@ function SpacingAuditOverlay() {
   );
 }
 
-function isVisibleForGeometry(element: HTMLElement): boolean {
+function isVisibleForGeometry(element: Element): boolean {
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);
   return (
@@ -394,7 +394,7 @@ function isVisibleForGeometry(element: HTMLElement): boolean {
   );
 }
 
-function measureTextBaseline(element: HTMLElement): number {
+function measureTextBaseline(element: Element): number {
   const marker = document.createElement('span');
   marker.setAttribute('aria-hidden', 'true');
   marker.style.cssText =
@@ -405,8 +405,42 @@ function measureTextBaseline(element: HTMLElement): number {
   return baseline;
 }
 
+function measureTextVisualCenter(element: Element): number {
+  const style = getComputedStyle(element);
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context is unavailable');
+  context.font = [
+    style.fontStyle,
+    style.fontVariant,
+    style.fontWeight,
+    style.fontSize,
+    style.fontFamily,
+  ].join(' ');
+  const metrics = context.measureText(element.textContent ?? '');
+  return (
+    measureTextBaseline(element) +
+    (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2
+  );
+}
+
+function measureVisualCenter(element: Element): number {
+  if (element.getAttribute(CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES.visual) === 'text') {
+    return measureTextVisualCenter(element);
+  }
+  if (element instanceof SVGGraphicsElement) {
+    const box = element.getBBox();
+    const matrix = element.getScreenCTM();
+    if (matrix) {
+      return new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(matrix).y;
+    }
+  }
+  const rect = element.getBoundingClientRect();
+  return rect.top + rect.height / 2;
+}
+
 function measureSemanticAlignmentCoordinate(
-  element: HTMLElement,
+  element: Element,
   anchor: SemanticAlignmentAnchor
 ): number {
   const rect = element.getBoundingClientRect();
@@ -426,6 +460,8 @@ function measureSemanticAlignmentCoordinate(
       return rect.bottom;
     case 'text-baseline':
       return measureTextBaseline(element);
+    case 'visual-center':
+      return measureVisualCenter(element);
   }
 }
 
@@ -449,9 +485,9 @@ function readSemanticAlignments(): readonly SemanticAlignmentEntry[] {
         ? CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES.x
         : CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES.y;
     const elements = Array.from(
-      root.querySelectorAll<HTMLElement>(`[${attribute}="${rule.name}"]`)
+      root.querySelectorAll<Element>(`[${attribute}="${rule.name}"]`)
     ).filter(isVisibleForGeometry);
-    const groups = new Map<string, HTMLElement[]>();
+    const groups = new Map<string, Element[]>();
     for (const element of elements) {
       const instance =
         rule.scope === 'instance'
@@ -543,6 +579,7 @@ function SemanticAlignmentOverlay() {
             key={`${entry.groupLabel}-${index}`}
             data-geometry-alignment-name={entry.groupLabel}
             data-geometry-alignment-axis={entry.axis}
+            data-geometry-alignment-anchor={entry.anchor}
             data-geometry-alignment-aligned={entry.aligned ? 'true' : 'false'}
             data-geometry-alignment-spread={Number(entry.spread.toFixed(2))}
             style={{
@@ -702,6 +739,7 @@ function SemanticBaselineOverlay() {
         return (
           <div
             key={`${entry.groupLabel}-${index}`}
+            data-geometry-baseline-name={entry.groupLabel}
             data-geometry-baseline-aligned={entry.aligned ? 'true' : 'false'}
             data-geometry-baseline-mode={entry.mode}
             data-geometry-baseline-spread={Number(entry.spread.toFixed(2))}
@@ -760,6 +798,10 @@ export default function WorkspaceGeometryDevtools({
       <style>{`
         [data-geometry-actions-visible="true"] [data-geometry-hover-action] {
           opacity: 1 !important;
+          pointer-events: none !important;
+        }
+        [data-geometry-actions-visible="true"] [data-geometry-hover-rest] {
+          opacity: 0 !important;
           pointer-events: none !important;
         }
       `}</style>

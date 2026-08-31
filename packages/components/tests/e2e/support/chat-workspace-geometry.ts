@@ -4,18 +4,22 @@ import {
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
   CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE,
   CHAT_WORKSPACE_GEOMETRY_SPEC,
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
   CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS,
   CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
   CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES,
   CHAT_WORKSPACE_SPACING_AUDIT_PROPERTIES,
   evaluateSemanticAlignmentGroup,
   evaluateSemanticBaselineGroup,
+  discoverAlignmentRails,
   isSpacingRhythmMultiple,
   type ChatWorkspaceSpacingAuditProperty,
   type ChatWorkspaceGeometryAnchor,
   type ChatWorkspaceGeometrySnapshot,
   type GeometryRect,
   type GeometryViolation,
+  type AlignmentRailCandidate,
+  type DiscoveredAlignmentRail,
   type SemanticAlignmentAnchor,
   type SemanticAlignmentAxis,
   type SemanticAlignmentPolicy,
@@ -65,6 +69,13 @@ export type BrowserSemanticAlignmentEntry = Readonly<{
     delta: number;
     rect: GeometryRect;
   }>[];
+}>;
+
+export type BrowserAlignmentRailDiscoveryScope = Readonly<{
+  scope: string;
+  rect: GeometryRect;
+  candidateCount: number;
+  rails: readonly DiscoveredAlignmentRail[];
 }>;
 
 const anchorValues = Object.values(CHAT_WORKSPACE_GEOMETRY_ANCHORS);
@@ -283,6 +294,114 @@ export async function auditChatWorkspaceSpacing(
   });
 }
 
+export async function discoverChatWorkspaceAlignmentRails(
+  page: Page
+): Promise<readonly BrowserAlignmentRailDiscoveryScope[]> {
+  const scopes = await page.evaluate(
+    ({ discoveryAttribute, alignmentAttributes }) => {
+      const isVisible = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number.parseFloat(style.opacity || '1') > 0
+        );
+      };
+      const hasDirectText = (element: Element) =>
+        Array.from(element.childNodes).some(
+          (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+        );
+      const isCandidate = (element: Element) =>
+        element.matches(
+          `button, a, input, select, textarea, svg, [${alignmentAttributes.member}]`
+        ) || hasDirectText(element);
+      const describe = (element: Element, index: number) => {
+        const semanticMember = element.getAttribute(alignmentAttributes.member);
+        const ariaLabel = element.getAttribute('aria-label');
+        const dataId = element.getAttribute('data-id');
+        const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 48);
+        const label =
+          (semanticMember ?? ariaLabel ?? dataId ?? text) || element.tagName.toLowerCase();
+        return `${index + 1}:${label}`;
+      };
+
+      return Array.from(document.querySelectorAll<Element>(`[${discoveryAttribute}]`)).map(
+        (scopeElement) => {
+          const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
+          const scopeRect = scopeElement.getBoundingClientRect();
+          const elements = Array.from(scopeElement.querySelectorAll<Element>('*')).filter(
+            (element) =>
+              element.closest(`[${discoveryAttribute}]`) === scopeElement &&
+              !element.closest('[data-geometry-devtool]') &&
+              isVisible(element) &&
+              isCandidate(element)
+          );
+          const candidates = elements.flatMap((element, index) => {
+            const rect = element.getBoundingClientRect();
+            const instance = element
+              .closest(`[${alignmentAttributes.instance}]`)
+              ?.getAttribute(alignmentAttributes.instance);
+            const rowId =
+              instance ??
+              `y:${Number((rect.top + rect.height / 2).toFixed(2))}:${Number(rect.height.toFixed(2))}`;
+            const elementId = describe(element, index);
+            return [
+              {
+                elementId,
+                rowId,
+                anchor: 'inline-start' as const,
+                coordinate: rect.left,
+                yStart: rect.top,
+                yEnd: rect.bottom,
+              },
+              {
+                elementId,
+                rowId,
+                anchor: 'inline-center' as const,
+                coordinate: rect.left + rect.width / 2,
+                yStart: rect.top,
+                yEnd: rect.bottom,
+              },
+              {
+                elementId,
+                rowId,
+                anchor: 'inline-end' as const,
+                coordinate: rect.right,
+                yStart: rect.top,
+                yEnd: rect.bottom,
+              },
+            ];
+          });
+          return {
+            scope,
+            rect: {
+              x: scopeRect.x,
+              y: scopeRect.y,
+              width: scopeRect.width,
+              height: scopeRect.height,
+            },
+            candidates,
+          };
+        }
+      );
+    },
+    {
+      discoveryAttribute: CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+      alignmentAttributes: CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
+    }
+  );
+
+  return scopes.map(({ scope, rect, candidates }) => ({
+    scope,
+    rect,
+    candidateCount: candidates.length,
+    rails: discoverAlignmentRails(candidates as readonly AlignmentRailCandidate[]),
+  }));
+}
+
 export async function auditChatWorkspaceSemanticAlignments(
   page: Page
 ): Promise<readonly BrowserSemanticAlignmentEntry[]> {
@@ -290,7 +409,7 @@ export async function auditChatWorkspaceSemanticAlignments(
     ({ anchors, attribute, alignmentAttributes, rules }) => {
       const root = document.querySelector(`[${attribute}="${anchors.workspaceShell}"]`);
       if (!(root instanceof HTMLElement)) throw new Error('Workspace shell is missing');
-      const isVisible = (element: HTMLElement) => {
+      const isVisible = (element: Element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
         return (
@@ -299,10 +418,10 @@ export async function auditChatWorkspaceSemanticAlignments(
           style.visibility !== 'hidden'
         );
       };
-      const describe = (element: HTMLElement) =>
+      const describe = (element: Element) =>
         element.getAttribute(alignmentAttributes.member) ??
         `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}`;
-      const textBaseline = (element: HTMLElement) => {
+      const textBaseline = (element: Element) => {
         const marker = document.createElement('span');
         marker.setAttribute('aria-hidden', 'true');
         marker.style.cssText =
@@ -312,7 +431,43 @@ export async function auditChatWorkspaceSemanticAlignments(
         marker.remove();
         return baseline;
       };
-      const coordinate = (element: HTMLElement, anchor: string) => {
+      const textVisualCenter = (element: Element) => {
+        const style = getComputedStyle(element);
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas 2D context is unavailable');
+        context.font = [
+          style.fontStyle,
+          style.fontVariant,
+          style.fontWeight,
+          style.fontSize,
+          style.fontFamily,
+        ].join(' ');
+        const metrics = context.measureText(element.textContent ?? '');
+        const ascent = metrics.actualBoundingBoxAscent;
+        const descent = metrics.actualBoundingBoxDescent;
+        if (!Number.isFinite(ascent) || !Number.isFinite(descent)) {
+          throw new Error(`Cannot measure visual text bounds for ${describe(element)}`);
+        }
+        return textBaseline(element) + (descent - ascent) / 2;
+      };
+      const visualCenter = (element: Element) => {
+        if (element.getAttribute(alignmentAttributes.visual) === 'text') {
+          return textVisualCenter(element);
+        }
+        if (element instanceof SVGGraphicsElement) {
+          const box = element.getBBox();
+          const matrix = element.getScreenCTM();
+          if (matrix) {
+            return new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(
+              matrix
+            ).y;
+          }
+        }
+        const rect = element.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      };
+      const coordinate = (element: Element, anchor: string) => {
         const rect = element.getBoundingClientRect();
         const direction = getComputedStyle(element).direction;
         if (anchor === 'inline-start') return direction === 'rtl' ? rect.right : rect.left;
@@ -321,15 +476,16 @@ export async function auditChatWorkspaceSemanticAlignments(
         if (anchor === 'block-start') return rect.top;
         if (anchor === 'block-center') return rect.top + rect.height / 2;
         if (anchor === 'block-end') return rect.bottom;
+        if (anchor === 'visual-center') return visualCenter(element);
         return textBaseline(element);
       };
 
       return Object.values(rules).flatMap((rule) => {
         const axisAttribute = rule.axis === 'x' ? alignmentAttributes.x : alignmentAttributes.y;
         const elements = Array.from(
-          root.querySelectorAll<HTMLElement>(`[${axisAttribute}="${rule.name}"]`)
+          root.querySelectorAll<Element>(`[${axisAttribute}="${rule.name}"]`)
         ).filter(isVisible);
-        const groups = new Map<string, HTMLElement[]>();
+        const groups = new Map<string, Element[]>();
         for (const element of elements) {
           const instance =
             rule.scope === 'instance'

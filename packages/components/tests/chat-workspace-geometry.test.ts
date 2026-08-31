@@ -7,6 +7,7 @@ import {
   calculateGridPlacementRect,
   calculateMainPaneGrid,
   calculateSidebarGrid,
+  discoverAlignmentRails,
   evaluateSemanticAlignmentGroup,
   evaluateSemanticBaselineGroup,
   isSpacingRhythmMultiple,
@@ -210,6 +211,63 @@ describe('conversation, spacing, and semantic baselines', () => {
         members: [{ name: 'title', coordinate: 40 }],
       })
     ).toMatchObject({ measurable: false, aligned: false });
+  });
+
+  it('discovers a repeated rail and identifies a two-pixel outlier', () => {
+    const result = discoverAlignmentRails(
+      [322, 322, 322, 324, 322, 322].map((coordinate, index) => ({
+        elementId: `child-${index + 1}`,
+        rowId: `row-${index + 1}`,
+        anchor: 'inline-end' as const,
+        coordinate,
+        yStart: index * 32,
+        yEnd: index * 32 + 20,
+      }))
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      anchor: 'inline-end',
+      line: 322,
+      support: 5,
+      sampleSize: 6,
+      confidence: 5 / 6,
+      outliers: [{ elementId: 'child-4', coordinate: 324, delta: 2, outlier: true }],
+    });
+  });
+
+  it('does not let nested boxes on one row manufacture rail support', () => {
+    const result = discoverAlignmentRails(
+      [
+        {
+          elementId: 'row-one-wrapper',
+          rowId: 'row-one',
+          anchor: 'inline-start' as const,
+          coordinate: 42,
+          yStart: 0,
+          yEnd: 20,
+        },
+        {
+          elementId: 'row-one-text',
+          rowId: 'row-one',
+          anchor: 'inline-start' as const,
+          coordinate: 42,
+          yStart: 2,
+          yEnd: 18,
+        },
+        {
+          elementId: 'row-two-text',
+          rowId: 'row-two',
+          anchor: 'inline-start' as const,
+          coordinate: 42,
+          yStart: 32,
+          yEnd: 52,
+        },
+      ],
+      { minSupport: 3 }
+    );
+
+    expect(result).toEqual([]);
   });
 });
 

@@ -14,8 +14,10 @@ mobile surfaces.
 - Compact number units (K/M/B vs 万/亿) follow the product language via
   `toIntlLocaleOrEn` / `formatCompactNumber`, never the host OS locale.
 - Prefer shared primitives from `src/components/ui` over private replacements.
-- `src/lib/chat-workspace-geometry.ts` owns the mathematical design grid for the
-  authenticated Web chat workspace. Production layout stays ordinary Flex/Grid
+- `src/lib/chat-workspace-geometry.ts` owns the bootstrap mathematical design grid
+  for the authenticated Web chat workspace. Its current numeric grid is a reviewed
+  reference, not evidence that the product was automatically inferred. Production
+  layout stays ordinary Flex/Grid
   and exposes only stable geometry data markers; never turn its columns into
   component props or wrapper DOM. The Storybook fixture and Playwright gate
   consume the same spec. In development, `?geometry=1` adds the reference overlay
@@ -23,12 +25,19 @@ mobile surfaces.
   spacing-rhythm diagnostics, and Mesurer; none mounts in production or tests.
   Semantic alignment compares explicit control boxes: repeated slots may share
   an X-axis line across rows, while icon/text controls within one row may share a
-  Y-axis instance. Only text uses a typographic baseline; SVG optical weight stays
-  outside deterministic geometry. Named text groups expose stable member labels;
-  diagnostics place guides at the median and fail on the complete member spread,
-  never DOM order. Padding, margin, gap, and line-height multiples are spacing
-  diagnostics, never alignment violations. Diagnostic debt remains non-blocking
-  until a rule is explicitly promoted into the Playwright gate.
+  Y-axis instance. Cross-font rows use visual ink centers: text comes from the
+  rendered font's actual ascent/descent metrics, SVGs from their transformed path
+  bounds, and CSS shapes from their visible boxes. Typographic baselines compare
+  text only; glyph weight and perceived balance remain CV concerns. Named groups
+  expose stable member labels; diagnostics place guides at the median and fail on
+  the complete member spread, never DOM order. Padding, margin, gap, and line-height
+  multiples are spacing diagnostics, never alignment violations. Diagnostic debt
+  remains non-blocking until a rule is explicitly promoted into the Playwright gate.
+  Alignment-rail discovery is an earlier, heuristic stage: scoped visible DOM boxes
+  contribute start/center/end candidates, repeated X coordinates form median rails,
+  and members outside the inlier tolerance are reported as outliers. A discovered
+  rail is not layout intent and cannot pass or fail the gate until review promotes
+  it into a named rule.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches

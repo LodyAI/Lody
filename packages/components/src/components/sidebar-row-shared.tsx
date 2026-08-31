@@ -136,18 +136,23 @@ function SessionRowIndicator({
   hasUnreadMessages?: boolean;
 }) {
   let icon: ReactNode = null;
+  const visualAlignmentProps = {
+    [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowVisualCenter.name,
+    [semanticAlignmentAttributes.member]: 'leading-indicator-ink',
+  };
 
   if (isWaitingPermission) {
-    icon = <Hand className="h-3 w-3 text-status-warning" />;
+    icon = <Hand {...visualAlignmentProps} className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
     icon = (
       <Loader2
+        {...visualAlignmentProps}
         data-session-working-spinner=""
         className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
       />
     );
   } else if (hasUnreadMessages) {
-    icon = <span className="h-2 w-2 rounded-full bg-primary" />;
+    icon = <span {...visualAlignmentProps} className="h-2 w-2 rounded-full bg-primary" />;
   }
 
   return (
@@ -458,6 +463,7 @@ export function SessionRowLeadingSlot({
     >
       {openerTree ? (
         <button
+          data-geometry-hover-rest=""
           type="button"
           data-session-opened-by-toggle=""
           aria-label={openerTree.label}
@@ -484,7 +490,7 @@ export function SessionRowLeadingSlot({
           />
         </button>
       ) : showChildConnectors ? (
-        <div className={cn('absolute inset-0', restClassName)}>
+        <div data-geometry-hover-rest="" className={cn('absolute inset-0', restClassName)}>
           <span
             aria-hidden="true"
             data-session-tree-connector="trunk"
@@ -507,7 +513,7 @@ export function SessionRowLeadingSlot({
           />
         </div>
       ) : (
-        <div className={restClassName}>
+        <div data-geometry-hover-rest="" className={restClassName}>
           <SessionRowIndicator
             isWaitingPermission={isWaitingPermission}
             isWorking={isWorking}
@@ -653,6 +659,7 @@ export function SidebarRowEndSlot({
     >
       {hasRest ? (
         <span
+          data-geometry-hover-rest=""
           className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
         >
           {restIcon}

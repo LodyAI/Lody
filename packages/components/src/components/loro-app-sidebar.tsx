@@ -189,7 +189,10 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
-import { CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS } from '@/lib/chat-workspace-geometry';
+import {
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+  CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS,
+} from '@/lib/chat-workspace-geometry';
 
 const sidebarAlignmentRules = CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS;
 
@@ -635,7 +638,16 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     if (!canRename) return;
     setRenameTarget({ sessionId: session.id, initialTitle: title });
   }, [canRename, session.id, title]);
-  const titleContent = <span className="truncate">{title}</span>;
+  const titleContent = (
+    <span
+      data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
+      data-geometry-align-member="local-session-title-ink"
+      data-geometry-align-visual="text"
+      className="truncate"
+    >
+      {title}
+    </span>
+  );
   // Copy URL is always available (a private link still works for the owner);
   // sharing is a separate menu item that only appears when the conversation
   // isn't already team-visible.
@@ -2178,6 +2190,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           return (
             <div
               key={section.sectionKey}
+              {...{
+                [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: `sidebar.local-projects:${section.sectionKey}`,
+              }}
               className={cn('space-y-0.5', sectionCollapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0')}
             >
               <SidebarSectionHeader

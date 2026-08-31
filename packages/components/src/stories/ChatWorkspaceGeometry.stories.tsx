@@ -39,7 +39,10 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
 import type { SessionListProps, SessionListRow } from '@/components/session-list';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { WebWorkspaceFrame } from '@/components/web-workspace-layout';
-import { CHAT_WORKSPACE_GEOMETRY_SPEC } from '@/lib/chat-workspace-geometry';
+import {
+  CHAT_WORKSPACE_GEOMETRY_SPEC,
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+} from '@/lib/chat-workspace-geometry';
 
 const GEOMETRY_MACHINE_ID = 'machine-geometry' as MachineId;
 const GEOMETRY_PROJECT_ID = 'project-geometry' as LocalProjectId;
@@ -185,7 +188,10 @@ const geometryLocalSessions: SessionMeta[] = [
 function GeometrySidebarTopContent() {
   const [projectCollapsed, setProjectCollapsed] = useState(false);
   return (
-    <div className="mb-3 space-y-0.5">
+    <div
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'sidebar.local-projects:geometry' }}
+      className="mb-3 space-y-0.5"
+    >
       <SidebarSectionHeader
         label="Local Projects"
         collapsed={false}

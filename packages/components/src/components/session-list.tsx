@@ -96,7 +96,10 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
-import { CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS } from '@/lib/chat-workspace-geometry';
+import {
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+  CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS,
+} from '@/lib/chat-workspace-geometry';
 
 const sidebarAlignmentRules = CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS;
 
@@ -459,7 +462,12 @@ function SessionRowTime({
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
     <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span data-geometry-baseline-member="session-time" className="select-none tabular-nums">
+      <span
+        data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
+        data-geometry-align-member="session-time-ink"
+        data-geometry-align-visual="text"
+        className="select-none tabular-nums"
+      >
         {relativeTime}
       </span>
     </span>
@@ -659,6 +667,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
 
   return (
     <div
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: `sidebar.group:${group.key}` }}
       className={cn(
         'flex flex-col gap-0.5',
         group.collapsed ? 'mb-1 last:mb-0' : 'mb-2.5 last:mb-0'
@@ -878,7 +887,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
             const renderTitle = (extraClassName?: string) => (
               <span
-                data-geometry-baseline-member="session-title"
+                data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
+                data-geometry-align-member="session-title-ink"
+                data-geometry-align-visual="text"
                 className={cn('truncate', extraClassName)}
               >
                 {session.title}
@@ -995,11 +1006,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     onClick={handleAnchorClick}
                   />
                 ) : null}
-                <div
-                  data-geometry-baseline-group="text"
-                  data-geometry-baseline-name="sidebar.session.text"
-                  className="flex min-w-0 items-center gap-1.5"
-                >
+                <div className="flex min-w-0 items-center gap-1.5">
                   <SessionRowLeadingSlot
                     isWaitingPermission={session.isWaitingPermission}
                     isWorking={session.isWorking}
@@ -1063,13 +1070,21 @@ const SessionGroupSection = memo(function SessionGroupSection({
                           ) : hasChanges && !isMergeable ? (
                             <span className="flex items-center gap-1">
                               <span
-                                data-geometry-baseline-member="session-added-lines"
+                                data-geometry-align-y={
+                                  sidebarAlignmentRules.sidebarRowVisualCenter.name
+                                }
+                                data-geometry-align-member="session-added-lines-ink"
+                                data-geometry-align-visual="text"
                                 className="text-code-added"
                               >
                                 +{session.addedLines}
                               </span>
                               <span
-                                data-geometry-baseline-member="session-removed-lines"
+                                data-geometry-align-y={
+                                  sidebarAlignmentRules.sidebarRowVisualCenter.name
+                                }
+                                data-geometry-align-member="session-removed-lines-ink"
+                                data-geometry-align-visual="text"
                                 className="text-code-removed"
                               >
                                 -{session.deletedLines}

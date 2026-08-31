@@ -145,7 +145,7 @@ if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {
     const baselineGroups = Number(
       await baselineOverlay.getAttribute('data-geometry-baseline-group-count')
     );
-    expect(baselineGroups).toBeGreaterThan(0);
+    expect(baselineGroups).toBe(0);
     const baselineLines = baselineOverlay.locator('[data-geometry-baseline-aligned]');
     await expect(baselineLines).toHaveCount(baselineGroups);
     for (let index = 0; index < baselineGroups; index += 1) {
@@ -161,6 +161,10 @@ if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {
     await expect(alignmentOverlay.locator('[data-geometry-alignment-axis]')).toHaveCount(
       alignmentGroups
     );
+    const visualCenters = alignmentOverlay.locator(
+      '[data-geometry-alignment-anchor="visual-center"]'
+    );
+    expect(await visualCenters.count()).toBeGreaterThan(0);
     const trailingRail = alignmentOverlay.locator(
       '[data-geometry-alignment-name="sidebar.primary-trailing-rail-end"]'
     );
@@ -176,6 +180,13 @@ if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {
     expect(await hoverActions.count()).toBeGreaterThan(0);
     for (let index = 0; index < (await hoverActions.count()); index += 1) {
       await expect(hoverActions.nth(index)).toHaveCSS('opacity', '1');
+    }
+    const hoverRestContent = page.locator(
+      '[data-geometry-actions-visible="true"] [data-geometry-hover-rest]'
+    );
+    expect(await hoverRestContent.count()).toBeGreaterThan(0);
+    for (let index = 0; index < (await hoverRestContent.count()); index += 1) {
+      await expect(hoverRestContent.nth(index)).toHaveCSS('opacity', '0');
     }
 
     await expect(page.locator('[data-geometry-grid-scope="sidebar"]')).toBeVisible();
