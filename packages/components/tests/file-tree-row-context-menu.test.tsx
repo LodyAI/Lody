@@ -67,6 +67,8 @@ describe('file tree row context menu', () => {
     container?.remove();
     container = null;
     delete (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__;
+    // `vi.unstubAllGlobals` does not reach a property defined on `navigator`.
+    delete (navigator as { clipboard?: unknown }).clipboard;
     vi.unstubAllGlobals();
   });
 
@@ -198,7 +200,12 @@ describe('file tree row context menu', () => {
 
   it('copies the machine-absolute path and the workspace-relative one separately', async () => {
     const writeText = vi.fn(async () => undefined);
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    // Define the one property instead of replacing `navigator`: spreading it
+    // drops the Navigator prototype (and its accessors) along with it.
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     const host = await render(
       createElement(FileTreeProviderView, {
         fileProvider: createProvider(['src/a.ts']),

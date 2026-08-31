@@ -483,6 +483,13 @@ function buildFileManagerLauncherInput(
         command: run('xdg-open'),
         fallbackCommands: [run('nautilus'), run('dolphin'), run('thunar')],
       };
+    default: {
+      // Exhaustive over FileManagerLauncherId. `consistent-return` needs every
+      // path to end in a return or a throw, and this keeps a new id a type error
+      // here rather than silently inheriting the previous case's command.
+      const exhaustiveId: never = id;
+      throw new Error(`Path launcher ${String(exhaustiveId)} has no file manager command`);
+    }
   }
 }
 
