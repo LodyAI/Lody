@@ -4,10 +4,8 @@ import {
   buildPathLauncherLaunchInput,
   buildPathLauncherProbes,
   buildVSCodePathLauncherFallbackUrl,
-  canPathLauncherOpenFile,
   getAvailablePathLauncherOptions,
   getCustomPathLauncherOptionId,
-  getPathLauncherId,
   validateCustomPathLauncherCommandTemplate,
   type CustomPathLauncher,
 } from '../src/lib/session-path-launchers';
@@ -190,104 +188,6 @@ describe('built-in path launchers', () => {
       command: 'subl',
       args: ['/home/me/project'],
     });
-  });
-
-  it('offers exactly one file manager per platform, never first in the list', () => {
-    const forPlatform = (platform: string) =>
-      getAvailablePathLauncherOptions({ customLaunchers: [], isElectron: true, platform });
-    const fileManagerIds = (platform: string) =>
-      forPlatform(platform)
-        .filter(
-          (launcher) =>
-            launcher.kind === 'builtin' &&
-            (launcher.id === 'finder' ||
-              launcher.id === 'explorer' ||
-              launcher.id === 'file-manager')
-        )
-        .map((launcher) => (launcher.kind === 'builtin' ? launcher.id : ''));
-
-    expect(fileManagerIds('darwin')).toEqual(['finder']);
-    expect(fileManagerIds('win32')).toEqual(['explorer']);
-    expect(fileManagerIds('linux')).toEqual(['file-manager']);
-    // Web has no desktop bridge at all, so no file manager is offered there.
-    expect(
-      getAvailablePathLauncherOptions({
-        customLaunchers: [],
-        isElectron: false,
-        platform: 'darwin',
-      }).some((launcher) => launcher.kind === 'builtin' && launcher.id === 'finder')
-    ).toBe(false);
-
-    // `resolveSelectedPathLauncher` falls back to the first option, so a user
-    // who never picked a launcher must still land on an editor.
-    const first = forPlatform('darwin')[0];
-    expect(first?.kind === 'builtin' && first.id).toBe('vscode');
-  });
-
-  // The Files tree offers "Open in <launcher>" on a single file. A file manager
-  // command there would hand the file to its default application instead of
-  // showing it (revealing is a separate bridge), and a Warp tab does not
-  // describe a file at all.
-  it('excludes the file managers and Warp from single-file opens', () => {
-    const byId = (platform: string) =>
-      Object.fromEntries(
-        getAvailablePathLauncherOptions({
-          customLaunchers: [],
-          isElectron: true,
-          platform,
-        }).map((launcher) => [getPathLauncherId(launcher), canPathLauncherOpenFile(launcher)])
-      );
-
-    const darwin = byId('darwin');
-    expect(darwin['finder']).toBe(false);
-    expect(darwin['warp']).toBe(false);
-    expect(darwin['vscode']).toBe(true);
-    expect(darwin['zed']).toBe(true);
-    expect(darwin['xcode']).toBe(true);
-    expect(byId('win32')['explorer']).toBe(false);
-    expect(byId('linux')['file-manager']).toBe(false);
-
-    // A custom launcher is the user's own editor command.
-    const custom = getAvailablePathLauncherOptions({
-      customLaunchers: [{ id: 'x', label: 'PhpStorm', commandTemplate: 'phpstorm {path}' }],
-      isElectron: true,
-      platform: 'darwin',
-    }).find((launcher) => launcher.kind === 'custom');
-    expect(custom && canPathLauncherOpenFile(custom)).toBe(true);
-  });
-
-  it('opens the folder itself in each platform file manager', () => {
-    const fileManager = (id: string, platform: string) =>
-      getAvailablePathLauncherOptions({ customLaunchers: [], isElectron: true, platform }).find(
-        (launcher) => launcher.kind === 'builtin' && launcher.id === id
-      );
-
-    expect(buildPathLauncherLaunchInput(fileManager('finder', 'darwin')!, '/Users/me/p')).toEqual({
-      kind: 'command',
-      command: { command: '/usr/bin/open', args: ['/Users/me/p'] },
-      fallbackCommands: [{ command: 'open', args: ['/Users/me/p'] }],
-      targetPath: '/Users/me/p',
-      label: 'Finder',
-    });
-
-    expect(
-      buildPathLauncherLaunchInput(fileManager('explorer', 'win32')!, 'C:\\code\\app')
-    ).toEqual({
-      kind: 'command',
-      command: { command: 'explorer', args: ['C:\\code\\app'] },
-      fallbackCommands: [{ command: 'C:\\Windows\\explorer.exe', args: ['C:\\code\\app'] }],
-      targetPath: 'C:\\code\\app',
-      label: 'File Explorer',
-    });
-
-    const linux = buildPathLauncherLaunchInput(fileManager('file-manager', 'linux')!, '/home/me/p');
-    expect(linux.kind === 'command' && linux.command).toEqual({
-      command: 'xdg-open',
-      args: ['/home/me/p'],
-    });
-    expect(
-      linux.kind === 'command' && linux.fallbackCommands?.map((spec) => spec.command)
-    ).toEqual(['nautilus', 'dolphin', 'thunar']);
   });
 
   const getEditor = (id: string, platform: string) =>

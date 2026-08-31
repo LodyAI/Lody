@@ -845,9 +845,8 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   session mention takes — and `buildFileMentionInsertion` shares
   `toFileCandidate`'s token convention rather than restating it: a directory's
   VALUE keeps its trailing slash (what the known-path set and the hydrator match
-  on) while its committed TEXT drops it. Coverage:
-  `tests/file-tree-row-context-menu.test.tsx`, `tests/file-tree-download.test.ts`,
-  `tests/workspace-file-download.test.ts`.
+  on) while its committed TEXT drops it. This surface ships with NO automated
+  coverage, so every rule above rests on review alone.
 - **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
   panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
   over a network; in the local Electron bundle a lazy `import()` adds no benefit

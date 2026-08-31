@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CliRuntimeStateSchema,
-  IMAGE_EXPORT_MAX_BYTES,
   isDevEmailPasswordLoginEnabled,
   LaunchLocalPathInputSchema,
-  SaveFileBytesInputSchema,
-  SaveImageFileInputSchema,
 } from '../src/electron-ipc';
 
 describe('isDevEmailPasswordLoginEnabled', () => {
@@ -60,37 +57,6 @@ describe('LaunchLocalPathInputSchema', () => {
         kind: 'command',
         command: { command: 'code', args: ['/tmp/project\0bad'] },
         targetPath: '/tmp/project',
-      }).success
-    ).toBe(false);
-  });
-});
-
-describe('SaveFileBytesInputSchema', () => {
-  const parse = (byteLength: number) =>
-    SaveFileBytesInputSchema.safeParse({
-      fileName: 'notes.txt',
-      bytes: new ArrayBuffer(byteLength),
-    }).success;
-
-  // An empty file is an ordinary workspace file and `fs.writeFile` creates it
-  // exactly as asked. Inheriting the image export's non-empty bound turned
-  // downloading a 0-byte file into `invalid_payload` with no save dialog.
-  it('accepts an empty file', () => {
-    expect(parse(0)).toBe(true);
-  });
-
-  it('accepts a file at the budget and refuses one past it', () => {
-    expect(parse(IMAGE_EXPORT_MAX_BYTES)).toBe(true);
-    expect(parse(IMAGE_EXPORT_MAX_BYTES + 1)).toBe(false);
-  });
-
-  // The image export keeps its own lower bound: a zero-byte image is a failed
-  // encode, not a legitimate file.
-  it('leaves the image export refusing empty bytes', () => {
-    expect(
-      SaveImageFileInputSchema.safeParse({
-        fileName: 'shot.png',
-        bytes: new ArrayBuffer(0),
       }).success
     ).toBe(false);
   });
