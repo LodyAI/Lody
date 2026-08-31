@@ -299,6 +299,18 @@ Two things the dev build does deliberately, both load-bearing:
 
 ## GitHub auth shortcut
 
+- Custom and Registry ACP authentication uses a temporary protocol connection: initialize,
+  select an advertised agent-driven method, then call ACP `authenticate`. Deprecated `env_var`
+  methods are rejected rather than revived as a second credential protocol, and terminal methods
+  remain unavailable until Machine RPC has a real interactive terminal bridge. Request-scoped URL
+  and text/secret/single-select form elicitations are bounded, validated, and bridged one at a time
+  to Machine RPC progress; URLs must use HTTP(S). Replies stay ephemeral; secret defaults and raw
+  authentication-process output never enter retained progress. Renderer cancellation and the
+  CLI-owned deadline must abort the ACP request and terminate its whole process group, including a
+  timeout that lands during cleanup. A capability refresh after login remains the proof that
+  credentials actually became usable and must finish inside the renderer's 300-second workflow
+  deadline.
+
 - Agent `gh` auth for GitHub repo sessions is managed in
   `src/session/session-manager.ts`: it creates the git credential broker, prepends the
   `~/.lody/bin/gh` shim, and injects/refreshes a managed `GH_TOKEN` when no user token

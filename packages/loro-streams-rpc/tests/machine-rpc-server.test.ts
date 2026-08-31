@@ -142,6 +142,9 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-code-ack',
             action: 'start',
             authorizationCode: 'secret-browser-code',
+            authenticationInput: 'secret-form-input',
+            authorizationCodeEnvelope: { ciphertext: 'secret-code-ciphertext' },
+            authenticationInputEnvelope: { ciphertext: 'secret-form-ciphertext' },
             cliType: 'builtin',
             agentType: 'claude',
           },
@@ -155,7 +158,13 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
     await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledOnce());
     expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCode":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInput":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCodeEnvelope":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInputEnvelope":"[REDACTED]"');
     expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-browser-code');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-input');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-code-ciphertext');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-ciphertext');
     server.stop();
   });
 
@@ -362,11 +371,18 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     await server.start();
     await fake.waitForAppendedCount(1);
-    const publicKey = (
+    const authorizationProgress = (
       fake.appended[0]!.value as {
-        result: { authorizationCodePublicKey: RpcSecretPublicKey };
+        result: {
+          authorizationCodePublicKey: RpcSecretPublicKey;
+          authenticationInputPublicKey?: RpcSecretPublicKey;
+        };
       }
-    ).result.authorizationCodePublicKey;
+    ).result;
+    const publicKey = authorizationProgress.authorizationCodePublicKey;
+    // Preserve the old built-in OAuth progress shape for strict older clients.
+    // The generic key is advertised only by the new interactive protocol flows.
+    expect(authorizationProgress.authenticationInputPublicKey).toBeUndefined();
     const authorizationCodeEnvelope = await encryptRpcSecret(
       publicKey,
       'browser-returned-code',

@@ -1154,12 +1154,95 @@ const AcpModelSchema = z
 const MachineAcpAuthMethodSummarySchema = z
   .object({
     type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().optional(),
-    name: z.string().optional(),
-    description: z.string().optional(),
-    args: z.array(z.string()).optional(),
+    id: z.string().trim().min(1).max(1024).optional(),
+    name: z.string().max(4096).optional(),
+    description: z.string().max(16_384).optional(),
+    args: z.array(z.string().max(4096)).max(64).optional(),
   })
   .strict();
+
+const MachineAcpAuthenticationFormFieldSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      id: z.string().trim().min(1).max(1024),
+      type: z.literal('text'),
+      label: z.string().trim().min(1).max(4096),
+      description: z.string().max(16_384).optional(),
+      required: z.boolean(),
+      defaultValue: z.string().max(16_384).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().trim().min(1).max(1024),
+      type: z.literal('secret'),
+      label: z.string().trim().min(1).max(4096),
+      description: z.string().max(16_384).optional(),
+      required: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().trim().min(1).max(1024),
+      type: z.literal('select'),
+      label: z.string().trim().min(1).max(4096),
+      description: z.string().max(16_384).optional(),
+      required: z.boolean(),
+      options: z
+        .array(
+          z
+            .object({
+              value: z.string().min(1).max(16_384),
+              label: z.string().trim().min(1).max(4096),
+            })
+            .strict()
+        )
+        .min(1)
+        .max(256),
+      defaultValue: z.string().max(16_384).optional(),
+    })
+    .strict(),
+]);
+
+const MachineAcpAuthenticationFormSchema = z
+  .object({
+    title: z.string().max(4096).optional(),
+    description: z.string().max(16_384).optional(),
+    fields: z.array(MachineAcpAuthenticationFormFieldSchema).min(1).max(32),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const fieldIds = new Set<string>();
+    value.fields.forEach((field, fieldIndex) => {
+      if (fieldIds.has(field.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['fields', fieldIndex, 'id'],
+          message: 'Authentication form field ids must be unique',
+        });
+      }
+      fieldIds.add(field.id);
+      if (field.type !== 'select') return;
+      const optionValues = new Set<string>();
+      field.options.forEach((option, optionIndex) => {
+        if (optionValues.has(option.value)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['fields', fieldIndex, 'options', optionIndex, 'value'],
+            message: 'Authentication select option values must be unique',
+          });
+        }
+        optionValues.add(option.value);
+      });
+      if (field.defaultValue !== undefined && !optionValues.has(field.defaultValue)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['fields', fieldIndex, 'defaultValue'],
+          message: 'Authentication select default must match an option',
+        });
+      }
+    });
+  });
 
 export const MachineAcpCapabilitiesRefreshRequestSchema = z
   .object({
@@ -1204,7 +1287,7 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
       )
       .optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
     error: z.string().optional(),
   })
   .strict();
@@ -1214,11 +1297,13 @@ export const MachineAcpAuthenticateRequestSchema = z
     type: z.literal('machine/acp-authenticate'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
-    requestId: z.string().trim().min(1),
-    action: z.enum(['start', 'cancel', 'submit-code']),
-    authenticationRequestId: z.string().trim().min(1).optional(),
+    requestId: z.string().trim().min(1).max(1024),
+    action: z.enum(['start', 'cancel', 'submit-code', 'submit-input']),
+    authenticationRequestId: z.string().trim().min(1).max(1024).optional(),
     authorizationCode: z.string().trim().min(1).max(4096).optional(),
-    methodId: z.string().trim().min(1).max(256).optional(),
+    methodId: z.string().trim().min(1).max(1024).optional(),
+    interactionId: z.string().trim().min(1).max(1024).optional(),
+    authenticationInput: z.string().min(1).max(65536).optional(),
     configId: AgentConfigIdSchema.optional(),
     cliType: AgentConfigCliTypeSchema,
     agentType: z.string().trim().min(1),
@@ -1243,10 +1328,29 @@ export const MachineAcpAuthenticateRequestSchema = z
           message: 'authorizationCode is required when submitting an authorization code',
         });
       }
-    } else if (value.authenticationRequestId || value.authorizationCode) {
+    } else if (value.action === 'submit-input') {
+      if (!value.authenticationRequestId || !value.interactionId || !value.authenticationInput) {
+        context.addIssue({
+          code: 'custom',
+          message: 'submit-input requires an authentication request, interaction, and input',
+        });
+      }
+    } else if (
+      value.authenticationRequestId ||
+      value.authorizationCode ||
+      value.interactionId ||
+      value.authenticationInput
+    ) {
       context.addIssue({
         code: 'custom',
-        message: 'Authorization-code fields are only valid for submit-code',
+        message: 'Authentication input fields are only valid for input submission',
+      });
+    }
+    if (value.action !== 'start' && value.methodId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['methodId'],
+        message: 'methodId is only valid when starting authentication',
       });
     }
   });
@@ -1268,7 +1372,7 @@ export const MachineAcpAuthenticateResponseSchema = z
     ]),
     capabilitiesRefreshed: z.boolean().optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
     error: z.string().optional(),
   })
   .strict();
@@ -1279,15 +1383,38 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
     machineId: MachineIdSchema,
     requestId: z.string().trim().min(1),
     agentType: z.string().trim().min(1),
-    status: z.enum(['starting', 'authorization', 'output', 'authenticated', 'cancelled', 'error']),
-    authorizationUrl: z.string().url().max(8192).optional(),
+    status: z.enum([
+      'starting',
+      'auth-methods',
+      'authorization',
+      'input-required',
+      'output',
+      'authenticated',
+      'cancelled',
+      'error',
+    ]),
+    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
+    interactionId: z.string().trim().min(1).max(1024).optional(),
+    message: z.string().max(16_384).optional(),
+    form: MachineAcpAuthenticationFormSchema.optional(),
+    authorizationUrl: z
+      .string()
+      .url()
+      .max(8192)
+      .refine((value) => {
+        const protocol = new URL(value).protocol;
+        return protocol === 'https:' || protocol === 'http:';
+      }, 'authorizationUrl must use http or https')
+      .optional(),
     userCode: z.string().trim().min(1).max(128).optional(),
     acceptsAuthorizationCode: z.boolean().optional(),
     authorizationCodePublicKey: RpcSecretPublicKeySchema.optional(),
+    authenticationInputPublicKey: RpcSecretPublicKeySchema.optional(),
+    requiresAuthorizationConsent: z.boolean().optional(),
     expiresInSeconds: z.number().int().positive().optional(),
     stream: z.enum(['stdout', 'stderr']).optional(),
-    output: z.string().optional(),
-    error: z.string().optional(),
+    output: z.string().max(16_384).optional(),
+    error: z.string().max(65_536).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -1296,6 +1423,37 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
         code: 'custom',
         path: ['authorizationUrl'],
         message: 'authorizationUrl is required for authorization progress',
+      });
+    }
+    if (
+      value.status === 'auth-methods' &&
+      (!value.interactionId ||
+        !value.authMethods?.length ||
+        value.authMethods.some((method) => !method.id || method.type !== 'agent') ||
+        new Set(value.authMethods.map((method) => method.id)).size !== value.authMethods.length)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authMethods'],
+        message: 'auth-methods progress requires an interaction and methods with ids',
+      });
+    }
+    if (value.status === 'input-required' && (!value.interactionId || !value.form)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['form'],
+        message: 'input-required progress requires an interaction and form',
+      });
+    }
+    if (
+      value.status === 'authorization' &&
+      value.requiresAuthorizationConsent &&
+      !value.interactionId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['interactionId'],
+        message: 'URL consent requires an interaction id',
       });
     }
   });

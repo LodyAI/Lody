@@ -1289,7 +1289,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setProbing(true);
     setProbeError(null);
     try {
-      await onRefreshCapabilities({
+      const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
         cliType: formData.cliType,
@@ -1298,6 +1298,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         env: latestProbeEnvRef.current,
         runtimeOverrides: formData.runtimeOverrides,
       });
+      if (response.authRequired) {
+        setAuthRequired(true);
+        setManuallyTested(false);
+        return;
+      }
+      if (!response.success) {
+        throw new Error(
+          response.error ?? t('settings.agent.dialog.probeFailed', 'Provider verification failed.')
+        );
+      }
+      setAuthRequired(false);
       setTestedCustomKey(probedKey);
     } catch (error) {
       setProbeError(error instanceof Error ? error.message : String(error));
@@ -2134,6 +2145,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     setAuthRequired(false);
                     setProbeError(null);
                     setManuallyTested(true);
+                    if (isCustom && parsedCustomAcp) {
+                      setTestedCustomKey(customAcpKey);
+                    }
                     if (requiresBuiltinCreationVerification) {
                       setVerifiedBuiltinContext(builtinVerificationContext);
                     }

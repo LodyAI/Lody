@@ -61,6 +61,41 @@ function isAcpAuthMethodSummary(value: unknown): boolean {
   );
 }
 
+function isAcpAuthenticationFormField(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    value.id.trim().length > 0 &&
+    (value.type === 'text' || value.type === 'secret' || value.type === 'select') &&
+    typeof value.label === 'string' &&
+    value.label.trim().length > 0 &&
+    isOptionalString(value.description) &&
+    typeof value.required === 'boolean' &&
+    isOptionalString(value.defaultValue) &&
+    (value.type !== 'secret' || typeof value.defaultValue === 'undefined') &&
+    (value.type !== 'select' ||
+      (Array.isArray(value.options) &&
+        value.options.length > 0 &&
+        value.options.every(
+          (option) =>
+            isObjectRecord(option) &&
+            typeof option.value === 'string' &&
+            typeof option.label === 'string'
+        )))
+  );
+}
+
+function isAcpAuthenticationForm(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false;
+  return (
+    isOptionalString(value.title) &&
+    isOptionalString(value.description) &&
+    Array.isArray(value.fields) &&
+    value.fields.length > 0 &&
+    value.fields.every(isAcpAuthenticationFormField)
+  );
+}
+
 function isPreviewTarget(value: unknown): boolean {
   if (!isObjectRecord(value)) {
     return false;
@@ -486,15 +521,37 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.workspaceId === 'string' &&
       typeof value.requestId === 'string' &&
       value.requestId.trim().length > 0 &&
-      (value.action === 'start' || value.action === 'cancel' || value.action === 'submit-code') &&
+      value.requestId.length <= 1024 &&
+      (value.action === 'start' ||
+        value.action === 'cancel' ||
+        value.action === 'submit-code' ||
+        value.action === 'submit-input') &&
+      (typeof value.methodId === 'undefined' ||
+        (value.action === 'start' &&
+          typeof value.methodId === 'string' &&
+          value.methodId.trim().length > 0 &&
+          value.methodId.length <= 1024)) &&
       (value.action === 'submit-code'
         ? typeof value.authenticationRequestId === 'string' &&
           value.authenticationRequestId.trim().length > 0 &&
+          value.authenticationRequestId.length <= 1024 &&
           typeof value.authorizationCode === 'string' &&
           value.authorizationCode.trim().length > 0 &&
           value.authorizationCode.length <= 4096
-        : typeof value.authenticationRequestId === 'undefined' &&
-          typeof value.authorizationCode === 'undefined') &&
+        : value.action === 'submit-input'
+          ? typeof value.authenticationRequestId === 'string' &&
+            value.authenticationRequestId.trim().length > 0 &&
+            value.authenticationRequestId.length <= 1024 &&
+            typeof value.interactionId === 'string' &&
+            value.interactionId.trim().length > 0 &&
+            value.interactionId.length <= 1024 &&
+            typeof value.authenticationInput === 'string' &&
+            value.authenticationInput.length > 0 &&
+            value.authenticationInput.length <= 65536
+          : typeof value.authenticationRequestId === 'undefined' &&
+            typeof value.authorizationCode === 'undefined' &&
+            typeof value.interactionId === 'undefined' &&
+            typeof value.authenticationInput === 'undefined') &&
       isAgentConfigCliType(value.cliType) &&
       typeof value.agentType === 'string' &&
       value.agentType.trim().length > 0 &&
@@ -759,7 +816,9 @@ export function isLocalSessionControlResponse(
       typeof value.agentType === 'string' &&
       value.agentType.trim().length > 0 &&
       (value.status === 'starting' ||
+        value.status === 'auth-methods' ||
         value.status === 'authorization' ||
+        value.status === 'input-required' ||
         value.status === 'output' ||
         value.status === 'authenticated' ||
         value.status === 'cancelled' ||
@@ -777,6 +836,11 @@ export function isLocalSessionControlResponse(
           value.userCode.length <= 128)) &&
       (typeof value.acceptsAuthorizationCode === 'undefined' ||
         typeof value.acceptsAuthorizationCode === 'boolean') &&
+      (typeof value.authMethods === 'undefined' ||
+        (Array.isArray(value.authMethods) && value.authMethods.every(isAcpAuthMethodSummary))) &&
+      isOptionalString(value.interactionId) &&
+      isOptionalString(value.message) &&
+      (typeof value.form === 'undefined' || isAcpAuthenticationForm(value.form)) &&
       (typeof value.expiresInSeconds === 'undefined' ||
         (typeof value.expiresInSeconds === 'number' &&
           Number.isInteger(value.expiresInSeconds) &&

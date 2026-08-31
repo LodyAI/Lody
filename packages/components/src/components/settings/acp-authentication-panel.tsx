@@ -1,20 +1,27 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, Loader2, LogIn, Square } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type {
-  AgentConfigCliType,
-  AgentConfigId,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
-  MachineAcpAuthMethodSummary,
-  MachineAcpAuthenticationProgressMessage,
-  MachineId,
+import {
+  machineSupportsAcpAuthenticationInteractionsProtocol,
+  type AgentConfigCliType,
+  type AgentConfigId,
+  type BuiltinRuntimeOverrides,
+  type CustomAcpLaunchSpec,
+  type MachineAcpAuthenticationForm,
+  type MachineAcpAuthenticationProgressMessage,
+  type MachineAcpAuthMethodSummary,
+  type MachineId,
+  type WorkspaceId,
 } from '@lody/shared';
 
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAtomValue } from 'jotai';
-import { useMachineAcpAuthentication } from '@/hooks/use-machine-acp-authentication';
+import {
+  useMachineAcpAuthentication,
+  type MachineAcpAuthenticationArgs,
+} from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -24,18 +31,100 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { cn } from '@/lib/utils';
 
-type AuthenticationPhase =
-  | 'idle'
-  | 'running'
-  // The agent advertised several sign-in methods and is waiting on the choice.
-  | 'choosing'
-  | 'authenticated'
-  | 'cancelled'
-  | 'error';
+type AuthenticationPhase = 'idle' | 'running' | 'authenticated' | 'cancelled' | 'error';
 export type AcpAuthorizationDetails = Pick<
   MachineAcpAuthenticationProgressMessage,
-  'authorizationUrl' | 'userCode' | 'acceptsAuthorizationCode' | 'expiresInSeconds'
+  | 'authorizationUrl'
+  | 'userCode'
+  | 'acceptsAuthorizationCode'
+  | 'expiresInSeconds'
+  | 'interactionId'
+  | 'message'
+  | 'requiresAuthorizationConsent'
 > & { authorizationUrl: string };
+
+export type AuthenticationInteraction =
+  | { type: 'methods'; interactionId: string; methods: MachineAcpAuthMethodSummary[] }
+  | {
+      type: 'form';
+      interactionId: string;
+      message: string;
+      form: MachineAcpAuthenticationForm;
+    };
+
+export function isAllowedAcpAuthorizationUrl(value: string): boolean {
+  if (value.length > 8192) return false;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+type ActivePanelAuthentication = {
+  requestId: string;
+  args: MachineAcpAuthenticationArgs;
+  runtime: WorkspaceRuntime | null;
+  workspaceId: WorkspaceId | null;
+  cancel: () => void;
+  submitCode: (authorizationCode: string) => Promise<void>;
+  submitInput: (
+    interactionId: string,
+    input: {
+      action: 'accept' | 'decline' | 'cancel';
+      methodId?: string;
+      content?: Record<string, unknown>;
+    }
+  ) => Promise<void>;
+};
+
+const areStringArraysEqual = (left?: string[], right?: string[]): boolean =>
+  left === right ||
+  (!!left &&
+    !!right &&
+    left.length === right.length &&
+    left.every((value, index) => value === right[index]));
+
+const areStringRecordsEqual = (
+  left?: Record<string, string>,
+  right?: Record<string, string>
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => left[key] === right[key]);
+};
+
+export function areAcpAuthenticationTargetsEqual(
+  left: MachineAcpAuthenticationArgs,
+  right: MachineAcpAuthenticationArgs
+): boolean {
+  const leftCustomAcp = left.customAcp;
+  const rightCustomAcp = right.customAcp;
+  const leftRuntimeOverrides = left.runtimeOverrides;
+  const rightRuntimeOverrides = right.runtimeOverrides;
+  return (
+    left.machineId === right.machineId &&
+    left.configId === right.configId &&
+    left.cliType === right.cliType &&
+    left.agentType === right.agentType &&
+    (leftCustomAcp === rightCustomAcp ||
+      (!!leftCustomAcp &&
+        !!rightCustomAcp &&
+        leftCustomAcp.command === rightCustomAcp.command &&
+        areStringArraysEqual(leftCustomAcp.args, rightCustomAcp.args))) &&
+    (leftRuntimeOverrides === rightRuntimeOverrides ||
+      (!!leftRuntimeOverrides &&
+        !!rightRuntimeOverrides &&
+        leftRuntimeOverrides.codexPath === rightRuntimeOverrides.codexPath &&
+        leftRuntimeOverrides.claudeCodeExecutable === rightRuntimeOverrides.claudeCodeExecutable &&
+        leftRuntimeOverrides.kimiPath === rightRuntimeOverrides.kimiPath &&
+        leftRuntimeOverrides.grokPath === rightRuntimeOverrides.grokPath)) &&
+    areStringRecordsEqual(left.env, right.env)
+  );
+}
 
 export function AcpAuthenticationPanel({
   machineId,
@@ -70,25 +159,39 @@ export function AcpAuthenticationPanel({
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const { startAuthentication, cancelAuthentication, submitAuthorizationCode } =
-    useMachineAcpAuthentication(runtime, workspaceId);
+  const machine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
+  const interactiveProtocolSupported =
+    cliType === 'builtin' || machineSupportsAcpAuthenticationInteractionsProtocol(machine);
+  const {
+    startAuthentication,
+    cancelAuthentication,
+    submitAuthorizationCode,
+    submitAuthenticationInput,
+  } = useMachineAcpAuthentication(runtime, workspaceId);
   const [phase, setPhase] = useState<AuthenticationPhase>('idle');
-  const [requestId, setRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authorization, setAuthorization] = useState<AcpAuthorizationDetails | null>(null);
+  const [interaction, setInteraction] = useState<AuthenticationInteraction | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [submittingInteraction, setSubmittingInteraction] = useState(false);
   const [authorizationCode, setAuthorizationCode] = useState('');
   const [authorizationCodeSubmitted, setAuthorizationCodeSubmitted] = useState(false);
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
-  const [methodChoices, setMethodChoices] = useState<MachineAcpAuthMethodSummary[]>([]);
   const pendingAuthorizationWindowRef = useRef<Window | null>(null);
   const openedAuthorizationUrlRef = useRef<string | null>(null);
+  const interactionIdRef = useRef<string | null>(null);
+  const activeAuthenticationRef = useRef<ActivePanelAuthentication | null>(null);
   const provider =
     getAcpAuthenticationAccountName(agentType) ?? (providerName?.trim() || agentType);
 
-  const authArgs = machineId
-    ? { machineId, configId, cliType, agentType, customAcp, runtimeOverrides, env }
-    : null;
+  const authArgs: MachineAcpAuthenticationArgs | null = useMemo(
+    () =>
+      machineId && (cliType !== 'custom' || customAcp)
+        ? { machineId, configId, cliType, agentType, customAcp, runtimeOverrides, env }
+        : null,
+    [agentType, cliType, configId, customAcp, env, machineId, runtimeOverrides]
+  );
 
   const closePendingAuthorizationWindow = (): void => {
     const pendingWindow = pendingAuthorizationWindowRef.current;
@@ -109,72 +212,196 @@ export function AcpAuthenticationPanel({
     []
   );
 
-  const openProviderAuthorization = (authorizationUrl: string): void => {
-    if (openedAuthorizationUrlRef.current === authorizationUrl) return;
+  useEffect(() => {
+    const active = activeAuthenticationRef.current;
+    if (
+      !active ||
+      (active.runtime === runtime &&
+        active.workspaceId === workspaceId &&
+        authArgs &&
+        areAcpAuthenticationTargetsEqual(active.args, authArgs))
+    ) {
+      return;
+    }
+    activeAuthenticationRef.current = null;
+    try {
+      active.cancel();
+    } catch {
+      // The previous runtime may already be disposed during a workspace switch.
+    }
+    const pendingWindow = pendingAuthorizationWindowRef.current;
+    pendingAuthorizationWindowRef.current = null;
+    if (pendingWindow && !pendingWindow.closed) pendingWindow.close();
+    interactionIdRef.current = null;
+    setAuthorization(null);
+    setInteraction(null);
+    setFormValues({});
+    setSubmittingInteraction(false);
+    setAuthorizationCode('');
+    setAuthorizationCodeSubmitted(false);
+    setSubmittingAuthorizationCode(false);
+    setPhase('idle');
+  }, [authArgs, runtime, workspaceId]);
+
+  const openProviderAuthorization = async (authorizationUrl: string): Promise<boolean> => {
+    if (!isAllowedAcpAuthorizationUrl(authorizationUrl)) {
+      closePendingAuthorizationWindow();
+      return false;
+    }
+    if (openedAuthorizationUrlRef.current === authorizationUrl) return true;
     openedAuthorizationUrlRef.current = authorizationUrl;
     const pendingWindow = pendingAuthorizationWindowRef.current;
     pendingAuthorizationWindowRef.current = null;
     if (pendingWindow && !pendingWindow.closed) {
       try {
         pendingWindow.location.href = authorizationUrl;
-        return;
+        return true;
       } catch {
         pendingWindow.close();
       }
     }
-    void openExternalUrl(authorizationUrl).then((opened) => {
-      if (!opened) openedAuthorizationUrlRef.current = null;
-    });
+    const opened = await openExternalUrl(authorizationUrl);
+    if (!opened) openedAuthorizationUrlRef.current = null;
+    return opened;
   };
 
-  const handleStart = (methodId?: string): void => {
-    if (!authArgs || phase === 'running') return;
+  const handleStart = (): void => {
+    if (!authArgs || phase === 'running' || !interactiveProtocolSupported) {
+      return;
+    }
     closePendingAuthorizationWindow();
-    pendingAuthorizationWindowRef.current = prepareAuthorizationWindow(
-      t('agents.authentication.preparingBrowser', 'Preparing {{provider}} sign-in…', { provider })
-    );
+    pendingAuthorizationWindowRef.current =
+      cliType === 'builtin'
+        ? prepareAuthorizationWindow(
+            t('agents.authentication.preparingBrowser', 'Preparing {{provider}} sign-in…', {
+              provider,
+            })
+          )
+        : null;
     openedAuthorizationUrlRef.current = null;
     setPhase('running');
     setError(null);
     setAuthorization(null);
+    setInteraction(null);
+    interactionIdRef.current = null;
+    setFormValues({});
+    setSubmittingInteraction(false);
     setAuthorizationCode('');
     setAuthorizationCodeSubmitted(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
-    setMethodChoices([]);
+    let startedRequestId: string | null = null;
     const operation = startAuthentication({
       ...authArgs,
-      methodId,
       onProgress: (progress) => {
+        if (!startedRequestId || activeAuthenticationRef.current?.requestId !== startedRequestId) {
+          return;
+        }
         if (progress.status === 'authorization' && progress.authorizationUrl) {
           const nextAuthorization: AcpAuthorizationDetails = {
             authorizationUrl: progress.authorizationUrl,
             userCode: progress.userCode,
             acceptsAuthorizationCode: progress.acceptsAuthorizationCode,
             expiresInSeconds: progress.expiresInSeconds,
+            interactionId: progress.interactionId,
+            message: progress.message,
+            requiresAuthorizationConsent: progress.requiresAuthorizationConsent,
           };
+          setSubmittingInteraction(false);
           setAuthorization(nextAuthorization);
-          openProviderAuthorization(progress.authorizationUrl);
+          setInteraction(null);
+          interactionIdRef.current = progress.requiresAuthorizationConsent
+            ? (progress.interactionId ?? null)
+            : null;
+          setFormValues({});
+          if (!progress.requiresAuthorizationConsent) {
+            void openProviderAuthorization(progress.authorizationUrl).then((opened) => {
+              if (!opened && activeAuthenticationRef.current?.requestId === startedRequestId) {
+                setError(
+                  t(
+                    'agents.authentication.browserOpenFailed',
+                    'Could not open the authorization page. Check your browser settings and try again.'
+                  )
+                );
+              }
+            });
+          }
+        } else if (
+          progress.status === 'auth-methods' &&
+          progress.interactionId &&
+          progress.authMethods
+        ) {
+          setSubmittingInteraction(false);
+          interactionIdRef.current = progress.interactionId;
+          setInteraction({
+            type: 'methods',
+            interactionId: progress.interactionId,
+            methods: progress.authMethods,
+          });
+          setAuthorization(null);
+        } else if (
+          progress.status === 'input-required' &&
+          progress.interactionId &&
+          progress.form
+        ) {
+          setSubmittingInteraction(false);
+          interactionIdRef.current = progress.interactionId;
+          setInteraction({
+            type: 'form',
+            interactionId: progress.interactionId,
+            message: progress.message ?? '',
+            form: progress.form,
+          });
+          setFormValues(
+            Object.fromEntries(
+              progress.form.fields.flatMap((field) =>
+                field.type === 'secret' || field.defaultValue === undefined
+                  ? []
+                  : [[field.id, field.defaultValue]]
+              )
+            )
+          );
+          setAuthorization(null);
         } else if (progress.status === 'cancelled') {
           closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setFormValues({});
+          setAuthorizationCode('');
           setPhase('cancelled');
         } else if (progress.status === 'error') {
           closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setFormValues({});
+          setAuthorizationCode('');
           setError(progress.error ?? null);
           setPhase('error');
         }
       },
     });
-    setRequestId(operation.requestId);
+    startedRequestId = operation.requestId;
+    activeAuthenticationRef.current = {
+      requestId: operation.requestId,
+      args: authArgs,
+      runtime,
+      workspaceId,
+      cancel: () => cancelAuthentication({ ...authArgs, requestId: operation.requestId }),
+      submitCode: (code) =>
+        submitAuthorizationCode({
+          ...authArgs,
+          authenticationRequestId: operation.requestId,
+          authorizationCode: code,
+        }),
+      submitInput: (interactionId, input) =>
+        submitAuthenticationInput({
+          ...authArgs,
+          authenticationRequestId: operation.requestId,
+          interactionId,
+          input,
+        }),
+    };
     void operation.promise
       .then(async (response) => {
-        if (response.disposition === 'method-required') {
-          // Nothing has been opened yet: the agent is waiting for the choice.
-          closePendingAuthorizationWindow();
-          setMethodChoices(response.authMethods ?? []);
-          setPhase('choosing');
-          return;
-        }
+        if (activeAuthenticationRef.current?.requestId !== operation.requestId) return;
         if (response.disposition === 'authenticated') {
           if (response.capabilitiesRefreshed === false) {
             setError(
@@ -184,46 +411,155 @@ export function AcpAuthenticationPanel({
                   : t('agents.acpCapabilities.refreshError', 'Refresh failed'))
             );
             closePendingAuthorizationWindow();
+            interactionIdRef.current = null;
+            setFormValues({});
+            setAuthorizationCode('');
             setPhase(response.authRequired ? 'error' : 'authenticated');
             return;
           }
           closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setFormValues({});
+          setAuthorizationCode('');
           setPhase('authenticated');
           await resyncMachineFlockRows(runtime, machineId).catch(() => undefined);
-          await onAuthenticated?.();
+          if (activeAuthenticationRef.current?.requestId === operation.requestId) {
+            await onAuthenticated?.();
+          }
         } else if (response.disposition === 'cancelled') {
           closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setFormValues({});
+          setAuthorizationCode('');
           setPhase('cancelled');
         } else {
           closePendingAuthorizationWindow();
+          interactionIdRef.current = null;
+          setFormValues({});
+          setAuthorizationCode('');
           setError(t('agents.authentication.failed', 'Authentication failed'));
           setPhase('error');
         }
       })
       .catch((nextError: unknown) => {
+        if (activeAuthenticationRef.current?.requestId !== operation.requestId) return;
         closePendingAuthorizationWindow();
+        interactionIdRef.current = null;
+        setFormValues({});
+        setAuthorizationCode('');
         setError(nextError instanceof Error ? nextError.message : String(nextError));
         setPhase('error');
       })
-      .finally(() => setRequestId(null));
+      .finally(() => {
+        if (activeAuthenticationRef.current?.requestId !== operation.requestId) return;
+        activeAuthenticationRef.current = null;
+      });
   };
 
   const handleCancel = (): void => {
-    if (!authArgs || !requestId) return;
+    const active = activeAuthenticationRef.current;
+    if (!active) return;
     closePendingAuthorizationWindow();
-    cancelAuthentication({ ...authArgs, requestId });
+    active.cancel();
   };
 
   const handleOpenAuthorization = async (): Promise<void> => {
-    if (!authorization) return;
-    const opened = await openExternalUrl(authorization.authorizationUrl);
-    if (!opened) {
+    const active = activeAuthenticationRef.current;
+    if (!authorization || !active) return;
+    if (!isAllowedAcpAuthorizationUrl(authorization.authorizationUrl)) {
+      setError(
+        t(
+          'agents.authentication.unsafeAuthorizationUrl',
+          'The Provider returned an unsafe authorization URL. Only HTTP and HTTPS pages can be opened.'
+        )
+      );
+      return;
+    }
+    if (
+      authorization.requiresAuthorizationConsent &&
+      authorization.interactionId &&
+      interactionIdRef.current === authorization.interactionId
+    ) {
+      closePendingAuthorizationWindow();
+      pendingAuthorizationWindowRef.current = prepareAuthorizationWindow(
+        t('agents.authentication.preparingBrowser', 'Preparing {{provider}} sign-in…', {
+          provider,
+        })
+      );
+      setSubmittingInteraction(true);
+      setError(null);
+      try {
+        await active.submitInput(authorization.interactionId, { action: 'accept' });
+      } catch (nextError) {
+        closePendingAuthorizationWindow();
+        if (
+          activeAuthenticationRef.current?.requestId === active.requestId &&
+          interactionIdRef.current === authorization.interactionId
+        ) {
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
+          setSubmittingInteraction(false);
+        }
+        return;
+      }
+      if (
+        activeAuthenticationRef.current?.requestId !== active.requestId ||
+        interactionIdRef.current !== authorization.interactionId
+      ) {
+        closePendingAuthorizationWindow();
+        return;
+      }
+      interactionIdRef.current = null;
+      setSubmittingInteraction(false);
+      setAuthorization((current) => {
+        if (!current || current.interactionId !== authorization.interactionId) return current;
+        return {
+          ...current,
+          authorizationUrl: current.authorizationUrl,
+          requiresAuthorizationConsent: false,
+        };
+      });
+    }
+    const opened = await openProviderAuthorization(authorization.authorizationUrl);
+    if (!opened && activeAuthenticationRef.current?.requestId === active.requestId) {
       setError(
         t(
           'agents.authentication.browserOpenFailed',
           'Could not open the authorization page. Check your browser settings and try again.'
         )
       );
+    }
+  };
+
+  const handleSubmitInteraction = async (
+    interactionId: string,
+    input: {
+      action: 'accept' | 'decline' | 'cancel';
+      methodId?: string;
+      content?: Record<string, unknown>;
+    }
+  ): Promise<void> => {
+    const active = activeAuthenticationRef.current;
+    if (!active || interactionIdRef.current !== interactionId) return;
+    setSubmittingInteraction(true);
+    setError(null);
+    try {
+      await active.submitInput(interactionId, input);
+      if (interactionIdRef.current === interactionId) {
+        interactionIdRef.current = null;
+        setInteraction(null);
+        setFormValues({});
+      }
+    } catch (nextError) {
+      if (
+        activeAuthenticationRef.current?.requestId === active.requestId &&
+        interactionIdRef.current === interactionId
+      ) {
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      }
+    } finally {
+      if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        setSubmittingInteraction(false);
+      }
     }
   };
 
@@ -238,20 +574,23 @@ export function AcpAuthenticationPanel({
   };
 
   const handleSubmitAuthorizationCode = async (): Promise<void> => {
-    if (!authArgs || !requestId || !authorizationCode.trim()) return;
+    const active = activeAuthenticationRef.current;
+    if (!active || !authorizationCode.trim()) return;
     setSubmittingAuthorizationCode(true);
     setError(null);
     try {
-      await submitAuthorizationCode({
-        ...authArgs,
-        authenticationRequestId: requestId,
-        authorizationCode: authorizationCode.trim(),
-      });
-      setAuthorizationCodeSubmitted(true);
+      await active.submitCode(authorizationCode.trim());
+      if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        setAuthorizationCodeSubmitted(true);
+      }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      }
     } finally {
-      setSubmittingAuthorizationCode(false);
+      if (activeAuthenticationRef.current?.requestId === active.requestId) {
+        setSubmittingAuthorizationCode(false);
+      }
     }
   };
 
@@ -271,18 +610,13 @@ export function AcpAuthenticationPanel({
               {t('common.cancel', 'Cancel')}
             </Button>
           </>
-        ) : phase === 'choosing' ? (
-          <Button type="button" size="sm" variant="ghost" onClick={() => setPhase('idle')}>
-            <Square className="h-3.5 w-3.5" />
-            {t('common.cancel', 'Cancel')}
-          </Button>
         ) : (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            disabled={!authArgs}
-            onClick={() => handleStart()}
+            disabled={!authArgs || !interactiveProtocolSupported}
+            onClick={handleStart}
           >
             <LogIn className="h-3.5 w-3.5" />
             {phase === 'error' || phase === 'cancelled'
@@ -300,12 +634,13 @@ export function AcpAuthenticationPanel({
           </span>
         ) : null}
       </div>
-      {phase === 'choosing' && methodChoices.length > 0 ? (
-        <AcpAuthenticationMethodChooser
-          provider={provider}
-          methods={methodChoices}
-          onSelect={(methodId) => handleStart(methodId)}
-        />
+      {!interactiveProtocolSupported ? (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'agents.authentication.machineUpgradeRequired',
+            'Update the target Machine to use interactive authentication for this Provider.'
+          )}
+        </p>
       ) : null}
       {phase === 'running' && authorization ? (
         <AcpAuthenticationAuthorizationView
@@ -319,85 +654,19 @@ export function AcpAuthenticationPanel({
           onCopyUserCode={() => void handleCopyUserCode()}
           onAuthorizationCodeChange={setAuthorizationCode}
           onSubmitAuthorizationCode={() => void handleSubmitAuthorizationCode()}
+          authorizationConsentPending={submittingInteraction}
+        />
+      ) : null}
+      {phase === 'running' && interaction ? (
+        <AcpAuthenticationInteractionView
+          interaction={interaction}
+          values={formValues}
+          submitting={submittingInteraction}
+          onValuesChange={setFormValues}
+          onSubmit={(input) => void handleSubmitInteraction(interaction.interactionId, input)}
         />
       ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
-    </div>
-  );
-}
-
-/**
- * An agent that advertises more than one sign-in method gets to keep that
- * choice: picking for the user could sign them into the wrong account or the
- * wrong billing path.
- */
-function AcpAuthenticationMethodChooser({
-  provider,
-  methods,
-  onSelect,
-}: {
-  provider: string;
-  methods: MachineAcpAuthMethodSummary[];
-  onSelect: (methodId: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="rounded-md border bg-muted/20 p-3">
-      <p className="text-sm font-medium">
-        {t('agents.authentication.chooseMethod', 'Choose how to sign in to {{provider}}', {
-          provider,
-        })}
-      </p>
-      <div className="mt-2 flex flex-col gap-1.5">
-        {methods.map((method) => {
-          const methodId = method.id;
-          if (!methodId) return null;
-          const label = method.name ?? methodId;
-          // An `env_var` method is configured on the agent, not signed into, so
-          // it is stated rather than offered as a button that only round-trips
-          // to the same instruction.
-          if (method.type === 'env_var') {
-            return (
-              <div
-                key={methodId}
-                className="rounded-md border border-dashed px-2.5 py-1.5 text-left"
-              >
-                <p className="text-xs font-medium">{label}</p>
-                <p className="text-xs font-normal text-muted-foreground">
-                  {method.description
-                    ? `${method.description} — ${t(
-                        'agents.authentication.envVarMethod',
-                        "set it in this agent's environment variables."
-                      )}`
-                    : t(
-                        'agents.authentication.envVarMethod',
-                        "set it in this agent's environment variables."
-                      )}
-                </p>
-              </div>
-            );
-          }
-          return (
-            <Button
-              key={methodId}
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-auto justify-start whitespace-normal py-1.5 text-left"
-              onClick={() => onSelect(methodId)}
-            >
-              <span className="flex min-w-0 flex-col items-start">
-                <span className="text-xs font-medium">{label}</span>
-                {method.description ? (
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {method.description}
-                  </span>
-                ) : null}
-              </span>
-            </Button>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -413,6 +682,7 @@ export function AcpAuthenticationAuthorizationView({
   onCopyUserCode,
   onAuthorizationCodeChange,
   onSubmitAuthorizationCode,
+  authorizationConsentPending = false,
 }: {
   provider: string;
   authorization: AcpAuthorizationDetails;
@@ -424,6 +694,7 @@ export function AcpAuthenticationAuthorizationView({
   onCopyUserCode: () => void;
   onAuthorizationCodeChange: (value: string) => void;
   onSubmitAuthorizationCode: () => void;
+  authorizationConsentPending?: boolean;
 }) {
   const { t } = useTranslation();
   const authorizationCodeInputId = useId();
@@ -441,17 +712,36 @@ export function AcpAuthenticationAuthorizationView({
             })}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {t(
-              'agents.authentication.browserOpened',
-              'Complete authorization in the browser window, then return to Lody.'
-            )}
+            {authorization.message ??
+              t(
+                'agents.authentication.browserOpened',
+                'Complete authorization in the browser window, then return to Lody.'
+              )}
           </p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={onOpenAuthorization}>
-          <ExternalLink className="h-3.5 w-3.5" />
-          {t('agents.authentication.openAuthorization', 'Open authorization page')}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={authorizationConsentPending}
+          onClick={onOpenAuthorization}
+        >
+          {authorizationConsentPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ExternalLink className="h-3.5 w-3.5" />
+          )}
+          {authorization.requiresAuthorizationConsent
+            ? t('agents.authentication.authorizeAndOpen', 'Authorize and open page')
+            : t('agents.authentication.openAuthorization', 'Open authorization page')}
         </Button>
       </div>
+
+      {authorization.requiresAuthorizationConsent ? (
+        <code className="mt-3 block break-all rounded border bg-background px-2 py-1.5 text-xs">
+          {authorization.authorizationUrl}
+        </code>
+      ) : null}
 
       {authorization.userCode ? (
         <div className="mt-3 rounded-md border bg-background px-3 py-2.5">
@@ -543,7 +833,125 @@ export function AcpAuthenticationAuthorizationView({
   );
 }
 
-/** The account a pinned provider signs into, which is not its config name. */
+export function AcpAuthenticationInteractionView({
+  interaction,
+  values,
+  submitting,
+  onValuesChange,
+  onSubmit,
+}: {
+  interaction: AuthenticationInteraction;
+  values: Record<string, string>;
+  submitting: boolean;
+  onValuesChange: (values: Record<string, string>) => void;
+  onSubmit: (input: {
+    action: 'accept' | 'decline' | 'cancel';
+    methodId?: string;
+    content?: Record<string, unknown>;
+  }) => void;
+}) {
+  const { t } = useTranslation();
+  if (interaction.type === 'methods') {
+    const methods = interaction.methods.filter(
+      (method): method is MachineAcpAuthMethodSummary & { id: string } =>
+        method.type === 'agent' && !!method.id
+    );
+    return (
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <p className="text-sm font-medium">
+          {t('agents.authentication.chooseMethod', 'Choose a sign-in method')}
+        </p>
+        <div className="flex flex-col gap-2">
+          {methods.map((method) => (
+            <Button
+              key={method.id}
+              type="button"
+              variant="outline"
+              className="h-auto justify-start px-3 py-2 text-left"
+              disabled={submitting}
+              onClick={() => onSubmit({ action: 'accept', methodId: method.id })}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{method.name ?? method.id}</span>
+                {method.description ? (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {method.description}
+                  </span>
+                ) : null}
+              </span>
+            </Button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const invalid = interaction.form.fields.some(
+    (field) => field.required && !(values[field.id] ?? '').trim()
+  );
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+      <div>
+        <p className="text-sm font-medium">
+          {interaction.form.title ??
+            t('agents.authentication.additionalInformation', 'Additional information')}
+        </p>
+        {interaction.message || interaction.form.description ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {interaction.message || interaction.form.description}
+          </p>
+        ) : null}
+      </div>
+      {interaction.form.fields.map((field) => (
+        <div key={field.id} className="space-y-1.5">
+          <Label className="text-xs">
+            {field.label}
+            {!field.required ? ` ${t('common.optional', '(optional)')}` : ''}
+          </Label>
+          {field.type === 'select' ? (
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={values[field.id] ?? ''}
+              disabled={submitting}
+              onChange={(event) => onValuesChange({ ...values, [field.id]: event.target.value })}
+            >
+              <option value="" disabled={field.required}>
+                {t('agents.authentication.selectOption', 'Select an option')}
+              </option>
+              {field.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              type={field.type === 'secret' ? 'password' : 'text'}
+              value={values[field.id] ?? ''}
+              disabled={submitting}
+              autoComplete={field.type === 'secret' ? 'off' : undefined}
+              spellCheck={false}
+              onChange={(event) => onValuesChange({ ...values, [field.id]: event.target.value })}
+            />
+          )}
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+      ))}
+      <Button
+        type="button"
+        size="sm"
+        disabled={submitting || invalid}
+        onClick={() => onSubmit({ action: 'accept', content: values })}
+      >
+        {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+        {t('common.continue', 'Continue')}
+      </Button>
+    </div>
+  );
+}
+
 function getAcpAuthenticationAccountName(agentType: string): string | undefined {
   if (agentType === 'claude') return 'Claude';
   if (agentType === 'codex') return 'ChatGPT';

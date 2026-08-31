@@ -1,10 +1,12 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
+import * as acp from '@agentclientprotocol/sdk';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
+import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
 
 const createSilentLogger = (): Logger => ({
@@ -320,6 +322,467 @@ describe('AcpAuthenticationManager', () => {
       success: true,
       disposition: 'authenticated',
     });
+  });
+
+  it('bridges request-scoped ACP form elicitation for a custom provider', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+    const agent = acp
+      .agent({ name: 'test-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+        const reply = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          requestId,
+          message: 'Complete provider sign-in',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              token: {
+                type: 'string',
+                title: 'Token',
+                default: 'must-not-cross-machine-rpc',
+                _meta: { secret: true },
+              },
+              account: {
+                type: 'string',
+                title: 'Account',
+                enum: ['work', 'personal'],
+                default: 'work',
+              },
+            },
+            required: ['token', 'account'],
+          },
+        });
+        elicitationReply.resolve(reply);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+
+    const formReceived = createDeferred<{ interactionId: string }>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-custom',
+      cliType: 'custom',
+      agentType: 'custom-test',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: (event) => {
+        if (event.status === 'input-required') {
+          expect(event.form.fields).toEqual([
+            { id: 'token', type: 'secret', label: 'Token', required: true },
+            {
+              id: 'account',
+              type: 'select',
+              label: 'Account',
+              required: true,
+              options: [
+                { value: 'work', label: 'work' },
+                { value: 'personal', label: 'personal' },
+              ],
+              defaultValue: 'work',
+            },
+          ]);
+          formReceived.resolve({ interactionId: event.interactionId });
+        }
+      },
+    });
+
+    const { interactionId } = await formReceived.promise;
+    expect(
+      manager.submitAuthenticationInput(
+        'custom-test',
+        'auth-custom',
+        interactionId,
+        JSON.stringify({
+          action: 'accept',
+          content: { token: 'secret-value', account: 'work' },
+        })
+      )
+    ).toEqual({ success: true, disposition: 'input-accepted' });
+    await expect(elicitationReply.promise).resolves.toEqual({
+      action: 'accept',
+      content: { token: 'secret-value', account: 'work' },
+    });
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+    });
+  });
+
+  it('selects between advertised agent-driven authentication methods', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const authenticatedWith = createDeferred<string>();
+    const agent = acp
+      .agent({ name: 'test-method-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [
+          { id: 'oauth', name: 'OAuth' },
+          { id: 'api-key', name: 'API key' },
+        ],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
+        authenticatedWith.resolve(params.methodId);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const methodsReceived = createDeferred<{ interactionId: string }>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-method-choice',
+      cliType: 'custom',
+      agentType: 'custom-methods',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: (event) => {
+        if (event.status === 'auth-methods') {
+          expect(event.authMethods.map((method) => method.id)).toEqual(['oauth', 'api-key']);
+          methodsReceived.resolve({ interactionId: event.interactionId });
+        }
+      },
+    });
+
+    const { interactionId } = await methodsReceived.promise;
+    expect(
+      manager.submitAuthenticationInput(
+        'custom-methods',
+        'auth-method-choice',
+        interactionId,
+        JSON.stringify({ action: 'accept', methodId: 'api-key' })
+      )
+    ).toEqual({ success: true, disposition: 'input-accepted' });
+    await expect(authenticatedWith.promise).resolves.toBe('api-key');
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+    });
+  });
+
+  it('cancels a pending custom ACP elicitation and terminates its process', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const agent = acp
+      .agent({ name: 'test-cancel-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+        await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          requestId,
+          message: 'Waiting for input',
+          requestedSchema: {
+            type: 'object',
+            properties: { token: { type: 'string', title: 'Token' } },
+          },
+        });
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const inputReceived = createDeferred<void>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-cancel-custom',
+      cliType: 'custom',
+      agentType: 'custom-cancel',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: (event) => {
+        if (event.status === 'input-required') inputReceived.resolve();
+      },
+    });
+
+    await inputReceived.promise;
+    expect(manager.cancel('custom-cancel', 'auth-cancel-custom')).toEqual({
+      success: true,
+      disposition: 'cancelled',
+    });
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'cancelled',
+    });
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('bridges ACP URL consent without retaining authentication process output', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+    const agent = acp
+      .agent({ name: 'test-url-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+        child.stderr?.write('authorization-code=must-not-cross-machine-rpc\n');
+        const reply = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'url',
+          requestId,
+          elicitationId: 'oauth-url',
+          message: 'Open the provider login page',
+          url: 'https://provider.example.test/oauth',
+        });
+        elicitationReply.resolve(reply);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+
+    const authorizationReceived = createDeferred<{ interactionId: string }>();
+    const progress = vi.fn((event: { status: string; interactionId?: string }) => {
+      if (event.status === 'authorization' && event.interactionId) {
+        authorizationReceived.resolve({ interactionId: event.interactionId });
+      }
+    });
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-url',
+      cliType: 'custom',
+      agentType: 'custom-url',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: progress,
+    });
+
+    const { interactionId } = await authorizationReceived.promise;
+    expect(
+      manager.submitAuthenticationInput(
+        'custom-url',
+        'auth-url',
+        interactionId,
+        JSON.stringify({ action: 'accept' })
+      )
+    ).toEqual({ success: true, disposition: 'input-accepted' });
+    await expect(elicitationReply.promise).resolves.toEqual({ action: 'accept' });
+    await expect(authentication).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+    });
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'authorization',
+        authorizationUrl: 'https://provider.example.test/oauth',
+        requiresAuthorizationConsent: true,
+      })
+    );
+    expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'output' }));
+  });
+
+  it('declines non-HTTP ACP authorization URLs without forwarding them to the renderer', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+    const agent = acp
+      .agent({ name: 'test-unsafe-url-auth-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+        const reply = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'url',
+          requestId,
+          elicitationId: 'unsafe-url',
+          message: 'Open this page',
+          url: 'javascript:alert(1)',
+        });
+        elicitationReply.resolve(reply);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const progress = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+
+    const authentication = manager.authenticate({
+      requestId: 'auth-unsafe-url',
+      cliType: 'custom',
+      agentType: 'custom-unsafe-url',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: progress,
+    });
+
+    await expect(elicitationReply.promise).resolves.toEqual({ action: 'decline' });
+    await expect(authentication).resolves.toEqual(
+      expect.objectContaining({
+        success: false,
+        disposition: 'error',
+        error: expect.stringContaining('unsafe authentication URL'),
+      })
+    );
+    expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'authorization' }));
+  });
+
+  it.each([
+    {
+      method: { id: 'legacy-env', name: 'Legacy environment', type: 'env_var' as const },
+      expected: 'only advertised the deprecated ACP env_var authentication method',
+    },
+    {
+      method: { id: 'terminal', name: 'Terminal login', type: 'terminal' as const },
+      expected: 'only advertised terminal authentication',
+    },
+  ])(
+    'rejects unsupported $method.type ACP authentication methods',
+    async ({ method, expected }) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const initialize = vi.fn(async ({ params }: { params: acp.InitializeRequest }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [method],
+      }));
+      const agent = acp
+        .agent({ name: 'test-unsupported-auth-agent' })
+        .onRequest(acp.methods.agent.initialize, initialize);
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: vi.fn(() => child) as never,
+        resolveLoginShellEnv: async () => ({}),
+      });
+
+      const result = await manager.authenticate({
+        requestId: `auth-${method.id}`,
+        cliType: 'custom',
+        agentType: 'custom-unsupported',
+        customAcp: { command: '/test/custom-acp', args: [] },
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          disposition: 'error',
+          error: expect.stringContaining(expected),
+        })
+      );
+      expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toEqual({
+        terminal: false,
+      });
+    }
+  );
+
+  it.each([
+    {
+      name: 'field type',
+      requestedSchema: {
+        type: 'object' as const,
+        properties: { attempts: { type: 'number' as const, title: 'Attempts' } },
+      },
+    },
+    {
+      name: 'empty field id',
+      requestedSchema: {
+        type: 'object' as const,
+        properties: { '': { type: 'string' as const, title: 'Token' } },
+      },
+    },
+  ])('reports and declines an unsupported ACP form $name', async ({ requestedSchema }) => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+    const agent = acp
+      .agent({ name: 'test-unsupported-form-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+        const reply = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          requestId,
+          message: 'Unsupported form',
+          requestedSchema,
+        });
+        elicitationReply.resolve(reply);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const progress = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+
+    const authentication = manager.authenticate({
+      requestId: 'auth-unsupported-form',
+      cliType: 'custom',
+      agentType: 'custom-form',
+      customAcp: { command: '/test/custom-acp', args: [] },
+      onProgress: progress,
+    });
+
+    await expect(elicitationReply.promise).resolves.toEqual({ action: 'decline' });
+    await expect(authentication).resolves.toEqual(
+      expect.objectContaining({
+        success: false,
+        disposition: 'error',
+        error: expect.stringContaining('unsupported authentication form'),
+      })
+    );
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        error: expect.stringContaining('text, secret, and single-select'),
+      })
+    );
   });
 });
 

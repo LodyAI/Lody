@@ -86,10 +86,16 @@ Machine RPC; the old session-scoped Code Collab Host RPC ingress has been remove
   consumers of the same launch/config work.
 - `machine/acp-authenticate` similarly may append
   `machine/acp-authentication-progress` envelopes before its final response. Progress
-  output must not resolve or remove the pending authentication request. A Claude
-  browser-returned code must never appear in the retained request JSON: the target
-  server advertises an ephemeral ECDH public key in progress, the client persists
-  only an AES-GCM envelope, and the server decrypts only in target-process memory.
+  output must not resolve or remove the pending authentication request. Browser-returned
+  codes, method/form replies, and other authentication input must never appear in retained
+  request JSON: the target server advertises an ephemeral ECDH public key in progress, the
+  client persists only an AES-GCM envelope bound to the authentication request and interaction,
+  and the server decrypts only in target-process memory. Redact plaintext and encrypted input fields
+  from invalid-request logging. Generic interaction keys appear only on the versioned method/form/
+  URL-consent progress shapes; built-in code submission keeps its old progress shape so strict older
+  clients still accept it. Custom/Registry ACP authentication stays on that same long-running request
+  so method selection, URL/form elicitation, cancellation, and timeout all target the temporary ACP
+  process that owns the login.
 - Code Collab v2 file/LSP methods are ordinary Machine RPC methods:
   `code-collab/open-text`, `refresh-text`, `save-text`, `init-directory`,
   `open-current-diff`, `open-turn-diff`, `lsp-definition`, and `lsp-references`.

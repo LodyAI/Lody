@@ -93,12 +93,47 @@ describe('local session control node validators', () => {
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',
     };
+    const inputProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'input-required',
+      interactionId: 'interaction-1',
+      message: 'Choose an account',
+      form: {
+        fields: [
+          {
+            id: 'account',
+            type: 'select',
+            label: 'Account',
+            required: true,
+            options: [{ value: 'work', label: 'Work' }],
+          },
+        ],
+      },
+    };
+    const submitInput = {
+      ...request,
+      requestId: 'auth-input-2',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-1',
+      interactionId: 'interaction-1',
+      authenticationInput: JSON.stringify({
+        action: 'accept',
+        content: { account: 'work' },
+      }),
+    };
     expect(isLocalSessionControlRequest(request)).toBe(true);
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
     expect(isLocalSessionControlRequest(submitCode)).toBe(true);
     expect(isLocalSessionControlRequestCjs(submitCode)).toBe(true);
+    expect(isLocalSessionControlRequest(submitInput)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(submitInput)).toBe(true);
     expect(isLocalSessionControlResponse(progress)).toBe(true);
     expect(isLocalSessionControlResponseCjs(progress)).toBe(true);
+    expect(isLocalSessionControlResponse(inputProgress)).toBe(true);
+    expect(isLocalSessionControlResponseCjs(inputProgress)).toBe(true);
     expect(isLocalSessionControlResponse(response)).toBe(true);
     expect(isLocalSessionControlResponseCjs(response)).toBe(true);
   });

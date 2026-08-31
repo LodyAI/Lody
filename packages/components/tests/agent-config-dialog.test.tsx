@@ -515,6 +515,7 @@ describe('AgentConfigDialog', () => {
       }),
       cancelAuthentication: vi.fn(),
       submitAuthorizationCode: vi.fn(async () => {}),
+      submitAuthenticationInput: vi.fn(async () => {}),
     });
     vi.spyOn(window, 'open').mockReturnValue(null);
     const onSubmit = vi.fn(async () => {});

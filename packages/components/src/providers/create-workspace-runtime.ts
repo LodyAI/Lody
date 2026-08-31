@@ -1958,6 +1958,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         authenticationRequestId: message.authenticationRequestId,
         authorizationCode: message.authorizationCode,
         methodId: message.methodId,
+        interactionId: message.interactionId,
+        authenticationInput: message.authenticationInput,
         configId: message.configId,
         cliType: message.cliType,
         agentType: message.agentType,

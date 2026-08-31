@@ -226,4 +226,52 @@ describe('useMachineAcpAuthentication', () => {
       })
     );
   });
+
+  it('submits an ACP authentication form response to the active remote login', async () => {
+    const sendControl = vi.fn();
+    const runtime = {
+      sendControl,
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: true,
+        disposition: 'input-accepted' as const,
+      })),
+    } as unknown as WorkspaceRuntime;
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    let controller: AuthenticationController | undefined;
+
+    await act(async () => {
+      root?.render(
+        createElement(Probe, {
+          runtime,
+          workspaceId,
+          onResult: (value) => {
+            controller = value;
+          },
+        })
+      );
+    });
+
+    await controller!.submitAuthenticationInput({
+      machineId,
+      cliType: 'registry',
+      agentType: 'custom-agent',
+      authenticationRequestId: 'auth-custom',
+      interactionId: 'form-1',
+      input: { action: 'accept', content: { code: 'secret-code', account: 'work' } },
+    });
+
+    expect(sendControl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'machine/acp-authenticate',
+        action: 'submit-input',
+        authenticationRequestId: 'auth-custom',
+        interactionId: 'form-1',
+        authenticationInput: JSON.stringify({
+          action: 'accept',
+          content: { code: 'secret-code', account: 'work' },
+        }),
+      })
+    );
+  });
 });

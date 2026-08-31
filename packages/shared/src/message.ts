@@ -348,21 +348,54 @@ export interface MachineAcpAuthMethodSummary {
   args?: string[];
 }
 
+export type MachineAcpAuthenticationFormField =
+  | {
+      id: string;
+      type: 'text';
+      label: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: string;
+    }
+  | {
+      id: string;
+      type: 'secret';
+      label: string;
+      description?: string;
+      required: boolean;
+    }
+  | {
+      id: string;
+      type: 'select';
+      label: string;
+      description?: string;
+      required: boolean;
+      options: Array<{ value: string; label: string }>;
+      defaultValue?: string;
+    };
+
+export interface MachineAcpAuthenticationForm {
+  title?: string;
+  description?: string;
+  fields: MachineAcpAuthenticationFormField[];
+}
+
 export interface MachineAcpAuthenticateRequest {
   type: 'machine/acp-authenticate';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requestId: string;
-  action: 'start' | 'cancel' | 'submit-code';
+  action: 'start' | 'cancel' | 'submit-code' | 'submit-input';
   /** Target login request for a one-time browser authorization code. */
   authenticationRequestId?: string;
   /** One-time provider input; never log or copy it into durable Lody product state. */
   authorizationCode?: string;
-  /**
-   * Which advertised ACP authentication method to run. Only registry/custom
-   * agents publish a choice; builtin providers have exactly one login command.
-   */
+  /** Selected method for protocol-driven Custom/Registry ACP authentication. */
   methodId?: string;
+  /** Target interaction when replying to a method picker, URL consent, or form. */
+  interactionId?: string;
+  /** Ephemeral interaction payload. It is encrypted by remote Machine RPC. */
+  authenticationInput?: string;
   configId?: AgentConfigId;
   cliType: AgentConfigCliType;
   agentType: string;
@@ -401,7 +434,20 @@ export interface MachineAcpAuthenticationProgressMessage {
   machineId: MachineId;
   requestId: string;
   agentType: string;
-  status: 'starting' | 'authorization' | 'output' | 'authenticated' | 'cancelled' | 'error';
+  status:
+    | 'starting'
+    | 'auth-methods'
+    | 'authorization'
+    | 'input-required'
+    | 'output'
+    | 'authenticated'
+    | 'cancelled'
+    | 'error';
+  authMethods?: MachineAcpAuthMethodSummary[];
+  /** Opaque id echoed by submit-input. */
+  interactionId?: string;
+  message?: string;
+  form?: MachineAcpAuthenticationForm;
   authorizationUrl?: string;
   /** Device user code entered on the provider's authorization page. */
   userCode?: string;
@@ -409,6 +455,10 @@ export interface MachineAcpAuthenticationProgressMessage {
   acceptsAuthorizationCode?: boolean;
   /** Ephemeral target-machine key used only to encrypt the one-time browser code. */
   authorizationCodePublicKey?: RpcSecretPublicKey;
+  /** Ephemeral target-machine key for generic authentication interaction input. */
+  authenticationInputPublicKey?: RpcSecretPublicKey;
+  /** URL-mode ACP elicitation requires an explicit user action before navigation. */
+  requiresAuthorizationConsent?: boolean;
   expiresInSeconds?: number;
   stream?: 'stdout' | 'stderr';
   output?: string;

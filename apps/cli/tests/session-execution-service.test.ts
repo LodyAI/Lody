@@ -5465,6 +5465,53 @@ describe('SessionExecutionService', () => {
     }
   });
 
+  it('bounds the post-authentication capability proof inside the renderer deadline', async () => {
+    vi.useFakeTimers();
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'authenticated' });
+    const service = new SessionExecutionService(createBaseDeps({}));
+    const refresh = vi.spyOn(service, 'refreshMachineAcpCapabilities').mockImplementation(
+      (_message, options) =>
+        new Promise<never>((_resolve, reject) => {
+          const signal = options?.signal;
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        })
+    );
+
+    try {
+      const resultPromise = service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'auth-refresh-timeout',
+        action: 'start',
+        configId: capabilityConfigId,
+        cliType: 'registry',
+        agentType: 'custom-agent',
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(resultPromise).resolves.toEqual(
+        expect.objectContaining({
+          success: true,
+          disposition: 'authenticated',
+          capabilitiesRefreshed: false,
+          error: 'Authentication succeeded, but capability verification timed out',
+        })
+      );
+      expect(refresh).toHaveBeenCalledWith(
+        expect.objectContaining({ configId: capabilityConfigId }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    } finally {
+      refresh.mockRestore();
+      authenticate.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('forwards a browser authorization code to the active login process', async () => {
     const submitAuthorizationCode = vi
       .spyOn(AcpAuthenticationManager.prototype, 'submitAuthorizationCode')
@@ -5488,6 +5535,42 @@ describe('SessionExecutionService', () => {
       expect(submitAuthorizationCode).toHaveBeenCalledWith('claude', 'auth-1', 'browser-code');
     } finally {
       submitAuthorizationCode.mockRestore();
+    }
+  });
+
+  it('forwards a Custom ACP form response to the active authentication request', async () => {
+    const submitAuthenticationInput = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'submitAuthenticationInput')
+      .mockReturnValue({ success: true, disposition: 'input-accepted' });
+    const service = new SessionExecutionService(createBaseDeps({}));
+    const authenticationInput = JSON.stringify({
+      action: 'accept',
+      content: { account: 'work', code: 'secret-code' },
+    });
+
+    try {
+      await expect(
+        service.authenticateMachineAcp({
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'auth-input-2',
+          action: 'submit-input',
+          authenticationRequestId: 'auth-custom',
+          interactionId: 'form-1',
+          authenticationInput,
+          cliType: 'registry',
+          agentType: 'custom-agent',
+        })
+      ).resolves.toEqual(expect.objectContaining({ success: true, disposition: 'input-accepted' }));
+      expect(submitAuthenticationInput).toHaveBeenCalledWith(
+        'custom-agent',
+        'auth-custom',
+        'form-1',
+        authenticationInput
+      );
+    } finally {
+      submitAuthenticationInput.mockRestore();
     }
   });
 

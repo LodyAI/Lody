@@ -20,7 +20,6 @@ export type MachineAcpAuthenticationArgs = {
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;
-  /** Set once the user picks from the methods the agent advertised. */
   methodId?: string;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
@@ -28,6 +27,16 @@ export type MachineAcpAuthenticationArgs = {
 export type MachineAcpAuthenticationCodeArgs = Omit<MachineAcpAuthenticationArgs, 'onProgress'> & {
   authenticationRequestId: string;
   authorizationCode: string;
+};
+
+export type MachineAcpAuthenticationInputArgs = Omit<MachineAcpAuthenticationArgs, 'onProgress'> & {
+  authenticationRequestId: string;
+  interactionId: string;
+  input: {
+    action: 'accept' | 'decline' | 'cancel';
+    methodId?: string;
+    content?: Record<string, unknown>;
+  };
 };
 
 type ActiveMachineAcpAuthentication = Omit<MachineAcpAuthenticationArgs, 'onProgress'> & {
@@ -122,6 +131,7 @@ export function useMachineAcpAuthentication(
             customAcp: args.customAcp,
             runtimeOverrides: args.runtimeOverrides,
             env: args.env,
+            methodId: args.methodId,
           });
           const response = await responsePromise;
           if (!response) {
@@ -205,5 +215,51 @@ export function useMachineAcpAuthentication(
     [runtime, t, workspaceId]
   );
 
-  return { startAuthentication, cancelAuthentication, submitAuthorizationCode };
+  const submitAuthenticationInput = useCallback(
+    async (args: MachineAcpAuthenticationInputArgs): Promise<void> => {
+      if (!runtime || workspaceId == null) {
+        throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
+      }
+      const requestId = crypto.randomUUID();
+      const responsePromise = runtime.waitForMachineAcpAuthenticateResponse(
+        args.machineId,
+        requestId,
+        { timeoutMs: 10000 }
+      );
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        machineId: args.machineId,
+        workspaceId,
+        requestId,
+        action: 'submit-input',
+        authenticationRequestId: args.authenticationRequestId,
+        interactionId: args.interactionId,
+        authenticationInput: JSON.stringify(args.input),
+        configId: args.configId,
+        cliType: args.cliType,
+        agentType: args.agentType,
+        customAcp: args.customAcp,
+        runtimeOverrides: args.runtimeOverrides,
+        env: args.env,
+      });
+      const response = await responsePromise;
+      if (!response || !response.success || response.disposition !== 'input-accepted') {
+        throw new Error(
+          response?.error ??
+            t(
+              'agents.authentication.inputSubmitFailed',
+              'Could not submit the authentication response. Please try again.'
+            )
+        );
+      }
+    },
+    [runtime, t, workspaceId]
+  );
+
+  return {
+    startAuthentication,
+    cancelAuthentication,
+    submitAuthorizationCode,
+    submitAuthenticationInput,
+  };
 }

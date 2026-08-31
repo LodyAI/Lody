@@ -156,8 +156,8 @@ arrive: context/message-flow.md "Upstream".
 - `acp-authentication.ts` — the authentication lifecycle, with ONE slot, timeout,
   and cancellation policy shared by both of its paths. Which path runs is decided
   by the provider, not by the caller: a managed builtin runs its pinned login
-  command, and everything else (registry and custom ACP) goes through
-  `acp-protocol-authentication.ts`. Trusted builtin lifecycle: Kimi runs
+  command, and everything else (registry and custom ACP) opens a temporary standard
+  ACP connection in the same bounded lifecycle. Trusted builtin lifecycle: Kimi runs
   `acp --login`; Grok runs the official `login --device-auth`; Claude Code runs
   the official `auth login --claudeai`
   subscription flow; Codex always runs the official `login --device-auth`
@@ -178,34 +178,18 @@ arrive: context/message-flow.md "Upstream".
   model providers with `requires_openai_auth = false`. The per-agent slot covers async
   launch preparation as well as the child process, so cancel and concurrent start cannot race spawn;
   timeout/cancel terminate and release the slot for Retry. Because protocol authentication
-  spans launch preparation, a JSON-RPC wait, and possibly a second process, the running
+  spans launch preparation, JSON-RPC requests, and process cleanup, the running
   slot also carries an `AbortController` that termination raises before any child exists.
-- `acp-protocol-authentication.ts` — standard ACP authentication for registry and
-  custom agents: spawn, `initialize`, `authenticate`. Nothing is provider-specific;
-  the method list is the agent's own, so a new registry agent needs no Lody change.
-  A method is never guessed: one advertised method runs directly, several return
-  `method-required` and sign nothing in until the user picks, because that choice
-  can decide the account or billing path. `env_var` is a configuration instruction
-  naming its variables, not a login; `terminal` runs the agent binary with the
-  method's args through the builtin login-process path. The agent's stdin is the
-  JSON-RPC channel, so no authorization code is written to it — only pinned
-  providers opt into code submission. A third-party agent has no host allowlist,
-  so `AcpAgentAuthorizationOutputParser` demands an https URL whose path or query
-  still reads as an authorization endpoint. The process is always stopped before
-  returning; the agent keeps its own credentials and the session spawns fresh.
-  INVARIANT: that process's stdout is a protocol channel, so its environment must
-  not describe a terminal. `TERM` is cleared before spawn because an agent opening
-  a browser sign-in with no display falls back to a TEXT browser (w3m/lynx/links),
-  which renders the consent page onto stdout; one rendered empty form field,
-  `[    ]`, is a valid JSON array, which the connection rejects as a JSON-RPC
-  batch and closes. Verified against Google Antigravity's `agy_acp_server`.
-  The picked `methodId` must travel on BOTH transports. The local plane forwards
-  the whole control message, but Streams RPC re-declares its own strict param
-  schema, so a field added only to `message-schemas.ts` is silently dropped on
-  remote machines — and an agent advertising several methods then answers
-  `method-required` forever. Clients gate the workflow on the
-  `acpProtocolAuthentication` capability rather than offering a sign-in an older
-  daemon will refuse.
+  Registry/custom initialization advertises no terminal capability and supports
+  ACP URL plus form elicitation. Only agent-driven methods are runnable: `env_var`
+  is deprecated and rejected, while `terminal` remains unsupported until Machine
+  RPC has a real interactive-terminal bridge. Multiple methods and every elicitation
+  stay on the original long-running request and permit only one pending interaction;
+  replies carry an interaction id and use the encrypted authentication-input path on
+  remote Machines. URL schemes, method/form sizes, ids, labels, options, and defaults
+  are bounded before they enter progress. Never forward raw third-party process output
+  or secret defaults into retained progress. The process is always stopped before
+  success returns, and cancellation or timeout during cleanup must still win.
 - `acp-binary-manager.ts` — registry binary-distribution agents. It follows the same
   consumer-lease cancellation rule as managed runtimes: one shared install, abort only after
   the last consumer leaves, and never reuse an aborted generation while it is cleaning up. Tar

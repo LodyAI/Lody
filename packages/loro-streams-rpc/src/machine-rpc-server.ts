@@ -90,6 +90,7 @@ import {
 } from './rpc';
 import {
   createRpcSecretRecipient,
+  getMachineAcpAuthenticationInputSecretContext,
   getMachineAcpAuthorizationCodeSecretContext,
   type RpcSecretRecipient,
 } from './rpc-secret';
@@ -133,7 +134,12 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
     request.method !== 'machine/acp-authenticate' ||
     typeof request.params !== 'object' ||
     request.params === null ||
-    !Object.hasOwn(request.params, 'authorizationCode')
+    ![
+      'authorizationCode',
+      'authenticationInput',
+      'authorizationCodeEnvelope',
+      'authenticationInputEnvelope',
+    ].some((key) => Object.hasOwn(request.params as object, key))
   ) {
     return raw;
   }
@@ -141,7 +147,18 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
     ...request,
     params: {
       ...(request.params as Record<string, unknown>),
-      authorizationCode: '[REDACTED]',
+      ...(Object.hasOwn(request.params, 'authorizationCode')
+        ? { authorizationCode: '[REDACTED]' }
+        : {}),
+      ...(Object.hasOwn(request.params, 'authenticationInput')
+        ? { authenticationInput: '[REDACTED]' }
+        : {}),
+      ...(Object.hasOwn(request.params, 'authorizationCodeEnvelope')
+        ? { authorizationCodeEnvelope: '[REDACTED]' }
+        : {}),
+      ...(Object.hasOwn(request.params, 'authenticationInputEnvelope')
+        ? { authenticationInputEnvelope: '[REDACTED]' }
+        : {}),
     },
   };
 };
@@ -303,10 +320,12 @@ type RpcServerDeps = {
   }) => Promise<MachineAcpCapabilitiesRefreshResponse>;
   authenticateMachineAcp?: (args: {
     requestId: string;
-    action: 'start' | 'cancel' | 'submit-code';
+    action: 'start' | 'cancel' | 'submit-code' | 'submit-input';
     authenticationRequestId?: string;
     authorizationCode?: string;
     methodId?: string;
+    interactionId?: string;
+    authenticationInput?: string;
     configId?: AgentConfigId;
     cliType: AgentConfigCliType;
     agentType: string;
@@ -660,7 +679,7 @@ export class LoroStreamsMachineRpcServer {
       return false;
     }
     const action = (request.params as { action?: unknown }).action;
-    return action === 'cancel' || action === 'submit-code';
+    return action === 'cancel' || action === 'submit-code' || action === 'submit-input';
   }
 
   private async runRequestTask(
@@ -849,9 +868,21 @@ export class LoroStreamsMachineRpcServer {
           }
           let progressWrites: Promise<void> = Promise.resolve();
           const appendProgress = (progress: MachineAcpAuthenticationProgressMessage) => {
+            const acceptsInteractionInput =
+              progress.status === 'auth-methods' ||
+              progress.status === 'input-required' ||
+              progress.requiresAuthorizationConsent === true;
             const safeProgress =
-              progress.acceptsAuthorizationCode && recipient
-                ? { ...progress, authorizationCodePublicKey: recipient.publicKey }
+              recipient && (progress.acceptsAuthorizationCode || acceptsInteractionInput)
+                ? {
+                    ...progress,
+                    ...(progress.acceptsAuthorizationCode
+                      ? { authorizationCodePublicKey: recipient.publicKey }
+                      : {}),
+                    ...(acceptsInteractionInput
+                      ? { authenticationInputPublicKey: recipient.publicKey }
+                      : {}),
+                  }
                 : progress;
             progressWrites = progressWrites
               .then(() =>
@@ -861,6 +892,7 @@ export class LoroStreamsMachineRpcServer {
           };
 
           let authorizationCode: string | undefined;
+          let authenticationInput: string | undefined;
           if (request.params.action === 'submit-code') {
             const authenticationRequestId = request.params.authenticationRequestId;
             const authorizationCodeEnvelope = request.params.authorizationCodeEnvelope;
@@ -884,6 +916,31 @@ export class LoroStreamsMachineRpcServer {
               throw new Error('Invalid decrypted authorization-code input.');
             }
           }
+          if (request.params.action === 'submit-input') {
+            const authenticationRequestId = request.params.authenticationRequestId;
+            const interactionId = request.params.interactionId;
+            const authenticationInputEnvelope = request.params.authenticationInputEnvelope;
+            if (!authenticationRequestId || !interactionId || !authenticationInputEnvelope) {
+              throw new Error('Missing encrypted authentication input.');
+            }
+            const activeRecipient =
+              this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
+            if (!activeRecipient) {
+              throw new Error('Authentication-input recipient is no longer active.');
+            }
+            authenticationInput = await activeRecipient.decrypt(
+              authenticationInputEnvelope,
+              getMachineAcpAuthenticationInputSecretContext({
+                workspaceId: this.deps.workspaceId,
+                machineId: this.deps.machineId,
+                authenticationRequestId,
+                interactionId,
+              })
+            );
+            if (!authenticationInput || authenticationInput.length > 65_536) {
+              throw new Error('Invalid decrypted authentication input.');
+            }
+          }
 
           try {
             const response = await this.deps.authenticateMachineAcp({
@@ -892,6 +949,8 @@ export class LoroStreamsMachineRpcServer {
               authenticationRequestId: request.params.authenticationRequestId,
               authorizationCode,
               methodId: request.params.methodId,
+              interactionId: request.params.interactionId,
+              authenticationInput,
               configId: request.params.configId as AgentConfigId | undefined,
               cliType: request.params.cliType,
               agentType: request.params.agentType,

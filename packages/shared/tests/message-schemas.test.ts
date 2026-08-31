@@ -309,15 +309,175 @@ describe('message-schemas machine ACP authentication', () => {
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',
     };
+    const methodProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'auth-methods',
+      interactionId: 'method-choice-1',
+      authMethods: [{ type: 'agent', id: 'oauth', name: 'Browser' }],
+    };
+    const formProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'input-required',
+      interactionId: 'form-1',
+      message: 'Complete sign-in',
+      form: {
+        fields: [
+          { id: 'code', type: 'secret', label: 'Code', required: true },
+          {
+            id: 'account',
+            type: 'select',
+            label: 'Account',
+            required: true,
+            options: [{ value: 'work', label: 'Work' }],
+          },
+        ],
+      },
+    };
+    const submitInput = {
+      ...request,
+      requestId: 'auth-input-2',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-1',
+      interactionId: 'form-1',
+      authenticationInput: JSON.stringify({
+        action: 'accept',
+        content: { code: 'one-time-code', account: 'work' },
+      }),
+    };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitCode).success).toBe(true);
+    expect(MachineAcpAuthenticateRequestSchema.safeParse(submitInput).success).toBe(true);
+    expect(
+      MachineAcpAuthenticateRequestSchema.safeParse({
+        ...request,
+        action: 'cancel',
+        methodId: 'oauth',
+      }).success
+    ).toBe(false);
     expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(progress).success).toBe(true);
+    expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(methodProgress).success).toBe(
+      true
+    );
+    expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(formProgress).success).toBe(
+      true
+    );
     expect(MachineAcpAuthenticateResponseSchema.safeParse(response).success).toBe(true);
     expect(LocalSessionControlResponseSchema.safeParse(response).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(submitCode)).success).toBe(true);
     expect(ServerToClientSchema.safeParse(progress).success).toBe(true);
+  });
+
+  it('rejects unsafe authorization schemes and incomplete interaction progress', () => {
+    const base = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+    };
+
+    for (const authorizationUrl of ['javascript:alert(1)', 'file:///tmp/credential']) {
+      expect(
+        MachineAcpAuthenticationProgressMessageSchema.safeParse({
+          ...base,
+          status: 'authorization',
+          authorizationUrl,
+        }).success
+      ).toBe(false);
+    }
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'http://127.0.0.1:8787/callback',
+      }).success
+    ).toBe(true);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'https://provider.example.test/oauth',
+        requiresAuthorizationConsent: true,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [{ type: 'env_var', id: 'legacy-env', name: 'Legacy environment' }],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [
+          { type: 'agent', id: 'oauth', name: 'Browser' },
+          { type: 'agent', id: 'oauth', name: 'Duplicate' },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [{ type: 'agent', name: 'Missing id' }],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+        form: {
+          fields: [
+            {
+              id: 'token',
+              type: 'secret',
+              label: 'Token',
+              required: true,
+              defaultValue: 'must-not-be-retained',
+            },
+          ],
+        },
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+        form: {
+          fields: [
+            {
+              id: 'account',
+              type: 'select',
+              label: 'Account',
+              required: true,
+              options: [{ value: 'work', label: 'Work' }],
+              defaultValue: 'missing',
+            },
+          ],
+        },
+      }).success
+    ).toBe(false);
   });
 });
 

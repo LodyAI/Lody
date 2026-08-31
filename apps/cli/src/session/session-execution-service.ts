@@ -139,6 +139,11 @@ type FinalizeTurnContext = {
 };
 
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
+// Renderer, local IPC, and Machine RPC wait at most 300s for the complete
+// authentication workflow. Keep the post-login capability proof inside that
+// envelope and leave a small delivery margin for the final response.
+const ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS = 295_000;
+const ACP_POST_AUTH_REFRESH_MAX_MS = 60_000;
 
 /**
  * Shown in chat when a turn ends with no agent output at all. It names the most
@@ -583,13 +588,18 @@ const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary =>
       : ({} as Record<string, unknown>);
   const type =
     record.type === 'terminal' || record.type === 'env_var' ? record.type : ('agent' as const);
+  const boundedString = (value: unknown, maxLength: number): string | undefined =>
+    typeof value === 'string' ? value.slice(0, maxLength) : undefined;
+  const id = boundedString(record.id, 1024);
+  const name = boundedString(record.name, 4096);
+  const description = boundedString(record.description, 16_384);
   return {
     type,
-    ...(typeof record.id === 'string' ? { id: record.id } : {}),
-    ...(typeof record.name === 'string' ? { name: record.name } : {}),
-    ...(typeof record.description === 'string' ? { description: record.description } : {}),
+    ...(id !== undefined ? { id } : {}),
+    ...(name !== undefined ? { name } : {}),
+    ...(description !== undefined ? { description } : {}),
     ...(Array.isArray(record.args) && record.args.every((arg) => typeof arg === 'string')
-      ? { args: record.args }
+      ? { args: record.args.slice(0, 64).map((arg) => arg.slice(0, 4096)) }
       : {}),
   };
 };
@@ -4864,6 +4874,7 @@ export class SessionExecutionService {
     message: MachineAcpAuthenticateRequestValidated,
     options: AcpAuthenticationOptions = {}
   ): Promise<MachineAcpAuthenticateResponse> {
+    const workflowStartedAt = Date.now();
     const base = {
       type: 'machine/acp-authenticate_response' as const,
       machineId: this.deps.machineId,
@@ -4903,8 +4914,43 @@ export class SessionExecutionService {
         ),
       };
     }
+    if (message.action === 'submit-input') {
+      if (
+        !message.authenticationRequestId ||
+        !message.interactionId ||
+        !message.authenticationInput
+      ) {
+        return {
+          ...base,
+          success: false,
+          disposition: 'error',
+          error: 'Missing authentication request, interaction, or input',
+        };
+      }
+      return {
+        ...base,
+        ...this.acpAuthenticationManager.submitAuthenticationInput(
+          message.agentType,
+          message.authenticationRequestId,
+          message.interactionId,
+          message.authenticationInput
+        ),
+      };
+    }
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
+      if (event.status === 'auth-methods') {
+        options.onProgress?.({
+          type: 'machine/acp-authentication-progress',
+          machineId: this.deps.machineId,
+          requestId: message.requestId,
+          agentType: message.agentType,
+          status: event.status,
+          interactionId: event.interactionId,
+          authMethods: event.authMethods.map(summarizeAcpAuthMethod),
+        });
+        return;
+      }
       options.onProgress?.({
         type: 'machine/acp-authentication-progress',
         machineId: this.deps.machineId,
@@ -4923,31 +4969,48 @@ export class SessionExecutionService {
       methodId: message.methodId,
       onProgress,
     });
-
-    // The agent advertises several sign-in methods; the caller re-sends the
-    // request with the one the user picked.
-    if (result.disposition === 'method-required') {
-      return {
-        ...base,
-        success: true,
-        disposition: 'method-required',
-        authRequired: true,
-        authMethods: result.authMethods.map((method) => ({ ...method })),
-      };
-    }
-
     if (result.success && result.disposition === 'authenticated' && message.configId) {
-      const refresh = await this.refreshMachineAcpCapabilities({
-        type: 'machine/acp-capabilities-refresh',
-        machineId: message.machineId,
-        workspaceId: message.workspaceId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        customAcp: message.customAcp,
-        runtimeOverrides: message.runtimeOverrides,
-        env: message.env,
-      });
+      const refreshController = new AbortController();
+      const refreshTimeoutMs = Math.max(
+        1,
+        Math.min(
+          ACP_POST_AUTH_REFRESH_MAX_MS,
+          ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS - (Date.now() - workflowStartedAt)
+        )
+      );
+      const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
+      refreshTimeout.unref?.();
+      let refresh: MachineAcpCapabilitiesRefreshResponse;
+      try {
+        refresh = await this.refreshMachineAcpCapabilities(
+          {
+            type: 'machine/acp-capabilities-refresh',
+            machineId: message.machineId,
+            workspaceId: message.workspaceId,
+            configId: message.configId,
+            cliType: message.cliType,
+            agentType: message.agentType,
+            customAcp: message.customAcp,
+            runtimeOverrides: message.runtimeOverrides,
+            env: message.env,
+          },
+          { signal: refreshController.signal }
+        );
+      } catch (error) {
+        refresh = {
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId: message.machineId,
+          configId: message.configId,
+          cliType: message.cliType,
+          agentType: message.agentType,
+          success: false,
+          error: refreshController.signal.aborted
+            ? 'Authentication succeeded, but capability verification timed out'
+            : formatErrorMessage(error),
+        };
+      } finally {
+        clearTimeout(refreshTimeout);
+      }
       if (!refresh.success) {
         return {
           ...base,
