@@ -4209,11 +4209,14 @@ export const SessionChatInterface = memo(
       });
       try {
         await dispatchPrompt(
-          buildResolvePrConflictsPrompt({
-            repoFullName: latestPrRepoFullName,
-            prNumber: latestPrNumber,
-            prUrl: latestPr.url,
-          }),
+          buildResolvePrConflictsPrompt(
+            {
+              repoFullName: latestPrRepoFullName,
+              prNumber: latestPrNumber,
+              prUrl: latestPr.url,
+            },
+            t
+          ),
           executionTurnConfigOverrides
         );
       } finally {
@@ -4227,6 +4230,7 @@ export const SessionChatInterface = memo(
       latestPr,
       latestPrNumber,
       latestPrRepoFullName,
+      t,
       workspaceDirty,
     ]);
 
@@ -4244,11 +4248,14 @@ export const SessionChatInterface = memo(
           toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'));
           return;
         }
-        const prompt = buildFixCiErrorsPrompt({
-          repoFullName: latestPrRepoFullName,
-          pullRequest: refreshed.pullRequest,
-          checkRuns: refreshed.checkRuns,
-        });
+        const prompt = buildFixCiErrorsPrompt(
+          {
+            repoFullName: latestPrRepoFullName,
+            pullRequest: refreshed.pullRequest,
+            checkRuns: refreshed.checkRuns,
+          },
+          t
+        );
         if (!prompt) {
           toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
           return;
