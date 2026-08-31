@@ -740,7 +740,11 @@ const buildPlanHistory = (): SessionHistoryParsed[] => [
   }),
 ];
 
-const buildHistory = (state: PageState, streamChunkCount = 0): SessionHistoryParsed[] => {
+const buildHistory = (
+  state: PageState,
+  streamChunkCount = 0,
+  showCapacityRetry = false
+): SessionHistoryParsed[] => {
   if (state === 'working') {
     return buildWorkingHistory(streamChunkCount);
   }
@@ -774,6 +778,32 @@ const buildHistory = (state: PageState, streamChunkCount = 0): SessionHistoryPar
       })
     );
   }
+  if (showCapacityRetry) {
+    messages.push(
+      buildMessage({
+        id: 'capacity-user-turn',
+        role: 'user',
+        userId: STORY_USER_ID,
+        timestamp: '2026-07-09T09:35:00.000Z',
+        items: [{ type: 'text', text: 'Please continue with the implementation.' }],
+      }),
+      buildMessage({
+        id: 'capacity-failure',
+        role: 'system',
+        timestamp: '2026-07-09T09:35:02.000Z',
+        items: [
+          {
+            type: 'system_notice',
+            name: 'chat_failed',
+            meta: {
+              reason: 'acp_provider_overloaded',
+              message: 'Selected model is at capacity. Please try a different model.',
+            },
+          },
+        ],
+      })
+    );
+  }
   return messages;
 };
 
@@ -791,6 +821,20 @@ const renderMessageRow = ({
     message={message}
     sessionId={sessionId}
     user={message.userId ? usersById[message.userId] : undefined}
+    capacityRetry={
+      message.id === 'capacity-failure'
+        ? {
+            noticeId: message.id,
+            retryInSeconds: 4,
+            retryRemainingRatio: 0.8,
+            pending: false,
+            canRetry: true,
+            autoRetryEnabled: true,
+            autoRetryExhausted: false,
+            retry: action,
+          }
+        : undefined
+    }
   />
 );
 
@@ -911,10 +955,12 @@ function StoryShell({
   state,
   frame,
   dropActive = false,
+  showCapacityRetry = false,
 }: {
   state: PageState;
   frame: DeviceFrame;
   dropActive?: boolean;
+  showCapacityRetry?: boolean;
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
@@ -936,7 +982,10 @@ function StoryShell({
     }, STREAM_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [state]);
-  const history = useMemo(() => buildHistory(state, streamChunkCount), [state, streamChunkCount]);
+  const history = useMemo(
+    () => buildHistory(state, streamChunkCount, showCapacityRetry),
+    [showCapacityRetry, state, streamChunkCount]
+  );
   const permissionHistory = history as unknown as SessionDoc['history'];
   const liveStatus =
     state === 'idle'
@@ -1399,6 +1448,12 @@ export const DesktopPlanFlow: Story = {
 
 export const DesktopPlanFlowLight: Story = {
   args: { state: 'plan' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopCapacityRetry: Story = {
+  args: { showCapacityRetry: true },
   globals: { theme: 'light' },
   decorators: [withDesktopViewport],
 };

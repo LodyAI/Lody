@@ -196,6 +196,10 @@ import {
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
+import {
+  CAPACITY_RETRY_CONTINUATION_PROMPT,
+  useCapacityAutoRetry,
+} from './use-capacity-auto-retry';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -3888,6 +3892,17 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    const capacityRetry = useCapacityAutoRetry({
+      sessionId: session.id,
+      history: sessionDoc?.history,
+      canRetry:
+        !isAgentBusy && !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing,
+      onRetry: async () =>
+        await dispatchPrompt(
+          t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
+        ),
+    });
+
     // Resend a user turn the missing-history recovery negatively acknowledged:
     // the row's "Not delivered" label opens a confirmation dialog that calls
     // this with the turn's exact content. It rides the ordinary send path as a
@@ -5728,6 +5743,7 @@ export const SessionChatInterface = memo(
                             editableLastUserMessageId ? handleEditLastUser : undefined
                           }
                           onResendUndelivered={handleResendUndelivered}
+                          capacityRetry={capacityRetry ?? undefined}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={

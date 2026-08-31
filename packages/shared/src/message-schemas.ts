@@ -2907,6 +2907,7 @@ export const ChatFailedReasonSchema = z.enum([
   'acp_auth_required',
   'acp_internal_error',
   'acp_upstream_api_error',
+  'acp_provider_overloaded',
   'acp_session_storage_incompatible',
   'acp_resource_not_found',
   'acp_request_cancelled',
