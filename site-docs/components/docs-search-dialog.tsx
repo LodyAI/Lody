@@ -65,7 +65,7 @@ export function DocsSearchDialog(props: SharedProps) {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!props.open) return;
+    if (!props.open) return undefined;
 
     let active = true;
     setIsLoading(true);
