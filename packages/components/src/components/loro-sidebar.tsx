@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
+import { CHAT_WORKSPACE_GEOMETRY_ANCHORS } from '@/lib/chat-workspace-geometry';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
@@ -414,8 +415,12 @@ function LineChangeBadge({ lineChange }: { lineChange: LoroSidebarRepoItemDelta 
   const removedText = `-${lineChange.del}`;
   return (
     <div className="flex items-center gap-1 text-[11px] tabular-nums">
-      <span className="text-code-added">{addedText}</span>
-      <span className="text-code-removed">{removedText}</span>
+      <span data-geometry-baseline-member className="text-code-added">
+        {addedText}
+      </span>
+      <span data-geometry-baseline-member className="text-code-removed">
+        {removedText}
+      </span>
     </div>
   );
 }
@@ -566,6 +571,7 @@ function NavButton({
   return (
     <div className="relative flex w-full items-center">
       <button
+        data-geometry-baseline-group="center"
         type="button"
         onClick={onClick}
         className={cn(
@@ -833,6 +839,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
   return (
     <div
+      data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.sidebarCard}
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn(
@@ -893,6 +900,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="min-w-0 flex-1">
                 <DropdownMenuTrigger asChild>
                   <button
+                    data-geometry-baseline-group="center"
                     type="button"
                     className={cn(
                       workspaceIdentityClassName,
@@ -959,7 +967,11 @@ export const LoroSidebar = memo(function LoroSidebar({
             </DropdownMenu>
           ) : (
             <div className="min-w-0 flex-1">
-              <div className={workspaceIdentityClassName} data-workspace-identity>
+              <div
+                data-geometry-baseline-group="center"
+                className={workspaceIdentityClassName}
+                data-workspace-identity
+              >
                 {workspaceIdentity}
               </div>
             </div>
@@ -1155,7 +1167,10 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="space-y-3 pt-1">
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1 text-[12px] font-medium text-sidebar-foreground-muted">
+                    <div
+                      data-geometry-baseline-group="center"
+                      className="flex items-center gap-2 px-1 text-[12px] font-medium text-sidebar-foreground-muted"
+                    >
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterPlaceholder ? (
@@ -1168,6 +1183,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         {section.items.map((item) => (
                           <li key={item.id}>
                             <div
+                              data-geometry-baseline-group="text"
                               className={cn(
                                 'flex items-center gap-2 rounded-lg px-2 py-2 text-[12px]',
                                 item.isSelected
@@ -1176,9 +1192,17 @@ export const LoroSidebar = memo(function LoroSidebar({
                               )}
                             >
                               <span className="h-2 w-2 rounded-full bg-sidebar-border" />
-                              <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                              <span
+                                data-geometry-baseline-member
+                                className="min-w-0 flex-1 truncate"
+                              >
+                                {item.title}
+                              </span>
                               {item.ageLabel ? (
-                                <span className="shrink-0 text-[11px] text-sidebar-foreground-muted">
+                                <span
+                                  data-geometry-baseline-member
+                                  className="shrink-0 text-[11px] text-sidebar-foreground-muted"
+                                >
                                   {item.ageLabel}
                                 </span>
                               ) : null}
@@ -1222,7 +1246,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         ) : null}
 
         <div className={getLoroSidebarFooterClassName(isMobile)}>
-          <div className="flex items-center gap-1">
+          <div data-geometry-baseline-group="center" className="flex items-center gap-1">
             <IconButton label="Settings" onClick={onSettingsClicked}>
               <Settings className="h-4 w-4" />
             </IconButton>

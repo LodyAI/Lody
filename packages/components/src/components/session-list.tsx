@@ -96,6 +96,9 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS } from '@/lib/chat-workspace-geometry';
+
+const sidebarAlignmentRules = CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS;
 
 export type { PrStatus };
 
@@ -456,7 +459,9 @@ function SessionRowTime({
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
     <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span className="select-none tabular-nums">{relativeTime}</span>
+      <span data-geometry-baseline-member className="select-none tabular-nums">
+        {relativeTime}
+      </span>
     </span>
   );
 }
@@ -659,7 +664,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
         group.collapsed ? 'mb-1 last:mb-0' : 'mb-2.5 last:mb-0'
       )}
     >
-      <div className="group flex h-7 items-center">
+      <div
+        data-geometry-align-instance={`sidebar-group:${group.key}`}
+        className="group flex h-7 items-center"
+      >
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
@@ -745,7 +753,13 @@ const SessionGroupSection = memo(function SessionGroupSection({
               )}
             </button>
           ) : null}
-          <span className="min-w-0 truncate text-left">{group.label}</span>
+          <span
+            data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+            data-geometry-align-member="group-label"
+            className="min-w-0 truncate text-left"
+          >
+            {group.label}
+          </span>
           {!showGroupHeaderIcon && canToggle ? (
             <ChevronDown
               className={cn(
@@ -766,6 +780,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
 
         {canCreateNew && (
           <button
+            data-geometry-hover-action=""
+            data-geometry-align-x={sidebarAlignmentRules.sidebarPrimaryTrailingRailEnd.name}
+            data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+            data-geometry-align-member="group-new-action"
             type="button"
             className={cn(
               'ml-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm',
@@ -781,7 +799,16 @@ const SessionGroupSection = memo(function SessionGroupSection({
           </button>
         )}
 
-        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        {headerAction ? (
+          <div
+            data-geometry-align-x={sidebarAlignmentRules.sidebarPrimaryTrailingRailEnd.name}
+            data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+            data-geometry-align-member="group-header-action"
+            className="shrink-0"
+          >
+            {headerAction}
+          </div>
+        ) : null}
       </div>
 
       {!group.collapsed && (
@@ -850,7 +877,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const sessionHref = isSelectable ? getSessionHref?.(session.sessionId) : undefined;
             const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
             const renderTitle = (extraClassName?: string) => (
-              <span className={cn('truncate', extraClassName)}>{session.title}</span>
+              <span data-geometry-baseline-member className={cn('truncate', extraClassName)}>
+                {session.title}
+              </span>
             );
             const handleAnchorClick = useAnchor
               ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -894,6 +923,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const row = (
               <div
                 key={session.sessionId}
+                data-geometry-align-instance={`sidebar-session:${session.sessionId}`}
                 role={!useAnchor && isSelectable ? 'button' : undefined}
                 tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                 aria-disabled={!isSelectable ? true : undefined}
@@ -962,7 +992,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     onClick={handleAnchorClick}
                   />
                 ) : null}
-                <div className="flex min-w-0 items-center gap-1.5">
+                <div
+                  data-geometry-baseline-group="text"
+                  className="flex min-w-0 items-center gap-1.5"
+                >
                   <SessionRowLeadingSlot
                     isWaitingPermission={session.isWaitingPermission}
                     isWorking={session.isWorking}
@@ -972,6 +1005,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     openedByTree={openedByTreeSlot}
                   />
                   <div
+                    data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+                    data-geometry-align-member="session-title"
                     className={cn(
                       'min-w-0 flex-1 flex items-center gap-1 truncate text-sm',
                       showSelectedState
@@ -1023,8 +1058,12 @@ const SessionGroupSection = memo(function SessionGroupSection({
                             <SessionMergeablePill />
                           ) : hasChanges && !isMergeable ? (
                             <span className="flex items-center gap-1">
-                              <span className="text-code-added">+{session.addedLines}</span>
-                              <span className="text-code-removed">-{session.deletedLines}</span>
+                              <span data-geometry-baseline-member className="text-code-added">
+                                +{session.addedLines}
+                              </span>
+                              <span data-geometry-baseline-member className="text-code-removed">
+                                -{session.deletedLines}
+                              </span>
                             </span>
                           ) : null}
                           {hasPr ? (

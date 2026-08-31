@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lody Chat Workspace Geometry Report</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        background: light-dark(#f3f4f6, #09090b);
+        color: light-dark(#18181b, #f4f4f5);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .report {
+        width: min(1560px, 100%);
+        margin-inline: auto;
+        padding: 32px;
+      }
+
+      .report-header,
+      .section-header,
+      .metrics,
+      .controls,
+      .legend {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .report-header,
+      .section-header {
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(24px, 4vw, 40px);
+        letter-spacing: -0.04em;
+      }
+
+      h2 {
+        font-size: 18px;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle,
+      .timestamp,
+      figcaption,
+      .empty-state {
+        color: light-dark(#71717a, #a1a1aa);
+      }
+
+      .subtitle {
+        margin-top: 8px;
+      }
+
+      .status {
+        border: 1px solid light-dark(#bbf7d0, #166534);
+        background: light-dark(#f0fdf4, #052e16);
+        color: light-dark(#166534, #86efac);
+        border-radius: 999px;
+        padding: 7px 11px;
+        font:
+          600 12px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      .status.has-debt {
+        border-color: light-dark(#fde68a, #92400e);
+        background: light-dark(#fffbeb, #451a03);
+        color: light-dark(#92400e, #fcd34d);
+      }
+
+      .metrics {
+        gap: 8px;
+        margin-top: 24px;
+      }
+
+      .metric {
+        min-width: 130px;
+        padding: 12px 14px;
+        border: 1px solid light-dark(#e4e4e7, #27272a);
+        border-radius: 12px;
+        background: light-dark(#ffffff, #18181b);
+      }
+
+      .metric-label {
+        display: block;
+        margin-bottom: 5px;
+        color: light-dark(#71717a, #a1a1aa);
+        font-size: 11px;
+      }
+
+      .metric-value {
+        font:
+          650 16px/1.2 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      section {
+        margin-top: 32px;
+      }
+
+      .comparison {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 14px;
+      }
+
+      figure {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid light-dark(#e4e4e7, #27272a);
+        border-radius: 14px;
+        background: light-dark(#ffffff, #18181b);
+      }
+
+      figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        border: 1px solid light-dark(#e4e4e7, #3f3f46);
+      }
+
+      figcaption {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 4px 2px;
+        font-size: 12px;
+      }
+
+      figcaption strong {
+        color: light-dark(#18181b, #f4f4f5);
+      }
+
+      figcaption a {
+        color: inherit;
+      }
+
+      .controls,
+      .legend {
+        gap: 8px;
+      }
+
+      .control {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid light-dark(#d4d4d8, #3f3f46);
+        border-radius: 8px;
+        background: transparent;
+        color: inherit;
+        padding: 7px 9px;
+        cursor: pointer;
+      }
+
+      .control[aria-pressed='false'] {
+        opacity: 0.45;
+      }
+
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+      }
+
+      .swatch.columns {
+        background: #0ea5e9;
+      }
+
+      .swatch.baseline {
+        background: #10b981;
+      }
+
+      .swatch.violations {
+        background: #f59e0b;
+      }
+
+      .explorer {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+        gap: 16px;
+        margin-top: 14px;
+      }
+
+      .stage-shell,
+      .debt-panel {
+        border: 1px solid light-dark(#e4e4e7, #27272a);
+        border-radius: 14px;
+        background: light-dark(#ffffff, #18181b);
+      }
+
+      .stage-shell {
+        padding: 16px;
+      }
+
+      .stage {
+        position: relative;
+        overflow: hidden;
+        width: 100%;
+        aspect-ratio: 1440 / 900;
+        border: 1px solid light-dark(#d4d4d8, #3f3f46);
+        background: light-dark(#fafafa, #111113);
+      }
+
+      .geometry-box,
+      .grid-column,
+      .alignment-frame,
+      .alignment-line,
+      .alignment-member-line,
+      .semantic-frame,
+      .semantic-line,
+      .spacing-frame {
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .geometry-box {
+        border: 1px solid light-dark(#a1a1aa, #52525b);
+      }
+
+      .geometry-box.sidebar-card {
+        background: light-dark(#f4f4f5, #27272a);
+        border-radius: 1.2%;
+      }
+
+      .geometry-box.main-pane {
+        background: light-dark(#ffffff, #18181b);
+      }
+
+      .grid-column {
+        z-index: 2;
+        top: 0;
+        bottom: 0;
+        background: rgb(14 165 233 / 0.055);
+        border-inline: 1px solid rgb(14 165 233 / 0.22);
+      }
+
+      .grid-column.sidebar {
+        background: rgb(99 102 241 / 0.045);
+        border-inline-color: rgb(99 102 241 / 0.2);
+      }
+
+      .semantic-frame {
+        z-index: 3;
+        border: 0;
+      }
+
+      .alignment-frame {
+        z-index: 4;
+        border: 0;
+        background: transparent;
+      }
+
+      .alignment-line,
+      .alignment-member-line {
+        background: rgb(16 185 129 / 0.78);
+        box-shadow: 0 0 0 0.5px rgb(16 185 129 / 0.2);
+      }
+
+      .alignment-line.x,
+      .alignment-member-line.x {
+        top: 0;
+        bottom: 0;
+        width: 1px;
+      }
+
+      .alignment-line.y,
+      .alignment-member-line.y {
+        left: 0;
+        right: 0;
+        height: 1px;
+      }
+
+      .alignment-frame.is-misaligned .alignment-line {
+        background: rgb(244 63 94 / 0.8);
+        box-shadow: 0 0 0 0.5px rgb(244 63 94 / 0.22);
+      }
+
+      .alignment-member-line {
+        background: rgb(244 63 94 / 0.22);
+        box-shadow: none;
+      }
+
+      .semantic-frame.is-misaligned {
+        background: rgb(244 63 94 / 0.008);
+      }
+
+      .semantic-line {
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: rgb(16 185 129 / 0.78);
+        box-shadow: 0 0 0 0.5px rgb(16 185 129 / 0.25);
+      }
+
+      .semantic-frame.is-misaligned .semantic-line {
+        background: rgb(244 63 94 / 0.84);
+        box-shadow: 0 0 0 0.5px rgb(244 63 94 / 0.3);
+      }
+
+      .spacing-frame {
+        z-index: 4;
+        min-width: 4px;
+        min-height: 4px;
+        border: 1px solid rgb(245 158 11 / 0.14);
+        background: rgb(245 158 11 / 0.006);
+      }
+
+      .spacing-frame.is-selected {
+        z-index: 5;
+        border-color: rgb(245 158 11 / 0.78);
+        background: rgb(245 158 11 / 0.07);
+      }
+
+      .layer-hidden {
+        display: none;
+      }
+
+      .debt-panel {
+        max-height: 590px;
+        overflow: auto;
+        padding: 10px;
+      }
+
+      .panel-heading {
+        padding: 8px 6px;
+        color: light-dark(#52525b, #d4d4d8);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .panel-heading:not(:first-child) {
+        margin-top: 10px;
+        border-top: 1px solid light-dark(#e4e4e7, #27272a);
+        padding-top: 16px;
+      }
+
+      .debt-item {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 8px;
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid light-dark(#f4f4f5, #27272a);
+        background: transparent;
+        color: inherit;
+        padding: 10px 6px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .debt-item.is-selected {
+        background: light-dark(#fffbeb, #451a03);
+      }
+
+      .debt-index {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: #d97706;
+        color: white;
+        font:
+          650 11px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      .debt-element,
+      .debt-values {
+        display: block;
+        overflow-wrap: anywhere;
+      }
+
+      .debt-element {
+        font:
+          600 11px/1.35 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      .debt-values {
+        margin-top: 4px;
+        color: light-dark(#b45309, #fcd34d);
+        font:
+          11px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      .baseline-result {
+        display: grid;
+        grid-template-columns: 12px 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 6px;
+        border-bottom: 1px solid light-dark(#f4f4f5, #27272a);
+        font:
+          11px/1.4 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      .baseline-result-line {
+        height: 1px;
+        background: #10b981;
+      }
+
+      .baseline-result.is-misaligned .baseline-result-line {
+        background: #f43f5e;
+      }
+
+      .baseline-result-status {
+        color: light-dark(#047857, #6ee7b7);
+      }
+
+      .baseline-result.is-misaligned .baseline-result-status {
+        color: light-dark(#be123c, #fda4af);
+      }
+
+      .legend {
+        margin-top: 10px;
+        color: light-dark(#71717a, #a1a1aa);
+        font-size: 11px;
+      }
+
+      @media (max-width: 920px) {
+        .report {
+          padding: 20px;
+        }
+
+        .comparison,
+        .explorer {
+          grid-template-columns: 1fr;
+        }
+
+        .debt-panel {
+          max-height: 420px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .report {
+          padding: 14px;
+        }
+
+        .metric {
+          flex: 1 1 42%;
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="report">
+      <header class="report-header">
+        <div>
+          <h1>Chat Workspace Geometry</h1>
+          <p class="subtitle">实际 DOMRect、Sidebar/Main Columns、语义行基准与 Spacing rhythm</p>
+        </div>
+        <span class="status" id="geometry-status"></span>
+      </header>
+
+      <div class="metrics" id="metrics"></div>
+
+      <section aria-labelledby="comparison-title">
+        <div class="section-header">
+          <h2 id="comparison-title">同一帧画面对照</h2>
+          <span class="timestamp" id="timestamp"></span>
+        </div>
+        <div class="comparison">
+          <figure>
+            <img id="clean-image" alt="没有辅助线的 Chat Workspace 截图" />
+            <figcaption>
+              <strong>原始界面</strong>
+              <a id="clean-link">打开 PNG</a>
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              id="annotated-image"
+              alt="显示 Sidebar 与 Main Columns、语义对齐线和透明 Spacing 范围的截图"
+            />
+            <figcaption>
+              <strong>Columns、语义对齐线与透明诊断范围</strong>
+              <a id="annotated-link">打开 PNG</a>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section aria-labelledby="explorer-title">
+        <div class="section-header">
+          <h2 id="explorer-title">几何结构浏览</h2>
+          <div class="controls" aria-label="可见图层">
+            <button class="control" type="button" aria-pressed="true" data-layer="columns">
+              <span class="swatch columns"></span>Columns
+            </button>
+            <button class="control" type="button" aria-pressed="true" data-layer="baseline">
+              <span class="swatch baseline"></span>语义对齐线
+            </button>
+            <button class="control" type="button" aria-pressed="true" data-layer="spacing">
+              <span class="swatch violations"></span>Spacing rhythm
+            </button>
+          </div>
+        </div>
+        <div class="explorer">
+          <div class="stage-shell">
+            <div class="stage" id="geometry-stage" aria-label="Workspace 几何结构图"></div>
+            <div class="legend" id="legend"></div>
+          </div>
+          <aside class="debt-panel" id="debt-panel" aria-label="语义对齐与 Spacing 诊断"></aside>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const report = __GEOMETRY_REPORT_DATA__;
+      const stage = document.getElementById('geometry-stage');
+      const debtPanel = document.getElementById('debt-panel');
+      const viewport = report.viewport;
+      const anchor = {
+        sidebarSlot: 'workspace-sidebar-slot',
+        sidebarCard: 'workspace-sidebar-card',
+        mainPane: 'workspace-main-pane',
+      };
+
+      function setRect(element, rect) {
+        element.style.left = `${(rect.x / viewport.width) * 100}%`;
+        element.style.top = `${(rect.y / viewport.height) * 100}%`;
+        element.style.width = `${(rect.width / viewport.width) * 100}%`;
+        element.style.height = `${(rect.height / viewport.height) * 100}%`;
+      }
+
+      function addBox(className, rect) {
+        const element = document.createElement('div');
+        element.className = `geometry-box ${className}`;
+        setRect(element, rect);
+        stage.append(element);
+      }
+
+      addBox('sidebar-slot', report.snapshot[anchor.sidebarSlot]);
+      addBox('sidebar-card', report.snapshot[anchor.sidebarCard]);
+      addBox('main-pane', report.snapshot[anchor.mainPane]);
+
+      for (const [grid, scope] of [
+        [report.sidebarGrid, 'sidebar'],
+        [report.mainGrid, 'main'],
+      ]) {
+        grid.columns.forEach((column) => {
+          const element = document.createElement('div');
+          element.className = `grid-column ${scope}`;
+          element.dataset.layerItem = 'columns';
+          setRect(element, column.rect);
+          stage.append(element);
+        });
+      }
+
+      const alignmentHeading = document.createElement('div');
+      alignmentHeading.className = 'panel-heading';
+      alignmentHeading.textContent = 'Semantic alignment lines';
+      debtPanel.append(alignmentHeading);
+
+      report.semanticAlignments.forEach((entry) => {
+        const frame = document.createElement('div');
+        frame.className = `alignment-frame${entry.aligned ? '' : ' is-misaligned'}`;
+        frame.dataset.layerItem = 'baseline';
+        setRect(frame, entry.rect);
+        const line = document.createElement('span');
+        line.className = `alignment-line ${entry.axis}`;
+        if (entry.axis === 'x') {
+          line.style.left = `${((entry.line - entry.rect.x) / entry.rect.width) * 100}%`;
+        } else {
+          line.style.top = `${((entry.line - entry.rect.y) / entry.rect.height) * 100}%`;
+        }
+        frame.append(line);
+        if (!entry.aligned) {
+          entry.members.forEach((member) => {
+            const memberLine = document.createElement('span');
+            memberLine.className = `alignment-member-line ${entry.axis}`;
+            if (entry.axis === 'x') {
+              memberLine.style.left = `${((member.coordinate - entry.rect.x) / entry.rect.width) * 100}%`;
+              memberLine.style.top = `${((member.rect.y - entry.rect.y) / entry.rect.height) * 100}%`;
+              memberLine.style.height = `${(member.rect.height / entry.rect.height) * 100}%`;
+              memberLine.style.bottom = 'auto';
+            } else {
+              memberLine.style.top = `${((member.coordinate - entry.rect.y) / entry.rect.height) * 100}%`;
+              memberLine.style.left = `${((member.rect.x - entry.rect.x) / entry.rect.width) * 100}%`;
+              memberLine.style.width = `${(member.rect.width / entry.rect.width) * 100}%`;
+              memberLine.style.right = 'auto';
+            }
+            frame.append(memberLine);
+          });
+        }
+        stage.append(frame);
+
+        const result = document.createElement('div');
+        result.className = `baseline-result${entry.aligned ? '' : ' is-misaligned'}`;
+        result.innerHTML =
+          '<span class="baseline-result-line"></span>' +
+          `<span>${entry.groupLabel}<br>${entry.axis} · ${entry.anchor} · ${entry.members.length} members</span>` +
+          `<span class="baseline-result-status">${entry.aligned ? 'aligned' : `spread ${Number(entry.spread.toFixed(2))}px`}</span>`;
+        debtPanel.append(result);
+      });
+
+      const baselineHeading = document.createElement('div');
+      baselineHeading.className = 'panel-heading';
+      baselineHeading.textContent = 'Typographic baseline groups';
+      debtPanel.append(baselineHeading);
+
+      report.semanticBaselines.forEach((entry) => {
+        const frame = document.createElement('div');
+        frame.className = `semantic-frame${entry.aligned ? '' : ' is-misaligned'}`;
+        frame.dataset.layerItem = 'baseline';
+        setRect(frame, entry.rect);
+        const line = document.createElement('span');
+        line.className = 'semantic-line';
+        line.style.top = `${((entry.line - entry.rect.y) / entry.rect.height) * 100}%`;
+        frame.append(line);
+        stage.append(frame);
+
+        const result = document.createElement('div');
+        result.className = `baseline-result${entry.aligned ? '' : ' is-misaligned'}`;
+        const maxDelta = Math.max(...entry.members.map((member) => member.delta));
+        result.innerHTML =
+          '<span class="baseline-result-line"></span>' +
+          `<span>${entry.mode} · ${entry.members.length} members</span>` +
+          `<span class="baseline-result-status">${entry.aligned ? 'aligned' : `Δ${Number(maxDelta.toFixed(2))}px`}</span>`;
+        debtPanel.append(result);
+      });
+
+      const spacingHeading = document.createElement('div');
+      spacingHeading.className = 'panel-heading';
+      spacingHeading.textContent = 'Spacing rhythm debt';
+      debtPanel.append(spacingHeading);
+
+      report.spacingAudit.forEach((entry, index) => {
+        const marker = document.createElement('div');
+        marker.className = 'spacing-frame';
+        marker.dataset.layerItem = 'spacing';
+        marker.dataset.spacingIndex = String(index);
+        setRect(marker, entry.rect);
+        stage.append(marker);
+
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'debt-item';
+        item.dataset.spacingIndex = String(index);
+        const values = entry.violations
+          .map(({ property, value }) => `${property}=${Number(value.toFixed(2))}px`)
+          .join(' · ');
+        item.innerHTML =
+          `<span class="debt-index">${index + 1}</span>` +
+          `<span><span class="debt-element">${entry.element}</span>` +
+          `<span class="debt-values">${values}</span></span>`;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('[data-spacing-index]').forEach((element) => {
+            element.classList.toggle('is-selected', element.dataset.spacingIndex === String(index));
+          });
+        });
+        debtPanel.append(item);
+      });
+
+      document.querySelectorAll('[data-layer]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const next = button.getAttribute('aria-pressed') !== 'true';
+          button.setAttribute('aria-pressed', String(next));
+          document
+            .querySelectorAll(`[data-layer-item="${button.dataset.layer}"]`)
+            .forEach((item) => {
+              item.classList.toggle('layer-hidden', !next);
+            });
+        });
+      });
+
+      const geometryPasses = report.geometryViolations.length === 0;
+      const semanticViolationCount =
+        report.semanticBaselines.filter((entry) => !entry.aligned).length +
+        report.semanticAlignments.filter((entry) => !entry.aligned).length;
+      const status = document.getElementById('geometry-status');
+      status.textContent = !geometryPasses
+        ? `${report.geometryViolations.length} GEOMETRY ERRORS`
+        : semanticViolationCount > 0
+          ? `STRUCTURE PASS · ${semanticViolationCount} ALIGNMENT DEBT`
+          : 'GEOMETRY PASS';
+      status.classList.toggle('has-debt', geometryPasses && semanticViolationCount > 0);
+      document.getElementById('timestamp').textContent = new Date(
+        report.generatedAt
+      ).toLocaleString();
+
+      const metrics = [
+        ['Viewport', `${viewport.width} × ${viewport.height}`],
+        ['Main Grid', `${report.mainGrid.range.columns} columns`],
+        ['Sidebar Grid', `${report.sidebarGrid.range.columns} columns`],
+        [
+          'Main Margin / Gutter',
+          `${report.mainGrid.range.margin}px / ${report.mainGrid.range.gutter}px`,
+        ],
+        [
+          'Sidebar Margin / Gutter',
+          `${report.sidebarGrid.range.margin}px / ${report.sidebarGrid.range.gutter}px`,
+        ],
+        [
+          'Semantic rows',
+          `${report.semanticBaselines.length} · ${semanticViolationCount} misaligned`,
+        ],
+        ['Spacing step / debt', `${report.spec.spacingStep}px · ${report.spacingAudit.length}`],
+      ];
+      document.getElementById('metrics').innerHTML = metrics
+        .map(
+          ([label, value]) =>
+            `<div class="metric"><span class="metric-label">${label}</span>` +
+            `<span class="metric-value">${value}</span></div>`
+        )
+        .join('');
+
+      document.getElementById('legend').textContent =
+        `Sidebar ${report.sidebarGrid.range.columns} cols × ${report.sidebarGrid.columnWidth}px · ` +
+        `Main ${report.mainGrid.range.columns} cols × ${Number(report.mainGrid.columnWidth.toFixed(2))}px · ` +
+        `${report.semanticBaselines.length} 条语义基准线 · ${report.spacingAudit.length} 个 spacing rhythm 债务`;
+
+      for (const [imageId, linkId, source] of [
+        ['clean-image', 'clean-link', report.images.clean],
+        ['annotated-image', 'annotated-link', report.images.annotated],
+      ]) {
+        const image = document.getElementById(imageId);
+        const link = document.getElementById(linkId);
+        image.src = source;
+        link.href = source;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+      }
+    </script>
+  </body>
+</html>

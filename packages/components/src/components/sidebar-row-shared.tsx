@@ -23,6 +23,13 @@ import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { UserAvatar } from '@/components/user-avatar';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
+import {
+  CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS,
+  CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
+} from '@/lib/chat-workspace-geometry';
+
+const semanticAlignmentAttributes = CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES;
+const sidebarAlignmentRules = CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS;
 
 /**
  * Shared building blocks for the single-line sidebar session rows. All three
@@ -440,6 +447,10 @@ export function SessionRowLeadingSlot({
   return (
     <div
       data-session-row-leading-slot=""
+      {...{
+        [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowContentCenter.name,
+        [semanticAlignmentAttributes.member]: 'leading-slot',
+      }}
       className={cn(
         'relative flex h-3.5 shrink-0 items-center',
         isTreeChild ? TREE_CHILD_SLOT_CLASS : 'w-3.5 justify-center'
@@ -506,6 +517,7 @@ export function SessionRowLeadingSlot({
       )}
       {showMenuButton ? (
         <button
+          data-geometry-hover-action=""
           type="button"
           aria-label={menuLabel}
           onClick={(event) => {
@@ -590,6 +602,7 @@ export function SidebarRowArchiveButton({
     <Tooltip delayDuration={500}>
       <TooltipTrigger asChild>
         <SidebarConfirmArchiveButton
+          data-geometry-hover-action=""
           label={label}
           confirmLabel={confirmLabel}
           className={cn(
@@ -628,6 +641,11 @@ export function SidebarRowEndSlot({
     // pointer-events-none so the resting PR icon area still passes clicks through to
     // the row's navigation; the Archive button re-enables pointer events on hover.
     <div
+      {...{
+        [semanticAlignmentAttributes.x]: sidebarAlignmentRules.sidebarPrimaryTrailingRailEnd.name,
+        [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowContentCenter.name,
+        [semanticAlignmentAttributes.member]: 'trailing-slot',
+      }}
       className={cn(
         'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
         reserve ? 'min-w-5' : 'w-0'
@@ -721,12 +739,16 @@ export function SidebarSectionHeader({
   isMobile?: boolean;
   toggleLabel?: string;
 }) {
+  const geometryInstance = `sidebar-section:${useId()}`;
   const canToggle = typeof onToggleCollapsed === 'function';
   const handleToggle = () => {
     if (canToggle) onToggleCollapsed?.();
   };
   return (
-    <div className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div
+      {...{ [semanticAlignmentAttributes.instance]: geometryInstance }}
+      className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]"
+    >
       <div
         role={canToggle ? 'button' : undefined}
         tabIndex={canToggle ? 0 : -1}
@@ -750,7 +772,15 @@ export function SidebarSectionHeader({
         )}
       >
         {icon}
-        <span className="min-w-0 truncate">{label}</span>
+        <span
+          {...{
+            [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowContentCenter.name,
+            [semanticAlignmentAttributes.member]: 'section-label',
+          }}
+          className="min-w-0 truncate"
+        >
+          {label}
+        </span>
         {canToggle ? (
           <ChevronDown
             className={cn(
@@ -766,7 +796,19 @@ export function SidebarSectionHeader({
         ) : null}
         <span className="flex-1" aria-hidden="true" />
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? (
+        <div
+          {...{
+            [semanticAlignmentAttributes.x]:
+              sidebarAlignmentRules.sidebarPrimaryTrailingRailEnd.name,
+            [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowContentCenter.name,
+            [semanticAlignmentAttributes.member]: 'section-trailing-action',
+          }}
+          className="shrink-0"
+        >
+          {action}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Button } from '@/ui/button';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
+import { CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS } from '@/lib/chat-workspace-geometry';
 
 export type { SidebarOrganizeMode, SidebarChatScope };
 
@@ -121,6 +122,10 @@ export function SidebarFilterPopover({
       <PopoverTrigger asChild>
         {trigger ?? (
           <Button
+            data-geometry-align-x={
+              CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS.sidebarPrimaryTrailingRailEnd.name
+            }
+            data-geometry-align-member="sidebar-filter-trigger"
             type="button"
             variant="ghost"
             size="icon"

@@ -1,6 +1,7 @@
 import type { ReactNode, Ref } from 'react';
 import type { DropZone } from '@/hooks/use-drop-zone';
 import { cn } from '@/lib/utils';
+import { CHAT_WORKSPACE_GEOMETRY_ANCHORS } from '@/lib/chat-workspace-geometry';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getSessionChatInputAreaShellClassName } from '@/components/sessions/session-chat-input-area';
 import { ConversationColumn } from '@/components/shared/conversation-column';
@@ -47,6 +48,7 @@ export function WebChatLandingScreen({
 
   return (
     <div
+      data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.chatLanding}
       className={cn(
         'relative flex h-full w-full flex-1 flex-col overflow-hidden',
         'bg-background text-foreground',
@@ -87,7 +89,10 @@ export function WebChatLandingScreen({
         {/* Greeting fills the space above the docked composer and stays vertically
             centered. overflow-auto lets it yield when the iPad soft keyboard shrinks the
             area (the composer band lifts itself — see the note below). */}
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-auto px-4">
+        <div
+          data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.greetingRegion}
+          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-auto px-4"
+        >
           <h1 className="text-4xl font-semibold tracking-tight text-foreground">{title}</h1>
           {contextSwitch}
         </div>
@@ -96,7 +101,10 @@ export function WebChatLandingScreen({
             landing inherits its exact bottom docking + iPad `--native-keyboard-height`
             lift and can never drift from the session composer. Hints sit above the
             composer so its bottom edge stays pinned to the shell when a hint toggles. */}
-        <div className={getSessionChatInputAreaShellClassName()}>
+        <div
+          data-geometry-anchor={CHAT_WORKSPACE_GEOMETRY_ANCHORS.composerBand}
+          className={getSessionChatInputAreaShellClassName()}
+        >
           <ConversationColumn className="@container">
             {noMachineHint != null ? <div className="pb-2">{noMachineHint}</div> : null}
             {agentConfigHint != null ? <div className="pb-2">{agentConfigHint}</div> : null}

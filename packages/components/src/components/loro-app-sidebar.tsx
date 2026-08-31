@@ -189,6 +189,9 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS } from '@/lib/chat-workspace-geometry';
+
+const sidebarAlignmentRules = CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS;
 
 export type LoroAppSidebarProps = {
   className?: string;
@@ -651,6 +654,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const row = (
     <div
       key={session.id}
+      data-geometry-align-instance={`sidebar-local-session:${session.id}`}
       role="button"
       tabIndex={0}
       aria-label={title}
@@ -691,6 +695,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           openedByTree={openedByTree}
         />
         <div
+          data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+          data-geometry-align-member="local-session-title"
           className="min-w-0 flex-1 flex items-center gap-1 truncate text-sm text-current"
           // Double-click to rename is scoped to the title only, so it can't be
           // triggered by double-clicking the Archive confirm button.
@@ -1037,6 +1043,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         <Tooltip delayDuration={500}>
           <TooltipTrigger asChild>
             <div
+              data-geometry-align-instance={`sidebar-local-project:${machineId}:${project.id}`}
               role={projectCanNavigate ? 'button' : undefined}
               tabIndex={projectCanNavigate ? 0 : -1}
               aria-label={ariaLabel}
@@ -1073,6 +1080,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               }}
             >
               <button
+                data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+                data-geometry-align-member="project-leading-control"
                 type="button"
                 className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
                 aria-label={toggleLabel}
@@ -1099,7 +1108,13 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   )}
                 />
               </button>
-              <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
+              <span
+                data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+                data-geometry-align-member="project-label"
+                className="min-w-0 flex-1 truncate text-left"
+              >
+                {project.name}
+              </span>
 
               {removalStateLabel ? (
                 <Tooltip delayDuration={300}>
@@ -1116,8 +1131,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   <TooltipContent side="right">{removalStateLabel}</TooltipContent>
                 </Tooltip>
               ) : canRemoveProject ? (
-                <div className="relative h-5 w-5 shrink-0">
+                <div
+                  data-geometry-align-x={sidebarAlignmentRules.sidebarPrimaryTrailingRailEnd.name}
+                  data-geometry-align-y={sidebarAlignmentRules.sidebarRowContentCenter.name}
+                  data-geometry-align-member="project-trailing-action"
+                  className="relative h-5 w-5 shrink-0"
+                >
                   <button
+                    data-geometry-hover-action=""
                     type="button"
                     className={cn(
                       'absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-sm',

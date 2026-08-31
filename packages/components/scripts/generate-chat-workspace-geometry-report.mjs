@@ -1,0 +1,103 @@
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const packageRoot = fileURLToPath(new URL('..', import.meta.url));
+const templatePath = path.join(
+  packageRoot,
+  'scripts/templates/chat-workspace-geometry-report.html'
+);
+const argumentsList = process.argv.slice(2);
+const shouldOpen = argumentsList.includes('--open');
+const requestedOutput = argumentsList.find((argument) => !argument.startsWith('--'));
+const outputDirectory = path.resolve(packageRoot, requestedOutput ?? 'geometry-report');
+const reportPath = path.join(outputDirectory, 'index.html');
+const dataPath = path.join(outputDirectory, 'report-data.json');
+
+function run(command, arguments_, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, arguments_, {
+      cwd: packageRoot,
+      env: process.env,
+      stdio: 'inherit',
+      ...options,
+    });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `${command} exited with ${signal ? `signal ${signal}` : `status ${String(code)}`}`
+        )
+      );
+    });
+  });
+}
+
+async function openReport() {
+  const command =
+    process.platform === 'darwin'
+      ? ['open', [reportPath]]
+      : process.platform === 'win32'
+        ? ['cmd.exe', ['/c', 'start', '', reportPath]]
+        : ['xdg-open', [reportPath]];
+  const child = spawn(command[0], command[1], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
+
+const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const reportEnvironment = {
+  ...process.env,
+  GEOMETRY_REPORT_OUTPUT_DIR: outputDirectory,
+  VITE_PREVIEW_PUBLIC_BASE_DOMAIN: process.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN ?? 'local.invalid',
+  ...(process.platform === 'darwin' && process.env.PLAYWRIGHT_USE_SYSTEM_CHROME == null
+    ? { PLAYWRIGHT_USE_SYSTEM_CHROME: '1' }
+    : {}),
+};
+
+await run(
+  pnpmCommand,
+  [
+    'exec',
+    'playwright',
+    'test',
+    'tests/e2e/chat-workspace-geometry-report.spec.ts',
+    '--workers=1',
+    '--retries=0',
+    '--reporter=line',
+  ],
+  { env: reportEnvironment }
+);
+
+const [template, reportDataText] = await Promise.all([
+  readFile(templatePath, 'utf8'),
+  readFile(dataPath, 'utf8'),
+]);
+const reportData = JSON.parse(reportDataText);
+const serializedData = JSON.stringify(reportData)
+  .replaceAll('<', '\\u003c')
+  .replaceAll('\u2028', '\\u2028')
+  .replaceAll('\u2029', '\\u2029');
+const reportHtml = template.replace('__GEOMETRY_REPORT_DATA__', serializedData);
+if (reportHtml === template) throw new Error('Geometry report template data marker is missing');
+if (/data:image\//i.test(reportHtml)) {
+  throw new Error('Geometry report must reference image files instead of embedding Base64 images');
+}
+await writeFile(reportPath, reportHtml, 'utf8');
+
+const [cleanImage, annotatedImage] = await Promise.all([
+  stat(path.join(outputDirectory, reportData.images.clean)),
+  stat(path.join(outputDirectory, reportData.images.annotated)),
+]);
+console.log(`Geometry report: ${reportPath}`);
+console.log(`Clean PNG: ${(cleanImage.size / 1024).toFixed(1)} KiB`);
+console.log(`Annotated PNG: ${(annotatedImage.size / 1024).toFixed(1)} KiB`);
+
+if (shouldOpen) await openReport();
