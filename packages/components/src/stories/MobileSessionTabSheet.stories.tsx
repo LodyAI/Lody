@@ -47,6 +47,18 @@ const conversations: ConversationTabEntry[] = [
     unread: true,
     lastActivityAt: now - 3 * 86_400_000,
   },
+  /* The case the hand exists for: a subagent tab the user is not looking at is
+     blocked on an approval. Without it this row is a spinner, indistinguishable
+     from `c2` above, and nothing on screen says the run is stalled on you. */
+  {
+    id: 'c5',
+    title: 'Subagent · migrate the presence fixtures',
+    active: false,
+    running: true,
+    waitingPermission: true,
+    unread: false,
+    lastActivityAt: now - 20_000,
+  },
 ];
 
 /* Crowded case: many threads + archived — exercises scroll, the Main chip on a
@@ -66,6 +78,7 @@ const manyConversations: ConversationTabEntry[] = [
     title: 'Investigate flaky presence heartbeat',
     active: false,
     running: true,
+    waitingPermission: true,
     unread: false,
     lastActivityAt: now - 40_000,
   },

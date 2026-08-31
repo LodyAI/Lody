@@ -44,6 +44,7 @@ import {
   type ProjectRef,
   type SessionId,
   type SessionMeta,
+  type SessionStatus,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
 } from '@lody/shared';
@@ -4100,25 +4101,27 @@ const SessionDetail = ({
       void resolveForkWorktreeAvailability(activeTabSession);
     }
   }, [activeTabSession, mobileMenuSheetOpen, resolveForkWorktreeAvailability]);
-  // Reactive per-conversation "working" state. Rules-of-hooks forbids calling
+  // Reactive per-conversation live status. Rules-of-hooks forbids calling
   // useAtomValue per tab in a map, so read them all through ONE derived atom
   // keyed on the (memoized) real-session id list (drafts have no live status).
+  // The sheet needs the status TYPE, not just presence: a tab blocked on a
+  // permission request must read as "needs you", not as one more spinner.
   const conversationSessionIds = useMemo(
     () => orderedSessionTabIds.filter((id) => !isDraftSessionTabId(id)),
     [orderedSessionTabIds]
   );
-  const conversationWorkingAtom = useMemo(
+  const conversationLiveStatusAtom = useMemo(
     () =>
       atom((get) => {
-        const map: Record<string, boolean> = {};
+        const map: Record<string, SessionStatus | null> = {};
         for (const id of conversationSessionIds) {
-          map[id] = get(sessionLiveStatusAtomFamily(id as SessionId)) != null;
+          map[id] = get(sessionLiveStatusAtomFamily(id as SessionId));
         }
         return map;
       }),
     [conversationSessionIds]
   );
-  const conversationWorkingMap = useAtomValue(conversationWorkingAtom);
+  const conversationLiveStatusMap = useAtomValue(conversationLiveStatusAtom);
 
   const mobileConversations = useMemo<ConversationTabEntry[]>(() => {
     const conversationTabActive = effectiveActiveViewerTabId == null;
@@ -4130,6 +4133,7 @@ const SessionDetail = ({
       const draft = meta ? null : (draftTabs.find((d) => d.id === tabId) ?? null);
       const lastMessageAt = typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null;
       const lastReadAt = typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null;
+      const liveStatus = meta != null ? (conversationLiveStatusMap[tabId] ?? null) : null;
       return {
         id: tabId,
         title:
@@ -4138,7 +4142,8 @@ const SessionDetail = ({
           t('sessions.tabs.newTab', 'New Tab'),
         active: conversationTabActive && tabId === activeTabSessionId,
         main: tabId === sessionId,
-        running: meta != null && conversationWorkingMap[tabId] === true,
+        running: liveStatus != null,
+        waitingPermission: liveStatus?.type === 'requestPermission',
         unread:
           meta != null &&
           lastMessageAt !== null &&
@@ -4154,7 +4159,7 @@ const SessionDetail = ({
     draftTabs,
     activeTabSessionId,
     effectiveActiveViewerTabId,
-    conversationWorkingMap,
+    conversationLiveStatusMap,
     t,
   ]);
 

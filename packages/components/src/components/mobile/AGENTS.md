@@ -113,7 +113,7 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   (`MobileSessionTabButton` 💬 in the header — accent (`bg-primary`) dot when a
   background tab is unread — opens the tab switcher: grouped cards (bg-card +
   hairline divide-y, matching the menu sheet); Conversations rows read
-  `[spinner|accent unread dot|empty] title [Main chip] relative-time`, no
+  `[hand|spinner|accent unread dot|empty] title [Main chip] relative-time`, no
   close/check affordance, order = shared tab order (main first, NOT time);
   a collapsed `Archived (N)` disclosure row lists archived children (tap =
   restore + switch); then a Viewers card of Files/file/diff/PR/browser — `Files`
@@ -125,8 +125,15 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   `SessionMeta.userId`, multi-member workspaces only — see `../sessions/AGENTS.md`);
   it is a DISCLOSURE, not a flat list, so a large team cannot push the actions off
   screen. Both are pure; session-detail
-  resolves conversation running via ONE derived atom over `sessionLiveStatusAtomFamily`
-  (never loop `useAtomValue`) and unread via `lastMessageAt > lastReadAt`.
+  resolves each conversation's live status via ONE derived atom over
+  `sessionLiveStatusAtomFamily` (never loop `useAtomValue`) and unread via
+  `lastMessageAt > lastReadAt`. That atom hands over the status TYPE, not just
+  presence: `requestPermission` is the warning-tone hand and outranks the
+  spinner, as on the project screen and the desktop sidebar. A subagent tab
+  waiting on approval is why — the sheet is the only surface that says so while
+  another tab is on screen. The header badge deliberately stays two-state: a dot
+  can only differ by COLOR, and `--status-warning` resolves to `--primary` in
+  VS Code-derived themes, so a warning dot would just be the unread dot.
 - Opened files: `mobile-file-viewer-drawer.tsx` is a full-screen right drawer
   layered over the still-mounted conversation. Its header always shows the
   file-type icon and basename; the `…` sheet exposes the complete, wrapping
