@@ -145,7 +145,12 @@ import {
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
 import { UserMessageEditor } from './user-message-editor';
-import { hasUnansweredPlanApproval, resolvePermissionRecord } from './permission-record';
+import { resolvePermissionRecord } from './permission-record';
+import {
+  hasSeparatePlanItem,
+  hasUnansweredPlanApproval,
+  resolvePlanExitMarkdown,
+} from './plan-surface';
 import {
   CONVERSATION_PANEL_BODY_CLASS,
   CONVERSATION_PANEL_FRAME_CLASS,
@@ -3819,6 +3824,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
           onFilePathClick,
           conversationFontSize,
           planAwaitingDecision: hasUnansweredPlanApproval(message.items),
+          planRenderedSeparately: hasSeparatePlanItem(message.items),
         });
       }
       case 'activity_group_header':
@@ -4155,8 +4161,10 @@ const renderAssistantContent = (
     isStreaming?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
-    /** This turn's plan approval is still unanswered — see `ProposedPlanBlock`. */
+    /** This turn's plan approval is still unanswered — see `PlanPanel`. */
     planAwaitingDecision?: boolean;
+    /** This turn renders the plan as its own row, so the card must not repeat it. */
+    planRenderedSeparately?: boolean;
   }
 ) => {
   const messageId = options?.messageId ?? 'assistant';
@@ -4236,6 +4244,10 @@ const renderAssistantContent = (
           toolCall={content}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
+          messageId={messageId}
+          itemIndex={itemIndex}
+          awaitingDecision={options?.planAwaitingDecision}
+          planRenderedSeparately={options?.planRenderedSeparately}
         />
       ) : (
         <ToolCallCard
@@ -5211,23 +5223,36 @@ const PlanBlock = ({
   </div>
 );
 
-export const ProposedPlanBlock = ({
-  plan,
+/**
+ * The ONE plan surface. Every agent's plan reaches it, whatever carrier the
+ * adapter used (`plan-surface.ts`): Codex's separate `proposed_plan` item and
+ * Claude's / Kimi's card-carried `content` render the same panel, clamp the
+ * same way, and open the same way while a decision is pending. Rendering the
+ * card-carried ones as bare markdown was why a Claude plan looked nothing like
+ * a Codex one.
+ */
+const PlanPanel = ({
+  markdown,
+  searchBlockId,
   messageId,
   itemIndex,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
   awaitingDecision = false,
+  isStreaming = false,
 }: {
-  plan: ProposedPlanMessage;
+  markdown: string;
+  searchBlockId: string;
   messageId: string;
   itemIndex: number;
   onFilePathClick?: (filePath: string) => void;
   fontSize?: ConversationFontSize;
   /** The approval below this plan is still unanswered. */
   awaitingDecision?: boolean;
+  /** The plan is still being written. */
+  isStreaming?: boolean;
 }) => {
-  const searchBlockId = getProposedPlanSearchBlockId(messageId, itemIndex);
+  const plan = { markdown, status: isStreaming ? ('delta' as const) : ('completed' as const) };
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -5360,6 +5385,33 @@ export const ProposedPlanBlock = ({
     </div>
   );
 };
+
+export const ProposedPlanBlock = ({
+  plan,
+  messageId,
+  itemIndex,
+  onFilePathClick,
+  fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  awaitingDecision = false,
+}: {
+  plan: ProposedPlanMessage;
+  messageId: string;
+  itemIndex: number;
+  onFilePathClick?: (filePath: string) => void;
+  fontSize?: ConversationFontSize;
+  awaitingDecision?: boolean;
+}) => (
+  <PlanPanel
+    markdown={plan.markdown}
+    searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
+    messageId={messageId}
+    itemIndex={itemIndex}
+    onFilePathClick={onFilePathClick}
+    fontSize={fontSize}
+    awaitingDecision={awaitingDecision}
+    isStreaming={plan.status === 'delta'}
+  />
+);
 
 // Inline marker so the user can locate where the goal entered the timeline.
 // Rich controls and metrics live in the sticky `SessionGoalBanner`.
@@ -6112,23 +6164,38 @@ const PlanExitBlock = ({
   sessionId,
   fontSize,
   onFilePathClick,
+  messageId,
+  itemIndex,
+  awaitingDecision = false,
+  planRenderedSeparately = false,
 }: {
   toolCall: ToolCallMessage;
   sessionId: SessionId;
   fontSize: ConversationFontSize;
   onFilePathClick?: (filePath: string) => void;
+  messageId: string;
+  itemIndex: number;
+  awaitingDecision?: boolean;
+  /** The turn renders the plan as its own `proposed_plan` row (Codex). */
+  planRenderedSeparately?: boolean;
 }) => {
-  const blocks = toolCall.content?.filter((block) => block.type === 'content');
+  /* Claude and Kimi carry the plan in the card; Codex renders it as its own row
+     just above. Take it from the card only when nobody else is showing it, or
+     the plan prints twice. */
+  const carriedMarkdown = planRenderedSeparately ? null : resolvePlanExitMarkdown(toolCall);
   return (
     <div className="space-y-2">
-      {blocks?.map((block, index) => (
-        <ToolCallContentRenderer
-          key={`plan-exit-content-${index}`}
-          block={block}
+      {carriedMarkdown ? (
+        <PlanPanel
+          markdown={carriedMarkdown}
+          searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
+          messageId={messageId}
+          itemIndex={itemIndex}
           onFilePathClick={onFilePathClick}
           fontSize={fontSize}
+          awaitingDecision={awaitingDecision}
         />
-      ))}
+      ) : null}
       <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />
     </div>
   );
