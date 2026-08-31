@@ -664,7 +664,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   Goal controls are transport-gated: the current `/goal …` prompt bridge is
   Codex-only, so provider-neutral snapshots remain read-only until their advertised
   `_session/goal` method is routed through the session control plane; Stop must never
-  synthesize `pause` for those providers. An `active` goal is persistent session state,
+  synthesize `pause` for those providers. Paused and blocked Codex goals both expose
+  Resume; a blocked goal is waiting for explicit user continuation, not terminal.
+  An `active` goal is persistent session state,
   not proof that an ACP prompt is running: current busy/running UI, message queue routing,
   and completion prompts must use live turn presence only. Active goal state may still
   gate destructive history rewrites and expose an explicit Codex Pause control.
