@@ -57,8 +57,10 @@ export interface WorkspaceScreenViewProps {
   onNewSlugChange: (next: string) => void;
   onResetNewSlug: () => void;
 
-  /** True while we're awaiting setActive / create. */
+  /** True while the initial bounded wait is keeping navigation locked. */
   saving: boolean;
+  /** True until the underlying mutation settles, including after the wait becomes stale. */
+  writePending: boolean;
   /** Last create failure detail, shown inline until the input changes. */
   createError: string | null;
 
@@ -90,6 +92,7 @@ export function WorkspaceScreenView({
   onNewSlugChange,
   onResetNewSlug,
   saving,
+  writePending,
   createError,
   onSelectWorkspace,
   onConfirmSelection,
@@ -117,7 +120,7 @@ export function WorkspaceScreenView({
 
   const canSubmitCreate =
     creating &&
-    !saving &&
+    !writePending &&
     !(newSlugChecking && !newSlugCheckStale) &&
     newNameError === null &&
     newSlugError === null &&
@@ -126,7 +129,7 @@ export function WorkspaceScreenView({
   // so the button must say so by being disabled rather than dying silently.
   const selectedEntry = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
   const canConfirmSelection =
-    !saving && selectedEntry !== undefined && selectedEntry.slug.length > 0;
+    !writePending && selectedEntry !== undefined && selectedEntry.slug.length > 0;
   const previewWorkspaceName = creating
     ? newName.trim()
     : workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.name;
@@ -161,7 +164,7 @@ export function WorkspaceScreenView({
       }
       previewIdentity={previewWorkspaceName ? { workspaceName: previewWorkspaceName } : undefined}
       previewState={{
-        workspaceStatus: saving
+        workspaceStatus: writePending
           ? 'draft'
           : previewWorkspaceName || hasWorkspaces
             ? 'ready'
@@ -218,7 +221,7 @@ export function WorkspaceScreenView({
                 onChange={(event) => onNewNameChange(event.target.value)}
                 placeholder={t('organization.workspaceNamePlaceholder', 'My Workspace')}
                 autoFocus
-                disabled={saving}
+                disabled={writePending}
                 className={newNameError ? 'border-destructive' : ''}
               />
               {newNameError ? <p className="text-xs text-destructive">{newNameError}</p> : null}
@@ -235,7 +238,7 @@ export function WorkspaceScreenView({
                       type="button"
                       className="hover:text-foreground"
                       onClick={onResetNewSlug}
-                      disabled={saving}
+                      disabled={writePending}
                     >
                       {t('organization.workspaceSlugReset', 'Reset')}
                     </button>
@@ -264,7 +267,7 @@ export function WorkspaceScreenView({
                 value={newSlug}
                 onChange={(event) => onNewSlugChange(event.target.value)}
                 placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
-                disabled={saving}
+                disabled={writePending}
                 className={newSlugError ? 'border-destructive' : ''}
               />
               {slugErrorText ? <p className="text-xs text-destructive">{slugErrorText}</p> : null}
@@ -328,9 +331,9 @@ export function WorkspaceScreenView({
                       <motion.button
                         key={workspace.id}
                         type="button"
-                        whileHover={saving || !hasSlug ? undefined : { y: -1 }}
-                        whileTap={saving || !hasSlug ? undefined : { scale: 0.99 }}
-                        disabled={saving || !hasSlug}
+                        whileHover={writePending || !hasSlug ? undefined : { y: -1 }}
+                        whileTap={writePending || !hasSlug ? undefined : { scale: 0.99 }}
+                        disabled={writePending || !hasSlug}
                         onClick={() => onSelectWorkspace(workspace.id)}
                         aria-pressed={isSelected}
                         className={cn(
@@ -391,7 +394,7 @@ export function WorkspaceScreenView({
             {workspacesStatus === 'ready' ? (
               <button
                 type="button"
-                disabled={saving}
+                disabled={writePending}
                 onClick={onStartCreate}
                 className={cn(
                   'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
@@ -420,13 +423,17 @@ interface WorkspaceScreenProps {
 // workspace settings, where it can be undone.
 /** Bounds the slug availability wait; the server remains the final authority. */
 const SLUG_CHECK_STALE_MS = 8_000;
-/** Bounds create/setActive so a hung write cannot lock the whole screen. */
+/** Bounds how long a workspace write may prevent Back/Cancel. */
 const WORKSPACE_WRITE_STALE_MS = 15_000;
+const pendingWorkspaceWrites = new WeakMap<object, Promise<unknown>>();
 
-function rejectAfter(ms: number, message: string): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(message)), ms);
-  });
+function trackWorkspaceWrite<T>(owner: object, write: Promise<T>): Promise<T> {
+  pendingWorkspaceWrites.set(owner, write);
+  const clear = () => {
+    if (pendingWorkspaceWrites.get(owner) === write) pendingWorkspaceWrites.delete(owner);
+  };
+  void write.then(clear, clear);
+  return write;
 }
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
@@ -461,8 +468,28 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [writePending, setWritePending] = useState(() =>
+    pendingWorkspaceWrites.has(platform.workspaces)
+  );
   const [createError, setCreateError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
+
+  // A write can outlive this phase after Back. Re-entering the step must join
+  // that write instead of issuing a competing setActive mutation.
+  useEffect(() => {
+    const pending = pendingWorkspaceWrites.get(platform.workspaces);
+    if (!pending) return undefined;
+    let mounted = true;
+    setSaving(false);
+    setWritePending(true);
+    const settle = () => {
+      if (mounted) setWritePending(false);
+    };
+    void pending.then(settle, settle);
+    return () => {
+      mounted = false;
+    };
+  }, [platform.workspaces]);
 
   // Only a READY empty list opens the create form; while the list is loading
   // or failed, the form must not pose as "you have no workspaces".
@@ -485,6 +512,12 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   // Incremented per write attempt so a late-settling promise from a superseded
   // attempt can never commit or navigate.
   const writeAttemptRef = useRef(0);
+  useEffect(
+    () => () => {
+      writeAttemptRef.current += 1;
+    },
+    []
+  );
 
   const [newName, setNewName] = useState('');
   // null = follow the auto-suggested slug derived from the name. A user edit
@@ -526,7 +559,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   }, [creating, newSlug, shouldCheckAvailability, availability]);
 
   const handleConfirmSelection = useCallback(() => {
-    if (selectedWorkspaceId === null) return;
+    if (selectedWorkspaceId === null || writePending) return;
     const target = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
     if (!target?.slug) return;
     if (selectedWorkspaceId === activeWorkspaceId) {
@@ -535,41 +568,47 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       return;
     }
     setSaving(true);
+    setWritePending(true);
     commitWorkspaceContext(null);
     const attempt = ++writeAttemptRef.current;
-    let settled = false;
-    const advance = () => {
-      if (settled || writeAttemptRef.current !== attempt) return;
-      settled = true;
-      commitWorkspaceContext(target);
-      onNext();
-    };
-    const switchWrite = platform.workspaces.setActive(selectedWorkspaceId);
-    void (async () => {
-      try {
-        await Promise.race([
-          switchWrite,
-          rejectAfter(
-            WORKSPACE_WRITE_STALE_MS,
-            t(
-              'onboarding.workspace.timedOut',
-              'The request timed out. If it completes in the background, you will continue automatically.'
-            )
+    const switchWrite = trackWorkspaceWrite(
+      platform.workspaces,
+      platform.workspaces.setActive(selectedWorkspaceId)
+    );
+    const staleTimer = setTimeout(() => {
+      if (writeAttemptRef.current !== attempt) return;
+      setSaving(false);
+      toast.error(
+        t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
+        {
+          description: t(
+            'onboarding.workspace.timedOut',
+            'The request timed out. You can go back while it finishes in the background.'
           ),
-        ]);
-        advance();
-      } catch (error) {
+        }
+      );
+    }, WORKSPACE_WRITE_STALE_MS);
+    void switchWrite.then(
+      () => {
+        clearTimeout(staleTimer);
+        setSaving(false);
+        setWritePending(false);
+        if (writeAttemptRef.current !== attempt) return;
+        commitWorkspaceContext(target);
+        onNext();
+      },
+      (error: unknown) => {
+        clearTimeout(staleTimer);
+        setSaving(false);
+        setWritePending(false);
+        if (writeAttemptRef.current !== attempt) return;
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
           { description: error instanceof Error ? error.message : String(error) }
         );
-        setSaving(false);
       }
-    })();
-    // A timed-out write may still land: a late success finishes the switch
-    // instead of leaving the UI unlocked against a promise that later wins.
-    void switchWrite.then(advance, () => undefined);
+    );
   }, [
     activeWorkspace,
     activeWorkspaceId,
@@ -578,59 +617,71 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     platform.workspaces,
     selectedWorkspaceId,
     t,
+    writePending,
     workspaces,
   ]);
 
   const handleSubmitCreate = useCallback(() => {
     const trimmedName = newName.trim();
-    if (!trimmedName || newSlugError !== null || (newSlugChecking && !newSlugCheckStale)) return;
+    if (
+      writePending ||
+      !trimmedName ||
+      newSlugError !== null ||
+      (newSlugChecking && !newSlugCheckStale)
+    ) {
+      return;
+    }
     setSaving(true);
+    setWritePending(true);
     setCreateError(null);
     commitWorkspaceContext(null);
     const attempt = ++writeAttemptRef.current;
-    let settled = false;
-    const createWrite = (async () => {
-      if (!platform.workspaces.create) {
-        throw new Error('Workspace creation is unavailable on this platform');
-      }
-      const created = await platform.workspaces.create({ name: trimmedName, slug: newSlug });
-      await platform.workspaces.setActive(created.id);
-      return created;
-    })();
-    const advance = (created: { id: string; name: string; slug: string | null }) => {
-      if (settled || writeAttemptRef.current !== attempt) return;
-      settled = true;
-      commitWorkspaceContext({
-        id: created.id,
-        name: created.name,
-        slug: created.slug ?? newSlug,
-      });
-      onNext();
-    };
-    void (async () => {
-      try {
-        const created = await Promise.race([
-          createWrite,
-          rejectAfter(
-            WORKSPACE_WRITE_STALE_MS,
-            t(
-              'onboarding.workspace.timedOut',
-              'The request timed out. If it completes in the background, you will continue automatically.'
-            )
-          ),
-        ]);
-        advance(created);
-      } catch (error) {
+    const createWrite = trackWorkspaceWrite(
+      platform.workspaces,
+      (async () => {
+        if (!platform.workspaces.create) {
+          throw new Error('Workspace creation is unavailable on this platform');
+        }
+        const created = await platform.workspaces.create({ name: trimmedName, slug: newSlug });
+        if (writeAttemptRef.current !== attempt) return null;
+        await platform.workspaces.setActive(created.id);
+        return created;
+      })()
+    );
+    const staleTimer = setTimeout(() => {
+      if (writeAttemptRef.current !== attempt) return;
+      setSaving(false);
+      setCreateError(
+        t(
+          'onboarding.workspace.timedOut',
+          'The request timed out. You can go back while it finishes in the background.'
+        )
+      );
+    }, WORKSPACE_WRITE_STALE_MS);
+    void createWrite.then(
+      (created) => {
+        clearTimeout(staleTimer);
+        setSaving(false);
+        setWritePending(false);
+        if (!created || writeAttemptRef.current !== attempt) return;
+        commitWorkspaceContext({
+          id: created.id,
+          name: created.name,
+          slug: created.slug ?? newSlug,
+        });
+        onNext();
+      },
+      (error: unknown) => {
+        clearTimeout(staleTimer);
+        setSaving(false);
+        setWritePending(false);
+        if (writeAttemptRef.current !== attempt) return;
         commitWorkspaceContext(activeWorkspace);
         // The error stays inline in the form: a toast disappears and leaves a
         // user with no workspaces without any visible way forward.
         setCreateError(error instanceof Error ? error.message : String(error));
-        setSaving(false);
       }
-    })();
-    // A timed-out create may still land: a late success activates the new
-    // workspace and continues instead of stranding the unlocked form.
-    void createWrite.then(advance, () => undefined);
+    );
   }, [
     activeWorkspace,
     commitWorkspaceContext,
@@ -642,6 +693,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     onNext,
     platform.workspaces,
     t,
+    writePending,
   ]);
 
   return (
@@ -658,6 +710,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         setCreateError(null);
       }}
       onCancelCreate={() => {
+        writeAttemptRef.current += 1;
         setCreateError(null);
         if (workspaces.length === 0) {
           // No list to fall back to — cancel leaves the step instead of
@@ -683,11 +736,15 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       }}
       onResetNewSlug={() => setSlugDraft(null)}
       saving={saving}
+      writePending={writePending}
       createError={createError}
       onSelectWorkspace={setSelectedWorkspaceId}
       onConfirmSelection={handleConfirmSelection}
       onSubmitCreate={handleSubmitCreate}
-      onBack={onBack}
+      onBack={() => {
+        writeAttemptRef.current += 1;
+        onBack();
+      }}
     />
   );
 }

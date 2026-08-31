@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
-import type { ManagedBuiltinAgentType } from '@lody/shared';
+import type { AgentConfigMeta, ManagedBuiltinAgentType, ProviderSetupTask } from '@lody/shared';
 import {
   desktopOnboardingDraftAtom,
   desktopOnboardingPhaseAtom,
+  type DesktopOnboardingProviderSelection,
   type DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
 import { getAllAgentConfigAtom, getAllProviderSetupsAtom } from '@/atoms/agents';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
 import { OnboardingCeremony } from './ceremony/ceremony';
 import { useOnboardingAudio } from './ceremony/use-onboarding-audio';
@@ -25,6 +28,27 @@ export type DesktopOnboardingCompletion = {
   sessionId?: string;
   workspaceSlug?: string;
 };
+
+export function resolveDesktopOnboardingSummaryAgent(
+  provider: DesktopOnboardingProviderSelection | null,
+  providerSetups: readonly ProviderSetupTask[],
+  agentConfigs: readonly AgentConfigMeta[]
+): {
+  state: 'ready' | 'preparing' | 'failed' | 'missing';
+  name: string | undefined;
+} {
+  if (provider?.kind === 'agentConfig') return { state: 'ready', name: provider.agentName };
+  if (provider?.kind !== 'providerSetup') return { state: 'missing', name: undefined };
+
+  const publishedConfig = agentConfigs.find((config) => config.id === provider.providerSetupId);
+  if (publishedConfig) return { state: 'ready', name: publishedConfig.name };
+  const setup = providerSetups.find((candidate) => candidate.id === provider.providerSetupId);
+  if (!setup) return { state: 'missing', name: provider.agentName };
+  return {
+    state: setup.status === 'failed' ? 'failed' : 'preparing',
+    name: provider.agentName,
+  };
+}
 
 export function resolveDesktopOnboardingPhase(
   phase: DesktopOnboardingResumePhase | null,
@@ -96,21 +120,17 @@ export function OnboardingOverlay({
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const selectedSetupId =
     draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;
-  const selectedSetup = providerSetups.find((setup) => setup.id === selectedSetupId);
-  const publishedSetupConfig = agentConfigs.find((config) => config.id === selectedSetupId);
-  const summaryAgentState =
-    draft.provider?.kind === 'agentConfig'
-      ? ('ready' as const)
-      : draft.provider?.kind === 'providerSetup'
-        ? publishedSetupConfig !== undefined
-          ? ('ready' as const)
-          : selectedSetup === undefined
-            ? ('missing' as const)
-            : selectedSetup.status === 'failed'
-              ? ('failed' as const)
-              : ('preparing' as const)
-        : ('missing' as const);
-  const summaryAgentName = publishedSetupConfig?.name ?? draft.provider?.agentName;
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const selectedSetupMachineIds = useMemo(
+    () => (selectedSetupId !== null && localMachineId !== null ? [localMachineId] : []),
+    [localMachineId, selectedSetupId]
+  );
+  useMachineFlockAgentConfigsForMachineIds(selectedSetupMachineIds);
+  const summaryAgent = resolveDesktopOnboardingSummaryAgent(
+    draft.provider,
+    providerSetups,
+    agentConfigs
+  );
 
   useEffect(() => {
     if (phase === 'ceremony') {
@@ -196,14 +216,13 @@ export function OnboardingOverlay({
           onContinue={() => {
             void onCompleted({});
           }}
-          onSessionStarted={onCompleted}
         />
       ) : null,
     summary: (
       <SummaryScreen
         key="summary"
-        agentState={summaryAgentState}
-        agentName={summaryAgentName}
+        agentState={summaryAgent.state}
+        agentName={summaryAgent.name}
         projectName={draft.project?.name}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => {

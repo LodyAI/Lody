@@ -12,18 +12,16 @@ export type FirstTaskPrimaryAction = {
 export function getFirstTaskPrimaryAction({
   canStartFirstTask,
   hasPrompt,
-  submitting,
-  startFailed,
+  startRequested,
 }: {
   canStartFirstTask: boolean;
   hasPrompt: boolean;
-  submitting: boolean;
-  startFailed: boolean;
+  startRequested: boolean;
 }): FirstTaskPrimaryAction {
-  const kind = submitting || (canStartFirstTask && !startFailed) ? 'run' : 'enter';
+  const kind = canStartFirstTask && hasPrompt && !startRequested ? 'run' : 'enter';
   return {
     kind,
-    disabled: submitting || (kind === 'run' && !hasPrompt),
-    loading: submitting,
+    disabled: false,
+    loading: false,
   };
 }

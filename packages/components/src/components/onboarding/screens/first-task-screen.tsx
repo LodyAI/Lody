@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { FolderGit2 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   buildInitialHistoryEntry,
   getServerNow,
@@ -16,7 +17,6 @@ import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import type { DesktopOnboardingProjectSelection } from '@/atoms/onboarding';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { buildAgentPrompt } from '@/lib';
 import { cn } from '@/lib/utils';
@@ -44,15 +44,6 @@ export function getSelectedFirstTaskAgentConfig(
   return availableConfigs.find((candidate) => candidate.id === agentConfigId) ?? null;
 }
 
-/** Bounds the session-create wait so a hung write cannot freeze the screen. */
-const START_SESSION_STALE_MS = 20_000;
-
-function rejectAfter(ms: number): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('Starting the session timed out')), ms);
-  });
-}
-
 export function FirstTaskScreen({
   agentConfigId,
   project,
@@ -60,7 +51,6 @@ export function FirstTaskScreen({
   onAgentConfigChange,
   onSkip,
   onContinue,
-  onSessionStarted,
 }: {
   agentConfigId: AgentConfigId;
   project: DesktopOnboardingProjectSelection;
@@ -68,13 +58,10 @@ export function FirstTaskScreen({
   onAgentConfigChange: (config: AgentConfigMeta) => void;
   onSkip: () => void;
   onContinue: () => void;
-  onSessionStarted: (input: { sessionId: string; workspaceSlug: string }) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const user = useAtomValue(userAtom);
-  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const resolvedWorkspaceSlug = workspaceSlug ?? runtime?.workspaceSlug ?? null;
   const configs = useAtomValue(getAllAgentConfigAtom);
   const { startSession, requestSessionDispatch } = useSessionActions();
   const availableConfigs = useMemo(
@@ -94,76 +81,32 @@ export function FirstTaskScreen({
     [t]
   );
   const [prompt, setPrompt] = useState(seedPrompts[0] ?? '');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Incremented per start attempt (and on Agent change) so a late-settling
-  // write from a superseded attempt can never dispatch or complete.
-  const startAttemptRef = useRef(0);
+  const [startRequested, setStartRequested] = useState(false);
   const canStartFirstTask =
     project.kind === 'local' &&
     config !== null &&
     config.machineId === project.machineId &&
     runtime !== null &&
-    user !== null &&
-    resolvedWorkspaceSlug !== null;
+    user !== null;
   const hasPrompt = prompt.trim().length > 0;
   const canCreateSession = canStartFirstTask && hasPrompt;
   const primaryAction = getFirstTaskPrimaryAction({
     canStartFirstTask,
     hasPrompt,
-    submitting,
-    startFailed: error !== null,
+    startRequested,
   });
 
   const handleSubmit = useCallback(() => {
-    if (
-      !canCreateSession ||
-      submitting ||
-      project.kind !== 'local' ||
-      !config ||
-      !user ||
-      !resolvedWorkspaceSlug
-    ) {
+    if (!canCreateSession || startRequested || project.kind !== 'local' || !config || !user) {
       return;
     }
     const machineId = project.machineId;
     const trimmedPrompt = prompt.trim();
-    setSubmitting(true);
-    setError(null);
-    const attempt = ++startAttemptRef.current;
-    let settled = false;
-    // Shared by the raced path and the late-write continuation: exactly one of
-    // them finishes dispatch + completion, so a timed-out write can never
-    // become an orphaned Session without dispatch or navigation.
-    const finishWithSession = (result: Awaited<ReturnType<typeof startSession>>) => {
-      if (settled || startAttemptRef.current !== attempt) return;
-      settled = true;
-      // The Session and its first turn are already durable. Dispatch is only
-      // acceleration; normal recovery can pick up the pointer if this request
-      // fails, so it must not turn a successful first Session into a failure.
-      void requestSessionDispatch(result.sessionId, result.historyEntry.id, {
-        inputConfig: result.historyEntry.inputConfig,
-        machineId,
-      }).catch((dispatchError: unknown) => {
-        console.error('Failed to accelerate the first onboarding session', dispatchError);
-      });
-      void onSessionStarted({
-        sessionId: result.sessionId,
-        workspaceSlug: resolvedWorkspaceSlug,
-      }).then((completed) => {
-        if (!completed && startAttemptRef.current === attempt) {
-          // The Session is durable; only the completion step failed. Unlock the
-          // screen so Enter Lody can retry instead of stranding a finished run.
-          setError(
-            t(
-              'onboarding.firstTask.completionFailed',
-              'The session was created, but setup could not finish. Try entering Lody again.'
-            )
-          );
-          setSubmitting(false);
-        }
-      });
-    };
+    setStartRequested(true);
+
+    // Entering the product is the primary transaction. Session creation is an
+    // optional background enhancement and must never delay or redirect it.
+    onContinue();
     void (async () => {
       try {
         const projectRef: ProjectRef = {
@@ -179,7 +122,7 @@ export function FirstTaskScreen({
           inputBlocks: undefined,
         });
         if (!entry) throw new Error('Could not build the first turn');
-        const started = startSession(
+        const result = await startSession(
           {
             sessionId: uuidv4() as SessionId,
             userId: user.id,
@@ -196,32 +139,28 @@ export function FirstTaskScreen({
           },
           entry
         );
-        // A hung write must not lock every button forever. The continuation
-        // takes over if the write lands after the bound has unlocked the UI.
-        void started.then(finishWithSession, () => undefined);
-        const result = await Promise.race([started, rejectAfter(START_SESSION_STALE_MS)]);
-        finishWithSession(result);
+        void requestSessionDispatch(result.sessionId, result.historyEntry.id, {
+          inputConfig: result.historyEntry.inputConfig,
+          machineId,
+        }).catch((dispatchError: unknown) => {
+          console.error('Failed to accelerate the first onboarding session', dispatchError);
+        });
       } catch (submitError) {
         console.error('Failed to start the first onboarding session', submitError);
-        setError(
-          t(
-            'onboarding.firstTask.startFailed',
-            'The session could not start. Enter Lody and finish setup from Settings.'
-          )
-        );
-        setSubmitting(false);
+        toast.error(t('onboarding.firstTask.startFailed', 'The first session could not start.'), {
+          description: submitError instanceof Error ? submitError.message : String(submitError),
+        });
       }
     })();
   }, [
     canCreateSession,
     config,
-    onSessionStarted,
+    onContinue,
     project,
     prompt,
     requestSessionDispatch,
-    resolvedWorkspaceSlug,
     startSession,
-    submitting,
+    startRequested,
     t,
     user,
   ]);
@@ -259,16 +198,15 @@ export function FirstTaskScreen({
         agentStatus: config ? 'ready' : 'preparing',
         projectStatus: 'ready',
         promptValue: prompt,
-        conversationStatus: submitting ? 'starting' : prompt.trim() ? 'draft' : 'empty',
+        conversationStatus: startRequested ? 'starting' : prompt.trim() ? 'draft' : 'empty',
       }}
-      secondaryAction={<OnboardingBackButton onClick={onBack} disabled={submitting} />}
+      secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="lg"
             onClick={onSkip}
-            disabled={submitting}
             className="text-muted-foreground hover:text-foreground"
           >
             {t('onboarding.firstTask.skip', 'Skip for now')}
@@ -309,12 +247,9 @@ export function FirstTaskScreen({
             onValueChange={(value) => {
               const next = availableConfigs.find((candidate) => candidate.id === value);
               if (!next) return;
-              // Supersede any unlocked-but-still-pending start attempt.
-              startAttemptRef.current += 1;
-              setError(null);
               onAgentConfigChange(next);
             }}
-            disabled={submitting || availableConfigs.length === 0}
+            disabled={availableConfigs.length === 0}
           >
             <SelectTrigger
               id="onboarding-first-task-agent"
@@ -366,7 +301,6 @@ export function FirstTaskScreen({
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           rows={4}
-          disabled={submitting}
           placeholder={t('onboarding.firstTask.promptPlaceholder', 'What should Lody do first?')}
         />
         <div className="flex flex-wrap gap-2">
@@ -375,7 +309,6 @@ export function FirstTaskScreen({
               key={seed}
               type="button"
               onClick={() => setPrompt(seed)}
-              disabled={submitting}
               className={cn(
                 'rounded-full border border-border px-3 py-1 text-xs text-muted-foreground',
                 'hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
@@ -385,7 +318,6 @@ export function FirstTaskScreen({
             </button>
           ))}
         </div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     </OnboardingShell>
   );

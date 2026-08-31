@@ -71,6 +71,7 @@ function InteractiveWorkspaceScreen({
         setManualSlug(suggestedSlug);
       }}
       saving={saving}
+      writePending={saving}
       createError={null}
       workspacesStatus="ready"
       workspacesError={null}
@@ -110,6 +111,7 @@ const meta = {
     workspacesStatus: 'ready',
     workspacesError: null,
     newSlugCheckStale: false,
+    writePending: false,
     onStartCreate: fn(),
     onCancelCreate: fn(),
     onNewNameChange: fn(),
@@ -143,6 +145,7 @@ export const SingleWorkspace: Story = {
     newSlugError: null,
     canResetSlug: false,
     saving: false,
+    writePending: false,
   },
 };
 
@@ -241,6 +244,7 @@ export const Saving: Story = {
     newSlugError: null,
     canResetSlug: false,
     saving: true,
+    writePending: true,
   },
 };
 

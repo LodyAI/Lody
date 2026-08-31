@@ -4,7 +4,14 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentConfigId, AgentConfigMeta, LocalProjectId, MachineId } from '@lody/shared';
+import {
+  getAgentConfigRoomId,
+  type AgentConfigId,
+  type AgentConfigMeta,
+  type LocalProjectId,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
 
 const sessionActions = vi.hoisted(() => ({
   requestSessionDispatch: vi.fn(),
@@ -20,6 +27,9 @@ import {
   getFirstTaskAgentConfigs,
   getSelectedFirstTaskAgentConfig,
 } from '../src/components/onboarding/screens/first-task-screen';
+import { userAtom } from '../src/atoms';
+import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
+import { runtimeAtom } from '../src/atoms/runtime';
 import { initI18n } from '../src/i18n';
 
 const machineId = 'machine-1' as MachineId;
@@ -102,7 +112,6 @@ describe('first task Agent Provider state', () => {
             onAgentConfigChange={vi.fn()}
             onSkip={onSkip}
             onContinue={onContinue}
-            onSessionStarted={vi.fn()}
           />
         </Provider>
       );
@@ -121,5 +130,72 @@ describe('first task Agent Provider state', () => {
     expect(onContinue).not.toHaveBeenCalled();
     expect(sessionActions.startSession).not.toHaveBeenCalled();
     expect(sessionActions.requestSessionDispatch).not.toHaveBeenCalled();
+  });
+
+  it('enters Lody before background Session creation settles', async () => {
+    const selected = config('selected', 'Claude Code');
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'User', email: 'user@example.com' });
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceSlug: 'workspace-1',
+    } as never);
+    store.set(agentConfigMetaCacheAtom, {
+      [getAgentConfigRoomId(selected.id)]: selected,
+    });
+    let resolveStart:
+      | ((value: {
+          sessionId: string;
+          historyEntry: { id: string; inputConfig: Record<string, unknown> };
+        }) => void)
+      | undefined;
+    sessionActions.startSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      })
+    );
+    sessionActions.requestSessionDispatch.mockResolvedValue(true);
+    const onContinue = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <FirstTaskScreen
+            agentConfigId={selected.id}
+            project={project}
+            onBack={vi.fn()}
+            onAgentConfigChange={vi.fn()}
+            onSkip={vi.fn()}
+            onContinue={onContinue}
+          />
+        </Provider>
+      );
+    });
+
+    const runButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Run first task'
+    );
+    expect(runButton).toBeDefined();
+    await act(async () => {
+      runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onContinue).toHaveBeenCalledOnce();
+    expect(sessionActions.startSession).toHaveBeenCalledOnce();
+    expect(onContinue.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionActions.startSession.mock.invocationCallOrder[0]
+    );
+    expect(sessionActions.requestSessionDispatch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Enter Lody');
+
+    await act(async () => {
+      resolveStart?.({
+        sessionId: 'session-1',
+        historyEntry: { id: 'turn-1', inputConfig: {} },
+      });
+      await Promise.resolve();
+    });
+    expect(sessionActions.requestSessionDispatch).toHaveBeenCalledOnce();
+    expect(onContinue).toHaveBeenCalledOnce();
   });
 });
