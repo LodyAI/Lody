@@ -128,6 +128,32 @@ describe('buildWorkspaceFolderArchive', () => {
     expect(!archive.ok && archive.reason).toBe('too-large');
   });
 
+  // The read loop bounds the RAW bytes, which does not bound the ARCHIVE: every
+  // entry adds a local header plus a central-directory record, and deflate grows
+  // incompressible data (64 MiB of random bytes zips to ~64.01 MiB). The save
+  // bridge takes the finished archive, so an archive that passed the raw check
+  // could still be rejected there as a malformed payload — after paying for
+  // every remote read. Four 1-byte files are 4 raw bytes and a 402-byte zip.
+  it('refuses when the finished archive outgrows the budget the raw bytes fit', async () => {
+    const provider = createProvider(
+      Object.fromEntries(
+        ['a', 'b', 'c', 'd'].map((name) => [`src/${name}.ts`, { kind: 'text', text: 'x' } as const])
+      )
+    );
+
+    const archive = await buildWorkspaceFolderArchive({
+      provider,
+      folderPath: 'src',
+      filePaths: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'],
+      maxTotalBytes: 200,
+    });
+
+    expect(archive.ok).toBe(false);
+    expect(!archive.ok && archive.reason).toBe('too-large');
+    // The reported size is the ARCHIVE's, not the 4 raw bytes that passed.
+    expect(!archive.ok && (archive.totalBytes ?? 0)).toBeGreaterThan(200);
+  });
+
   it('reports empty when nothing could be read at all', async () => {
     const provider = createProvider({ 'src/a.ts': { kind: 'unavailable', message: 'gone' } });
     const archive = await buildWorkspaceFolderArchive({

@@ -20,9 +20,14 @@ export const FILE_TREE_DOWNLOAD_LIMITS = {
   /**
    * The save bridge takes the finished archive as ONE structured clone
    * (`IMAGE_EXPORT_MAX_BYTES`, 64 MiB), and the zip is fully assembled in
-   * renderer memory first. Budget the raw bytes against that ceiling rather
-   * than discovering it after spending every round trip: compression can only
-   * help, so a plan that fits here always fits the bridge.
+   * renderer memory first.
+   *
+   * Applied to the raw bytes as an EARLY exit — it stops a hopeless download
+   * before spending every round trip — and then to the finished archive, which
+   * is the size that actually has to fit. Passing the raw check does not imply
+   * passing the second one: deflate grows incompressible data and each entry
+   * carries a local header plus a central-directory record, so 64 MiB of random
+   * bytes lands at about 64.01 MiB.
    */
   maxTotalBytes: 64 * 1024 * 1024,
 } as const;

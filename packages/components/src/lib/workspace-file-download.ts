@@ -132,9 +132,20 @@ export async function buildWorkspaceFolderArchive({
   }
 
   // Synchronous on purpose: fflate's async entry points create their worker from
-  // a blob URL, which the packaged renderer's CSP does not allow. The budget
-  // above is what keeps this bounded.
-  return { ok: true, bytes: zipSync(entries), fileCount, skippedPaths };
+  // a blob URL, which the packaged renderer's CSP does not allow.
+  const archiveBytes = zipSync(entries);
+
+  // The read loop bounded the RAW bytes, which does not bound the archive.
+  // Deflate GROWS incompressible data slightly, and every entry adds a local
+  // header plus a central-directory record: 64 MiB of random bytes zips to about
+  // 64.01 MiB. The save bridge takes the finished archive, so the archive is
+  // what has to fit — otherwise it is rejected there as a malformed payload and
+  // the user gets a bare "failed to download" after paying for every read.
+  if (archiveBytes.byteLength > maxTotalBytes) {
+    return { ok: false, reason: 'too-large', totalBytes: archiveBytes.byteLength };
+  }
+
+  return { ok: true, bytes: archiveBytes, fileCount, skippedPaths };
 }
 
 /** Exactly the archive's bytes, so a pooled view never ships its whole buffer. */
