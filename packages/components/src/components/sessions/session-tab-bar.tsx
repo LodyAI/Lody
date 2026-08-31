@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Loader2, X, History, Undo2, Pin, FileDiff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
@@ -746,7 +747,10 @@ export const SessionTabBar = memo(function SessionTabBar({
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}>
+    <div
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.topbar' }}
+      className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}
+    >
       {leftSlot ? (
         <div
           className={cn(

@@ -6,6 +6,7 @@ import {
 } from '@/components/shared/conversation-drop-overlay';
 import { CardHeader } from '@/ui/card';
 import { cn } from '@/lib/utils';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 
 export interface SessionConversationPageHeaderProps {
   titleSlot: ReactNode;
@@ -77,7 +78,11 @@ export function SessionConversationPageBody({
     <>
       {pinSlot}
       {goalBannerSlot}
-      <div ref={messageAreaRef} className="relative flex-1 min-h-0">
+      <div
+        ref={messageAreaRef}
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.messages' }}
+        className="relative flex-1 min-h-0"
+      >
         {searchSlot}
         {streamSlot}
       </div>
@@ -122,6 +127,7 @@ export function SessionConversationPage({
 }: SessionConversationPageProps) {
   return (
     <div
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.page' }}
       className={cn('relative flex flex-col', hideMessageArea ? '' : 'h-full', className)}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}

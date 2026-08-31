@@ -5,6 +5,7 @@ import type { PendingScheduledTask, SessionGoalCommand, SessionGoalMessage } fro
 import type { SessionPullRequestMeta } from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 import { cn } from '@/lib/utils';
 import { ActionChip } from './info-chip';
 import {
@@ -277,6 +278,7 @@ export function SessionInfoBar({
     // Keep the bar in the composer's input-surface family, with a lighter
     // opacity so it reads as the secondary tier of the same control stack.
     <div
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.info' }}
       className={cn(
         'w-full shrink-0 bg-background pb-1.5',
         /* Gutter is on ConversationColumn (same as stream + composer).

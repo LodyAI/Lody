@@ -295,10 +295,11 @@ export async function auditChatWorkspaceSpacing(
 }
 
 export async function discoverChatWorkspaceAlignmentRails(
-  page: Page
+  page: Page,
+  options: Readonly<{ aggregateScopes?: readonly string[] }> = {}
 ): Promise<readonly BrowserAlignmentRailDiscoveryScope[]> {
   const scopes = await page.evaluate(
-    ({ discoveryAttribute, alignmentAttributes }) => {
+    ({ discoveryAttribute, alignmentAttributes, aggregateScopes }) => {
       const isVisible = (element: Element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -331,10 +332,12 @@ export async function discoverChatWorkspaceAlignmentRails(
       return Array.from(document.querySelectorAll<Element>(`[${discoveryAttribute}]`)).map(
         (scopeElement) => {
           const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
+          const aggregateNestedScopes = aggregateScopes.includes(scope);
           const scopeRect = scopeElement.getBoundingClientRect();
           const elements = Array.from(scopeElement.querySelectorAll<Element>('*')).filter(
             (element) =>
-              element.closest(`[${discoveryAttribute}]`) === scopeElement &&
+              (aggregateNestedScopes ||
+                element.closest(`[${discoveryAttribute}]`) === scopeElement) &&
               !element.closest('[data-geometry-devtool]') &&
               isVisible(element) &&
               isCandidate(element)
@@ -391,6 +394,7 @@ export async function discoverChatWorkspaceAlignmentRails(
     {
       discoveryAttribute: CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
       alignmentAttributes: CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
+      aggregateScopes: [...(options.aggregateScopes ?? [])],
     }
   );
 

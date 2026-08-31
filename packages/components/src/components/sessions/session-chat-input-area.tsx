@@ -80,6 +80,7 @@ import {
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type {
   AcpConfigOptionSelector,
@@ -2400,6 +2401,7 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.composer' }}
         className={getSessionChatInputAreaShellClassName({
           protectFromEdgeBackZone: isMobile,
         })}

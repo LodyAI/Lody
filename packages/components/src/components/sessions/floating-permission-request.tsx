@@ -5,6 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card'
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
@@ -450,6 +451,7 @@ export function FloatingPermissionRequest({
   if (hasAskUserQuestion) {
     return (
       <ScrollArea
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.permission' }}
         className={cn(
           'mx-3 mb-[calc(0.5rem+var(--native-keyboard-height,0px))]',
           'max-h-[calc(100dvh-var(--native-keyboard-height,0px)-4rem)]',
@@ -468,6 +470,7 @@ export function FloatingPermissionRequest({
 
   return (
     <ScrollArea
+      {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.permission' }}
       className="mx-3 mb-2 max-h-[min(24rem,calc(100vh-14rem))]"
       viewportClassName="overscroll-contain"
     >

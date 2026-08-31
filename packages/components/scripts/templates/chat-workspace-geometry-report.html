@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Lody Semantic Guide Violations</title>
+    <title>Lody Alignment Findings</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -123,6 +123,10 @@
         text-align: right;
       }
 
+      .detail-review[data-kind='candidate'] .detail-finding {
+        color: light-dark(#a16207, #facc15);
+      }
+
       .detail-pair {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -190,15 +194,15 @@
     <main class="report">
       <header class="report-header">
         <div>
-          <h1>Semantic Guide Violations</h1>
-          <p class="subtitle">只列出未通过的语义对齐线；每个判定独立成图。</p>
+          <h1>Alignment Findings</h1>
+          <p class="subtitle">显式语义失败与分区候选轨；每个发现都有原图和标注图。</p>
         </div>
         <span class="status" id="status"></span>
       </header>
 
       <section aria-labelledby="violations-title">
         <div class="section-header">
-          <h2 id="violations-title">失败项</h2>
+          <h2 id="violations-title">问题照片</h2>
           <span class="timestamp" id="timestamp"></span>
         </div>
         <div class="detail-reviews" id="detail-reviews"></div>
@@ -208,7 +212,7 @@
     <script>
       const report = __GEOMETRY_REPORT_DATA__;
       const details = document.getElementById('detail-reviews');
-      document.getElementById('status').textContent = `${report.details.length} VIOLATIONS`;
+      document.getElementById('status').textContent = `${report.details.length} FINDINGS`;
       document.getElementById('timestamp').textContent = new Date(
         report.generatedAt
       ).toLocaleString();
@@ -216,6 +220,7 @@
       report.details.forEach((detail) => {
         const review = document.createElement('article');
         review.className = 'detail-review';
+        review.dataset.kind = detail.kind;
 
         const heading = document.createElement('div');
         heading.className = 'detail-heading';
@@ -233,9 +238,10 @@
 
         const pair = document.createElement('div');
         pair.className = 'detail-pair';
+        const annotatedLabel = detail.kind === 'candidate' ? '候选轨与偏移' : '失败语义线';
         for (const [label, source, alt] of [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
-          ['失败语义线', detail.images.annotated, `${detail.title} 失败语义线局部截图`],
+          [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
         ]) {
           const figure = document.createElement('figure');
           const image = document.createElement('img');
