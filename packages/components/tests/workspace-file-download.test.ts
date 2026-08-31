@@ -51,6 +51,15 @@ describe('readWorkspaceFileBytes', () => {
     expect(result.ok && result.bytes).toEqual(bytes);
   });
 
+  // An empty file reads successfully with zero bytes — it is not an unavailable
+  // one. The save bridge accepts that buffer; only the image export refuses it.
+  it('reads an empty file as a successful zero-byte read', async () => {
+    const provider = createProvider({ 'empty.txt': { kind: 'text', text: '' } });
+    const result = await readWorkspaceFileBytes(provider, 'empty.txt');
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.bytes.byteLength).toBe(0);
+  });
+
   it('surfaces the machine message when the file is unavailable', async () => {
     const provider = createProvider({ 'a.txt': { kind: 'unavailable', message: 'too big' } });
     expect(await readWorkspaceFileBytes(provider, 'a.txt')).toEqual({

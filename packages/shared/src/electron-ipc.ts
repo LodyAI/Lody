@@ -638,9 +638,15 @@ export type SaveImageFileResult =
  * whole zip in renderer memory before it gets here.
  */
 
+/**
+ * Only an upper bound. The image export refuses an empty buffer because a
+ * zero-byte image is a failed encode, but an empty FILE is an ordinary
+ * workspace file that `fs.writeFile` creates exactly as asked — rejecting it
+ * here turned "download this file" into a payload error with no save dialog.
+ */
 const SaveFileBytesSchema = z
   .instanceof(ArrayBuffer)
-  .refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= IMAGE_EXPORT_MAX_BYTES, {
+  .refine((bytes) => bytes.byteLength <= IMAGE_EXPORT_MAX_BYTES, {
     message: 'file bytes out of range',
   });
 
