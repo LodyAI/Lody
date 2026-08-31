@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentConfigMeta, MachineMeta } from '@lody/shared';
+import type { AgentConfigId, AgentConfigMeta, MachineMeta } from '@lody/shared';
 import {
   applyEnvUpdates,
   inferAgentConfigCliType,
@@ -11,8 +11,8 @@ import {
 } from './agent-config';
 
 const createAgentConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta => ({
-  id: 'agent-config-id',
-  machineId: 'machine-id',
+  id: 'agent-config-id' as AgentConfigId,
+  machineId: 'machine-id' as MachineId,
   name: 'Codex Default',
   cliType: 'builtin',
   agentType: 'codex',
@@ -22,7 +22,7 @@ const createAgentConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfi
 });
 
 const createMachine = (overrides: Partial<MachineMeta> = {}): MachineMeta => ({
-  id: 'machine-id',
+  id: 'machine-id' as MachineId,
   name: 'Machine',
   cliVersion: '0.0.0',
   os: 'linux',
@@ -120,3 +120,41 @@ FOO=from-file
     expect(inferAgentConfigCliType('kimi-code')).toBe('registry');
   });
 });
+
+describe('refresh-capabilities dispatch payload', () => {
+    it('forwards customAcp for custom cliType agents', () => {
+      const config = createAgentConfig({
+        id: 'custom-cfg',
+        cliType: 'custom',
+        agentType: 'ohmypi',
+        customAcp: {
+          command: '/usr/local/bin/omp',
+          args: ['acp'],
+        },
+      });
+
+      // The dispatch payload must include customAcp so the ACP process
+      // can be spawned during capability refresh.
+      expect(config.customAcp).toEqual({
+        command: '/usr/local/bin/omp',
+        args: ['acp'],
+      });
+    });
+
+    it('forwards runtimeOverrides for builtin agents', () => {
+      const config = createAgentConfig({
+        id: 'builtin-cfg'  as AgentConfigId,
+        cliType: 'builtin',
+        agentType: 'codex',
+        runtimeOverrides: {
+          codexPath: '/custom/path/to/codex',
+        },
+      });
+
+      // The dispatch payload must include runtimeOverrides so capability
+      // refresh probes the configured executable, not the managed default.
+      expect(config.runtimeOverrides).toEqual({
+        codexPath: '/custom/path/to/codex',
+      });
+    });
+  });

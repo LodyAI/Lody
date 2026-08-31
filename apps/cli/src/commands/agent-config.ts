@@ -582,6 +582,8 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             configId: config.id,
             cliType: config.cliType,
             agentType: config.agentType,
+            customAcp: config.customAcp,
+            runtimeOverrides: config.runtimeOverrides,
             env: config.env,
           })
         );
