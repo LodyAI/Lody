@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent } from '@lody/shared';
 
-import {
-  hasUnansweredPlanApproval,
-  resolvePermissionRecord,
-} from '../src/components/ai-gui/permission-record';
+import { resolvePermissionRecord } from '../src/components/ai-gui/permission-record';
 
 type PermissionRequest = NonNullable<
   Extract<MessageContent, { type: 'tool_call' }>['permissionRequest']
@@ -60,48 +57,5 @@ describe('resolvePermissionRecord', () => {
         })
       )
     ).toEqual({ kind: 'settled', allowed: true, optionName: null });
-  });
-});
-
-describe('hasUnansweredPlanApproval', () => {
-  const planExit = (permissionRequest: unknown): MessageContent =>
-    ({
-      type: 'tool_call',
-      toolCallId: 'plan-exit',
-      kind: 'switch_mode',
-      status: 'pending',
-      permissionRequest,
-    }) as MessageContent;
-
-  it('holds the plan open while the approval is unanswered', () => {
-    expect(hasUnansweredPlanApproval([planExit(request())])).toBe(true);
-  });
-
-  it('lets the plan clamp once the reader has answered', () => {
-    expect(
-      hasUnansweredPlanApproval([
-        planExit(request({ outcome: { outcome: 'selected', optionId: 'allow' } })),
-      ])
-    ).toBe(false);
-  });
-
-  it('treats a withdrawn request as answered, not pending', () => {
-    // A cancelled request has nothing left to decide, so it must not pin the
-    // plan open for the rest of the session.
-    expect(
-      hasUnansweredPlanApproval([planExit(request({ outcome: { outcome: 'cancelled' } }))])
-    ).toBe(false);
-  });
-
-  it('ignores tool calls that are not a plan exit', () => {
-    const edit = {
-      type: 'tool_call',
-      toolCallId: 'edit-1',
-      kind: 'edit',
-      status: 'pending',
-      permissionRequest: request(),
-    } as MessageContent;
-    expect(hasUnansweredPlanApproval([edit])).toBe(false);
-    expect(hasUnansweredPlanApproval([{ type: 'text', text: 'hi' } as MessageContent])).toBe(false);
   });
 });

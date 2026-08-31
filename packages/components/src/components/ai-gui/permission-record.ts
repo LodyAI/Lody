@@ -34,20 +34,3 @@ export const resolvePermissionRecord = (permission: PermissionRequest): Permissi
     optionName: optionName ? optionName : null,
   };
 };
-
-/**
- * Is this turn's plan approval still waiting on the reader? Keyed on the ACP
- * tool kind and an ABSENT outcome — a CANCELLED request is answered (withdrawn),
- * not pending, so it must not hold the plan open.
- *
- * Drives `ProposedPlanBlock`'s default: a plan you are being asked to approve
- * opens in full, a plan you already decided on clamps.
- */
-export const hasUnansweredPlanApproval = (items: readonly MessageContent[]): boolean =>
-  items.some(
-    (item) =>
-      item.type === 'tool_call' &&
-      item.kind === 'switch_mode' &&
-      Boolean(item.permissionRequest) &&
-      !item.permissionRequest?.outcome
-  );

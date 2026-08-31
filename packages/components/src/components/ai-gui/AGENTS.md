@@ -39,7 +39,8 @@
   `getTextIndexBeforeTrailingNeverCollapsedItems`.
 - One turn may contain several `AssistantTurnRenderSegment`s. A plan approval
   inside a running turn cuts a segment so implementation stays under the plan.
-  Match ACP tool kind `switch_mode`, never a rendered title. Keep
+  Match ACP kind `switch_mode`, never a title; carrier varies
+  (`plan-surface.ts`). Keep
   `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility, and
   `expandedWorkedGroups` per segment. Expansion keys include the segment; only
   the last region may show a duration, while earlier regions say "Finished

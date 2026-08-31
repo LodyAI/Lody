@@ -10,7 +10,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
@@ -216,6 +216,10 @@ export const DesktopFinishedTurn: Story = {
  *     (`AGENT_ATTACHMENT_TYPES`): a plan runs long, and a file card stranded
  *     above one is a small thing to find mid-markdown. The answer text still
  *     reads above that whole tail.
+ *   - One plan surface, whatever the adapter. Claude and Kimi carry the plan in
+ *     the approval card's `content`, Codex in `rawInput` plus a separate
+ *     `proposed_plan` row. `plan-surface.ts` resolves the carrier and they all
+ *     render one `PlanPanel` — see `DesktopPlanAdapterParity`.
  *   - One panel. Every framed block — command, tool input/output, permission,
  *     proposed plan — uses `conversation-panel.ts`: the HEADER carries the
  *     raised fill, the body sits on the frame. Never the reverse, and never an
@@ -515,6 +519,115 @@ const planAwaitingDecisionTurn: SessionHistoryParsed = {
       },
     },
   ],
+};
+
+/**
+ * ADAPTER PARITY. The bundled agents put the plan in different places
+ * (`plan-surface.ts`), and the turn must not show it: Claude and Kimi carry it
+ * in the card's `content`, Codex in `rawInput` plus a separate `proposed_plan`
+ * row. All three render the same panel here. If one of these starts looking
+ * different, an adapter grew a carrier `resolvePlanExitMarkdown` does not know.
+ */
+const PARITY_PLAN = [
+  '## Goal',
+  '',
+  'Render the same plan panel whichever adapter produced it.',
+  '',
+  '## Steps',
+  '',
+  '1. Resolve the carrier in `plan-surface.ts`.',
+  '2. Feed every carrier into one `PlanPanel`.',
+].join('\n');
+
+const parityTurn = (
+  id: string,
+  label: string,
+  planExit: Record<string, unknown>,
+  extraItems: MessageContent[] = []
+): SessionHistoryParsed =>
+  ({
+    id,
+    role: 'assistant',
+    timestamp: '2026-08-11T09:10:00.000Z',
+    read: true,
+    finished: true,
+    endedAt: Date.parse('2026-08-11T09:10:30.000Z'),
+    items: [
+      { type: 'text', text: label },
+      ...extraItems,
+      {
+        type: 'tool_call',
+        toolCallId: `${id}-exit`,
+        kind: 'switch_mode',
+        status: 'completed',
+        permissionRequest: {
+          requestId: `${id}-permission`,
+          options: [
+            { optionId: 'approve', name: 'Yes, implement this plan', kind: 'allow_once' },
+            { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
+          ],
+          outcome: { outcome: 'selected', optionId: 'approve' },
+        },
+        ...planExit,
+      },
+    ],
+  }) as unknown as SessionHistoryParsed;
+
+const parityTurns: SessionHistoryParsed[] = [
+  // Claude: `ExitPlanMode` puts the plan in a `content` text block.
+  parityTurn('parity-claude', 'Claude — plan in the card `content`', {
+    title: 'Ready to code?',
+    content: [{ type: 'content', content: { type: 'text', text: PARITY_PLAN } }],
+  }),
+  // Kimi: same carrier, with the `Plan saved to:` prefix its adapter composes.
+  parityTurn('parity-kimi', 'Kimi — same carrier, plus its trailing action summary', {
+    title: 'ExitPlanMode',
+    content: [
+      {
+        type: 'content',
+        content: { type: 'text', text: `Plan saved to: /tmp/plan.md\n\n${PARITY_PLAN}` },
+      },
+      // `buildPermissionToolCallUpdate` always appends this after the plan; it
+      // must not end up inside the plan panel.
+      { type: 'content', content: { type: 'text', text: 'Requesting approval to exit plan mode' } },
+    ],
+  }),
+  // Codex: `rawInput` plus a separate `proposed_plan` row, which wins.
+  parityTurn(
+    'parity-codex',
+    'Codex — `rawInput` plus a separate plan row',
+    { title: 'Implement this plan?', rawInput: { plan: PARITY_PLAN } },
+    [
+      {
+        type: 'proposed_plan',
+        turnId: 'parity-codex-turn',
+        markdown: PARITY_PLAN,
+        status: 'completed',
+        isLatest: true,
+      } as MessageContent,
+    ]
+  ),
+];
+
+export const DesktopPlanAdapterParity: Story = {
+  args: {
+    sessionId,
+    items: parityTurns.map((message) => ({ type: 'message', sessionId, message }) as const),
+    renderMessageRow,
+  },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className="relative h-[1100px] w-full bg-background">
+        <SessionChatStreamView
+          items={parityTurns.map((message) => ({ type: 'message', sessionId, message }) as const)}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+        />
+        <RailGuide />
+      </div>
+    </WithRuntime>
+  ),
 };
 
 export const DesktopPlanAwaitingDecision: Story = outcomeStory(
