@@ -286,6 +286,14 @@ mobile surfaces.
   browser/OS time zone, and describe it as the time through which the forecast is valid
   rather than promising a reset.
 - Responsive mobile UI: `src/components/mobile/AGENTS.md`.
+- Adding a folder is a workspace action, not a this-machine action: the picker
+  chooses the machine, so every entry point says "Add folder" rather than "Add a
+  local project". Settings > Projects therefore pills EVERY machine the user may
+  add to, including ones with no project yet, and its add action passes that
+  machine as `initialMachineId`. Whoever needs the addable set reads
+  `useAddLocalProjectMachines` — the ownership rule (`canAddProjects`) has one
+  home and must not be re-derived per surface. Onboarding is the deliberate
+  exception: it drives the desktop native picker and really is this-machine only.
 - A pending local-project removal is a visible lifecycle state, not an absent
   project: keep the project and its existing Sessions discoverable while the
   owning machine is offline or retrying, but exclude it from new-Session

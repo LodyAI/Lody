@@ -556,7 +556,7 @@ function AddProjectActionSheet({
     options.push({
       key: 'local',
       icon: <FolderPlus className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />,
-      title: labels.addLocalProject ?? '添加本地项目',
+      title: labels.addLocalProject ?? '添加文件夹',
       hint: labels.addLocalProjectHint ?? '浏览机器目录，选择一个文件夹',
       onSelect: onAddLocalProject,
     });

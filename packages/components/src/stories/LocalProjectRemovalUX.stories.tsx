@@ -124,7 +124,7 @@ function DesktopSidebar({
               <button
                 type="button"
                 className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
-                aria-label="添加本地项目"
+                aria-label="添加文件夹"
               >
                 <FolderPlus className="h-4 w-4" />
               </button>

@@ -9,6 +9,7 @@ import {
 } from '@lody/shared';
 import {
   ProjectSettingsView,
+  type AddableProjectMachine,
   type ProjectSettingsSection,
   type ProjectSettingsRow,
   type GithubProjectSettingsSection,
@@ -149,13 +150,20 @@ const baseGithubSections: GithubProjectSettingsSection[] = [
   },
 ];
 
+const baseAddableMachines: AddableProjectMachine[] = [
+  { machineId: machineLocal, machineName: 'MacBook Pro', online: true },
+  { machineId: machineRemote, machineName: 'Workstation', online: false },
+];
+
 function StoryWrapper({
   sections = baseSections,
   githubSections = baseGithubSections,
+  addableMachines = baseAddableMachines,
   isLoading = false,
 }: {
   sections?: ProjectSettingsSection[];
   githubSections?: GithubProjectSettingsSection[];
+  addableMachines?: AddableProjectMachine[];
   isLoading?: boolean;
 }) {
   const [currentSections, setCurrentSections] = useState(sections);
@@ -178,8 +186,9 @@ function StoryWrapper({
             }))
           );
         }}
-        onAddLocalProject={() => {
-          console.info('Add local project');
+        addableMachines={addableMachines}
+        onAddLocalProject={(machineId) => {
+          console.info('Add folder', machineId ?? '(choose a machine)');
         }}
         onAddGitHubProject={() => {
           console.info('Add GitHub project');
@@ -520,6 +529,17 @@ export const ManyProjects: Story = {
 export const Empty: Story = {
   args: {
     sections: [],
+    addableMachines: [],
+  },
+};
+
+/** A machine the user can add to but that has no project yet still gets a pill
+    and an in-place add action. */
+export const MachineWithoutProjects: Story = {
+  args: {
+    sections: [],
+    githubSections: [],
+    addableMachines: [baseAddableMachines[0]!],
   },
 };
 

@@ -78,7 +78,10 @@ import { settingContainerClass } from '.';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
 import { useGithubProjectWorktreeSaves } from '@/hooks/use-github-project-worktree-admin';
-import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
+import {
+  AddLocalProjectDialogContainer,
+  useAddLocalProjectMachines,
+} from '@/components/local-projects/add-local-project-dialog-container';
 import { ProjectSkillsTab } from './project-skills-tab';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
@@ -148,6 +151,13 @@ type ProjectSettingsSelection =
   | { key: string; kind: 'local'; row: ProjectSettingsRow }
   | { key: string; kind: 'github'; row: GithubProjectSettingsRow };
 
+/** A machine the current user is allowed to add folders to. */
+export type AddableProjectMachine = {
+  machineId: MachineId;
+  machineName: string;
+  online: boolean;
+};
+
 export type ProjectSettingsViewProps = {
   sections: ProjectSettingsSection[];
   githubSections: GithubProjectSettingsSection[];
@@ -187,7 +197,11 @@ export type ProjectSettingsViewProps = {
     row: GithubProjectSettingsRow,
     config: WorktreeCleanupScriptConfig
   ) => Promise<void>;
-  onAddLocalProject?: () => void;
+  /** Machines the current user may add folders to, including ones that have no
+      project yet — those still get a pill so the folder can be added here. */
+  addableMachines?: readonly AddableProjectMachine[];
+  /** Opens the folder picker; a machine id pre-selects that machine. */
+  onAddLocalProject?: (machineId?: MachineId | null) => void;
   onAddGitHubProject?: () => void;
 };
 
@@ -303,6 +317,25 @@ export function ProjectSettingsComponent({
   const resolvedInitialProjectKey =
     initialProjectKey !== undefined ? initialProjectKey : modalProjectTarget;
   const [addLocalProjectDialogOpen, setAddLocalProjectDialogOpen] = useState(false);
+  const [addLocalProjectMachineId, setAddLocalProjectMachineId] = useState<MachineId | null>(null);
+  /* Same ownership rule the picker itself applies, so a machine the user may
+     add to shows up here even before it has a single project. */
+  const { machines: pickerMachines } = useAddLocalProjectMachines();
+  const addableMachines = useMemo<AddableProjectMachine[]>(
+    () =>
+      pickerMachines
+        .filter((machine) => machine.canAddProjects)
+        .map((machine) => ({
+          machineId: machine.id,
+          machineName: machine.name,
+          online: machine.online,
+        })),
+    [pickerMachines]
+  );
+  const handleAddLocalProject = useCallback((machineId?: MachineId | null) => {
+    setAddLocalProjectMachineId(machineId ?? null);
+    setAddLocalProjectDialogOpen(true);
+  }, []);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
      same data model without duplicating mutations / catalog state. */
@@ -400,12 +433,14 @@ export function ProjectSettingsComponent({
         onWorktreeCleanupChange={onWorktreeCleanupChange}
         onGithubWorktreeSetupChange={onGithubWorktreeSetupChange}
         onGithubWorktreeCleanupChange={onGithubWorktreeCleanupChange}
-        onAddLocalProject={() => setAddLocalProjectDialogOpen(true)}
+        addableMachines={addableMachines}
+        onAddLocalProject={handleAddLocalProject}
         onAddGitHubProject={workspaceSlug ? handleAddGitHubProject : undefined}
       />
       <AddLocalProjectDialogContainer
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
+        initialMachineId={addLocalProjectMachineId}
       />
     </>
   );
@@ -430,6 +465,7 @@ function ProjectSettingsDesktop({
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
+  addableMachines,
   onAddLocalProject,
   onAddGitHubProject,
   initialMachineId,
@@ -443,8 +479,30 @@ function ProjectSettingsDesktop({
   const totalCount = totalProjects + totalGithubProjects;
   const isAnyLoading = isLoading || githubProjectsLoading;
 
-  // Pills under the title: GitHub first (if any repos), then each machine that
-  // has local projects. The selected pill drives the left project list.
+  /* One entry per machine that has local projects OR that the user may add a
+     folder to, so a machine connected but still empty is reachable here
+     instead of only from the generic add menu. */
+  const machineEntries = useMemo<AddableProjectMachine[]>(() => {
+    const byId = new Map<MachineId, AddableProjectMachine>();
+    for (const section of sections) {
+      byId.set(section.machineId, {
+        machineId: section.machineId,
+        machineName: section.machineName,
+        online: onlineMachineIds.has(section.machineId),
+      });
+    }
+    for (const machine of addableMachines ?? []) {
+      if (byId.has(machine.machineId)) continue;
+      byId.set(machine.machineId, {
+        ...machine,
+        online: machine.online || onlineMachineIds.has(machine.machineId),
+      });
+    }
+    return [...byId.values()];
+  }, [sections, addableMachines, onlineMachineIds]);
+
+  // Pills under the title: GitHub first (if any repos), then each machine.
+  // The selected pill drives the left project list.
   const pills = useMemo<MachinePillItem[]>(() => {
     const list: MachinePillItem[] = [];
     if (githubSections.length > 0) {
@@ -454,15 +512,15 @@ function ProjectSettingsDesktop({
         icon: <Github className="h-3.5 w-3.5" />,
       });
     }
-    for (const section of sections) {
+    for (const machine of machineEntries) {
       list.push({
-        id: section.machineId,
-        label: section.machineName,
-        online: onlineMachineIds.has(section.machineId),
+        id: machine.machineId,
+        label: machine.machineName,
+        online: machine.online,
       });
     }
     return list;
-  }, [sections, githubSections, onlineMachineIds, t]);
+  }, [machineEntries, githubSections, t]);
 
   const [selectedPillId, setSelectedPillId] = useState<string | null>(
     () => initialMachineId ?? null
@@ -494,11 +552,33 @@ function ProjectSettingsDesktop({
   const addProjectActions =
     onAddLocalProject || onAddGitHubProject ? (
       <ProjectAddMenu
-        onAddLocalProject={onAddLocalProject}
+        onAddLocalProject={onAddLocalProject ? () => onAddLocalProject() : undefined}
         onAddGitHubProject={onAddGitHubProject}
         className="h-8 w-8 shrink-0 bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.1]"
       />
     ) : null;
+
+  /* The selected pill scopes the add action: the picker opens straight on that
+     machine (its Back button still leads to the full machine list). */
+  const addableMachineIds = useMemo(
+    () => new Set((addableMachines ?? []).map((machine) => machine.machineId)),
+    [addableMachines]
+  );
+  const selectedMachine =
+    machineEntries.find((entry) => entry.machineId === resolvedPillId) ?? null;
+  const selectedMachineAddTarget =
+    onAddLocalProject && selectedMachine && addableMachineIds.has(selectedMachine.machineId)
+      ? selectedMachine
+      : null;
+  const addToSelectedMachine = selectedMachineAddTarget
+    ? () => onAddLocalProject?.(selectedMachineAddTarget.machineId)
+    : null;
+  const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
+  const addFolderToMachineTitle = selectedMachineAddTarget
+    ? t('workspace.projects.addFolderOnMachine', 'Add a folder on {{machine}}', {
+        machine: selectedMachineAddTarget.machineName,
+      })
+    : undefined;
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -534,7 +614,7 @@ function ProjectSettingsDesktop({
           <Loader2 className="h-4 w-4 animate-spin" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
-      ) : totalCount === 0 ? (
+      ) : totalCount === 0 && machineEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 px-3 py-12 text-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
@@ -552,37 +632,73 @@ function ProjectSettingsDesktop({
               setSelectedPillId(id);
               setSelectedProjectKey(null);
             }}
+            trailing={
+              addToSelectedMachine ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  title={addFolderToMachineTitle}
+                  className="h-6 gap-1 rounded-full border border-border/60 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+                  onClick={addToSelectedMachine}
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  {addFolderLabel}
+                </Button>
+              ) : null
+            }
           />
           <div className="flex min-h-0 min-w-0 flex-1">
             <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
-              {isGithubPill
-                ? githubSections.map((section) => (
-                    <div key={section.owner} className="mb-2">
-                      <ProjectOwnerLabel owner={section.owner} />
-                      {section.rows.map((row) => (
-                        <ProjectMasterRow
-                          key={row.key}
-                          selected={selectedProject?.key === row.key}
-                          icon={<OwnerAvatar owner={section.owner} />}
-                          title={row.name}
-                          subtitle={row.repoFullName}
-                          onClick={() => setSelectedProjectKey(row.key)}
-                        />
-                      ))}
-                    </div>
-                  ))
-                : currentSelections.map((selection) =>
-                    selection.kind === 'local' ? (
+              {isGithubPill ? (
+                githubSections.map((section) => (
+                  <div key={section.owner} className="mb-2">
+                    <ProjectOwnerLabel owner={section.owner} />
+                    {section.rows.map((row) => (
                       <ProjectMasterRow
-                        key={selection.key}
-                        selected={selectedProject?.key === selection.key}
-                        icon={<Folder className="h-3.5 w-3.5" />}
-                        title={selection.row.project.name}
-                        subtitle={selection.row.project.rootPath}
-                        onClick={() => setSelectedProjectKey(selection.key)}
+                        key={row.key}
+                        selected={selectedProject?.key === row.key}
+                        icon={<OwnerAvatar owner={section.owner} />}
+                        title={row.name}
+                        subtitle={row.repoFullName}
+                        onClick={() => setSelectedProjectKey(row.key)}
                       />
-                    ) : null
-                  )}
+                    ))}
+                  </div>
+                ))
+              ) : currentSelections.length === 0 ? (
+                <div className="flex flex-col items-start gap-2 px-2 py-4">
+                  <p className="text-xs text-muted-foreground">
+                    {t('workspace.projects.machineEmpty', 'No folders added on this machine yet.')}
+                  </p>
+                  {addToSelectedMachine ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title={addFolderToMachineTitle}
+                      className="h-7 gap-1 px-2 text-xs"
+                      onClick={addToSelectedMachine}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5" />
+                      {addFolderLabel}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                currentSelections.map((selection) =>
+                  selection.kind === 'local' ? (
+                    <ProjectMasterRow
+                      key={selection.key}
+                      selected={selectedProject?.key === selection.key}
+                      icon={<Folder className="h-3.5 w-3.5" />}
+                      title={selection.row.project.name}
+                      subtitle={selection.row.project.rootPath}
+                      onClick={() => setSelectedProjectKey(selection.key)}
+                    />
+                  ) : null
+                )
+              )}
             </div>
             <div className="min-w-0 flex-1 overflow-hidden">
               {selectedProject ? (
@@ -691,7 +807,7 @@ function ProjectAddMenu({
           <DropdownMenuItem onSelect={() => onAddLocalProject()}>
             <FolderPlus className="h-4 w-4" />
             <span className="flex min-w-0 flex-col">
-              <span>{t('chat.contextSwitch.addProject', 'Add a local project')}</span>
+              <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
               <span className="text-xs text-muted-foreground">
                 {t(
                   'chat.contextSwitch.addLocalProjectHint',

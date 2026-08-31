@@ -44,22 +44,20 @@ function normalizeResponse<T>(
 }
 
 /**
- * Builds the workspace-visible machine list and the RPC-backed directory
- * operations for the directory picker. Ownership is a UI-only control today:
- * teammate rows remain visible for context, but the picker never sends browse
- * or add RPCs for them. Workspace Machine RPC does not authenticate a
- * caller-supplied user id, so this guard must not be described as
- * defense-in-depth. Kept as a hook so the pure `AddLocalProjectDialog` stays
- * Storybook-friendly with injected fakes.
+ * Workspace-visible machines annotated with whether the current user may add
+ * folders to them. Ownership is a UI-only control today: teammate rows remain
+ * visible for context, but the picker never sends browse or add RPCs for them.
+ * Workspace Machine RPC does not authenticate a caller-supplied user id, so
+ * this guard must not be described as defense-in-depth. Exported on its own so
+ * surfaces that need the addable set without the picker's RPC wiring (the
+ * Projects settings page) resolve it through the same rule as the dialog.
  */
-export function useAddLocalProjectController(
-  onProjectAdded?: AddLocalProjectDialogProps['onAdded'],
-  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void
-) {
-  const { t } = useTranslation();
+export function useAddLocalProjectMachines(): {
+  machines: RemoteDirectoryPickerMachine[];
+  machinesLoading: boolean;
+} {
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const localMachineId = useAtomValue(localMachineIdAtom);
-  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { activeOrganization } = useOrganization();
   const { machines: visibleMachines, accessByMachineId } = useVisibleMachineMetas();
   const onlineMachineIds = useOnlineMachineIds();
@@ -90,6 +88,23 @@ export function useAddLocalProjectController(
       ownerNameByUserId,
     ]
   );
+
+  return { machines, machinesLoading: currentUserId === null };
+}
+
+/**
+ * Pairs the addable machine list with the RPC-backed directory operations for
+ * the picker. Kept as a hook so the pure `AddLocalProjectDialog` stays
+ * Storybook-friendly with injected fakes.
+ */
+export function useAddLocalProjectController(
+  onProjectAdded?: AddLocalProjectDialogProps['onAdded'],
+  onProjectLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void
+) {
+  const { t } = useTranslation();
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const { activeOrganization } = useOrganization();
+  const { machines, machinesLoading } = useAddLocalProjectMachines();
 
   const ops = useMemo<RemoteDirectoryOps>(() => {
     const timeoutMessage = t('localProjects.add.timeout', 'The machine did not respond in time.');
@@ -169,7 +184,7 @@ export function useAddLocalProjectController(
 
   return {
     machines,
-    machinesLoading: currentUserId === null,
+    machinesLoading,
     ops,
     onAdded,
     onLocateRegistered,

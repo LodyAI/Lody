@@ -6306,7 +6306,7 @@ function WorkspaceChatLanding({
             localTab: t('chat.contextSwitch.localProjects', 'Local'),
             githubTab: t('chat.contextSwitch.github', 'GitHub'),
             addProjectMenu: t('chat.contextSwitch.addProjectMenu', 'Add project'),
-            addLocalProject: t('chat.contextSwitch.addProject', 'Add a local project'),
+            addLocalProject: t('chat.contextSwitch.addProject', 'Add a folder'),
             addLocalProjectHint: t(
               'chat.contextSwitch.addLocalProjectHint',
               'Browse the machine and pick a folder'
