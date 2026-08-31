@@ -61,12 +61,12 @@
 
       h1 {
         font-size: clamp(24px, 4vw, 40px);
-        letter-spacing: -0.04em;
+        letter-spacing: 0;
       }
 
       h2 {
         font-size: 18px;
-        letter-spacing: -0.02em;
+        letter-spacing: 0;
       }
 
       .subtitle,
@@ -131,6 +131,70 @@
         margin-top: 32px;
       }
 
+      .detail-reviews {
+        margin-top: 14px;
+        border-block: 1px solid light-dark(#d4d4d8, #3f3f46);
+      }
+
+      .detail-review {
+        padding-block: 24px;
+      }
+
+      .detail-review + .detail-review {
+        border-top: 1px solid light-dark(#e4e4e7, #27272a);
+      }
+
+      .detail-heading {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px 24px;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+
+      .detail-heading h3 {
+        margin: 0;
+        font-size: 15px;
+        letter-spacing: 0;
+      }
+
+      .detail-description {
+        margin-top: 5px;
+        max-width: 76ch;
+        color: light-dark(#71717a, #a1a1aa);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .detail-finding {
+        color: light-dark(#be123c, #fda4af);
+        font:
+          650 12px/1.3 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        text-align: right;
+      }
+
+      .detail-pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .detail-pair figure {
+        padding: 8px;
+        border-radius: 8px;
+      }
+
+      .detail-pair figure img {
+        background: #ffffff;
+      }
+
+      .overview-section {
+        opacity: 0.88;
+      }
+
       .comparison {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -142,7 +206,7 @@
         margin: 0;
         padding: 10px;
         border: 1px solid light-dark(#e4e4e7, #27272a);
-        border-radius: 14px;
+        border-radius: 8px;
         background: light-dark(#ffffff, #18181b);
       }
 
@@ -219,7 +283,7 @@
       .stage-shell,
       .debt-panel {
         border: 1px solid light-dark(#e4e4e7, #27272a);
-        border-radius: 14px;
+        border-radius: 8px;
         background: light-dark(#ffffff, #18181b);
       }
 
@@ -469,8 +533,17 @@
         }
 
         .comparison,
+        .detail-pair,
         .explorer {
           grid-template-columns: 1fr;
+        }
+
+        .detail-heading {
+          grid-template-columns: 1fr;
+        }
+
+        .detail-finding {
+          text-align: left;
         }
 
         .debt-panel {
@@ -502,10 +575,17 @@
 
       <div class="metrics" id="metrics"></div>
 
-      <section aria-labelledby="comparison-title">
+      <section aria-labelledby="details-title">
         <div class="section-header">
-          <h2 id="comparison-title">同一帧画面对照</h2>
+          <h2 id="details-title">局部放大语义线检查</h2>
           <span class="timestamp" id="timestamp"></span>
+        </div>
+        <div class="detail-reviews" id="detail-reviews"></div>
+      </section>
+
+      <section class="overview-section" aria-labelledby="comparison-title">
+        <div class="section-header">
+          <h2 id="comparison-title">Workspace 总览（仅用于定位）</h2>
         </div>
         <div class="comparison">
           <figure>
@@ -660,11 +740,10 @@
 
         const result = document.createElement('div');
         result.className = `baseline-result${entry.aligned ? '' : ' is-misaligned'}`;
-        const maxDelta = Math.max(...entry.members.map((member) => member.delta));
         result.innerHTML =
           '<span class="baseline-result-line"></span>' +
           `<span>${entry.mode} · ${entry.members.length} members</span>` +
-          `<span class="baseline-result-status">${entry.aligned ? 'aligned' : `Δ${Number(maxDelta.toFixed(2))}px`}</span>`;
+          `<span class="baseline-result-status">${entry.aligned ? 'aligned' : `spread ${Number(entry.spread.toFixed(2))}px`}</span>`;
         debtPanel.append(result);
       });
 
@@ -757,6 +836,39 @@
         `Sidebar ${report.sidebarGrid.range.columns} cols × ${report.sidebarGrid.columnWidth}px · ` +
         `Main ${report.mainGrid.range.columns} cols × ${Number(report.mainGrid.columnWidth.toFixed(2))}px · ` +
         `${report.semanticBaselines.length} 条语义基准线 · ${report.spacingAudit.length} 个 spacing rhythm 债务`;
+
+      const details = document.getElementById('detail-reviews');
+      report.details.forEach((detail, index) => {
+        const review = document.createElement('article');
+        review.className = 'detail-review';
+        const cleanId = `detail-clean-${index}`;
+        const annotatedId = `detail-annotated-${index}`;
+        const cleanLinkId = `detail-clean-link-${index}`;
+        const annotatedLinkId = `detail-annotated-link-${index}`;
+        review.innerHTML =
+          '<div class="detail-heading">' +
+          `<div><h3>${detail.title}</h3><p class="detail-description">${detail.description}</p></div>` +
+          `<span class="detail-finding">${detail.finding}</span>` +
+          '</div>' +
+          '<div class="detail-pair">' +
+          `<figure><img id="${cleanId}" alt="${detail.title} 原始局部截图" />` +
+          `<figcaption><strong>原始界面</strong><a id="${cleanLinkId}">打开 2× PNG</a></figcaption></figure>` +
+          `<figure><img id="${annotatedId}" alt="${detail.title} 语义线局部截图" />` +
+          `<figcaption><strong>语义线与 Columns</strong><a id="${annotatedLinkId}">打开 2× PNG</a></figcaption></figure>` +
+          '</div>';
+        details.append(review);
+        for (const [imageId, linkId, source] of [
+          [cleanId, cleanLinkId, detail.images.clean],
+          [annotatedId, annotatedLinkId, detail.images.annotated],
+        ]) {
+          const image = document.getElementById(imageId);
+          const link = document.getElementById(linkId);
+          image.src = source;
+          link.href = source;
+          link.target = '_blank';
+          link.rel = 'noreferrer';
+        }
+      });
 
       for (const [imageId, linkId, source] of [
         ['clean-image', 'clean-link', report.images.clean],

@@ -459,7 +459,7 @@ function SessionRowTime({
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
     <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span data-geometry-baseline-member className="select-none tabular-nums">
+      <span data-geometry-baseline-member="session-time" className="select-none tabular-nums">
         {relativeTime}
       </span>
     </span>
@@ -877,7 +877,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const sessionHref = isSelectable ? getSessionHref?.(session.sessionId) : undefined;
             const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
             const renderTitle = (extraClassName?: string) => (
-              <span data-geometry-baseline-member className={cn('truncate', extraClassName)}>
+              <span
+                data-geometry-baseline-member="session-title"
+                className={cn('truncate', extraClassName)}
+              >
                 {session.title}
               </span>
             );
@@ -994,6 +997,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ) : null}
                 <div
                   data-geometry-baseline-group="text"
+                  data-geometry-baseline-name="sidebar.session.text"
                   className="flex min-w-0 items-center gap-1.5"
                 >
                   <SessionRowLeadingSlot
@@ -1058,10 +1062,16 @@ const SessionGroupSection = memo(function SessionGroupSection({
                             <SessionMergeablePill />
                           ) : hasChanges && !isMergeable ? (
                             <span className="flex items-center gap-1">
-                              <span data-geometry-baseline-member className="text-code-added">
+                              <span
+                                data-geometry-baseline-member="session-added-lines"
+                                className="text-code-added"
+                              >
                                 +{session.addedLines}
                               </span>
-                              <span data-geometry-baseline-member className="text-code-removed">
+                              <span
+                                data-geometry-baseline-member="session-removed-lines"
+                                className="text-code-removed"
+                              >
                                 -{session.deletedLines}
                               </span>
                             </span>

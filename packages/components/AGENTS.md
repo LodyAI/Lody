@@ -24,9 +24,11 @@ mobile surfaces.
   Semantic alignment compares explicit control boxes: repeated slots may share
   an X-axis line across rows, while icon/text controls within one row may share a
   Y-axis instance. Only text uses a typographic baseline; SVG optical weight stays
-  outside deterministic geometry. Padding, margin, gap, and line-height multiples
-  are spacing diagnostics, never alignment violations. Diagnostic debt remains
-  non-blocking until a rule is explicitly promoted into the Playwright gate.
+  outside deterministic geometry. Named text groups expose stable member labels;
+  diagnostics place guides at the median and fail on the complete member spread,
+  never DOM order. Padding, margin, gap, and line-height multiples are spacing
+  diagnostics, never alignment violations. Diagnostic debt remains non-blocking
+  until a rule is explicitly promoted into the Playwright gate.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches

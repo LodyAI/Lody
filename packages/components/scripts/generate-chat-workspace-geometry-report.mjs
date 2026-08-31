@@ -92,12 +92,28 @@ if (/data:image\//i.test(reportHtml)) {
 }
 await writeFile(reportPath, reportHtml, 'utf8');
 
-const [cleanImage, annotatedImage] = await Promise.all([
-  stat(path.join(outputDirectory, reportData.images.clean)),
-  stat(path.join(outputDirectory, reportData.images.annotated)),
-]);
+const imagePaths = [
+  reportData.images.clean,
+  reportData.images.annotated,
+  ...reportData.details.flatMap((detail) => [detail.images.clean, detail.images.annotated]),
+];
+const imageStats = await Promise.all(
+  imagePaths.map(async (imagePath) => ({
+    imagePath,
+    file: await stat(path.join(outputDirectory, imagePath)),
+  }))
+);
+const cleanImage = imageStats.find(({ imagePath }) => imagePath === reportData.images.clean)?.file;
+const annotatedImage = imageStats.find(
+  ({ imagePath }) => imagePath === reportData.images.annotated
+)?.file;
+if (!cleanImage || !annotatedImage) throw new Error('Overview images are missing');
+const detailImageBytes = imageStats.slice(2).reduce((total, { file }) => total + file.size, 0);
 console.log(`Geometry report: ${reportPath}`);
 console.log(`Clean PNG: ${(cleanImage.size / 1024).toFixed(1)} KiB`);
 console.log(`Annotated PNG: ${(annotatedImage.size / 1024).toFixed(1)} KiB`);
+console.log(
+  `${reportData.details.length} detail pairs: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
+);
 
 if (shouldOpen) await openReport();

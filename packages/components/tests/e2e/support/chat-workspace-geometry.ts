@@ -44,6 +44,7 @@ export type BrowserSemanticBaselineEntry = Readonly<{
   mode: SemanticBaselineMode;
   rect: GeometryRect;
   line: number;
+  spread: number;
   aligned: boolean;
   members: readonly Readonly<{ name: string; coordinate: number; delta: number }>[];
 }>;
@@ -404,7 +405,7 @@ export async function auditChatWorkspaceSemanticBaselines(
   page: Page
 ): Promise<readonly BrowserSemanticBaselineEntry[]> {
   const measurements = await page.evaluate(
-    ({ anchors, attribute, baselineAttributes }) => {
+    ({ anchors, attribute, baselineAttributes, alignmentAttributes }) => {
       const root = document.querySelector(`[${attribute}="${anchors.workspaceShell}"]`);
       if (!(root instanceof HTMLElement)) throw new Error('Workspace shell is missing');
 
@@ -448,14 +449,20 @@ export async function auditChatWorkspaceSemanticBaselines(
           );
           if (elements.length < 2) return [];
           const rect = group.getBoundingClientRect();
+          const semanticName = group.getAttribute(baselineAttributes.name);
+          const instance = group
+            .closest(`[${alignmentAttributes.instance}]`)
+            ?.getAttribute(alignmentAttributes.instance);
           return [
             {
-              name: `${describe(group)}:${index + 1}`,
+              name: semanticName
+                ? `${semanticName}${instance ? ` · ${instance}` : ''}`
+                : `${describe(group)}:${index + 1}`,
               mode,
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
               members: elements.map((element) => {
                 return {
-                  name: describe(element),
+                  name: element.getAttribute(baselineAttributes.member) || describe(element),
                   coordinate: textBaseline(element),
                 };
               }),
@@ -468,6 +475,7 @@ export async function auditChatWorkspaceSemanticBaselines(
       anchors: CHAT_WORKSPACE_GEOMETRY_ANCHORS,
       attribute: CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE,
       baselineAttributes: CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES,
+      alignmentAttributes: CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
     }
   );
 
@@ -482,6 +490,7 @@ export async function auditChatWorkspaceSemanticBaselines(
       mode: result.mode,
       rect: measurement.rect,
       line: result.line,
+      spread: result.spread,
       aligned: result.aligned,
       members: result.members,
     };

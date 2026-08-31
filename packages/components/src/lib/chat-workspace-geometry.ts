@@ -18,6 +18,7 @@ export const CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE = 'data-geometry-anchor';
 
 export const CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES = {
   group: 'data-geometry-baseline-group',
+  name: 'data-geometry-baseline-name',
   member: 'data-geometry-baseline-member',
 } as const;
 
@@ -272,6 +273,7 @@ export type SemanticBaselineGroupResult = Readonly<{
   name: string;
   mode: SemanticBaselineMode;
   line: number;
+  spread: number;
   aligned: boolean;
   members: readonly Readonly<SemanticBaselineMemberMeasurement & { delta: number }>[];
 }>;
@@ -538,9 +540,9 @@ export function isSpacingRhythmMultiple(
 }
 
 /**
- * Resolve one semantic row against its first member's line. A group with fewer
- * than two measurable members is reported as aligned because it has no
- * cross-element relationship to compare.
+ * Resolve one text group against its median line. Pass/fail uses the complete
+ * member spread, so DOM order cannot select the reference member or hide two
+ * members that sit on opposite sides of the displayed guide.
  */
 export function evaluateSemanticBaselineGroup(
   group: SemanticBaselineGroupMeasurement,
@@ -549,19 +551,30 @@ export function evaluateSemanticBaselineGroup(
   if (!Number.isFinite(tolerance) || tolerance < 0) {
     throw new RangeError('tolerance must be a finite, non-negative number');
   }
-  const first = group.members[0];
-  const line = first?.coordinate ?? 0;
-  const members = group.members.map((member) => {
+  const coordinates = group.members.map((member) => {
     if (!Number.isFinite(member.coordinate)) {
       throw new RangeError(`${group.name}.${member.name} must have a finite coordinate`);
     }
+    return member.coordinate;
+  });
+  const sorted = [...coordinates].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  const line =
+    sorted.length === 0
+      ? 0
+      : sorted.length % 2 === 0
+        ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+        : (sorted[middle] ?? 0);
+  const members = group.members.map((member) => {
     return { ...member, delta: Math.abs(member.coordinate - line) };
   });
+  const spread = sorted.length < 2 ? 0 : (sorted.at(-1) ?? 0) - (sorted[0] ?? 0);
   return {
     name: group.name,
     mode: group.mode,
     line,
-    aligned: members.length < 2 || members.every((member) => member.delta <= tolerance),
+    spread,
+    aligned: members.length < 2 || spread <= tolerance,
     members,
   };
 }

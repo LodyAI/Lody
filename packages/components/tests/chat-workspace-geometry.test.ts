@@ -141,7 +141,31 @@ describe('conversation, spacing, and semantic baselines', () => {
           { name: 'time', coordinate: 42 },
         ],
       })
-    ).toMatchObject({ aligned: false, line: 40, members: [{ delta: 0 }, { delta: 2 }] });
+    ).toMatchObject({
+      aligned: false,
+      line: 41,
+      spread: 2,
+      members: [{ delta: 1 }, { delta: 1 }],
+    });
+  });
+
+  it('places a text baseline guide independently of DOM order', () => {
+    const members = [
+      { name: 'title', coordinate: 42 },
+      { name: 'time', coordinate: 40 },
+      { name: 'diff', coordinate: 41 },
+    ];
+
+    expect(
+      evaluateSemanticBaselineGroup({ name: 'sidebar-row', mode: 'text', members })
+    ).toMatchObject({ line: 41, spread: 2, aligned: false });
+    expect(
+      evaluateSemanticBaselineGroup({
+        name: 'sidebar-row',
+        mode: 'text',
+        members: [...members].reverse(),
+      })
+    ).toMatchObject({ line: 41, spread: 2, aligned: false });
   });
 
   it('compares repeated semantic slots on either axis without trusting DOM order', () => {

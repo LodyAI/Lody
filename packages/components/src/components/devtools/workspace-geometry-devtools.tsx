@@ -48,6 +48,7 @@ type SemanticBaselineEntry = Readonly<{
   mode: SemanticBaselineMode;
   rect: GeometryRect;
   line: number;
+  spread: number;
   aligned: boolean;
   members: readonly Readonly<{ name: string; coordinate: number; delta: number }>[];
 }>;
@@ -614,11 +615,21 @@ function readSemanticBaselines(): readonly SemanticBaselineEntry[] {
     if (elements.length < 2) return [];
 
     const result = evaluateSemanticBaselineGroup({
-      name: `${describeElement(group)}:${index + 1}`,
+      name: (() => {
+        const semanticName = group.getAttribute(CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES.name);
+        const instance = group
+          .closest(`[${CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES.instance}]`)
+          ?.getAttribute(CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES.instance);
+        return semanticName
+          ? `${semanticName}${instance ? ` · ${instance}` : ''}`
+          : `${describeElement(group)}:${index + 1}`;
+      })(),
       mode,
       members: elements.map((element) => {
         return {
-          name: describeElement(element),
+          name:
+            element.getAttribute(CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES.member) ||
+            describeElement(element),
           coordinate: measureTextBaseline(element),
         };
       }),
@@ -629,6 +640,7 @@ function readSemanticBaselines(): readonly SemanticBaselineEntry[] {
         mode,
         rect: readRect(group),
         line: result.line,
+        spread: result.spread,
         aligned: result.aligned,
         members: result.members,
       },
@@ -692,6 +704,7 @@ function SemanticBaselineOverlay() {
             key={`${entry.groupLabel}-${index}`}
             data-geometry-baseline-aligned={entry.aligned ? 'true' : 'false'}
             data-geometry-baseline-mode={entry.mode}
+            data-geometry-baseline-spread={Number(entry.spread.toFixed(2))}
             style={{
               position: 'absolute',
               left: entry.rect.x,
