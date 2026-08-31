@@ -167,11 +167,18 @@ export function useFileTreeRowMenu(
   const provider = config?.provider ?? null;
   const workspaceRootPath = config?.workspaceRootPath?.trim() || null;
   const onMentionFile = config?.onMentionFile;
-  // Reveal and open are Electron bridges; a browser host has no file manager or
-  // local editor to talk to even when the files happen to be local.
-  const isLocal = Boolean(config?.isLocalMachine) && Boolean(workspaceRootPath);
-  const canReveal = isLocal && isElectronRenderer();
-  const canDownload = Boolean(provider) && !isLocal;
+  // Machine ownership ALONE decides download vs the local actions. An
+  // unresolved `workspaceRootPath` is missing metadata (a `dotlodyPath` or
+  // local-project root that has not synced yet), not evidence that the files are
+  // somewhere else — folding it in here turned a local workspace into a
+  // downloadable one for as long as that lag lasted.
+  const isLocalMachine = Boolean(config?.isLocalMachine);
+  const canDownload = Boolean(provider) && !isLocalMachine;
+  // Reveal and open additionally need an absolute path to hand the OS, and are
+  // Electron bridges: a browser host has no file manager or local editor to talk
+  // to even when the files happen to be local. Without the path they are simply
+  // absent, which is the correct degradation — the file is still not downloadable.
+  const canReveal = isLocalMachine && Boolean(workspaceRootPath) && isElectronRenderer();
   const openLauncher = useFileOpenLauncher(canReveal ? workspaceRootPath : null);
 
   const reportSave = useStableCallback(

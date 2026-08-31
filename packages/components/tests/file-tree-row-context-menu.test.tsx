@@ -168,6 +168,34 @@ describe('file tree row context menu', () => {
     ]);
   });
 
+  // Regression: `workspaceRootPath` used to be ANDed into the local check, so a
+  // session whose path metadata had not synced yet (dotlodyPath / local-project
+  // root unresolved) fell through to the remote branch and offered Download for
+  // a file sitting on this very machine. Machine ownership alone decides that;
+  // a missing path may only remove reveal/open.
+  it('never offers Download on this machine, even with no workspace path resolved', async () => {
+    (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__ = true;
+    const host = await render(
+      createElement(FileTreeProviderView, {
+        fileProvider: createProvider(['a.ts']),
+        fileProviderPending: false,
+        handleOpenFile: () => undefined,
+        rowMenu: {
+          provider: createProvider(['a.ts']),
+          workspaceRootPath: null,
+          isLocalMachine: true,
+          onMentionFile: () => true,
+        },
+      })
+    );
+
+    await rightClick(findRow(host, 'a.ts'));
+    expect(menuLabels()).not.toContain('Download');
+    // Reveal and Copy path drop out with no absolute path to hand the OS; what
+    // the row can still do without one stays.
+    expect(menuLabels()).toEqual(['Add to conversation', 'Copy relative path']);
+  });
+
   it('copies the machine-absolute path and the workspace-relative one separately', async () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
