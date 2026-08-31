@@ -2,6 +2,12 @@
 
 Parent `AGENTS.md` files also apply.
 
+## Lightweight hosted entries
+
+- Public/auth entry points that bypass the full product router import route-agnostic
+  surfaces. Keep host navigation behind callback props so those surfaces do not import
+  the route tree, `RuntimeProvider`, or workspace Flock document implementation.
+
 ## Keyboard navigation
 
 - Each independently navigable list owns one `FocusScope` and one

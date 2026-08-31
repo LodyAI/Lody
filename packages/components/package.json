@@ -11,6 +11,10 @@
       "import": "./src/router.tsx",
       "types": "./src/router.tsx"
     },
+    "./components/pages/workspace-join-request-surface": {
+      "import": "./src/components/pages/workspace-join-request-surface.tsx",
+      "types": "./src/components/pages/workspace-join-request-surface.tsx"
+    },
     "./atoms/*": {
       "import": "./src/atoms/*.{ts,tsx}",
       "types": "./src/atoms/*.{ts,tsx}"
