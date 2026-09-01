@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentConfigMeta, MachineMeta } from '@lody/shared';
+import type { AgentConfigId, AgentConfigMeta, MachineId, MachineMeta, WorkspaceId } from '@lody/shared';
 import {
   applyEnvUpdates,
+  buildRefreshCapabilitiesPayload,
   inferAgentConfigCliType,
   parseEnvAssignments,
   parseEnvFileText,
@@ -11,8 +12,8 @@ import {
 } from './agent-config';
 
 const createAgentConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta => ({
-  id: 'agent-config-id',
-  machineId: 'machine-id',
+  id: 'agent-config-id' as AgentConfigId,
+  machineId: 'machine-id' as MachineId,
   name: 'Codex Default',
   cliType: 'builtin',
   agentType: 'codex',
@@ -22,7 +23,7 @@ const createAgentConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfi
 });
 
 const createMachine = (overrides: Partial<MachineMeta> = {}): MachineMeta => ({
-  id: 'machine-id',
+  id: 'machine-id' as MachineId,
   name: 'Machine',
   cliVersion: '0.0.0',
   os: 'linux',
@@ -118,5 +119,75 @@ FOO=from-file
     expect(inferAgentConfigCliType('opencode')).toBe('registry');
     expect(inferAgentConfigCliType('kimi')).toBe('registry');
     expect(inferAgentConfigCliType('kimi-code')).toBe('registry');
+  });
+});
+
+describe('buildRefreshCapabilitiesPayload', () => {
+  it('forwards customAcp for custom cliType agents', () => {
+    const config = createAgentConfig({
+      cliType: 'custom',
+      agentType: 'ohmypi',
+      customAcp: {
+        command: '/usr/local/bin/omp',
+        args: ['acp'],
+      },
+    });
+
+    const payload = buildRefreshCapabilitiesPayload(
+      config,
+      'machine-id' as MachineId,
+      'workspace-id' as WorkspaceId
+    );
+
+    expect(payload.type).toBe('machine/acp-capabilities-refresh');
+    expect(payload.machineId).toBe('machine-id');
+    expect(payload.workspaceId).toBe('workspace-id');
+    expect(payload.configId).toBe(config.id);
+    expect(payload.cliType).toBe('custom');
+    expect(payload.agentType).toBe('ohmypi');
+    expect(payload.customAcp).toEqual({
+      command: '/usr/local/bin/omp',
+      args: ['acp'],
+    });
+    expect(payload.runtimeOverrides).toBeUndefined();
+  });
+
+  it('forwards runtimeOverrides for builtin agents', () => {
+    const config = createAgentConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      runtimeOverrides: {
+        codexPath: '/custom/path/to/codex',
+      },
+    });
+
+    const payload = buildRefreshCapabilitiesPayload(
+      config,
+      'machine-id' as MachineId,
+      'workspace-id' as WorkspaceId
+    );
+
+    expect(payload.runtimeOverrides).toEqual({
+      codexPath: '/custom/path/to/codex',
+    });
+    expect(payload.customAcp).toBeUndefined();
+  });
+
+  it('omits optional fields when the config has none', () => {
+    const config = createAgentConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: { FOO: 'bar' },
+    });
+
+    const payload = buildRefreshCapabilitiesPayload(
+      config,
+      'machine-id' as MachineId,
+      'workspace-id' as WorkspaceId
+    );
+
+    expect(payload.customAcp).toBeUndefined();
+    expect(payload.runtimeOverrides).toBeUndefined();
+    expect(payload.env).toEqual({ FOO: 'bar' });
   });
 });
