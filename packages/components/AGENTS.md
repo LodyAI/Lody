@@ -39,6 +39,9 @@ mobile surfaces.
   manufacture support. `data-geometry-discovery-scope` remains an optional hint for
   named or aggregate regions, never a prerequisite for discovery. Repeated X coordinates
   form median rails and members outside the inlier tolerance are reported as outliers.
+  Discovery must not read semantic-alignment attributes: it derives visual rows and their
+  direct layout slots from ordinary DOM topology, including transparent hover controls that
+  still occupy layout, and collapses each slot's start/center/end family to one canonical rail.
   Rails with the same topology signature and normalized position across captures may
   become evidence-backed contract proposals. A discovered rail or proposal is not layout
   intent and cannot pass or fail the gate until a contract compiler binds it to stable

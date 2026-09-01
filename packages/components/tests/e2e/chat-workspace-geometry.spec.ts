@@ -4,6 +4,7 @@ import {
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
   CHAT_WORKSPACE_GEOMETRY_SPEC,
   CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
+  CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
   resolveMainPaneGridRange,
   validateChatWorkspaceGeometry,
 } from '../../src/lib/chat-workspace-geometry';
@@ -136,6 +137,55 @@ test('alignment rails are discovered without manual scope attributes', async ({ 
         scope.rails.length > 0
     )
   ).toBe(true);
+});
+
+test('sidebar trailing rail is inferred without semantic alignment attributes', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const response = await page.goto(
+    '/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story'
+  );
+  expect(response?.ok()).toBeTruthy();
+  await expect(page.locator('[data-geometry-fixture-ready="true"]')).toBeAttached({
+    timeout: 30_000,
+  });
+
+  const semanticAttributes = Object.values(CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES);
+  await page.locator('*').evaluateAll((elements, attributes) => {
+    for (const element of elements) {
+      for (const attribute of attributes) element.removeAttribute(attribute);
+    }
+  }, semanticAttributes);
+  await page
+    .locator(`[${CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE}]`)
+    .evaluateAll((elements, attribute) => {
+      for (const element of elements) element.removeAttribute(attribute);
+    }, CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE);
+
+  const discovery = await discoverChatWorkspaceAlignmentRails(page);
+  const trailingRail = discovery
+    .filter((scope) => scope.source === 'auto')
+    .flatMap((scope) => scope.rails)
+    .find(
+      (rail) =>
+        rail.anchor === 'inline-end' &&
+        Math.abs(rail.line - 266) <= 0.5 &&
+        rail.outliers.some((member) => member.coordinate === 267) &&
+        rail.outliers.some((member) => member.coordinate === 262) &&
+        rail.outliers.some((member) => member.coordinate === 275)
+    );
+
+  expect(trailingRail).toMatchObject({
+    line: 266,
+    support: 8,
+    sampleSize: 11,
+    outliers: [
+      { coordinate: 267, delta: 1 },
+      { coordinate: 262, delta: 4 },
+      { coordinate: 275, delta: 9 },
+    ],
+  });
 });
 
 if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {

@@ -15,7 +15,9 @@ import {
   isSpacingRhythmMultiple,
   resolveConversationHorizontalInset,
   resolveMainPaneGridRange,
+  selectCanonicalAlignmentRails,
   validateChatWorkspaceGeometry,
+  type AlignmentRailCandidate,
   type ChatWorkspaceGeometrySnapshot,
   type LayoutTopologyNode,
 } from '../src/lib/chat-workspace-geometry';
@@ -236,6 +238,55 @@ describe('conversation, spacing, and semantic baselines', () => {
       sampleSize: 6,
       confidence: 5 / 6,
       outliers: [{ elementId: 'child-4', coordinate: 324, delta: 2, outlier: true }],
+    });
+  });
+
+  it('collapses repeated slot anchors to the boundary-facing canonical rail', () => {
+    const slots = [
+      { id: 'section-action', left: 219, right: 267 },
+      { id: 'project-action', left: 242, right: 262 },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        id: `session-action-${index + 1}`,
+        left: 246,
+        right: 266,
+      })),
+      { id: 'new-session-action', left: 251, right: 275 },
+    ];
+    const candidates: AlignmentRailCandidate[] = slots.flatMap((slot, index) => {
+      const common = {
+        elementId: slot.id,
+        rowId: `row-${index + 1}`,
+        kind: 'button',
+        yStart: index * 40,
+        yEnd: index * 40 + 20,
+      };
+      return [
+        { ...common, anchor: 'inline-start' as const, coordinate: slot.left },
+        {
+          ...common,
+          anchor: 'inline-center' as const,
+          coordinate: (slot.left + slot.right) / 2,
+        },
+        { ...common, anchor: 'inline-end' as const, coordinate: slot.right },
+      ];
+    });
+
+    const rails = selectCanonicalAlignmentRails(
+      discoverAlignmentRails(candidates, { mergeTolerance: 12 }),
+      { x: 17, y: 0, width: 258, height: 400 }
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]).toMatchObject({
+      anchor: 'inline-end',
+      line: 266,
+      support: 5,
+      sampleSize: 8,
+      outliers: [
+        { elementId: 'section-action', coordinate: 267, delta: 1 },
+        { elementId: 'project-action', coordinate: 262, delta: 4 },
+        { elementId: 'new-session-action', coordinate: 275, delta: 9 },
+      ],
     });
   });
 

@@ -324,6 +324,8 @@ export type AlignmentRailCandidate = Readonly<{
   elementId: string;
   /** Stable row identity so nested boxes on one row cannot inflate support. */
   rowId: string;
+  /** Geometry-derived visual role; semantic contract names never enter discovery. */
+  kind?: string;
   anchor: AlignmentRailCandidateAnchor;
   coordinate: number;
   yStart: number;
@@ -1095,6 +1097,71 @@ export function discoverAlignmentRails(
       first.line - second.line ||
       first.anchor.localeCompare(second.anchor)
   );
+}
+
+/**
+ * Collapse start/center/end rails produced by the same repeated visual slot.
+ * Text slots keep their start edge; slots near a region boundary keep that
+ * boundary-facing edge. The discarded rails remain derivable from raw capture
+ * data but do not compete for attention in the design report.
+ */
+export function selectCanonicalAlignmentRails(
+  rails: readonly DiscoveredAlignmentRail[],
+  scope: GeometryRect
+): readonly DiscoveredAlignmentRail[] {
+  if (!Number.isFinite(scope.x) || !Number.isFinite(scope.width) || scope.width <= 0) {
+    throw new RangeError('Canonical rail selection requires a positive finite scope width');
+  }
+
+  const memberKeys = (rail: DiscoveredAlignmentRail) =>
+    new Set(rail.members.map((member) => `${member.rowId}\u0000${member.elementId}`));
+  const overlap = (leftRail: DiscoveredAlignmentRail, rightRail: DiscoveredAlignmentRail) => {
+    const leftKeys = memberKeys(leftRail);
+    const rightKeys = memberKeys(rightRail);
+    const shared = [...leftKeys].filter((key) => rightKeys.has(key)).length;
+    return shared / Math.min(leftKeys.size, rightKeys.size);
+  };
+
+  const families: DiscoveredAlignmentRail[][] = [];
+  for (const rail of rails) {
+    const family = families.find(
+      (candidateFamily) =>
+        !candidateFamily.some((candidate) => candidate.anchor === rail.anchor) &&
+        candidateFamily.some((candidate) => overlap(candidate, rail) >= 0.75)
+    );
+    if (family) family.push(rail);
+    else families.push([rail]);
+  }
+
+  return families
+    .map((family) => {
+      const kinds = family.flatMap((rail) => rail.members.map((member) => member.kind));
+      const textShare = kinds.filter((kind) => kind === 'text').length / Math.max(1, kinds.length);
+      const normalizedLines = family.map((rail) => (rail.line - scope.x) / scope.width);
+      const preferredAnchor: AlignmentRailCandidateAnchor =
+        textShare >= 0.5
+          ? 'inline-start'
+          : Math.max(...normalizedLines) >= 0.72
+            ? 'inline-end'
+            : Math.min(...normalizedLines) <= 0.28
+              ? 'inline-start'
+              : 'inline-center';
+      return (
+        family.find((rail) => rail.anchor === preferredAnchor) ??
+        [...family].sort(
+          (leftRail, rightRail) =>
+            rightRail.confidence - leftRail.confidence || rightRail.support - leftRail.support
+        )[0]
+      );
+    })
+    .filter((rail): rail is DiscoveredAlignmentRail => rail !== undefined)
+    .sort(
+      (first, second) =>
+        second.confidence - first.confidence ||
+        second.support - first.support ||
+        first.line - second.line ||
+        first.anchor.localeCompare(second.anchor)
+    );
 }
 
 /**

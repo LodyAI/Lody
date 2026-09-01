@@ -133,6 +133,7 @@ const DISCOVERY_SCOPE_LABELS: Readonly<Record<string, string>> = {
   'session.permission': '权限确认区',
   'sidebar.group:__only_chats__': 'Sidebar Chats 会话分组',
   'sidebar.local-projects:geometry': 'Sidebar 本地项目与会话列表',
+  'sidebar.shell': 'Sidebar 整体工作区',
 };
 
 const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
@@ -142,6 +143,9 @@ const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
 };
 
 const DISCOVERY_ELEMENT_LABELS: Readonly<Record<string, string>> = {
+  'Import local project folder': '分区尾部按钮',
+  'New session': '新建会话按钮',
+  'Remove project': '项目尾部按钮',
   'local-session-title-ink': '会话标题视觉墨迹',
   'project-label': '项目标题',
   'project-leading-control': '项目文件夹图标',
@@ -169,7 +173,7 @@ function discoverySurfaceLabel(surface: string): string {
 }
 
 function discoveryElementLabel(elementId: string, rowId: string, coordinate: number): string {
-  const rawLabel = elementId.replace(/^\d+:/, '');
+  const rawLabel = elementId.replace(/^\d+(?:\.\d+)?:/, '');
   if (rawLabel === 'svg') {
     if (rowId.includes('sidebar-')) {
       return coordinate > 160 ? '会话行尾图标' : '会话行首图标';
@@ -639,26 +643,38 @@ function createDiscoveryDetails({
   return railDiscovery.flatMap((scope, scopeIndex): readonly ReportDetail[] => {
     if (scope.rails.length === 0) return [];
 
-    const id = `discovery-${idPrefix}-${scopeIndex + 1}`;
-    const outliers = scope.rails.flatMap((rail) => rail.outliers);
-    const outlierGroups = groupDiscoveryOutliers(scope);
-    const maxOffset = Math.max(0, ...outliers.map((member) => member.delta));
-    const finding =
-      outliers.length > 0
-        ? `候选 · ${outlierGroups.length} 个元素需要确认 · 最大偏移 ${Number(maxOffset.toFixed(2))}px`
-        : '候选 · 当前轨道稳定';
-    const scopeLabel = discoveryScopeLabel(scope);
-    const hasAnnotations = outlierGroups.length > 0;
-    const annotationGutter = hasAnnotations ? 400 : 0;
+    const railRegions = new Map<'leading' | 'middle' | 'trailing', typeof scope.rails>();
+    for (const rail of scope.rails) {
+      const position = (rail.line - scope.rect.x) / scope.rect.width;
+      const region = position < 1 / 3 ? 'leading' : position > 2 / 3 ? 'trailing' : 'middle';
+      railRegions.set(region, [...(railRegions.get(region) ?? []), rail]);
+    }
+    const regionLabels = {
+      leading: '行首区',
+      middle: '中部区',
+      trailing: '尾部区',
+    } as const;
 
-    return [
-      {
+    return Array.from(railRegions.entries()).map(([region, rails]): ReportDetail => {
+      const groupedScope = { ...scope, rails };
+      const id = `discovery-${idPrefix}-${scopeIndex + 1}-${region}`;
+      const outliers = rails.flatMap((rail) => rail.outliers);
+      const outlierGroups = groupDiscoveryOutliers(groupedScope);
+      const maxOffset = Math.max(0, ...outliers.map((member) => member.delta));
+      const finding =
+        outliers.length > 0
+          ? `候选 · ${outlierGroups.length} 个元素需要确认 · 最大偏移 ${Number(maxOffset.toFixed(2))}px`
+          : '候选 · 当前轨道稳定';
+      const hasAnnotations = outlierGroups.length > 0;
+      const annotationGutter = hasAnnotations ? 400 : 0;
+
+      return {
         kind: 'candidate',
         id,
-        title: `${discoverySurfaceLabel(surface)} · ${scopeLabel}`,
+        title: `${discoverySurfaceLabel(surface)} · ${discoveryScopeLabel(scope)} · ${regionLabels[region]}`,
         description: hasAnnotations
-          ? `${scope.rails.length} 条候选对齐轨 · ${outlierGroups.length} 个待确认元素`
-          : `${scope.rails.length} 条候选对齐轨 · 暂无偏离元素`,
+          ? `${rails.length} 条候选对齐轨 · ${outlierGroups.length} 个待确认元素`
+          : `${rails.length} 条候选对齐轨 · 暂无偏离元素`,
         finding,
         clip: clampClip(
           {
@@ -692,7 +708,7 @@ function createDiscoveryDetails({
               },
             })
           ),
-          discoveredRails: scope.rails.map((rail) => ({
+          discoveredRails: rails.map((rail) => ({
             line: rail.line,
             members: rail.members.map(({ coordinate, yStart, yEnd, outlier }) => ({
               coordinate,
@@ -702,8 +718,8 @@ function createDiscoveryDetails({
             })),
           })),
         },
-      },
-    ];
+      };
+    });
   });
 }
 
@@ -762,7 +778,9 @@ test('captures the visual geometry report', async ({ browser }) => {
   const spacingAudit = await auditChatWorkspaceSpacing(page);
   const semanticAlignments = await auditChatWorkspaceSemanticAlignments(page);
   const semanticBaselines = await auditChatWorkspaceSemanticBaselines(page);
-  const railDiscovery = await discoverChatWorkspaceAlignmentRails(page);
+  const railDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
+    aggregateScopes: ['sidebar.shell'],
+  });
   expect(semanticBaselines.every((entry) => Number.isFinite(entry.spread))).toBe(true);
   expect(railDiscovery.some((scope) => scope.rails.length > 0)).toBe(true);
   const mainPane = requireGeometryRect(
@@ -787,12 +805,14 @@ test('captures the visual geometry report', async ({ browser }) => {
     viewport,
     railDiscovery,
   });
-  const localProjectsDiscovery = workspaceDiscoveryDetails.find((detail) =>
-    detail.title.includes('Sidebar 本地项目与会话列表')
+  const sidebarDiscovery = workspaceDiscoveryDetails.find(
+    (detail) => detail.title.includes('Sidebar 整体工作区') && detail.title.includes('尾部区')
   );
-  expect(localProjectsDiscovery?.description).toContain('5 个待确认元素');
-  expect(localProjectsDiscovery?.description).not.toContain('9 outliers');
-  expect(localProjectsDiscovery?.overlay.semanticAnnotations).toHaveLength(5);
+  expect(sidebarDiscovery?.description).toMatch(/\b3 个待确认元素$/);
+  expect(sidebarDiscovery?.overlay.semanticAnnotations).toHaveLength(3);
+  expect(
+    sidebarDiscovery?.overlay.discoveredRails.some((rail) => Math.abs(rail.line - 266) <= 0.5)
+  ).toBe(true);
   const workspaceDetails = [...semanticDetails, ...workspaceDiscoveryDetails];
 
   const assetsDirectory = path.join(outputDirectory, 'assets');

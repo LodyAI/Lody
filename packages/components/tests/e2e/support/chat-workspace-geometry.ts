@@ -14,6 +14,7 @@ import {
   discoverAlignmentRails,
   discoverRepeatedLayoutScopes,
   isSpacingRhythmMultiple,
+  selectCanonicalAlignmentRails,
   type ChatWorkspaceSpacingAuditProperty,
   type ChatWorkspaceGeometryAnchor,
   type ChatWorkspaceGeometrySnapshot,
@@ -314,14 +315,13 @@ export async function discoverChatWorkspaceAlignmentRails(
   options: Readonly<{ aggregateScopes?: readonly string[] }> = {}
 ): Promise<readonly BrowserAlignmentRailDiscoveryScope[]> {
   const snapshot = await page.evaluate(
-    ({ discoveryAttribute, alignmentAttributes, aggregateScopes }) => {
+    ({ discoveryAttribute, aggregateScopes }) => {
       const isRendered = (element: Element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
         return (
           style.display !== 'none' &&
           style.visibility !== 'hidden' &&
-          Number.parseFloat(style.opacity || '1') > 0 &&
           rect.right >= 0 &&
           rect.bottom >= 0 &&
           rect.left <= innerWidth &&
@@ -333,11 +333,9 @@ export async function discoverChatWorkspaceAlignmentRails(
           (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
         );
       const isCandidate = (element: Element) =>
-        element.matches(
-          `button, a, input, select, textarea, svg, [${alignmentAttributes.member}]`
-        ) || hasDirectText(element);
+        element.matches('button, [role="button"], a, input, select, textarea, svg') ||
+        hasDirectText(element);
       const candidateKind = (element: Element) => {
-        if (element.hasAttribute(alignmentAttributes.member)) return 'semantic-member';
         if (element.matches('button, [role="button"]')) return 'button';
         if (element.matches('a')) return 'link';
         if (element.matches('input, select, textarea')) return 'field';
@@ -345,67 +343,177 @@ export async function discoverChatWorkspaceAlignmentRails(
         return hasDirectText(element) ? 'text' : null;
       };
       const describe = (element: Element, index: number) => {
-        const semanticMember = element.getAttribute(alignmentAttributes.member);
         const ariaLabel = element.getAttribute('aria-label');
         const dataId = element.getAttribute('data-id');
         const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 48);
-        const label =
-          (semanticMember ?? ariaLabel ?? dataId ?? text) || element.tagName.toLowerCase();
+        const label = (ariaLabel ?? dataId ?? text) || element.tagName.toLowerCase();
         return `${index + 1}:${label}`;
       };
 
-      const manualScopes = Array.from(
-        document.querySelectorAll<Element>(`[${discoveryAttribute}]`)
-      ).map((scopeElement) => {
-        const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
-        const aggregateNestedScopes = aggregateScopes.includes(scope);
+      const elementDepth = (element: Element) => {
+        let depth = 0;
+        for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          depth += 1;
+        }
+        return depth;
+      };
+
+      const scopeSnapshot = (
+        scopeElement: Element,
+        scope: string,
+        aggregateNestedScopes: boolean,
+        honorNestedScopeBoundaries: boolean
+      ) => {
         const scopeRect = scopeElement.getBoundingClientRect();
-        const elements = Array.from(scopeElement.querySelectorAll<Element>('*')).filter(
+        const belongsToScope = (element: Element) =>
+          aggregateNestedScopes ||
+          !honorNestedScopeBoundaries ||
+          element.closest(`[${discoveryAttribute}]`) === scopeElement;
+        const elements = [scopeElement, ...scopeElement.querySelectorAll<Element>('*')].filter(
           (element) =>
-            (aggregateNestedScopes ||
-              element.closest(`[${discoveryAttribute}]`) === scopeElement) &&
+            belongsToScope(element) &&
             !element.closest('[data-geometry-devtool]') &&
-            isRendered(element) &&
-            element.getBoundingClientRect().width > 0 &&
-            element.getBoundingClientRect().height > 0 &&
-            isCandidate(element)
+            isRendered(element)
         );
-        const candidates = elements.flatMap((element, index) => {
+
+        const rowProposals = elements.flatMap((element) => {
           const rect = element.getBoundingClientRect();
-          const instance = element
-            .closest(`[${alignmentAttributes.instance}]`)
-            ?.getAttribute(alignmentAttributes.instance);
-          const rowId =
-            instance ??
-            `visual-row:${Number((Math.round((rect.top + rect.height / 2) * 2) / 2).toFixed(1))}`;
-          const elementId = describe(element, index);
-          return [
-            {
-              elementId,
-              rowId,
-              anchor: 'inline-start' as const,
-              coordinate: rect.left,
-              yStart: rect.top,
-              yEnd: rect.bottom,
-            },
-            {
-              elementId,
-              rowId,
-              anchor: 'inline-center' as const,
-              coordinate: rect.left + rect.width / 2,
-              yStart: rect.top,
-              yEnd: rect.bottom,
-            },
-            {
-              elementId,
-              rowId,
-              anchor: 'inline-end' as const,
-              coordinate: rect.right,
-              yStart: rect.top,
-              yEnd: rect.bottom,
-            },
-          ];
+          if (
+            rect.height < 16 ||
+            rect.height > 48 ||
+            rect.width < Math.min(120, scopeRect.width * 0.55)
+          ) {
+            return [];
+          }
+          const slots = Array.from(element.children).filter((child) => {
+            const childRect = child.getBoundingClientRect();
+            const childCenter = childRect.top + childRect.height / 2;
+            return (
+              belongsToScope(child) &&
+              isRendered(child) &&
+              childRect.width > 0 &&
+              childRect.height > 0 &&
+              childCenter >= rect.top - 1 &&
+              childCenter <= rect.bottom + 1
+            );
+          });
+          if (slots.length < 2) return [];
+          const slotLeft = Math.min(...slots.map((slot) => slot.getBoundingClientRect().left));
+          const slotRight = Math.max(...slots.map((slot) => slot.getBoundingClientRect().right));
+          const slotSpan = slotRight - slotLeft;
+          if (slotSpan / rect.width < 0.72) return [];
+          return [{ element, rect, slots, slotSpan, depth: elementDepth(element) }];
         });
+
+        const rows = rowProposals
+          .sort(
+            (left, right) =>
+              left.rect.top - right.rect.top ||
+              right.slotSpan - left.slotSpan ||
+              right.depth - left.depth
+          )
+          .filter((proposal, index, proposals) => {
+            const center = proposal.rect.top + proposal.rect.height / 2;
+            return !proposals.slice(0, index).some((existing) => {
+              const existingCenter = existing.rect.top + existing.rect.height / 2;
+              const horizontalOverlap =
+                Math.max(
+                  0,
+                  Math.min(proposal.rect.right, existing.rect.right) -
+                    Math.max(proposal.rect.left, existing.rect.left)
+                ) / Math.min(proposal.rect.width, existing.rect.width);
+              return Math.abs(center - existingCenter) <= 1 && horizontalOverlap >= 0.5;
+            });
+          });
+
+        const candidates = rows.flatMap((row, rowIndex) => {
+          const rowCenter = row.rect.top + row.rect.height / 2;
+          return row.slots.flatMap((slot, slotIndex) => {
+            const rect = slot.getBoundingClientRect();
+            const labelledDescendant = slot.querySelector<Element>(
+              '[aria-label], button, [role="button"], a, input, select, textarea'
+            );
+            const labelSource =
+              slot.getAttribute('aria-label') || labelledDescendant?.getAttribute('aria-label');
+            const text = slot.textContent?.trim().replace(/\s+/g, ' ').slice(0, 48);
+            const elementId = `${rowIndex + 1}.${slotIndex + 1}:${
+              labelSource || text || slot.tagName.toLowerCase()
+            }`;
+            const kind =
+              candidateKind(slot) ??
+              (slot.querySelector('button, [role="button"], a, input, select, textarea')
+                ? 'button'
+                : slot.querySelector('svg')
+                  ? 'svg'
+                  : text
+                    ? 'text'
+                    : 'slot');
+            const common = {
+              elementId,
+              rowId: `visual-row:${Number(rowCenter.toFixed(1))}:${Number(row.rect.x.toFixed(1))}`,
+              kind,
+              yStart: rect.top,
+              yEnd: rect.bottom,
+            };
+            return [
+              { ...common, anchor: 'inline-start' as const, coordinate: rect.left },
+              {
+                ...common,
+                anchor: 'inline-center' as const,
+                coordinate: rect.left + rect.width / 2,
+              },
+              { ...common, anchor: 'inline-end' as const, coordinate: rect.right },
+            ];
+          });
+        });
+
+        const atomsOutsideRows = elements.filter((element) => {
+          if (element === scopeElement || !isCandidate(element)) return false;
+          if (
+            Array.from(element.querySelectorAll<Element>('*')).some(
+              (descendant) => isRendered(descendant) && isCandidate(descendant)
+            )
+          ) {
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          const center = rect.top + rect.height / 2;
+          const belongsToVisualRow = rows.some((row) => {
+            const rowCenter = row.rect.top + row.rect.height / 2;
+            const overlapsRow = rect.right >= row.rect.left && rect.left <= row.rect.right;
+            return (
+              row.element.contains(element) ||
+              element.contains(row.element) ||
+              (Math.abs(center - rowCenter) <= 1 && overlapsRow)
+            );
+          });
+          return !belongsToVisualRow;
+        });
+        candidates.push(
+          ...atomsOutsideRows.flatMap((element, index) => {
+            const rect = element.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return [];
+            const common = {
+              elementId: describe(element, index),
+              rowId: `visual-row:${Number((rect.top + rect.height / 2).toFixed(1))}:${Number(
+                rect.x.toFixed(1)
+              )}`,
+              kind: candidateKind(element) ?? 'atom',
+              yStart: rect.top,
+              yEnd: rect.bottom,
+            };
+            return [
+              { ...common, anchor: 'inline-start' as const, coordinate: rect.left },
+              {
+                ...common,
+                anchor: 'inline-center' as const,
+                coordinate: rect.left + rect.width / 2,
+              },
+              { ...common, anchor: 'inline-end' as const, coordinate: rect.right },
+            ];
+          })
+        );
+
         return {
           scope,
           rect: {
@@ -414,9 +522,53 @@ export async function discoverChatWorkspaceAlignmentRails(
             width: scopeRect.width,
             height: scopeRect.height,
           },
+          rowCount: rows.length,
           candidates,
         };
+      };
+
+      const manualScopes = Array.from(
+        document.querySelectorAll<Element>(`[${discoveryAttribute}]`)
+      ).map((scopeElement) => {
+        const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
+        return scopeSnapshot(scopeElement, scope, aggregateScopes.includes(scope), true);
       });
+
+      const regionScopes = Array.from(
+        document.body.querySelectorAll<Element>('aside, main, nav, section, div, ul, ol')
+      )
+        .filter((element) => {
+          if (element.closest('[data-geometry-devtool]') || !isRendered(element)) return false;
+          const rect = element.getBoundingClientRect();
+          return (
+            rect.width >= 120 &&
+            rect.height >= 80 &&
+            element.querySelectorAll('button, [role="button"], a, input, select, textarea')
+              .length >= 3
+          );
+        })
+        .map((scopeElement, index) =>
+          scopeSnapshot(scopeElement, `auto-region:${index + 1}`, true, false)
+        )
+        .filter((scope) => scope.rowCount >= 3)
+        .sort(
+          (left, right) =>
+            right.rowCount - left.rowCount ||
+            left.rect.width * left.rect.height - right.rect.width * right.rect.height
+        )
+        .filter(
+          (scope, index, scopes) =>
+            !scopes
+              .slice(0, index)
+              .some(
+                (existing) =>
+                  Math.abs(existing.rect.x - scope.rect.x) <= 1 &&
+                  Math.abs(existing.rect.y - scope.rect.y) <= 1 &&
+                  Math.abs(existing.rect.width - scope.rect.width) <= 1 &&
+                  Math.abs(existing.rect.height - scope.rect.height) <= 1
+              )
+        )
+        .slice(0, 12);
 
       const topologyElements = Array.from(document.body.querySelectorAll<Element>('*')).filter(
         (element) => !element.closest('[data-geometry-devtool]') && isRendered(element)
@@ -452,14 +604,29 @@ export async function discoverChatWorkspaceAlignmentRails(
         };
       });
 
-      return { manualScopes, topologyNodes };
+      return { manualScopes, regionScopes, topologyNodes };
     },
     {
       discoveryAttribute: CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
-      alignmentAttributes: CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
       aggregateScopes: [...(options.aggregateScopes ?? [])],
     }
   );
+
+  const discoverScopeRails = (
+    candidates: readonly AlignmentRailCandidate[],
+    rect: GeometryRect
+  ) => {
+    const heights = candidates
+      .map((candidate) => candidate.yEnd - candidate.yStart)
+      .filter((height) => Number.isFinite(height) && height > 0)
+      .sort((left, right) => left - right);
+    const typicalHeight = heights[Math.floor(heights.length / 2)] ?? 16;
+    const mergeTolerance = Math.max(4, Math.min(12, typicalHeight / 2));
+    return selectCanonicalAlignmentRails(
+      discoverAlignmentRails(candidates, { mergeTolerance }),
+      rect
+    );
+  };
 
   const manualScopes: BrowserAlignmentRailDiscoveryScope[] = snapshot.manualScopes.map(
     ({ scope, rect, candidates }) => ({
@@ -467,9 +634,37 @@ export async function discoverChatWorkspaceAlignmentRails(
       source: 'hint',
       rect,
       candidateCount: candidates.length,
-      rails: discoverAlignmentRails(candidates as readonly AlignmentRailCandidate[]),
+      rails: discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
     })
   );
+
+  const overlapShare = (left: GeometryRect, right: GeometryRect) => {
+    const width = Math.max(
+      0,
+      Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x)
+    );
+    const height = Math.max(
+      0,
+      Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y)
+    );
+    return (width * height) / Math.min(left.width * left.height, right.width * right.height);
+  };
+  const regionScopes: BrowserAlignmentRailDiscoveryScope[] = snapshot.regionScopes
+    .filter(
+      ({ rect }) => !manualScopes.some((manualScope) => overlapShare(rect, manualScope.rect) >= 0.8)
+    )
+    .map(({ scope, rect, rowCount, candidates }) => ({
+      scope,
+      source: 'auto',
+      rect,
+      candidateCount: candidates.length,
+      rails: discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
+      topology: {
+        signature: 'geometry-region',
+        instanceCount: rowCount,
+        confidence: Math.min(1, rowCount / 6),
+      },
+    }));
 
   type BrowserTopologyNode = LayoutTopologyNode & Readonly<{ elementId: string | null }>;
   const topologyNodes = snapshot.topologyNodes as readonly BrowserTopologyNode[];
@@ -497,6 +692,7 @@ export async function discoverChatWorkspaceAlignmentRails(
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
+            kind: node.candidateKind ?? undefined,
             anchor: 'inline-start',
             coordinate: node.rect.x,
             yStart,
@@ -505,6 +701,7 @@ export async function discoverChatWorkspaceAlignmentRails(
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
+            kind: node.candidateKind ?? undefined,
             anchor: 'inline-center',
             coordinate: node.rect.x + node.rect.width / 2,
             yStart,
@@ -513,6 +710,7 @@ export async function discoverChatWorkspaceAlignmentRails(
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
+            kind: node.candidateKind ?? undefined,
             anchor: 'inline-end',
             coordinate: node.rect.x + node.rect.width,
             yStart,
@@ -525,7 +723,7 @@ export async function discoverChatWorkspaceAlignmentRails(
         source: 'auto',
         rect: autoScope.rect,
         candidateCount: candidates.length,
-        rails: discoverAlignmentRails(candidates),
+        rails: selectCanonicalAlignmentRails(discoverAlignmentRails(candidates), autoScope.rect),
         topology: {
           signature: autoScope.signature,
           instanceCount: autoScope.instanceIds.length,
@@ -535,7 +733,7 @@ export async function discoverChatWorkspaceAlignmentRails(
     }
   );
 
-  return [...manualScopes, ...autoScopes];
+  return [...manualScopes, ...regionScopes, ...autoScopes];
 }
 
 export async function auditChatWorkspaceSemanticAlignments(
