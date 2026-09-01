@@ -188,10 +188,11 @@ describe('ACP session config derivation', () => {
        turn's preferences carry `fast`, the agent's runtime snapshot does not.
        The old reconcile/apply reducer pair alternated between re-seeding and
        deleting `fast` forever; derivation settles it once — the runtime
-       snapshot owns the non-user table, so `fast` resolves to the selector's
-       own fallback (false), never back to the stale preference (true here, so
-       a resurrection would be visible) — and, being a pure function, returns
-       the identical result on every evaluation. */
+       snapshot owns the whole non-user KEY SET, so `fast` is OMITTED (not
+       back-filled from the selector fallback, and never resurrected from the
+       stale preference, set to true here so a resurrection would be visible)
+       — and, being a pure function, returns the identical result on every
+       evaluation. */
     const preferences = {
       modeId: 'auto',
       modelId: 'claude-fable-5[1m]',
@@ -237,13 +238,15 @@ describe('ACP session config derivation', () => {
       const first = resolveAcpSessionConfigSelection(inputs, options);
       const second = resolveAcpSessionConfigSelection(inputs, options);
       expect(second).toEqual(first);
-      // The runtime snapshot owns the table: `fast` is never resurrected from
-      // the stale turn preference (true); it settles on the selector's own
-      // concrete fallback instead.
-      expect(first.configOptionValues.effort).toBe('high');
       expect(first.selectedModeId).toBe('auto');
       expect(first.selectedModelId).toBe('claude-fable-5');
-      expect(first.configOptionValues.fast).toBe(false);
+      // The runtime snapshot owns the key set: `fast` is omitted, never
+      // resurrected from the stale preference or a selector fallback.
+      expect(first.configOptionValues).toEqual(
+        authority === 'provisional'
+          ? { effort: 'high', mode: 'auto', model: 'claude-fable-5' }
+          : { effort: 'high' }
+      );
     }
   });
 

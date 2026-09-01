@@ -176,11 +176,11 @@ const resolveSelectField = (
  *
  * Priority per field: user edit > runtime baseline > turn preference >
  * capability default. A present `runtimePreferences.configOptionValues` is a
- * FULL snapshot and owns the whole non-user config table (a preference key it
- * omits is gone, not re-seeded — the exact disagreement that used to
- * oscillate). Authoritative capabilities validate every value and give each
- * selector a concrete fallback; non-authoritative ones keep stored values
- * verbatim, unknown keys included.
+ * FULL snapshot and owns the whole non-user config table — a key it omits is
+ * gone, whether it came from a preference or a selector fallback (the exact
+ * disagreement that used to oscillate). Authoritative capabilities validate
+ * every value; non-authoritative ones keep stored values verbatim, unknown
+ * keys included. Selector fallbacks seed only the no-runtime path.
  */
 export const resolveAcpSessionConfigSelection = (
   inputs: AcpSessionConfigSelectionInputs,
@@ -199,33 +199,43 @@ export const resolveAcpSessionConfigSelection = (
   const runtimeTable = runtimePreferences?.configOptionValues;
   const baseTable = runtimeTable ?? preferences.configOptionValues ?? {};
 
+  /* A present runtime table owns the whole non-user KEY SET, not just the
+     values: a selector key it omits stays omitted (the agent did not report a
+     value for it) rather than being back-filled from the selector's fallback.
+     Selector fallbacks seed only the no-runtime path, preserving the old
+     reconcile behavior for a conversation the agent has not reported on yet. */
   const configOptionValues: Record<string, AcpConfigOptionValue> = {};
   if (capabilityAuthority !== 'authoritative') {
     Object.assign(configOptionValues, baseTable);
-    for (const selector of configOptionSelectors) {
-      if (!(selector.configId in configOptionValues)) {
-        configOptionValues[selector.configId] = selector.currentValue;
+    if (!runtimeTable) {
+      for (const selector of configOptionSelectors) {
+        if (!(selector.configId in configOptionValues)) {
+          configOptionValues[selector.configId] = selector.currentValue;
+        }
       }
     }
     Object.assign(configOptionValues, edits.configOptions);
   } else {
-    // Authoritative: only cataloged selectors exist, every one resolves to a
-    // concrete value, and invalid stored values fall through the chain.
+    // Authoritative: only cataloged selectors exist and invalid stored values
+    // fall through the chain.
     for (const selector of configOptionSelectors) {
       const configId = selector.configId;
-      const chain = [
-        configId in edits.configOptions ? edits.configOptions[configId] : undefined,
-        runtimeTable?.[configId],
-        runtimeTable ? undefined : preferences.configOptionValues?.[configId],
-      ];
-      let resolved: AcpConfigOptionValue | undefined;
-      for (const candidate of chain) {
-        if (isConfigOptionValueValid(selector, candidate)) {
-          resolved = candidate;
-          break;
-        }
+      const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
+      if (isConfigOptionValueValid(selector, editValue)) {
+        configOptionValues[configId] = editValue;
+        continue;
       }
-      configOptionValues[configId] = resolved ?? selector.currentValue;
+      if (runtimeTable) {
+        const runtimeValue = runtimeTable[configId];
+        if (isConfigOptionValueValid(selector, runtimeValue)) {
+          configOptionValues[configId] = runtimeValue;
+        }
+        continue;
+      }
+      const preferredValue = preferences.configOptionValues?.[configId];
+      configOptionValues[configId] = isConfigOptionValueValid(selector, preferredValue)
+        ? preferredValue
+        : selector.currentValue;
     }
   }
 
