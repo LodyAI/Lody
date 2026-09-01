@@ -12,6 +12,7 @@ import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { cn } from '@/lib/utils';
+import { ErrorBoundary } from '@/components/error-boundary';
 import {
   generateWorkspaceSlug,
   getWorkspaceSlugRuleError,
@@ -43,8 +44,11 @@ export interface WorkspaceScreenViewProps {
   selectedWorkspaceId: string | null;
   /** True when the user has clicked "Create new" and the form is open. */
   creating: boolean;
+  /** Existing workspace whose missing handle is being repaired in the form. */
+  repairingWorkspaceName: string | null;
   /** Open the create form (does not commit yet). */
   onStartCreate: () => void;
+  onStartRepair: (id: string) => void;
   /** Close the create form and return to the list. */
   onCancelCreate: () => void;
 
@@ -52,13 +56,17 @@ export interface WorkspaceScreenViewProps {
   newName: string;
   newSlug: string;
   newSlugChecking: boolean;
+  newSlugAvailable: boolean;
   /** True when the availability check is slow; validation remains pending. */
   newSlugCheckSlow: boolean;
+  /** Underlying query failure detail; distinct from a merely slow check. */
+  newSlugCheckError: string | null;
   newSlugError: SlugError | null;
   canResetSlug: boolean;
   onNewNameChange: (next: string) => void;
   onNewSlugChange: (next: string) => void;
   onResetNewSlug: () => void;
+  onRetryNewSlugCheck: () => void;
 
   /** True while the initial bounded wait is keeping navigation locked. */
   saving: boolean;
@@ -85,17 +93,22 @@ export function WorkspaceScreenView({
   onRetryWorkspaces,
   selectedWorkspaceId,
   creating,
+  repairingWorkspaceName,
   onStartCreate,
+  onStartRepair,
   onCancelCreate,
   newName,
   newSlug,
   newSlugChecking,
+  newSlugAvailable,
   newSlugCheckSlow,
+  newSlugCheckError,
   newSlugError,
   canResetSlug,
   onNewNameChange,
   onNewSlugChange,
   onResetNewSlug,
+  onRetryNewSlugCheck,
   saving,
   writePending,
   createError,
@@ -106,10 +119,11 @@ export function WorkspaceScreenView({
 }: WorkspaceScreenViewProps) {
   const { t } = useTranslation();
   const hasWorkspaces = workspaces.length > 0;
+  const repairingWorkspace = repairingWorkspaceName !== null;
 
   // Validation only matters while the create form is open.
   const newNameError =
-    creating && newName.trim().length === 0
+    creating && !repairingWorkspace && newName.trim().length === 0
       ? t('organization.workspaceNameRequired', 'Workspace name is required')
       : null;
   const slugErrorText = (() => {
@@ -127,6 +141,8 @@ export function WorkspaceScreenView({
     creating &&
     !writePending &&
     !newSlugChecking &&
+    newSlugAvailable &&
+    newSlugCheckError === null &&
     newNameError === null &&
     newSlugError === null &&
     newSlug.length > 0;
@@ -144,15 +160,22 @@ export function WorkspaceScreenView({
       stepKey="workspace"
       title={
         creating
-          ? t('onboarding.workspace.createTitle', 'Create a workspace')
+          ? repairingWorkspace
+            ? t('onboarding.workspace.repairTitle', 'Set a workspace handle')
+            : t('onboarding.workspace.createTitle', 'Create a workspace')
           : t('onboarding.workspace.title', 'Choose your workspace')
       }
       description={
         creating
-          ? t(
-              'onboarding.workspace.createDescription',
-              'Give it a name — your team will see this everywhere.'
-            )
+          ? repairingWorkspace
+            ? t(
+                'onboarding.workspace.repairDescription',
+                'Add the URL handle this workspace needs before continuing.'
+              )
+            : t(
+                'onboarding.workspace.createDescription',
+                'Give it a name — your team will see this everywhere.'
+              )
           : workspacesStatus === 'loading'
             ? t('onboarding.workspace.loadingDescription', 'Loading your workspaces…')
             : workspacesStatus === 'error'
@@ -196,7 +219,9 @@ export function WorkspaceScreenView({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {createError
               ? t('common.retry', 'Retry')
-              : t('onboarding.workspace.createAndContinue', 'Create & continue')}
+              : repairingWorkspace
+                ? t('onboarding.workspace.saveHandleAndContinue', 'Save & continue')
+                : t('onboarding.workspace.createAndContinue', 'Create & continue')}
             {!saving ? (
               createError ? (
                 <RotateCcw className="h-4 w-4" />
@@ -224,21 +249,30 @@ export function WorkspaceScreenView({
             transition={{ duration: 0.25 }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="onboarding-workspace-name">
-                {t('organization.workspaceName', 'Workspace name')}
-              </Label>
-              <Input
-                id="onboarding-workspace-name"
-                value={newName}
-                onChange={(event) => onNewNameChange(event.target.value)}
-                placeholder={t('organization.workspaceNamePlaceholder', 'My Workspace')}
-                autoFocus
-                disabled={writePending}
-                className={newNameError ? 'border-destructive' : ''}
-              />
-              {newNameError ? <p className="text-xs text-destructive">{newNameError}</p> : null}
-            </div>
+            {repairingWorkspace ? (
+              <div className="space-y-2">
+                <Label>{t('organization.workspaceName', 'Workspace name')}</Label>
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium">
+                  {repairingWorkspaceName}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="onboarding-workspace-name">
+                  {t('organization.workspaceName', 'Workspace name')}
+                </Label>
+                <Input
+                  id="onboarding-workspace-name"
+                  value={newName}
+                  onChange={(event) => onNewNameChange(event.target.value)}
+                  placeholder={t('organization.workspaceNamePlaceholder', 'My Workspace')}
+                  autoFocus
+                  disabled={writePending}
+                  className={newNameError ? 'border-destructive' : ''}
+                />
+                {newNameError ? <p className="text-xs text-destructive">{newNameError}</p> : null}
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-4">
@@ -266,6 +300,26 @@ export function WorkspaceScreenView({
               />
               {slugErrorText ? (
                 <p className="text-xs text-destructive">{slugErrorText}</p>
+              ) : newSlugCheckError ? (
+                <div
+                  role="alert"
+                  className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                >
+                  <p>
+                    {t('organization.workspaceSlugCheckFailed', 'Could not verify this handle.')}
+                  </p>
+                  <p className="break-words font-mono opacity-90">{newSlugCheckError}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={onRetryNewSlugCheck}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t('common.retry', 'Retry')}
+                  </Button>
+                </div>
               ) : newSlugChecking ? (
                 <p
                   role="status"
@@ -280,8 +334,17 @@ export function WorkspaceScreenView({
                         )
                       : t('organization.workspaceSlugChecking', 'Checking…')}
                   </span>
+                  {newSlugCheckSlow ? (
+                    <button
+                      type="button"
+                      className="shrink-0 font-medium text-foreground underline-offset-4 hover:underline"
+                      onClick={onRetryNewSlugCheck}
+                    >
+                      {t('organization.workspaceSlugCheckAgain', 'Check again')}
+                    </button>
+                  ) : null}
                 </p>
-              ) : newSlug.length > 0 ? (
+              ) : newSlugAvailable ? (
                 <p role="status" className="text-xs text-primary">
                   {t('organization.workspaceSlugAvailable', 'Available')}
                 </p>
@@ -300,7 +363,15 @@ export function WorkspaceScreenView({
                 className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
               >
                 <p>
-                  {t('onboarding.workspace.createFailed', 'Could not create workspace. Try again.')}
+                  {repairingWorkspace
+                    ? t(
+                        'onboarding.workspace.repairFailed',
+                        'Could not save the workspace handle. Try again.'
+                      )
+                    : t(
+                        'onboarding.workspace.createFailed',
+                        'Could not create workspace. Try again.'
+                      )}
                 </p>
                 {createError.length > 0 ? (
                   <p className="mt-1 break-words opacity-90">{createError}</p>
@@ -356,10 +427,12 @@ export function WorkspaceScreenView({
                       <motion.button
                         key={workspace.id}
                         type="button"
-                        whileHover={writePending || !hasSlug ? undefined : { y: -1 }}
-                        whileTap={writePending || !hasSlug ? undefined : { scale: 0.99 }}
-                        disabled={writePending || !hasSlug}
-                        onClick={() => onSelectWorkspace(workspace.id)}
+                        whileHover={writePending ? undefined : { y: -1 }}
+                        whileTap={writePending ? undefined : { scale: 0.99 }}
+                        disabled={writePending}
+                        onClick={() =>
+                          hasSlug ? onSelectWorkspace(workspace.id) : onStartRepair(workspace.id)
+                        }
                         aria-pressed={isSelected}
                         className={cn(
                           'group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all',
@@ -389,7 +462,7 @@ export function WorkspaceScreenView({
                               ? `/${workspace.slug}`
                               : t(
                                   'onboarding.workspace.slugMissing',
-                                  'No handle yet — open workspace settings to set one.'
+                                  'No handle yet — select this workspace to set one.'
                                 )}
                           </div>
                         </div>
@@ -444,13 +517,18 @@ interface WorkspaceScreenProps {
   onNext: () => void;
 }
 
-// We deliberately do not edit existing names/slugs here — that's handled in
-// workspace settings, where it can be undone.
+// Existing names stay untouched here. A missing slug is repaired inline because
+// workspace settings cannot be routed to until that slug exists.
 /** Marks a slow slug check without treating an unanswered query as validation. */
 const SLUG_CHECK_SLOW_MS = 8_000;
 /** Bounds how long a workspace write may prevent Back/Cancel. */
 const WORKSPACE_WRITE_STALE_MS = 15_000;
 const pendingWorkspaceWrites = new WeakMap<object, Promise<unknown>>();
+
+type SlugAvailabilityState =
+  | { slug: string; status: 'checking' }
+  | { slug: string; status: 'available' | 'unavailable' }
+  | { slug: string; status: 'error'; message: string };
 
 function trackWorkspaceWrite<T>(owner: object, write: Promise<T>): Promise<T> {
   pendingWorkspaceWrites.set(owner, write);
@@ -459,6 +537,24 @@ function trackWorkspaceWrite<T>(owner: object, write: Promise<T>): Promise<T> {
   };
   void write.then(clear, clear);
   return write;
+}
+
+function releaseWorkspaceWrite(owner: object, write: Promise<unknown>): void {
+  if (pendingWorkspaceWrites.get(owner) === write) pendingWorkspaceWrites.delete(owner);
+}
+
+function WorkspaceSlugAvailabilityProbe({
+  slug,
+  onResolved,
+}: {
+  slug: string;
+  onResolved: (slug: string, available: boolean) => void;
+}) {
+  const availability = useCloudQuery(cloudOperations.auth.isWorkspaceSlugAvailable, { slug });
+  useEffect(() => {
+    if (availability !== undefined) onResolved(slug, availability.available);
+  }, [availability, onResolved, slug]);
+  return null;
 }
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
@@ -492,6 +588,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   );
 
   const [creating, setCreating] = useState(false);
+  const [repairingWorkspaceId, setRepairingWorkspaceId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [writePending, setWritePending] = useState(() =>
     pendingWorkspaceWrites.has(platform.workspaces)
@@ -500,6 +597,8 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
   const [retryingWorkspaces, setRetryingWorkspaces] = useState(false);
   const [workspaceRetryError, setWorkspaceRetryError] = useState<string | null>(null);
+  const repairingWorkspace =
+    workspaces.find((workspace) => workspace.id === repairingWorkspaceId) ?? null;
 
   useEffect(() => {
     if (workspaceState.status === 'error') {
@@ -539,11 +638,22 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     setSaving(false);
     setWritePending(true);
     const settle = () => {
+      clearTimeout(staleTimer);
       if (mounted) setWritePending(false);
     };
+    const staleTimer = setTimeout(() => {
+      if (!mounted) return;
+      const error = new Error(
+        'The previous workspace request is still pending. You can try again.'
+      );
+      console.error('[onboarding] Previous workspace request timed out:', error);
+      releaseWorkspaceWrite(platform.workspaces, pending);
+      setWritePending(false);
+    }, WORKSPACE_WRITE_STALE_MS);
     void pending.then(settle, settle);
     return () => {
       mounted = false;
+      clearTimeout(staleTimer);
     };
   }, [platform.workspaces]);
 
@@ -552,7 +662,10 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const workspacesReadyEmpty =
     workspaceState.status === 'ready' && workspaceState.workspaces.length === 0;
   useEffect(() => {
-    if (workspacesReadyEmpty) setCreating(true);
+    if (workspacesReadyEmpty) {
+      setRepairingWorkspaceId(null);
+      setCreating(true);
+    }
   }, [workspacesReadyEmpty]);
 
   // Default-select the active workspace once it loads, so the user can
@@ -585,12 +698,23 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const shouldCheckAvailability = isUsableWorkspaceSlug(newSlug);
   const canCheckAvailability = creating && shouldCheckAvailability;
-  const availability = useCloudQuery(
-    cloudOperations.auth.isWorkspaceSlugAvailable,
-    creating && shouldCheckAvailability ? { slug: newSlug } : 'skip'
-  );
+  const [slugAvailability, setSlugAvailability] = useState<SlugAvailabilityState | null>(null);
+  const [slugCheckAttempt, setSlugCheckAttempt] = useState(0);
+  const matchingSlugAvailability = slugAvailability?.slug === newSlug ? slugAvailability : null;
   const newSlugChecking =
-    creating && shouldCheckAvailability && canCheckAvailability && availability === undefined;
+    canCheckAvailability &&
+    (matchingSlugAvailability === null || matchingSlugAvailability.status === 'checking');
+  const newSlugAvailable = matchingSlugAvailability?.status === 'available';
+  const newSlugCheckError =
+    matchingSlugAvailability?.status === 'error' ? matchingSlugAvailability.message : null;
+  const handleSlugAvailabilityResolved = useCallback((slug: string, available: boolean) => {
+    setSlugAvailability({ slug, status: available ? 'available' : 'unavailable' });
+  }, []);
+  const handleRetrySlugCheck = useCallback(() => {
+    if (!canCheckAvailability) return;
+    setSlugAvailability({ slug: newSlug, status: 'checking' });
+    setSlugCheckAttempt((attempt) => attempt + 1);
+  }, [canCheckAvailability, newSlug]);
   const [newSlugCheckSlow, setNewSlugCheckSlow] = useState(false);
   useEffect(() => {
     if (!newSlugChecking) {
@@ -599,7 +723,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     }
     const timer = setTimeout(() => setNewSlugCheckSlow(true), SLUG_CHECK_SLOW_MS);
     return () => clearTimeout(timer);
-  }, [newSlugChecking]);
+  }, [newSlugChecking, slugCheckAttempt]);
 
   const newSlugError = useMemo<SlugError | null>(() => {
     if (!creating) return null;
@@ -608,11 +732,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     if (ruleError) return ruleError;
     // Only a resolved answer can condemn a slug. A slow pending check is still
     // pending, never "taken" and never permission to bypass server validation.
-    if (shouldCheckAvailability && availability !== undefined && !availability.available) {
+    if (matchingSlugAvailability?.status === 'unavailable') {
       return 'unavailable';
     }
     return null;
-  }, [creating, newSlug, shouldCheckAvailability, availability]);
+  }, [creating, matchingSlugAvailability?.status, newSlug]);
 
   const handleConfirmSelection = useCallback(() => {
     if (selectedWorkspaceId === null || writePending) return;
@@ -636,11 +760,14 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       const error = new Error(
         t(
           'onboarding.workspace.timedOut',
-          'The request timed out. You can go back while it finishes in the background.'
+          'The request is still pending. You can try again or go back.'
         )
       );
       console.error('[onboarding] Workspace switch timed out:', error);
+      writeAttemptRef.current += 1;
+      releaseWorkspaceWrite(platform.workspaces, switchWrite);
       setSaving(false);
+      setWritePending(false);
       toast.error(
         t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
         { description: error.message }
@@ -649,17 +776,17 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     void switchWrite.then(
       () => {
         clearTimeout(staleTimer);
+        if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
-        if (writeAttemptRef.current !== attempt) return;
         commitWorkspaceContext(target);
         onNext();
       },
       (error: unknown) => {
         clearTimeout(staleTimer);
+        if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
-        if (writeAttemptRef.current !== attempt) return;
         console.error('[onboarding] Failed to switch workspace:', error);
         commitWorkspaceContext(activeWorkspace);
         toast.error(
@@ -682,7 +809,14 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const handleSubmitCreate = useCallback(() => {
     const trimmedName = newName.trim();
-    if (writePending || !trimmedName || newSlugError !== null || newSlugChecking) {
+    if (
+      writePending ||
+      !trimmedName ||
+      newSlugError !== null ||
+      newSlugChecking ||
+      !newSlugAvailable ||
+      newSlugCheckError !== null
+    ) {
       return;
     }
     setSaving(true);
@@ -693,6 +827,15 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     const createWrite = trackWorkspaceWrite(
       platform.workspaces,
       (async () => {
+        if (repairingWorkspace) {
+          if (!platform.workspaces.updateSlug) {
+            throw new Error('Workspace handle updates are unavailable on this platform');
+          }
+          const updated = await platform.workspaces.updateSlug(repairingWorkspace.id, newSlug);
+          if (writeAttemptRef.current !== attempt) return null;
+          await platform.workspaces.setActive(updated.id);
+          return updated;
+        }
         if (!platform.workspaces.create) {
           throw new Error('Workspace creation is unavailable on this platform');
         }
@@ -707,19 +850,27 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       const error = new Error(
         t(
           'onboarding.workspace.timedOut',
-          'The request timed out. You can go back while it finishes in the background.'
+          'The request is still pending. You can try again or go back.'
         )
       );
-      console.error('[onboarding] Workspace creation timed out:', error);
+      console.error(
+        repairingWorkspace
+          ? '[onboarding] Workspace handle update timed out:'
+          : '[onboarding] Workspace creation timed out:',
+        error
+      );
+      writeAttemptRef.current += 1;
+      releaseWorkspaceWrite(platform.workspaces, createWrite);
       setSaving(false);
+      setWritePending(false);
       setCreateError(error.message);
     }, WORKSPACE_WRITE_STALE_MS);
     void createWrite.then(
       (created) => {
         clearTimeout(staleTimer);
+        if (!created || writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
-        if (!created || writeAttemptRef.current !== attempt) return;
         commitWorkspaceContext({
           id: created.id,
           name: created.name,
@@ -729,10 +880,15 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       },
       (error: unknown) => {
         clearTimeout(staleTimer);
+        if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
-        if (writeAttemptRef.current !== attempt) return;
-        console.error('[onboarding] Failed to create workspace:', error);
+        console.error(
+          repairingWorkspace
+            ? '[onboarding] Failed to save workspace handle:'
+            : '[onboarding] Failed to create workspace:',
+          error
+        );
         commitWorkspaceContext(activeWorkspace);
         // The error stays inline in the form: a toast disappears and leaves a
         // user with no workspaces without any visible way forward.
@@ -744,67 +900,107 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     commitWorkspaceContext,
     newName,
     newSlug,
+    newSlugAvailable,
+    newSlugCheckError,
     newSlugChecking,
     newSlugError,
     onNext,
     platform.workspaces,
+    repairingWorkspace,
     t,
     writePending,
   ]);
 
   return (
-    <WorkspaceScreenView
-      workspaces={workspaces}
-      workspacesStatus={workspaceState.status}
-      workspacesError={
-        workspaceRetryError ?? (workspaceState.status === 'error' ? workspaceState.message : null)
-      }
-      retryingWorkspaces={retryingWorkspaces}
-      onRetryWorkspaces={handleRetryWorkspaces}
-      selectedWorkspaceId={selectedWorkspaceId}
-      creating={creating}
-      onStartCreate={() => {
-        setCreating(true);
-        setNewName('');
-        setSlugDraft(null);
-        setCreateError(null);
-      }}
-      onCancelCreate={() => {
-        writeAttemptRef.current += 1;
-        setCreateError(null);
-        if (workspaces.length === 0) {
-          // No list to fall back to — cancel leaves the step instead of
-          // trapping the user in a form they cannot complete.
-          onBack();
-          return;
+    <>
+      {canCheckAvailability ? (
+        <ErrorBoundary
+          name="OnboardingWorkspaceSlugCheck"
+          fallbackRender={() => null}
+          resetKeys={[newSlug, slugCheckAttempt]}
+          propagateAuthErrors={false}
+          onError={(error) => {
+            console.error('[onboarding] Failed to verify workspace handle:', error);
+            setSlugAvailability({ slug: newSlug, status: 'error', message: error.message });
+          }}
+        >
+          <WorkspaceSlugAvailabilityProbe
+            key={`${newSlug}:${slugCheckAttempt}`}
+            slug={newSlug}
+            onResolved={handleSlugAvailabilityResolved}
+          />
+        </ErrorBoundary>
+      ) : null}
+      <WorkspaceScreenView
+        workspaces={workspaces}
+        workspacesStatus={workspaceState.status}
+        workspacesError={
+          workspaceRetryError ?? (workspaceState.status === 'error' ? workspaceState.message : null)
         }
-        setCreating(false);
-      }}
-      newName={newName}
-      newSlug={newSlug}
-      newSlugChecking={newSlugChecking}
-      newSlugCheckSlow={newSlugCheckSlow}
-      newSlugError={newSlugError}
-      canResetSlug={slugDraft !== null && slugDraft !== suggestedSlug}
-      onNewNameChange={(next) => {
-        setCreateError(null);
-        setNewName(next);
-      }}
-      onNewSlugChange={(next) => {
-        setCreateError(null);
-        setSlugDraft(normalizeWorkspaceSlugInput(next));
-      }}
-      onResetNewSlug={() => setSlugDraft(null)}
-      saving={saving}
-      writePending={writePending}
-      createError={createError}
-      onSelectWorkspace={setSelectedWorkspaceId}
-      onConfirmSelection={handleConfirmSelection}
-      onSubmitCreate={handleSubmitCreate}
-      onBack={() => {
-        writeAttemptRef.current += 1;
-        onBack();
-      }}
-    />
+        retryingWorkspaces={retryingWorkspaces}
+        onRetryWorkspaces={handleRetryWorkspaces}
+        selectedWorkspaceId={selectedWorkspaceId}
+        creating={creating}
+        repairingWorkspaceName={repairingWorkspace?.name ?? null}
+        onStartCreate={() => {
+          setRepairingWorkspaceId(null);
+          setCreating(true);
+          setNewName('');
+          setSlugDraft(null);
+          setSlugAvailability(null);
+          setCreateError(null);
+        }}
+        onStartRepair={(workspaceId) => {
+          const target = workspaces.find((workspace) => workspace.id === workspaceId);
+          if (!target) return;
+          setRepairingWorkspaceId(target.id);
+          setCreating(true);
+          setNewName(target.name);
+          setSlugDraft(null);
+          setSlugAvailability(null);
+          setCreateError(null);
+        }}
+        onCancelCreate={() => {
+          writeAttemptRef.current += 1;
+          setCreateError(null);
+          if (workspaces.length === 0) {
+            // No list to fall back to — cancel leaves the step instead of
+            // trapping the user in a form they cannot complete.
+            onBack();
+            return;
+          }
+          setRepairingWorkspaceId(null);
+          setCreating(false);
+        }}
+        newName={newName}
+        newSlug={newSlug}
+        newSlugChecking={newSlugChecking}
+        newSlugAvailable={newSlugAvailable}
+        newSlugCheckSlow={newSlugCheckSlow}
+        newSlugCheckError={newSlugCheckError}
+        newSlugError={newSlugError}
+        canResetSlug={slugDraft !== null && slugDraft !== suggestedSlug}
+        onNewNameChange={(next) => {
+          setCreateError(null);
+          setNewName(next);
+        }}
+        onNewSlugChange={(next) => {
+          setCreateError(null);
+          setSlugDraft(normalizeWorkspaceSlugInput(next));
+        }}
+        onResetNewSlug={() => setSlugDraft(null)}
+        onRetryNewSlugCheck={handleRetrySlugCheck}
+        saving={saving}
+        writePending={writePending}
+        createError={createError}
+        onSelectWorkspace={setSelectedWorkspaceId}
+        onConfirmSelection={handleConfirmSelection}
+        onSubmitCreate={handleSubmitCreate}
+        onBack={() => {
+          writeAttemptRef.current += 1;
+          onBack();
+        }}
+      />
+    </>
   );
 }

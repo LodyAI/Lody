@@ -66,6 +66,8 @@ export interface PlatformWorkspaces {
    * this with its id is a no-op and any other id rejects.
    */
   setActive(workspaceId: string): Promise<void>;
+  /** Repair or replace the route slug for an existing workspace. */
+  updateSlug?(workspaceId: string, slug: string): Promise<WorkspaceSummary>;
   /** Present only when the `multiWorkspace` capability is available. */
   create?(input: WorkspaceCreateInput): Promise<WorkspaceSummary>;
 }

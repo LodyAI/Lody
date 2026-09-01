@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
 import type { AgentConfigMeta, ManagedBuiltinAgentType, ProviderSetupTask } from '@lody/shared';
 import {
@@ -8,7 +8,11 @@ import {
   type DesktopOnboardingProviderSelection,
   type DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
-import { getAllAgentConfigAtom, getAllProviderSetupsAtom } from '@/atoms/agents';
+import {
+  cmdRetryProviderSetupAtom,
+  getAllAgentConfigAtom,
+  getAllProviderSetupsAtom,
+} from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
@@ -123,6 +127,7 @@ export function OnboardingOverlay({
   // id, so the config check must come first or success reads as "missing".
   const providerSetups = useAtomValue(getAllProviderSetupsAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const retryProviderSetup = useSetAtom(cmdRetryProviderSetupAtom);
   const selectedSetupId =
     draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -243,7 +248,11 @@ export function OnboardingOverlay({
         key="summary"
         agentState={summaryAgent.state}
         agentName={summaryAgent.name}
+        agentFailureCode={failedProviderSetup?.failureCode}
         projectName={draft.project?.name}
+        onRetryAgent={
+          failedProviderSetup ? () => retryProviderSetup(failedProviderSetup.id) : undefined
+        }
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => {
           void onCompleted({});

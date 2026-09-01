@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Clock3, Minus, XCircle } from 'lucide-react';
+import { Check, Clock3, Loader2, Minus, RotateCcw, XCircle } from 'lucide-react';
 import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
+import { Button } from '@/ui/button';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 
 export type OnboardingSummaryAgentState = 'ready' | 'preparing' | 'failed' | 'missing';
@@ -10,17 +12,23 @@ type SummaryStatus = 'ready' | 'preparing' | 'failed' | 'missing';
 export function SummaryScreen({
   agentState,
   agentName,
+  agentFailureCode,
   projectName,
   onBack,
   onComplete,
+  onRetryAgent,
 }: {
   agentState: OnboardingSummaryAgentState;
   agentName?: string;
+  agentFailureCode?: string;
   projectName?: string;
   onBack: () => void;
   onComplete: () => void;
+  onRetryAgent?: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [retryingAgent, setRetryingAgent] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const title =
     agentState === 'ready'
       ? t('onboarding.summary.title', 'Lody is ready')
@@ -40,7 +48,7 @@ export function SummaryScreen({
         : agentState === 'failed'
           ? t(
               'onboarding.summary.failedDescription',
-              'Your Agent could not finish setup. You can enter Lody now and retry from Settings.'
+              'Your Agent could not finish setup. Retry here or enter Lody and finish later.'
             )
           : t(
               'onboarding.summary.exploreDescription',
@@ -88,6 +96,48 @@ export function SummaryScreen({
           </TableBody>
         </Table>
       </div>
+      {agentState === 'failed' && onRetryAgent ? (
+        <div className="mt-3 space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
+          <div role="alert">
+            <p>{t('onboarding.summary.agentRetryHint', 'Agent setup can be retried here.')}</p>
+            {agentFailureCode ? (
+              <p className="mt-1 break-words font-mono opacity-90">
+                {t('onboarding.summary.failureCode', 'Failure code: {{code}}', {
+                  code: agentFailureCode,
+                })}
+              </p>
+            ) : null}
+            {retryError ? (
+              <p className="mt-1 break-words font-mono opacity-90">{retryError}</p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={retryingAgent}
+            onClick={() => {
+              if (retryingAgent) return;
+              setRetryingAgent(true);
+              setRetryError(null);
+              void onRetryAgent()
+                .catch((error: unknown) => {
+                  console.error('[onboarding] Failed to retry Agent setup from Summary:', error);
+                  setRetryError(error instanceof Error ? error.message : String(error));
+                })
+                .finally(() => setRetryingAgent(false));
+            }}
+          >
+            {retryingAgent ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RotateCcw className="size-3.5" />
+            )}
+            {t('common.retry', 'Retry')}
+          </Button>
+        </div>
+      ) : null}
     </OnboardingShell>
   );
 }

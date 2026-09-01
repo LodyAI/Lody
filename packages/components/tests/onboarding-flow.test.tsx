@@ -60,6 +60,7 @@ import {
   ProjectsScreenView,
 } from '../src/components/onboarding/screens/projects-screen';
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
+import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
 import { TestCloudPlatformProvider } from './test-platform';
 
@@ -426,5 +427,45 @@ describe('desktop onboarding flow', () => {
     expect(
       container.querySelector('[aria-label="Failed: The API key was rejected."]')
     ).not.toBeNull();
+  });
+
+  it('keeps failed Agent setup retryable from Summary with investigation detail', async () => {
+    const retry = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('machine is offline'))
+      .mockResolvedValueOnce(undefined);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await act(async () => {
+      root?.render(
+        <SummaryScreen
+          agentState="failed"
+          agentName="Codex"
+          agentFailureCode="runtime-install-failed"
+          onBack={vi.fn()}
+          onComplete={vi.fn()}
+          onRetryAgent={retry}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Failure code: runtime-install-failed');
+    await act(async () => {
+      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('machine is offline');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[onboarding] Failed to retry Agent setup from Summary:',
+      expect.any(Error)
+    );
+    expect(findButton(container, 'Retry').disabled).toBe(false);
+
+    await act(async () => {
+      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(retry).toHaveBeenCalledTimes(2);
   });
 });

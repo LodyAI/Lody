@@ -53,12 +53,16 @@ function InteractiveWorkspaceScreen({
       workspaces={workspaces}
       selectedWorkspaceId={selectedId}
       creating={creating}
+      repairingWorkspaceName={null}
       onStartCreate={() => setCreating(true)}
+      onStartRepair={fn()}
       onCancelCreate={() => setCreating(false)}
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={false}
+      newSlugAvailable
       newSlugCheckSlow={false}
+      newSlugCheckError={null}
       newSlugError={null}
       canResetSlug={manuallyEditedSlug && newSlug !== suggestedSlug}
       onNewNameChange={setNewName}
@@ -70,6 +74,7 @@ function InteractiveWorkspaceScreen({
         setManuallyEditedSlug(false);
         setManualSlug(suggestedSlug);
       }}
+      onRetryNewSlugCheck={fn()}
       saving={saving}
       writePending={saving}
       createError={null}
@@ -114,7 +119,12 @@ const meta = {
     workspacesError: null,
     retryingWorkspaces: false,
     onRetryWorkspaces: fn(),
+    repairingWorkspaceName: null,
+    onStartRepair: fn(),
+    newSlugAvailable: true,
     newSlugCheckSlow: false,
+    newSlugCheckError: null,
+    onRetryNewSlugCheck: fn(),
     writePending: false,
     onStartCreate: fn(),
     onCancelCreate: fn(),
@@ -234,6 +244,53 @@ export const SlugCheckingSlow: Story = {
     newSlugCheckSlow: true,
     newSlugError: null,
     canResetSlug: true,
+    saving: false,
+  },
+};
+
+export const SlugCheckFailed: Story = {
+  args: {
+    workspaces: sampleWorkspaces,
+    selectedWorkspaceId: sampleWorkspaces[0]!.id,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: false,
+    newSlugAvailable: false,
+    newSlugCheckError: 'network connection unavailable',
+    newSlugError: null,
+    canResetSlug: true,
+    saving: false,
+  },
+};
+
+export const MissingHandle: Story = {
+  args: {
+    workspaces: [{ id: 'org_legacy', name: 'Legacy Workspace', slug: '' }],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugAvailable: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+  },
+};
+
+export const RepairHandle: Story = {
+  args: {
+    workspaces: [{ id: 'org_legacy', name: 'Legacy Workspace', slug: '' }],
+    selectedWorkspaceId: null,
+    creating: true,
+    repairingWorkspaceName: 'Legacy Workspace',
+    newName: 'Legacy Workspace',
+    newSlug: 'legacy-workspace',
+    newSlugChecking: false,
+    newSlugAvailable: true,
+    newSlugError: null,
+    canResetSlug: false,
     saving: false,
   },
 };

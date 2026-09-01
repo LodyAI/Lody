@@ -56,6 +56,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     createOrganization,
     refetchActiveOrganization,
     refetchOrganizations,
+    updateOrganization,
   } = organization;
   const signOut = useAuthSignOut();
   const [sessionStore] = useState(() => createStore<PlatformSessionState>({ status: 'loading' }));
@@ -141,6 +142,16 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         setActive: async (workspaceId) => {
           await activateOrganization(workspaceId);
         },
+        updateSlug: async (workspaceId, slug) => {
+          const updated = await updateOrganization(workspaceId, { slug });
+          if (!updated) {
+            throw new Error('Cloud workspace update returned no workspace');
+          }
+          return toWorkspaceSummary(
+            updated,
+            updated.id === organization.activeOrganization?.id ? organization.role : undefined
+          );
+        },
         create: async (input) => {
           const created = await createOrganization(input.name, input.slug);
           if (!created) {
@@ -163,6 +174,9 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
       sessionStore,
       signOut,
       activateOrganization,
+      organization.activeOrganization?.id,
+      organization.role,
+      updateOrganization,
       workspacesStore,
     ]
   );
