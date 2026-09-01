@@ -100,7 +100,7 @@ describe('first task Agent Provider state', () => {
 
   it('skips without creating a Session, first turn, or dispatch request', async () => {
     const onSkip = vi.fn();
-    const onContinue = vi.fn();
+    const onContinue = vi.fn().mockResolvedValue(true);
 
     await act(async () => {
       root?.render(
@@ -155,7 +155,7 @@ describe('first task Agent Provider state', () => {
       })
     );
     sessionActions.requestSessionDispatch.mockResolvedValue(true);
-    const onContinue = vi.fn();
+    const onContinue = vi.fn().mockResolvedValue(true);
 
     await act(async () => {
       root?.render(

@@ -100,7 +100,10 @@ function MultipleProvidersStory() {
           onBack={() => {}}
           onAgentConfigChange={(config) => setSelectedAgentConfigId(config.id)}
           onSkip={() => setCompleted(true)}
-          onContinue={() => setCompleted(true)}
+          onContinue={async () => {
+            setCompleted(true);
+            return true;
+          }}
         />
       </Provider>
     </PlatformContext.Provider>

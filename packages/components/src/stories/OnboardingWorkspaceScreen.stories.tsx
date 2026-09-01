@@ -95,6 +95,7 @@ function InteractiveWorkspaceScreen({
         }, 600);
       }}
       onBack={fn()}
+      onExit={fn()}
     />
   );
 }
@@ -121,6 +122,7 @@ const meta = {
     onConfirmSelection: fn(),
     onSubmitCreate: fn(),
     onBack: fn(),
+    onExit: fn(),
   },
   decorators: [
     (Story) => (

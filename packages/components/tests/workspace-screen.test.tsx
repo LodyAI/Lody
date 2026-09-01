@@ -43,7 +43,7 @@ describe('WorkspaceScreen write recovery', () => {
     vi.clearAllMocks();
   });
 
-  it('allows Back after a stale switch and ignores its late success', async () => {
+  it('allows immediate product entry during a pending switch and ignores its late success', async () => {
     let resolveSwitch: (() => void) | undefined;
     const setActive = vi.fn(
       () =>
@@ -70,12 +70,13 @@ describe('WorkspaceScreen write recovery', () => {
     };
     const onBack = vi.fn();
     const onNext = vi.fn();
+    const onExit = vi.fn();
 
     await act(async () => {
       root?.render(
         <PlatformContext.Provider value={platform}>
           <Provider store={createStore()}>
-            <WorkspaceScreen onBack={onBack} onNext={onNext} />
+            <WorkspaceScreen onBack={onBack} onNext={onNext} onExit={onExit} />
           </Provider>
         </PlatformContext.Provider>
       );
@@ -89,35 +90,18 @@ describe('WorkspaceScreen write recovery', () => {
 
     expect(setActive).toHaveBeenCalledWith('workspace-b');
     expect(findButton(container, 'Back').disabled).toBe(true);
+    expect(findButton(container, 'Enter Lody').disabled).toBe(false);
 
     await act(async () => {
-      vi.advanceTimersByTime(15_000);
+      findButton(container, 'Enter Lody').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(findButton(container, 'Back').disabled).toBe(false);
-    expect(findButton(container, 'Next').disabled).toBe(true);
-
-    await act(async () => {
-      findButton(container, 'Back').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      root?.render(<div />);
-    });
-    await act(async () => {
-      root?.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={createStore()}>
-            <WorkspaceScreen onBack={onBack} onNext={onNext} />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-    expect(findButton(container, 'Beta').disabled).toBe(true);
-    expect(setActive).toHaveBeenCalledOnce();
+    expect(onExit).toHaveBeenCalledOnce();
+    expect(onBack).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveSwitch?.();
       await Promise.resolve();
     });
-    expect(onBack).toHaveBeenCalledOnce();
     expect(onNext).not.toHaveBeenCalled();
-    expect(findButton(container, 'Beta').disabled).toBe(false);
   });
 });

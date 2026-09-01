@@ -37,7 +37,12 @@ export function resolveDesktopOnboardingSummaryAgent(
   state: 'ready' | 'preparing' | 'failed' | 'missing';
   name: string | undefined;
 } {
-  if (provider?.kind === 'agentConfig') return { state: 'ready', name: provider.agentName };
+  if (provider?.kind === 'agentConfig') {
+    const publishedConfig = agentConfigs.find((config) => config.id === provider.agentConfigId);
+    return publishedConfig
+      ? { state: 'ready', name: publishedConfig.name }
+      : { state: 'missing', name: provider.agentName };
+  }
   if (provider?.kind !== 'providerSetup') return { state: 'missing', name: undefined };
 
   const publishedConfig = agentConfigs.find((config) => config.id === provider.providerSetupId);
@@ -64,7 +69,7 @@ export function resolveDesktopOnboardingPhase(
 export function OnboardingOverlay({
   onCompleted,
 }: {
-  /** Resolves to whether completion fully succeeded; failures are retryable. */
+  /** Resolves to whether product navigation succeeded; native persistence never gates it. */
   onCompleted: (completion: DesktopOnboardingCompletion) => Promise<boolean>;
 }) {
   const cloudAccount = usePlatformCapability('cloudAccount');
@@ -158,6 +163,9 @@ export function OnboardingOverlay({
         key="workspace"
         onBack={() => advanceTo(cloudAccount ? 'login' : 'ceremony')}
         onNext={() => advanceTo('providers')}
+        onExit={() => {
+          void onCompleted({});
+        }}
       />
     ),
     providers: (
@@ -214,7 +222,7 @@ export function OnboardingOverlay({
             void onCompleted({});
           }}
           onContinue={() => {
-            void onCompleted({});
+            return onCompleted({});
           }}
         />
       ) : null,

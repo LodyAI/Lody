@@ -72,6 +72,8 @@ export interface WorkspaceScreenViewProps {
   onSubmitCreate: () => void;
 
   onBack: () => void;
+  /** Leave onboarding without waiting for workspace reads or writes. */
+  onExit: () => void;
 }
 
 export function WorkspaceScreenView({
@@ -98,6 +100,7 @@ export function WorkspaceScreenView({
   onConfirmSelection,
   onSubmitCreate,
   onBack,
+  onExit,
 }: WorkspaceScreenViewProps) {
   const { t } = useTranslation();
   const hasWorkspaces = workspaces.length > 0;
@@ -186,19 +189,34 @@ export function WorkspaceScreenView({
         )
       }
       primaryAction={
-        creating ? (
-          <Button size="lg" disabled={!canSubmitCreate} onClick={onSubmitCreate} className="gap-2">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {t('onboarding.workspace.createAndContinue', 'Create & continue')}
-            {!saving ? <ArrowRight className="h-4 w-4" /> : null}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="lg"
+            onClick={onExit}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            {t('onboarding.workspace.enter', 'Enter Lody')}
           </Button>
-        ) : hasWorkspaces ? (
-          <OnboardingNextButton
-            onClick={onConfirmSelection}
-            disabled={!canConfirmSelection}
-            loading={saving}
-          />
-        ) : null
+          {creating ? (
+            <Button
+              size="lg"
+              disabled={!canSubmitCreate}
+              onClick={onSubmitCreate}
+              className="gap-2"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {t('onboarding.workspace.createAndContinue', 'Create & continue')}
+              {!saving ? <ArrowRight className="h-4 w-4" /> : null}
+            </Button>
+          ) : hasWorkspaces ? (
+            <OnboardingNextButton
+              onClick={onConfirmSelection}
+              disabled={!canConfirmSelection}
+              loading={saving}
+            />
+          ) : null}
+        </div>
       }
     >
       <AnimatePresence mode="wait" initial={false}>
@@ -417,6 +435,7 @@ export function WorkspaceScreenView({
 interface WorkspaceScreenProps {
   onBack: () => void;
   onNext: () => void;
+  onExit: () => void;
 }
 
 // We deliberately do not edit existing names/slugs here — that's handled in
@@ -436,7 +455,7 @@ function trackWorkspaceWrite<T>(owner: object, write: Promise<T>): Promise<T> {
   return write;
 }
 
-export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
+export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps) {
   const { t } = useTranslation();
   const platform = usePlatform();
   const workspaceState = usePlatformWorkspaces();
@@ -744,6 +763,10 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       onBack={() => {
         writeAttemptRef.current += 1;
         onBack();
+      }}
+      onExit={() => {
+        writeAttemptRef.current += 1;
+        onExit();
       }}
     />
   );

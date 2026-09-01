@@ -31,6 +31,24 @@ function setup(status: ProviderSetupTask['status']): ProviderSetupTask {
 }
 
 describe('resolveDesktopOnboardingSummaryAgent', () => {
+  it('requires the selected AgentConfig to still be published', () => {
+    const selectedConfig = {
+      kind: 'agentConfig' as const,
+      agentConfigId: setupId,
+      agentName: 'Draft Agent',
+    };
+    expect(resolveDesktopOnboardingSummaryAgent(selectedConfig, [], [])).toEqual({
+      state: 'missing',
+      name: 'Draft Agent',
+    });
+    expect(
+      resolveDesktopOnboardingSummaryAgent(selectedConfig, [], [setup('verifying').config])
+    ).toEqual({
+      state: 'ready',
+      name: 'Draft Agent',
+    });
+  });
+
   it('maps live pending, failed, deleted, and published setup states', () => {
     expect(resolveDesktopOnboardingSummaryAgent(provider, [setup('verifying')], [])).toEqual({
       state: 'preparing',

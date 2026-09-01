@@ -57,7 +57,7 @@ export function FirstTaskScreen({
   onBack: () => void;
   onAgentConfigChange: (config: AgentConfigMeta) => void;
   onSkip: () => void;
-  onContinue: () => void;
+  onContinue: () => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const user = useAtomValue(userAtom);
@@ -104,10 +104,14 @@ export function FirstTaskScreen({
     const trimmedPrompt = prompt.trim();
     setStartRequested(true);
 
-    // Entering the product is the primary transaction. Session creation is an
-    // optional background enhancement and must never delay or redirect it.
-    onContinue();
     void (async () => {
+      // Entering the product is the primary transaction. Start the optional
+      // Session only after navigation succeeds, never as a prerequisite for it.
+      const entered = await onContinue();
+      if (!entered) {
+        setStartRequested(false);
+        return;
+      }
       try {
         const projectRef: ProjectRef = {
           kind: 'local',
