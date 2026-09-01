@@ -42,6 +42,9 @@ type ReportDetail = Readonly<{
     hoverActions: boolean;
     semanticAnnotations: readonly Readonly<{
       label: string;
+      measurement?: string;
+      layout?: 'target-row' | 'gutter-list';
+      tone?: 'violation' | 'candidate';
       axis: 'x' | 'y';
       coordinate: number;
       line: number;
@@ -86,11 +89,6 @@ function sidebarAnnotationBand(
   );
 }
 
-function formatSignedOffset(value: number): string {
-  const rounded = Number(value.toFixed(2));
-  return `${rounded > 0 ? '+' : ''}${rounded}px`;
-}
-
 const SEMANTIC_MEMBER_LABELS: Readonly<Record<string, string>> = {
   'group-new-action': '新建会话按钮',
   'leading-indicator-ink': '左侧状态图标',
@@ -126,6 +124,116 @@ function semanticAlignmentTitle(entry: BrowserSemanticAlignmentEntry): string {
     return 'Sidebar / 会话行视觉中心';
   }
   return entry.groupLabel;
+}
+
+const DISCOVERY_SCOPE_LABELS: Readonly<Record<string, string>> = {
+  'main.chat-landing': 'Chat Landing 主内容区',
+  'session.messages': '消息列表',
+  'session.page': '会话页整体',
+  'session.permission': '权限确认区',
+  'sidebar.group:__only_chats__': 'Sidebar Chats 会话分组',
+  'sidebar.local-projects:geometry': 'Sidebar 本地项目与会话列表',
+};
+
+const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
+  'Chat Session / Idle': 'Chat Session / 空闲态',
+  'Chat Session / Permission': 'Chat Session / 权限确认态',
+  'Workspace / Chat Landing': 'Workspace / Chat Landing',
+};
+
+const DISCOVERY_ELEMENT_LABELS: Readonly<Record<string, string>> = {
+  'local-session-title-ink': '会话标题视觉墨迹',
+  'project-label': '项目标题',
+  'project-leading-control': '项目文件夹图标',
+  'project-trailing-action': '项目尾部按钮',
+  'section-trailing-action': '分区尾部按钮',
+  'Turn configuration': '会话配置控件',
+  Worktree: 'Worktree 标记',
+};
+
+const DISCOVERY_ANCHOR_LABELS = {
+  'inline-start': '左缘',
+  'inline-center': '中心',
+  'inline-end': '右缘',
+} as const;
+
+function discoveryScopeLabel(scope: BrowserAlignmentRailDiscoveryScope): string {
+  if (scope.source === 'auto') {
+    return `自动发现的重复结构（${scope.topology?.instanceCount ?? 0} 项）`;
+  }
+  return DISCOVERY_SCOPE_LABELS[scope.scope] ?? scope.scope;
+}
+
+function discoverySurfaceLabel(surface: string): string {
+  return DISCOVERY_SURFACE_LABELS[surface] ?? surface;
+}
+
+function discoveryElementLabel(elementId: string, rowId: string, coordinate: number): string {
+  const rawLabel = elementId.replace(/^\d+:/, '');
+  if (rawLabel === 'svg') {
+    if (rowId.includes('sidebar-')) {
+      return coordinate > 160 ? '会话行尾图标' : '会话行首图标';
+    }
+    return '图标';
+  }
+  return DISCOVERY_ELEMENT_LABELS[rawLabel] ?? semanticMemberLabel(rawLabel);
+}
+
+type DiscoveryOutlier = Readonly<{
+  elementId: string;
+  rowId: string;
+  anchor: 'inline-start' | 'inline-center' | 'inline-end';
+  coordinate: number;
+  yStart: number;
+  yEnd: number;
+  delta: number;
+}>;
+
+function groupDiscoveryOutliers(scope: BrowserAlignmentRailDiscoveryScope): readonly Readonly<{
+  label: string;
+  measurement: string;
+  representative: DiscoveryOutlier;
+  line: number;
+}>[] {
+  const elements = new Map<
+    string,
+    Array<Readonly<{ member: DiscoveryOutlier; line: number; offset: number }>>
+  >();
+  for (const rail of scope.rails) {
+    for (const member of rail.outliers) {
+      const key = `${member.rowId}\u0000${member.elementId}`;
+      const entries = elements.get(key) ?? [];
+      entries.push({ member, line: rail.line, offset: member.coordinate - rail.line });
+      elements.set(key, entries);
+    }
+  }
+
+  return Array.from(elements.values()).map((entries) => {
+    const byOffset = new Map<string, { offset: number; anchors: string[] }>();
+    for (const { member, offset } of entries) {
+      const offsetKey = offset.toFixed(2);
+      const group = byOffset.get(offsetKey) ?? { offset, anchors: [] };
+      group.anchors.push(DISCOVERY_ANCHOR_LABELS[member.anchor]);
+      byOffset.set(offsetKey, group);
+    }
+    const measurement = Array.from(byOffset.values())
+      .map(({ offset, anchors }) => `${anchors.join('/')} ${formatDirectionalOffset('x', offset)}`)
+      .join(' / ');
+    const strongest = [...entries].sort(
+      (left, right) => Math.abs(right.offset) - Math.abs(left.offset)
+    )[0];
+    if (!strongest) throw new Error('Discovery outlier group is unexpectedly empty');
+    return {
+      label: discoveryElementLabel(
+        strongest.member.elementId,
+        strongest.member.rowId,
+        strongest.member.coordinate
+      ),
+      measurement,
+      representative: strongest.member,
+      line: strongest.line,
+    };
+  });
 }
 
 function reportImages(id: string) {
@@ -227,7 +335,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${yStart}px`,
             width: '1.5px',
             height: `${Math.max(1, yEnd - yStart)}px`,
-            background: 'rgb(244 63 94 / 0.58)',
+            background: 'rgb(14 116 144 / 0.24)',
             boxShadow: '0 0 0 0.5px rgb(255 255 255 / 0.58)',
           });
           overlay.append(line);
@@ -241,7 +349,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${y - 0.75}px`,
             width: '5.5px',
             height: '1.5px',
-            background: 'rgb(244 63 94 / 0.86)',
+            background: 'rgb(14 116 144 / 0.5)',
           });
           overlay.append(tick);
         }
@@ -254,7 +362,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${y}px`,
             width: `${Math.max(1, Math.abs(member.coordinate - rail.line))}px`,
             height: '1.5px',
-            background: 'rgb(244 63 94 / 0.9)',
+            background: 'rgb(217 119 6 / 0.9)',
           });
           const marker = document.createElement('div');
           Object.assign(marker.style, {
@@ -263,7 +371,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${y - 3}px`,
             width: '3px',
             height: '7px',
-            background: 'rgb(244 63 94 / 0.9)',
+            background: 'rgb(217 119 6 / 0.9)',
           });
           overlay.append(connector, marker);
         }
@@ -284,7 +392,13 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
           fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         });
 
-        const appendLeader = (fromX: number, fromY: number, toX: number, toY: number) => {
+        const appendLeader = (
+          fromX: number,
+          fromY: number,
+          toX: number,
+          toY: number,
+          accent: string
+        ) => {
           const length = Math.hypot(toX - fromX, toY - fromY);
           const leader = document.createElement('div');
           Object.assign(leader.style, {
@@ -293,7 +407,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${fromY}px`,
             width: `${length}px`,
             height: '1px',
-            background: 'rgb(37 99 235 / 0.72)',
+            background: `rgb(${accent} / 0.72)`,
             transform: `rotate(${Math.atan2(toY - fromY, toX - fromX)}rad)`,
             transformOrigin: '0 50%',
           });
@@ -301,16 +415,26 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
         };
 
         annotations.forEach((annotation, index) => {
-          const text = `${index + 1}  ${annotation.label}  ${
-            annotation.axis === 'y'
-              ? annotation.offset < 0
-                ? '↑'
-                : '↓'
-              : annotation.offset < 0
-                ? '←'
-                : '→'
-          }${Number(Math.abs(annotation.offset).toFixed(2))}px`;
-          const labelWidth = Math.min(196, Math.max(112, text.length * 7 + 20));
+          const isCandidate = annotation.tone === 'candidate';
+          const accent = isCandidate ? '217 119 6' : '37 99 235';
+          const measurement =
+            annotation.measurement ??
+            `${
+              annotation.axis === 'y'
+                ? annotation.offset < 0
+                  ? '↑'
+                  : '↓'
+                : annotation.offset < 0
+                  ? '←'
+                  : '→'
+            }${Number(Math.abs(annotation.offset).toFixed(2))}px`;
+          const text = `${index + 1}  ${annotation.label}  ${measurement}`;
+          const maxLabelWidth = annotation.layout === 'gutter-list' ? 350 : 196;
+          const estimatedTextWidth = Array.from(text).reduce(
+            (width, character) => width + (character.charCodeAt(0) > 255 ? 11 : 7),
+            20
+          );
+          const labelWidth = Math.min(maxLabelWidth, Math.max(112, estimatedTextWidth));
           const labelHeight = 22;
           const targetX =
             annotation.axis === 'y'
@@ -324,12 +448,14 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
               : annotation.rect.y + annotation.rect.height / 2;
           const labelLeft = Math.max(4, clip.x + clip.width - labelWidth - 8);
           const labelTop =
-            annotation.axis === 'y'
-              ? annotation.rect.y +
-                annotation.rect.height / 2 -
-                (annotations.length * labelHeight + (annotations.length - 1) * 4) / 2 +
-                index * (labelHeight + 4)
-              : annotation.rect.y + annotation.rect.height / 2 - labelHeight / 2;
+            annotation.layout === 'gutter-list'
+              ? clip.y + 8 + index * (labelHeight + 4)
+              : annotation.axis === 'y'
+                ? annotation.rect.y +
+                  annotation.rect.height / 2 -
+                  (annotations.length * labelHeight + (annotations.length - 1) * 4) / 2 +
+                  index * (labelHeight + 4)
+                : annotation.rect.y + annotation.rect.height / 2 - labelHeight / 2;
 
           const actualAnchor = document.createElement('div');
           actualAnchor.setAttribute('data-geometry-report-member-anchor', annotation.label);
@@ -339,7 +465,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${annotation.axis === 'y' ? annotation.coordinate - 1 : annotation.rect.y - 2}px`,
             width: `${annotation.axis === 'y' ? annotation.rect.width + 4 : 2}px`,
             height: `${annotation.axis === 'y' ? 2 : annotation.rect.height + 4}px`,
-            background: 'rgb(37 99 235 / 0.9)',
+            background: `rgb(${accent} / 0.9)`,
             boxShadow: '0 0 0 0.5px rgb(255 255 255 / 0.9)',
           });
 
@@ -350,7 +476,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${annotation.axis === 'y' ? Math.min(annotation.line, annotation.coordinate) : targetY - 0.75}px`,
             width: `${annotation.axis === 'y' ? 1.5 : Math.max(1, Math.abs(annotation.offset))}px`,
             height: `${annotation.axis === 'y' ? Math.max(1, Math.abs(annotation.offset)) : 1.5}px`,
-            background: 'rgb(37 99 235 / 0.92)',
+            background: `rgb(${accent} / 0.92)`,
           });
 
           const targetDot = document.createElement('span');
@@ -360,7 +486,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             top: `${targetY - 2.5}px`,
             width: '5px',
             height: '5px',
-            border: '1.5px solid rgb(37 99 235 / 0.96)',
+            border: `1.5px solid rgb(${accent} / 0.96)`,
             borderRadius: '50%',
             background: 'rgb(255 255 255 / 0.72)',
           });
@@ -374,10 +500,10 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             width: `${labelWidth}px`,
             height: `${labelHeight}px`,
             padding: '3px 6px',
-            border: '1px solid rgb(37 99 235 / 0.58)',
+            border: `1px solid rgb(${accent} / 0.58)`,
             borderRadius: '4px',
-            background: 'rgb(255 255 255 / 0.8)',
-            color: '#172554',
+            background: isCandidate ? 'rgb(255 251 235 / 0.82)' : 'rgb(255 255 255 / 0.8)',
+            color: isCandidate ? '#78350f' : '#172554',
             font: '650 11px/14px ui-monospace, SFMono-Regular, Menlo, monospace',
             letterSpacing: '0',
             whiteSpace: 'nowrap',
@@ -387,7 +513,7 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
 
           const leaderX = Math.max(labelLeft, Math.min(labelLeft + labelWidth, targetX));
           const leaderY = Math.max(labelTop, Math.min(labelTop + labelHeight, targetY));
-          appendLeader(leaderX, leaderY, targetX, targetY);
+          appendLeader(leaderX, leaderY, targetX, targetY, accent);
           overlay.append(actualAnchor, offsetConnector, targetDot, label);
         });
         document.body.append(overlay);
@@ -515,33 +641,30 @@ function createDiscoveryDetails({
 
     const id = `discovery-${idPrefix}-${scopeIndex + 1}`;
     const outliers = scope.rails.flatMap((rail) => rail.outliers);
+    const outlierGroups = groupDiscoveryOutliers(scope);
     const maxOffset = Math.max(0, ...outliers.map((member) => member.delta));
     const finding =
       outliers.length > 0
-        ? `CANDIDATE · ${outliers.length} offsets · max ${formatSignedOffset(maxOffset)}`
-        : 'CANDIDATE · stable support · no offset';
-    const scopeLabel =
-      scope.source === 'auto'
-        ? `Auto repeated region · ${scope.topology?.instanceCount ?? 0} instances`
-        : scope.scope;
-    const topologyEvidence = scope.topology
-      ? ` · topology ${Number((scope.topology.confidence * 100).toFixed(1))}%`
-      : '';
+        ? `候选 · ${outlierGroups.length} 个元素需要确认 · 最大偏移 ${Number(maxOffset.toFixed(2))}px`
+        : '候选 · 当前轨道稳定';
+    const scopeLabel = discoveryScopeLabel(scope);
+    const hasAnnotations = outlierGroups.length > 0;
+    const annotationGutter = hasAnnotations ? 400 : 0;
 
     return [
       {
         kind: 'candidate',
         id,
-        title: `${surface} / ${scopeLabel}`,
-        description:
-          `${scope.rails.length} candidate rails · ${scope.candidateCount} anchors sampled` +
-          ` · ${outliers.length} outliers${topologyEvidence}`,
+        title: `${discoverySurfaceLabel(surface)} · ${scopeLabel}`,
+        description: hasAnnotations
+          ? `${scope.rails.length} 条候选对齐轨 · ${outlierGroups.length} 个待确认元素`
+          : `${scope.rails.length} 条候选对齐轨 · 暂无偏离元素`,
         finding,
         clip: clampClip(
           {
             x: scope.rect.x - 8,
             y: scope.rect.y - 12,
-            width: scope.rect.width + 16,
+            width: scope.rect.width + annotationGutter + 16,
             height: scope.rect.height + 24,
           },
           viewport
@@ -551,7 +674,24 @@ function createDiscoveryDetails({
           alignmentGroups: [],
           baselineGroups: [],
           hoverActions: false,
-          semanticAnnotations: [],
+          semanticAnnotations: outlierGroups.map(
+            ({ label, measurement, representative, line }) => ({
+              label,
+              measurement,
+              layout: 'gutter-list',
+              tone: 'candidate',
+              axis: 'x',
+              coordinate: representative.coordinate,
+              line,
+              offset: representative.coordinate - line,
+              rect: {
+                x: representative.coordinate - 1,
+                y: representative.yStart,
+                width: 2,
+                height: representative.yEnd - representative.yStart,
+              },
+            })
+          ),
           discoveredRails: scope.rails.map((rail) => ({
             line: rail.line,
             members: rail.members.map(({ coordinate, yStart, yEnd, outlier }) => ({
@@ -647,6 +787,12 @@ test('captures the visual geometry report', async ({ browser }) => {
     viewport,
     railDiscovery,
   });
+  const localProjectsDiscovery = workspaceDiscoveryDetails.find((detail) =>
+    detail.title.includes('Sidebar 本地项目与会话列表')
+  );
+  expect(localProjectsDiscovery?.description).toContain('5 个待确认元素');
+  expect(localProjectsDiscovery?.description).not.toContain('9 outliers');
+  expect(localProjectsDiscovery?.overlay.semanticAnnotations).toHaveLength(5);
   const workspaceDetails = [...semanticDetails, ...workspaceDiscoveryDetails];
 
   const assetsDirectory = path.join(outputDirectory, 'assets');

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Lody Alignment Findings</title>
+    <title>Lody 几何对齐报告</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -194,15 +194,15 @@
     <main class="report">
       <header class="report-header">
         <div>
-          <h1>Alignment Findings</h1>
-          <p class="subtitle">显式语义失败与分区候选轨；每个发现都有原图和标注图。</p>
+          <h1>几何对齐报告</h1>
+          <p class="subtitle">已确认的语义线违规与待确认的候选轨；每项都有原图和标注图。</p>
         </div>
         <span class="status" id="status"></span>
       </header>
 
       <section aria-labelledby="violations-title">
         <div class="section-header">
-          <h2 id="violations-title">问题照片</h2>
+          <h2 id="violations-title">逐项检查</h2>
           <span class="timestamp" id="timestamp"></span>
         </div>
         <div class="detail-reviews" id="detail-reviews"></div>
@@ -213,7 +213,7 @@
       const report = __GEOMETRY_REPORT_DATA__;
       const details = document.getElementById('detail-reviews');
       document.getElementById('status').textContent =
-        `${report.details.length} FINDINGS · ${report.contractProposals.length} PROPOSALS`;
+        `${report.details.length} 组检查 · ${report.contractProposals.length} 个 Contract 候选`;
       document.getElementById('timestamp').textContent = new Date(
         report.generatedAt
       ).toLocaleString();

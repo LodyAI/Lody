@@ -46,6 +46,10 @@ mobile surfaces.
   images label every deviating member in place with its human-readable role, physical
   direction, measured offset, actual anchor, and a leader to the rendered element; a bare
   internal member id or an unlabelled shared line is not an actionable design finding.
+  Discovery cards use product-region names rather than scope ids, count unique rendered
+  elements rather than repeated anchor votes, and group one element's start/center/end
+  offsets into one in-image annotation. Candidate rails stay visually subordinate to
+  emphasized outliers because a heuristic proposal is not yet a violation.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches
