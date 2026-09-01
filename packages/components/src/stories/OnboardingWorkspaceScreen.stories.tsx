@@ -75,6 +75,8 @@ function InteractiveWorkspaceScreen({
       createError={null}
       workspacesStatus="ready"
       workspacesError={null}
+      retryingWorkspaces={false}
+      onRetryWorkspaces={fn()}
       onSelectWorkspace={setSelectedId}
       onConfirmSelection={() => {
         if (selectedId === null) return;
@@ -95,7 +97,6 @@ function InteractiveWorkspaceScreen({
         }, 600);
       }}
       onBack={fn()}
-      onExit={fn()}
     />
   );
 }
@@ -111,6 +112,8 @@ const meta = {
     createError: null,
     workspacesStatus: 'ready',
     workspacesError: null,
+    retryingWorkspaces: false,
+    onRetryWorkspaces: fn(),
     newSlugCheckStale: false,
     writePending: false,
     onStartCreate: fn(),
@@ -122,7 +125,6 @@ const meta = {
     onConfirmSelection: fn(),
     onSubmitCreate: fn(),
     onBack: fn(),
-    onExit: fn(),
   },
   decorators: [
     (Story) => (

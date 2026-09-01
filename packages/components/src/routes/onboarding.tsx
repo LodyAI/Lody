@@ -66,6 +66,7 @@ function DesktopOnboardingRoute() {
           );
         },
         onNavigationFailure: (error) => {
+          console.error('[onboarding] Failed to enter the product:', error);
           toast.error(error instanceof Error ? error.message : String(error));
         },
       }).finally(() => {

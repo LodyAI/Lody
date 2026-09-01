@@ -51,7 +51,12 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
   });
   const session = useStableSession();
   const organization = useOrganization();
-  const { activateOrganization, createOrganization } = organization;
+  const {
+    activateOrganization,
+    createOrganization,
+    refetchActiveOrganization,
+    refetchOrganizations,
+  } = organization;
   const signOut = useAuthSignOut();
   const [sessionStore] = useState(() => createStore<PlatformSessionState>({ status: 'loading' }));
   const [workspacesStore] = useState(() => createStore<WorkspacesState>({ status: 'loading' }));
@@ -130,6 +135,9 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
       },
       workspaces: {
         state: workspacesStore,
+        retry: async () => {
+          await Promise.all([refetchOrganizations(), refetchActiveOrganization()]);
+        },
         setActive: async (workspaceId) => {
           await activateOrganization(workspaceId);
         },
@@ -150,6 +158,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     [
       createOrganization,
       localAgentSyncMode,
+      refetchActiveOrganization,
+      refetchOrganizations,
       sessionStore,
       signOut,
       activateOrganization,

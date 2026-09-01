@@ -358,6 +358,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
           window.location.assign(installUrl);
         }
       } catch (error) {
+        console.error('[onboarding] Failed to start GitHub installation:', error);
         toast.error(
           t('settings.integrations.github.connectFailed', 'Failed to start GitHub installation'),
           {

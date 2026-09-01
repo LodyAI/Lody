@@ -43,7 +43,7 @@ describe('WorkspaceScreen write recovery', () => {
     vi.clearAllMocks();
   });
 
-  it('allows immediate product entry during a pending switch and ignores its late success', async () => {
+  it('bounds a pending switch and ignores late success after the user goes back', async () => {
     let resolveSwitch: (() => void) | undefined;
     const setActive = vi.fn(
       () =>
@@ -70,13 +70,12 @@ describe('WorkspaceScreen write recovery', () => {
     };
     const onBack = vi.fn();
     const onNext = vi.fn();
-    const onExit = vi.fn();
 
     await act(async () => {
       root?.render(
         <PlatformContext.Provider value={platform}>
           <Provider store={createStore()}>
-            <WorkspaceScreen onBack={onBack} onNext={onNext} onExit={onExit} />
+            <WorkspaceScreen onBack={onBack} onNext={onNext} />
           </Provider>
         </PlatformContext.Provider>
       );
@@ -90,18 +89,63 @@ describe('WorkspaceScreen write recovery', () => {
 
     expect(setActive).toHaveBeenCalledWith('workspace-b');
     expect(findButton(container, 'Back').disabled).toBe(true);
-    expect(findButton(container, 'Enter Lody').disabled).toBe(false);
+    expect(findButton(container, 'Next').disabled).toBe(true);
 
     await act(async () => {
-      findButton(container, 'Enter Lody').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      vi.advanceTimersByTime(15_000);
     });
-    expect(onExit).toHaveBeenCalledOnce();
-    expect(onBack).not.toHaveBeenCalled();
+    expect(findButton(container, 'Back').disabled).toBe(false);
+
+    await act(async () => {
+      findButton(container, 'Back').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onBack).toHaveBeenCalledOnce();
 
     await act(async () => {
       resolveSwitch?.();
       await Promise.resolve();
     });
     expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('shows the workspace load error, logs it, and offers a real retry', async () => {
+    const retry = vi.fn(() => Promise.resolve());
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const platform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      kind: 'local',
+      capabilities: LOCAL_PLATFORM_CAPABILITIES,
+      cloudApi: undefined,
+      workspaces: {
+        state: createStaticStore({
+          status: 'error' as const,
+          message: 'organization list request failed with status 503',
+        }),
+        retry,
+        setActive: vi.fn(() => Promise.resolve()),
+      },
+    };
+
+    await act(async () => {
+      root?.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={createStore()}>
+            <WorkspaceScreen onBack={vi.fn()} onNext={vi.fn()} />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+
+    expect(container.textContent).toContain('organization list request failed with status 503');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[onboarding] Failed to load workspaces:',
+      'organization list request failed with status 503'
+    );
+
+    await act(async () => {
+      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

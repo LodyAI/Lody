@@ -59,6 +59,8 @@ export interface WorkspaceCreateInput {
 
 export interface PlatformWorkspaces {
   state: ReadonlyStore<WorkspacesState>;
+  /** Re-fetch workspace state after a recoverable read failure. */
+  retry?(): Promise<void>;
   /**
    * Local platform: exactly one implicit workspace exists (D-O14); calling
    * this with its id is a no-op and any other id rejects.

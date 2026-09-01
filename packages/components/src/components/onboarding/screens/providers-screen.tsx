@@ -717,6 +717,9 @@ export function ProvidersScreen({
         const services = getIpcServices();
         const restart = services ? services.cli.restart.bind(services.cli) : undefined;
         if (!restart) {
+          console.error(
+            '[onboarding] Local agent restart is unavailable while waiting for provider setup'
+          );
           toast.error(
             t(
               'onboarding.providers.localAgentUnreachable',
@@ -734,6 +737,9 @@ export function ProvidersScreen({
             }
             secondTimeoutId = window.setTimeout(() => {
               if (cancelled) return;
+              console.error(
+                '[onboarding] Local agent remained unreachable after an automatic restart'
+              );
               toast.error(
                 t(
                   'onboarding.providers.localAgentUnreachable',
@@ -744,6 +750,7 @@ export function ProvidersScreen({
           })
           .catch((error) => {
             if (cancelled) return;
+            console.error('[onboarding] Failed to restart the local agent:', error);
             toast.error(
               t(
                 'onboarding.providers.localAgentUnreachable',
@@ -846,6 +853,7 @@ export function ProvidersScreen({
           setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
         } catch (error) {
           if (!testRunsRef.current.finish(config.id, run)) return;
+          console.error(`[onboarding] Failed to test Agent ${config.name}:`, error);
           clearTestActivity(config.id);
           const failureReason = error instanceof Error ? error.message : String(error);
           setFailureReasons((prev) => ({ ...prev, [config.id]: failureReason }));
@@ -909,6 +917,7 @@ export function ProvidersScreen({
           setStatus(dialogMode.config.id, 'untested');
         }
       } catch (error) {
+        console.error('[onboarding] Failed to save Agent configuration:', error);
         toast.error(
           dialogMode.kind === 'create'
             ? t('agents.createConfigError', 'Failed to create configuration')
@@ -934,6 +943,7 @@ export function ProvidersScreen({
       try {
         await retrySetup(setup.id);
       } catch (error) {
+        console.error('[onboarding] Failed to retry Agent setup:', error);
         toast.error(t('settings.agent.setup.retryFailed', 'Could not retry provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
@@ -948,6 +958,7 @@ export function ProvidersScreen({
       try {
         await deleteSetup(setup.id);
       } catch (error) {
+        console.error('[onboarding] Failed to cancel Agent setup:', error);
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
@@ -970,6 +981,7 @@ export function ProvidersScreen({
       });
       setPendingDelete(null);
     } catch (error) {
+      console.error('[onboarding] Failed to delete Agent configuration:', error);
       toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'), {
         description: error instanceof Error ? error.message : String(error),
       });

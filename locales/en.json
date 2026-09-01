@@ -1051,7 +1051,6 @@
   "onboarding.workspace.description": "Pick the workspace you want to start with, or create a new one.",
   "onboarding.workspace.descriptionEmpty": "Create your first workspace to get started.",
   "onboarding.workspace.errorDescription": "Your workspaces could not be loaded.",
-  "onboarding.workspace.enter": "Enter Lody",
   "onboarding.workspace.loadFailed": "Could not load workspaces.",
   "onboarding.workspace.loading": "Loading workspaces…",
   "onboarding.workspace.loadingDescription": "Loading your workspaces…",

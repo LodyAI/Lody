@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Building2, Check, Loader2, Plus } from 'lucide-react';
+import { ArrowRight, Building2, Check, Loader2, Plus, RotateCcw } from 'lucide-react';
 import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -36,6 +36,9 @@ export interface WorkspaceScreenViewProps {
   workspacesStatus: 'loading' | 'error' | 'ready';
   /** Detail for `workspacesStatus === 'error'`, shown verbatim. */
   workspacesError: string | null;
+  /** True while an explicit workspace-list retry is running. */
+  retryingWorkspaces: boolean;
+  onRetryWorkspaces: () => void;
   /** Highlighted (clicked, not yet confirmed) workspace id. */
   selectedWorkspaceId: string | null;
   /** True when the user has clicked "Create new" and the form is open. */
@@ -72,14 +75,14 @@ export interface WorkspaceScreenViewProps {
   onSubmitCreate: () => void;
 
   onBack: () => void;
-  /** Leave onboarding without waiting for workspace reads or writes. */
-  onExit: () => void;
 }
 
 export function WorkspaceScreenView({
   workspaces,
   workspacesStatus,
   workspacesError,
+  retryingWorkspaces,
+  onRetryWorkspaces,
   selectedWorkspaceId,
   creating,
   onStartCreate,
@@ -100,7 +103,6 @@ export function WorkspaceScreenView({
   onConfirmSelection,
   onSubmitCreate,
   onBack,
-  onExit,
 }: WorkspaceScreenViewProps) {
   const { t } = useTranslation();
   const hasWorkspaces = workspaces.length > 0;
@@ -189,34 +191,27 @@ export function WorkspaceScreenView({
         )
       }
       primaryAction={
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onExit}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            {t('onboarding.workspace.enter', 'Enter Lody')}
+        creating ? (
+          <Button size="lg" disabled={!canSubmitCreate} onClick={onSubmitCreate} className="gap-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {createError
+              ? t('common.retry', 'Retry')
+              : t('onboarding.workspace.createAndContinue', 'Create & continue')}
+            {!saving ? (
+              createError ? (
+                <RotateCcw className="h-4 w-4" />
+              ) : (
+                <ArrowRight className="h-4 w-4" />
+              )
+            ) : null}
           </Button>
-          {creating ? (
-            <Button
-              size="lg"
-              disabled={!canSubmitCreate}
-              onClick={onSubmitCreate}
-              className="gap-2"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {t('onboarding.workspace.createAndContinue', 'Create & continue')}
-              {!saving ? <ArrowRight className="h-4 w-4" /> : null}
-            </Button>
-          ) : hasWorkspaces ? (
-            <OnboardingNextButton
-              onClick={onConfirmSelection}
-              disabled={!canConfirmSelection}
-              loading={saving}
-            />
-          ) : null}
-        </div>
+        ) : hasWorkspaces ? (
+          <OnboardingNextButton
+            onClick={onConfirmSelection}
+            disabled={!canConfirmSelection}
+            loading={saving}
+          />
+        ) : null
       }
     >
       <AnimatePresence mode="wait" initial={false}>
@@ -326,14 +321,24 @@ export function WorkspaceScreenView({
                 {t('onboarding.workspace.loading', 'Loading workspaces…')}
               </div>
             ) : workspacesStatus === 'error' ? (
-              <div
-                role="alert"
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              >
-                <p>{t('onboarding.workspace.loadFailed', 'Could not load workspaces.')}</p>
-                {workspacesError ? (
-                  <p className="mt-1 break-words opacity-90">{workspacesError}</p>
-                ) : null}
+              <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3">
+                <div role="alert" className="text-xs text-destructive">
+                  <p>{t('onboarding.workspace.loadFailed', 'Could not load workspaces.')}</p>
+                  {workspacesError ? (
+                    <p className="mt-1 break-words font-mono opacity-90">{workspacesError}</p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={retryingWorkspaces}
+                  onClick={onRetryWorkspaces}
+                  className="gap-2"
+                >
+                  <RotateCcw className={cn('size-3.5', retryingWorkspaces && 'animate-spin')} />
+                  {t('common.retry', 'Retry')}
+                </Button>
               </div>
             ) : hasWorkspaces ? (
               // ~6 rows visible (each row ≈ 64px incl. gap); longer lists scroll
@@ -435,7 +440,6 @@ export function WorkspaceScreenView({
 interface WorkspaceScreenProps {
   onBack: () => void;
   onNext: () => void;
-  onExit: () => void;
 }
 
 // We deliberately do not edit existing names/slugs here — that's handled in
@@ -455,7 +459,7 @@ function trackWorkspaceWrite<T>(owner: object, write: Promise<T>): Promise<T> {
   return write;
 }
 
-export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps) {
+export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
   const platform = usePlatform();
   const workspaceState = usePlatformWorkspaces();
@@ -492,6 +496,37 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
   );
   const [createError, setCreateError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
+  const [retryingWorkspaces, setRetryingWorkspaces] = useState(false);
+  const [workspaceRetryError, setWorkspaceRetryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (workspaceState.status === 'error') {
+      console.error('[onboarding] Failed to load workspaces:', workspaceState.message);
+      return;
+    }
+    setWorkspaceRetryError(null);
+  }, [workspaceState]);
+
+  const handleRetryWorkspaces = useCallback(() => {
+    if (retryingWorkspaces) return;
+    const retry = platform.workspaces.retry;
+    if (!retry) {
+      const error = new Error('Workspace reload is unavailable on this platform');
+      console.error('[onboarding] Failed to retry workspace loading:', error);
+      setWorkspaceRetryError(error.message);
+      return;
+    }
+    setRetryingWorkspaces(true);
+    setWorkspaceRetryError(null);
+    void retry()
+      .catch((error: unknown) => {
+        console.error('[onboarding] Failed to retry workspace loading:', error);
+        setWorkspaceRetryError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setRetryingWorkspaces(false);
+      });
+  }, [platform.workspaces, retryingWorkspaces]);
 
   // A write can outlive this phase after Back. Re-entering the step must join
   // that write instead of issuing a competing setActive mutation.
@@ -596,15 +631,17 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
     );
     const staleTimer = setTimeout(() => {
       if (writeAttemptRef.current !== attempt) return;
+      const error = new Error(
+        t(
+          'onboarding.workspace.timedOut',
+          'The request timed out. You can go back while it finishes in the background.'
+        )
+      );
+      console.error('[onboarding] Workspace switch timed out:', error);
       setSaving(false);
       toast.error(
         t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
-        {
-          description: t(
-            'onboarding.workspace.timedOut',
-            'The request timed out. You can go back while it finishes in the background.'
-          ),
-        }
+        { description: error.message }
       );
     }, WORKSPACE_WRITE_STALE_MS);
     void switchWrite.then(
@@ -621,6 +658,7 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
         setSaving(false);
         setWritePending(false);
         if (writeAttemptRef.current !== attempt) return;
+        console.error('[onboarding] Failed to switch workspace:', error);
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
@@ -669,13 +707,15 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
     );
     const staleTimer = setTimeout(() => {
       if (writeAttemptRef.current !== attempt) return;
-      setSaving(false);
-      setCreateError(
+      const error = new Error(
         t(
           'onboarding.workspace.timedOut',
           'The request timed out. You can go back while it finishes in the background.'
         )
       );
+      console.error('[onboarding] Workspace creation timed out:', error);
+      setSaving(false);
+      setCreateError(error.message);
     }, WORKSPACE_WRITE_STALE_MS);
     void createWrite.then(
       (created) => {
@@ -695,6 +735,7 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
         setSaving(false);
         setWritePending(false);
         if (writeAttemptRef.current !== attempt) return;
+        console.error('[onboarding] Failed to create workspace:', error);
         commitWorkspaceContext(activeWorkspace);
         // The error stays inline in the form: a toast disappears and leaves a
         // user with no workspaces without any visible way forward.
@@ -719,7 +760,11 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
     <WorkspaceScreenView
       workspaces={workspaces}
       workspacesStatus={workspaceState.status}
-      workspacesError={workspaceState.status === 'error' ? workspaceState.message : null}
+      workspacesError={
+        workspaceRetryError ?? (workspaceState.status === 'error' ? workspaceState.message : null)
+      }
+      retryingWorkspaces={retryingWorkspaces}
+      onRetryWorkspaces={handleRetryWorkspaces}
       selectedWorkspaceId={selectedWorkspaceId}
       creating={creating}
       onStartCreate={() => {
@@ -763,10 +808,6 @@ export function WorkspaceScreen({ onBack, onNext, onExit }: WorkspaceScreenProps
       onBack={() => {
         writeAttemptRef.current += 1;
         onBack();
-      }}
-      onExit={() => {
-        writeAttemptRef.current += 1;
-        onExit();
       }}
     />
   );

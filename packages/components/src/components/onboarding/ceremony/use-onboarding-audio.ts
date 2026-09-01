@@ -684,7 +684,9 @@ export function useOnboardingAudio(): OnboardingAudio {
       if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = window.setTimeout(
         () => {
-          void ctx.close().catch(() => undefined);
+          void ctx.close().catch((error: unknown) => {
+            console.error('[onboarding] Failed to close the ceremony audio context:', error);
+          });
           ctxRef.current = null;
           masterRef.current = null;
           busesRef.current = null;

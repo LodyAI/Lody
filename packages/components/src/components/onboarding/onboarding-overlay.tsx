@@ -136,6 +136,21 @@ export function OnboardingOverlay({
     providerSetups,
     agentConfigs
   );
+  const failedProviderSetup =
+    selectedSetupId === null
+      ? undefined
+      : providerSetups.find((setup) => setup.id === selectedSetupId && setup.status === 'failed');
+
+  useEffect(() => {
+    if (!failedProviderSetup) return;
+    console.error('[onboarding] Agent setup failed:', {
+      id: failedProviderSetup.id,
+      machineId: failedProviderSetup.machineId,
+      agentName: failedProviderSetup.config.name,
+      failureCode: failedProviderSetup.failureCode,
+      attempt: failedProviderSetup.attempt,
+    });
+  }, [failedProviderSetup]);
 
   useEffect(() => {
     if (phase === 'ceremony') {
@@ -163,9 +178,6 @@ export function OnboardingOverlay({
         key="workspace"
         onBack={() => advanceTo(cloudAccount ? 'login' : 'ceremony')}
         onNext={() => advanceTo('providers')}
-        onExit={() => {
-          void onCompleted({});
-        }}
       />
     ),
     providers: (

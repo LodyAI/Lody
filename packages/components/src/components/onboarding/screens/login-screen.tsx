@@ -48,6 +48,7 @@ export function LoginScreen({ onBack, onNext }: { onBack: () => void; onNext: ()
         callbackURL: '/onboarding',
       })
       .catch((signInError: unknown) => {
+        console.error('[onboarding] Failed to start browser sign-in:', signInError);
         setOpeningBrowser(false);
         setError(signInError instanceof Error ? signInError.message : String(signInError));
       });

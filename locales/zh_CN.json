@@ -1051,7 +1051,6 @@
   "onboarding.workspace.description": "选择你想要进入的工作区，或新建一个。",
   "onboarding.workspace.descriptionEmpty": "创建你的第一个工作区开始使用。",
   "onboarding.workspace.errorDescription": "无法加载你的工作区。",
-  "onboarding.workspace.enter": "进入 Lody",
   "onboarding.workspace.loadFailed": "加载工作区失败。",
   "onboarding.workspace.loading": "正在加载工作区…",
   "onboarding.workspace.loadingDescription": "正在加载你的工作区…",
