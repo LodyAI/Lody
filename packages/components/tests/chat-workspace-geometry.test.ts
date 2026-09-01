@@ -319,6 +319,29 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(rails[0]).toMatchObject({ verticalSpan: 50, confidence: 0.5 });
   });
 
+  it('does not infer center rails from flow-text boxes', () => {
+    const candidates: AlignmentRailCandidate[] = ['text', 'button'].flatMap((kind, groupIndex) =>
+      [0, 1, 2].map((index) => ({
+        elementId: `${kind}-${index + 1}`,
+        rowId: `${kind}-row-${index + 1}`,
+        kind,
+        anchor: 'inline-center' as const,
+        coordinate: groupIndex === 0 ? 100 : 200,
+        yStart: index * 32,
+        yEnd: index * 32 + 20,
+      }))
+    );
+
+    expect(discoverAlignmentRails(candidates)).toEqual([
+      expect.objectContaining({
+        anchor: 'inline-center',
+        line: 200,
+        support: 3,
+        sampleSize: 3,
+      }),
+    ]);
+  });
+
   it('collapses repeated slot anchors to the boundary-facing canonical rail', () => {
     const slots = [
       { id: 'section-action', left: 219, right: 267 },

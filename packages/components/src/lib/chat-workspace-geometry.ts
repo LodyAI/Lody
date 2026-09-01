@@ -996,8 +996,10 @@ function median(values: readonly number[]): number {
 /**
  * Discover repeated horizontal alignment rails without assigning layout intent.
  * Candidates are clustered independently by anchor kind, then scored against
- * the cluster median. The result is diagnostic only: callers decide whether a
- * reviewed rail should later become an explicit semantic contract.
+ * the cluster median. Flow text can define start or end edges, but its box
+ * center is content-dependent and cannot define a center rail. The result is
+ * diagnostic only: callers decide whether a reviewed rail should later become
+ * an explicit semantic contract.
  */
 export function discoverAlignmentRails(
   candidates: readonly AlignmentRailCandidate[],
@@ -1037,6 +1039,7 @@ export function discoverAlignmentRails(
 
   const byAnchor = new Map<AlignmentRailCandidateAnchor, AlignmentRailCandidate[]>();
   for (const candidate of candidates) {
+    if (candidate.kind === 'text' && candidate.anchor === 'inline-center') continue;
     const members = byAnchor.get(candidate.anchor) ?? [];
     members.push(candidate);
     byAnchor.set(candidate.anchor, members);

@@ -147,8 +147,11 @@ const DISCOVERY_SCOPE_LABELS: Readonly<Record<string, string>> = {
 };
 
 const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
+  'Chat Session / Agent Question': 'Chat Session / Agent 提问态',
   'Chat Session / Idle': 'Chat Session / 空闲态',
+  'Chat Session / Mention Drop': 'Chat Session / 会话引用拖放态',
   'Chat Session / Permission': 'Chat Session / 权限确认态',
+  'Chat Session / Working': 'Chat Session / 工作态（冻结帧）',
   'Workspace / Chat Landing': 'Workspace / Chat Landing',
 };
 
@@ -844,7 +847,7 @@ async function enableReportCaptureMode(page: Page): Promise<void> {
 test.skip(!outputDirectory, 'Run through the geometry:report script');
 
 test('captures the visual geometry report', async ({ browser }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   if (!outputDirectory) throw new Error('GEOMETRY_REPORT_OUTPUT_DIR is required');
 
   const viewport = { width: 1440, height: 900 };
@@ -1063,9 +1066,24 @@ test('captures the visual geometry report', async ({ browser }) => {
       storyId: 'sessions-sessionconversationpage--desktop-idle',
     },
     {
+      surface: 'Chat Session / Working',
+      idPrefix: 'session-working',
+      storyId: 'sessions-sessionconversationpage--desktop-working-settled',
+    },
+    {
       surface: 'Chat Session / Permission',
       idPrefix: 'session-permission',
       storyId: 'sessions-sessionconversationpage--desktop-permission-approval',
+    },
+    {
+      surface: 'Chat Session / Agent Question',
+      idPrefix: 'session-question',
+      storyId: 'sessions-sessionconversationpage--desktop-agent-question',
+    },
+    {
+      surface: 'Chat Session / Mention Drop',
+      idPrefix: 'session-mention-drop',
+      storyId: 'sessions-sessionconversationpage--desktop-session-mention-drop',
     },
   ] as const;
 
@@ -1076,6 +1094,9 @@ test('captures the visual geometry report', async ({ browser }) => {
     expect(response?.ok()).toBeTruthy();
     await waitForSessionConversationStory(page);
     await enableReportCaptureMode(page);
+    if (story.idPrefix === 'session-working') {
+      await expect(page.locator('[data-stream-phase="indicator-only"]')).toBeAttached();
+    }
     if (story.idPrefix === 'session-permission') {
       const responseActionBar = page.locator(
         '[data-geometry-capture-reveal="true"]:has(.lucide-info)'
@@ -1190,6 +1211,14 @@ test('captures the visual geometry report', async ({ browser }) => {
     contractProposals.some(
       (proposal) =>
         proposal.scopeKey.startsWith('workspace:') &&
+        proposal.evidence.captureIds.length >= 3 &&
+        proposal.evidence.captureCoverage > 0.5
+    )
+  ).toBe(true);
+  expect(
+    contractProposals.some(
+      (proposal) =>
+        proposal.scopeKey.startsWith('session:') &&
         proposal.evidence.captureIds.length >= 3 &&
         proposal.evidence.captureCoverage > 0.5
     )

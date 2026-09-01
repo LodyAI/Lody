@@ -139,6 +139,7 @@ const storyPlatform = createLocalPlatformProvider({
 
 type PageState = 'idle' | 'working' | 'permission' | 'question';
 type DeviceFrame = 'desktop' | 'mobile';
+type StreamFixtureMode = 'live' | 'settled';
 
 const action = fn();
 const STREAM_INTERVAL_MS = 60;
@@ -721,18 +722,21 @@ function StoryShell({
   state,
   frame,
   dropActive = false,
+  streamMode = 'live',
 }: {
   state: PageState;
   frame: DeviceFrame;
   dropActive?: boolean;
+  streamMode?: StreamFixtureMode;
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
   const session = useMemo(() => buildSession(state, frame), [frame, state]);
   const store = useMemo(() => createStoryStore(session, state), [session, state]);
   useEffect(() => {
-    setStreamChunkCount(0);
-    if (state !== 'working') {
+    const settledStream = state === 'working' && streamMode === 'settled';
+    setStreamChunkCount(settledStream ? STREAM_CHUNK_TOTAL : 0);
+    if (state !== 'working' || settledStream) {
       return undefined;
     }
     const interval = window.setInterval(() => {
@@ -745,7 +749,7 @@ function StoryShell({
       });
     }, STREAM_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [state]);
+  }, [state, streamMode]);
   const history = useMemo(() => buildHistory(state, streamChunkCount), [state, streamChunkCount]);
   const permissionHistory = history as unknown as SessionDoc['history'];
   const liveStatus =
@@ -1160,6 +1164,7 @@ const meta = {
   args: {
     state: 'idle',
     frame: 'desktop',
+    streamMode: 'live',
   },
 } satisfies Meta<typeof StoryShell>;
 
@@ -1179,6 +1184,13 @@ export const DesktopSessionMentionDrop: Story = {
 
 export const DesktopStreamingWorking: Story = {
   args: { state: 'working' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopWorkingSettled: Story = {
+  name: 'Desktop Working (settled geometry)',
+  args: { state: 'working', streamMode: 'settled' },
   globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
 };

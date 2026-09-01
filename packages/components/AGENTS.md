@@ -43,7 +43,9 @@ mobile surfaces.
   named or aggregate regions, never a prerequisite for discovery. Coordinate-ordered
   one-dimensional clusters form median rails independent of DOM order; members outside
   the inlier tolerance are reported as outliers, and confidence includes the rail's span
-  relative to its containing scope rather than the minimum-span admission threshold.
+  relative to its containing scope rather than the minimum-span admission threshold. Flow
+  text may contribute start/end edges but never a center rail because its box center changes
+  with content and wrapping; center evidence comes from controls with an explicit geometry.
   Discovery must not read semantic-alignment attributes: it derives visual rows and their
   direct layout slots from ordinary DOM topology, including transparent hover controls that
   still occupy layout. It preserves each slot's start/center/end family until all captures
