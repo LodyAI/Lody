@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider as JotaiProvider, createStore } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import { expect, userEvent, within } from 'storybook/test';
 import {
   getSessionRoomId,
   type AgentConfigId,
@@ -113,6 +114,14 @@ export const Countdown: Story = {
     capacityRetry: countdownControl,
   },
   render: renderRow,
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name: 'Stop auto-retry' });
+    const widthBeforeHover = button.getBoundingClientRect().width;
+
+    await userEvent.hover(button);
+    await expect(button.getBoundingClientRect().width).toBe(widthBeforeHover);
+    await userEvent.unhover(button);
+  },
 };
 
 export const Retrying: Story = {
