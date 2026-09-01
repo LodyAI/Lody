@@ -1090,7 +1090,7 @@
   "organization.workspaceSlug": "Workspace Slug",
   "organization.workspaceSlugAvailable": "Slug available",
   "organization.workspaceSlugChecking": "Checking availability...",
-  "organization.workspaceSlugCheckStale": "Could not verify — you can still continue",
+  "organization.workspaceSlugCheckingSlow": "Network is taking longer than expected. Still checking…",
   "organization.workspaceSlugError.invalidChars": "Only lowercase letters, numbers, and hyphens are allowed",
   "organization.workspaceSlugError.invalidLength": "Use 3-40 characters",
   "organization.workspaceSlugError.invalidTrailing": "Slug cannot end with a hyphen",

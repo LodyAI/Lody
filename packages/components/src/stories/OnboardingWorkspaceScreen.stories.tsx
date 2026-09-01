@@ -58,7 +58,7 @@ function InteractiveWorkspaceScreen({
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={false}
-      newSlugCheckStale={false}
+      newSlugCheckSlow={false}
       newSlugError={null}
       canResetSlug={manuallyEditedSlug && newSlug !== suggestedSlug}
       onNewNameChange={setNewName}
@@ -114,7 +114,7 @@ const meta = {
     workspacesError: null,
     retryingWorkspaces: false,
     onRetryWorkspaces: fn(),
-    newSlugCheckStale: false,
+    newSlugCheckSlow: false,
     writePending: false,
     onStartCreate: fn(),
     onCancelCreate: fn(),
@@ -217,6 +217,21 @@ export const SlugChecking: Story = {
     newName: 'Loro Lab',
     newSlug: 'loro-lab',
     newSlugChecking: true,
+    newSlugError: null,
+    canResetSlug: true,
+    saving: false,
+  },
+};
+
+export const SlugCheckingSlow: Story = {
+  args: {
+    workspaces: sampleWorkspaces,
+    selectedWorkspaceId: sampleWorkspaces[0]!.id,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: true,
+    newSlugCheckSlow: true,
     newSlugError: null,
     canResetSlug: true,
     saving: false,

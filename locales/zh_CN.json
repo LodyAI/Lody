@@ -1090,7 +1090,7 @@
   "organization.workspaceSlug": "工作空间标识",
   "organization.workspaceSlugAvailable": "该标识可以使用",
   "organization.workspaceSlugChecking": "正在检查可用性...",
-  "organization.workspaceSlugCheckStale": "无法验证可用性 — 仍可继续",
+  "organization.workspaceSlugCheckingSlow": "网络响应较慢，仍在检查…",
   "organization.workspaceSlugError.invalidChars": "仅支持小写字母、数字和短横线",
   "organization.workspaceSlugError.invalidLength": "长度需为 3-40 个字符",
   "organization.workspaceSlugError.invalidTrailing": "末尾不能是短横线",

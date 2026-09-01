@@ -10,7 +10,10 @@ import {
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceScreen } from '../src/components/onboarding/screens/workspace-screen';
+import {
+  WorkspaceScreen,
+  WorkspaceScreenView,
+} from '../src/components/onboarding/screens/workspace-screen';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
@@ -147,5 +150,50 @@ describe('WorkspaceScreen write recovery', () => {
       await Promise.resolve();
     });
     expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it('keeps creation blocked when slug verification is slow', async () => {
+    const noop = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>
+          <Provider store={createStore()}>
+            <WorkspaceScreenView
+              workspaces={[]}
+              workspacesStatus="ready"
+              workspacesError={null}
+              retryingWorkspaces={false}
+              onRetryWorkspaces={noop}
+              selectedWorkspaceId={null}
+              creating
+              onStartCreate={noop}
+              onCancelCreate={noop}
+              newName="Loro Lab"
+              newSlug="loro-lab"
+              newSlugChecking
+              newSlugCheckSlow
+              newSlugError={null}
+              canResetSlug={false}
+              onNewNameChange={noop}
+              onNewSlugChange={noop}
+              onResetNewSlug={noop}
+              saving={false}
+              writePending={false}
+              createError={null}
+              onSelectWorkspace={noop}
+              onConfirmSelection={noop}
+              onSubmitCreate={noop}
+              onBack={noop}
+            />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+
+    expect(container.textContent).toContain(
+      'Network is taking longer than expected. Still checking…'
+    );
+    expect(findButton(container, 'Create & continue').disabled).toBe(true);
   });
 });

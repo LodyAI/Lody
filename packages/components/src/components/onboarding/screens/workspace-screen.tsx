@@ -52,8 +52,8 @@ export interface WorkspaceScreenViewProps {
   newName: string;
   newSlug: string;
   newSlugChecking: boolean;
-  /** True when the availability check has been pending too long; stops blocking. */
-  newSlugCheckStale: boolean;
+  /** True when the availability check is slow; validation remains pending. */
+  newSlugCheckSlow: boolean;
   newSlugError: SlugError | null;
   canResetSlug: boolean;
   onNewNameChange: (next: string) => void;
@@ -90,7 +90,7 @@ export function WorkspaceScreenView({
   newName,
   newSlug,
   newSlugChecking,
-  newSlugCheckStale,
+  newSlugCheckSlow,
   newSlugError,
   canResetSlug,
   onNewNameChange,
@@ -126,7 +126,7 @@ export function WorkspaceScreenView({
   const canSubmitCreate =
     creating &&
     !writePending &&
-    !(newSlugChecking && !newSlugCheckStale) &&
+    !newSlugChecking &&
     newNameError === null &&
     newSlugError === null &&
     newSlug.length > 0;
@@ -256,16 +256,17 @@ export function WorkspaceScreenView({
                       {t('organization.workspaceSlugReset', 'Reset')}
                     </button>
                   ) : null}
-                  {newSlugChecking && !newSlugCheckStale ? (
+                  {newSlugChecking && !newSlugCheckSlow ? (
                     <span className="inline-flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" />
                       {t('organization.workspaceSlugChecking', 'Checking…')}
                     </span>
-                  ) : newSlugChecking && newSlugCheckStale ? (
-                    <span className="text-muted-foreground">
+                  ) : newSlugChecking && newSlugCheckSlow ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
                       {t(
-                        'organization.workspaceSlugCheckStale',
-                        'Could not verify — you can still continue'
+                        'organization.workspaceSlugCheckingSlow',
+                        'Network is taking longer than expected. Still checking…'
                       )}
                     </span>
                   ) : !newSlugError && newSlug.length > 0 ? (
@@ -444,8 +445,8 @@ interface WorkspaceScreenProps {
 
 // We deliberately do not edit existing names/slugs here — that's handled in
 // workspace settings, where it can be undone.
-/** Bounds the slug availability wait; the server remains the final authority. */
-const SLUG_CHECK_STALE_MS = 8_000;
+/** Marks a slow slug check without treating an unanswered query as validation. */
+const SLUG_CHECK_SLOW_MS = 8_000;
 /** Bounds how long a workspace write may prevent Back/Cancel. */
 const WORKSPACE_WRITE_STALE_MS = 15_000;
 const pendingWorkspaceWrites = new WeakMap<object, Promise<unknown>>();
@@ -589,13 +590,13 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   );
   const newSlugChecking =
     creating && shouldCheckAvailability && canCheckAvailability && availability === undefined;
-  const [newSlugCheckStale, setNewSlugCheckStale] = useState(false);
+  const [newSlugCheckSlow, setNewSlugCheckSlow] = useState(false);
   useEffect(() => {
     if (!newSlugChecking) {
-      setNewSlugCheckStale(false);
+      setNewSlugCheckSlow(false);
       return undefined;
     }
-    const timer = setTimeout(() => setNewSlugCheckStale(true), SLUG_CHECK_STALE_MS);
+    const timer = setTimeout(() => setNewSlugCheckSlow(true), SLUG_CHECK_SLOW_MS);
     return () => clearTimeout(timer);
   }, [newSlugChecking]);
 
@@ -604,8 +605,8 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     if (!newSlug) return 'required';
     const ruleError = getWorkspaceSlugRuleError(newSlug);
     if (ruleError) return ruleError;
-    // Only a resolved answer can condemn a slug; a pending or stale check must
-    // never look like "taken", and the server stays the final authority.
+    // Only a resolved answer can condemn a slug. A slow pending check is still
+    // pending, never "taken" and never permission to bypass server validation.
     if (shouldCheckAvailability && availability !== undefined && !availability.available) {
       return 'unavailable';
     }
@@ -680,12 +681,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const handleSubmitCreate = useCallback(() => {
     const trimmedName = newName.trim();
-    if (
-      writePending ||
-      !trimmedName ||
-      newSlugError !== null ||
-      (newSlugChecking && !newSlugCheckStale)
-    ) {
+    if (writePending || !trimmedName || newSlugError !== null || newSlugChecking) {
       return;
     }
     setSaving(true);
@@ -748,7 +744,6 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     newName,
     newSlug,
     newSlugChecking,
-    newSlugCheckStale,
     newSlugError,
     onNext,
     platform.workspaces,
@@ -787,7 +782,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={newSlugChecking}
-      newSlugCheckStale={newSlugCheckStale}
+      newSlugCheckSlow={newSlugCheckSlow}
       newSlugError={newSlugError}
       canResetSlug={slugDraft !== null && slugDraft !== suggestedSlug}
       onNewNameChange={(next) => {
