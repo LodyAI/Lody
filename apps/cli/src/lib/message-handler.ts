@@ -332,6 +332,7 @@ import {
   type CodeCollabV2WorkspaceResolveOptions,
   type CodeCollabV2WorkspaceResolver,
 } from '@/lib/code-collab/code-collab-v2-service';
+import { resolveCodeCollabLocalProjectWorkspaceRoot } from '@/lib/code-collab/code-collab-workspace-root';
 import { FilePreviewService } from '@/lib/file-preview/file-preview-service';
 import {
   CodeCollabV2DiffStore,
@@ -6234,23 +6235,39 @@ export class MessageHandler {
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
     if (project?.kind === 'local') {
-      const workspaceRoot = await resolveWorkspaceLocalProjectRootPath(
+      const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
         project.localProjectId
       );
-      if (!workspaceRoot) {
+      if (!originalRootPath) {
         return {
           ok: false,
           error: 'workspace_unavailable',
           message: `Local project not found in workspace: ${project.localProjectId}`,
         };
       }
+      const isLocalWorktree = meta.isWorktree === true || project.useWorktree === true;
+      const workspaceRoot = resolveCodeCollabLocalProjectWorkspaceRoot({
+        originalRootPath,
+        ownerSessionId,
+        isWorktree: isLocalWorktree,
+        logger: this.logger,
+      });
+      if (!workspaceRoot) {
+        return {
+          ok: false,
+          error: 'workspace_unavailable',
+          message: 'Session worktree is unavailable.',
+        };
+      }
       return {
         ok: true,
         workspaceRoot,
-        source: `local-project:${project.localProjectId}`,
+        source: isLocalWorktree
+          ? `local-worktree-existing:${ownerSessionId}`
+          : `local-project:${project.localProjectId}`,
         ...ownerSessionIdField(ownerSessionId),
       };
     }
