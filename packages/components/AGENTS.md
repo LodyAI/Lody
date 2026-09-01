@@ -61,8 +61,10 @@ mobile surfaces.
   elements rather than repeated anchor votes, and group one element's start/center/end
   offsets into one in-image annotation. Candidate rails stay visually subordinate to
   emphasized outliers because a heuristic proposal is not yet a violation. Report capture
-  mode disables hover interaction and transitions and forces every geometry hover action
-  visible in both clean and annotated screenshots.
+  mode disables hover interaction and transitions, preserves explicit hover-action/rest
+  swaps, and automatically reveals transparent containers that own interactive controls.
+  Every measured control must therefore remain visible in both clean and annotated images
+  without requiring business components to carry geometry-only markers.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches

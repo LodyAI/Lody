@@ -777,6 +777,10 @@ async function enableReportCaptureMode(page: Page): Promise<void> {
         opacity: 0 !important;
         pointer-events: none !important;
       }
+      [data-geometry-report-capture="true"] [data-geometry-capture-reveal="true"] {
+        opacity: 1 !important;
+        pointer-events: none !important;
+      }
     `,
   });
   const workspace = page.locator(
@@ -785,12 +789,43 @@ async function enableReportCaptureMode(page: Page): Promise<void> {
   await page.locator('body').evaluate((element) => {
     element.setAttribute('data-geometry-report-capture', 'true');
     element.setAttribute('data-geometry-actions-visible', 'true');
+
+    const interactiveSelector =
+      'button, [role="button"], a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+    for (const candidate of element.querySelectorAll<HTMLElement>('*')) {
+      if (candidate.closest('[data-geometry-hover-rest]')) continue;
+      const style = getComputedStyle(candidate);
+      const rect = candidate.getBoundingClientRect();
+      const occupiesViewport =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right >= 0 &&
+        rect.bottom >= 0 &&
+        rect.left <= innerWidth &&
+        rect.top <= innerHeight;
+      const ownsInteraction =
+        candidate.matches(interactiveSelector) || candidate.querySelector(interactiveSelector);
+      if (
+        Number.parseFloat(style.opacity) <= 0.01 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        occupiesViewport &&
+        ownsInteraction
+      ) {
+        candidate.setAttribute('data-geometry-capture-reveal', 'true');
+      }
+    }
   });
   if ((await workspace.count()) > 0) {
     await workspace.evaluate((element) => {
       element.setAttribute('data-geometry-report-capture', 'true');
       element.setAttribute('data-geometry-actions-visible', 'true');
     });
+  }
+
+  const revealedSurfaces = page.locator('[data-geometry-capture-reveal="true"]');
+  for (let index = 0; index < (await revealedSurfaces.count()); index += 1) {
+    await expect(revealedSurfaces.nth(index)).toHaveCSS('opacity', '1');
   }
 }
 
@@ -1029,6 +1064,13 @@ test('captures the visual geometry report', async ({ browser }) => {
     expect(response?.ok()).toBeTruthy();
     await waitForSessionConversationStory(page);
     await enableReportCaptureMode(page);
+    if (story.idPrefix === 'session-permission') {
+      const responseActionBar = page.locator(
+        '[data-geometry-capture-reveal="true"]:has(.lucide-info)'
+      );
+      await expect(responseActionBar).toHaveCount(1);
+      await expect(responseActionBar).toHaveCSS('opacity', '1');
+    }
     const sessionRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
       aggregateScopes: ['session.page'],
     });
