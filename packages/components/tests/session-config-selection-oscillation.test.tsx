@@ -83,6 +83,7 @@ describe('session composer config selection wiring (#185 regression)', () => {
     renderCount = 0;
     settledModelId = null;
     settledConfigKeys = [];
+    catalogBuilds = 0;
   });
 
   afterEach(() => {
@@ -91,28 +92,35 @@ describe('session composer config selection wiring (#185 regression)', () => {
     container.remove();
   });
 
+  let catalogBuilds = 0;
+
   /** The `session-chat-interface.tsx` cycle: selection → options → selection. */
-  function ConfigSelectionHarness() {
+  function ConfigSelectionHarness({
+    framePreferences = preferences,
+    frameRuntimePreferences = runtimeConfig,
+  }: {
+    framePreferences?: typeof preferences;
+    frameRuntimePreferences?: typeof runtimeConfig;
+  }) {
     renderCount += 1;
     const controller = useAcpSessionConfigSelectionState({
       enabled: true,
       targetKey,
       preferenceRevision,
-      preferences,
-      runtimePreferences: runtimeConfig,
+      preferences: framePreferences,
+      runtimePreferences: frameRuntimePreferences,
       preserveUnsentUserEdits: true,
     });
-    const selectorOptions = useMemo(
-      () =>
-        buildAcpSelectorOptions({
-          cliType: 'builtin',
-          agentType: 'claude',
-          selectedModeId: controller.candidates.modeId,
-          selectedModelId: controller.candidates.modelId,
-          configOptionValues: controller.candidates.configOptionValues,
-        }),
-      [controller.candidates]
-    );
+    const selectorOptions = useMemo(() => {
+      catalogBuilds += 1;
+      return buildAcpSelectorOptions({
+        cliType: 'builtin',
+        agentType: 'claude',
+        selectedModeId: controller.candidates.modeId,
+        selectedModelId: controller.candidates.modelId,
+        configOptionValues: controller.candidates.configOptionValues,
+      });
+    }, [controller.candidates]);
     const resolved = useResolvedAcpSessionConfigSelection(controller.selection, selectorOptions);
     settledModelId = resolved.selectedModelId;
     settledConfigKeys = Object.keys(resolved.configOptionValues).sort();
@@ -131,5 +139,34 @@ describe('session composer config selection wiring (#185 regression)', () => {
     expect(settledModelId).toBe('claude-fable-5');
     expect(settledConfigKeys).not.toContain('fast');
     expect(settledConfigKeys).toContain('effort');
+  });
+
+  it('keeps the selector catalog stable across value-equal document frames', () => {
+    /* Streaming rebuilds `sessionDoc.history` — and thus the resolved
+       preference/runtime object literals — with unchanged VALUES once per
+       merge frame. The replaced reducer absorbed that churn by returning the
+       same state object; the hook must absorb it too, or the catalog (and the
+       memoized composer subtree fed from it) rebuilds on every frame of the
+       conversation hot path. */
+    flushSync(() => root?.render(<ConfigSelectionHarness />));
+    const settledCatalogBuilds = catalogBuilds;
+    for (let frame = 0; frame < 10; frame += 1) {
+      const freshPreferences = {
+        ...preferences,
+        configOptionValues: { ...(preferences.configOptionValues ?? {}) },
+      };
+      const freshRuntime = runtimeConfig
+        ? { ...runtimeConfig, configOptionValues: { ...(runtimeConfig.configOptionValues ?? {}) } }
+        : runtimeConfig;
+      flushSync(() =>
+        root?.render(
+          <ConfigSelectionHarness
+            framePreferences={freshPreferences}
+            frameRuntimePreferences={freshRuntime}
+          />
+        )
+      );
+    }
+    expect(catalogBuilds).toBe(settledCatalogBuilds);
   });
 });

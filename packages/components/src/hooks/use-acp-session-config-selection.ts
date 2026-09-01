@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AcpConfigOptionValue } from '@lody/shared';
 import {
+  areAcpSessionConfigPreferencesEqual,
   buildAcpSessionConfigCandidates,
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
   fenceAcpSessionUserEdits,
@@ -99,8 +100,31 @@ export function useAcpSessionConfigSelectionState({
     });
   }
 
-  const effectivePreferences = enabled ? preferences : EMPTY_PREFERENCES;
-  const effectiveRuntimePreferences = enabled ? (runtimePreferences ?? null) : null;
+  /* VALUE-stabilize the preference inputs. `preferences`/`runtimePreferences`
+     are object literals resolved from `sessionDoc.history`, and the doc mirror
+     rebuilds `history` with unchanged values on every merge frame while an
+     agent streams. The reducer this hook replaced absorbed that churn by
+     returning the same state object; without this cache the frame-fresh
+     identities would miss every downstream memo — selector catalog rebuild and
+     a composer-subtree re-render per document frame on the conversation hot
+     path. Ref writes during render are safe here: a replaced value is always
+     value-equal to what it replaces. */
+  const stablePreferencesRef = useRef(preferences);
+  if (!areAcpSessionConfigPreferencesEqual(stablePreferencesRef.current, preferences)) {
+    stablePreferencesRef.current = preferences;
+  }
+  const stableRuntimePreferencesRef = useRef(runtimePreferences ?? null);
+  if (
+    !areAcpSessionConfigPreferencesEqual(
+      stableRuntimePreferencesRef.current,
+      runtimePreferences ?? null
+    )
+  ) {
+    stableRuntimePreferencesRef.current = runtimePreferences ?? null;
+  }
+
+  const effectivePreferences = enabled ? stablePreferencesRef.current : EMPTY_PREFERENCES;
+  const effectiveRuntimePreferences = enabled ? stableRuntimePreferencesRef.current : null;
   const edits = enabled ? fence.edits : EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
   const selection = useMemo<AcpSessionConfigSelectionInputs>(

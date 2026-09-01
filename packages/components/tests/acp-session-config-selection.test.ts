@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+  areAcpSessionConfigPreferencesEqual,
   buildAcpSessionConfigCandidates,
   fenceAcpSessionUserEdits,
   filterAcpSessionConfigOptionValues,
@@ -289,6 +290,34 @@ describe('ACP session config derivation', () => {
         selectors
       )
     ).toEqual({});
+  });
+});
+
+describe('areAcpSessionConfigPreferencesEqual', () => {
+  it('compares by value across fresh object identities', () => {
+    expect(
+      areAcpSessionConfigPreferencesEqual(
+        { modeId: 'auto', modelId: 'm', configOptionValues: { effort: 'high', fast: false } },
+        { modeId: 'auto', modelId: 'm', configOptionValues: { fast: false, effort: 'high' } }
+      )
+    ).toBe(true);
+    expect(
+      areAcpSessionConfigPreferencesEqual(
+        { configOptionValues: { effort: 'high' } },
+        { configOptionValues: { effort: 'low' } }
+      )
+    ).toBe(false);
+  });
+
+  it('distinguishes an absent config table from an empty one', () => {
+    // For the runtime baseline, `undefined` means "no snapshot" while `{}`
+    // is a full snapshot that owns — and empties — the non-user table.
+    expect(areAcpSessionConfigPreferencesEqual({}, { configOptionValues: {} })).toBe(false);
+    expect(
+      areAcpSessionConfigPreferencesEqual({ configOptionValues: {} }, { configOptionValues: {} })
+    ).toBe(true);
+    expect(areAcpSessionConfigPreferencesEqual(null, null)).toBe(true);
+    expect(areAcpSessionConfigPreferencesEqual(null, {})).toBe(false);
   });
 });
 

@@ -89,6 +89,36 @@ export const fenceAcpSessionUserEdits = (
   return { ...(mode ? { mode } : {}), ...(model ? { model } : {}), configOptions };
 };
 
+/**
+ * Value equality for preference inputs. The reducer this derivation replaced
+ * returned the SAME state object for a no-op reconcile, which doubled as a
+ * value-level debounce: session-doc merge frames rebuild `history` (and thus
+ * the resolved preference/runtime object literals) with unchanged values many
+ * times per second while an agent streams. The selection hook uses this to
+ * keep its output identities stable across such frames, so the selector
+ * catalog and the memoized composer subtree are not rebuilt per frame.
+ *
+ * An absent `configOptionValues` is NOT equal to an empty one: for the runtime
+ * baseline, `undefined` means "no snapshot" (selector fallbacks seed) while
+ * `{}` is a full snapshot that owns — and empties — the non-user table.
+ */
+export const areAcpSessionConfigPreferencesEqual = (
+  left: AcpSessionConfigPreferences | null | undefined,
+  right: AcpSessionConfigPreferences | null | undefined
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if ((left.modeId ?? null) !== (right.modeId ?? null)) return false;
+  if ((left.modelId ?? null) !== (right.modelId ?? null)) return false;
+  const leftValues = left.configOptionValues;
+  const rightValues = right.configOptionValues;
+  if (leftValues === rightValues) return true;
+  if (!leftValues || !rightValues) return false;
+  const leftKeys = Object.keys(leftValues);
+  if (leftKeys.length !== Object.keys(rightValues).length) return false;
+  return leftKeys.every((key) => key in rightValues && leftValues[key] === rightValues[key]);
+};
+
 export type AcpSessionConfigSelectionInputs = {
   edits: AcpSessionUserConfigEdits;
   preferences: AcpSessionConfigPreferences;
