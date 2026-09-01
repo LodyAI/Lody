@@ -43,11 +43,10 @@ mobile surfaces.
   named or aggregate regions, never a prerequisite for discovery. Coordinate modes with
   repeated row support establish rails independent of DOM order before nearby singleton
   observations attach to the nearest mode; intermediate coordinates must not chain distinct
-  indentation levels together. Broad visual-row scans partition candidates by the measured row
-  container start, so a parent heading and its nested list do not judge each other; automatic
-  repeated-subtree scopes remain the check for a whole shifted row. A rail is a finite Y-axis
-  segment spanning its repeated support, extended at each end by one typical member height;
-  coincidental X coordinates in distant headers, footers, or modules do not become outliers.
+  indentation levels together. Discovery uses final rendered coordinates, not component
+  structure or row-container boundaries, to infer multiple stable visual rails. Every candidate
+  remains eligible for its nearest rail across the full scope; broad scans deliberately prefer
+  an extra review candidate over silently excusing a shifted module or indentation level.
   Members outside the inlier tolerance are reported as outliers, and confidence includes the
   rail's span relative to its containing scope rather than the minimum-span admission threshold. Flow
   text may contribute start/end edges but never a center rail because its box center changes

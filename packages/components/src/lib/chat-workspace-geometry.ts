@@ -335,8 +335,6 @@ export type AlignmentRailCandidate = Readonly<{
   elementId: string;
   /** Stable row identity so nested boxes on one row cannot inflate support. */
   rowId: string;
-  /** Optional geometry-derived row start used to keep indentation levels separate. */
-  rowStart?: number;
   /** Geometry-derived visual role; semantic contract names never enter discovery. */
   kind?: string;
   anchor: AlignmentRailCandidateAnchor;
@@ -1036,7 +1034,6 @@ export function discoverAlignmentRails(
       !Number.isFinite(candidate.coordinate) ||
       !Number.isFinite(candidate.yStart) ||
       !Number.isFinite(candidate.yEnd) ||
-      (candidate.rowStart !== undefined && !Number.isFinite(candidate.rowStart)) ||
       candidate.yEnd < candidate.yStart
     ) {
       throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
@@ -1051,50 +1048,8 @@ export function discoverAlignmentRails(
     byAnchor.set(candidate.anchor, members);
   }
 
-  const discoveryGroups: Readonly<{
-    anchor: AlignmentRailCandidateAnchor;
-    candidates: AlignmentRailCandidate[];
-  }>[] = [];
-  for (const [anchor, anchorCandidates] of byAnchor) {
-    const withoutRowStart = anchorCandidates.filter(
-      (candidate) => candidate.rowStart === undefined
-    );
-    if (withoutRowStart.length > 0) discoveryGroups.push({ anchor, candidates: withoutRowStart });
-    const orderedByRowStart = anchorCandidates
-      .filter(
-        (candidate): candidate is AlignmentRailCandidate & { rowStart: number } =>
-          candidate.rowStart !== undefined
-      )
-      .sort(
-        (first, second) =>
-          first.rowStart - second.rowStart ||
-          first.yStart - second.yStart ||
-          first.elementId.localeCompare(second.elementId)
-      );
-    const rowStartClusters: AlignmentRailCandidate[][] = [];
-    for (const candidate of orderedByRowStart) {
-      const currentCluster = rowStartClusters.at(-1);
-      const clusterStart = currentCluster?.[0]?.rowStart;
-      if (
-        !currentCluster ||
-        clusterStart === undefined ||
-        (candidate.rowStart ?? clusterStart) - clusterStart > inlierTolerance * 2
-      ) {
-        rowStartClusters.push([candidate]);
-      } else {
-        currentCluster.push(candidate);
-      }
-    }
-    discoveryGroups.push(
-      ...rowStartClusters.map((clusterCandidates) => ({
-        anchor,
-        candidates: clusterCandidates,
-      }))
-    );
-  }
-
   const rails: DiscoveredAlignmentRail[] = [];
-  for (const { anchor, candidates: anchorCandidates } of discoveryGroups) {
+  for (const [anchor, anchorCandidates] of byAnchor) {
     const ordered = [...anchorCandidates].sort(
       (first, second) =>
         first.coordinate - second.coordinate ||
@@ -1136,12 +1091,11 @@ export function discoverAlignmentRails(
         (member) => Math.abs(member.coordinate - line) <= inlierTolerance
       );
       if (supporters.length < minSupport) return [];
-      const yStart = Math.min(...supporters.map((member) => member.yStart));
-      const yEnd = Math.max(...supporters.map((member) => member.yEnd));
-      const verticalSpan = yEnd - yStart;
+      const verticalSpan =
+        Math.max(...supporters.map((member) => member.yEnd)) -
+        Math.min(...supporters.map((member) => member.yStart));
       if (verticalSpan < minVerticalSpan) return [];
-      const attachmentPadding = median(supporters.map((member) => member.yEnd - member.yStart));
-      return [{ line, verticalSpan, yStart, yEnd, attachmentPadding }];
+      return [{ line, verticalSpan }];
     });
 
     const assignedByMode = stableModes.map(() => [] as AlignmentRailCandidate[]);
@@ -1150,10 +1104,7 @@ export function discoverAlignmentRails(
       let nearestDistance = Number.POSITIVE_INFINITY;
       for (const [modeIndex, mode] of stableModes.entries()) {
         const distance = Math.abs(candidate.coordinate - mode.line);
-        const intersectsRailSegment =
-          candidate.yEnd >= mode.yStart - mode.attachmentPadding &&
-          candidate.yStart <= mode.yEnd + mode.attachmentPadding;
-        if (intersectsRailSegment && distance <= mergeTolerance && distance < nearestDistance) {
+        if (distance <= mergeTolerance && distance < nearestDistance) {
           nearestModeIndex = modeIndex;
           nearestDistance = distance;
         }

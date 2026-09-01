@@ -338,7 +338,7 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(rails.find((rail) => rail.line === 116)?.outliers).toEqual([]);
   });
 
-  it('does not attach distant regions to a finite rail segment', () => {
+  it('keeps distant visual regions eligible for a nearby rail', () => {
     const rails = discoverAlignmentRails(
       [
         ...[100, 140, 180].map((yStart, index) => ({
@@ -362,36 +362,12 @@ describe('conversation, spacing, and semantic baselines', () => {
     );
 
     expect(rails).toHaveLength(1);
-    expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
-  });
-
-  it('does not compare a parent row with a nested indentation level', () => {
-    const rails = discoverAlignmentRails(
-      [
-        ...[40, 80, 120].map((yStart, index) => ({
-          elementId: `nested-item-${index + 1}`,
-          rowId: `nested-row-${index + 1}`,
-          rowStart: 40,
-          coordinate: 100,
-          yStart,
-        })),
-        {
-          elementId: 'parent-heading',
-          rowId: 'parent-row',
-          rowStart: 20,
-          coordinate: 92,
-          yStart: 0,
-        },
-      ].map((candidate) => ({
-        ...candidate,
-        anchor: 'inline-start' as const,
-        yEnd: candidate.yStart + 20,
-      })),
-      { mergeTolerance: 12 }
-    );
-
-    expect(rails).toHaveLength(1);
-    expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
+    expect(rails[0]).toMatchObject({
+      line: 100,
+      support: 3,
+      sampleSize: 4,
+      outliers: [{ elementId: 'unrelated-footer', coordinate: 108, delta: 8, outlier: true }],
+    });
   });
 
   it('scores vertical coverage relative to the containing scope', () => {
@@ -473,8 +449,9 @@ describe('conversation, spacing, and semantic baselines', () => {
       anchor: 'inline-end',
       line: 266,
       support: 5,
-      sampleSize: 7,
+      sampleSize: 8,
       outliers: [
+        { elementId: 'section-action', coordinate: 267, delta: 1 },
         { elementId: 'project-action', coordinate: 262, delta: 4 },
         { elementId: 'new-session-action', coordinate: 275, delta: 9 },
       ],
