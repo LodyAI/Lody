@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useAuthSignOut } from '../../providers/convex-provider';
 import {
   WorkspaceJoinRequestPage,
   type WorkspaceJoinPageState,
@@ -12,6 +11,7 @@ import {
 export interface WorkspaceJoinRequestSurfaceProps {
   token: string;
   onSignInRequested: () => void;
+  onEmailVerificationRequested: () => void;
   onWorkspaceRequested: (workspaceSlug: string | null) => void;
   onHomeRequested: () => void;
 }
@@ -25,11 +25,11 @@ export interface WorkspaceJoinRequestSurfaceProps {
 export function WorkspaceJoinRequestSurface({
   token,
   onSignInRequested,
+  onEmailVerificationRequested,
   onWorkspaceRequested,
   onHomeRequested,
 }: WorkspaceJoinRequestSurfaceProps) {
   const { t } = useTranslation();
-  const signOut = useAuthSignOut();
   const { data: session, isPending: sessionPending } = useStableSession();
   const joinRequestsAvailable = usePlatformCapability('teamSharing');
   const preview = useCloudQuery(cloudOperations.workspaceJoinRequests.getLinkPreview, { token });
@@ -67,12 +67,7 @@ export function WorkspaceJoinRequestSurface({
       errorMessage={errorMessage}
       onReasonChange={setReason}
       onContinue={onSignInRequested}
-      onVerifyEmail={() => {
-        void (async () => {
-          await signOut();
-          onSignInRequested();
-        })();
-      }}
+      onVerifyEmail={onEmailVerificationRequested}
       onSubmit={() => {
         void (async () => {
           setSubmitting(true);

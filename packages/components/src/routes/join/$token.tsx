@@ -1,5 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { WorkspaceJoinRequestSurface } from '@/components/pages/workspace-join-request-surface';
+import { signOutWithoutRedirect } from '@/lib/auth';
+import { useAuthClient } from '@/providers/convex-provider';
 
 export const Route = createFileRoute('/join/$token')({
   component: WorkspaceJoinRequestRoute,
@@ -8,12 +10,21 @@ export const Route = createFileRoute('/join/$token')({
 export function WorkspaceJoinRequestRoute() {
   const { token } = Route.useParams();
   const navigate = useNavigate();
+  const authClient = useAuthClient();
+
+  const goToLogin = () => {
+    void navigate({ to: '/login', search: { redirect: `/join/${token}`, view: 'email' } });
+  };
 
   return (
     <WorkspaceJoinRequestSurface
       token={token}
-      onSignInRequested={() => {
-        void navigate({ to: '/login', search: { redirect: `/join/${token}`, view: 'email' } });
+      onSignInRequested={goToLogin}
+      onEmailVerificationRequested={() => {
+        void (async () => {
+          await signOutWithoutRedirect(authClient);
+          goToLogin();
+        })();
       }}
       onWorkspaceRequested={(workspaceSlug) => {
         if (workspaceSlug) {

@@ -6,7 +6,9 @@ Parent `AGENTS.md` files also apply.
 
 - Public/auth entry points that bypass the full product router import route-agnostic
   surfaces. Keep host navigation behind callback props so those surfaces do not import
-  the route tree, `RuntimeProvider`, or workspace Flock document implementation.
+  the route tree, `RuntimeProvider`, or workspace Flock document implementation. When
+  an auth transition selects the destination, the host owns both the non-redirecting
+  auth action and navigation so an auth helper cannot discard route-specific state.
 
 ## Keyboard navigation
 
