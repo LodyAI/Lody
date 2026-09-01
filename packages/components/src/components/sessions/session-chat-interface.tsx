@@ -2107,6 +2107,7 @@ export const SessionChatInterface = memo(
     const {
       selection: sessionConfigSelection,
       candidates: sessionConfigCandidates,
+      hasUserEdits: sessionRunConfigHasUserEdits,
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
@@ -5995,6 +5996,7 @@ export const SessionChatInterface = memo(
                       durableAgentRoleSourceTurnKey={sessionConversationSourceFence.currentTurnKey}
                       durableAgentRoleKnownTurnKeys={sessionConversationSourceFence.knownTurnKeys}
                       durableAgentRoleReady={sessionDocReady}
+                      runConfigHasUserEdits={sessionRunConfigHasUserEdits}
                       modeOptions={modeOptions}
                       modelOptions={modelOptions}
                       rateLimits={sessionRateLimits}

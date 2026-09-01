@@ -75,6 +75,7 @@ describe('useSessionAgentRole', () => {
     durableSourceTurnKey?: string;
     durableKnownSourceTurnKeys?: readonly string[];
     durableRoleReady?: boolean;
+    runConfigHasUserEdits?: boolean;
     selectedModelId: string;
   };
 
@@ -87,6 +88,7 @@ describe('useSessionAgentRole', () => {
       durableSourceTurnKey: hookProps.durableSourceTurnKey,
       durableKnownSourceTurnKeys: hookProps.durableKnownSourceTurnKeys,
       durableRoleReady: hookProps.durableRoleReady,
+      runConfigHasUserEdits: hookProps.runConfigHasUserEdits,
       machineId: 'machine-1' as MachineId,
       agentConfigId: 'agent-1' as AgentConfigId,
       modelOptions: [{ value: 'model-1', label: 'Model 1' }],
@@ -107,6 +109,7 @@ describe('useSessionAgentRole', () => {
     durableSourceTurnKey,
     durableKnownSourceTurnKeys,
     durableRoleReady,
+    runConfigHasUserEdits,
     selectedModelId = 'model-1',
   }: {
     sessionId?: string;
@@ -116,6 +119,7 @@ describe('useSessionAgentRole', () => {
     durableSourceTurnKey?: string;
     durableKnownSourceTurnKeys?: readonly string[];
     durableRoleReady?: boolean;
+    runConfigHasUserEdits?: boolean;
     selectedModelId?: string;
   }) => {
     hookProps = {
@@ -126,6 +130,7 @@ describe('useSessionAgentRole', () => {
       durableSourceTurnKey,
       durableKnownSourceTurnKeys,
       durableRoleReady,
+      runConfigHasUserEdits,
       selectedModelId,
     };
     await act(async () => root?.render(createElement(Harness)));
@@ -262,7 +267,7 @@ describe('useSessionAgentRole', () => {
     });
   });
 
-  it('keeps an unsent Role through queue promotion, reorder, or deletion', async () => {
+  it('keeps an unsent Role through queue lifecycle and older backfill', async () => {
     catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
     await render({
       durableRoleId: 'role-1' as AgentRoleId,
@@ -272,12 +277,12 @@ describe('useSessionAgentRole', () => {
     });
     await act(async () => control?.onSelect('role-2' as AgentRoleId));
 
-    // Queue -> history promotion keeps the same logical Turn identity.
+    // Older backfill extends the lineage without changing its current Turn.
     await render({
       durableRoleId: 'role-1' as AgentRoleId,
       durableRoleRevision: 1,
       durableSourceTurnKey: 'turn:turn-2',
-      durableKnownSourceTurnKeys: ['turn:turn-2', 'turn:turn-1'],
+      durableKnownSourceTurnKeys: ['turn:turn-2', 'turn:turn-1', 'turn:turn-0'],
     });
     expect(control?.selectedRoleId).toBe('role-2');
 
@@ -304,6 +309,15 @@ describe('useSessionAgentRole', () => {
       agentRoleId: 'role-1',
       agentRoleRevision: 5,
     });
+
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 5,
+      durableSourceTurnKey: 'turn:turn-1',
+      runConfigHasUserEdits: true,
+      selectedModelId: 'model-2',
+    });
+    expect(control?.turnSelection).toBeUndefined();
   });
 
   it('does not name the provenance Role after its run config changes', async () => {

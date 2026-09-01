@@ -68,6 +68,7 @@ export function useSessionAgentRole({
   onModeChange,
   configOptionSelectors,
   configOptionValues,
+  runConfigHasUserEdits = false,
   onConfigOptionChange,
 }: {
   sessionId: SessionId;
@@ -93,6 +94,8 @@ export function useSessionAgentRole({
   onModeChange?: (value: string) => void;
   configOptionSelectors: ReadonlyArray<AcpConfigOptionSelector>;
   configOptionValues: Record<string, AcpConfigOptionValue | undefined> | undefined;
+  /** Tracks manual drift even while the selected Role row is unavailable. */
+  runConfigHasUserEdits?: boolean;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
 }): SessionAgentRoleControl {
   const { roles, synced: agentRolesSynced } = useWorkspaceAgentRoles();
@@ -186,7 +189,8 @@ export function useSessionAgentRole({
   ]);
   const selectionOverrideIsCurrent =
     !selectionOverride ||
-    effectiveKnownTurnKeys.every((key) => selectionOverride.basedOnTurnKeys.includes(key));
+    !hydratedTurnKey ||
+    selectionOverride.basedOnTurnKeys.includes(hydratedTurnKey);
   const pickedRoleId =
     selectionOverride && (!durableRoleReady || selectionOverrideIsCurrent)
       ? selectionOverride.roleId
@@ -234,12 +238,18 @@ export function useSessionAgentRole({
         : pickedItem
           ? // A manual run-config change means this is no longer that Role.
             null
-          : !agentRolesSynced || scopedRoles.some((role) => role.id === pickedRoleId)
-            ? typeof storedPickedRevision === 'number'
-              ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
-              : undefined
-            : // The synchronized catalog authoritatively no longer contains it.
-              null;
+          : !agentRolesSynced
+            ? runConfigHasUserEdits
+              ? undefined
+              : typeof storedPickedRevision === 'number'
+                ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
+                : undefined
+            : scopedRoles.some((role) => role.id === pickedRoleId)
+              ? typeof storedPickedRevision === 'number'
+                ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
+                : undefined
+              : // The synchronized catalog authoritatively no longer contains it.
+                null;
 
   const onSelect = useCallback(
     (roleId: AgentRoleId | null) => {

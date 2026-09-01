@@ -387,7 +387,9 @@ Session conversation page chain:
   session-keyed last-known durable snapshot may bridge the empty document while
   that remount hydrates, but it is never an authority: replace it as soon as the
   document is ready. Keep the known logical Turn lineage as its supersession
-  fence: queue promotion, deletion, and reordering are not newer Turns. Role
+  fence: queue promotion, deletion, reordering, and older history backfill are
+  not newer Turns; consume a draft only when the authoritative current Turn
+  moves to a previously unseen key. Role
   selection and Turn submission stay disabled until the Session document is
   ready because its transient provider defaults are not a valid run config.
   Programmatic Turns inherit the current
@@ -396,7 +398,8 @@ Session conversation page chain:
   A legacy/non-composer Turn with both fields absent inherits the most recent
   explicit selection; only `agentRoleId: null` means None. Keep unsynced catalog
   rows and not-yet-hydrated Session docs in the unknown state — neither may
-  turn a durable Role into explicit None.
+  turn a durable Role into explicit None. If the catalog row is still unknown,
+  an unsent manual run-config edit drops stale Role provenance to unknown.
   Session provenance remains the legacy fallback when the selected Turn
   predates these fields; never rewrite `SessionMeta.agentRoleId`, which records
   creation provenance only.

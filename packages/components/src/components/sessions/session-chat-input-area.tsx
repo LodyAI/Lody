@@ -395,6 +395,8 @@ export interface SessionChatInputAreaProps {
   durableAgentRoleKnownTurnKeys?: readonly string[];
   /** False while this Session's durable document is still hydrating. */
   durableAgentRoleReady?: boolean;
+  /** True when the composer run config differs through an unsent user edit. */
+  runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
   modelOptions: AcpSessionSelectOption[];
   /** Subscription limits already resolved from this session's machine Flock data. */
@@ -503,6 +505,7 @@ export const SessionChatInputArea = memo(
       durableAgentRoleSourceTurnKey,
       durableAgentRoleKnownTurnKeys,
       durableAgentRoleReady,
+      runConfigHasUserEdits,
       modeOptions,
       modelOptions,
       rateLimits,
@@ -2218,6 +2221,7 @@ export const SessionChatInputArea = memo(
       onModeChange,
       configOptionSelectors: configOptionSelectors ?? [],
       configOptionValues,
+      runConfigHasUserEdits,
       onConfigOptionChange,
     });
     const effectiveAgentRoleControl = agentRoleControl ?? sessionAgentRole;

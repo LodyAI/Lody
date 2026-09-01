@@ -66,6 +66,8 @@ export type AcpSessionConfigSelectionHandle = {
    */
   appliedTargetKey: string | null;
   appliedPreferenceRevision: string | null;
+  /** Whether the current run config contains an unsent user edit. */
+  hasUserEdits: boolean;
   selectMode: (value: string | null) => void;
   selectModel: (value: string | null) => void;
   selectConfigOption: (configId: string, value: AcpConfigOptionValue) => void;
@@ -165,6 +167,10 @@ export function useAcpSessionConfigSelectionState({
     candidates,
     appliedTargetKey: fence.targetKey,
     appliedPreferenceRevision: fence.preferenceRevision,
+    hasUserEdits:
+      edits.mode !== undefined ||
+      edits.model !== undefined ||
+      Object.keys(edits.configOptions).length > 0,
     selectMode,
     selectModel,
     selectConfigOption,
