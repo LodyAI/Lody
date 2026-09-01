@@ -5,6 +5,7 @@ import {
   type PersistedSidePanelState,
   type PersistedViewerTab,
 } from './session-draft-tabs';
+import { parseSessionTabSearch } from './session-tab-url';
 
 const DEFAULT_SIDE_PANEL_STATE: PersistedSidePanelState = {
   open: false,
@@ -20,6 +21,13 @@ export type SessionDetailInitialTabState = {
 };
 
 export type SessionDetailInitialTabStateOptions = {
+  /**
+   * Mobile shows ONE active surface: an explicit conversation deep link
+   * (`?tab=session:<id>` / `?tab=draft:<id>`) must not arrive under a
+   * restored full-screen viewer, so the viewer restores as an open-but-idle
+   * tab there. Desktop viewers live in the side panel and stay active.
+   */
+  readonly oneActiveSurface?: boolean;
   readonly readPersistedState?: (parentSessionId: SessionId) => PersistedLastActiveTabState | null;
 };
 
@@ -32,15 +40,19 @@ export type SessionDetailInitialTabStateOptions = {
  */
 export const getSessionDetailInitialTabState = (
   parentSessionId: SessionId,
+  urlTab?: string,
   options: SessionDetailInitialTabStateOptions = {}
 ): SessionDetailInitialTabState => {
   const persistedState =
     options.readPersistedState?.(parentSessionId) ?? readStoredLastActiveTabState(parentSessionId);
   const viewerTab = persistedState?.viewerTab ?? null;
+  const parsedUrlTab = parseSessionTabSearch(urlTab);
+  const urlNamesConversationTab = parsedUrlTab.kind === 'session' || parsedUrlTab.kind === 'draft';
 
   return {
     viewerTabs: viewerTab ? [viewerTab] : [],
-    activeViewerTabId: viewerTab?.id ?? null,
+    activeViewerTabId:
+      options.oneActiveSurface && urlNamesConversationTab ? null : (viewerTab?.id ?? null),
     sidePanel: persistedState?.sidePanel ?? DEFAULT_SIDE_PANEL_STATE,
   };
 };
