@@ -27,9 +27,10 @@ import {
 } from './support/chat-workspace-geometry';
 
 const outputDirectory = process.env.GEOMETRY_REPORT_OUTPUT_DIR;
+const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:6006';
 
 type ReportDetail = Readonly<{
-  kind: 'violation' | 'candidate';
+  kind: 'violation' | 'candidate' | 'jitter' | 'insufficient';
   id: string;
   title: string;
   description: string;
@@ -44,7 +45,7 @@ type ReportDetail = Readonly<{
       label: string;
       measurement?: string;
       layout?: 'target-row' | 'gutter-list';
-      tone?: 'violation' | 'candidate';
+      tone?: 'violation' | 'candidate' | 'jitter';
       axis: 'x' | 'y';
       coordinate: number;
       line: number;
@@ -257,15 +258,9 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
     `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
   );
   if ((await workspace.count()) > 0) {
-    if (detail.overlay.hoverActions) {
-      await workspace.evaluate((element) =>
-        element.setAttribute('data-geometry-actions-visible', 'true')
-      );
-    } else {
-      await workspace.evaluate((element) =>
-        element.removeAttribute('data-geometry-actions-visible')
-      );
-    }
+    await workspace.evaluate((element) =>
+      element.setAttribute('data-geometry-actions-visible', 'true')
+    );
   }
   await page
     .locator('[data-geometry-devtool="semantic-alignments"] [data-geometry-alignment-name]')
@@ -419,8 +414,8 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
         };
 
         annotations.forEach((annotation, index) => {
-          const isCandidate = annotation.tone === 'candidate';
-          const accent = isCandidate ? '217 119 6' : '37 99 235';
+          const isWarmDiagnostic = annotation.tone === 'candidate' || annotation.tone === 'jitter';
+          const accent = isWarmDiagnostic ? '217 119 6' : '37 99 235';
           const measurement =
             annotation.measurement ??
             `${
@@ -506,8 +501,8 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
             padding: '3px 6px',
             border: `1px solid rgb(${accent} / 0.58)`,
             borderRadius: '4px',
-            background: isCandidate ? 'rgb(255 251 235 / 0.82)' : 'rgb(255 255 255 / 0.8)',
-            color: isCandidate ? '#78350f' : '#172554',
+            background: isWarmDiagnostic ? 'rgb(255 251 235 / 0.82)' : 'rgb(255 255 255 / 0.8)',
+            color: isWarmDiagnostic ? '#78350f' : '#172554',
             font: '650 11px/14px ui-monospace, SFMono-Regular, Menlo, monospace',
             letterSpacing: '0',
             whiteSpace: 'nowrap',
@@ -539,7 +534,7 @@ function createReportDetails({
   semanticBaselines: readonly BrowserSemanticBaselineEntry[];
 }>): readonly ReportDetail[] {
   const alignmentDetails = semanticAlignments
-    .filter((entry) => entry.measurable && !entry.aligned)
+    .filter((entry) => entry.status !== 'aligned')
     .map((entry, index): ReportDetail => {
       const memberOffsets = entry.members
         .filter((member) => member.delta > 0)
@@ -555,14 +550,26 @@ function createReportDetails({
       const contextText = entry.members.find(
         (member) => member.name.includes('title') && member.text
       )?.text;
+      const kind =
+        entry.status === 'violation'
+          ? 'violation'
+          : entry.status === 'sub-pixel-jitter'
+            ? 'jitter'
+            : 'insufficient';
+      const finding =
+        entry.status === 'violation'
+          ? `FAIL · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px`
+          : entry.status === 'sub-pixel-jitter'
+            ? `SUB-PIXEL JITTER · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px · 不进入 gate`
+            : `证据不足 · 仅 ${entry.members.length} 个可测元素`;
       return {
-        kind: 'violation',
+        kind,
         id,
         title: semanticAlignmentTitle(entry),
         description: `${contextText ? `“${contextText}” · ` : ''}${
           entry.axis === 'y' ? '视觉中心' : '水平位置'
         } · ${entry.members.length} 个元素`,
-        finding: `FAIL · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px`,
+        finding,
         clip: sidebarAnnotationBand(
           sidebarCard,
           entry.rect,
@@ -571,11 +578,11 @@ function createReportDetails({
         ),
         images: reportImages(id),
         overlay: {
-          alignmentGroups: [entry.groupLabel],
+          alignmentGroups: entry.measurable ? [entry.groupLabel] : [],
           baselineGroups: [],
           hoverActions: entry.groupLabel === 'sidebar.primary-trailing-rail-end',
           semanticAnnotations: entry.members
-            .filter((member) => member.delta > 0)
+            .filter((member) => entry.measurable && member.delta > 0)
             .map((member) => ({
               label: semanticMemberLabel(member.name),
               axis: entry.axis,
@@ -583,13 +590,14 @@ function createReportDetails({
               line: entry.line,
               offset: member.coordinate - entry.line,
               rect: member.rect,
+              tone: entry.status === 'sub-pixel-jitter' ? ('jitter' as const) : undefined,
             })),
           discoveredRails: [],
         },
       };
     });
   const baselineDetails = semanticBaselines
-    .filter((entry) => !entry.aligned)
+    .filter((entry) => entry.status !== 'aligned')
     .map((entry, index): ReportDetail => {
       const id = `text-baseline-${index + 1}`;
       const instance = entry.groupLabel.split(' · ').at(-1) ?? entry.groupLabel;
@@ -602,26 +610,41 @@ function createReportDetails({
             )}`
         )
         .join(' · ');
+      const kind =
+        entry.status === 'violation'
+          ? 'violation'
+          : entry.status === 'sub-pixel-jitter'
+            ? 'jitter'
+            : 'insufficient';
+      const finding =
+        entry.status === 'violation'
+          ? `FAIL · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px`
+          : entry.status === 'sub-pixel-jitter'
+            ? `SUB-PIXEL JITTER · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px · 不进入 gate`
+            : `证据不足 · 仅 ${entry.members.length} 个可测元素`;
       return {
-        kind: 'violation',
+        kind,
         id,
         title: `Sidebar / ${instance}`,
         description: `text baseline · ${entry.members.map((member) => member.name).join(' ↔ ')}`,
-        finding: `FAIL · ${memberOffsets} · 两端差 ${Number(entry.spread.toFixed(2))}px`,
+        finding,
         clip: sidebarAnnotationBand(sidebarCard, entry.rect, viewport, 46),
         images: reportImages(id),
         overlay: {
           alignmentGroups: [],
-          baselineGroups: [entry.groupLabel],
+          baselineGroups: entry.measurable ? [entry.groupLabel] : [],
           hoverActions: false,
-          semanticAnnotations: entry.members.map((member) => ({
-            label: semanticMemberLabel(member.name),
-            axis: 'y',
-            coordinate: member.coordinate,
-            line: entry.line,
-            offset: member.coordinate - entry.line,
-            rect: member.rect,
-          })),
+          semanticAnnotations: entry.members
+            .filter(() => entry.measurable)
+            .map((member) => ({
+              label: semanticMemberLabel(member.name),
+              axis: 'y',
+              coordinate: member.coordinate,
+              line: entry.line,
+              offset: member.coordinate - entry.line,
+              rect: member.rect,
+              tone: entry.status === 'sub-pixel-jitter' ? ('jitter' as const) : undefined,
+            })),
           discoveredRails: [],
         },
       };
@@ -735,6 +758,42 @@ async function waitForSessionConversationStory(page: Page): Promise<void> {
   });
 }
 
+async function enableReportCaptureMode(page: Page): Promise<void> {
+  await expect(
+    page.locator('[data-geometry-fixture-ready="true"], [data-testid="session-conversation-story"]')
+  ).toBeAttached({ timeout: 30_000 });
+  await page.addStyleTag({
+    content: `
+      [data-geometry-report-capture="true"] * {
+        pointer-events: none !important;
+        animation: none !important;
+        transition: none !important;
+      }
+      [data-geometry-actions-visible="true"] [data-geometry-hover-action] {
+        opacity: 1 !important;
+        pointer-events: none !important;
+      }
+      [data-geometry-actions-visible="true"] [data-geometry-hover-rest] {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+    `,
+  });
+  const workspace = page.locator(
+    `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
+  );
+  await page.locator('body').evaluate((element) => {
+    element.setAttribute('data-geometry-report-capture', 'true');
+    element.setAttribute('data-geometry-actions-visible', 'true');
+  });
+  if ((await workspace.count()) > 0) {
+    await workspace.evaluate((element) => {
+      element.setAttribute('data-geometry-report-capture', 'true');
+      element.setAttribute('data-geometry-actions-visible', 'true');
+    });
+  }
+}
+
 test.skip(!outputDirectory, 'Run through the geometry:report script');
 
 test('captures the visual geometry report', async ({ browser }) => {
@@ -751,7 +810,7 @@ test('captures the visual geometry report', async ({ browser }) => {
   const unexpectedNetworkRequests: string[] = [];
   await context.route(/https?:\/\//, async (route) => {
     const url = new URL(route.request().url());
-    if (url.origin === 'http://127.0.0.1:6006') {
+    if (url.origin === storybookOrigin) {
       await route.continue();
       return;
     }
@@ -760,10 +819,17 @@ test('captures the visual geometry report', async ({ browser }) => {
   });
 
   const page = await context.newPage();
-  const cleanUrl =
-    'http://127.0.0.1:6006/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story';
+  const cleanUrl = `${storybookOrigin}/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story`;
   const cleanResponse = await page.goto(cleanUrl);
   expect(cleanResponse?.ok()).toBeTruthy();
+  await enableReportCaptureMode(page);
+  const hoverActions = page.locator('[data-geometry-hover-action]');
+  expect(await hoverActions.count()).toBeGreaterThan(0);
+  expect(
+    await hoverActions.evaluateAll((elements) =>
+      elements.every((element) => getComputedStyle(element).opacity === '1')
+    )
+  ).toBe(true);
 
   const measurement = await measureSettledChatWorkspace(page);
   const geometryViolations = validateChatWorkspaceGeometry(measurement.snapshot, {
@@ -827,10 +893,10 @@ test('captures the visual geometry report', async ({ browser }) => {
     });
   }
 
-  const annotatedUrl =
-    'http://127.0.0.1:6006/iframe.html?id=geometry-chatworkspace--geometry-audit&viewMode=story';
+  const annotatedUrl = `${storybookOrigin}/iframe.html?id=geometry-chatworkspace--geometry-audit&viewMode=story`;
   const annotatedResponse = await page.goto(annotatedUrl);
   expect(annotatedResponse?.ok()).toBeTruthy();
+  await enableReportCaptureMode(page);
   await measureSettledChatWorkspace(page);
   const spacingOverlay = page.locator('[data-geometry-devtool="spacing-audit"]');
   await expect(spacingOverlay).toBeAttached();
@@ -886,10 +952,62 @@ test('captures the visual geometry report', async ({ browser }) => {
 
   const discoverySurfaces: Array<
     Readonly<{
+      captureId: string;
+      contractDomain: 'workspace' | 'session';
       surface: string;
+      viewport: Readonly<{ width: number; height: number }>;
       railDiscovery: readonly BrowserAlignmentRailDiscoveryScope[];
     }>
-  > = [{ surface: 'Workspace / Chat Landing', railDiscovery }];
+  > = [
+    {
+      captureId: 'workspace:wide-expanded',
+      contractDomain: 'workspace',
+      surface: 'Workspace / Chat Landing',
+      viewport,
+      railDiscovery,
+    },
+  ];
+
+  for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
+    if (verificationCase.name === 'wide-expanded') continue;
+    const matrixContext = await browser.newContext({
+      viewport: verificationCase.viewport,
+      deviceScaleFactor: 1,
+      reducedMotion: 'reduce',
+      colorScheme: 'light',
+    });
+    await matrixContext.route(/https?:\/\//, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === storybookOrigin) {
+        await route.continue();
+        return;
+      }
+      unexpectedNetworkRequests.push(url.href);
+      await route.abort('blockedbyclient');
+    });
+    const matrixPage = await matrixContext.newPage();
+    const storyId =
+      verificationCase.sidebar === 'expanded'
+        ? 'geometry-chatworkspace--expanded-sidebar'
+        : 'geometry-chatworkspace--collapsed-sidebar';
+    const response = await matrixPage.goto(
+      `${storybookOrigin}/iframe.html?id=${storyId}&viewMode=story`
+    );
+    expect(response?.ok()).toBeTruthy();
+    await enableReportCaptureMode(matrixPage);
+    await measureSettledChatWorkspace(matrixPage);
+    const matrixDiscovery = await discoverChatWorkspaceAlignmentRails(matrixPage, {
+      aggregateScopes: ['sidebar.shell'],
+    });
+    discoverySurfaces.push({
+      captureId: `workspace:${verificationCase.name}`,
+      contractDomain: 'workspace',
+      surface: `Workspace / ${verificationCase.name}`,
+      viewport: verificationCase.viewport,
+      railDiscovery: matrixDiscovery,
+    });
+    await matrixContext.close();
+  }
   const sessionDetails: ReportDetail[] = [];
   const sessionStories = [
     {
@@ -906,10 +1024,11 @@ test('captures the visual geometry report', async ({ browser }) => {
 
   for (const story of sessionStories) {
     const response = await page.goto(
-      `http://127.0.0.1:6006/iframe.html?id=${story.storyId}&viewMode=story`
+      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
     );
     expect(response?.ok()).toBeTruthy();
     await waitForSessionConversationStory(page);
+    await enableReportCaptureMode(page);
     const sessionRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
       aggregateScopes: ['session.page'],
     });
@@ -943,22 +1062,68 @@ test('captures the visual geometry report', async ({ browser }) => {
     }
 
     sessionDetails.push(...storyDetails);
-    discoverySurfaces.push({ surface: story.surface, railDiscovery: sessionRailDiscovery });
+    discoverySurfaces.push({
+      captureId: `${story.idPrefix}:1440x900`,
+      contractDomain: 'session',
+      surface: story.surface,
+      viewport,
+      railDiscovery: sessionRailDiscovery,
+    });
   }
 
   const details = [...workspaceDetails, ...sessionDetails];
   expect(details.length).toBeGreaterThan(0);
-  const contractProposals = inferAlignmentRailContractProposals(
-    discoverySurfaces.flatMap(({ surface, railDiscovery: scopes }) =>
-      scopes.map((scope) => ({
-        captureId: surface,
-        scopeKey: scope.topology ? `auto:${scope.topology.signature}` : `hint:${scope.scope}`,
-        scopeRect: scope.rect,
-        rails: scope.rails,
-      }))
-    )
-  );
+  const scopeKey = (
+    contractDomain: 'workspace' | 'session',
+    scope: BrowserAlignmentRailDiscoveryScope
+  ) =>
+    `${contractDomain}:${
+      scope.topology ? `auto:${scope.topology.signature}` : `hint:${scope.scope}`
+    }`;
+  const contractCaptures = (['workspace', 'session'] as const).flatMap((contractDomain) => {
+    const captures = discoverySurfaces.filter(
+      (capture) => capture.contractDomain === contractDomain
+    );
+    const keys = new Set(
+      captures.flatMap((capture) =>
+        capture.railDiscovery.map((scope) => scopeKey(contractDomain, scope))
+      )
+    );
+    return captures.flatMap((capture) =>
+      Array.from(keys).map((key) => {
+        const matchingScope = capture.railDiscovery
+          .filter((scope) => scopeKey(contractDomain, scope) === key)
+          .sort(
+            (left, right) =>
+              right.rails.length - left.rails.length || right.candidateCount - left.candidateCount
+          )[0];
+        return {
+          captureId: capture.captureId,
+          scopeKey: key,
+          scopeRect: matchingScope?.rect ?? {
+            x: 0,
+            y: 0,
+            width: capture.viewport.width,
+            height: capture.viewport.height,
+          },
+          rails: matchingScope?.rails ?? [],
+          railFamilies: matchingScope?.railFamilies ?? [],
+        };
+      })
+    );
+  });
+  const contractProposals = inferAlignmentRailContractProposals(contractCaptures, {
+    minConfidence: 0.35,
+  });
   expect(contractProposals.length).toBeGreaterThan(0);
+  expect(
+    contractProposals.some(
+      (proposal) =>
+        proposal.scopeKey.startsWith('workspace:') &&
+        proposal.evidence.captureIds.length >= 3 &&
+        proposal.evidence.captureCoverage > 0.5
+    )
+  ).toBe(true);
 
   const reportData = {
     generatedAt: new Date().toISOString(),

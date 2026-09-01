@@ -149,6 +149,10 @@
         color: var(--candidate);
       }
 
+      .dot--insufficient {
+        color: var(--text-faint);
+      }
+
       .toolbar-end {
         margin-left: auto;
         font-size: 12px;
@@ -230,6 +234,16 @@
       .detail-review[data-kind='candidate'] .detail-finding {
         color: var(--candidate);
         background: var(--candidate-soft);
+      }
+
+      .detail-review[data-kind='jitter'] .detail-finding {
+        color: var(--candidate);
+        background: var(--candidate-soft);
+      }
+
+      .detail-review[data-kind='insufficient'] .detail-finding {
+        color: var(--text-muted);
+        background: var(--hover);
       }
 
       .chevron {
@@ -448,6 +462,8 @@
 
       const violations = report.details.filter((d) => d.kind === 'violation');
       const candidates = report.details.filter((d) => d.kind === 'candidate');
+      const jitters = report.details.filter((d) => d.kind === 'jitter');
+      const insufficient = report.details.filter((d) => d.kind === 'insufficient');
 
       document.getElementById('meta').replaceChildren(
         ...[
@@ -470,6 +486,8 @@
       const filters = [
         ['all', '全部', report.details.length, null],
         ['violation', '违规', violations.length, 'dot--fail'],
+        ['jitter', '亚像素抖动', jitters.length, 'dot--candidate'],
+        ['insufficient', '证据不足', insufficient.length, 'dot--insufficient'],
         ['candidate', '候选轨', candidates.length, 'dot--candidate'],
       ];
 
@@ -541,7 +559,13 @@
         indexSpan.textContent = String(index + 1).padStart(2, '0');
 
         const dot = document.createElement('span');
-        dot.className = `dot ${detail.kind === 'violation' ? 'dot--fail' : 'dot--candidate'}`;
+        dot.className = `dot ${
+          detail.kind === 'violation'
+            ? 'dot--fail'
+            : detail.kind === 'insufficient'
+              ? 'dot--insufficient'
+              : 'dot--candidate'
+        }`;
 
         const copy = document.createElement('div');
         const title = document.createElement('div');
@@ -566,7 +590,14 @@
         const pair = document.createElement('div');
         pair.className = 'detail-pair';
 
-        const annotatedLabel = detail.kind === 'candidate' ? '候选轨与偏移' : '失败语义线';
+        const annotatedLabel =
+          detail.kind === 'candidate'
+            ? '候选轨与偏移'
+            : detail.kind === 'jitter'
+              ? '亚像素抖动'
+              : detail.kind === 'insufficient'
+                ? '证据不足'
+                : '失败语义线';
         for (const [label, source, alt] of [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
           [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
@@ -581,7 +612,9 @@
           image.src = source;
           image.alt = alt;
           frame.append(image);
-          frame.addEventListener('click', () => openLightbox(source, `${detail.title} · ${label}`, alt));
+          frame.addEventListener('click', () =>
+            openLightbox(source, `${detail.title} · ${label}`, alt)
+          );
           const caption = document.createElement('figcaption');
           const captionLabel = document.createElement('span');
           captionLabel.textContent = label;

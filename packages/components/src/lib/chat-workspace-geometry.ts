@@ -272,6 +272,14 @@ export type ChatWorkspaceSpacingAuditProperty =
 
 export type SemanticBaselineMode = 'center' | 'text';
 
+export const CHAT_WORKSPACE_SUBPIXEL_JITTER_THRESHOLD = 1;
+
+export type SemanticGeometryStatus =
+  | 'aligned'
+  | 'sub-pixel-jitter'
+  | 'violation'
+  | 'insufficient-evidence';
+
 export type SemanticBaselineMemberMeasurement = Readonly<{
   name: string;
   coordinate: number;
@@ -289,6 +297,8 @@ export type SemanticBaselineGroupResult = Readonly<{
   line: number;
   spread: number;
   aligned: boolean;
+  measurable: boolean;
+  status: SemanticGeometryStatus;
   members: readonly Readonly<SemanticBaselineMemberMeasurement & { delta: number }>[];
 }>;
 
@@ -314,6 +324,7 @@ export type SemanticAlignmentGroupResult = Readonly<{
   line: number;
   aligned: boolean;
   measurable: boolean;
+  status: SemanticGeometryStatus;
   spread: number;
   members: readonly Readonly<SemanticBaselineMemberMeasurement & { delta: number }>[];
 }>;
@@ -339,6 +350,8 @@ export type AlignmentRailDiscoveryOptions = Readonly<{
   inlierTolerance?: number;
   minSupport?: number;
   minVerticalSpan?: number;
+  /** Region height used to score how much of the region the rail traverses. */
+  scopeHeight?: number;
 }>;
 
 export type DiscoveredAlignmentRail = Readonly<{
@@ -350,6 +363,10 @@ export type DiscoveredAlignmentRail = Readonly<{
   confidence: number;
   members: readonly Readonly<AlignmentRailCandidate & { delta: number; outlier: boolean }>[];
   outliers: readonly Readonly<AlignmentRailCandidate & { delta: number; outlier: true }>[];
+}>;
+
+export type AlignmentRailFamily = Readonly<{
+  rails: readonly DiscoveredAlignmentRail[];
 }>;
 
 export type LayoutTopologyNode = Readonly<{
@@ -386,6 +403,8 @@ export type AlignmentRailCapture = Readonly<{
   scopeKey: string;
   scopeRect: GeometryRect;
   rails: readonly DiscoveredAlignmentRail[];
+  /** Raw start/center/end families preserve evidence until cross-capture canonicalization. */
+  railFamilies?: readonly AlignmentRailFamily[];
 }>;
 
 export type AlignmentRailContractProposal = Readonly<{
@@ -410,6 +429,8 @@ export type AlignmentRailContractProposal = Readonly<{
 export type AlignmentRailContractInferenceOptions = Readonly<{
   minCaptures?: number;
   mergeTolerance?: number;
+  /** Absolute cap applied after converting the normalized tolerance to pixels. */
+  maxPixelMergeTolerance?: number;
   minConfidence?: number;
 }>;
 
@@ -678,12 +699,22 @@ export function evaluateSemanticBaselineGroup(
     return { ...member, delta: Math.abs(member.coordinate - line) };
   });
   const spread = sorted.length < 2 ? 0 : (sorted.at(-1) ?? 0) - (sorted[0] ?? 0);
+  const measurable = members.length >= 2;
+  const status: SemanticGeometryStatus = !measurable
+    ? 'insufficient-evidence'
+    : spread <= tolerance
+      ? 'aligned'
+      : spread <= CHAT_WORKSPACE_SUBPIXEL_JITTER_THRESHOLD
+        ? 'sub-pixel-jitter'
+        : 'violation';
   return {
     name: group.name,
     mode: group.mode,
     line,
     spread,
-    aligned: members.length < 2 || spread <= tolerance,
+    aligned: status === 'aligned',
+    measurable,
+    status,
     members,
   };
 }
@@ -722,6 +753,13 @@ export function evaluateSemanticAlignmentGroup(
   }));
   const spread = sorted.length < 2 ? 0 : (sorted.at(-1) ?? 0) - (sorted[0] ?? 0);
   const measurable = members.length >= group.minMembers;
+  const status: SemanticGeometryStatus = !measurable
+    ? 'insufficient-evidence'
+    : spread <= group.tolerance
+      ? 'aligned'
+      : spread <= CHAT_WORKSPACE_SUBPIXEL_JITTER_THRESHOLD
+        ? 'sub-pixel-jitter'
+        : 'violation';
   return {
     name: group.name,
     instance: group.instance,
@@ -732,8 +770,9 @@ export function evaluateSemanticAlignmentGroup(
     policy: group.policy,
     line,
     measurable,
+    status,
     spread,
-    aligned: measurable && spread <= group.tolerance,
+    aligned: status === 'aligned',
     members,
   };
 }
@@ -964,10 +1003,11 @@ export function discoverAlignmentRails(
   candidates: readonly AlignmentRailCandidate[],
   options: AlignmentRailDiscoveryOptions = {}
 ): readonly DiscoveredAlignmentRail[] {
-  const mergeTolerance = options.mergeTolerance ?? 4;
+  const mergeTolerance = options.mergeTolerance ?? 2;
   const inlierTolerance = options.inlierTolerance ?? 0.5;
   const minSupport = options.minSupport ?? 3;
   const minVerticalSpan = options.minVerticalSpan ?? 24;
+  const scopeHeight = options.scopeHeight;
   if (!Number.isFinite(mergeTolerance) || mergeTolerance < 0) {
     throw new RangeError('mergeTolerance must be a finite, non-negative number');
   }
@@ -979,6 +1019,9 @@ export function discoverAlignmentRails(
   }
   if (!Number.isFinite(minVerticalSpan) || minVerticalSpan < 0) {
     throw new RangeError('minVerticalSpan must be a finite, non-negative number');
+  }
+  if (scopeHeight !== undefined && (!Number.isFinite(scopeHeight) || scopeHeight <= 0)) {
+    throw new RangeError('scopeHeight must be a positive finite number');
   }
 
   for (const candidate of candidates) {
@@ -1004,24 +1047,19 @@ export function discoverAlignmentRails(
     const clusters: AlignmentRailCandidate[][] = [];
     const ordered = [...anchorCandidates].sort(
       (first, second) =>
-        first.yStart - second.yStart ||
         first.coordinate - second.coordinate ||
+        first.yStart - second.yStart ||
         first.elementId.localeCompare(second.elementId)
     );
 
     for (const candidate of ordered) {
-      let target: AlignmentRailCandidate[] | undefined;
-      let targetDistance = Number.POSITIVE_INFINITY;
-      for (const cluster of clusters) {
-        const distance = Math.abs(
-          candidate.coordinate - median(cluster.map((member) => member.coordinate))
-        );
-        if (distance <= mergeTolerance && distance < targetDistance) {
-          target = cluster;
-          targetDistance = distance;
-        }
-      }
-      if (!target) {
+      const target = clusters.at(-1);
+      const previousCoordinate = target?.at(-1)?.coordinate;
+      if (
+        !target ||
+        previousCoordinate === undefined ||
+        candidate.coordinate - previousCoordinate > mergeTolerance
+      ) {
         clusters.push([candidate]);
         continue;
       }
@@ -1072,7 +1110,7 @@ export function discoverAlignmentRails(
       if (support < minSupport || verticalSpan < minVerticalSpan) continue;
       const confidence =
         (support / members.length) *
-        (minVerticalSpan === 0 ? 1 : Math.min(1, verticalSpan / minVerticalSpan));
+        (scopeHeight === undefined ? 1 : Math.min(1, verticalSpan / scopeHeight));
       const outliers = members.filter(
         (member): member is AlignmentRailCandidate & { delta: number; outlier: true } =>
           member.outlier
@@ -1099,20 +1137,10 @@ export function discoverAlignmentRails(
   );
 }
 
-/**
- * Collapse start/center/end rails produced by the same repeated visual slot.
- * Text slots keep their start edge; slots near a region boundary keep that
- * boundary-facing edge. The discarded rails remain derivable from raw capture
- * data but do not compete for attention in the design report.
- */
-export function selectCanonicalAlignmentRails(
-  rails: readonly DiscoveredAlignmentRail[],
-  scope: GeometryRect
-): readonly DiscoveredAlignmentRail[] {
-  if (!Number.isFinite(scope.x) || !Number.isFinite(scope.width) || scope.width <= 0) {
-    throw new RangeError('Canonical rail selection requires a positive finite scope width');
-  }
-
+/** Group start/center/end rails that describe the same repeated visual slot. */
+export function groupAlignmentRailFamilies(
+  rails: readonly DiscoveredAlignmentRail[]
+): readonly AlignmentRailFamily[] {
   const memberKeys = (rail: DiscoveredAlignmentRail) =>
     new Set(rail.members.map((member) => `${member.rowId}\u0000${member.elementId}`));
   const overlap = (leftRail: DiscoveredAlignmentRail, rightRail: DiscoveredAlignmentRail) => {
@@ -1122,33 +1150,64 @@ export function selectCanonicalAlignmentRails(
     return shared / Math.min(leftKeys.size, rightKeys.size);
   };
 
-  const families: DiscoveredAlignmentRail[][] = [];
+  const families: AlignmentRailFamily[] = [];
   for (const rail of rails) {
     const family = families.find(
       (candidateFamily) =>
-        !candidateFamily.some((candidate) => candidate.anchor === rail.anchor) &&
-        candidateFamily.some((candidate) => overlap(candidate, rail) >= 0.75)
+        !candidateFamily.rails.some((candidate) => candidate.anchor === rail.anchor) &&
+        candidateFamily.rails.some((candidate) => overlap(candidate, rail) >= 0.75)
     );
-    if (family) family.push(rail);
-    else families.push([rail]);
+    if (family) {
+      const index = families.indexOf(family);
+      families[index] = { rails: [...family.rails, rail] };
+    } else {
+      families.push({ rails: [rail] });
+    }
+  }
+  return families;
+}
+
+function selectPreferredAlignmentRailAnchor(
+  observations: readonly Readonly<{ family: AlignmentRailFamily; scope: GeometryRect }>[]
+): AlignmentRailCandidateAnchor {
+  const kinds = observations.flatMap(({ family }) => {
+    const representative =
+      family.rails.find((rail) => rail.anchor === 'inline-center') ?? family.rails[0];
+    return representative?.members.map((member) => member.kind) ?? [];
+  });
+  const textShare = kinds.filter((kind) => kind === 'text').length / Math.max(1, kinds.length);
+  const normalizedLines = (anchor: AlignmentRailCandidateAnchor) =>
+    observations.flatMap(({ family, scope }) => {
+      const rail = family.rails.find((candidate) => candidate.anchor === anchor);
+      return rail ? [(rail.line - scope.x) / scope.width] : [];
+    });
+  const starts = normalizedLines('inline-start');
+  const ends = normalizedLines('inline-end');
+  if (textShare >= 0.5 && starts.length > 0) return 'inline-start';
+  if (ends.length > 0 && median(ends) >= 0.72) return 'inline-end';
+  if (starts.length > 0 && median(starts) <= 0.28) return 'inline-start';
+  return 'inline-center';
+}
+
+/**
+ * Collapse start/center/end rails produced by the same repeated visual slot.
+ * This per-capture view is for diagnostics. Contract inference consumes the
+ * raw families and makes the same anchor decision across all captures.
+ */
+export function selectCanonicalAlignmentRails(
+  rails: readonly DiscoveredAlignmentRail[],
+  scope: GeometryRect
+): readonly DiscoveredAlignmentRail[] {
+  if (!Number.isFinite(scope.x) || !Number.isFinite(scope.width) || scope.width <= 0) {
+    throw new RangeError('Canonical rail selection requires a positive finite scope width');
   }
 
-  return families
+  return groupAlignmentRailFamilies(rails)
     .map((family) => {
-      const kinds = family.flatMap((rail) => rail.members.map((member) => member.kind));
-      const textShare = kinds.filter((kind) => kind === 'text').length / Math.max(1, kinds.length);
-      const normalizedLines = family.map((rail) => (rail.line - scope.x) / scope.width);
-      const preferredAnchor: AlignmentRailCandidateAnchor =
-        textShare >= 0.5
-          ? 'inline-start'
-          : Math.max(...normalizedLines) >= 0.72
-            ? 'inline-end'
-            : Math.min(...normalizedLines) <= 0.28
-              ? 'inline-start'
-              : 'inline-center';
+      const preferredAnchor = selectPreferredAlignmentRailAnchor([{ family, scope }]);
       return (
-        family.find((rail) => rail.anchor === preferredAnchor) ??
-        [...family].sort(
+        family.rails.find((rail) => rail.anchor === preferredAnchor) ??
+        [...family.rails].sort(
           (leftRail, rightRail) =>
             rightRail.confidence - leftRail.confidence || rightRail.support - leftRail.support
         )[0]
@@ -1175,12 +1234,16 @@ export function inferAlignmentRailContractProposals(
 ): readonly AlignmentRailContractProposal[] {
   const minCaptures = options.minCaptures ?? 2;
   const mergeTolerance = options.mergeTolerance ?? 0.01;
+  const maxPixelMergeTolerance = options.maxPixelMergeTolerance ?? 4;
   const minConfidence = options.minConfidence ?? 0.7;
   if (!Number.isInteger(minCaptures) || minCaptures < 2) {
     throw new RangeError('minCaptures must be an integer of at least two');
   }
   if (!Number.isFinite(mergeTolerance) || mergeTolerance <= 0 || mergeTolerance > 1) {
     throw new RangeError('mergeTolerance must be greater than zero and at most one');
+  }
+  if (!Number.isFinite(maxPixelMergeTolerance) || maxPixelMergeTolerance <= 0) {
+    throw new RangeError('maxPixelMergeTolerance must be a positive finite number');
   }
   if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
     throw new RangeError('minConfidence must be between zero and one');
@@ -1191,10 +1254,46 @@ export function inferAlignmentRailContractProposals(
     scopeKey: string;
     anchor: AlignmentRailCandidateAnchor;
     normalizedLine: number;
+    mergeTolerance: number;
     rail: DiscoveredAlignmentRail;
   }>;
+  type FamilyObservation = Readonly<{
+    captureId: string;
+    scopeKey: string;
+    scope: GeometryRect;
+    family: AlignmentRailFamily;
+    normalizedLine: number;
+    mergeTolerance: number;
+  }>;
+
+  const clusterByLine = <T extends Readonly<{ normalizedLine: number; mergeTolerance: number }>>(
+    observations: readonly T[]
+  ): readonly T[][] => {
+    const clusters: T[][] = [];
+    const ordered = [...observations].sort(
+      (first, second) => first.normalizedLine - second.normalizedLine
+    );
+    for (const observation of ordered) {
+      const cluster = clusters.at(-1);
+      const clusterStart = cluster?.[0]?.normalizedLine;
+      const clusterTolerance = cluster
+        ? Math.min(...cluster.map((member) => member.mergeTolerance), observation.mergeTolerance)
+        : observation.mergeTolerance;
+      if (
+        !cluster ||
+        clusterStart === undefined ||
+        observation.normalizedLine - clusterStart > clusterTolerance
+      ) {
+        clusters.push([observation]);
+      } else {
+        cluster.push(observation);
+      }
+    }
+    return clusters;
+  };
+
   const captureIdsByScope = new Map<string, Set<string>>();
-  const observationsByGroup = new Map<string, Observation[]>();
+  const familyObservationsByScope = new Map<string, FamilyObservation[]>();
   for (const capture of captures) {
     if (!capture.captureId || !capture.scopeKey) {
       throw new RangeError('Alignment rail captures require captureId and scopeKey');
@@ -1205,46 +1304,62 @@ export function inferAlignmentRailContractProposals(
     const scopeCaptures = captureIdsByScope.get(capture.scopeKey) ?? new Set<string>();
     scopeCaptures.add(capture.captureId);
     captureIdsByScope.set(capture.scopeKey, scopeCaptures);
-    for (const rail of capture.rails) {
-      const normalizedLine = (rail.line - capture.scopeRect.x) / capture.scopeRect.width;
+    const effectiveMergeTolerance = Math.min(
+      mergeTolerance,
+      maxPixelMergeTolerance / capture.scopeRect.width
+    );
+    const families = capture.railFamilies ?? groupAlignmentRailFamilies(capture.rails);
+    for (const family of families) {
+      const centerRail = family.rails.find((rail) => rail.anchor === 'inline-center');
+      const normalizedLine = centerRail
+        ? (centerRail.line - capture.scopeRect.x) / capture.scopeRect.width
+        : median(
+            family.rails.map((rail) => (rail.line - capture.scopeRect.x) / capture.scopeRect.width)
+          );
       if (!Number.isFinite(normalizedLine)) continue;
-      const groupKey = `${capture.scopeKey}\u0000${rail.anchor}`;
-      const observations = observationsByGroup.get(groupKey) ?? [];
+      const observations = familyObservationsByScope.get(capture.scopeKey) ?? [];
       observations.push({
         captureId: capture.captureId,
         scopeKey: capture.scopeKey,
-        anchor: rail.anchor,
+        scope: capture.scopeRect,
+        family,
         normalizedLine,
-        rail,
+        mergeTolerance: effectiveMergeTolerance,
       });
-      observationsByGroup.set(groupKey, observations);
+      familyObservationsByScope.set(capture.scopeKey, observations);
+    }
+  }
+
+  const observationsByGroup = new Map<string, Observation[]>();
+  for (const familyObservations of familyObservationsByScope.values()) {
+    for (const familyCluster of clusterByLine(familyObservations)) {
+      const preferredAnchor = selectPreferredAlignmentRailAnchor(
+        familyCluster.map(({ family, scope }) => ({ family, scope }))
+      );
+      for (const observation of familyCluster) {
+        const rail = observation.family.rails.find(
+          (candidate) => candidate.anchor === preferredAnchor
+        );
+        if (!rail) continue;
+        const normalizedLine = (rail.line - observation.scope.x) / observation.scope.width;
+        const groupKey = `${observation.scopeKey}\u0000${preferredAnchor}`;
+        const selected = observationsByGroup.get(groupKey) ?? [];
+        selected.push({
+          captureId: observation.captureId,
+          scopeKey: observation.scopeKey,
+          anchor: preferredAnchor,
+          normalizedLine,
+          mergeTolerance: observation.mergeTolerance,
+          rail,
+        });
+        observationsByGroup.set(groupKey, selected);
+      }
     }
   }
 
   const proposals: AlignmentRailContractProposal[] = [];
   for (const observations of observationsByGroup.values()) {
-    const clusters: Observation[][] = [];
-    const ordered = [...observations].sort(
-      (first, second) =>
-        first.normalizedLine - second.normalizedLine ||
-        first.captureId.localeCompare(second.captureId)
-    );
-    for (const observation of ordered) {
-      let target: Observation[] | undefined;
-      let targetDistance = Number.POSITIVE_INFINITY;
-      for (const cluster of clusters) {
-        const line = median(cluster.map((member) => member.normalizedLine));
-        const distance = Math.abs(observation.normalizedLine - line);
-        if (distance <= mergeTolerance && distance < targetDistance) {
-          target = cluster;
-          targetDistance = distance;
-        }
-      }
-      if (target) target.push(observation);
-      else clusters.push([observation]);
-    }
-
-    for (const cluster of clusters) {
+    for (const cluster of clusterByLine(observations)) {
       const initialLine = median(cluster.map((member) => member.normalizedLine));
       const byCapture = new Map<string, Observation>();
       for (const observation of cluster) {
@@ -1269,7 +1384,8 @@ export function inferAlignmentRailContractProposals(
       const captureCoverage = evidence.length / scopeCaptureCount;
       const meanRailConfidence =
         evidence.reduce((sum, member) => sum + member.rail.confidence, 0) / evidence.length;
-      const residualConfidence = Math.max(0, 1 - maxNormalizedResidual / mergeTolerance);
+      const normalizedTolerance = Math.min(...evidence.map((member) => member.mergeTolerance));
+      const residualConfidence = Math.max(0, 1 - maxNormalizedResidual / normalizedTolerance);
       const confidence = meanRailConfidence * captureCoverage * residualConfidence;
       if (confidence < minConfidence) continue;
       const captureIds = evidence.map((member) => member.captureId).sort();
@@ -1282,7 +1398,7 @@ export function inferAlignmentRailContractProposals(
         scopeKey: first.scopeKey,
         anchor: first.anchor,
         normalizedLine,
-        normalizedTolerance: mergeTolerance,
+        normalizedTolerance,
         confidence,
         policy: 'proposal',
         evidence: {

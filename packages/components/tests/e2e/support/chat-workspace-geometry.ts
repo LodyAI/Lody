@@ -13,6 +13,7 @@ import {
   evaluateSemanticBaselineGroup,
   discoverAlignmentRails,
   discoverRepeatedLayoutScopes,
+  groupAlignmentRailFamilies,
   isSpacingRhythmMultiple,
   selectCanonicalAlignmentRails,
   type ChatWorkspaceSpacingAuditProperty,
@@ -21,12 +22,14 @@ import {
   type GeometryRect,
   type GeometryViolation,
   type AlignmentRailCandidate,
+  type AlignmentRailFamily,
   type DiscoveredAlignmentRail,
   type LayoutTopologyNode,
   type SemanticAlignmentAnchor,
   type SemanticAlignmentAxis,
   type SemanticAlignmentPolicy,
   type SemanticBaselineMode,
+  type SemanticGeometryStatus,
   type SpacingMeasurement,
 } from '../../../src/lib/chat-workspace-geometry';
 
@@ -53,6 +56,8 @@ export type BrowserSemanticBaselineEntry = Readonly<{
   line: number;
   spread: number;
   aligned: boolean;
+  measurable: boolean;
+  status: SemanticGeometryStatus;
   members: readonly Readonly<{
     name: string;
     text: string | null;
@@ -71,6 +76,7 @@ export type BrowserSemanticAlignmentEntry = Readonly<{
   line: number;
   aligned: boolean;
   measurable: boolean;
+  status: SemanticGeometryStatus;
   spread: number;
   members: readonly Readonly<{
     name: string;
@@ -87,6 +93,7 @@ export type BrowserAlignmentRailDiscoveryScope = Readonly<{
   rect: GeometryRect;
   candidateCount: number;
   rails: readonly DiscoveredAlignmentRail[];
+  railFamilies: readonly AlignmentRailFamily[];
   topology?: Readonly<{
     signature: string;
     instanceCount: number;
@@ -622,10 +629,14 @@ export async function discoverChatWorkspaceAlignmentRails(
       .sort((left, right) => left - right);
     const typicalHeight = heights[Math.floor(heights.length / 2)] ?? 16;
     const mergeTolerance = Math.max(4, Math.min(12, typicalHeight / 2));
-    return selectCanonicalAlignmentRails(
-      discoverAlignmentRails(candidates, { mergeTolerance }),
-      rect
-    );
+    const rawRails = discoverAlignmentRails(candidates, {
+      mergeTolerance,
+      scopeHeight: rect.height,
+    });
+    return {
+      rails: selectCanonicalAlignmentRails(rawRails, rect),
+      railFamilies: groupAlignmentRailFamilies(rawRails),
+    };
   };
 
   const manualScopes: BrowserAlignmentRailDiscoveryScope[] = snapshot.manualScopes.map(
@@ -634,7 +645,7 @@ export async function discoverChatWorkspaceAlignmentRails(
       source: 'hint',
       rect,
       candidateCount: candidates.length,
-      rails: discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
+      ...discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
     })
   );
 
@@ -658,7 +669,7 @@ export async function discoverChatWorkspaceAlignmentRails(
       source: 'auto',
       rect,
       candidateCount: candidates.length,
-      rails: discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
+      ...discoverScopeRails(candidates as readonly AlignmentRailCandidate[], rect),
       topology: {
         signature: 'geometry-region',
         instanceCount: rowCount,
@@ -718,12 +729,13 @@ export async function discoverChatWorkspaceAlignmentRails(
           },
         ];
       });
+      const discovered = discoverScopeRails(candidates, autoScope.rect);
       return {
         scope: autoScope.id,
         source: 'auto',
         rect: autoScope.rect,
         candidateCount: candidates.length,
-        rails: selectCanonicalAlignmentRails(discoverAlignmentRails(candidates), autoScope.rect),
+        ...discovered,
         topology: {
           signature: autoScope.signature,
           instanceCount: autoScope.instanceIds.length,
@@ -883,6 +895,7 @@ export async function auditChatWorkspaceSemanticAlignments(
       line: result.line,
       aligned: result.aligned,
       measurable: result.measurable,
+      status: result.status,
       spread: result.spread,
       members: result.members.map((member, index) => ({
         ...member,
@@ -939,7 +952,6 @@ export async function auditChatWorkspaceSemanticBaselines(
           const elements = Array.from(group.querySelectorAll<HTMLElement>(memberSelector)).filter(
             (member) => member.closest(groupSelector) === group && isVisible(member)
           );
-          if (elements.length < 2) return [];
           const rect = group.getBoundingClientRect();
           const semanticName = group.getAttribute(baselineAttributes.name);
           const instance = group
@@ -992,6 +1004,8 @@ export async function auditChatWorkspaceSemanticBaselines(
       line: result.line,
       spread: result.spread,
       aligned: result.aligned,
+      measurable: result.measurable,
+      status: result.status,
       members: result.members.map((member, index) => ({
         ...member,
         text: measurement.members[index]?.text ?? null,

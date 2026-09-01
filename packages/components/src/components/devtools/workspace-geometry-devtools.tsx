@@ -22,6 +22,7 @@ import {
   type SemanticAlignmentAxis,
   type SemanticAlignmentPolicy,
   type SemanticBaselineMode,
+  type SemanticGeometryStatus,
 } from '@/lib/chat-workspace-geometry';
 
 const ENABLE_QUERY_PARAMETER = 'geometry';
@@ -50,6 +51,8 @@ type SemanticBaselineEntry = Readonly<{
   line: number;
   spread: number;
   aligned: boolean;
+  measurable: boolean;
+  status: SemanticGeometryStatus;
   members: readonly Readonly<{ name: string; coordinate: number; delta: number }>[];
 }>;
 
@@ -62,6 +65,7 @@ type SemanticAlignmentEntry = Readonly<{
   line: number;
   aligned: boolean;
   measurable: boolean;
+  status: SemanticGeometryStatus;
   spread: number;
   members: readonly Readonly<{
     name: string;
@@ -70,6 +74,13 @@ type SemanticAlignmentEntry = Readonly<{
     rect: GeometryRect;
   }>[];
 }>;
+
+function semanticStatusColor(status: SemanticGeometryStatus): string {
+  if (status === 'aligned') return 'rgb(16 185 129 / 0.72)';
+  if (status === 'sub-pixel-jitter') return 'rgb(217 119 6 / 0.72)';
+  if (status === 'insufficient-evidence') return 'rgb(100 116 139 / 0.62)';
+  return 'rgb(244 63 94 / 0.82)';
+}
 
 export function resolveWorkspaceGeometryDevtoolsEnabled(
   search: string,
@@ -523,6 +534,7 @@ function readSemanticAlignments(): readonly SemanticAlignmentEntry[] {
         line: result.line,
         aligned: result.aligned,
         measurable: result.measurable,
+        status: result.status,
         spread: result.spread,
         members: result.members.map((member, index) => ({
           ...member,
@@ -563,7 +575,7 @@ function SemanticAlignmentOverlay() {
     };
   }, []);
 
-  const violations = entries.filter((entry) => !entry.aligned);
+  const violations = entries.filter((entry) => entry.status === 'violation');
   return (
     <div
       aria-hidden="true"
@@ -573,7 +585,7 @@ function SemanticAlignmentOverlay() {
       style={{ position: 'fixed', inset: 0, zIndex: 2_147_483_003, pointerEvents: 'none' }}
     >
       {entries.map((entry, index) => {
-        const color = entry.aligned ? 'rgb(16 185 129 / 0.72)' : 'rgb(244 63 94 / 0.78)';
+        const color = semanticStatusColor(entry.status);
         return (
           <div
             key={`${entry.groupLabel}-${index}`}
@@ -581,6 +593,7 @@ function SemanticAlignmentOverlay() {
             data-geometry-alignment-axis={entry.axis}
             data-geometry-alignment-anchor={entry.anchor}
             data-geometry-alignment-aligned={entry.aligned ? 'true' : 'false'}
+            data-geometry-alignment-status={entry.status}
             data-geometry-alignment-spread={Number(entry.spread.toFixed(2))}
             style={{
               position: 'absolute',
@@ -603,7 +616,7 @@ function SemanticAlignmentOverlay() {
                 boxShadow: `0 0 0 0.5px ${color}`,
               }}
             />
-            {!entry.aligned
+            {entry.status === 'violation' || entry.status === 'sub-pixel-jitter'
               ? entry.members.map((member, memberIndex) => (
                   <span
                     key={`${member.name}-${memberIndex}`}
@@ -619,7 +632,10 @@ function SemanticAlignmentOverlay() {
                           : member.rect.y - entry.rect.y,
                       width: entry.axis === 'x' ? 1 : member.rect.width,
                       height: entry.axis === 'y' ? 1 : member.rect.height,
-                      background: 'rgb(244 63 94 / 0.24)',
+                      background:
+                        entry.status === 'violation'
+                          ? 'rgb(244 63 94 / 0.24)'
+                          : 'rgb(217 119 6 / 0.18)',
                     }}
                   />
                 ))
@@ -649,8 +665,6 @@ function readSemanticBaselines(): readonly SemanticBaselineEntry[] {
     const elements = Array.from(group.querySelectorAll<HTMLElement>(memberSelector)).filter(
       (member) => member.closest(groupSelector) === group && isVisibleForGeometry(member)
     );
-    if (elements.length < 2) return [];
-
     const result = evaluateSemanticBaselineGroup({
       name: (() => {
         const semanticName = group.getAttribute(CHAT_WORKSPACE_SEMANTIC_BASELINE_ATTRIBUTES.name);
@@ -679,6 +693,8 @@ function readSemanticBaselines(): readonly SemanticBaselineEntry[] {
         line: result.line,
         spread: result.spread,
         aligned: result.aligned,
+        measurable: result.measurable,
+        status: result.status,
         members: result.members,
       },
     ];
@@ -725,7 +741,7 @@ function SemanticBaselineOverlay() {
     };
   }, []);
 
-  const violationCount = entries.filter((entry) => !entry.aligned).length;
+  const violationCount = entries.filter((entry) => entry.status === 'violation').length;
   return (
     <div
       aria-hidden="true"
@@ -735,12 +751,13 @@ function SemanticBaselineOverlay() {
       style={{ position: 'fixed', inset: 0, zIndex: 2_147_483_002, pointerEvents: 'none' }}
     >
       {entries.map((entry, index) => {
-        const color = entry.aligned ? 'rgb(16 185 129 / 0.72)' : 'rgb(244 63 94 / 0.82)';
+        const color = semanticStatusColor(entry.status);
         return (
           <div
             key={`${entry.groupLabel}-${index}`}
             data-geometry-baseline-name={entry.groupLabel}
             data-geometry-baseline-aligned={entry.aligned ? 'true' : 'false'}
+            data-geometry-baseline-status={entry.status}
             data-geometry-baseline-mode={entry.mode}
             data-geometry-baseline-spread={Number(entry.spread.toFixed(2))}
             style={{
@@ -750,7 +767,7 @@ function SemanticBaselineOverlay() {
               width: entry.rect.width,
               height: entry.rect.height,
               border: 0,
-              background: entry.aligned ? 'transparent' : 'rgb(244 63 94 / 0.008)',
+              background: entry.status === 'violation' ? 'rgb(244 63 94 / 0.008)' : 'transparent',
             }}
           >
             <span
@@ -761,9 +778,7 @@ function SemanticBaselineOverlay() {
                 top: entry.line - entry.rect.y,
                 height: 1,
                 background: color,
-                boxShadow: entry.aligned
-                  ? `0 0 0 0.5px rgb(16 185 129 / 0.18)`
-                  : `0 0 0 0.5px rgb(244 63 94 / 0.24)`,
+                boxShadow: `0 0 0 0.5px ${color}`,
               }}
             />
           </div>

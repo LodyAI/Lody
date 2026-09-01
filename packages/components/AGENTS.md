@@ -17,8 +17,8 @@ mobile surfaces.
 - `src/lib/chat-workspace-geometry.ts` owns the bootstrap mathematical design grid
   for the authenticated Web chat workspace. Its current numeric grid is a reviewed
   reference, not evidence that the product was automatically inferred. Production
-  layout stays ordinary Flex/Grid
-  and exposes only stable geometry data markers; never turn its columns into
+  layout stays ordinary Flex/Grid and exposes only stable geometry data markers;
+  never turn its columns into
   component props or wrapper DOM. The Storybook fixture and Playwright gate
   consume the same spec. In development, `?geometry=1` adds the reference overlay
   for both the Sidebar-local and Main Pane grids, semantic alignment lines,
@@ -29,22 +29,30 @@ mobile surfaces.
   rendered font's actual ascent/descent metrics, SVGs from their transformed path
   bounds, and CSS shapes from their visible boxes. Typographic baselines compare
   text only; glyph weight and perceived balance remain CV concerns. Named groups
-  expose stable member labels; diagnostics place guides at the median and fail on
-  the complete member spread, never DOM order. Padding, margin, gap, and line-height
-  multiples are spacing diagnostics, never alignment violations. Diagnostic debt
-  remains non-blocking until a rule is explicitly promoted into the Playwright gate.
+  expose stable member labels; diagnostics place guides at the median and assess the
+  complete member spread, never DOM order. A measurable spread above tolerance but at
+  most 1px is `sub-pixel-jitter`, stays folded in reports, and never enters the gate;
+  larger spreads are violations. Groups below their required member count are
+  `insufficient-evidence`, never aligned. Padding, margin, gap, and line-height multiples
+  are spacing diagnostics, never alignment violations. Diagnostic debt remains
+  non-blocking until a rule is explicitly promoted into the Playwright gate.
   Alignment-rail discovery is an earlier, heuristic stage. It mines repeated sibling
   subtrees from DOM topology and geometry; each repeated subtree instance contributes
   at most one member to a start/center/end rail, so a control and its nested icon cannot
   manufacture support. `data-geometry-discovery-scope` remains an optional hint for
-  named or aggregate regions, never a prerequisite for discovery. Repeated X coordinates
-  form median rails and members outside the inlier tolerance are reported as outliers.
+  named or aggregate regions, never a prerequisite for discovery. Coordinate-ordered
+  one-dimensional clusters form median rails independent of DOM order; members outside
+  the inlier tolerance are reported as outliers, and confidence includes the rail's span
+  relative to its containing scope rather than the minimum-span admission threshold.
   Discovery must not read semantic-alignment attributes: it derives visual rows and their
   direct layout slots from ordinary DOM topology, including transparent hover controls that
-  still occupy layout, and collapses each slot's start/center/end family to one canonical rail.
-  Rails with the same topology signature and normalized position across captures may
-  become evidence-backed contract proposals. A discovered rail or proposal is not layout
-  intent and cannot pass or fail the gate until a contract compiler binds it to stable
+  still occupy layout. It preserves each slot's start/center/end family until all captures
+  choose one canonical anchor together. Contract inference samples every workspace
+  verification viewport, caps normalized merging at 4 physical pixels, and counts missing
+  scope observations in capture coverage. Rails with the same topology signature and
+  normalized position across captures may become evidence-backed contract proposals. A
+  discovered rail or proposal is not layout intent and cannot pass or fail the gate until
+  a contract compiler binds it to stable
   semantic members and review promotes it into a named rule. Geometry-report violation
   images label every deviating member in place with its human-readable role, physical
   direction, measured offset, actual anchor, and a leader to the rendered element; a bare
@@ -52,7 +60,9 @@ mobile surfaces.
   Discovery cards use product-region names rather than scope ids, count unique rendered
   elements rather than repeated anchor votes, and group one element's start/center/end
   offsets into one in-image annotation. Candidate rails stay visually subordinate to
-  emphasized outliers because a heuristic proposal is not yet a violation.
+  emphasized outliers because a heuristic proposal is not yet a violation. Report capture
+  mode disables hover interaction and transitions and forces every geometry hover action
+  visible in both clean and annotated screenshots.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches

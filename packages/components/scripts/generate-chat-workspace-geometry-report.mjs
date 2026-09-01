@@ -1,5 +1,6 @@
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,6 +15,22 @@ const requestedOutput = argumentsList.find((argument) => !argument.startsWith('-
 const outputDirectory = path.resolve(packageRoot, requestedOutput ?? 'geometry-report');
 const reportPath = path.join(outputDirectory, 'index.html');
 const dataPath = path.join(outputDirectory, 'report-data.json');
+
+function portIsAvailable(port) {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+  });
+}
+
+async function resolveReportPort() {
+  if (process.env.GEOMETRY_REPORT_PORT) return Number(process.env.GEOMETRY_REPORT_PORT);
+  for (let port = 6100; port < 6120; port += 1) {
+    if (await portIsAvailable(port)) return port;
+  }
+  throw new Error('No available Storybook port in the geometry-report range 6100-6119');
+}
 
 function run(command, arguments_, options = {}) {
   return new Promise((resolve, reject) => {
@@ -53,9 +70,12 @@ async function openReport() {
 }
 
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const reportPort = await resolveReportPort();
 const reportEnvironment = {
   ...process.env,
   GEOMETRY_REPORT_OUTPUT_DIR: outputDirectory,
+  PLAYWRIGHT_PORT: String(reportPort),
+  PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${reportPort}`,
   VITE_PREVIEW_PUBLIC_BASE_DOMAIN: process.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN ?? 'local.invalid',
   ...(process.platform === 'darwin' && process.env.PLAYWRIGHT_USE_SYSTEM_CHROME == null
     ? { PLAYWRIGHT_USE_SYSTEM_CHROME: '1' }

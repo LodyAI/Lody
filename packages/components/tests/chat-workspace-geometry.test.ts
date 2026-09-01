@@ -218,6 +218,44 @@ describe('conversation, spacing, and semantic baselines', () => {
     ).toMatchObject({ measurable: false, aligned: false });
   });
 
+  it('classifies sub-pixel spread separately from actionable violations', () => {
+    expect(
+      evaluateSemanticAlignmentGroup({
+        name: 'sidebar.row.visual-center',
+        instance: 'row-1',
+        axis: 'y',
+        anchor: 'visual-center',
+        minMembers: 2,
+        tolerance: 0.5,
+        policy: 'observe',
+        members: [
+          { name: 'icon', coordinate: 40 },
+          { name: 'label', coordinate: 40.75 },
+        ],
+      })
+    ).toMatchObject({
+      measurable: true,
+      aligned: false,
+      spread: 0.75,
+      status: 'sub-pixel-jitter',
+    });
+  });
+
+  it('marks a single-member baseline as insufficient evidence', () => {
+    expect(
+      evaluateSemanticBaselineGroup({
+        name: 'sidebar-row',
+        mode: 'text',
+        members: [{ name: 'title', coordinate: 40 }],
+      })
+    ).toMatchObject({
+      measurable: false,
+      aligned: false,
+      spread: 0,
+      status: 'insufficient-evidence',
+    });
+  });
+
   it('discovers a repeated rail and identifies a two-pixel outlier', () => {
     const result = discoverAlignmentRails(
       [322, 322, 322, 324, 322, 322].map((coordinate, index) => ({
@@ -239,6 +277,46 @@ describe('conversation, spacing, and semantic baselines', () => {
       confidence: 5 / 6,
       outliers: [{ elementId: 'child-4', coordinate: 324, delta: 2, outlier: true }],
     });
+  });
+
+  it('partitions rails by coordinate independently of DOM order', () => {
+    const candidates = [
+      { coordinate: 103, rowId: 'right-2', yStart: 50 },
+      { coordinate: 100, rowId: 'left-3', yStart: 90 },
+      { coordinate: 103, rowId: 'right-1', yStart: 10 },
+      { coordinate: 100, rowId: 'left-1', yStart: 20 },
+      { coordinate: 103, rowId: 'right-3', yStart: 80 },
+      { coordinate: 100, rowId: 'left-2', yStart: 60 },
+    ].map(({ coordinate, rowId, yStart }) => ({
+      elementId: rowId,
+      rowId,
+      anchor: 'inline-start' as const,
+      coordinate,
+      yStart,
+      yEnd: yStart + 20,
+    }));
+
+    const forward = discoverAlignmentRails(candidates);
+    const reversed = discoverAlignmentRails([...candidates].reverse());
+
+    expect(forward.map((rail) => rail.line).sort()).toEqual([100, 103]);
+    expect(reversed).toEqual(forward);
+  });
+
+  it('scores vertical coverage relative to the containing scope', () => {
+    const rails = discoverAlignmentRails(
+      [0, 20, 40].map((yStart, index) => ({
+        elementId: `child-${index + 1}`,
+        rowId: `row-${index + 1}`,
+        anchor: 'inline-start' as const,
+        coordinate: 100,
+        yStart,
+        yEnd: yStart + 10,
+      })),
+      { minVerticalSpan: 0, scopeHeight: 100 }
+    );
+
+    expect(rails[0]).toMatchObject({ verticalSpan: 50, confidence: 0.5 });
   });
 
   it('collapses repeated slot anchors to the boundary-facing canonical rail', () => {
@@ -480,6 +558,107 @@ describe('conversation, spacing, and semantic baselines', () => {
           ],
         },
       ])
+    ).toEqual([]);
+  });
+
+  it('chooses one canonical anchor from family evidence across captures', () => {
+    const family = (kinds: readonly string[]) => {
+      const rail = (anchor: 'inline-start' | 'inline-center' | 'inline-end', line: number) => ({
+        anchor,
+        line,
+        support: kinds.length,
+        sampleSize: kinds.length,
+        verticalSpan: 100,
+        confidence: 1,
+        members: kinds.map((kind, index) => ({
+          elementId: `slot-${index + 1}`,
+          rowId: `row-${index + 1}`,
+          kind,
+          anchor,
+          coordinate: line,
+          yStart: index * 30,
+          yEnd: index * 30 + 20,
+          delta: 0,
+          outlier: false,
+        })),
+        outliers: [],
+      });
+      return {
+        rails: [rail('inline-start', 20), rail('inline-center', 50), rail('inline-end', 80)],
+      };
+    };
+    const textMajority = family(['text', 'text', 'button']);
+    const controlMajority = family(['text', 'button', 'button']);
+
+    const proposals = inferAlignmentRailContractProposals(
+      [
+        {
+          captureId: 'capture-a',
+          scopeKey: 'sidebar:row-slot',
+          scopeRect: { x: 0, y: 0, width: 100, height: 200 },
+          rails: [textMajority.rails[0]!],
+          railFamilies: [textMajority],
+        },
+        {
+          captureId: 'capture-b',
+          scopeKey: 'sidebar:row-slot',
+          scopeRect: { x: 0, y: 0, width: 100, height: 200 },
+          rails: [controlMajority.rails[2]!],
+          railFamilies: [controlMajority],
+        },
+        {
+          captureId: 'capture-c',
+          scopeKey: 'sidebar:row-slot',
+          scopeRect: { x: 0, y: 0, width: 100, height: 200 },
+          rails: [],
+          railFamilies: [],
+        },
+      ],
+      { minConfidence: 0 }
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        anchor: 'inline-start',
+        normalizedLine: 0.2,
+        evidence: expect.objectContaining({
+          captureIds: ['capture-a', 'capture-b'],
+          captureCoverage: 2 / 3,
+        }),
+      }),
+    ]);
+  });
+
+  it('caps normalized clustering tolerance at four physical pixels', () => {
+    const rail = (line: number) => ({
+      anchor: 'inline-start' as const,
+      line,
+      support: 4,
+      sampleSize: 4,
+      verticalSpan: 100,
+      confidence: 1,
+      members: [],
+      outliers: [],
+    });
+
+    expect(
+      inferAlignmentRailContractProposals(
+        [
+          {
+            captureId: 'wide-a',
+            scopeKey: 'main:content',
+            scopeRect: { x: 0, y: 0, width: 1000, height: 500 },
+            rails: [rail(200)],
+          },
+          {
+            captureId: 'wide-b',
+            scopeKey: 'main:content',
+            scopeRect: { x: 0, y: 0, width: 1000, height: 500 },
+            rails: [rail(207)],
+          },
+        ],
+        { minConfidence: 0 }
+      )
     ).toEqual([]);
   });
 });

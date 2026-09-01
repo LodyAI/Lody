@@ -22,6 +22,7 @@ const STORY_IDS = {
   expanded: 'geometry-chatworkspace--expanded-sidebar',
   collapsed: 'geometry-chatworkspace--collapsed-sidebar',
 } as const;
+const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:6006';
 
 for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
   test(`${verificationCase.name} satisfies the authenticated chat workspace contract`, async ({
@@ -37,7 +38,7 @@ for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
     const unexpectedNetworkRequests: string[] = [];
     await context.route(/https?:\/\//, async (route) => {
       const url = new URL(route.request().url());
-      if (url.origin === 'http://127.0.0.1:6006') {
+      if (url.origin === storybookOrigin) {
         await route.continue();
         return;
       }
@@ -47,7 +48,7 @@ for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
 
     const page = await context.newPage();
     const storyId = STORY_IDS[verificationCase.sidebar];
-    const storyUrl = `http://127.0.0.1:6006/iframe.html?id=${storyId}&viewMode=story`;
+    const storyUrl = `${storybookOrigin}/iframe.html?id=${storyId}&viewMode=story`;
     const response = await page.goto(storyUrl);
     expect(response?.ok(), `Story iframe did not return 2xx for ${storyId}`).toBeTruthy();
 
