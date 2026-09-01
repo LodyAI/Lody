@@ -422,9 +422,15 @@ Session conversation page chain:
   the menu the moment it opened; `AgentRoleEditorDialog` is the one editor,
   shared with Settings.
   Picking a Role flows through the SAME preference channel as that agent's
-  remembered defaults (`useReconcileAcpSessionConfigSelection`), never a second
+  remembered defaults (`useAcpSessionConfigSelectionState`), never a second
   apply path — so a pinned value the agent no longer supports falls back visibly
-  there instead of being forced in. The footer names a Role only while
+  there instead of being forced in. That channel is a PURE DERIVATION: user
+  edits are the only stored selection state, and effective values resolve per
+  render (user edit > runtime baseline > turn preference > capability default;
+  a full runtime snapshot owns the non-user config table). Never reintroduce a
+  reducer that stores the resolved selection or an effect that reconciles it —
+  two dispatches disagreeing about a runtime-omitted key plus options rebuilt
+  from the selection was a synchronous #185 render loop on session open. The footer names a Role only while
   `isComposerAgentRoleApplied` still holds (`lib/composer-agent-roles.ts`):
   every value the Role pins is what will run. Moving a knob takes the name away
   rather than clearing the preference, which would re-seed the value just

@@ -246,7 +246,7 @@ import { useComposerCycleCommands } from '@/hooks/use-composer-cycle-commands';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
@@ -2039,14 +2039,70 @@ export const SessionChatInterface = memo(
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      doc: sessionDoc,
+      addHistory: addSessionHistory,
+      pushMessageQueue,
+      removeMessageQueueItem,
+      updateMessageQueueItem,
+      reorderMessageQueueItem,
+      updateHistoryEntry,
+      waitUntilSynced,
+      ready: sessionDocReady,
+      synced: sessionDocSynced,
+      syncState: sessionDocSyncState,
+    } = useSessionDoc(session.id, {
+      enabled: !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
+    });
+    const sessionConversationConfig = useMemo(
+      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
+      [sessionDoc?.history, sessionDoc?.mq]
+    );
+    const sessionRuntimeConfig = useMemo(
+      () =>
+        resolveSessionAcpRuntimeConfig(
+          sessionDoc?.history ?? [],
+          sessionDoc?.mq ?? [],
+          sessionDoc?.acpRuntimeConfig
+        ),
+      [sessionDoc?.acpRuntimeConfig, sessionDoc?.history, sessionDoc?.mq]
+    );
+    // `sourceConfigKey` identifies the durable turn selected by the resolver,
+    // so there is no need to hash its mode/model/option values separately.
+    const sessionConversationConfigRevision = `${session.id}:${
+      sessionConversationConfig.sourceConfigKey ?? ''
+    }`;
+    const sessionConfigPreferences = useMemo(
+      () => ({
+        modeId: sessionConversationConfig.modeId,
+        modelId: sessionConversationConfig.modelId,
+        configOptionValues: sessionConversationConfig.configOptionValues,
+      }),
+      [
+        sessionConversationConfig.configOptionValues,
+        sessionConversationConfig.modeId,
+        sessionConversationConfig.modelId,
+      ]
+    );
+    /* No effects here: user edits are the only stored selection state and the
+       effective values derive per render. The UNVALIDATED candidates feed the
+       capability lookup so the catalog can depend on the selection (Codex
+       reasoning tiers, provisional menu enrichment) without feeding back into
+       the values it validates — the #185 reconcile loop is unrepresentable. */
+    const {
+      selection: sessionConfigSelection,
+      candidates: sessionConfigCandidates,
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
-      dispatch: dispatchSessionConfigSelection,
-    } = useAcpSessionConfigSelectionState();
+    } = useAcpSessionConfigSelectionState({
+      enabled: !hideMessageArea && sessionDocReady,
+      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
+      preferenceRevision: sessionConversationConfigRevision,
+      preferences: sessionConfigPreferences,
+      runtimePreferences: sessionRuntimeConfig,
+      preserveUnsentUserEdits: true,
+    });
     const {
       availableCommands,
       capabilityAuthority,
@@ -2062,10 +2118,30 @@ export const SessionChatInterface = memo(
       configId: session.agentConfigId,
       cliType: session.cliType,
       agentType: session.agentType,
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      selectedModeId: sessionConfigCandidates.modeId,
+      selectedModelId: sessionConfigCandidates.modelId,
+      configOptionValues: sessionConfigCandidates.configOptionValues,
     });
+    const sessionSelectorOptions = useMemo(
+      () => ({
+        capabilityAuthority,
+        configOptionSelectors,
+        defaultModeId,
+        defaultModelId,
+        modeOptions,
+        modelOptions,
+      }),
+      [
+        capabilityAuthority,
+        configOptionSelectors,
+        defaultModeId,
+        defaultModelId,
+        modeOptions,
+        modelOptions,
+      ]
+    );
+    const { selectedModeId, selectedModelId, configOptionValues } =
+      useResolvedAcpSessionConfigSelection(sessionConfigSelection, sessionSelectorOptions);
     useMachineFlockAgentConfigsForMachineIds([session.machineId]);
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
@@ -2279,23 +2355,6 @@ export const SessionChatInterface = memo(
           : undefined,
       [handleChangeOwner, isMultiMember, pendingOwnerUserId, session.userId, workspaceMembers]
     );
-    const {
-      doc: sessionDoc,
-      addHistory: addSessionHistory,
-      pushMessageQueue,
-      removeMessageQueueItem,
-      updateMessageQueueItem,
-      reorderMessageQueueItem,
-      updateHistoryEntry,
-      waitUntilSynced,
-      ready: sessionDocReady,
-      synced: sessionDocSynced,
-      syncState: sessionDocSyncState,
-    } = useSessionDoc(session.id, {
-      enabled: !hideMessageArea,
-      syncEnabled: !hideMessageArea && syncEnabled,
-    });
-
     const [sendingMessageIds, setSendingMessageIds] = useState<ReadonlySet<string>>(new Set());
     const [dismissedProposedPlanDecisionKeys, setDismissedProposedPlanDecisionKeys] = useState<
       ReadonlySet<string>
@@ -2384,67 +2443,9 @@ export const SessionChatInterface = memo(
       TITLE_SYNCING_INDICATOR_DELAY_MS
     );
 
-    const sessionConversationConfig = useMemo(
-      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
-      [sessionDoc?.history, sessionDoc?.mq]
-    );
-    const sessionRuntimeConfig = useMemo(
-      () =>
-        resolveSessionAcpRuntimeConfig(
-          sessionDoc?.history ?? [],
-          sessionDoc?.mq ?? [],
-          sessionDoc?.acpRuntimeConfig
-        ),
-      [sessionDoc?.acpRuntimeConfig, sessionDoc?.history, sessionDoc?.mq]
-    );
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
-    });
-    // `sourceConfigKey` identifies the durable turn selected by the resolver,
-    // so there is no need to hash its mode/model/option values separately.
-    const sessionConversationConfigRevision = `${session.id}:${
-      sessionConversationConfig.sourceConfigKey ?? ''
-    }`;
-    const sessionConfigPreferences = useMemo(
-      () => ({
-        modeId: sessionConversationConfig.modeId,
-        modelId: sessionConversationConfig.modelId,
-        configOptionValues: sessionConversationConfig.configOptionValues,
-      }),
-      [
-        sessionConversationConfig.configOptionValues,
-        sessionConversationConfig.modeId,
-        sessionConversationConfig.modelId,
-      ]
-    );
-    const sessionSelectorOptions = useMemo(
-      () => ({
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      }),
-      [
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      ]
-    );
-    useReconcileAcpSessionConfigSelection({
-      enabled: !hideMessageArea && sessionDocReady,
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
-      preferenceRevision: sessionConversationConfigRevision,
-      preferences: sessionConfigPreferences,
-      runtimePreferences: sessionRuntimeConfig,
-      preserveUnsentUserEdits: true,
-      selectorOptions: sessionSelectorOptions,
-      dispatch: dispatchSessionConfigSelection,
     });
     const executionTurnConfigOverrides = useMemo(
       () =>

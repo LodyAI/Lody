@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '../src/hooks/use-acp-session-config-selection';
 import { agentDefaultsCache, persistAgentSessionDefaults } from '../src/lib/local-storage-cache';
 
@@ -32,18 +32,16 @@ const selectorOptions = (
 });
 
 function DefaultsProbe({ options }: { options: AcpSelectorOptions }) {
-  const controller = useAcpSessionConfigSelectionState();
-  useReconcileAcpSessionConfigSelection({
+  const controller = useAcpSessionConfigSelectionState({
     targetKey: `${machineId}:${agentId}`,
     preferenceRevision: agentId,
     preferences: agentDefaultsCache.get(agentId) ?? {},
-    selectorOptions: options,
-    dispatch: controller.dispatch,
   });
+  const resolved = useResolvedAcpSessionConfigSelection(controller.selection, options);
 
   return (
     <>
-      <output data-model={controller.selectedModelId ?? ''} />
+      <output data-model={resolved.selectedModelId ?? ''} />
       <button type="button" onClick={() => controller.selectModel('gpt-5.5')}>
         Select 5.5
       </button>
@@ -108,3 +106,6 @@ describe('chat landing agent session defaults', () => {
     expect(container.querySelector('output')?.dataset.model).toBe('gpt-5.5');
   });
 });
+
+/* The #185 oscillation regression (session 51e236e0…) lives in
+   tests/session-config-selection-oscillation.test.tsx. */

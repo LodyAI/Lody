@@ -56,7 +56,7 @@ import {
 } from '@/components/shared/acp-selector-options';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import { useComposerCycleCommands } from '@/hooks/use-composer-cycle-commands';
@@ -143,40 +143,7 @@ export const DraftSessionChatInterface = memo(
       const resolvedTheme = useResolvedTheme();
       const isDark = resolvedTheme === 'dark';
       const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
-      const {
-        state: sessionConfigSelectionState,
-        selectedModeId,
-        selectedModelId,
-        configOptionValues,
-        selectMode,
-        selectModel,
-        selectConfigOption,
-        dispatch: dispatchSessionConfigSelection,
-      } = useAcpSessionConfigSelectionState();
       const sessionConfigTargetKey = `${draft.id}:${draft.agentConfigId ?? ''}:${draft.cliType}:${draft.agentType}`;
-      const {
-        availableCommands,
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        machineFlockRows,
-        modeOptions,
-        modelOptions,
-        sessionMachine,
-      } = useSessionAcpSelectorContext({
-        machineId: parentSession.machineId,
-        configId: draft.agentConfigId,
-        cliType: draft.cliType,
-        agentType: draft.agentType,
-        selectedModeId,
-        selectedModelId,
-        configOptionValues,
-      });
-      const dispatchConfigOptionValues = useMemo(
-        () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-        [configOptionSelectors, configOptionValues]
-      );
       const agentConfigs = useAtomValue(getAllAgentConfigAtom);
       const { roles: workspaceAgentRoles } = useWorkspaceAgentRoles();
       const { resolve: resolveAgentRoleAvailability } =
@@ -265,6 +232,46 @@ export const DraftSessionChatInterface = memo(
         parentConversationConfig.modelId,
         preferAgentDefaults,
       ]);
+      const sessionConfigPreferenceRevision = agentRolePreference
+        ? `${sessionConfigTargetKey}:role:${agentRolePreference.id}:${agentRolePreference.revision}:${agentRolePreferenceToken}`
+        : `${sessionConfigTargetKey}:${parentConversationConfig.sourceConfigKey ?? ''}`;
+      /* No effects: user edits are the only stored selection state; the
+         effective values derive per render. Candidates feed the capability
+         lookup so the catalog can depend on the selection without feeding
+         back into it. */
+      const {
+        selection: sessionConfigSelection,
+        candidates: sessionConfigCandidates,
+        appliedTargetKey: appliedSessionConfigTargetKey,
+        appliedPreferenceRevision: appliedSessionConfigPreferenceRevision,
+        selectMode,
+        selectModel,
+        selectConfigOption,
+      } = useAcpSessionConfigSelectionState({
+        enabled: parentSessionDocReady,
+        targetKey: sessionConfigTargetKey,
+        preferenceRevision: sessionConfigPreferenceRevision,
+        preferences: preferredSessionConfig,
+      });
+      const {
+        availableCommands,
+        capabilityAuthority,
+        configOptionSelectors,
+        defaultModeId,
+        defaultModelId,
+        machineFlockRows,
+        modeOptions,
+        modelOptions,
+        sessionMachine,
+      } = useSessionAcpSelectorContext({
+        machineId: parentSession.machineId,
+        configId: draft.agentConfigId,
+        cliType: draft.cliType,
+        agentType: draft.agentType,
+        selectedModeId: sessionConfigCandidates.modeId,
+        selectedModelId: sessionConfigCandidates.modelId,
+        configOptionValues: sessionConfigCandidates.configOptionValues,
+      });
       const selectorOptions = useMemo(
         () => ({
           capabilityAuthority,
@@ -283,17 +290,12 @@ export const DraftSessionChatInterface = memo(
           modelOptions,
         ]
       );
-      const sessionConfigPreferenceRevision = agentRolePreference
-        ? `${sessionConfigTargetKey}:role:${agentRolePreference.id}:${agentRolePreference.revision}:${agentRolePreferenceToken}`
-        : `${sessionConfigTargetKey}:${parentConversationConfig.sourceConfigKey ?? ''}`;
-      useReconcileAcpSessionConfigSelection({
-        enabled: parentSessionDocReady,
-        targetKey: sessionConfigTargetKey,
-        preferenceRevision: sessionConfigPreferenceRevision,
-        preferences: preferredSessionConfig,
-        selectorOptions,
-        dispatch: dispatchSessionConfigSelection,
-      });
+      const { selectedModeId, selectedModelId, configOptionValues } =
+        useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions);
+      const dispatchConfigOptionValues = useMemo(
+        () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
+        [configOptionSelectors, configOptionValues]
+      );
       const thinkEffortSelector = useMemo(
         () =>
           configOptionSelectors.find(
@@ -448,8 +450,8 @@ export const DraftSessionChatInterface = memo(
       useLayoutEffect(() => {
         if (
           !parentSessionDocReady ||
-          sessionConfigSelectionState.targetKey !== sessionConfigTargetKey ||
-          sessionConfigSelectionState.preferenceRevision !== sessionConfigPreferenceRevision
+          appliedSessionConfigTargetKey !== sessionConfigTargetKey ||
+          appliedSessionConfigPreferenceRevision !== sessionConfigPreferenceRevision
         ) {
           return;
         }
@@ -476,8 +478,8 @@ export const DraftSessionChatInterface = memo(
         parentSessionDocReady,
         selectedModeId,
         selectedModelId,
-        sessionConfigSelectionState.targetKey,
-        sessionConfigSelectionState.preferenceRevision,
+        appliedSessionConfigTargetKey,
+        appliedSessionConfigPreferenceRevision,
         sessionConfigPreferenceRevision,
         sessionConfigTargetKey,
       ]);

@@ -10,11 +10,10 @@ import {
   type SessionId,
 } from '@lody/shared';
 import {
-  createEmptyAcpSessionConfigSelectionState,
-  getAcpSessionConfigOptionValues,
-  reduceAcpSessionConfigSelection,
+  EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+  resolveAcpSessionConfigSelection,
   type AcpSessionConfigPreferences,
-  type AcpSessionConfigSelectionState,
+  type AcpSessionUserConfigEdits,
 } from '../src/lib/acp-session-config-selection';
 
 const userTurnId = 'turn-plan-low';
@@ -73,24 +72,14 @@ const createUserTurn = (): SessionHistoryInput => ({
   },
 });
 
-const createComposerState = (): AcpSessionConfigSelectionState =>
-  reduceAcpSessionConfigSelection(createEmptyAcpSessionConfigSelectionState(), {
-    type: 'reconcile',
-    targetKey: 'session:codex',
-    preferenceRevision: `history:${userTurnId}`,
-    preferences: sharedPlanLow,
-    ...selectorOptions,
-  });
-
-const applyRuntime = (
-  state: AcpSessionConfigSelectionState,
-  preferences: AcpSessionConfigPreferences
-): AcpSessionConfigSelectionState =>
-  reduceAcpSessionConfigSelection(state, {
-    type: 'apply-runtime-preferences',
-    preferences,
-    ...selectorOptions,
-  });
+const resolveComposerValues = (
+  edits: AcpSessionUserConfigEdits,
+  runtimePreferences: AcpSessionConfigPreferences | null
+) =>
+  resolveAcpSessionConfigSelection(
+    { edits, preferences: sharedPlanLow, runtimePreferences },
+    selectorOptions
+  ).configOptionValues;
 
 describe('ACP runtime config across two clients', () => {
   it("syncs Plan exit to both clients without publishing A's unsent High choice", () => {
@@ -115,13 +104,9 @@ describe('ACP runtime config across two clients', () => {
       throwOnValidationError: true,
     });
 
-    let composerA = createComposerState();
-    let composerB = createComposerState();
-    composerA = reduceAcpSessionConfigSelection(composerA, {
-      type: 'select-config-option',
-      configId: 'reasoning_effort',
-      value: 'high',
-    });
+    // A holds an unsent High edit; B has none.
+    const editsA: AcpSessionUserConfigEdits = { configOptions: { reasoning_effort: 'high' } };
+    const editsB = EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
     mirrorA.setState((state) => ({
       ...state,
@@ -155,14 +140,11 @@ describe('ACP runtime config across two clients', () => {
       reasoning_effort: 'low',
     });
 
-    composerA = applyRuntime(composerA, runtimeA ?? {});
-    composerB = applyRuntime(composerB, runtimeB ?? {});
-
-    expect(getAcpSessionConfigOptionValues(composerA)).toEqual({
+    expect(resolveComposerValues(editsA, runtimeA)).toEqual({
       collaboration_mode: 'default',
       reasoning_effort: 'high',
     });
-    expect(getAcpSessionConfigOptionValues(composerB)).toEqual({
+    expect(resolveComposerValues(editsB, runtimeB)).toEqual({
       collaboration_mode: 'default',
       reasoning_effort: 'low',
     });
