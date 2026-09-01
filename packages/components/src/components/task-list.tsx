@@ -51,7 +51,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -70,6 +69,7 @@ import {
   SessionRowLeadingSlot,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SessionMergeablePill,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -191,26 +191,6 @@ export function getVisibleTaskGroupTasks(
   whetherShowFullList: boolean
 ): TaskListTask[] {
   return whetherShowFullList ? group.tasks : group.tasks.slice(0, MAX_VISIBLE_TASKS);
-}
-
-function TaskListSkeleton({ className }: { className?: string }) {
-  const rowWidths = ['w-[70%]', 'w-[58%]', 'w-[76%]', 'w-[62%]', 'w-[68%]', 'w-[54%]'];
-  return (
-    <div className={cn('space-y-3', className)}>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-24" />
-        <div className="space-y-2 rounded-lg border border-border/50 p-2">
-          {rowWidths.map((width, index) => (
-            <div key={index} className="flex items-center gap-2 px-1 py-1.5">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className={cn('h-3', width)} />
-              <Skeleton className="ml-auto h-3 w-10" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function normalizeRepoFullName(value: TaskListTask['repoFullName']): string | null {
@@ -1302,7 +1282,7 @@ export const TaskList = memo(function TaskList({
         {headerAction ? (
           <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>
         ) : null}
-        <TaskListSkeleton className={className} />
+        <SidebarListSkeleton className={className} />
       </div>
     );
   }

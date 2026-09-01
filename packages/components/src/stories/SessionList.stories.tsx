@@ -26,6 +26,7 @@ type TaskListDemoProps = SessionListProps & {
 function TaskListDemo({
   sessions,
   repos,
+  isLoading,
   selectedSessionId,
   containerClassName,
   collapsedOpenedBySessionIds,
@@ -119,6 +120,7 @@ function TaskListDemo({
         <SessionList
           sessions={taskState}
           repos={repoState}
+          isLoading={isLoading}
           chatsCollapsed={chatsCollapsed}
           selectedSessionId={selectedId}
           onSelect={setSelectedId}
@@ -249,6 +251,16 @@ const DEFAULT_ARGS: SessionListProps = {
 
 export const Default: Story = {
   args: DEFAULT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
+export const Loading: Story = {
+  args: {
+    ...DEFAULT_ARGS,
+    sessions: [],
+    repos: [],
+    isLoading: true,
+  },
   render: (args) => <TaskListDemo {...args} />,
 };
 
