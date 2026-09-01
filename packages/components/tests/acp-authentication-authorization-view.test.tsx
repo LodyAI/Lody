@@ -3,7 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId } from '@lody/shared';
+import type { AgentConfigId, MachineId } from '@lody/shared';
 
 import {
   AcpAuthenticationAuthorizationView,
@@ -40,40 +40,27 @@ describe('AcpAuthenticationAuthorizationView', () => {
     expect(isAllowedAcpAuthorizationUrl('not a url')).toBe(false);
   });
 
-  it('treats launch, runtime, and environment changes as a different authentication target', () => {
+  it('identifies an authentication target only by machine and persisted config', () => {
     const target = {
       machineId: 'machine-1' as MachineId,
-      cliType: 'custom' as const,
-      agentType: 'provider',
-      customAcp: { command: 'provider-acp', args: ['serve'] },
-      runtimeOverrides: { codexPath: '/opt/codex' },
-      env: { PROVIDER_TOKEN: 'first' },
+      configId: 'config-1' as AgentConfigId,
     };
 
     expect(
       areAcpAuthenticationTargetsEqual(target, {
         ...target,
-        customAcp: { command: 'provider-acp', args: ['serve'] },
-        runtimeOverrides: { codexPath: '/opt/codex' },
-        env: { PROVIDER_TOKEN: 'first' },
       })
     ).toBe(true);
     expect(
       areAcpAuthenticationTargetsEqual(target, {
         ...target,
-        env: { PROVIDER_TOKEN: 'second' },
+        configId: 'config-2' as AgentConfigId,
       })
     ).toBe(false);
     expect(
       areAcpAuthenticationTargetsEqual(target, {
         ...target,
-        customAcp: { command: 'other-acp', args: ['serve'] },
-      })
-    ).toBe(false);
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        ...target,
-        runtimeOverrides: { codexPath: '/usr/local/bin/codex' },
+        machineId: 'machine-2' as MachineId,
       })
     ).toBe(false);
   });

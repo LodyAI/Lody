@@ -3260,67 +3260,56 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onAcpBinaryProgress,
-          signal,
-        }) =>
+        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
             },
             { onAcpBinaryProgress, signal }
           ),
-        authenticateMachineAcp: async ({
-          requestId,
-          action,
-          authenticationRequestId,
-          authorizationCode,
-          methodId,
-          interactionId,
-          authenticationInput,
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onProgress,
-        }) =>
-          await this.authenticateMachineAcpAndResumeSetup(
-            {
-              type: 'machine/acp-authenticate',
-              machineId: this.machineId,
-              workspaceId: this.workspaceId,
-              requestId,
-              action,
-              authenticationRequestId,
-              authorizationCode,
-              methodId,
-              interactionId,
-              authenticationInput,
-              configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
-            },
-            { onProgress }
-          ),
+        authenticateMachineAcp: async (args) => {
+          const common = {
+            type: 'machine/acp-authenticate' as const,
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+            requestId: args.requestId,
+          };
+          const message: MachineAcpAuthenticateRequestValidated = (() => {
+            switch (args.action) {
+              case 'start':
+                return { ...common, action: args.action, configId: args.configId };
+              case 'cancel':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                };
+              case 'submit-code':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  authorizationCode: args.authorizationCode,
+                };
+              case 'submit-input':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  interactionId: args.interactionId,
+                  authenticationInput: args.authenticationInput,
+                };
+              default:
+                throw new Error('Unsupported ACP authentication action');
+            }
+          })();
+          return await this.authenticateMachineAcpAndResumeSetup(message, {
+            onProgress: args.onProgress,
+          });
+        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',
@@ -8287,7 +8276,6 @@ export class MessageHandler {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
       message.action === 'start' &&
-      message.configId &&
       response.success &&
       response.disposition === 'authenticated'
     ) {

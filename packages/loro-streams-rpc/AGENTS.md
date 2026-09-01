@@ -96,6 +96,12 @@ Machine RPC; the old session-scoped Code Collab Host RPC ingress has been remove
   clients still accept it. Custom/Registry ACP authentication stays on that same long-running request
   so method selection, URL/form elicitation, cancellation, and timeout all target the temporary ACP
   process that owns the login.
+  Version 2 binds every process-launching authentication/capability request to a
+  daemon-resolved persisted `configId`. Start requests never carry launch fields;
+  cancel/code/form replies carry only the established authentication request and
+  interaction ids. Do not reintroduce caller-supplied `customAcp`, `env`, or runtime
+  overrides on Workspace Machine RPC: that transport cannot authorize a caller to
+  choose a command for the target daemon.
 - Code Collab v2 file/LSP methods are ordinary Machine RPC methods:
   `code-collab/open-text`, `refresh-text`, `save-text`, `init-directory`,
   `open-current-diff`, `open-turn-diff`, `lsp-definition`, and `lsp-references`.

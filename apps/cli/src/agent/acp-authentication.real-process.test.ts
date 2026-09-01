@@ -61,7 +61,6 @@ describe('Custom ACP authentication real process', () => {
             expect(
               manager.submitAuthenticationInput(
                 'real-process-validation',
-                'real-process-validation',
                 event.interactionId,
                 JSON.stringify({ action: 'accept', methodId: 'manual' })
               )
@@ -99,7 +98,6 @@ describe('Custom ACP authentication real process', () => {
       ]);
       expect(
         manager.submitAuthenticationInput(
-          'real-process-validation',
           'real-process-validation',
           interaction.interactionId,
           JSON.stringify({

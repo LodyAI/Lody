@@ -187,7 +187,7 @@ describe('AcpAuthenticationManager', () => {
       })
     );
 
-    expect(manager.submitAuthorizationCode('claude', 'auth-claude', 'browser-code')).toEqual({
+    expect(manager.submitAuthorizationCode('auth-claude', 'browser-code')).toEqual({
       success: true,
       disposition: 'input-accepted',
     });
@@ -259,7 +259,7 @@ describe('AcpAuthenticationManager', () => {
     const firstAttempt = manager.authenticate({ requestId: 'auth-1', ...input });
     await preparationStarted.promise;
     expect(resolveLoginShellEnv).toHaveBeenCalledOnce();
-    expect(manager.cancel('kimi', 'auth-1')).toEqual({
+    expect(manager.cancel('auth-1')).toEqual({
       success: true,
       disposition: 'cancelled',
     });
@@ -404,7 +404,6 @@ describe('AcpAuthenticationManager', () => {
     const { interactionId } = await formReceived.promise;
     expect(
       manager.submitAuthenticationInput(
-        'custom-test',
         'auth-custom',
         interactionId,
         JSON.stringify({
@@ -468,7 +467,6 @@ describe('AcpAuthenticationManager', () => {
     const { interactionId } = await methodsReceived.promise;
     expect(
       manager.submitAuthenticationInput(
-        'custom-methods',
         'auth-method-choice',
         interactionId,
         JSON.stringify({ action: 'accept', methodId: 'api-key' })
@@ -525,7 +523,7 @@ describe('AcpAuthenticationManager', () => {
     });
 
     await inputReceived.promise;
-    expect(manager.cancel('custom-cancel', 'auth-cancel-custom')).toEqual({
+    expect(manager.cancel('auth-cancel-custom')).toEqual({
       success: true,
       disposition: 'cancelled',
     });
@@ -587,7 +585,6 @@ describe('AcpAuthenticationManager', () => {
     const { interactionId } = await authorizationReceived.promise;
     expect(
       manager.submitAuthenticationInput(
-        'custom-url',
         'auth-url',
         interactionId,
         JSON.stringify({ action: 'accept' })

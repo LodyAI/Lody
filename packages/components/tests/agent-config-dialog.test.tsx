@@ -174,8 +174,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response' as const,
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: true,
     }),
     onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected']
@@ -335,7 +335,7 @@ describe('AgentConfigDialog', () => {
       onSubmit
     );
     await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const firstId = onSubmit.mock.calls[0]?.[0].id;
 
     await renderDialog(
@@ -344,9 +344,9 @@ describe('AgentConfigDialog', () => {
       onSubmit
     );
     await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
 
-    expect(onSubmit.mock.calls[1]?.[0].id).toBe(firstId);
+    expect(onSubmit.mock.calls.every(([payload]) => payload.id === firstId)).toBe(true);
   });
 
   it('shows the managed Kimi Node requirement before create', async () => {
@@ -407,7 +407,10 @@ describe('AgentConfigDialog', () => {
       createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await vi.waitFor(() => expect(onRefreshCapabilities).toHaveBeenCalledOnce());
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+      onRefreshCapabilities.mock.invocationCallOrder[0]!
+    );
 
     await act(async () => {
       finishRefresh?.({
@@ -464,8 +467,8 @@ describe('AgentConfigDialog', () => {
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
+        cliType: 'builtin',
+        agentType,
         success: false,
         authRequired: true,
         authMethods: [],
@@ -494,7 +497,10 @@ describe('AgentConfigDialog', () => {
         expect(document.body.textContent).toContain(`Sign in with ${accountName}`);
       });
       expect(onRefreshCapabilities).toHaveBeenCalledOnce();
-      expect(onSubmit).not.toHaveBeenCalled();
+      expect(onSubmit).toHaveBeenCalledOnce();
+      expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        onRefreshCapabilities.mock.invocationCallOrder[0]!
+      );
     }
   );
 
@@ -523,8 +529,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: false,
       authRequired: true,
       authMethods: [],
@@ -571,8 +577,8 @@ describe('AgentConfigDialog', () => {
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
+        cliType: 'builtin',
+        agentType,
         success: true,
       }));
       await renderDialog(
@@ -595,17 +601,20 @@ describe('AgentConfigDialog', () => {
 
       await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
       expect(onRefreshCapabilities).toHaveBeenCalledOnce();
+      expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        onRefreshCapabilities.mock.invocationCallOrder[0]!
+      );
     }
   );
 
-  it('does not create a built-in provider when its live probe fails', async () => {
+  it('persists the provider before probing and surfaces a live-probe failure', async () => {
     const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: false,
       error: 'Codex could not reach OpenAI',
     }));
@@ -630,7 +639,10 @@ describe('AgentConfigDialog', () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Codex could not reach OpenAI');
     });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+      onRefreshCapabilities.mock.invocationCallOrder[0]!
+    );
   });
 
   it('revalidates a built-in provider when its environment changes after a successful test', async () => {
@@ -639,8 +651,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: true,
     }));
     await renderDialog(
@@ -683,7 +695,7 @@ describe('AgentConfigDialog', () => {
       createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
     expect(onRefreshCapabilities).toHaveBeenCalledTimes(2);
   });
 

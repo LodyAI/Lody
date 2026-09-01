@@ -1129,7 +1129,9 @@ export function parseMachineFlockRow(
     }
     case 'agentConfig': {
       const config = normalizeAgentConfigMeta(value);
-      return config ? { key: parsedKey.key, value: config } : undefined;
+      return config && config.id === parsedKey.agentConfigId
+        ? { key: parsedKey.key, value: config }
+        : undefined;
     }
     case 'providerSetup': {
       const setup = normalizeProviderSetupTask(value);

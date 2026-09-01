@@ -1148,10 +1148,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'custom',
-      agentType: 'custom-agent',
-      customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-      env: { ACP_PROVIDER_TOKEN: 'secret-token' },
       timeoutMs: 5000,
     });
 
@@ -1163,13 +1159,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       id: string;
       params?: {
         configId?: string;
-        customAcp?: { command: string; args?: string[] };
-        env?: Record<string, string>;
       };
     };
     expect(request.params?.configId).toBe(configId);
-    expect(request.params?.customAcp).toEqual({ command: 'my-acp-agent', args: ['--stdio'] });
-    expect(request.params?.env).toEqual({ ACP_PROVIDER_TOKEN: 'secret-token' });
+    expect(request.params).toEqual({ configId });
     fake.pushBatch({
       messages: [
         {
@@ -1193,8 +1186,8 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         type: 'machine/acp-capabilities-refresh_response',
         configId,
-        cliType: 'custom',
-        agentType: 'custom-agent',
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
       })
     );
@@ -1213,8 +1206,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       timeoutMs: 5000,
     });
@@ -1306,8 +1297,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       signal: controller.signal,
       timeoutMs: 5000,
@@ -1388,8 +1377,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
       const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
         configId,
-        cliType: 'builtin',
-        agentType: 'codex',
         timeoutMs: 1_000,
       });
       await originalAppendStarted;
@@ -1425,8 +1412,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     await fake.waitForAppendedCount(1);
@@ -1454,8 +1439,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     client.stop();
@@ -1477,9 +1460,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-1',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'kimi',
-      runtimeOverrides: { kimiPath: '/opt/kimi' },
       onProgress,
       timeoutMs: 5000,
     });
@@ -1493,10 +1473,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         requestId: 'auth-1',
         action: 'start',
-        agentType: 'kimi',
-        runtimeOverrides: { kimiPath: '/opt/kimi' },
+        configId,
       })
     );
+    expect(request.params).toEqual({ requestId: 'auth-1', action: 'start', configId });
 
     fake.pushBatch({
       messages: [
@@ -1579,8 +1559,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-claude',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
       onProgress: () => resolveProgressReceived(),
     });
@@ -1617,9 +1595,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       action: 'submit-code',
       authenticationRequestId: 'auth-claude',
       authorizationCode: 'browser-returned-code',
-      configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
     });
 
@@ -1724,8 +1699,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-custom',
       action: 'start',
       configId,
-      cliType: 'registry',
-      agentType: 'custom-agent',
       timeoutMs: 5000,
       onProgress: () => resolveProgressReceived(),
     });
@@ -1770,9 +1743,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       authenticationRequestId: 'auth-custom',
       interactionId: 'form-1',
       authenticationInput,
-      configId,
-      cliType: 'registry',
-      agentType: 'custom-agent',
       timeoutMs: 5000,
     });
     await fake.waitForAppendedCount(2);

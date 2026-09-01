@@ -1,6 +1,5 @@
 import type {
   AgentConfigId,
-  AgentConfigCliType,
   CodeCollabV2InitDirectoryOk,
   CodeCollabV2InitDirectoryRequest,
   CodeCollabV2Error,
@@ -17,8 +16,6 @@ import type {
   CodeCollabV2RefreshTextResponse,
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
   LocalProjectControlRequest,
   LocalProjectControlResponse,
   LocalProjectId,
@@ -131,32 +128,27 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
   if (typeof raw !== 'object' || raw === null) return raw;
   const request = raw as { method?: unknown; params?: unknown };
   if (
-    request.method !== 'machine/acp-authenticate' ||
+    (request.method !== 'machine/acp-authenticate' &&
+      request.method !== 'machine/acp-capabilities-refresh') ||
     typeof request.params !== 'object' ||
-    request.params === null ||
-    ![
-      'authorizationCode',
-      'authenticationInput',
-      'authorizationCodeEnvelope',
-      'authenticationInputEnvelope',
-    ].some((key) => Object.hasOwn(request.params as object, key))
+    request.params === null
   ) {
     return raw;
   }
+  const params = request.params as Record<string, unknown>;
   return {
     ...request,
     params: {
-      ...(request.params as Record<string, unknown>),
-      ...(Object.hasOwn(request.params, 'authorizationCode')
-        ? { authorizationCode: '[REDACTED]' }
-        : {}),
-      ...(Object.hasOwn(request.params, 'authenticationInput')
+      ...params,
+      ...(Object.hasOwn(params, 'env') ? { env: '[REDACTED]' } : {}),
+      ...(Object.hasOwn(params, 'authorizationCode') ? { authorizationCode: '[REDACTED]' } : {}),
+      ...(Object.hasOwn(params, 'authenticationInput')
         ? { authenticationInput: '[REDACTED]' }
         : {}),
-      ...(Object.hasOwn(request.params, 'authorizationCodeEnvelope')
+      ...(Object.hasOwn(params, 'authorizationCodeEnvelope')
         ? { authorizationCodeEnvelope: '[REDACTED]' }
         : {}),
-      ...(Object.hasOwn(request.params, 'authenticationInputEnvelope')
+      ...(Object.hasOwn(params, 'authenticationInputEnvelope')
         ? { authenticationInputEnvelope: '[REDACTED]' }
         : {}),
     },
@@ -310,30 +302,29 @@ type RpcServerDeps = {
   ) => void;
   refreshMachineAcpCapabilities: (args: {
     configId: AgentConfigId;
-    cliType: AgentConfigCliType;
-    agentType: string;
-    customAcp?: CustomAcpLaunchSpec;
-    runtimeOverrides?: BuiltinRuntimeOverrides;
-    env?: Record<string, string>;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal: AbortSignal;
   }) => Promise<MachineAcpCapabilitiesRefreshResponse>;
-  authenticateMachineAcp?: (args: {
-    requestId: string;
-    action: 'start' | 'cancel' | 'submit-code' | 'submit-input';
-    authenticationRequestId?: string;
-    authorizationCode?: string;
-    methodId?: string;
-    interactionId?: string;
-    authenticationInput?: string;
-    configId?: AgentConfigId;
-    cliType: AgentConfigCliType;
-    agentType: string;
-    customAcp?: CustomAcpLaunchSpec;
-    runtimeOverrides?: BuiltinRuntimeOverrides;
-    env?: Record<string, string>;
-    onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
-  }) => Promise<MachineAcpAuthenticateResponse>;
+  authenticateMachineAcp?: (
+    args: {
+      requestId: string;
+      onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+    } & (
+      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'cancel'; authenticationRequestId: string }
+      | {
+          action: 'submit-code';
+          authenticationRequestId: string;
+          authorizationCode: string;
+        }
+      | {
+          action: 'submit-input';
+          authenticationRequestId: string;
+          interactionId: string;
+          authenticationInput: string;
+        }
+    )
+  ) => Promise<MachineAcpAuthenticateResponse>;
   getMachineAcpBinaryStatus?: (args: {
     agentType: string;
   }) => Promise<MachineAcpBinaryStatusResponse>;
@@ -822,11 +813,6 @@ export class LoroStreamsMachineRpcServer {
             };
             const response = await this.deps.refreshMachineAcpCapabilities({
               configId: request.params.configId as AgentConfigId,
-              cliType: request.params.cliType,
-              agentType: request.params.agentType,
-              customAcp: request.params.customAcp,
-              runtimeOverrides: request.params.runtimeOverrides,
-              env: request.params.env,
               onAcpBinaryProgress: appendProgress,
               signal: controller.signal,
             });
@@ -896,9 +882,6 @@ export class LoroStreamsMachineRpcServer {
           if (request.params.action === 'submit-code') {
             const authenticationRequestId = request.params.authenticationRequestId;
             const authorizationCodeEnvelope = request.params.authorizationCodeEnvelope;
-            if (!authenticationRequestId || !authorizationCodeEnvelope) {
-              throw new Error('Missing encrypted authorization-code input.');
-            }
             const activeRecipient =
               this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
             if (!activeRecipient) {
@@ -920,9 +903,6 @@ export class LoroStreamsMachineRpcServer {
             const authenticationRequestId = request.params.authenticationRequestId;
             const interactionId = request.params.interactionId;
             const authenticationInputEnvelope = request.params.authenticationInputEnvelope;
-            if (!authenticationRequestId || !interactionId || !authenticationInputEnvelope) {
-              throw new Error('Missing encrypted authentication input.');
-            }
             const activeRecipient =
               this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
             if (!activeRecipient) {
@@ -943,28 +923,60 @@ export class LoroStreamsMachineRpcServer {
           }
 
           try {
-            const response = await this.deps.authenticateMachineAcp({
-              requestId: request.params.requestId,
-              action: request.params.action,
-              authenticationRequestId: request.params.authenticationRequestId,
-              authorizationCode,
-              methodId: request.params.methodId,
-              interactionId: request.params.interactionId,
-              authenticationInput,
-              configId: request.params.configId as AgentConfigId | undefined,
-              cliType: request.params.cliType,
-              agentType: request.params.agentType,
-              customAcp: request.params.customAcp,
-              runtimeOverrides: request.params.runtimeOverrides,
-              env: request.params.env,
-              onProgress: appendProgress,
-            });
+            const response = await (() => {
+              switch (request.params.action) {
+                case 'start':
+                  return this.deps.authenticateMachineAcp?.({
+                    requestId: request.params.requestId,
+                    action: request.params.action,
+                    configId: request.params.configId as AgentConfigId,
+                    onProgress: appendProgress,
+                  });
+                case 'cancel':
+                  return this.deps.authenticateMachineAcp?.({
+                    requestId: request.params.requestId,
+                    action: request.params.action,
+                    authenticationRequestId: request.params.authenticationRequestId,
+                    onProgress: appendProgress,
+                  });
+                case 'submit-code':
+                  if (authorizationCode === undefined) {
+                    throw new Error('Missing decrypted authorization-code input.');
+                  }
+                  return this.deps.authenticateMachineAcp?.({
+                    requestId: request.params.requestId,
+                    action: request.params.action,
+                    authenticationRequestId: request.params.authenticationRequestId,
+                    authorizationCode,
+                    onProgress: appendProgress,
+                  });
+                case 'submit-input':
+                  if (authenticationInput === undefined) {
+                    throw new Error('Missing decrypted authentication input.');
+                  }
+                  return this.deps.authenticateMachineAcp?.({
+                    requestId: request.params.requestId,
+                    action: request.params.action,
+                    authenticationRequestId: request.params.authenticationRequestId,
+                    interactionId: request.params.interactionId,
+                    authenticationInput,
+                    onProgress: appendProgress,
+                  });
+                default:
+                  throw new Error('Unsupported ACP authentication action.');
+              }
+            })();
+            if (!response) {
+              throw new Error('ACP authentication is not available on this machine.');
+            }
             await progressWrites;
             await this.appendResultResponse(request.replyTo, request.id, request.method, response);
             return;
           } finally {
-            if (isStart || request.params.action === 'cancel') {
+            if (isStart) {
               this.acpAuthorizationCodeRecipients.delete(request.params.requestId);
+            } else if (request.params.action === 'cancel') {
+              this.acpAuthorizationCodeRecipients.delete(request.params.authenticationRequestId);
             }
           }
         }

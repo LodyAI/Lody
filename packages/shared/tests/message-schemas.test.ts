@@ -248,28 +248,30 @@ describe('message-schemas machine ACP capabilities refresh', () => {
     expect(BuiltinRuntimeOverridesSchema.safeParse({ grokPath: '/opt/grok' }).success).toBe(true);
   });
 
-  it('accepts provider env for capability probing', () => {
-    const result = MachineAcpCapabilitiesRefreshRequestSchema.safeParse({
+  it('accepts only a persisted config reference for capability probing', () => {
+    const request = {
       type: 'machine/acp-capabilities-refresh',
       machineId: 'machine-1',
       workspaceId: 'workspace-1',
       configId: 'config-1',
-      cliType: 'registry',
-      agentType: 'env-agent',
-      env: {
-        ACP_PROVIDER_TOKEN: 'secret-token',
-      },
-    });
+    };
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.env).toEqual({ ACP_PROVIDER_TOKEN: 'secret-token' });
-    }
+    expect(MachineAcpCapabilitiesRefreshRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      MachineAcpCapabilitiesRefreshRequestSchema.safeParse({
+        ...request,
+        cliType: 'registry',
+        agentType: 'env-agent',
+        customAcp: { command: '/tmp/untrusted-acp' },
+        env: { ACP_PROVIDER_TOKEN: 'attacker-controlled' },
+        runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
+      }).success
+    ).toBe(false);
   });
 });
 
 describe('message-schemas machine ACP authentication', () => {
-  it('accepts browser authorization, code submission, and the final response', () => {
+  it('accepts config-bound starts and request-bound follow-ups', () => {
     const request = {
       type: 'machine/acp-authenticate',
       machineId: 'machine-1',
@@ -277,9 +279,14 @@ describe('message-schemas machine ACP authentication', () => {
       requestId: 'auth-1',
       action: 'start',
       configId: 'config-1',
-      cliType: 'builtin',
-      agentType: 'kimi',
-      runtimeOverrides: { kimiPath: '/opt/kimi' },
+    };
+    const forgedStart = {
+      ...request,
+      cliType: 'registry',
+      agentType: 'custom-agent',
+      customAcp: { command: '/tmp/untrusted-acp' },
+      env: { TOKEN: 'attacker-controlled' },
+      runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
     };
     const progress = {
       type: 'machine/acp-authentication-progress',
@@ -292,7 +299,9 @@ describe('message-schemas machine ACP authentication', () => {
       expiresInSeconds: 1800,
     };
     const submitCode = {
-      ...request,
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
       requestId: 'auth-input-1',
       action: 'submit-code',
       authenticationRequestId: 'auth-1',
@@ -341,7 +350,9 @@ describe('message-schemas machine ACP authentication', () => {
       },
     };
     const submitInput = {
-      ...request,
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
       requestId: 'auth-input-2',
       action: 'submit-input',
       authenticationRequestId: 'auth-1',
@@ -353,13 +364,18 @@ describe('message-schemas machine ACP authentication', () => {
     };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
+    expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitCode).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitInput).success).toBe(true);
     expect(
       MachineAcpAuthenticateRequestSchema.safeParse({
-        ...request,
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        requestId: 'auth-cancel-1',
         action: 'cancel',
-        methodId: 'oauth',
+        authenticationRequestId: 'auth-1',
+        customAcp: { command: '/tmp/untrusted-acp' },
       }).success
     ).toBe(false);
     expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(progress).success).toBe(true);

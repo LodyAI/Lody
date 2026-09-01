@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, WorkspaceId } from '@lody/shared';
+import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
 
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { useMachineAcpAuthentication } from '../src/hooks/use-machine-acp-authentication';
@@ -72,8 +72,7 @@ describe('useMachineAcpAuthentication', () => {
 
     const attempt = controller!.startAuthentication({
       machineId,
-      cliType: 'builtin',
-      agentType: 'kimi',
+      configId: 'config-kimi' as AgentConfigId,
       onProgress: vi.fn(),
     });
 
@@ -86,8 +85,8 @@ describe('useMachineAcpAuthentication', () => {
     });
     expect(sendControl.mock.calls[1]?.[0]).toMatchObject({
       type: 'machine/acp-authenticate',
-      requestId: attempt.requestId,
       action: 'cancel',
+      authenticationRequestId: attempt.requestId,
     });
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
@@ -120,8 +119,7 @@ describe('useMachineAcpAuthentication', () => {
 
     const attempt = controller!.startAuthentication({
       machineId,
-      cliType: 'builtin',
-      agentType: 'kimi',
+      configId: 'config-kimi' as AgentConfigId,
     });
 
     await expect(attempt.promise).rejects.toThrow('Authentication failed');
@@ -164,8 +162,7 @@ describe('useMachineAcpAuthentication', () => {
 
     const attempt = controller!.startAuthentication({
       machineId,
-      cliType: 'builtin',
-      agentType: 'kimi',
+      configId: 'config-kimi' as AgentConfigId,
     });
     await act(async () => {
       root?.unmount();
@@ -211,8 +208,6 @@ describe('useMachineAcpAuthentication', () => {
 
     await controller!.submitAuthorizationCode({
       machineId,
-      cliType: 'builtin',
-      agentType: 'claude',
       authenticationRequestId: 'auth-claude',
       authorizationCode: 'browser-code',
     });
@@ -254,8 +249,6 @@ describe('useMachineAcpAuthentication', () => {
 
     await controller!.submitAuthenticationInput({
       machineId,
-      cliType: 'registry',
-      agentType: 'custom-agent',
       authenticationRequestId: 'auth-custom',
       interactionId: 'form-1',
       input: { action: 'accept', content: { code: 'secret-code', account: 'work' } },

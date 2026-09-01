@@ -1269,11 +1269,6 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
-    cliType: AgentConfigCliTypeSchema,
-    agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-    env: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
@@ -1314,68 +1309,34 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
   })
   .strict();
 
-export const MachineAcpAuthenticateRequestSchema = z
-  .object({
-    type: z.literal('machine/acp-authenticate'),
-    machineId: MachineIdSchema,
-    workspaceId: WorkspaceIdSchema,
-    requestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
-    action: z.enum(['start', 'cancel', 'submit-code', 'submit-input']),
-    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
-    methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
-    authenticationInput: z.string().min(1).max(65536).optional(),
-    configId: AgentConfigIdSchema.optional(),
-    cliType: AgentConfigCliTypeSchema,
-    agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-    env: z.record(z.string(), z.string()).optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.action === 'submit-code') {
-      if (!value.authenticationRequestId) {
-        context.addIssue({
-          code: 'custom',
-          path: ['authenticationRequestId'],
-          message: 'authenticationRequestId is required when submitting an authorization code',
-        });
-      }
-      if (!value.authorizationCode) {
-        context.addIssue({
-          code: 'custom',
-          path: ['authorizationCode'],
-          message: 'authorizationCode is required when submitting an authorization code',
-        });
-      }
-    } else if (value.action === 'submit-input') {
-      if (!value.authenticationRequestId || !value.interactionId || !value.authenticationInput) {
-        context.addIssue({
-          code: 'custom',
-          message: 'submit-input requires an authentication request, interaction, and input',
-        });
-      }
-    } else if (
-      value.authenticationRequestId ||
-      value.authorizationCode ||
-      value.interactionId ||
-      value.authenticationInput
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Authentication input fields are only valid for input submission',
-      });
-    }
-    if (value.action !== 'start' && value.methodId) {
-      context.addIssue({
-        code: 'custom',
-        path: ['methodId'],
-        message: 'methodId is only valid when starting authentication',
-      });
-    }
-  });
+const MachineAcpAuthenticateRequestBaseSchema = z.object({
+  type: z.literal('machine/acp-authenticate'),
+  machineId: MachineIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  requestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+});
+
+export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action', [
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('start'),
+    configId: AgentConfigIdSchema,
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('cancel'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('submit-code'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('submit-input'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    authenticationInput: z.string().min(1).max(65536),
+  }).strict(),
+]);
 
 export const MachineAcpAuthenticateResponseSchema = z
   .object({

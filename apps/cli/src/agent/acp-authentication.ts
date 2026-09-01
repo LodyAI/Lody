@@ -532,7 +532,6 @@ export class AcpAuthenticationManager {
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
     env?: Record<string, string>;
-    methodId?: string;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
     const isBuiltinAuthentication =
@@ -691,11 +690,16 @@ export class AcpAuthenticationManager {
     }
   }
 
-  cancel(agentType: string, requestId: string): AcpAuthenticationResult {
-    const running = this.runningByAgentType.get(agentType);
-    if (!running || running.requestId !== requestId) {
+  getAgentType(requestId: string): string | undefined {
+    return this.findRunningAuthentication(requestId)?.agentType;
+  }
+
+  cancel(requestId: string): AcpAuthenticationResult {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
       return { success: true, disposition: 'not-running' };
     }
+    const { agentType, running } = active;
 
     running.cancelled = true;
     running.abortController.abort();
@@ -708,15 +712,12 @@ export class AcpAuthenticationManager {
     return { success: true, disposition: 'cancelled' };
   }
 
-  submitAuthorizationCode(
-    agentType: string,
-    requestId: string,
-    authorizationCode: string
-  ): AcpAuthenticationResult {
-    const running = this.runningByAgentType.get(agentType);
-    if (!running || running.requestId !== requestId) {
+  submitAuthorizationCode(requestId: string, authorizationCode: string): AcpAuthenticationResult {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
       return { success: true, disposition: 'not-running' };
     }
+    const { agentType, running } = active;
     if (!running.acceptsAuthorizationCode) {
       return {
         success: false,
@@ -765,15 +766,15 @@ export class AcpAuthenticationManager {
   }
 
   submitAuthenticationInput(
-    agentType: string,
     requestId: string,
     interactionId: string,
     authenticationInput: string
   ): AcpAuthenticationResult {
-    const running = this.runningByAgentType.get(agentType);
-    if (!running || running.requestId !== requestId) {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
       return { success: true, disposition: 'not-running' };
     }
+    const { agentType, running } = active;
     const pending = running.pendingInteraction;
     if (!pending || pending.id !== interactionId) {
       return {
@@ -796,6 +797,15 @@ export class AcpAuthenticationManager {
     running.pendingInteraction = undefined;
     pending.resolve(parsed.data);
     return { success: true, disposition: 'input-accepted' };
+  }
+
+  private findRunningAuthentication(
+    requestId: string
+  ): { agentType: string; running: RunningAuthentication } | undefined {
+    for (const [agentType, running] of this.runningByAgentType) {
+      if (running.requestId === requestId) return { agentType, running };
+    }
+    return undefined;
   }
 
   private waitForAuthenticationInput(
@@ -825,7 +835,6 @@ export class AcpAuthenticationManager {
       customAcp?: CustomAcpLaunchSpec;
       runtimeOverrides?: BuiltinRuntimeOverrides;
       env?: Record<string, string>;
-      methodId?: string;
       onProgress?: (event: AcpAuthenticationProgressEvent) => void;
     },
     running: RunningAuthentication
@@ -1026,8 +1035,8 @@ export class AcpAuthenticationManager {
                       `${options.agentType} advertised too many or invalid authentication methods`
                     );
                   }
-                  let methodId = options.methodId;
-                  if (!methodId && methods.length === 1) {
+                  let methodId: string | undefined;
+                  if (methods.length === 1) {
                     methodId = methods[0]?.id;
                   }
                   if (!methodId) {

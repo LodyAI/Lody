@@ -307,16 +307,12 @@ describe.runIf(runIntegrationTests)('loro streams rpc integration', () => {
           cpuUsagePercent: 20,
         },
       }),
-      refreshMachineAcpCapabilities: async ({
-        configId: requestedConfigId,
-        cliType,
-        agentType,
-      }) => ({
+      refreshMachineAcpCapabilities: async ({ configId: requestedConfigId }) => ({
         type: 'machine/acp-capabilities-refresh_response',
         machineId,
         configId: requestedConfigId,
-        cliType,
-        agentType,
+        cliType: 'builtin',
+        agentType: 'codex',
         success: true,
         modes: [{ id: 'agent', name: 'Agent' }],
         models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
@@ -334,8 +330,6 @@ describe.runIf(runIntegrationTests)('loro streams rpc integration', () => {
     await expect(
       client.requestMachineAcpCapabilitiesRefresh({
         configId,
-        cliType: 'builtin',
-        agentType: 'codex',
         timeoutMs: 10_000,
       })
     ).resolves.toEqual(

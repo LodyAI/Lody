@@ -9,10 +9,8 @@ import {
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
-  type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
-  type CustomAcpLaunchSpec,
   type MachineId,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
@@ -764,12 +762,8 @@ export function ProvidersScreen({
 
   const refreshCapabilities = useCallback(
     async (args: {
+      machineId: MachineId;
       configId: AgentConfigId;
-      cliType: AgentConfigCliType;
-      agentType: string;
-      customAcp?: CustomAcpLaunchSpec;
-      runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
-      env?: Record<string, string>;
       signal?: AbortSignal;
       onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
     }) => {
@@ -779,14 +773,9 @@ export function ProvidersScreen({
       const response = await runtime.requestMachineAcpCapabilitiesRefresh(
         {
           type: 'machine/acp-capabilities-refresh',
-          machineId: localMachineId,
+          machineId: args.machineId,
           workspaceId,
           configId: args.configId,
-          cliType: args.cliType,
-          agentType: args.agentType,
-          customAcp: args.customAcp,
-          runtimeOverrides: args.runtimeOverrides,
-          env: args.env,
         },
         { signal: args.signal, onProgress: args.onProgress }
       );
@@ -805,7 +794,7 @@ export function ProvidersScreen({
       }
       // The machine flock doc only syncs once per session; force a re-sync so
       // the freshly probed capabilities surface without a reload.
-      await resyncMachineFlockRows(runtime, localMachineId);
+      await resyncMachineFlockRows(runtime, args.machineId);
       return response;
     },
     [localMachineId, runtime, t, workspaceId]
@@ -825,12 +814,8 @@ export function ProvidersScreen({
       void (async () => {
         try {
           const response = await refreshCapabilities({
+            machineId: config.machineId,
             configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            env: config.env,
             signal: run.signal,
             onProgress: (progress) => {
               if (!testRunsRef.current.isCurrent(config.id, run)) return;

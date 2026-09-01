@@ -190,6 +190,10 @@ arrive: context/message-flow.md "Upstream".
   are bounded before they enter progress; the form also has a shared serialized-byte
   budget so individually valid dimensions cannot multiply into an oversized RPC payload.
   Never forward raw third-party process output or secret defaults into retained progress.
+  Machine RPC may name only a persisted Provider `configId`; the daemon resolves and freezes
+  machine/CLI/agent/launch/env/runtime fields before spawning. Capability refresh follows the
+  same rule because it also launches an ACP. Later authentication replies identify only the
+  established request and interaction and can never replace its launch target.
   The real-process authentication test keeps method selection, versioned secret metadata,
   form submission, URL parsing, protocol stdout integrity, and process cleanup on one
   spawned ACP connection. The process is always stopped before success returns, and

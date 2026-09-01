@@ -589,11 +589,6 @@ export type AgentConfigDialogMode =
 type RefreshArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
 };
 
 /** Whether a registry agent's platform binary is present on the target machine. */
@@ -900,19 +895,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
   const isNarrowLayout = useNarrowDialogLayout();
   const titleDefaultsAppliedRef = useRef(false);
-  const latestProbeEnvRef = useRef(formData.env);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const machineRef = useRef(machine);
   machineRef.current = machine;
   useKeyboardAwareScrollIntoView(formScrollRef);
 
   useEffect(() => {
-    latestProbeEnvRef.current = formData.env;
-  }, [formData.env]);
-
-  useEffect(() => {
     if (open) {
-      latestProbeEnvRef.current = initialForm.env;
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1053,6 +1042,51 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     machineSupportsProviderSetupProtocol(machine) &&
     requiresBuiltinCreationVerification &&
     usesDefaultManagedRuntime;
+  const lastPersistedPayloadKeyRef = useRef<string | null>(null);
+  const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
+    let env = { ...formData.env };
+    if (activePreset) {
+      env = buildPresetEnv(activePreset, activeCredentialMode, formData);
+    }
+    const agentType = formData.agentType as AgentType;
+    const titleGeneration = acpProvidesSessionTitle
+      ? undefined
+      : isPreset
+        ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
+        : formData.titleGeneration;
+    return {
+      id: agentConfigId,
+      name: formData.name.trim(),
+      cliType: formData.cliType,
+      agentType,
+      customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
+      runtimeOverrides: formData.runtimeOverrides,
+      prompt: formData.prompt,
+      env,
+      titleGeneration,
+      description: undefined,
+      brandId: resolvedBrandId,
+      ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
+    };
+  }, [
+    activeCredentialMode,
+    activePreset,
+    acpProvidesSessionTitle,
+    agentConfigId,
+    backgroundManagedBuiltinSetup,
+    formData,
+    isCustom,
+    isPreset,
+    parsedCustomAcp,
+    resolvedBrandId,
+  ]);
+  const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
+    const payload = buildSubmitPayload();
+    const payloadKey = JSON.stringify(payload);
+    if (lastPersistedPayloadKeyRef.current === payloadKey) return;
+    await onSubmit(payload);
+    lastPersistedPayloadKeyRef.current = payloadKey;
+  }, [buildSubmitPayload, onSubmit]);
 
   useEffect(() => {
     if (
@@ -1221,13 +1255,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setProbeError(null);
     void (async () => {
       try {
+        await persistConfigBeforeMachineLaunch();
+        if (cancelled) return;
         const response = await onRefreshCapabilities({
           machineId: machine.id,
           configId: agentConfigId,
-          cliType: formData.cliType,
-          agentType: formData.agentType,
-          env: latestProbeEnvRef.current,
-          runtimeOverrides: formData.runtimeOverrides,
         });
         if (cancelled) return;
         if (response.authRequired) {
@@ -1278,6 +1310,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     binaryReady,
     requiresBuiltinCreationVerification,
     builtinVerificationContext,
+    persistConfigBeforeMachineLaunch,
     t,
   ]);
 
@@ -1289,14 +1322,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setProbing(true);
     setProbeError(null);
     try {
+      await persistConfigBeforeMachineLaunch();
       const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
-        cliType: formData.cliType,
-        agentType: formData.agentType,
-        customAcp: parsedCustomAcp,
-        env: latestProbeEnvRef.current,
-        runtimeOverrides: formData.runtimeOverrides,
       });
       if (response.authRequired) {
         setAuthRequired(true);
@@ -1391,7 +1420,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const envCount = Object.keys(additionalEnv).length;
 
   const updateEnvironment = (env: Record<string, string>) => {
-    latestProbeEnvRef.current = env;
     setManuallyTested(false);
     setAuthRequired(false);
     setProbeError(null);
@@ -1603,50 +1631,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const persistConfig = useCallback(async () => {
     try {
       setSubmitting(true);
-      let env = { ...formData.env };
-      if (activePreset) {
-        env = buildPresetEnv(activePreset, activeCredentialMode, formData);
-      }
-      const agentType = formData.agentType as AgentType;
-      const titleGeneration = acpProvidesSessionTitle
-        ? undefined
-        : isPreset
-          ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
-          : formData.titleGeneration;
-      await onSubmit({
-        id: agentConfigId,
-        name: formData.name.trim(),
-        cliType: formData.cliType,
-        agentType,
-        customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
-        runtimeOverrides: formData.runtimeOverrides,
-        prompt: formData.prompt,
-        env,
-        titleGeneration,
-        description: undefined,
-        brandId: resolvedBrandId,
-        ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
-      });
+      await persistConfigBeforeMachineLaunch();
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save agent config:', error);
     } finally {
       setSubmitting(false);
     }
-  }, [
-    activeCredentialMode,
-    activePreset,
-    acpProvidesSessionTitle,
-    agentConfigId,
-    backgroundManagedBuiltinSetup,
-    formData,
-    isCustom,
-    isPreset,
-    onOpenChange,
-    onSubmit,
-    parsedCustomAcp,
-    resolvedBrandId,
-  ]);
+  }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
     if (disableReason || submitting) return;
@@ -2141,6 +2133,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   env={formData.env}
                   compact
                   reauthentication={!authRequired}
+                  onBeforeStart={persistConfigBeforeMachineLaunch}
                   onAuthenticated={() => {
                     setAuthRequired(false);
                     setProbeError(null);

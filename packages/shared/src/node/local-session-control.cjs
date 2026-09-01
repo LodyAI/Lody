@@ -493,10 +493,11 @@ function isLocalSessionControlRequest(value) {
       typeof value.workspaceId === 'string' &&
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
-      isAgentConfigCliType(value.cliType) &&
-      typeof value.agentType === 'string' &&
-      value.agentType.trim().length > 0 &&
-      (typeof value.env === 'undefined' || isStringRecord(value.env))
+      typeof value.cliType === 'undefined' &&
+      typeof value.agentType === 'undefined' &&
+      typeof value.customAcp === 'undefined' &&
+      typeof value.runtimeOverrides === 'undefined' &&
+      typeof value.env === 'undefined'
     );
   }
 
@@ -511,36 +512,50 @@ function isLocalSessionControlRequest(value) {
         value.action === 'cancel' ||
         value.action === 'submit-code' ||
         value.action === 'submit-input') &&
-      (typeof value.methodId === 'undefined' ||
-        (value.action === 'start' &&
-          typeof value.methodId === 'string' &&
-          value.methodId.trim().length > 0 &&
-          value.methodId.length <= 1024)) &&
-      (value.action === 'submit-code'
-        ? typeof value.authenticationRequestId === 'string' &&
-          value.authenticationRequestId.trim().length > 0 &&
-          value.authenticationRequestId.length <= 1024 &&
-          typeof value.authorizationCode === 'string' &&
-          value.authorizationCode.trim().length > 0 &&
-          value.authorizationCode.length <= 4096
-        : value.action === 'submit-input'
+      (value.action === 'start'
+        ? typeof value.configId === 'string' &&
+          value.configId.trim().length > 0 &&
+          typeof value.authenticationRequestId === 'undefined' &&
+          typeof value.authorizationCode === 'undefined' &&
+          typeof value.interactionId === 'undefined' &&
+          typeof value.authenticationInput === 'undefined'
+        : value.action === 'cancel'
           ? typeof value.authenticationRequestId === 'string' &&
             value.authenticationRequestId.trim().length > 0 &&
             value.authenticationRequestId.length <= 1024 &&
-            typeof value.interactionId === 'string' &&
-            value.interactionId.trim().length > 0 &&
-            value.interactionId.length <= 1024 &&
-            typeof value.authenticationInput === 'string' &&
-            value.authenticationInput.length > 0 &&
-            value.authenticationInput.length <= 65536
-          : typeof value.authenticationRequestId === 'undefined' &&
+            typeof value.configId === 'undefined' &&
             typeof value.authorizationCode === 'undefined' &&
             typeof value.interactionId === 'undefined' &&
-            typeof value.authenticationInput === 'undefined') &&
-      isAgentConfigCliType(value.cliType) &&
-      typeof value.agentType === 'string' &&
-      value.agentType.trim().length > 0 &&
-      (typeof value.env === 'undefined' || isStringRecord(value.env))
+            typeof value.authenticationInput === 'undefined'
+          : value.action === 'submit-code'
+            ? typeof value.authenticationRequestId === 'string' &&
+              value.authenticationRequestId.trim().length > 0 &&
+              value.authenticationRequestId.length <= 1024 &&
+              typeof value.authorizationCode === 'string' &&
+              value.authorizationCode.trim().length > 0 &&
+              value.authorizationCode.length <= 4096 &&
+              typeof value.configId === 'undefined' &&
+              typeof value.interactionId === 'undefined' &&
+              typeof value.authenticationInput === 'undefined'
+            : value.action === 'submit-input'
+              ? typeof value.authenticationRequestId === 'string' &&
+                value.authenticationRequestId.trim().length > 0 &&
+                value.authenticationRequestId.length <= 1024 &&
+                typeof value.interactionId === 'string' &&
+                value.interactionId.trim().length > 0 &&
+                value.interactionId.length <= 1024 &&
+                typeof value.authenticationInput === 'string' &&
+                value.authenticationInput.length > 0 &&
+                value.authenticationInput.length <= 65536 &&
+                typeof value.configId === 'undefined' &&
+                typeof value.authorizationCode === 'undefined'
+              : false) &&
+      typeof value.cliType === 'undefined' &&
+      typeof value.agentType === 'undefined' &&
+      typeof value.customAcp === 'undefined' &&
+      typeof value.runtimeOverrides === 'undefined' &&
+      typeof value.env === 'undefined' &&
+      typeof value.methodId === 'undefined'
     );
   }
 

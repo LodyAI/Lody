@@ -79,51 +79,11 @@ type ActivePanelAuthentication = {
   ) => Promise<void>;
 };
 
-const areStringArraysEqual = (left?: string[], right?: string[]): boolean =>
-  left === right ||
-  (!!left &&
-    !!right &&
-    left.length === right.length &&
-    left.every((value, index) => value === right[index]));
-
-const areStringRecordsEqual = (
-  left?: Record<string, string>,
-  right?: Record<string, string>
-): boolean => {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length && leftKeys.every((key) => left[key] === right[key]);
-};
-
 export function areAcpAuthenticationTargetsEqual(
   left: MachineAcpAuthenticationArgs,
   right: MachineAcpAuthenticationArgs
 ): boolean {
-  const leftCustomAcp = left.customAcp;
-  const rightCustomAcp = right.customAcp;
-  const leftRuntimeOverrides = left.runtimeOverrides;
-  const rightRuntimeOverrides = right.runtimeOverrides;
-  return (
-    left.machineId === right.machineId &&
-    left.configId === right.configId &&
-    left.cliType === right.cliType &&
-    left.agentType === right.agentType &&
-    (leftCustomAcp === rightCustomAcp ||
-      (!!leftCustomAcp &&
-        !!rightCustomAcp &&
-        leftCustomAcp.command === rightCustomAcp.command &&
-        areStringArraysEqual(leftCustomAcp.args, rightCustomAcp.args))) &&
-    (leftRuntimeOverrides === rightRuntimeOverrides ||
-      (!!leftRuntimeOverrides &&
-        !!rightRuntimeOverrides &&
-        leftRuntimeOverrides.codexPath === rightRuntimeOverrides.codexPath &&
-        leftRuntimeOverrides.claudeCodeExecutable === rightRuntimeOverrides.claudeCodeExecutable &&
-        leftRuntimeOverrides.kimiPath === rightRuntimeOverrides.kimiPath &&
-        leftRuntimeOverrides.grokPath === rightRuntimeOverrides.grokPath)) &&
-    areStringRecordsEqual(left.env, right.env)
-  );
+  return left.machineId === right.machineId && left.configId === right.configId;
 }
 
 export function AcpAuthenticationPanel({
@@ -132,11 +92,10 @@ export function AcpAuthenticationPanel({
   cliType,
   agentType,
   customAcp,
-  runtimeOverrides,
-  env,
   compact = false,
   reauthentication = false,
   providerName,
+  onBeforeStart,
   onAuthenticated,
 }: {
   machineId: MachineId | null;
@@ -154,6 +113,8 @@ export function AcpAuthenticationPanel({
    * the config.
    */
   providerName?: string;
+  /** Persist the exact Provider config that the daemon will resolve before launch. */
+  onBeforeStart?: () => void | Promise<void>;
   onAuthenticated?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -161,7 +122,7 @@ export function AcpAuthenticationPanel({
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(machineId ?? undefined));
   const interactiveProtocolSupported =
-    cliType === 'builtin' || machineSupportsAcpAuthenticationInteractionsProtocol(machine);
+    machineSupportsAcpAuthenticationInteractionsProtocol(machine);
   const {
     startAuthentication,
     cancelAuthentication,
@@ -187,10 +148,8 @@ export function AcpAuthenticationPanel({
 
   const authArgs: MachineAcpAuthenticationArgs | null = useMemo(
     () =>
-      machineId && (cliType !== 'custom' || customAcp)
-        ? { machineId, configId, cliType, agentType, customAcp, runtimeOverrides, env }
-        : null,
-    [agentType, cliType, configId, customAcp, env, machineId, runtimeOverrides]
+      machineId && configId && (cliType !== 'custom' || customAcp) ? { machineId, configId } : null,
+    [cliType, configId, customAcp, machineId]
   );
 
   const closePendingAuthorizationWindow = (): void => {
@@ -266,6 +225,10 @@ export function AcpAuthenticationPanel({
   };
 
   const handleStart = (): void => {
+    void startAuthenticationFromPersistedConfig();
+  };
+
+  const startAuthenticationFromPersistedConfig = async (): Promise<void> => {
     if (!authArgs || phase === 'running' || !interactiveProtocolSupported) {
       return;
     }
@@ -290,6 +253,14 @@ export function AcpAuthenticationPanel({
     setAuthorizationCodeSubmitted(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
+    try {
+      await onBeforeStart?.();
+    } catch (nextError) {
+      closePendingAuthorizationWindow();
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setPhase('error');
+      return;
+    }
     let startedRequestId: string | null = null;
     const operation = startAuthentication({
       ...authArgs,
@@ -384,16 +355,20 @@ export function AcpAuthenticationPanel({
       args: authArgs,
       runtime,
       workspaceId,
-      cancel: () => cancelAuthentication({ ...authArgs, requestId: operation.requestId }),
+      cancel: () =>
+        cancelAuthentication({
+          machineId: authArgs.machineId,
+          authenticationRequestId: operation.requestId,
+        }),
       submitCode: (code) =>
         submitAuthorizationCode({
-          ...authArgs,
+          machineId: authArgs.machineId,
           authenticationRequestId: operation.requestId,
           authorizationCode: code,
         }),
       submitInput: (interactionId, input) =>
         submitAuthenticationInput({
-          ...authArgs,
+          machineId: authArgs.machineId,
           authenticationRequestId: operation.requestId,
           interactionId,
           input,

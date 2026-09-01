@@ -14,10 +14,10 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpProtocolAuthentication: 'acpProtocolAuthentication',
 } as const;
 
-export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 1;
+export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
-export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 1;
+export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;

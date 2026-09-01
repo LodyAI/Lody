@@ -6,11 +6,8 @@ import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   type AcpSessionMonitorSnapshot,
-  type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
-  type AgentType,
-  type CustomAcpLaunchSpec,
   type MachineId,
   type MachineViewMeta,
   type ProviderSetupTask,
@@ -682,31 +679,15 @@ export function MachineAgentSettings({
   }, [remoteMachinesAvailable]);
 
   const refreshCapabilities = useCallback(
-    async (args: {
-      machineId: MachineId;
-      configId: AgentConfigId;
-      cliType: AgentConfigCliType;
-      agentType: string;
-      customAcp?: CustomAcpLaunchSpec;
-      runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
-      env?: Record<string, string>;
-    }) => {
+    async (args: { machineId: MachineId; configId: AgentConfigId }) => {
       if (!runtime || !workspaceId) {
         throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
-      }
-      if (!args.agentType.trim()) {
-        throw new Error(t('agents.validation.missingAgentType', 'Agent type is required'));
       }
       const response = await runtime.requestMachineAcpCapabilitiesRefresh({
         type: 'machine/acp-capabilities-refresh',
         machineId: args.machineId,
         workspaceId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType as AgentType,
-        customAcp: args.customAcp,
-        runtimeOverrides: args.runtimeOverrides,
-        env: args.env,
       });
       if (!response) {
         throw new Error(
@@ -848,11 +829,6 @@ export function MachineAgentSettings({
       await refreshCapabilities({
         machineId: config.machineId,
         configId: config.id,
-        cliType: config.cliType,
-        agentType: config.agentType,
-        customAcp: config.customAcp,
-        runtimeOverrides: config.runtimeOverrides,
-        env: config.env,
       });
     },
     [refreshCapabilities]
