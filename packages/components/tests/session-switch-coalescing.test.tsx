@@ -21,7 +21,7 @@ vi.mock('react-i18next', () => ({
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const SESSION_IDS = ['s1', 's2', 's3', 's4', 's5', 's6'];
+const SESSION_IDS = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10'];
 
 /** Frames only run when the test says so, standing in for "the browser painted". */
 class ManualFrames {
@@ -95,7 +95,13 @@ beforeEach(() => {
   routeSessionId = 's1';
 
   const callbacks: SidebarNavCallbacks = {
-    onNavigateToSession: (id) => navigations.push(id),
+    // The real router commits before the next frame, so the route follows every
+    // navigation we issue. Tests that model an outside selection overwrite
+    // `routeSessionId` afterwards.
+    onNavigateToSession: (id) => {
+      navigations.push(id);
+      routeSessionId = id;
+    },
     onNavigateToNewSession: () => {},
     onToggleRepoCollapsed: () => {},
     onToggleChatsCollapsed: () => {},
@@ -154,7 +160,6 @@ describe('session switch coalescing', () => {
   it('resumes immediately once a press lands after a paint', () => {
     pressNext();
     frames.paint();
-    routeSessionId = 's2';
 
     pressNext();
     expect(navigations).toEqual(['s2', 's3']);
@@ -170,8 +175,91 @@ describe('session switch coalescing', () => {
     expect(navigations).toEqual(['s2', 's6']);
   });
 
+  it('drops a queued navigation when a click claims the selection first', () => {
+    pressNext();
+    pressNext();
+    expect(navigations).toEqual(['s2']);
+    expect(frames.pending).toBe(1);
+
+    // The click lands inside the very window the queued frame was waiting on.
+    routeSessionId = 's9';
+
+    frames.paint();
+    expect(navigations).toEqual(['s2']);
+    expect(frames.pending).toBe(0);
+
+    // The next press continues from the click, not from the dead burst.
+    pressNext();
+    expect(navigations).toEqual(['s2', 's10']);
+  });
+
+  it('never carries a stale session across a workspace switch', () => {
+    pressNext();
+    pressNext();
+    expect(frames.pending).toBe(1);
+
+    // The workspace switched: different rows, and the route no longer points at
+    // anything this burst navigated to.
+    act(() => {
+      store.set(
+        sidebarNavItemsAtom,
+        ['w2-a', 'w2-b', 'w2-c'].map((sessionId) => ({
+          kind: 'session' as const,
+          sessionId,
+          groupKey: 'g2',
+        }))
+      );
+    });
+    routeSessionId = 'w2-a';
+
+    frames.paint();
+    // Anything here would be an old-workspace id resolved against the new
+    // workspace slug — a route with no such session.
+    expect(navigations).toEqual(['s2']);
+
+    pressNext();
+    expect(navigations).toEqual(['s2', 'w2-b']);
+  });
+
+  it('abandons a queued burst when a press follows an outside selection', () => {
+    pressNext();
+    expect(frames.pending).toBe(1);
+
+    routeSessionId = 's9';
+    // Pressing before the queued frame runs must not advance from the dead
+    // burst, and must not leave its frame able to fire later.
+    pressNext();
+    expect(navigations).toEqual(['s2', 's10']);
+
+    frames.paint();
+    expect(navigations).toEqual(['s2', 's10']);
+  });
+
+  it('drops a queued navigation when its target leaves the list', () => {
+    pressNext();
+    pressNext();
+    expect(navigations).toEqual(['s2']);
+
+    // Two presses put the pending target on s3; it is archived while the frame
+    // is still owed.
+    act(() => {
+      store.set(
+        sidebarNavItemsAtom,
+        SESSION_IDS.filter((id) => id !== 's3').map((sessionId) => ({
+          kind: 'session' as const,
+          sessionId,
+          groupKey: 'g',
+        }))
+      );
+    });
+
+    frames.paint();
+    expect(navigations).toEqual(['s2']);
+    expect(frames.pending).toBe(0);
+  });
+
   it('stops at the last session instead of wrapping', () => {
-    routeSessionId = 's6';
+    routeSessionId = 's10';
     pressNext();
     expect(navigations).toEqual([]);
     expect(frames.pending).toBe(0);

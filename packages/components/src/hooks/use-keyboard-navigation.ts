@@ -63,6 +63,37 @@ export function useKeyboardNavigation(): void {
   const navigatedSessionRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
 
+  const abandonBurst = useCallback(() => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pendingSessionRef.current = null;
+    navigatedSessionRef.current = null;
+  }, []);
+
+  /**
+   * The target a queued burst may still act on, or `null` once the burst has
+   * stopped owning the selection.
+   *
+   * A keyboard burst is only ever an offset from its OWN last navigation, so it
+   * has to yield the moment anything else moves the selection. A sidebar click
+   * leaves the route somewhere the burst did not put it; a workspace switch does
+   * that and replaces the visible rows underneath it. Carrying a stale id into
+   * the queued frame would overwrite the user's choice, or hand
+   * `onNavigateToSession` a session id from the previous workspace and build a
+   * route the target workspace has no session for.
+   */
+  const claimBurstTarget = useCallback(
+    (sessionIds: readonly string[]): string | null => {
+      const target = pendingSessionRef.current;
+      if (target === null) return null;
+      const callbacks = callbacksRef.current;
+      if (!callbacks) return null;
+      if (callbacks.getSelectedSessionId() !== navigatedSessionRef.current) return null;
+      return sessionIds.includes(target) ? target : null;
+    },
+    []
+  );
+
   const flushSessionNavigation = useCallback(() => {
     const callbacks = callbacksRef.current;
     const target = pendingSessionRef.current;
@@ -74,18 +105,18 @@ export function useKeyboardNavigation(): void {
     callbacks.onNavigateToSession(target);
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null;
+      // Re-validate before acting: the paint we were waiting on is also the
+      // window in which a click or a workspace switch can land.
+      if (claimBurstTarget(getVisibleSessionIds()) === null) {
+        abandonBurst();
+        return;
+      }
       // The burst moved on while this navigation rendered; take the latest.
       if (pendingSessionRef.current !== navigatedSessionRef.current) flushSessionNavigation();
     });
-  }, []);
+  }, [abandonBurst, claimBurstTarget, getVisibleSessionIds]);
 
-  useEffect(
-    () => () => {
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    },
-    []
-  );
+  useEffect(() => () => abandonBurst(), [abandonBurst]);
 
   const navigateVisibleSession = useCallback(
     (direction: 'previous' | 'next') => {
@@ -94,14 +125,12 @@ export function useKeyboardNavigation(): void {
       const sessionIds = getVisibleSessionIds();
       if (sessionIds.length === 0) return;
 
-      // No paint is owed, so this press starts a burst rather than continuing
-      // one: re-anchor on the route, which has committed by now, and drop a
-      // pending target left over from a selection the user has since changed.
-      if (frameRef.current === null) pendingSessionRef.current = null;
-      const anchorId =
-        pendingSessionRef.current !== null && sessionIds.includes(pendingSessionRef.current)
-          ? pendingSessionRef.current
-          : callbacks.getSelectedSessionId();
+      // Continue the burst only while it still owns the selection. Otherwise it
+      // is dead: drop its queued frame and start again from wherever the route
+      // actually is, so this press gets the ordinary immediate response.
+      const burstTarget = claimBurstTarget(sessionIds);
+      if (burstTarget === null) abandonBurst();
+      const anchorId = burstTarget ?? callbacks.getSelectedSessionId();
       const currentIndex = anchorId ? sessionIds.indexOf(anchorId) : -1;
       const nextIndex =
         direction === 'previous'
@@ -112,7 +141,7 @@ export function useKeyboardNavigation(): void {
       pendingSessionRef.current = nextId;
       if (frameRef.current === null) flushSessionNavigation();
     },
-    [flushSessionNavigation, getVisibleSessionIds]
+    [abandonBurst, claimBurstTarget, flushSessionNavigation, getVisibleSessionIds]
   );
 
   useFocusScopeSwitcher({ enabled: !isMobile });
