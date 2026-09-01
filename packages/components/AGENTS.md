@@ -46,7 +46,11 @@ mobile surfaces.
   indentation levels together. Discovery uses final rendered coordinates, not component
   structure or row-container boundaries, to infer multiple stable visual rails. Every candidate
   remains eligible for its nearest rail across the full scope; broad scans deliberately prefer
-  an extra review candidate over silently excusing a shifted module or indentation level.
+  an extra review candidate over silently excusing a shifted module or indentation level. Two
+  repeated visible rows are sufficient to establish a local indentation rail; do not absorb a
+  legitimate two-row visual level into a nearby rail merely because a broader rail has more support.
+  A rail established by one rendered primitive kind accepts only that kind; cross-kind attachment
+  requires mixed support on the rail itself so a coincidentally nearby icon is not judged by a text rail.
   Members outside the inlier tolerance are reported as outliers, and confidence includes the
   rail's span relative to its containing scope rather than the minimum-span admission threshold. Flow
   text may contribute start/end edges but never a center rail because its box center changes

@@ -338,6 +338,64 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(rails.find((rail) => rail.line === 116)?.outliers).toEqual([]);
   });
 
+  it('recognizes a two-row local indentation rail', () => {
+    const candidates = [
+      ...[0, 40, 80].map((yStart, index) => ({
+        elementId: `body-${index + 1}`,
+        rowId: `body-row-${index + 1}`,
+        coordinate: 100,
+        yStart,
+      })),
+      ...[120, 152].map((yStart, index) => ({
+        elementId: `status-${index + 1}`,
+        rowId: `status-row-${index + 1}`,
+        coordinate: 96,
+        yStart,
+      })),
+    ].map((candidate) => ({
+      ...candidate,
+      anchor: 'inline-start' as const,
+      yEnd: candidate.yStart + 20,
+    }));
+
+    const rails = discoverAlignmentRails(candidates, {
+      mergeTolerance: 8,
+      minSupport: 2,
+    });
+
+    expect(rails.map((rail) => rail.line).sort((left, right) => left - right)).toEqual([96, 100]);
+    expect(rails.every((rail) => rail.outliers.length === 0)).toBe(true);
+  });
+
+  it('does not attach an unrelated icon to a text-only rail', () => {
+    const rails = discoverAlignmentRails(
+      [
+        ...[0, 32, 64].map((yStart, index) => ({
+          elementId: `text-${index + 1}`,
+          rowId: `text-row-${index + 1}`,
+          kind: 'text',
+          coordinate: 100,
+          yStart,
+        })),
+        {
+          elementId: 'nearby-icon',
+          rowId: 'icon-row',
+          kind: 'svg',
+          coordinate: 106,
+          yStart: 96,
+        },
+      ].map((candidate) => ({
+        ...candidate,
+        anchor: 'inline-start' as const,
+        yEnd: candidate.yStart + 20,
+      })),
+      { mergeTolerance: 8 }
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
+  });
+
   it('keeps distant visual regions eligible for a nearby rail', () => {
     const rails = discoverAlignmentRails(
       [

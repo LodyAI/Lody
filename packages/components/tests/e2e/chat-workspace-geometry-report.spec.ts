@@ -1115,6 +1115,14 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery: sessionRailDiscovery,
     });
     expect(storyDetails.length).toBeGreaterThan(0);
+    if (story.idPrefix === 'session-question') {
+      const messageLeadingRails = storyDetails.find(
+        (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
+      );
+      expect(messageLeadingRails?.description).toContain('3 条候选对齐轨');
+      expect(messageLeadingRails?.description).toContain('暂无偏离元素');
+      expect(messageLeadingRails?.overlay.semanticAnnotations).toHaveLength(0);
+    }
 
     for (const detail of storyDetails) {
       await page.screenshot({

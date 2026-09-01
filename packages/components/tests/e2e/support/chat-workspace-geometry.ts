@@ -631,6 +631,7 @@ export async function discoverChatWorkspaceAlignmentRails(
     const mergeTolerance = Math.max(4, Math.min(12, typicalHeight / 2));
     const rawRails = discoverAlignmentRails(candidates, {
       mergeTolerance,
+      minSupport: 2,
       scopeHeight: rect.height,
     });
     return {

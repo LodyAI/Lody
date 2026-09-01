@@ -997,12 +997,13 @@ function median(values: readonly number[]): number {
  * Discover repeated horizontal alignment rails without assigning layout intent.
  * Candidates are grouped independently by anchor kind. Repeated coordinate
  * modes establish rails before nearby singleton observations are attached to
- * the nearest mode. This keeps stable indentation levels separate even when
- * intermediate coordinates would otherwise chain them into one cluster. Flow
- * text can define start or end edges, but its box center is content-dependent
- * and cannot define a center rail. The result is diagnostic only: callers
- * decide whether a reviewed rail should later become an explicit semantic
- * contract.
+ * the nearest compatible mode. A rail supported by one visual primitive kind
+ * only accepts that kind; a rail with mixed support may accept mixed kinds.
+ * This keeps stable indentation levels separate and prevents an unrelated icon
+ * from attaching to a nearby text rail. Flow text can define start or end edges,
+ * but its box center is content-dependent and cannot define a center rail. The
+ * result is diagnostic only: callers decide whether a reviewed rail should
+ * later become an explicit semantic contract.
  */
 export function discoverAlignmentRails(
   candidates: readonly AlignmentRailCandidate[],
@@ -1095,7 +1096,13 @@ export function discoverAlignmentRails(
         Math.max(...supporters.map((member) => member.yEnd)) -
         Math.min(...supporters.map((member) => member.yStart));
       if (verticalSpan < minVerticalSpan) return [];
-      return [{ line, verticalSpan }];
+      return [
+        {
+          line,
+          verticalSpan,
+          kinds: new Set(supporters.flatMap((member) => (member.kind ? [member.kind] : []))),
+        },
+      ];
     });
 
     const assignedByMode = stableModes.map(() => [] as AlignmentRailCandidate[]);
@@ -1104,7 +1111,10 @@ export function discoverAlignmentRails(
       let nearestDistance = Number.POSITIVE_INFINITY;
       for (const [modeIndex, mode] of stableModes.entries()) {
         const distance = Math.abs(candidate.coordinate - mode.line);
-        if (distance <= mergeTolerance && distance < nearestDistance) {
+        const kindCompatible =
+          candidate.kind === undefined || mode.kinds.size === 0 || mode.kinds.size > 1 ||
+          mode.kinds.has(candidate.kind);
+        if (kindCompatible && distance <= mergeTolerance && distance < nearestDistance) {
           nearestModeIndex = modeIndex;
           nearestDistance = distance;
         }
