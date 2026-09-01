@@ -813,6 +813,38 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('expires a Delivery 8h past its Operation deadline instead of waking the requester', async () => {
+    // deadline + 8h grace lands exactly on TEST_NOW: stranded completions from
+    // a long-dead store or downtime must not restart old conversations.
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T16:00:00.000Z' });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'finished',
+      });
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('still delivers a completion within the 8h post-deadline grace window', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T16:00:01.000Z' });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledTimes(1);
+    const requesterHistory = harness.histories.get(harness.requesterSessionId)!;
+    expect(requesterHistory.filter((turn) => turn.role === 'system')).toHaveLength(1);
+  });
+
   it('keeps a persisted terminal assistant result at the deadline before handled catches up', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
     const targetHistory = harness.histories.get(harness.targetSessionId)!;

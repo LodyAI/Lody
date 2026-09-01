@@ -407,6 +407,68 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('carries the picked ACP authentication method to the machine', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const authenticateMachineAcp = vi.fn(
+      async (args): Promise<MachineAcpAuthenticateResponse> => ({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: args.requestId,
+        agentType: args.agentType,
+        success: true,
+        disposition: 'authenticated',
+      })
+    );
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      maxConcurrentRequests: 1,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      authenticateMachineAcp,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0' as const,
+          rpcVersion: '1',
+          machineId,
+          workspaceId,
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          id: 'auth-pick',
+          method: 'machine/acp-authenticate',
+          params: {
+            requestId: 'auth-antigravity',
+            action: 'start',
+            methodId: 'gemini-api-key',
+            configId,
+            cliType: 'registry',
+            agentType: 'antigravity-acp',
+          },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    await server.start();
+    await fake.waitForAppendedCount(1);
+    // Dropping methodId here makes an agent advertising several methods answer
+    // `method-required` forever, so a remote machine could never be signed into.
+    expect(authenticateMachineAcp).toHaveBeenCalledWith(
+      expect.objectContaining({ methodId: 'gemini-api-key' })
+    );
+    server.stop();
+  });
+
   it('routes identifier-only session preparation requests on the control lane', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;

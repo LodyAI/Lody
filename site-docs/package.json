@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "clean:out": "node scripts/clean-output.mjs",
-    "generate": "fumadocs-mdx && node scripts/generate-sitemap.mjs && node scripts/generate-llms.mjs && node scripts/generate-rss.mjs && node scripts/generate-blog-reading-time.mjs",
+    "generate": "fumadocs-mdx && node scripts/generate-sitemap.mjs && node scripts/generate-docs-search.mjs && node scripts/generate-llms.mjs && node scripts/generate-rss.mjs && node scripts/generate-blog-reading-time.mjs",
     "generate:routes": "tsr generate",
     "postinstall": "node scripts/postinstall.mjs",
     "predev": "corepack pnpm run generate",

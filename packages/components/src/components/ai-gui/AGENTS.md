@@ -39,7 +39,8 @@
   `getTextIndexBeforeTrailingNeverCollapsedItems`.
 - One turn may contain several `AssistantTurnRenderSegment`s. A plan approval
   inside a running turn cuts a segment so implementation stays under the plan.
-  Match ACP tool kind `switch_mode`, never a rendered title. Keep
+  Match ACP kind `switch_mode`, never a title; carrier varies
+  (`plan-surface.ts`). Keep
   `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility, and
   `expandedWorkedGroups` per segment. Expansion keys include the segment; only
   the last region may show a duration, while earlier regions say "Finished
@@ -58,11 +59,11 @@
   the footer after buttons otherwise. Mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` so actions clear the edge-back strip.
-- Horizontal gutter belongs to `ConversationColumn`, not Virtua: absolute rows
-  ignore scroller padding. Top-level prose, headers, subagents,
-  edited files, and footer share one left rail; only child detail rows indent.
-  Preserve the footer's `-mx-[7px]`. Visual coverage:
-  `AssistantTurnAlignment.stories.tsx`.
+- Gutter belongs to `ConversationColumn`, not Virtua: absolute rows ignore
+  scroller padding. EVERY row shares one left rail with no shell pad, INCLUDING
+  the contents of an expanded region: expanding reveals rows, it never shifts
+  them right, and the chevron carries the hierarchy. Hover pills bleed instead
+  (footer `-mx-[7px]`, steps `-mx-1`). See `AssistantTurnAlignment.stories`.
 
 ## Conversation Outline
 
@@ -108,9 +109,11 @@ work) and a hover preview.
   `conversation-font-size-classes.ts`; settings own legacy preset migration.
   Keep Streamdown in streaming mode, but never enable word-level `animated`: its
   span-per-word compositor cost is unbounded on long turns.
-- `chat_failed` raw errors open a modal, never a hover tooltip. Mobile must be
-  able to read and copy the full `meta.message`, reason, and code. Extraction and
-  clipboard formatting live in `chat-failed-error-report.ts`.
+- `chat_failed` raw errors use a modal; extraction/copy live in `chat-failed-error-report.ts`.
+- Capacity retry targets only the latest notice: first click consents; bounded countdowns send a
+  new continuation turn, never replay the failed input. During a visible countdown, the countdown
+  control reveals its stop-auto-retry action on hover or keyboard focus and shows that action
+  directly on touch devices so consent stays reversible without adding a second control.
 - Terminal persistence and legacy preview bounds live in
   `context/terminal-output-lifecycle.md`. Never send full legacy output through
   ANSI parsing, search, or React rendering.

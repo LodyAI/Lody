@@ -1736,17 +1736,6 @@ pre,
     opacity: 0.8;
   }
 
-  /* Keyboard navigation highlight for sidebar items. offset -1px straddles the
-     row edge (1px in, 1px out) so the ring reads as a border ON the edge rather
-     than a floating inner ring, while still surviving the scroll viewport's
-     horizontal clip (only 1px extends outside the row box). */
-  .keyboard-nav-highlight {
-    background: hsl(var(--sidebar-hover)) !important;
-    outline: 2px solid hsl(var(--sidebar-ring) / 0.4);
-    outline-offset: -1px;
-    border-radius: var(--radius-md);
-  }
-
   /* Photo viewer safe area insets for mobile (notch/status bar) */
   .PhotoView-Slider__BannerWrap {
     padding-top: env(safe-area-inset-top, 0px);

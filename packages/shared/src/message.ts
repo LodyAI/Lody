@@ -358,6 +358,11 @@ export interface MachineAcpAuthenticateRequest {
   authenticationRequestId?: string;
   /** One-time provider input; never log or copy it into durable Lody product state. */
   authorizationCode?: string;
+  /**
+   * Which advertised ACP authentication method to run. Only registry/custom
+   * agents publish a choice; builtin providers have exactly one login command.
+   */
+  methodId?: string;
   configId?: AgentConfigId;
   cliType: AgentConfigCliType;
   agentType: string;
@@ -372,7 +377,17 @@ export interface MachineAcpAuthenticateResponse {
   requestId: string;
   agentType: string;
   success: boolean;
-  disposition: 'authenticated' | 'cancelled' | 'not-running' | 'input-accepted' | 'error';
+  /**
+   * `method-required` means the agent advertises several sign-in methods and
+   * the user must pick one; the request is then repeated with `methodId`.
+   */
+  disposition:
+    | 'authenticated'
+    | 'cancelled'
+    | 'not-running'
+    | 'input-accepted'
+    | 'method-required'
+    | 'error';
   /** Present when a post-login capability refresh was requested. */
   capabilitiesRefreshed?: boolean;
   /** A successful login command can still leave the runtime requiring auth. */

@@ -3,9 +3,9 @@ import { Trans, useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ExternalLink, Github, Loader2, Mail } from 'lucide-react';
 import { usePostHog } from '@posthog/react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
-import { electronDeepLinkSignInInProgressAtom } from '@/atoms';
+import { electronDeepLinkSignInInProgressAtom, nativeSignInInProgressAtom } from '@/atoms';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -15,6 +15,7 @@ import { setLoginHintCookie } from '@/lib/login-hint-cookie';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useStableSession } from '@/hooks/useStableSession';
+import { hasUsableSessionUser } from '@/hooks/stable-session-state';
 import {
   buildElectronWebLoginCallbackUrl,
   clearElectronAuthorizationCode,
@@ -35,6 +36,7 @@ import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { isElectronRenderer as isElectronRendererRuntime } from '@/lib/electron';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getAuthResponseError } from '@/lib/auth-response';
 import { buildEmailVerificationCallbackUrl } from '@/lib/email-verification-callback';
 import { buildEmailSignInInput } from '@/lib/email-sign-in';
@@ -571,6 +573,7 @@ export function LoginPage({
   // the desktop login shows a "signing in" spinner while better-auth exchanges
   // the token for a session.
   const isCompletingElectronSignIn = useAtomValue(electronDeepLinkSignInInProgressAtom);
+  const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
   const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
   const hasAutoElectronBridgeAttemptedRef = useRef(false);
   const providerLabelMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -591,7 +594,21 @@ export function LoginPage({
   const privacyUrl = new URL(isChinese ? '/zh/privacy' : '/privacy', legalLinksOrigin).toString();
   const emailAuthCallbackURL = getEmailAuthCallbackURL(electronOAuthQuery);
   const isNativeApp = isNativeAppShell();
-  const { data: session, hasLocalToken, hasRawUser, isPending, isRetrying } = useStableSession();
+  const {
+    data: session,
+    hasLocalToken,
+    hasRawUser,
+    isPending,
+    isRetrying,
+    error: sessionError,
+    confirmedUnauthenticated,
+  } = useStableSession();
+  const canRedirectAuthenticatedUser = hasUsableSessionUser({
+    hasRawUser,
+    isRetrying,
+    hasError: sessionError !== null,
+    confirmedUnauthenticated,
+  });
   const loginSurface = isElectronOAuthFlow
     ? 'electron_browser_callback'
     : isNativeApp
@@ -656,7 +673,7 @@ export function LoginPage({
   // client signal; the authoritative value comes from better-auth (spec §3.5).
   const oauthSucceededFiredRef = useRef(false);
   useEffect(() => {
-    if (!hasRawUser || oauthSucceededFiredRef.current) {
+    if (!canRedirectAuthenticatedUser || oauthSucceededFiredRef.current) {
       return;
     }
     const pending = readAndClearPendingOAuth();
@@ -677,7 +694,7 @@ export function LoginPage({
       is_new_user: inferIsNewUser(sessionUser),
       oauth_round_trip_ms: Date.now() - pending.started_at_ms,
     });
-  }, [hasRawUser, isElectronRenderer, postHog, session]);
+  }, [canRedirectAuthenticatedUser, isElectronRenderer, postHog, session]);
 
   useLayoutEffect(() => {
     const labelContainer = providerLabelMeasureRef.current;
@@ -802,6 +819,11 @@ export function LoginPage({
       const normalizedEmail = trimmedEmail.toLowerCase();
       const emailAuthClient = authClient as AuthClientWithEmailPassword;
       setIsEmailSubmitting(true);
+      const shouldFenceNativeSignIn = isNativeApp && emailAuthMode === 'sign-in';
+      let keepNativeSignInFence = false;
+      if (shouldFenceNativeSignIn) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (emailAuthMode === 'sign-in') {
@@ -858,10 +880,12 @@ export function LoginPage({
           }
           if (electronOAuthQuery) {
             replaceAppWindowLocation(emailAuthCallbackURL);
+            keepNativeSignInFence = true;
             return;
           }
           setLoginHintCookie(true);
           replaceLocation(getRedirectTarget());
+          keepNativeSignInFence = true;
           return;
         }
 
@@ -927,6 +951,9 @@ export function LoginPage({
             : t('login.emailAuthFailed', 'Email authentication failed. Please try again.')
         );
       } finally {
+        if (shouldFenceNativeSignIn && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setIsEmailSubmitting(false);
       }
     },
@@ -944,6 +971,7 @@ export function LoginPage({
       postHog,
       replaceLocation,
       sendVerificationEmail,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1004,6 +1032,10 @@ export function LoginPage({
       });
       // Persist a marker so the post-redirect return can fire oauth_succeeded.
       writePendingOAuth({ provider, login_surface: loginSurface, started_at_ms: Date.now() });
+      let keepNativeSignInFence = false;
+      if (isNativeApp) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (electronOAuthQuery) {
@@ -1059,6 +1091,7 @@ export function LoginPage({
             });
             setLoginHintCookie(true);
             replaceLocation(getRedirectTarget());
+            keepNativeSignInFence = true;
           }
           return;
         }
@@ -1079,6 +1112,9 @@ export function LoginPage({
         });
         console.error(`${provider} login error:`, err);
       } finally {
+        if (isNativeApp && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setLoadingProvider(null);
       }
     },
@@ -1090,6 +1126,7 @@ export function LoginPage({
       loginSurface,
       postHog,
       replaceLocation,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1197,7 +1234,7 @@ export function LoginPage({
   );
 
   useEffect(() => {
-    if (!isElectronOAuthFlow || !hasRawUser) {
+    if (!isElectronOAuthFlow || !canRedirectAuthenticatedUser) {
       return;
     }
     if (hasAutoElectronBridgeAttemptedRef.current) {
@@ -1205,9 +1242,9 @@ export function LoginPage({
     }
     hasAutoElectronBridgeAttemptedRef.current = true;
     void handleElectronSessionTransfer();
-  }, [handleElectronSessionTransfer, hasRawUser, isElectronOAuthFlow]);
+  }, [canRedirectAuthenticatedUser, handleElectronSessionTransfer, isElectronOAuthFlow]);
 
-  if (isElectronOAuthFlow && hasRawUser && !error) {
+  if (isElectronOAuthFlow && canRedirectAuthenticatedUser && !error) {
     return (
       <LoadingPlaceholder
         title={t('login.redirectingToDesktop', 'Redirecting to desktop app')}
@@ -1219,7 +1256,7 @@ export function LoginPage({
     );
   }
 
-  if (hasRawUser && !isElectronOAuthFlow) {
+  if (canRedirectAuthenticatedUser && !isElectronOAuthFlow) {
     return (
       <BrowserRedirect
         to={getRedirectTarget()}
@@ -1638,7 +1675,8 @@ export function LoginPage({
   })();
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background p-4">
+    <div className="relative flex h-screen w-full items-center justify-center bg-background p-4">
+      <WindowDragStrip />
       <motion.div
         layout
         transition={VIEW_TRANSITION}

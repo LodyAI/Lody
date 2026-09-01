@@ -170,6 +170,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -249,6 +250,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
+import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
 import { ensureValidBranchName } from '@/agent/branch-name-generator';
@@ -1713,13 +1715,30 @@ export class MessageHandler {
       acpSessionId: ACPSessionId | null;
       agentClient: AgentClient | null;
     },
-    config: AcpSessionRunConfig
+    config: AcpSessionRunConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+    }
   ): Promise<void> {
-    const { warningSelections } = await applyAcpSessionRunConfig({
+    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
       config,
       logger: this.logger,
     });
+
+    if (runtimeConfigPatch && context.basedOnUserTurnId) {
+      const basedOnUserTurnId = context.basedOnUserTurnId;
+      const persistRuntimeConfig = async (): Promise<void> => {
+        await this.awaitTurnHistoryGate(session.sessionId);
+        context.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+      };
+      void persistRuntimeConfig().catch((error) => {
+        this.logger.warn(
+          `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
+        );
+      });
+    }
 
     if (warningSelections.length > 0) {
       // Not awaited: this is reporting, and the prompt hot path must not block
@@ -3063,14 +3082,15 @@ export class MessageHandler {
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      applyAcpModeAndModel: async (session, acpConfig) =>
+      applyAcpModeAndModel: async (session, acpConfig, context) =>
         await this.applyAcpModeAndModel(
           session as {
             sessionId: SessionId;
             acpSessionId: ACPSessionId | null;
             agentClient: AgentClient | null;
           },
-          acpConfig
+          acpConfig,
+          context
         ),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo, userTurnId) =>
         await this.createAssistantEntryForTurn(
@@ -3269,6 +3289,7 @@ export class MessageHandler {
           action,
           authenticationRequestId,
           authorizationCode,
+          methodId,
           configId,
           cliType,
           agentType,
@@ -3286,6 +3307,7 @@ export class MessageHandler {
               action,
               authenticationRequestId,
               authorizationCode,
+              methodId,
               configId,
               cliType,
               agentType,
@@ -5201,6 +5223,16 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
+            group.updates.map((update) => update.notification)
+          );
+          if (runtimeConfigPatch && group.target.userTurnId) {
+            sessionDoc.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
+          } else if (runtimeConfigPatch) {
+            this.logger.debug(
+              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
+            );
+          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,
@@ -9829,11 +9861,10 @@ export class MessageHandler {
       return false;
     }
 
-    if (meta.processingUserMsgId) {
-      return true;
-    }
-
-    return Boolean(meta.latestUserMsgId && meta.latestUserMsgId !== meta.lastHandledUserMsgId);
+    // Same predicate the dispatch watcher uses: a retired activation leaves the
+    // pointers unequal on purpose, and a raw comparison would pin the session
+    // in memory forever.
+    return hasPendingUserTurnActivation(meta);
   }
 
   /**

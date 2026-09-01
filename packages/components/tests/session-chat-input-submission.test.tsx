@@ -400,4 +400,79 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(container.textContent).toContain('limited to 20 turns');
     expect(container.textContent).not.toContain('Upgrade to Plus');
   });
+
+  it('does not restore focus when the session changes during a pending send', async () => {
+    const acceptance = deferredBoolean();
+    const sessionA: SessionMeta = {
+      id: 'session-switch-a',
+      userId: 'user-1',
+      machineId: 'machine-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      isArchived: false,
+      createdAt: '2026-07-19T00:00:00.000Z',
+    } as SessionMeta;
+    const sessionB: SessionMeta = {
+      ...sessionA,
+      id: 'session-switch-b',
+    };
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const baseProps = (session: SessionMeta) => ({
+      session,
+      sessionLocalProjectRootPath: null,
+      isMachineRemoved: false,
+      isAgentBusy: false,
+      isDark: false,
+      isEmptyConversation: false,
+      selectedModeId: null,
+      selectedModelId: null,
+      modeOptions: [],
+      modelOptions: [],
+      onModeChange: () => undefined,
+      onModelChange: () => undefined,
+      onSendMessage: () => acceptance.promise,
+      onStop: () => undefined,
+      onRemoveQueueItem: async () => undefined,
+      initialInputText: 'draft before switch',
+    });
+
+    await act(async () => {
+      root?.render(createElement(SessionChatInputArea, baseProps(sessionA)));
+    });
+
+    const textarea = container.querySelector('textarea');
+    expect(textarea?.value).toBe('draft before switch');
+
+    // Start the send — the textarea becomes disabled and the session id is
+    // snapshotted inside sendMessage BEFORE the await.
+    await act(async () => {
+      container?.querySelector('button')?.click();
+      await Promise.resolve();
+    });
+
+    expect(textarea?.disabled).toBe(true);
+
+    // Switch the session prop in-place while the send is still pending.
+    await act(async () => {
+      root?.render(createElement(SessionChatInputArea, baseProps(sessionB)));
+    });
+
+    // The session switch resets submissionPending and loads session B's draft.
+    // Now resolve the original send. The desktop focus-restore effect must see
+    // that the stored session id (A) no longer matches the current session (B)
+    // and skip the focus restore.
+    await act(async () => {
+      acceptance.resolve(false);
+      await acceptance.promise;
+    });
+
+    const textareaAfterSwitch = container.querySelector('textarea');
+    // Focus must NOT have been restored to the new session's textarea.
+    expect(document.activeElement).not.toBe(textareaAfterSwitch);
+  });
 });

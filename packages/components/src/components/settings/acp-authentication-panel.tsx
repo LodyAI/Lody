@@ -6,6 +6,7 @@ import type {
   AgentConfigId,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
+  MachineAcpAuthMethodSummary,
   MachineAcpAuthenticationProgressMessage,
   MachineId,
 } from '@lody/shared';
@@ -23,7 +24,14 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { cn } from '@/lib/utils';
 
-type AuthenticationPhase = 'idle' | 'running' | 'authenticated' | 'cancelled' | 'error';
+type AuthenticationPhase =
+  | 'idle'
+  | 'running'
+  // The agent advertised several sign-in methods and is waiting on the choice.
+  | 'choosing'
+  | 'authenticated'
+  | 'cancelled'
+  | 'error';
 export type AcpAuthorizationDetails = Pick<
   MachineAcpAuthenticationProgressMessage,
   'authorizationUrl' | 'userCode' | 'acceptsAuthorizationCode' | 'expiresInSeconds'
@@ -39,6 +47,7 @@ export function AcpAuthenticationPanel({
   env,
   compact = false,
   reauthentication = false,
+  providerName,
   onAuthenticated,
 }: {
   machineId: MachineId | null;
@@ -50,6 +59,12 @@ export function AcpAuthenticationPanel({
   env?: Record<string, string>;
   compact?: boolean;
   reauthentication?: boolean;
+  /**
+   * Fallback label for agents Lody has no pinned account name for. A pinned
+   * provider always wins: the user signs into "ChatGPT", whatever they named
+   * the config.
+   */
+  providerName?: string;
   onAuthenticated?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -65,9 +80,11 @@ export function AcpAuthenticationPanel({
   const [authorizationCodeSubmitted, setAuthorizationCodeSubmitted] = useState(false);
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
+  const [methodChoices, setMethodChoices] = useState<MachineAcpAuthMethodSummary[]>([]);
   const pendingAuthorizationWindowRef = useRef<Window | null>(null);
   const openedAuthorizationUrlRef = useRef<string | null>(null);
-  const provider = getAcpAuthenticationAccountName(agentType);
+  const provider =
+    getAcpAuthenticationAccountName(agentType) ?? (providerName?.trim() || agentType);
 
   const authArgs = machineId
     ? { machineId, configId, cliType, agentType, customAcp, runtimeOverrides, env }
@@ -110,7 +127,7 @@ export function AcpAuthenticationPanel({
     });
   };
 
-  const handleStart = (): void => {
+  const handleStart = (methodId?: string): void => {
     if (!authArgs || phase === 'running') return;
     closePendingAuthorizationWindow();
     pendingAuthorizationWindowRef.current = prepareAuthorizationWindow(
@@ -124,8 +141,10 @@ export function AcpAuthenticationPanel({
     setAuthorizationCodeSubmitted(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
+    setMethodChoices([]);
     const operation = startAuthentication({
       ...authArgs,
+      methodId,
       onProgress: (progress) => {
         if (progress.status === 'authorization' && progress.authorizationUrl) {
           const nextAuthorization: AcpAuthorizationDetails = {
@@ -149,6 +168,13 @@ export function AcpAuthenticationPanel({
     setRequestId(operation.requestId);
     void operation.promise
       .then(async (response) => {
+        if (response.disposition === 'method-required') {
+          // Nothing has been opened yet: the agent is waiting for the choice.
+          closePendingAuthorizationWindow();
+          setMethodChoices(response.authMethods ?? []);
+          setPhase('choosing');
+          return;
+        }
         if (response.disposition === 'authenticated') {
           if (response.capabilitiesRefreshed === false) {
             setError(
@@ -245,13 +271,18 @@ export function AcpAuthenticationPanel({
               {t('common.cancel', 'Cancel')}
             </Button>
           </>
+        ) : phase === 'choosing' ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPhase('idle')}>
+            <Square className="h-3.5 w-3.5" />
+            {t('common.cancel', 'Cancel')}
+          </Button>
         ) : (
           <Button
             type="button"
             size="sm"
             variant="outline"
             disabled={!authArgs}
-            onClick={handleStart}
+            onClick={() => handleStart()}
           >
             <LogIn className="h-3.5 w-3.5" />
             {phase === 'error' || phase === 'cancelled'
@@ -269,6 +300,13 @@ export function AcpAuthenticationPanel({
           </span>
         ) : null}
       </div>
+      {phase === 'choosing' && methodChoices.length > 0 ? (
+        <AcpAuthenticationMethodChooser
+          provider={provider}
+          methods={methodChoices}
+          onSelect={(methodId) => handleStart(methodId)}
+        />
+      ) : null}
       {phase === 'running' && authorization ? (
         <AcpAuthenticationAuthorizationView
           provider={provider}
@@ -284,6 +322,82 @@ export function AcpAuthenticationPanel({
         />
       ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * An agent that advertises more than one sign-in method gets to keep that
+ * choice: picking for the user could sign them into the wrong account or the
+ * wrong billing path.
+ */
+function AcpAuthenticationMethodChooser({
+  provider,
+  methods,
+  onSelect,
+}: {
+  provider: string;
+  methods: MachineAcpAuthMethodSummary[];
+  onSelect: (methodId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-md border bg-muted/20 p-3">
+      <p className="text-sm font-medium">
+        {t('agents.authentication.chooseMethod', 'Choose how to sign in to {{provider}}', {
+          provider,
+        })}
+      </p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {methods.map((method) => {
+          const methodId = method.id;
+          if (!methodId) return null;
+          const label = method.name ?? methodId;
+          // An `env_var` method is configured on the agent, not signed into, so
+          // it is stated rather than offered as a button that only round-trips
+          // to the same instruction.
+          if (method.type === 'env_var') {
+            return (
+              <div
+                key={methodId}
+                className="rounded-md border border-dashed px-2.5 py-1.5 text-left"
+              >
+                <p className="text-xs font-medium">{label}</p>
+                <p className="text-xs font-normal text-muted-foreground">
+                  {method.description
+                    ? `${method.description} — ${t(
+                        'agents.authentication.envVarMethod',
+                        "set it in this agent's environment variables."
+                      )}`
+                    : t(
+                        'agents.authentication.envVarMethod',
+                        "set it in this agent's environment variables."
+                      )}
+                </p>
+              </div>
+            );
+          }
+          return (
+            <Button
+              key={methodId}
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-auto justify-start whitespace-normal py-1.5 text-left"
+              onClick={() => onSelect(methodId)}
+            >
+              <span className="flex min-w-0 flex-col items-start">
+                <span className="text-xs font-medium">{label}</span>
+                {method.description ? (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {method.description}
+                  </span>
+                ) : null}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -429,12 +543,13 @@ export function AcpAuthenticationAuthorizationView({
   );
 }
 
-function getAcpAuthenticationAccountName(agentType: string): string {
+/** The account a pinned provider signs into, which is not its config name. */
+function getAcpAuthenticationAccountName(agentType: string): string | undefined {
   if (agentType === 'claude') return 'Claude';
   if (agentType === 'codex') return 'ChatGPT';
   if (agentType === 'kimi') return 'Kimi';
   if (agentType === 'grok') return 'xAI';
-  return agentType;
+  return undefined;
 }
 
 function prepareAuthorizationWindow(message: string): Window | null {

@@ -89,6 +89,14 @@ describe('CodexResetForecastDialog', () => {
       'Third-party forecast from codex-resets.com. For reference only.'
     );
     expect(text().match(/codex-resets\.com/g)).toHaveLength(1);
+    const attributionLink = Array.from(dialog?.querySelectorAll('a') ?? []).find(
+      (node) => node.textContent?.includes('codex-resets.com')
+    );
+    expect(attributionLink?.getAttribute('href')).toBe(
+      'https://codex-resets.com/?utm_source=lody'
+    );
+    expect(attributionLink?.getAttribute('target')).toBe('_blank');
+    expect(attributionLink?.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
   it('renders the probability, window, level, and both timestamps', async () => {

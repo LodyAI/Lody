@@ -5,10 +5,10 @@ import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
-import { focusLayerAtom, sidebarCollapsedAtom, sidebarLastWidthAtom } from '../atoms';
-import { cn } from '@/lib/utils';
-import { isWindowsElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { isSettingsRoute, NATIVE_KEYBOARD_OFFSET_CLASS } from './workspace-layout-utils';
+import { sidebarCollapsedAtom, sidebarLastWidthAtom, WORKSPACE_FOCUS_SCOPES } from '../atoms';
+import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
+import { FocusScope } from '@/ui/focus-scope';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 
 // LoroSidebar's default expanded width (see loro-sidebar.tsx `defaultWidth`);
 // `sidebarLastWidthAtom` stores 0 until the user resizes, so fall back to this.
@@ -22,31 +22,16 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // resets), so search-only navigations (dialogs, panels) don't re-render the
   // whole workspace shell.
   const pathname = useLocation({ select: (l) => l.pathname });
-  const focusLayer = useAtomValue(focusLayerAtom);
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
-  const isElectronFullscreen = useElectronFullscreen();
 
   useKeyboardNavigation();
 
-  // On Windows the native title bar is hidden and the caption buttons are an
-  // OS overlay at the top-right; reserve the drag band behind them (36px,
-  // matching MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT in
-  // apps/electron/src/main/window-theme.ts and the drag strip in
-  // routes/__root.tsx) so page content never sits under the buttons.
-  const windowsTitleBarPadding =
-    isWindowsElectronRenderer() && !isElectronFullscreen ? 'pt-9' : undefined;
-
   if (isSettingsRoute(pathname)) {
     return (
-      <div
-        className={cn(
-          'flex h-svh w-full overflow-hidden bg-background',
-          NATIVE_KEYBOARD_OFFSET_CLASS,
-          windowsTitleBarPadding
-        )}
-      >
+      <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true })}>
+        <WindowDragStrip />
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {children}
@@ -66,13 +51,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     (sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH) + SIDEBAR_GUTTER;
 
   return (
-    <div
-      className={cn(
-        'flex h-svh w-full overflow-hidden bg-background',
-        NATIVE_KEYBOARD_OFFSET_CLASS,
-        windowsTitleBarPadding
-      )}
-    >
+    <div className={getWebWorkspaceLayoutRootClassName()}>
       <AnimatePresence initial={false}>
         {!sidebarCollapsed && (
           <motion.div
@@ -84,23 +63,22 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
             transition={{ duration: shouldReduceMotion ? 0 : 0.22, ease: [0.32, 0.72, 0, 1] }}
           >
             <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-              <LoroAppSidebar
-                className={cn(
-                  'h-full transition-shadow duration-150',
-                  focusLayer === 'L1' && 'ring-2 ring-ring/30 ring-inset rounded-2xl'
-                )}
-              />
+              <LoroAppSidebar className="h-full transition-shadow duration-150" />
             </ErrorBoundary>
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="flex min-w-0 flex-1 overflow-hidden">
+      <FocusScope
+        id={WORKSPACE_FOCUS_SCOPES.content}
+        className="relative flex min-w-0 flex-1 overflow-hidden"
+      >
+        <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
           <div className="flex h-full min-w-0 w-full flex-1 flex-col overflow-hidden">
             {children}
           </div>
         </ErrorBoundary>
-      </div>
+      </FocusScope>
     </div>
   );
 }

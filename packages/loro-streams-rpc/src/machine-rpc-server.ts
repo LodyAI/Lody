@@ -306,6 +306,7 @@ type RpcServerDeps = {
     action: 'start' | 'cancel' | 'submit-code';
     authenticationRequestId?: string;
     authorizationCode?: string;
+    methodId?: string;
     configId?: AgentConfigId;
     cliType: AgentConfigCliType;
     agentType: string;
@@ -890,6 +891,7 @@ export class LoroStreamsMachineRpcServer {
               action: request.params.action,
               authenticationRequestId: request.params.authenticationRequestId,
               authorizationCode,
+              methodId: request.params.methodId,
               configId: request.params.configId as AgentConfigId | undefined,
               cliType: request.params.cliType,
               agentType: request.params.agentType,

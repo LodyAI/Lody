@@ -296,6 +296,7 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
       action: z.enum(['start', 'cancel', 'submit-code']),
       authenticationRequestId: z.string().trim().min(1).optional(),
       authorizationCodeEnvelope: RpcSecretEnvelopeSchema.optional(),
+      methodId: z.string().trim().min(1).max(256).optional(),
       configId: AgentConfigIdSchema.optional(),
       cliType: AgentConfigCliTypeSchema,
       agentType: z.string().trim().min(1),
@@ -2389,6 +2390,8 @@ export class LoroStreamsMachineRpcClient {
     action: 'start' | 'cancel' | 'submit-code';
     authenticationRequestId?: string;
     authorizationCode?: string;
+    /** Which advertised ACP method the user picked; absent on the first attempt. */
+    methodId?: string;
     configId?: AgentConfigId;
     cliType: RpcAgentConfigCliType;
     agentType: string;
@@ -2443,6 +2446,9 @@ export class LoroStreamsMachineRpcClient {
           action: options.action,
           authenticationRequestId,
           authorizationCodeEnvelope,
+          // Omitted unless the user picked, so a daemon that predates method
+          // selection never sees a key its strict schema would reject.
+          ...(options.methodId ? { methodId: options.methodId } : {}),
           configId: options.configId,
           cliType: options.cliType,
           agentType: options.agentType,

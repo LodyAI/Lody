@@ -1105,6 +1105,7 @@ export type ChatFailedReason =
   | 'acp_auth_required' // -32000: Authentication required
   | 'acp_internal_error' // -32603: Internal JSON-RPC error
   | 'acp_upstream_api_error' // -32603 with upstream API error (500/529) - transient, retryable
+  | 'acp_provider_overloaded' // provider capacity exhausted; safe to continue in a new turn
   | 'acp_session_storage_incompatible' // -32603 from an incompatible session-persistence root
   | 'acp_resource_not_found' // -32002: Resource not found
   | 'acp_request_cancelled' // -32800: Request cancelled

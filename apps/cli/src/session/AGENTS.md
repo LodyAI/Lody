@@ -22,7 +22,12 @@ delegation proofs or a shared-machine gate without a new product and security de
   `latestUserMsgId` ≠ `lastHandledUserMsgId`. Also accepts `session/dispatch-turn`
   Machine RPC pushes via `offerRpcTurn` (ack-then-execute: stash the payload as a
   third turn source — history → queue → stash — and wake the per-session check
-  chain; the RPC ack means delivered, not authorized/executed). Fast-path turns
+  chain; the RPC ack means delivered, not authorized/executed). Absent session
+  meta during watch reconciliation is "unknown", not foreign: a freshly created
+  session's RPC turn can reach this machine before its meta syncs, so the
+  TTL-bounded RPC stash must survive until meta lands and only a definitive
+  verdict — deleted doc, another machine's session, or an archived one — drops
+  it. Fast-path turns
   that finish before their history entry syncs are reconciled by
   `maybeRepairAlreadyHandledTurn` (late `pending` entry gets flipped to its
   recorded terminal status, never re-dispatched). Extensive header comment is the
@@ -37,7 +42,23 @@ delegation proofs or a shared-machine gate without a new product and security de
   instead. The marker is a PERMANENT one-shot negative ack for the exact turn id:
   watch activation and turn selection (history AND the RPC stash) suppress pointers
   only when their id matches that marker; a different producer id wakes the session
-  without any read-await-clear race. A late-arriving history entry is NEVER
+  without any read-await-clear race. That slot holds exactly ONE turn, so nothing
+  may write an unrelated id into it: evicting the recorded turn unprotects it and its
+  late `pending` entry dispatches again, repeating side effects. A stale activation
+  whose entry is already terminal is retired by `settleTerminalActivation` into its
+  OWN slot, `settledActivationUserMsgId` — never by claiming the marker, and never by
+  rewriting `latestUserMsgId`: there is no CAS against the LWW map, so a send published
+  between the read and the write would lose its activation and go unwatched and unrun.
+  That slot may be replaced freely (the turn it names is terminal, so nothing can
+  revive it). Settling reports the session settled only when NO activation survives the
+  patch; a surviving one must reach the ordinary history wait, or recovery accuses a
+  turn published seconds ago. Because BOTH slots retire an activation while leaving the
+  pointers unequal on purpose, "does this session still owe a turn?" has exactly one
+  answer — `hasPendingUserTurnActivation` in `@lody/shared` — and dispatch, idle GC
+  (`hasPendingUserWork`), auto review, and MCP status all read it. A consumer that
+  compares `latestUserMsgId` to `lastHandledUserMsgId` itself sees pending work forever:
+  auto review waits on a finished session, GC never reclaims it, MCP reports a phantom
+  queued turn. `packages/shared/tests/dispatch-activation-predicate.test.ts` fails on any new one. A late-arriving history entry is NEVER
   re-dispatched — no path revives the old turn. The renderer derives a visible
   "not delivered" label for that exact entry from the marker plus its non-terminal
   status (no CLI repair write, no schema change), and recovery is a fresh send:
@@ -104,8 +125,28 @@ delegation proofs or a shared-machine gate without a new product and security de
   re-sending would duplicate it. An entry that is already active, terminal, or past
   `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
-  sends, edit-and-resend, refused-steer requeue, and accepted steer ownership
-  transfer) may publish it and clear a prior missing-history marker. Ordinary turn
+  sends, edit-and-resend, refused-steer requeue, accepted steer ownership
+  transfer, and message-queue promotion) may publish it, and every one of them
+  except promotion also clears a prior missing-history marker. Promotion must NOT
+  clear it: the others supersede the acknowledged entry to `canceled` first, so
+  without that step clearing the marker would revive its stale `pending` copy.
+  Publishing the pointer is not optional bookkeeping — it is what keeps the
+  pointer pair in lockstep. `lastHandledUserMsgId` advances to every turn that
+  RUNS, so if a turn never passes through `latestUserMsgId`, a drained queue
+  leaves the two permanently unequal, which reads as a pending activation forever:
+  the watcher waits out `HISTORY_SYNC_WAIT_TIMEOUT_MS` on a turn whose entry is
+  present and terminal, then negatively acknowledges it with a bogus
+  `message_delivery_failed` notice. **Publish the pointer in the SAME write as the
+  history append**: the pointer lives in workspace meta (the activation index startup
+  scans) and so cannot be derived from history, which is exactly why a separate
+  hand-written write is one forgotten line away from that bug.
+  `SessionDocument.appendUserTurn` is that binding and is the default. Producers that
+  fold the pointer into a larger meta patch keep doing so deliberately — durable create
+  (`commands/session.ts` `writeDispatchPointer`), dispatch start and steer ownership
+  transfer (`session-execution-service.ts`), and edit-and-resend all bundle status or
+  marker fields into one upsert on a latency-critical path. The renderer authors its own
+  writes and cannot reach `SessionDocument` at all.
+  Ordinary turn
   execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; its start,
   success, failure, denial, and cancel paths must never read-await-rewrite
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for

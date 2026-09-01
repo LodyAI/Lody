@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
@@ -73,6 +73,7 @@ import {
 } from '@lody/shared';
 import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
 import { buildArchivedSessionTree } from '@/lib/archived-session-tree';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 export type ArchivedSessionGroup = {
   key: string;
@@ -428,6 +429,7 @@ function DesktopArchivedSessionItem({
         depth === 1 && 'pl-10',
         'border border-transparent bg-transparent',
         'hover:bg-hover hover:text-hover-foreground',
+        'focus-within:ring-2 focus-within:ring-ring/60',
         isSelected && 'bg-selection text-selection-foreground hover:bg-selection',
         'cursor-pointer',
         'transition-colors'
@@ -462,7 +464,19 @@ function DesktopArchivedSessionItem({
       <div className="min-w-0 flex-1">
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
-            <span className="block w-full truncate text-left text-sm text-foreground/85">
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={isMultiSelectMode ? isSelected : undefined}
+              data-id={`archive-session:${session.id}`}
+              data-scope-item="row"
+              className="block w-full truncate text-left text-sm text-foreground/85 outline-hidden"
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                handleRowClick();
+              }}
+            >
               {title}
             </span>
           </TooltipTrigger>
@@ -669,6 +683,7 @@ function MobileArchivedSessionItem({
         'group relative flex w-full min-w-0 items-center gap-2 rounded-md py-1 pl-6 pr-2',
         depth === 1 && 'pl-10',
         'border border-transparent bg-transparent',
+        'focus-within:ring-2 focus-within:ring-ring/60',
         'cursor-pointer',
         'transition-colors'
       )}
@@ -696,7 +711,21 @@ function MobileArchivedSessionItem({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm text-foreground/85 flex-1">{title}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={isMultiSelectMode ? isSelected : undefined}
+              data-id={`archive-session:${session.id}`}
+              data-scope-item="row"
+              className="truncate text-sm text-foreground/85 flex-1 outline-hidden"
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                handleRowClick();
+              }}
+            >
+              {title}
+            </span>
             {hasChanges && (
               <div className="flex items-center gap-1 tabular-nums shrink-0 text-xs">
                 <span className="text-code-added">+{diffStats.allChange.add}</span>
@@ -881,6 +910,8 @@ export function ArchivedSessionGroupSection({
       {showHeader ? (
         <button
           type="button"
+          data-id={`archive-group:${groupKey}`}
+          data-scope-item="row"
           onClick={onToggleCollapse}
           className={cn(
             'group/header relative flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
@@ -1002,6 +1033,8 @@ export function ArchivedSessionGroupSection({
 
 export function ArchiveView() {
   const { t } = useTranslation();
+  const listScopeId = useId();
+  useListKeyboardNavigation({ scopeId: listScopeId });
   const router = useRouter();
   const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
@@ -1573,7 +1606,7 @@ export function ArchiveView() {
           <p className="mt-1 text-xs text-muted-foreground/70">{emptyDescription}</p>
         </div>
       ) : (
-        <div className="flex w-full min-w-0 flex-col">
+        <FocusScope id={listScopeId} className="flex w-full min-w-0 flex-col">
           {groupedSessions.map((group) => (
             <ArchivedSessionGroupSection
               key={group.key}
@@ -1600,7 +1633,7 @@ export function ArchiveView() {
               hideGroupHeader={groupMode === 'flat'}
             />
           ))}
-        </div>
+        </FocusScope>
       )}
     </div>
   );

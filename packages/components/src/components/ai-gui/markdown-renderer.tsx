@@ -665,40 +665,22 @@ type MarkdownTableProps = ComponentPropsWithoutRef<'table'> & {
   node?: unknown;
 };
 
-const normalizeAgentFilePathKey = (path: string): string =>
-  path.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-
-const pathKeyMatchesCovered = (
-  path: string,
-  coveredFilePaths: ReadonlySet<string> | undefined
-): boolean => {
-  if (!coveredFilePaths || coveredFilePaths.size === 0) return false;
-  const key = normalizeAgentFilePathKey(path);
-  if (coveredFilePaths.has(key)) return true;
-  const base = key.split('/').pop();
-  return Boolean(base && coveredFilePaths.has(base));
-};
-
 const AgentFileLink = ({
   href,
   children,
   onFilePathClick,
   copyAgentFileLabel,
   openAgentFileLabel,
-  coveredFilePaths,
 }: {
   href: string;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
-  /** Paths already shown in the turn's edited-files card — skip chip chrome. */
-  coveredFilePaths?: ReadonlySet<string>;
 }) => {
   const [didCopy, setDidCopy] = useState(false);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
-  const coveredByEditedFiles = pathKeyMatchesCovered(iconPath, coveredFilePaths);
 
   const handleClick = useCallback(async () => {
     if (onFilePathClick) {
@@ -712,12 +694,6 @@ const AgentFileLink = ({
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
   }, [href, onFilePathClick]);
-
-  /* Turn footer already lists this path with +/− stats — omit the duplicate
-     chip (common when agents end with a bare `README.md` link). */
-  if (coveredByEditedFiles) {
-    return null;
-  }
 
   return (
     <button
@@ -749,12 +725,10 @@ const createMarkdownComponents = ({
   copyAgentFileLabel,
   openAgentFileLabel,
   onAgentFileLinkClick,
-  coveredFilePaths,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
-  coveredFilePaths?: ReadonlySet<string>;
 }): Components => ({
   inlineCode: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, inline: _inline, ...rest } = props;
@@ -791,7 +765,6 @@ const createMarkdownComponents = ({
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
           openAgentFileLabel={openAgentFileLabel}
-          coveredFilePaths={coveredFilePaths}
         >
           {children}
         </AgentFileLink>
@@ -861,7 +834,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   allowHtml = false,
   isStreaming = false,
   onAgentFileLinkClick,
-  coveredFilePaths,
   searchBlockId,
 }: {
   text: string;
@@ -872,11 +844,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   /** Enables Streamdown's incremental animation while a turn is still streaming. */
   isStreaming?: boolean;
   onAgentFileLinkClick?: (href: string) => void;
-  /**
-   * Paths already listed in the turn's edited-files footer. Matching agent
-   * file links render as plain mono text instead of a second bordered chip.
-   */
-  coveredFilePaths?: ReadonlySet<string>;
   searchBlockId?: string;
 }) {
   const { t } = useTranslation();
@@ -893,9 +860,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         copyAgentFileLabel,
         openAgentFileLabel,
         onAgentFileLinkClick,
-        coveredFilePaths,
       }),
-    [copyAgentFileLabel, coveredFilePaths, onAgentFileLinkClick, openAgentFileLabel]
+    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel]
   );
 
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);

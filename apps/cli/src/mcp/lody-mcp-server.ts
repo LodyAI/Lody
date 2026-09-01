@@ -69,11 +69,13 @@ import {
   makeLodyError,
   normalizeSessionPullRequestMeta,
   resolveActiveAssistantTurnId,
+  resolveProjectGitHubRepo,
   type LodyOperationItemResult,
   type SessionTurnInputConfig,
   REVIEW_SEVERITY_VALUES,
   REVIEW_VERDICT_VALUES,
   ReviewSubmissionSchema,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import {
@@ -130,6 +132,7 @@ import type {
 } from '@/commands/session-output';
 import { MAX_AGENT_FEEDBACK_LENGTH, submitAgentFeedback } from '@/lib/feedback';
 import {
+  getLodyOperationStorePath,
   LodyOperationStore,
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
@@ -907,16 +910,31 @@ const getSessionContext = (): McpSessionContext =>
     taskToolsEnabled: readOptionalEnv('LODY_MCP_TASK_TOOLS_ENABLED') === '1',
   };
 
-// One connection for the whole MCP server process, opened without the
-// maintenance writes (the daemon-side coordinator owns those). Per-call
-// open/close made every tool call a burst of write transactions plus a
-// checkpoint-on-close against the shared machine-level WAL store, which is
-// exactly the contention that surfaces as "database is locked".
-let sharedOperationStore: LodyOperationStore | undefined;
+// One connection per machine-level store for the whole MCP server process,
+// opened without the maintenance writes (the daemon-side coordinator owns
+// those). Per-call open/close made every tool call a burst of write
+// transactions plus a checkpoint-on-close against the shared machine-level WAL
+// store, which is exactly the contention that surfaces as "database is locked".
+//
+// The store path MUST come from the session context's machineId, never from
+// this process's environment: the daemon-hosted HTTP transport carries its
+// context in per-request AsyncLocalStorage, and its process has no
+// LODY_MCP_MACHINE_ID, so the env fallback silently selects the 'local' store
+// that no daemon coordinator watches — Operations accepted there are never
+// finalized and their completion is never delivered back to the requester.
+const sharedOperationStores = new Map<string, LodyOperationStore>();
+
+const resolveOperationStorePathForContext = (): string =>
+  getLodyOperationStorePath(getSessionContext().machineId);
 
 const getSharedOperationStore = (): LodyOperationStore => {
-  sharedOperationStore ??= new LodyOperationStore(undefined, undefined, { maintenance: false });
-  return sharedOperationStore;
+  const storePath = resolveOperationStorePathForContext();
+  let store = sharedOperationStores.get(storePath);
+  if (!store) {
+    store = new LodyOperationStore(storePath, undefined, { maintenance: false });
+    sharedOperationStores.set(storePath, store);
+  }
+  return store;
 };
 
 const withOperationStore = <T>(fn: (store: LodyOperationStore) => T): Promise<T> =>
@@ -1489,19 +1507,13 @@ const readSessionExecutionSnapshot = async (
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(history);
   const queuedTurnCount =
-    docState?.mq?.length ?? (hasPendingDispatchPointer(session) && !activeTurnId ? 1 : 0);
+    docState?.mq?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
   return resolveSessionExecutionSnapshot({
     live,
     ...(activeTurnId ? { activeTurnId } : {}),
     queuedTurnCount,
   });
 };
-
-const hasPendingDispatchPointer = (session: SessionMeta): boolean =>
-  Boolean(
-    session.processingUserMsgId ||
-    (session.latestUserMsgId && session.latestUserMsgId !== session.lastHandledUserMsgId)
-  );
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1540,7 +1552,7 @@ const resolveSessionLiveWorking = (
       ...viewedField,
     };
   }
-  if (hasPendingDispatchPointer(session)) {
+  if (hasPendingUserTurnActivation(session)) {
     const dispatchedAtMs = session.lastMessageAt ?? Date.parse(session.createdAt);
     if (Number.isFinite(dispatchedAtMs) && opts.nowMs - dispatchedAtMs < MCP_PRE_START_WINDOW_MS) {
       return { working: true, status: 'initializing', source: 'pointer', ...viewedField };
@@ -2307,6 +2319,7 @@ const buildSessionWorkContext = async (
       projectId: string;
       localProjectName?: string;
       rootPath?: string;
+      githubRepo?: string;
       worktree?: boolean;
     }
 > => {
@@ -2321,11 +2334,17 @@ const buildSessionWorkContext = async (
       session.machineId
     );
     const localProject = localProjects[project.localProjectId];
+    const githubRepo = resolveProjectGitHubRepo(project);
     return {
       kind: 'local',
       projectId: project.localProjectId,
       ...(localProject?.name ? { localProjectName: localProject.name } : {}),
       ...(localProject?.rootPath ? { rootPath: localProject.rootPath } : {}),
+      // Reported so an Agent can tell a local Session that carries an authorized
+      // GitHub identity (PR actions available) from a purely local one. It is
+      // deliberately absent from `summarizeProjectRefForMcp`, whose output must
+      // stay a valid `workContext` create input.
+      ...(githubRepo ? { githubRepo } : {}),
       ...(project.useWorktree === true || session.isWorktree === true ? { worktree: true } : {}),
     };
   }
@@ -3776,6 +3795,7 @@ export const __lodyMcpServerInternals = {
   startSessionChatOperation,
   startSessionChatManyOperation,
   getSessionContext,
+  resolveOperationStorePathForContext,
   postFileUpload,
   postImageUpload,
   postPreviewCandidate,

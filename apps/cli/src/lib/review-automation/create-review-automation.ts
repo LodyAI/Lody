@@ -1,10 +1,12 @@
 import {
   getServerNow,
   getSessionRoomId,
+  hasPendingUserTurnActivation,
   type AgentConfigId,
   type MachineId,
   type ReviewerAgentRef,
   type SessionId,
+  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -55,16 +57,14 @@ const entryText = (entry: { items?: Array<{ text?: string }> } | undefined): str
  * written and the agent actually starting, and a prompt written into that window
  * lands behind the pending turn with the wrong context.
  */
-const isSessionBusy = (facts: {
-  status?: { type: string };
-  latestUserMsgId?: string;
-  lastHandledUserMsgId?: string;
-}): boolean => {
-  const type = facts.status?.type;
+const isSessionBusy = (meta: SessionMeta): boolean => {
+  const type = meta.status?.type;
   if (type === 'running' || type === 'initializing' || type === 'requestPermission') {
     return true;
   }
-  return Boolean(facts.latestUserMsgId) && facts.latestUserMsgId !== facts.lastHandledUserMsgId;
+  // Must match the dispatch watcher exactly: a retired activation leaves the
+  // pointers unequal on purpose, so a raw comparison would wait forever.
+  return hasPendingUserTurnActivation(meta);
 };
 
 export const createReviewAutomation = (

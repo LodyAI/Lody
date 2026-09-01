@@ -21,6 +21,7 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -39,6 +40,7 @@ import {
 type CreateMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
+  hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
 }
 
@@ -55,6 +57,7 @@ const MOUNT_WATCHDOG_TIMEOUT_MS = 20_000
 // most of those resolve on their own (GC, jank, sync layout). Only show the
 // dialog after a longer outage so we don't pester the user.
 const UNRESPONSIVE_DIALOG_DELAY_MS = 10_000
+const pendingInitialMaximize = new WeakSet<BrowserWindow>()
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
   if (meta) {
@@ -339,8 +342,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     // Windows: hide the native title bar (its neutral gray clashes with the
     // app canvas) and keep only the OS-drawn caption buttons as an overlay
-    // tinted to match the theme. The renderer reserves a drag band of the
-    // same height at the top of the window.
+    // tinted to match the theme.
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden',
@@ -349,11 +351,20 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      // Chromium's packaged locale resources are intentionally English-only.
+      // Carry Electron's OS-level preference into preload so first-run product
+      // language detection does not mistake the available .pak for user intent.
+      additionalArguments: [
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+      ],
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true
     }
   })
+  if (options.hideWindowOnAutoLaunch && shouldMaximizeOnLaunch) {
+    pendingInitialMaximize.add(window)
+  }
   trackMainWindowState(window)
   const mainTarget = resolveMainRendererTarget(options.initialPath)
   const recoveryTarget = resolveRecoveryTarget()
@@ -362,7 +373,11 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   attachMainWindowDiagnostics(window, recoveryTarget)
 
   window.on('ready-to-show', () => {
+    if (options.hideWindowOnAutoLaunch) {
+      return
+    }
     if (shouldMaximizeOnLaunch) {
+      pendingInitialMaximize.delete(window)
       window.maximize()
     }
     window.show()
@@ -416,11 +431,15 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 type OpenMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
+  hideWindowOnAutoLaunch?: boolean
 }
 
 export function focusMainWindow(window: BrowserWindow): void {
   if (window.isMinimized()) {
     window.restore()
+  }
+  if (pendingInitialMaximize.delete(window)) {
+    window.maximize()
   }
   if (!window.isVisible()) {
     window.show()
@@ -434,6 +453,7 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   const window = createMainWindow({
     icon: options.icon,
     initialPath: options.initialPath,
+    hideWindowOnAutoLaunch: options.hideWindowOnAutoLaunch,
     onDidFinishLoad: () => {
       const target = windowRef
       const pendingDeepLink = consumePendingDeepLink()

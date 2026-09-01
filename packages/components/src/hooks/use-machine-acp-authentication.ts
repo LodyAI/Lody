@@ -20,6 +20,8 @@ export type MachineAcpAuthenticationArgs = {
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;
+  /** Set once the user picks from the methods the agent advertised. */
+  methodId?: string;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
@@ -111,6 +113,9 @@ export function useMachineAcpAuthentication(
             workspaceId,
             requestId,
             action: 'start',
+            // Only sent once the user picked, so a daemon that predates method
+            // selection never sees a field its strict schema would reject.
+            ...(args.methodId ? { methodId: args.methodId } : {}),
             configId: args.configId,
             cliType: args.cliType,
             agentType: args.agentType,
@@ -133,6 +138,11 @@ export function useMachineAcpAuthentication(
           }
           if (response.disposition === 'not-running') {
             throw new Error(t('agents.authentication.failed', 'Authentication failed'));
+          }
+          if (response.disposition === 'method-required' && !response.authMethods?.length) {
+            throw new Error(
+              t('agents.authentication.noMethods', 'This agent did not advertise a sign-in method.')
+            );
           }
           return response;
         } catch (error) {

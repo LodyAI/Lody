@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { pathLauncherPreferenceSchema } from '../src/lib/local-storage-cache';
 import {
   buildPathLauncherLaunchInput,
+  buildPathLauncherProbes,
   buildVSCodePathLauncherFallbackUrl,
   getAvailablePathLauncherOptions,
   getCustomPathLauncherOptionId,
@@ -112,6 +113,23 @@ describe('custom path launcher command templates', () => {
       targetPath: '/Users/me/My Project',
       label: 'Code Insiders',
     });
+  });
+
+  it('skips invalid stored custom launchers during availability checks', () => {
+    expect(
+      buildPathLauncherProbes(
+        [
+          {
+            id: 'broken',
+            kind: 'custom',
+            launcherId: getCustomPathLauncherOptionId('broken'),
+            label: 'Broken',
+            commandTemplate: 'broken-without-a-path',
+          },
+        ],
+        '/Users/me/project'
+      )
+    ).toEqual([]);
   });
 });
 

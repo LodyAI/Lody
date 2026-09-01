@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
   compareChatLandingRepositoryByRecency,
+  getChatLandingSelectionSearch,
+  getChatLandingSelectionSyncDecision,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
   getChatLandingHintType,
@@ -17,7 +20,9 @@ import {
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
+  getSelectedLocalProjectKey,
   isChatLandingMachineReachable,
+  parseChatLandingSearch,
   shouldRetrySharingReviewConflict,
 } from '../src/components/chat/chat-landing-derived';
 
@@ -1041,5 +1046,200 @@ describe('chat landing machine online state', () => {
         isMachineOnline,
       })
     ).toBe(true);
+  });
+});
+
+describe('buildChatLandingPreSelectionKey', () => {
+  const projectIntent = {
+    context: 'local' as const,
+    machine: 'machine-1',
+    project: 'local-project-1',
+    repo: undefined,
+  };
+
+  it('is stable while the URL names the same target', () => {
+    expect(buildChatLandingPreSelectionKey(projectIntent)).toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent })
+    );
+  });
+
+  it('separates different targets', () => {
+    expect(buildChatLandingPreSelectionKey(projectIntent)).not.toBe(
+      buildChatLandingPreSelectionKey({ ...projectIntent, project: 'local-project-2' })
+    );
+  });
+});
+
+describe('parseChatLandingSearch', () => {
+  it('keeps the string search params the chat route understands', () => {
+    expect(
+      parseChatLandingSearch({
+        context: 'local',
+        machine: 'machine-1',
+        project: 'local-project-1',
+        repo: 'owner/repo',
+        resetDraftKey: 'r1',
+      })
+    ).toEqual({
+      context: 'local',
+      machine: 'machine-1',
+      project: 'local-project-1',
+      repo: 'owner/repo',
+      resetDraftKey: 'r1',
+    });
+  });
+
+  it('drops unknown contexts and non-string values', () => {
+    expect(
+      parseChatLandingSearch({
+        context: 'remote',
+        machine: 7,
+        project: null,
+        resetDraftKey: ['r1'],
+      })
+    ).toEqual({
+      context: undefined,
+      machine: undefined,
+      project: undefined,
+      repo: undefined,
+      resetDraftKey: undefined,
+    });
+  });
+});
+
+describe('getSelectedLocalProjectKey', () => {
+  it('reads the chat route search under the workspace prefix', () => {
+    expect(
+      getSelectedLocalProjectKey('/acme/chat', 'acme', {
+        context: 'local',
+        machine: 'machine-1',
+        project: 'local-project-1',
+      })
+    ).toBe('machine-1:local-project-1');
+  });
+
+  it('reads the legacy local project route', () => {
+    expect(getSelectedLocalProjectKey('/acme/local/machine-1/local-project-1', 'acme')).toBe(
+      'machine-1:local-project-1'
+    );
+  });
+
+  it('names no project for other locations', () => {
+    expect(getSelectedLocalProjectKey('/acme/chat', 'acme', { context: 'github' })).toBeNull();
+    expect(getSelectedLocalProjectKey('/acme/sessions/s1', 'acme')).toBeNull();
+  });
+});
+
+describe('getChatLandingSelectionSearch', () => {
+  it('names a complete local project selection', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'local',
+        machineId: 'machine-1',
+        localProjectId: 'local-project-1',
+        repoFullName: null,
+      })
+    ).toEqual({ context: 'local', machine: 'machine-1', project: 'local-project-1' });
+  });
+
+  it('names the chats-only context', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'chat',
+        machineId: 'machine-1',
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({ context: 'chat' });
+  });
+
+  it('names a complete github selection', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'github',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: 'owner/repo',
+      })
+    ).toEqual({ context: 'github', repo: 'owner/repo' });
+  });
+
+  it('maps incomplete selections to a URL that names nothing', () => {
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'local',
+        machineId: 'machine-1',
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({});
+    expect(
+      getChatLandingSelectionSearch({
+        contextType: 'github',
+        machineId: null,
+        localProjectId: null,
+        repoFullName: null,
+      })
+    ).toEqual({});
+  });
+});
+
+describe('getChatLandingSelectionSyncDecision', () => {
+  const drifted = { urlKey: 'url-selection', selectionKey: 'composer-selection' };
+
+  it('never touches a URL that names nothing', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: false,
+        intentApplied: true,
+        armed: true,
+      })
+    ).toBe('skip');
+  });
+
+  it('waits while the current URL intent has not been applied yet', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: false,
+        armed: true,
+      })
+    ).toBe('skip');
+  });
+
+  it('arms on the commit that applied an intent instead of racing it', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: false,
+      })
+    ).toBe('arm');
+  });
+
+  it('syncs composer drift once armed', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        ...drifted,
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: true,
+      })
+    ).toBe('sync');
+  });
+
+  it('leaves a truthful URL alone', () => {
+    expect(
+      getChatLandingSelectionSyncDecision({
+        urlNamesSelection: true,
+        intentApplied: true,
+        armed: true,
+        urlKey: 'same-selection',
+        selectionKey: 'same-selection',
+      })
+    ).toBe('skip');
   });
 });

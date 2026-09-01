@@ -719,7 +719,14 @@ describe('useSessionActions', () => {
     expect(startSession).toHaveBeenCalledOnce();
     expect(startSession).toHaveBeenCalledWith(
       sessionId,
-      expect.objectContaining({ id: sessionId, machineId: 'machine-1' }),
+      // lastMessageAt rides the accept unit itself: the meta always carries
+      // the first message's activity, so a close racing the first turn can
+      // never mistake the session for an empty, deletable one.
+      expect.objectContaining({
+        id: sessionId,
+        machineId: 'machine-1',
+        lastMessageAt: expect.any(Number),
+      }),
       expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
       expect.objectContaining({ userTurnId: result.historyEntry.id })
     );
@@ -1003,6 +1010,39 @@ describe('useSessionActions', () => {
       expect.objectContaining({
         needToArchiveSessions: { [sessionId]: true },
       })
+    );
+  });
+
+  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
+    const sessionId = 'session-archive-known-meta' as SessionId;
+    const renderedMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      createdAt: new Date().toISOString(),
+      parentSessionId: 'parent-session-1' as SessionId,
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    // The repo cannot read the doc meta yet (child session still hydrating).
+    const getDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
+    });
+
+    await actions.archiveSession(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
+    );
+
+    // A session neither the repo nor the UI knows still fails loudly.
+    await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
+      'Session metadata missing'
     );
   });
 

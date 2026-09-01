@@ -5,6 +5,8 @@
 ## Context maintenance
 
 Read every `AGENTS.md` from the repository root to the file being changed.
+Before starting work intended for a pull request, or creating or editing a
+pull request or issue, read `.github/AGENTS.md`.
 Record public contributor invariants in the narrowest relevant `AGENTS.md`.
 Internal context, plans, specifications, and task records stay in the private
 repository. Keep each `AGENTS.md` under 8 KiB and add a matching `CLAUDE.md`
@@ -117,6 +119,8 @@ Use Node.js 22+ and the pnpm version pinned in `package.json`.
 - Commit subjects use Conventional Commit prefixes such as `feat:`, `fix:`,
   `docs:`, `chore:`, and `test:`.
 - AI commits end with `Model: <runtime-model-id>`.
+- CI installs with `pnpm install --frozen-lockfile`, so a manifest change must
+  land with its `pnpm-lock.yaml` update.
 
 ## Test quality
 

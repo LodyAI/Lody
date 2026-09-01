@@ -10,7 +10,7 @@ import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog';
-import { JoinCommunityDialog } from './join-community-dialog';
+import { JoinCommunityButton } from './join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -143,11 +143,8 @@ export function AboutSettingsComponent() {
         <CompactRow label={t('settings.about.commitHash')}>
           <span className="text-sm text-muted-foreground font-mono">{GIT_COMMIT}</span>
         </CompactRow>
-        <CompactRow label={t('settings.about.website', 'Website')}>
-          <Button variant="outline" size="sm" className="h-7 px-2.5" onClick={handleOpenWebsite}>
-            <ExternalLink className="mr-1 h-3.5 w-3.5" />
-            {t('settings.about.visitWebsite', 'Visit website')}
-          </Button>
+        <CompactRow label={t('settings.about.community', 'Community')}>
+          <JoinCommunityButton />
         </CompactRow>
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
           <Button
@@ -160,8 +157,11 @@ export function AboutSettingsComponent() {
             {t('settings.about.openDownloadPage', 'Open download page')}
           </Button>
         </CompactRow>
-        <CompactRow label={t('settings.about.community', 'Community')}>
-          <JoinCommunityDialog />
+        <CompactRow label={t('settings.about.website', 'Website')}>
+          <Button variant="outline" size="sm" className="h-7 px-2.5" onClick={handleOpenWebsite}>
+            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+            {t('settings.about.visitWebsite', 'Visit website')}
+          </Button>
         </CompactRow>
         <CompactRow label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}>
           <OpenSourceAttributionsDialog

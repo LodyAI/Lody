@@ -1,5 +1,6 @@
 import http, { type AddressInfo } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { WebSocket, WebSocketServer } from 'ws';
 import type { PreviewTarget, SessionId } from '@lody/shared';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
 
@@ -70,6 +71,64 @@ const listenHtmlServer = async (): Promise<{
     styleReferers,
   };
 };
+
+type ObservedClose = { code: number; reason: string };
+
+const listenWebSocketServer = async (): Promise<{
+  server: http.Server;
+  target: PreviewTarget;
+  nextUpstreamSocket: () => Promise<WebSocket>;
+}> => {
+  const upstreamSockets: WebSocket[] = [];
+  const pendingSockets: Array<(socket: WebSocket) => void> = [];
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<html><body>socket</body></html>');
+  });
+  const webSocketServer = new WebSocketServer({ server });
+  webSocketServer.on('connection', (socket) => {
+    upstreamSockets.push(socket);
+    pendingSockets.shift()?.(socket);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    server,
+    target: { protocol: 'http', host: '127.0.0.1', port: address.port },
+    nextUpstreamSocket: () =>
+      new Promise<WebSocket>((resolve) => {
+        const existing = upstreamSockets[0];
+        if (existing) {
+          resolve(existing);
+          return;
+        }
+        pendingSockets.push(resolve);
+      }),
+  };
+};
+
+const openBrowserSocket = async (viewerUrl: string): Promise<WebSocket> => {
+  const socketUrl = new URL(viewerUrl);
+  socketUrl.protocol = 'ws:';
+  socketUrl.pathname = '/socket';
+  const socket = new WebSocket(socketUrl);
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  return socket;
+};
+
+const observeClose = (socket: WebSocket): Promise<ObservedClose> =>
+  new Promise((resolve) => {
+    socket.once('close', (code, reason) => resolve({ code, reason: reason.toString('utf8') }));
+  });
 
 describe('LocalPreviewProxyManager', () => {
   const servers: http.Server[] = [];
@@ -210,5 +269,124 @@ describe('LocalPreviewProxyManager', () => {
 
     expect(response.status).toBe(502);
     expect(await response.text()).toContain('Preview proxy error');
+  });
+});
+
+describe('LocalPreviewProxyManager WebSocket close forwarding', () => {
+  const servers: http.Server[] = [];
+  const managers: LocalPreviewProxyManager[] = [];
+  const sockets: WebSocket[] = [];
+  const uncaught: unknown[] = [];
+  // An unsendable close code makes `ws` throw from a TCP callback, which crashes the CLI
+  // rather than failing any single call. Capture that here so the tests below can fail on
+  // the real error instead of waiting out a timeout for a close that never arrives.
+  let failOnUncaught: Promise<never>;
+  let rejectOnUncaught: (error: unknown) => void;
+  const recordUncaught = (error: unknown) => {
+    uncaught.push(error);
+    rejectOnUncaught(error);
+  };
+
+  beforeEach(() => {
+    uncaught.length = 0;
+    failOnUncaught = new Promise<never>((_resolve, reject) => {
+      rejectOnUncaught = reject;
+    });
+    failOnUncaught.catch(() => {});
+    process.on('uncaughtException', recordUncaught);
+  });
+
+  afterEach(async () => {
+    process.off('uncaughtException', recordUncaught);
+    // A socket left open by a failing test would otherwise keep its server from closing.
+    for (const socket of sockets.splice(0)) {
+      socket.terminate();
+    }
+    await Promise.allSettled(managers.splice(0).map((manager) => manager.closeAll('test cleanup')));
+    await Promise.allSettled(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          })
+      )
+    );
+    expect(uncaught).toEqual([]);
+  });
+
+  const acquireProxiedSocket = async (sessionId: string) => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: sessionId as SessionId,
+      target: upstream.target,
+    });
+    const browserSocket = await openBrowserSocket(endpoint.viewerUrl);
+    const upstreamSocket = await upstream.nextUpstreamSocket();
+    sockets.push(browserSocket, upstreamSocket);
+    return { browserSocket, upstreamSocket };
+  };
+
+  const awaitClose = (socket: WebSocket): Promise<ObservedClose> =>
+    Promise.race([observeClose(socket), failOnUncaught]);
+
+  it('mirrors an abnormal upstream close to the browser instead of throwing', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-upstream-abnormal'
+    );
+    const browserClosed = awaitClose(browserSocket);
+
+    // Destroys the TCP connection without sending a Close frame, so the proxy observes 1006.
+    upstreamSocket.terminate();
+
+    expect(await browserClosed).toEqual({ code: 1006, reason: '' });
+  });
+
+  it('mirrors a status-less upstream close to the browser', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-upstream-no-status'
+    );
+    const browserClosed = awaitClose(browserSocket);
+
+    // An empty Close frame, so the proxy observes 1005.
+    upstreamSocket.close();
+
+    expect(await browserClosed).toEqual({ code: 1005, reason: '' });
+  });
+
+  it('mirrors an abnormal browser close to the upstream socket instead of throwing', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-browser-abnormal'
+    );
+    const upstreamClosed = awaitClose(upstreamSocket);
+
+    browserSocket.terminate();
+
+    expect(await upstreamClosed).toEqual({ code: 1006, reason: '' });
+  });
+
+  it('mirrors a status-less browser close to the upstream socket', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-browser-no-status'
+    );
+    const upstreamClosed = awaitClose(upstreamSocket);
+
+    browserSocket.close();
+
+    expect(await upstreamClosed).toEqual({ code: 1005, reason: '' });
+  });
+
+  it('forwards a sendable close code and reason in both directions', async () => {
+    const fromUpstream = await acquireProxiedSocket('session-preview-ws-code-upstream');
+    const browserClosed = awaitClose(fromUpstream.browserSocket);
+    fromUpstream.upstreamSocket.close(4001, 'upstream done');
+    expect(await browserClosed).toEqual({ code: 4001, reason: 'upstream done' });
+
+    const fromBrowser = await acquireProxiedSocket('session-preview-ws-code-browser');
+    const upstreamClosed = awaitClose(fromBrowser.upstreamSocket);
+    fromBrowser.browserSocket.close(4002, 'browser done');
+    expect(await upstreamClosed).toEqual({ code: 4002, reason: 'browser done' });
   });
 });

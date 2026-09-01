@@ -3815,6 +3815,59 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
   });
 
+  it('reports authentication required when a first turn cannot create its session', async () => {
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => undefined),
+      getHistory: vi.fn(async () => []),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+      roomId: 'session-session-create-auth',
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(async () => {
+        throw new AcpAuthenticationRequiredError([{ id: 'oauth-personal', name: 'Google' }]);
+      }),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-create-auth' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: { prompt: 'hello', cliType: 'registry', agentType: 'antigravity-acp' },
+      userTurnId: 'turn-create-auth',
+      userId: 'user-2',
+      userName: 'User 2',
+      userEmail: 'user2@example.com',
+    });
+
+    // The generic pre-prompt reason would leave the client with no way to sign in.
+    expect(deps.recordChatFailure).toHaveBeenCalledWith(
+      sessionDoc,
+      'acp_auth_required',
+      'Authentication required'
+    );
+  });
+
   it.each([
     {
       name: 'reports an ordinary restore failure',

@@ -67,6 +67,14 @@ mobile surfaces.
   the user picks an action. Copy re-encodes to PNG (the one format the system
   clipboard takes); save keeps the original encoding. Without the preload
   bridge the right-click must fall through to the browser's own menu.
+- The iPad native shell renders the DESKTOP layout (`detectAppDeviceClass()` is
+  `tablet`, viewport >= 768) with `viewport-fit=cover`, so `web-workspace-layout.tsx`
+  owns the top and side safe-area inset for every desktop surface
+  (`getWebWorkspaceLayoutRootClassName`). It stops at the sides: the bottom inset
+  belongs to the surface that sits against it — the composer shell already pads
+  itself by `env(safe-area-inset-bottom)` — and the mobile layout insets per
+  surface instead. `env()` is `0px` everywhere else, so this stays a no-op on
+  Electron, the browser, and in Split View / Stage Manager.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
@@ -101,6 +109,14 @@ mobile surfaces.
   list — never a keep-allowlist, so a missed key survives a clear instead of a
   missed preference being wiped. Register new `lody:*` localStorage cache keys
   there; the auth token and preferences always survive a cache-level clear.
+- The copy payload also carries the tail of `lib/session-render-trace.ts`, a
+  module-level ring of session render/mount/navigation lines (consecutive
+  duplicates collapse into ×N). It exists because a React #185 (nested update
+  limit) report names the fiber where the limit tripped, not the loop that
+  drove it. Diagnostics only: writers append one compact line and must never
+  read the trace to drive behavior; the surface mount/unmount lines use a
+  LAYOUT effect because passive effects may never flush inside the crashing
+  cascade.
 - `maybeClearLodyCacheOnBoot` runs at most once per page load and is shared by
   `AppInitializer` (so a user wedged before any workspace still gets the wipe) and
   `RuntimeProvider` (which must await it before opening the repo IndexedDB).
@@ -179,6 +195,17 @@ mobile surfaces.
 ## Common entry points
 
 - Chat landing: `src/components/chat/chat-landing.tsx`.
+- Child-tab drafts send through the same accept unit as every other first
+  message: `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta
+  plus the first user turn together via `startSession` and only then promotes
+  the draft tab; `requestSessionDispatch` is acceleration on top of the durable
+  pointer. Never reintroduce a create-then-hand-off flow (pending-turn refs,
+  post-mount ref flushes): a promoted tab must not exist before its first
+  message is locally durable, and preserved composer text crosses the promotion
+  via the input draft cache, not a component ref. `archiveSession` falls back to
+  the rendered meta cache when the repo read lags hydration (a session the UI
+  can show must be closable), and a close failure surfaces a toast — never a
+  silent no-op.
 - Sidebar: `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, and
   `sessions/session-list-rows.ts`. Sidebar rows are sessions, not Tasks.
   EVERY desktop session row is a drag source for a session mention
@@ -275,12 +302,23 @@ mobile surfaces.
   NOT own the dialog — opening a Radix Dialog from inside a Popover dismisses the
   popover and unmounts a dialog rendered in its content, so `SessionUsagePopover`
   renders `CodexResetForecastDialogHost` as a sibling of the popover instead.
+  The provider-row dialog is nested inside desktop settings: pass `nestedInDialog`
+  there so its overlay uses `--z-dialog` plus `bg-black/20`; mobile settings and the
+  usage-popover host stay top-level and retain the default dialog overlay.
   `forecast_window` is FREE TEXT, not a timestamp ("the next 6 hours", "later today").
   Do not show that untranslated phrase as the forecast time: render the absolute UTC
   `expires_at` instant semantically ("Today 2:00 PM", "明天 14:00") in the user's
   browser/OS time zone, and describe it as the time through which the forecast is valid
   rather than promising a reset.
 - Responsive mobile UI: `src/components/mobile/AGENTS.md`.
+- Adding a folder is a workspace action, not a this-machine action: the picker
+  chooses the machine, so every entry point says "Add folder" rather than "Add a
+  local project". Settings > Projects therefore pills EVERY machine the user may
+  add to, including ones with no project yet, and its add action passes that
+  machine as `initialMachineId`. Whoever needs the addable set reads
+  `useAddLocalProjectMachines` — the ownership rule (`canAddProjects`) has one
+  home and must not be re-derived per surface. Onboarding is the deliberate
+  exception: it drives the desktop native picker and really is this-machine only.
 - A pending local-project removal is a visible lifecycle state, not an absent
   project: keep the project and its existing Sessions discoverable while the
   owning machine is offline or retrying, but exclude it from new-Session

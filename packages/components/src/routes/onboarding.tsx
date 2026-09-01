@@ -38,7 +38,7 @@ function DesktopOnboardingRoute() {
         }
         completeThemeLifecycle();
         setPhase(null);
-        setDraft({ agentConfigId: null, project: null });
+        setDraft({ provider: null, project: null });
         const targetWorkspace = completion.workspaceSlug ?? workspaceSlug;
         if (targetWorkspace && completion.sessionId) {
           await navigate({

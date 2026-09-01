@@ -24,6 +24,8 @@ import {
   type SessionTurnInputConfig,
   type WorkspaceId,
   normalizeMcpServerIdSelection,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -37,8 +39,7 @@ import {
 import type { SessionUserResolver, SessionUserProfile } from './session-user-resolver';
 import {
   findNextDispatchableUserTurn,
-  getPendingUserTurnActivationId,
-  hasPendingUserTurnActivation,
+  isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
@@ -259,9 +260,12 @@ const isConfigOptionValueRecord = (
  *      • read === false (legacy field), OR
  *      • id matches meta.processingUserMsgId (interrupted processing), OR
  *      • id matches meta.latestUserMsgId but NOT meta.lastHandledUserMsgId
- *    - If no turn found in history, try promoting from the message queue (I/O).
- *    - If still nothing, wait for remote sync and retry (handles the race where
- *      metadata arrives before session doc content syncs from the web client).
+ *    - If no turn found in history, try promoting from the message queue (I/O)
+ *      via `SessionDocument.appendUserTurn`, which publishes the pointer too.
+ *    - If still nothing AND the pointer's entry is genuinely absent, wait for
+ *      remote sync and retry (the race where metadata arrives before session doc
+ *      content syncs from the web client). A pointer whose entry is already
+ *      terminal is settled instead — history has answered, so waiting cannot.
  *    └─ pending meta still has no history turn after 5m → negatively acknowledge
  *       that exact turn id and unload the session doc
  *
@@ -780,12 +784,7 @@ export class SessionDispatchWatcher {
           sessionId,
           userTurnId
         ) !== undefined ||
-        history.some(
-          (entry) =>
-            entry.id === userTurnId &&
-            entry.role === 'user' &&
-            (entry.status === 'handled' || entry.status === 'failed' || entry.status === 'canceled')
-        );
+        !isActivationAwaitingHistory(history, userTurnId);
       if (stashed.expiresAtMs <= now || isTerminal) {
         stash.delete(userTurnId);
         continue;
@@ -1136,9 +1135,8 @@ export class SessionDispatchWatcher {
       if (!isActive()) {
         return;
       }
-      const meta = isLoroRepoDocDeleted(record)
-        ? undefined
-        : (record?.meta as SessionMeta | undefined);
+      const docDeleted = isLoroRepoDocDeleted(record);
+      const meta = docDeleted ? undefined : (record?.meta as SessionMeta | undefined);
 
       phase = 'evaluate-ownership';
       const isOwned = meta?.machineId === this.deps.machineId && !meta?.isArchived;
@@ -1148,7 +1146,14 @@ export class SessionDispatchWatcher {
         this.watchedSessions.delete(sessionId);
         this.cancelCheckChains.delete(sessionId);
         this.cancelSeenTurn.delete(sessionId);
-        this.rpcTurnStash.delete(sessionId);
+        // Absent metadata is "unknown", not "foreign": a freshly created
+        // session's RPC turn can arrive before its meta syncs to this machine.
+        // Keep the TTL-bounded stash so the metadata watch dispatches it once
+        // the meta lands; only a definitive verdict — deleted doc, another
+        // machine's session, or an archived one — drops the stashed turn.
+        if (meta || docDeleted) {
+          this.rpcTurnStash.delete(sessionId);
+        }
         this.interruptAccessRetry(sessionId);
         return;
       }
@@ -1165,8 +1170,8 @@ export class SessionDispatchWatcher {
           this.deps.logger.debug(`[${sessionId}] Unwatching idle session (no pending work)`);
         }
         // A session with no pending work has nothing to retry. If a turn were still
-        // waiting on access verification, latestUserMsgId !== lastHandledUserMsgId
-        // would keep sessionNeedsActiveWatch() true and we would not reach here.
+        // waiting on access verification, its activation would keep
+        // sessionNeedsActiveWatch() true and we would not reach here.
         this.interruptAccessRetry(sessionId);
         return;
       }
@@ -1357,7 +1362,7 @@ export class SessionDispatchWatcher {
         return;
       }
       if (!nextUserTurn) {
-        if (this.hasPendingUserTurnSignal(meta)) {
+        if (hasPendingUserTurnActivation(meta)) {
           outcome = 'missing-history';
           await this.markMissingUserTurnRecovery(sessionId, sessionDoc, meta);
         } else {
@@ -2123,7 +2128,8 @@ export class SessionDispatchWatcher {
         id: queuedTurnId,
       };
 
-      await sessionDoc.updateHistory((prevHistory) => [...prevHistory, entry]);
+      // Promotion is a dispatch producer; `appendUserTurn` publishes the pointer.
+      await sessionDoc.appendUserTurn(entry);
       return entry;
     } finally {
       releaseQueueMutation();
@@ -2179,7 +2185,7 @@ export class SessionDispatchWatcher {
     const isActive = () => this.isLifecycleActive(lifecycleGeneration);
     // Phase 1: check immediately with whatever data we have locally
     // (history → queue → RPC stash).
-    const turn = await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
+    const { turn, history } = await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
     if (!isActive()) {
       return null;
     }
@@ -2187,20 +2193,76 @@ export class SessionDispatchWatcher {
       return turn;
     }
 
-    if (this.hasPendingUserTurnSignal(meta)) {
-      return await this.waitForPendingUserTurnHistorySync(
-        sessionId,
-        sessionDoc,
-        meta,
-        lifecycleGeneration
-      );
+    const pendingUserTurnId = getPendingUserTurnActivationId(meta);
+    if (!pendingUserTurnId) {
+      return null;
     }
-
-    return null;
+    // Phase 2 is a wait for HISTORY, so it is only meaningful while history can
+    // still explain the pointer. If the entry is already here and terminal, the
+    // check above just judged it and declined: waiting cannot change that, and
+    // the recovery that follows would accuse a turn that already ran. Settling
+    // the pointer instead keeps that path for genuinely undelivered turns.
+    if (!isActivationAwaitingHistory(history, pendingUserTurnId)) {
+      if (await this.settleTerminalActivation(sessionId, pendingUserTurnId)) {
+        return null;
+      }
+    }
+    return await this.waitForPendingUserTurnHistorySync(
+      sessionId,
+      sessionDoc,
+      meta,
+      lifecycleGeneration
+    );
   }
 
-  private hasPendingUserTurnSignal(meta: SessionMeta): boolean {
-    return hasPendingUserTurnActivation(meta);
+  /**
+   * Retire an activation whose turn is already terminal in history.
+   *
+   * Records the settlement in its own slot rather than rewriting the pointers.
+   * `latestUserMsgId` is producer-owned and there is no CAS against a Loro LWW
+   * map, so a send published between this read and this write would otherwise be
+   * overwritten — and a fresh turn whose entry has not synced yet would lose its
+   * activation entirely, going unwatched and silently unrun. `settledActivationUserMsgId`
+   * suppresses only a matching pointer, and the turn it names is already
+   * terminal, so a later settlement may replace it freely — unlike
+   * `lastMissingHistoryUserMsgId`, whose eviction would revive a pending turn.
+   *
+   * `processingUserMsgId` is different: it is execution-owned, dispatch is
+   * serialized per session, and we only reach here with no active turn, so
+   * clearing a slot whose turn is verifiably terminal is safe and repairs a
+   * crashed-mid-turn leftover.
+   *
+   * Returns whether the session is now settled. A patch that retires THIS
+   * activation while a different one survives must report false, or the caller
+   * short-circuits into missing-history recovery and accuses that survivor of
+   * never being delivered.
+   */
+  private async settleTerminalActivation(
+    sessionId: SessionId,
+    terminalUserTurnId: string
+  ): Promise<boolean> {
+    const roomId = getSessionRoomId(sessionId);
+    const record = await this.deps.workspaceDocument.repo.getDocMeta(roomId);
+    const meta = isLoroRepoDocDeleted(record)
+      ? undefined
+      : (record?.meta as SessionMeta | undefined);
+    if (!meta) {
+      return false;
+    }
+    const clearsProcessing = meta.processingUserMsgId === terminalUserTurnId;
+    const retiresLatest = meta.latestUserMsgId === terminalUserTurnId;
+    const patch: Partial<SessionMeta> = {
+      ...(clearsProcessing ? { processingUserMsgId: undefined } : {}),
+      ...(retiresLatest ? { settledActivationUserMsgId: terminalUserTurnId } : {}),
+    };
+    if (!clearsProcessing && !retiresLatest) {
+      return false;
+    }
+    this.deps.logger.debug(
+      `[${sessionId}] Settling stale activation ${terminalUserTurnId}; its history entry is already terminal`
+    );
+    await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, patch);
+    return !hasPendingUserTurnActivation({ ...meta, ...patch });
   }
 
   /**
@@ -2225,10 +2287,10 @@ export class SessionDispatchWatcher {
     const pendingUserTurnId = getPendingUserTurnActivationId(meta);
     this.deps.logger.debug(
       `[${sessionId}] Pending user turn ${
-        getPendingUserTurnActivationId(meta) ?? 'unknown'
-      } metadata is visible but history is missing it; waiting up to ${
+        pendingUserTurnId ?? 'unknown'
+      } has no history entry yet; waiting up to ${
         SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
-      }s for history CRDT sync (pendingUserMsgId=${pendingUserTurnId ?? 'unknown'})`
+      }s for history CRDT sync`
     );
 
     return await new Promise<SessionHistoryInput | null>((resolve) => {
@@ -2288,7 +2350,7 @@ export class SessionDispatchWatcher {
           try {
             while (checkRequested) {
               checkRequested = false;
-              const turn = await this.checkHistoryAndQueue(sessionDoc, currentMeta, isActive);
+              const { turn } = await this.checkHistoryAndQueue(sessionDoc, currentMeta, isActive);
               if (settled || !isActive()) {
                 finish(null);
                 return;
@@ -2477,7 +2539,7 @@ export class SessionDispatchWatcher {
           finish(null);
           return;
         }
-        if (!this.hasPendingUserTurnSignal(currentMeta)) {
+        if (!hasPendingUserTurnActivation(currentMeta)) {
           this.deps.logger.debug(
             `[${sessionId}] Pending user turn pointer cleared during pre-wait sync; exiting wait`
           );
@@ -2519,7 +2581,7 @@ export class SessionDispatchWatcher {
     if (
       meta.machineId !== this.deps.machineId ||
       meta.isArchived ||
-      !this.hasPendingUserTurnSignal(meta)
+      !hasPendingUserTurnActivation(meta)
     ) {
       return;
     }
@@ -2571,15 +2633,19 @@ export class SessionDispatchWatcher {
    * Shared by the initial check and every wait loop, so a stashed RPC payload
    * is picked up wherever the watcher would otherwise sit waiting for the
    * history CRDT.
+   *
+   * The returned snapshot predates queue promotion, but every path that appends also returns
+   * a turn — so it is accurate whenever `turn` is null, which is the only case
+   * a caller can act on it.
    */
   private async checkHistoryAndQueue(
     sessionDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>,
     meta: SessionMeta,
     isActive: () => boolean = () => true
-  ): Promise<SessionHistoryInput | null> {
+  ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
     const history = await sessionDoc.getHistory();
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     const turn = findNextDispatchableUserTurn(history, meta);
     if (turn) {
@@ -2591,20 +2657,20 @@ export class SessionDispatchWatcher {
       }
       // The history copy is authoritative once it syncs; drop the RPC copy.
       this.consumeStashedRpcTurn(meta.id, turn.id);
-      return turn;
+      return { turn, history };
     }
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     if (promoted) {
       this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
-      return promoted;
+      return { turn: promoted, history };
     }
-    return this.peekStashedRpcTurn(meta.id, meta, history);
+    return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
   }
 
   /**

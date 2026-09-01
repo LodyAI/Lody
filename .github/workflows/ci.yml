@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test contribution policy
+        run: node --test .github/scripts/*.test.mjs
+
       - name: Check formatting
         run: pnpm format:check
 

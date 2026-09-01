@@ -640,6 +640,12 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+      // The accept unit includes the first user message, so the meta it
+      // publishes already carries that activity. Written here, not by a
+      // follow-up touch: a close between acceptance and the first turn must
+      // never make the session look empty (empty tabs are deleted, not
+      // archived).
+      sessionMeta.lastMessageAt = getServerNow();
       const sessionRoomId = getSessionRoomId(sessionId);
       const historyEntry = { ...history, id: uuidv4() } as SessionHistory;
       const inputConfig = normalizeSessionTurnInputConfig(historyEntry.inputConfig);
@@ -1179,9 +1185,15 @@ export function useSessionActions(): SessionActions {
       }
 
       const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
+      const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
         | undefined;
+      // The repo read is preferred (freshest lifecycle fields), but it can lag
+      // a session the UI already renders. The archive write below is an
+      // idempotent patch, so the rendered meta cache is enough to proceed — a
+      // session the UI can show must also be closable.
+      const sessionMeta =
+        repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
       if (!sessionMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
@@ -1230,7 +1242,7 @@ export function useSessionActions(): SessionActions {
         lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store, getSessionLifecycleMetas]
   );
 
   const restoreSession = useCallback(

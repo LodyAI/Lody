@@ -1,6 +1,6 @@
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
-import { useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FileTreeItem } from '@lody/shared';
 import {
@@ -20,6 +20,7 @@ import {
 } from '@/lib/file-change-category';
 import { ScrollArea } from '@/ui/scroll-area';
 import type { SessionDiffChangeEntry } from './session-diff-summary';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 export type ChangesViewMode = 'files' | 'types';
 
@@ -53,6 +54,8 @@ export function SessionChangesSidebar({
   onOpenChangesDiff,
 }: SessionChangesSidebarProps) {
   const { t } = useTranslation();
+  const scopeId = useId();
+  useListKeyboardNavigation({ scopeId });
   const [viewMode, setViewMode] = useState<ChangesViewMode>(initialViewMode);
   const displayEntries = useMemo<DisplayChangeEntry[]>(
     () =>
@@ -138,6 +141,8 @@ export function SessionChangesSidebar({
       <button
         key={entry.filePath}
         type="button"
+        data-id={`change:${entry.filePath}`}
+        data-scope-item="row"
         className={cn(
           'group flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left',
           'text-foreground/90 hover:bg-hover hover:text-hover-foreground',
@@ -231,7 +236,7 @@ export function SessionChangesSidebar({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <FocusScope id={scopeId} className="flex h-full flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-3">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {t('sessions.changes.title', 'Changes')}
@@ -258,7 +263,7 @@ export function SessionChangesSidebar({
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">{renderBody()}</ScrollArea>
-    </div>
+    </FocusScope>
   );
 }
 

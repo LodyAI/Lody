@@ -413,11 +413,11 @@ export function SessionRowLeadingSlot({
   menuLabel,
   openedByTree,
   /** Fade the status while hovering (e.g. 'group-hover/row:opacity-0' for named groups). */
-  fadeClassName = 'group-hover:opacity-0',
+  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
   /** Disable an opener disclosure while its ⋯ replacement is active. */
-  restPointerClassName = 'group-hover:pointer-events-none',
+  restPointerClassName = 'group-hover:pointer-events-none group-data-[menu-open]:pointer-events-none',
   /** Reveal the ⋯ button while hovering. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto',
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;
@@ -541,6 +541,9 @@ export function SessionRowLeadingSlot({
             controlLeftClassName,
             'text-sidebar-foreground-muted transition-[opacity,color,background-color] duration-100',
             'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
+            // The trigger itself stays pressed-looking while its menu is open,
+            // not just the row around it.
+            'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
             revealClassName
           )}
         >
@@ -590,7 +593,7 @@ export function SidebarRowArchiveButton({
   confirmLabel,
   onConfirm,
   /** Which group's hover reveals the button — e.g. 'group-hover/row:...' for named groups. */
-  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto',
+  revealClassName = 'group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
 }: {
   label: string;
   confirmLabel: string;

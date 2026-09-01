@@ -18,6 +18,7 @@ import { ProjectsScreen } from './screens/projects-screen';
 import { FirstTaskScreen } from './screens/first-task-screen';
 import { SummaryScreen } from './screens/summary-screen';
 import { useOnboardingBuiltinRuntimePrefetch } from './use-onboarding-builtin-runtime-prefetch';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 
 export type DesktopOnboardingCompletion = {
   sessionId?: string;
@@ -58,9 +59,16 @@ export function OnboardingOverlay({
   const phase = resolveDesktopOnboardingPhase(persistedPhase, {
     cloudAccount,
     multiWorkspace,
-    hasAgent: draft.agentConfigId !== null,
+    hasAgent: draft.provider?.kind === 'agentConfig',
     hasProject: draft.project !== null,
   });
+  const visibleSteps = useMemo(
+    () =>
+      phase === 'summary' || draft.provider?.kind === 'providerSetup'
+        ? steps.map((step) => (step === 'firstTask' ? 'summary' : step))
+        : steps,
+    [draft.provider?.kind, phase, steps]
+  );
   const advanceTo = useCallback(
     (next: DesktopOnboardingResumePhase) => setPersistedPhase(next),
     [setPersistedPhase]
@@ -110,9 +118,12 @@ export function OnboardingOverlay({
       <ProvidersScreen
         key="providers"
         onBack={goBeforeProviders}
-        onSkip={() => advanceTo('summary')}
-        onNext={(agentConfigId) => {
-          setDraft((previous) => ({ ...previous, agentConfigId }));
+        onSkip={() => {
+          setDraft({ provider: null, project: null });
+          advanceTo('summary');
+        }}
+        onNext={(provider) => {
+          setDraft({ provider, project: null });
           advanceTo('projects');
         }}
         onManagedRuntimeSelected={setPreferredBuiltinRuntime}
@@ -124,23 +135,48 @@ export function OnboardingOverlay({
         onBack={() => advanceTo('providers')}
         onComplete={(project) => {
           setDraft((previous) => ({ ...previous, project }));
-          advanceTo(project.kind === 'local' && draft.agentConfigId ? 'firstTask' : 'summary');
+          advanceTo(
+            project.kind === 'local' && draft.provider?.kind === 'agentConfig'
+              ? 'firstTask'
+              : 'summary'
+          );
         }}
       />
     ),
     firstTask:
-      draft.agentConfigId && draft.project ? (
+      draft.provider?.kind === 'agentConfig' && draft.project ? (
         <FirstTaskScreen
           key="firstTask"
-          agentConfigId={draft.agentConfigId}
+          agentConfigId={draft.provider.agentConfigId}
           project={draft.project}
           onBack={() => advanceTo('projects')}
+          onAgentConfigChange={(config) => {
+            setDraft((previous) => ({
+              ...previous,
+              provider: {
+                kind: 'agentConfig',
+                agentConfigId: config.id,
+                agentName: config.name,
+              },
+            }));
+          }}
+          onSkip={() => onCompleted({})}
+          onContinue={() => onCompleted({})}
           onSessionStarted={onCompleted}
         />
       ) : null,
     summary: (
       <SummaryScreen
         key="summary"
+        agentState={
+          draft.provider?.kind === 'agentConfig'
+            ? 'ready'
+            : draft.provider?.kind === 'providerSetup'
+              ? 'preparing'
+              : 'missing'
+        }
+        agentName={draft.provider?.agentName}
+        projectName={draft.project?.name}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => onCompleted({})}
       />
@@ -148,8 +184,9 @@ export function OnboardingOverlay({
   };
 
   return (
-    <OnboardingStepsProvider steps={phase === 'summary' ? [...steps, 'summary'] : steps}>
+    <OnboardingStepsProvider steps={visibleSteps}>
       <div className="fixed inset-0 z-40 overflow-hidden bg-[#f7f5f2] text-slate-950">
+        <WindowDragStrip className="z-30" />
         {phase === 'ceremony' ? (
           <div className="absolute inset-0 z-10">{screens[phase]}</div>
         ) : (

@@ -537,6 +537,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
+          data-id={`group:${group.key}`}
+          data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
             'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
@@ -779,6 +781,9 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   role={!useAnchor && isSelectable ? 'button' : undefined}
                   tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                   aria-disabled={!isSelectable ? true : undefined}
+                  aria-current={isSelected ? 'page' : undefined}
+                  data-id={`session:${task.taskId}`}
+                  data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
                   className={cn(
                     'group relative w-full rounded-md text-left',
@@ -1104,6 +1109,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
           {shouldShowExpandCollapse && (
             <button
               type="button"
+              data-id={`show-more:${group.key}`}
+              data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
                 'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',

@@ -6,6 +6,7 @@ import { useTaskIndexSync } from '../hooks/use-task-index';
 import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
 import { WebWorkspaceLayout } from './web-workspace-layout';
 import { BugReportDialogContainer } from './bug-report/bug-report-dialog-container';
+import { JoinCommunityDialogContainer } from './settings/join-community-dialog-container';
 import { StuckConnectionBannerContainer } from './stuck-connection-banner';
 import { DesktopSettingsModal } from './settings/desktop-settings-modal';
 import { TaskQuickAddDialogContainer } from './tasks/task-quick-add-dialog-container';
@@ -64,6 +65,7 @@ export function MainLayout({
         </>
       ) : null}
       {workspaceReady ? <BugReportDialogContainer /> : null}
+      <JoinCommunityDialogContainer />
       <StuckConnectionBannerContainer />
       {workspaceReady ? <DesktopSettingsModal /> : null}
     </WorkspaceRuntimeShell>

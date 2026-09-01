@@ -1,6 +1,8 @@
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AtSign } from 'lucide-react';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 export type TaskInboxItem = {
   taskId: string;
@@ -31,11 +33,15 @@ export type TaskInboxPanelProps = {
  */
 export function TaskInboxPanel({ items, onOpenTask, now }: TaskInboxPanelProps) {
   const { t } = useTranslation();
+  const scopeId = useId();
+  useListKeyboardNavigation({ scopeId });
 
   if (items.length === 0) return null;
 
   return (
-    <section
+    <FocusScope
+      id={scopeId}
+      role="region"
       className="rounded-lg border border-border bg-sidebar p-2"
       aria-label={t('tasks.inbox.title', 'Inbox')}
     >
@@ -54,6 +60,8 @@ export function TaskInboxPanel({ items, onOpenTask, now }: TaskInboxPanelProps) 
           <li key={item.taskId}>
             <button
               type="button"
+              data-id={`task-inbox:${item.taskId}`}
+              data-scope-item="row"
               onClick={() => onOpenTask(item.taskId)}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted-foreground/10"
             >
@@ -67,6 +75,6 @@ export function TaskInboxPanel({ items, onOpenTask, now }: TaskInboxPanelProps) 
           </li>
         ))}
       </ul>
-    </section>
+    </FocusScope>
   );
 }

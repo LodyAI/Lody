@@ -4,6 +4,7 @@ type LodyPlatformInfo = {
   os: string
   homeDir: string
   machineName: string
+  preferredSystemLanguages?: readonly string[]
 }
 
 type LodyNativeAppInfo = {

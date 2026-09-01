@@ -82,10 +82,15 @@ Root `AGENTS.md` also applies.
   notify the renderer (`app.nativeTheme`). On macOS also subscribe
   to `AppleInterfaceThemeChangedNotification`; Chromium `matchMedia` and
   `nativeTheme.updated` often miss Control Center switches.
+- Frameless window drag is per-panel, not a root overlay: each column's top
+  header (or a same-height `WindowDragStrip` when there is no header) is
+  `-webkit-app-region: drag`. Interactive descendants use `app-region-no-drag`.
+  Dialog and alert-dialog overlays mount the strip themselves. Hide those
+  regions in native fullscreen. Windows caption buttons stay an OS overlay
+  (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`); right-edge headers pad `pr-[144px]`
+  so toolbar controls do not sit under them.
 - The onboarding window must be native Light before its first renderer paint; normal product windows start from the System theme source.
-  Windows title-bar geometry must stay aligned across
-  `MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`, the `h-9` drag strip in
-  `routes/__root.tsx`, and the `pt-9` offset in `web-workspace-layout.tsx`.
+  An automatic login launch may suppress the initial product window, but onboarding and deep-link launches must remain visible.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the
   listener after settlement, and treats only the final response as completion.

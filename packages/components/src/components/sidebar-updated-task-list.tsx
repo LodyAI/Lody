@@ -714,12 +714,18 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     </span>
   );
 
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
+
   const row = (
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-current={selected ? 'page' : undefined}
+      data-id={`updated:${item.id}`}
+      data-scope-item="row"
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
+      data-menu-open={rowMenuOpen ? '' : undefined}
       className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
@@ -730,7 +736,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
           'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
         // Keyboard-only focus ring — see TaskList: plain :focus-within also
@@ -778,7 +784,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
           fadeClassName="group-hover/row:opacity-0"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
         />
         {showPinnedIcon && item.isPinned ? (
           <Pin
@@ -838,7 +844,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
               />
             ) : undefined
           }
@@ -877,7 +883,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setRowMenuOpen}>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[180px]">
         {handlePrOpen ? (

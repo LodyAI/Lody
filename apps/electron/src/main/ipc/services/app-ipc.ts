@@ -1,9 +1,12 @@
-import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
+import { access } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
+import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   IPC_PUSH_CHANNELS,
   LaunchLocalPathInputSchema,
+  PathLauncherProbeSchema,
   type NativeThemeSource,
   type RendererFatalErrorReport,
   type SetGlobalShortcutInput,
@@ -11,7 +14,7 @@ import {
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { setMenuLanguage } from '../../menu'
-import { launchLocalPath } from '../../services/local-path-launcher-service'
+import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -21,6 +24,12 @@ import {
 } from '../../renderer-recovery'
 import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
+import {
+  applyAutoLaunchSettings,
+  getAutoLaunchEnabled,
+  getHideWindowOnAutoLaunchEnabled,
+  setHideWindowOnAutoLaunchEnabled
+} from '../../auto-launch-settings'
 
 const autoLaunchSupported = process.platform === 'darwin' || process.platform === 'win32'
 
@@ -28,21 +37,22 @@ function getAutoLaunchStatus() {
   if (!autoLaunchSupported) {
     return {
       supported: false,
-      enabled: false
+      enabled: false,
+      hideWindowOnAutoLaunch: false
     }
   }
   try {
-    const settings = app.getLoginItemSettings()
+    const enabled = getAutoLaunchEnabled()
     return {
       supported: true,
-      enabled: Boolean(settings.openAtLogin),
-      openAtLogin: Boolean(settings.openAtLogin),
-      openAsHidden: Boolean(settings.openAsHidden)
+      enabled,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled()
     }
   } catch (error) {
     return {
       supported: true,
       enabled: false,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled(),
       error: error instanceof Error ? error.message : String(error)
     }
   }
@@ -125,6 +135,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: 'invalid_enabled_flag'
       }
     }
@@ -133,19 +144,18 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
+        hideWindowOnAutoLaunch: false,
         error: 'unsupported_platform'
       }
     }
     try {
-      app.setLoginItemSettings({
-        openAtLogin: enabledRaw,
-        openAsHidden: enabledRaw
-      })
+      applyAutoLaunchSettings(enabledRaw)
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
-        enabled: status.enabled
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
       }
     } catch (error) {
       const status = getAutoLaunchStatus()
@@ -153,6 +163,56 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async setAutoLaunchHideWindow(enabledRaw: boolean) {
+    if (typeof enabledRaw !== 'boolean') {
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: 'invalid_enabled_flag'
+      }
+    }
+    if (!autoLaunchSupported) {
+      return {
+        ok: false,
+        supported: false,
+        enabled: false,
+        hideWindowOnAutoLaunch: false,
+        error: 'unsupported_platform'
+      }
+    }
+
+    const previous = getHideWindowOnAutoLaunchEnabled()
+    try {
+      setHideWindowOnAutoLaunchEnabled(enabledRaw)
+      const status = getAutoLaunchStatus()
+      return {
+        ok: true,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
+      }
+    } catch (error) {
+      try {
+        setHideWindowOnAutoLaunchEnabled(previous)
+      } catch {
+        // Preserve the original failure for the renderer.
+      }
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: error instanceof Error ? error.message : String(error)
       }
     }
@@ -206,12 +266,49 @@ export class AppIpc extends IpcService {
   }
 
   @IpcMethod()
+  async revealLocalPath(pathRaw: unknown) {
+    if (typeof pathRaw !== 'string') {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    const targetPath = pathRaw.trim()
+    if (!targetPath || !isAbsolute(targetPath)) {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    try {
+      await access(targetPath)
+    } catch {
+      return { revealed: false as const, error: 'not_found' }
+    }
+    shell.showItemInFolder(targetPath)
+    return { revealed: true as const }
+  }
+
+  @IpcMethod()
   async launchLocalPath(payload: unknown) {
     const parsed = LaunchLocalPathInputSchema.safeParse(payload)
     if (!parsed.success) {
       return { launched: false as const, error: 'invalid_payload' }
     }
     return await launchLocalPath(parsed.data)
+  }
+
+  @IpcMethod()
+  async probePathLaunchers(payload: unknown) {
+    const parsed = PathLauncherProbeSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { availableIds: [] }
+    }
+    const availability = await Promise.all(
+      parsed.data.launchers.map(async ({ launcherId, input }) => ({
+        launcherId,
+        available: await hasPathLauncher(input)
+      }))
+    )
+    return {
+      availableIds: availability
+        .filter(({ available }) => available)
+        .map(({ launcherId }) => launcherId)
+    }
   }
 
   @IpcMethod()

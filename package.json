@@ -8,6 +8,7 @@
     "build": "corepack pnpm --dir apps/electron build",
     "dev:cli": "corepack pnpm --filter lody dev",
     "dev:site-docs": "corepack pnpm --filter @lody/site-docs dev",
+    "dev:local": "corepack pnpm --dir apps/electron dev:local",
     "start:local": "corepack pnpm --dir apps/electron start:local",
     "storybook": "corepack pnpm --filter @lody/components storybook",
     "storybook:review-helper": "corepack pnpm --filter @lody/code-review-helper storybook",

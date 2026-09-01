@@ -61,6 +61,12 @@ Two things the dev build does deliberately, both load-bearing:
 - Preview targets are untrusted. Keep automatic candidates loopback-only and
   require explicit recent user approval before accepting a private literal IP;
   validate path-relative targets at the CLI boundary.
+- The local preview proxy must never forward an OBSERVED WebSocket close code into a
+  Close frame. RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a
+  TCP callback and kills the CLI with the active Agent session. Mirror the shape instead
+  (`mirrorWebSocketClose` in `preview/local-preview-proxy.ts`): `terminate()` for 1006,
+  code-less `close()` for 1005. Both directions, plus the local-socket `error` handler,
+  which must not pre-empt that mirror once the connection is open.
 - Embedded CLI packaging invariants (native deps, ABI, child runtime env) live in
   [apps/electron/AGENTS.md](../electron/AGENTS.md). Read them before changing runtime
   deps/bundle externals or spawning `process.execPath` with a filtered environment.
@@ -164,6 +170,12 @@ Two things the dev build does deliberately, both load-bearing:
 - Post-turn automatic commit/push is allowed for GitHub worktrees and local projects
   with `ProjectRef.useWorktree === true`. Never run it against a local project's
   original directory, even when that project has a `githubRepoFullName` or associated PR.
+- Local create resolves `ProjectRef.githubRepoFullName` from the project's `origin`
+  for direct AND worktree sessions, exactly like desktop creation, because
+  `repoFullName`, PR actions, and post-turn PR detection all read it. Bind only a
+  repository the workspace enables, recording the workspace's spelling; an
+  unauthorized, absent, or unreadable one leaves the Session local rather than
+  failing create.
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input
   schemas. New create/chat Commands require a caller-chosen Operation id. Create persists
   the Operation before its fallible availability/materialization step; the normal response

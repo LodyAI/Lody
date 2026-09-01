@@ -20,10 +20,14 @@ import {
 } from '@/components/mentions/file-at-mention';
 import {
   buildSessionMentionInsertion,
+  filterSessionMentionItemsByProject,
+  getMentionSourceProjectKey,
   hydrateSessionMentionsFromText,
   resolveSessionMentionIds,
   useSessionMentionItems,
   type SessionMentionItem,
+  type SessionMentionProjectKey,
+  type SessionMentionProjectScope,
 } from '@/components/mentions/mention-session-source';
 import {
   buildAgentRoleMentionContext,
@@ -62,6 +66,8 @@ import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 
 // ============================================================================
 // Two-level `@` menu
@@ -98,6 +104,8 @@ function TwoLevelMentionMenu({
   availableCommands,
   enableSessionMentions,
   sessionItems,
+  sessionProjectKey,
+  commandsEnabled,
   enableAgentRoleMentions,
   agentRoleItems,
   surface,
@@ -119,6 +127,8 @@ function TwoLevelMentionMenu({
   availableCommands?: AcpCommandSummary[];
   enableSessionMentions: boolean;
   sessionItems: SessionMentionItem[];
+  sessionProjectKey: SessionMentionProjectKey;
+  commandsEnabled: boolean;
   enableAgentRoleMentions: boolean;
   agentRoleItems: readonly AgentRoleMentionItem[];
   surface: MentionSurface;
@@ -126,6 +136,33 @@ function TwoLevelMentionMenu({
   const context = useMentionContext('TwoLevelMentionMenu');
   const { t } = useTranslation();
   const active = context.open;
+  const [sessionProjectScope, setSessionProjectScope] =
+    React.useState<SessionMentionProjectScope>('current');
+
+  React.useEffect(() => {
+    if (!active) setSessionProjectScope('current');
+  }, [active]);
+
+  const toggleSessionProjectScope = React.useCallback(() => {
+    setSessionProjectScope((scope) => (scope === 'current' ? 'all' : 'current'));
+  }, []);
+  const sessionMenuOpen =
+    active &&
+    context.trigger === '@' &&
+    parseMentionNamespaceSearch(context.filterStore.search)?.namespace === 'session';
+  useCommand(
+    {
+      id: 'mention.toggleSessionProjectScope',
+      titleKey: 'commands.mention.toggleSessionProjectScope',
+      title: 'Toggle Session Mention Project Scope',
+      category: 'Editor',
+      keybindings: getCommandKeybindings('mention.toggleSessionProjectScope'),
+      allowInTextInput: true,
+      when: () => sessionMenuOpen,
+      run: toggleSessionProjectScope,
+    },
+    enableSessionMentions && active && commandsEnabled
+  );
 
   const fileIndex = React.useMemo(
     () =>
@@ -250,9 +287,66 @@ function TwoLevelMentionMenu({
     [allowedSkillDirs, enableSkillMentions, onSkillsActivate, skillItems, skillState, t]
   );
 
+  const visibleSessionItems = React.useMemo(
+    () => filterSessionMentionItemsByProject(sessionItems, sessionProjectKey, sessionProjectScope),
+    [sessionItems, sessionProjectKey, sessionProjectScope]
+  );
+  const currentSessionScopeLabel =
+    sessionProjectKey === 'chat'
+      ? t('mention.session.scope.none', 'No project')
+      : t('mention.session.scope.current', 'Current project');
   const sessionSource = React.useMemo<MentionCategorySources['session']>(
-    () => ({ enabled: enableSessionMentions, items: sessionItems }),
-    [enableSessionMentions, sessionItems]
+    () => ({
+      enabled: enableSessionMentions,
+      items: visibleSessionItems,
+      header: {
+        ariaLabel: t('mention.session.scope.label', 'Session project scope'),
+        options: [
+          {
+            label: currentSessionScopeLabel,
+            selected: sessionProjectScope === 'current',
+            onSelect: () => setSessionProjectScope('current'),
+          },
+          {
+            label: t('mention.session.scope.all', 'All projects'),
+            selected: sessionProjectScope === 'all',
+            onSelect: () => setSessionProjectScope('all'),
+          },
+        ],
+      },
+      emptyState:
+        sessionProjectScope === 'current'
+          ? {
+              message:
+                sessionProjectKey === 'chat'
+                  ? t(
+                      'mention.session.empty.none',
+                      'There are no other sessions without a project.'
+                    )
+                  : t(
+                      'mention.session.empty.current',
+                      'There are no other sessions in the current project.'
+                    ),
+              action: {
+                label: t('mention.session.scope.viewAll', 'View all projects'),
+                ariaLabel: t(
+                  'mention.session.scope.showAllAria',
+                  'Show sessions from all projects'
+                ),
+                onAction: toggleSessionProjectScope,
+              },
+            }
+          : undefined,
+    }),
+    [
+      currentSessionScopeLabel,
+      enableSessionMentions,
+      sessionProjectKey,
+      sessionProjectScope,
+      t,
+      toggleSessionProjectScope,
+      visibleSessionItems,
+    ]
   );
 
   const agentRoleSource = React.useMemo<MentionCategorySources['agentRole']>(
@@ -503,6 +597,8 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
+  /** False for a mounted but hidden composer that must not own app commands. */
+  commandsEnabled?: boolean;
   /** Dropped from the `@session:` category — a session never references itself. */
   currentSessionId?: string | null;
   value: string;
@@ -563,6 +659,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
+      commandsEnabled = true,
       currentSessionId,
       value,
       onValueChange,
@@ -654,6 +751,10 @@ export const CombinedMentionTextarea = React.forwardRef<
       [initializeLazyDirectory]
     );
     const sessionItems = useSessionMentionItems(currentSessionId);
+    const sessionProjectKey = React.useMemo(
+      () => getMentionSourceProjectKey(mentionSource),
+      [mentionSource]
+    );
     const agentRoleContext = React.useMemo(
       () =>
         buildAgentRoleMentionContext({
@@ -931,6 +1032,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           availableCommands={availableCommands}
           enableSessionMentions={enableSessionMentions}
           sessionItems={sessionItems}
+          sessionProjectKey={sessionProjectKey}
+          commandsEnabled={commandsEnabled}
           enableAgentRoleMentions={enableAgentRoleMentions}
           agentRoleItems={agentRoleItems}
           surface={mentionSurface}

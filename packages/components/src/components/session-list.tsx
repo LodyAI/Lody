@@ -708,6 +708,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
+          data-id={`group:${group.key}`}
+          data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
             'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
@@ -959,6 +961,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 role={!useAnchor && isSelectable ? 'button' : undefined}
                 tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                 aria-disabled={!isSelectable ? true : undefined}
+                aria-current={isSelected ? 'page' : undefined}
+                data-id={`session:${session.sessionId}`}
+                data-scope-item="row"
                 data-sidebar-session-id={session.sessionId}
                 // Drag a conversation onto a chat surface to mention it there.
                 draggable
@@ -1312,6 +1317,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
           {canToggleFullList && (
             <button
               type="button"
+              data-id={`show-more:${group.key}`}
+              data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
                 'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',

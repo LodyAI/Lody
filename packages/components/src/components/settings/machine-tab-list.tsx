@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -60,11 +61,20 @@ export function MachineTabList({
   ownerByUserId,
 }: MachineTabListProps) {
   const { t } = useTranslation();
+  const scopeId = useId();
+  const handleItemFocus = useCallback(
+    (item: HTMLElement) => {
+      const machineId = item.dataset.settingsMachineId?.trim();
+      if (machineId) onSelect(machineId as MachineId);
+    },
+    [onSelect]
+  );
+  useListKeyboardNavigation({ onItemFocus: handleItemFocus, scopeId });
   const hiddenByFilter = Math.max(0, totalBeforeFilter - items.length);
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+      <FocusScope id={scopeId} className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
             {t('workspace.machines.title', 'Machines')}
@@ -121,7 +131,7 @@ export function MachineTabList({
             </div>
           )}
         </div>
-      </div>
+      </FocusScope>
     </TooltipProvider>
   );
 }
@@ -189,6 +199,10 @@ function MachineTab({
     <li className="min-w-0">
       <button
         type="button"
+        aria-current={isSelected ? 'true' : undefined}
+        data-id={`machine:${item.machine.id}`}
+        data-scope-item="row"
+        data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
         className={cn(
@@ -246,6 +260,10 @@ function DetailedMachineTab({
     <li className="min-w-0">
       <button
         type="button"
+        aria-current={isSelected ? 'true' : undefined}
+        data-id={`machine:${item.machine.id}`}
+        data-scope-item="row"
+        data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
         className={cn(

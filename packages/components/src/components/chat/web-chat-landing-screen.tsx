@@ -8,6 +8,11 @@ import {
   ConversationDropOverlay,
   type ConversationDropKind,
 } from '@/components/shared/conversation-drop-overlay';
+import { focusFirstChatLandingOption } from '@/hooks/use-chat-landing-keyboard-nav';
+import { FocusScope } from '@/ui/focus-scope';
+import { WINDOW_DRAG_EXEMPT_CLASS, WindowDragStrip } from '@/ui/window-drag-region';
+
+import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
 
 export type WebChatLandingScreenProps = {
   title: string;
@@ -50,11 +55,13 @@ export function WebChatLandingScreen({
       )}
       {...dropHandlers}
     >
+      <WindowDragStrip />
       <ConversationDropOverlay active={dropActive} kind={dropKind} />
       {leftSidebarExpandSlot != null ? (
         <div
           className={cn(
-            'absolute top-3 z-10',
+            'absolute top-3 z-20',
+            WINDOW_DRAG_EXEMPT_CLASS,
             // macOS Electron: `top-[9px]` centers the h-7 button at 23px, on the
             // traffic-light centerline (`trafficLightPosition.y` 16 + 7px radius
             // in apps/electron/src/main/window.ts); `left-[96px]` leaves a 24px
@@ -67,7 +74,16 @@ export function WebChatLandingScreen({
       ) : null}
       {/* Greeting + composer share one keyboard-nav scope (navRootRef); the
           absolutely-positioned sidebar-expand chrome above stays outside it. */}
-      <div ref={navRootRef} className="relative flex min-h-0 flex-1 flex-col">
+      <FocusScope
+        id={WORKSPACE_FOCUS_SCOPES.chatLanding}
+        ref={navRootRef}
+        className="relative flex min-h-0 flex-1 flex-col"
+        onFocus={(event) => {
+          if (event.target === event.currentTarget) {
+            focusFirstChatLandingOption(event.currentTarget);
+          }
+        }}
+      >
         {/* Greeting fills the space above the docked composer and stays vertically
             centered. overflow-auto lets it yield when the iPad soft keyboard shrinks the
             area (the composer band lifts itself — see the note below). */}
@@ -87,7 +103,7 @@ export function WebChatLandingScreen({
             {composer}
           </ConversationColumn>
         </div>
-      </div>
+      </FocusScope>
     </div>
   );
 }

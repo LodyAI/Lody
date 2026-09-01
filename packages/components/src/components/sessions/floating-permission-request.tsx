@@ -4,10 +4,14 @@ import { Button } from '@/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import {
+  CONVERSATION_PANEL_FRAME_CLASS,
+  CONVERSATION_PANEL_HEADER_CLASS,
+  CONVERSATION_PANEL_HEADER_RULE_CLASS,
+} from '@/components/ai-gui/conversation-panel';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
-import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useTranslation } from 'react-i18next';
 import {
@@ -204,11 +208,20 @@ export function PermissionRequestCard({
   return (
     <Card
       className={cn(
-        'overflow-hidden border-border/60 bg-secondary/25 text-xs shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300',
+        /* Same panel as the command block, tool output, and the proposed plan:
+           the header carries the lighter fill, the body sits on the frame. */
+        CONVERSATION_PANEL_FRAME_CLASS,
+        'text-xs animate-in fade-in slide-in-from-bottom-2 duration-300',
         className
       )}
     >
-      <CardHeader className="flex flex-col gap-0.5 border-b border-border/40 bg-secondary/55 px-3 py-2">
+      <CardHeader
+        className={cn(
+          CONVERSATION_PANEL_HEADER_CLASS,
+          CONVERSATION_PANEL_HEADER_RULE_CLASS,
+          'flex-col items-stretch gap-0.5 py-2'
+        )}
+      >
         <CardTitle className="text-[13px] font-medium text-muted-foreground">
           {headerLabel}
         </CardTitle>
@@ -301,8 +314,6 @@ function PermissionCard({
     };
   }, [permission.options]);
 
-  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
-
   const handleSelect = useCallback(
     async (optionId: string) => {
       if (isResolved || !isReady || pendingOptionId !== null) return;
@@ -312,23 +323,12 @@ function PermissionCard({
           outcome: 'selected',
           optionId,
         });
-        notifyPlanExitApproved(pending.toolCall, permission.options, optionId);
       } catch (error) {
         console.error('Failed to respond to permission request:', error);
         setPendingOptionId(null);
       }
     },
-    [
-      isResolved,
-      isReady,
-      notifyPlanExitApproved,
-      pending.toolCall,
-      pendingOptionId,
-      respondToPermission,
-      sessionId,
-      permission.options,
-      permission.requestId,
-    ]
+    [isResolved, isReady, pendingOptionId, respondToPermission, sessionId, permission.requestId]
   );
 
   const handleSubmitAnswers = useCallback(

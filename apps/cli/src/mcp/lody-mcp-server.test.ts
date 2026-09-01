@@ -23,8 +23,13 @@ import {
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { getLodyOperationStorePath } from '@/orchestration/operation-store';
 
-import { __lodyMcpServerInternals, buildLodyMcpServer } from './lody-mcp-server';
+import {
+  __lodyMcpServerInternals,
+  buildLodyMcpServer,
+  runWithMcpSessionContext,
+} from './lody-mcp-server';
 
 const {
   TaskListToolInputSchema,
@@ -63,6 +68,7 @@ const {
   buildOperationTargetCancelArgs,
   summarizeAgentConfig,
   getSessionContext,
+  resolveOperationStorePathForContext,
   resolveUploadPath,
   resolveInvokingHistoryInput,
   summarizeProjectRefForMcp,
@@ -106,6 +112,37 @@ const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   createdAt: 1,
   updatedAt: 1,
   ...overrides,
+});
+
+describe('shared Operation store path', () => {
+  // Regression: the daemon-hosted HTTP MCP transport carries its session
+  // context in AsyncLocalStorage and its process has no LODY_MCP_MACHINE_ID,
+  // so an env-derived store path silently falls back to the 'local' store that
+  // no daemon coordinator reconciles — accepted Operations never finish and
+  // the requester Session never receives its completion turn.
+  it('resolves the coordinator-visible store from the context machineId without env', () => {
+    const savedEnv = {
+      LODY_MCP_MACHINE_ID: process.env.LODY_MCP_MACHINE_ID,
+      LODY_PREVIEW_MCP_MACHINE_ID: process.env.LODY_PREVIEW_MCP_MACHINE_ID,
+    };
+    delete process.env.LODY_MCP_MACHINE_ID;
+    delete process.env.LODY_PREVIEW_MCP_MACHINE_ID;
+    try {
+      const context = { ...createMcpContext(), machineId: 'http-host-machine-id' };
+      const storePath = runWithMcpSessionContext(context, () =>
+        resolveOperationStorePathForContext()
+      );
+      // Same path the daemon coordinator opens for this machine id...
+      expect(storePath).toBe(getLodyOperationStorePath(context.machineId));
+      // ...and NOT the legacy 'local'-keyed store nobody reconciles.
+      expect(storePath).not.toBe(getLodyOperationStorePath('local'));
+    } finally {
+      for (const [name, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });
 
 const listPublishedToolNames = async (taskToolsEnabled: boolean): Promise<string[]> => {

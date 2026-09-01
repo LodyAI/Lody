@@ -44,10 +44,15 @@ role keeps them.
 The footer names a role only while the configuration is still that role's. Change the model by hand
 and the name disappears — the footer never claims a role that is not what will run.
 
+A blank child tab inside another conversation follows these same new-conversation rules. Its machine
+and working directory stay attached to the parent session, but its Role list includes every Role on
+that machine, across agent types. Picking one switches the draft to the Role's agent config and
+freezes its run configuration, instruction, and provenance when you send the first message.
+
 ## Use a role inside a conversation
 
-An existing conversation already runs an agent on a machine, and a role cannot move it there. So the
-**Role** row inside a conversation:
+Once a conversation has been created, it already runs an agent on a machine and a role cannot move
+it there. So the **Role** row inside a conversation:
 
 - offers only roles bound to an agent of the **same type**, whose model, reasoning, and permission
   values that agent understands, and

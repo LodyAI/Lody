@@ -111,6 +111,14 @@ describe('TaskInboxPanel', () => {
   beforeEach(async () => {
     localStorage.clear();
     await initI18n('en');
+    Object.defineProperty(HTMLElement.prototype, 'checkVisibility', {
+      configurable: true,
+      value: () => true,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -150,9 +158,30 @@ describe('TaskInboxPanel', () => {
   });
 
   it('still shows a readable row for a task with no title', () => {
-    render(
-      <TaskInboxPanel items={[{ taskId: 'task_1', title: '   ' }]} onOpenTask={vi.fn()} />
-    );
+    render(<TaskInboxPanel items={[{ taskId: 'task_1', title: '   ' }]} onOpenTask={vi.fn()} />);
     expect(container.textContent).toContain('Untitled task');
+  });
+
+  it('moves focus between inbox rows with the shared list navigation', () => {
+    render(
+      <TaskInboxPanel
+        items={[
+          { taskId: 'task_1', title: 'First' },
+          { taskId: 'task_2', title: 'Second' },
+        ]}
+        onOpenTask={vi.fn()}
+      />
+    );
+    const first = container.querySelector<HTMLElement>('[data-id="task-inbox:task_1"]')!;
+    const second = container.querySelector<HTMLElement>('[data-id="task-inbox:task_2"]')!;
+
+    act(() => first.focus());
+    act(() => {
+      first.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' })
+      );
+    });
+
+    expect(document.activeElement).toBe(second);
   });
 });

@@ -13,7 +13,6 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 
-import { focusLayerAtom, type FocusLayer } from '@/atoms/focus-layer';
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionAccessControl } from '@/components/session-sharing';
 import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
@@ -178,17 +177,11 @@ const manyChildSessions: SessionMeta[] = [
 }));
 
 type StoryShellProps = React.ComponentProps<typeof SessionTabBar> & {
-  focusLayer?: FocusLayer;
   frameWidth?: number;
   reservedRightWidth?: number;
 };
 
-function StoryShell({
-  focusLayer = 'L3',
-  frameWidth,
-  reservedRightWidth = 0,
-  ...props
-}: StoryShellProps) {
+function StoryShell({ frameWidth, reservedRightWidth = 0, ...props }: StoryShellProps) {
   const [store] = useState(() => {
     const nextStore = createStore();
     nextStore.set(lodyPresenceStatesAtom, {
@@ -220,9 +213,6 @@ function StoryShell({
   const [activeTabSessionId, setActiveTabSessionId] = useState(props.activeTabSessionId);
   const [activeViewerTabId, setActiveViewerTabId] = useState(props.activeViewerTabId);
 
-  useEffect(() => {
-    store.set(focusLayerAtom, focusLayer);
-  }, [focusLayer, store]);
   useEffect(() => {
     setActiveTabSessionId(props.activeTabSessionId);
   }, [props.activeTabSessionId]);
@@ -301,7 +291,6 @@ const meta = {
     onTabReorder: fn(),
     tabOrder: [childSessions[1]!.id, childSessions[0]!.id, draftTabs[0]!.id],
     viewerTabs: [],
-    focusLayer: 'L3',
     activeViewerTabId: null,
     onViewerTabSelect: fn(),
     onViewerTabClose: fn(),
@@ -449,12 +438,6 @@ export const ToolbarAndHistoryPressure: Story = {
           'Reserves space for the production toolbar while the new-tab and history buttons remain pinned.',
       },
     },
-  },
-};
-
-export const ParentKeyboardFocused: Story = {
-  args: {
-    focusLayer: 'L2',
   },
 };
 

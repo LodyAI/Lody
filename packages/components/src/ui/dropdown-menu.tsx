@@ -6,7 +6,11 @@ import { handleMenuCloseAutoFocus } from '@/lib/menu-focus';
 import { cn } from '@/lib/utils';
 import { useSafeAreaInsets } from '@/hooks/use-safe-area-insets';
 import {
+  menuGroupLabelClassName,
   menuItemClassName,
+  menuItemDestructiveClassName,
+  menuItemExtraClassName,
+  menuItemIconClassName,
   menuSelectionItemClassName,
   menuSeparatorClassName,
   menuSeparatorStyle,
@@ -234,14 +238,15 @@ const DropdownMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
     inset?: boolean;
+    icon?: React.ReactNode;
   }
->(({ className, inset, children, onPointerEnter, disabled, ...props }, ref) => {
+>(({ className, inset, icon, children, onPointerEnter, disabled, ...props }, ref) => {
   const setSubmenuOpen = React.useContext(DropdownMenuSubOpenContext);
 
   return (
     <DropdownMenuPrimitive.SubTrigger
       ref={ref}
-      className={cn(menuItemClassName, 'data-[state=open]:bg-hover', inset && 'pl-8', className)}
+      className={cn(menuItemClassName, inset && 'ps-8', className)}
       disabled={disabled}
       onPointerEnter={(event) => {
         onPointerEnter?.(event);
@@ -251,8 +256,11 @@ const DropdownMenuSubTrigger = React.forwardRef<
       }}
       {...props}
     >
+      {icon ? <span className={menuItemIconClassName}>{icon}</span> : null}
       {children}
-      <ChevronRight className="ml-auto" />
+      <span className={cn(menuItemIconClassName, 'ms-2 me-0 size-4 [&>svg]:size-3')}>
+        <ChevronRight />
+      </span>
     </DropdownMenuPrimitive.SubTrigger>
   );
 });
@@ -267,7 +275,7 @@ const DropdownMenuSubContent = React.forwardRef<
     sideOffset={sideOffset}
     style={{ ...menuSurfaceStyle, ...style }}
     className={cn(
-      'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] overflow-y-auto overflow-x-hidden',
+      'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden',
       menuSurfaceClassName,
       className
     )}
@@ -325,7 +333,7 @@ const DropdownMenuContent = React.forwardRef<
           });
         }}
         className={cn(
-          'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] overflow-y-auto overflow-x-hidden',
+          'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden',
           menuSurfaceClassName,
           className
         )}
@@ -340,13 +348,16 @@ const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
+    icon?: React.ReactNode;
+    variant?: 'default' | 'destructive';
   }
->(({ className, inset, onSelect, ...props }, ref) => {
+>(({ className, inset, icon, variant = 'default', children, onSelect, ...props }, ref) => {
   const selectionContext = React.useContext(DropdownMenuSelectionContext);
   return (
     <DropdownMenuPrimitive.Item
       ref={ref}
-      className={cn(menuItemClassName, inset && 'pl-8', className)}
+      data-variant={variant}
+      className={cn(menuItemClassName, menuItemDestructiveClassName, inset && 'ps-8', className)}
       onSelect={(event) => {
         // Mark even when the consumer preventDefaults to keep the menu open
         // (run-config multi-pick). That interaction still means "user chose
@@ -356,7 +367,18 @@ const DropdownMenuItem = React.forwardRef<
         onSelect?.(event);
       }}
       {...props}
-    />
+    >
+      {/* Pass `children` through untouched when there is no icon: a consumer
+          using `asChild` renders through a Slot, which takes exactly one child. */}
+      {icon ? (
+        <>
+          <span className={menuItemIconClassName}>{icon}</span>
+          {children}
+        </>
+      ) : (
+        children
+      )}
+    </DropdownMenuPrimitive.Item>
   );
 });
 DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
@@ -377,7 +399,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
       }}
       {...props}
     >
-      <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <span className="absolute start-3 flex h-3.5 w-3.5 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
           <Check className="h-4 w-4" />
         </DropdownMenuPrimitive.ItemIndicator>
@@ -403,7 +425,7 @@ const DropdownMenuRadioItem = React.forwardRef<
       }}
       {...props}
     >
-      <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <span className="absolute start-3 flex h-3.5 w-3.5 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
           <Circle className="h-2 w-2 fill-current" />
         </DropdownMenuPrimitive.ItemIndicator>
@@ -422,11 +444,7 @@ const DropdownMenuLabel = React.forwardRef<
 >(({ className, inset, ...props }, ref) => (
   <DropdownMenuPrimitive.Label
     ref={ref}
-    className={cn(
-      'select-none px-2.5 py-1.5 text-[0.8rem] font-semibold',
-      inset && 'pl-8',
-      className
-    )}
+    className={cn(menuGroupLabelClassName, inset && 'ps-8', className)}
     {...props}
   />
 ));
@@ -550,7 +568,16 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
     };
 
     return (
-      <div className={cn('flex items-center gap-2 px-2.5 py-1.5', className)}>
+      <div
+        className={cn('flex items-center gap-2 px-2.5 py-1.5', className)}
+        onClick={(event) => {
+          event.stopPropagation();
+          inputRef.current?.focus();
+        }}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+        }}
+      >
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <input
           ref={(node) => {
@@ -562,6 +589,12 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           onKeyDown={handleKeyDown}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
           placeholder={placeholder}
           aria-label={ariaLabel ?? placeholder}
           className="min-w-0 flex-1 border-none bg-transparent text-[0.8rem] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
@@ -573,9 +606,7 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
 DropdownMenuSearchInput.displayName = 'DropdownMenuSearchInput';
 
 const DropdownMenuShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
-  return (
-    <span className={cn('ml-auto text-xs tracking-widest opacity-60', className)} {...props} />
-  );
+  return <span className={cn(menuItemExtraClassName, className)} {...props} />;
 };
 DropdownMenuShortcut.displayName = 'DropdownMenuShortcut';
 

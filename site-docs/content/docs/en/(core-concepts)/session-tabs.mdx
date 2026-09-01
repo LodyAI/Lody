@@ -16,8 +16,8 @@ Session tabs let one task branch into several working surfaces without losing th
 ## Create a child chat
 
 1. Open a session and click `+` in the tab bar.
-2. The new tab inherits the parent session’s machine, project or repository, branch, agent config, model, and permission defaults.
-3. Send the first message in the new tab. Lody creates a child session for that conversation. The title starts from the first line of your prompt, and you can rename it later by double-clicking the tab.
+2. The new tab inherits the parent session’s machine, project or repository, branch, agent config, model, and permission defaults. Before sending, you can pick any Agent Role bound to that machine; the Role may switch the draft to another agent type.
+3. Send the first message in the new tab. Lody creates a child session with the selected Role’s run configuration and instruction. The title starts from the first line of your prompt, and you can rename it later by double-clicking the tab.
 
 Child tabs share the same working-directory context as the parent, but each tab keeps its own conversation history. This makes them useful for parallel review and follow-up work around the same task.
 

@@ -43,6 +43,13 @@ type TargetSubscription = {
 const TARGET_OUTPUT_PREVIEW_MAX_BYTES = 8 * 1024;
 const MATERIALIZATION_RETRY_MIN_MS = 1_000;
 const MATERIALIZATION_RETRY_MAX_MS = 30_000;
+// A Delivery that could not run within this grace window after its Operation's
+// deadline is expired instead of dispatched: waking a Session with a
+// continuation turn for work that ended long ago (stranded store, daemon down
+// for days) surprises the user and spends tokens on a stale result. The
+// default Operation deadline is 24h, so a legitimately finished completion
+// always has at least this window to reach the requester's idle boundary.
+const DELIVERY_EXPIRY_GRACE_MS = 8 * 60 * 60 * 1_000;
 
 const truncateTargetOutput = (
   text: string
@@ -804,12 +811,16 @@ export class LodyOperationCoordinator {
       this.consumeDelivery(delivery, reason, continuationEvidence);
       return;
     }
-    if (execution.hasActiveTurn) return;
-    if (this.options.dispatchWatcher.hasPendingDispatch(delivery.requesterSessionId)) return;
-
     const operation = this.withStore((store) =>
       store.get(delivery.requesterSessionId, delivery.operationId)
     );
+    if (this.now() >= Date.parse(operation.deadlineAt) + DELIVERY_EXPIRY_GRACE_MS) {
+      this.consumeDelivery(delivery, reason, 'expired_stale');
+      return;
+    }
+    if (execution.hasActiveTurn) return;
+    if (this.options.dispatchWatcher.hasPendingDispatch(delivery.requesterSessionId)) return;
+
     const configuration = await this.resolveFrozenConfiguration(operation, delivery, reason);
     if (configuration === 'unknown') {
       this.armConfigurationRetry(delivery.requesterSessionId);

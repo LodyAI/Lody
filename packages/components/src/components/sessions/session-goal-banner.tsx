@@ -18,6 +18,7 @@ import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-dur
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   isSessionGoalCleared,
+  isSessionGoalResumable,
   sanitizeGoalObjective,
   type SessionGoalCommand,
   type SessionGoalMessage,
@@ -173,9 +174,8 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
   const showPause =
     goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
   const showResume =
-    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
-  const showClear =
-    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
+    isSessionGoalResumable(goal) && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const triggerCommand = (command: SessionGoalCommand) => {

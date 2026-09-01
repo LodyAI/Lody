@@ -145,6 +145,17 @@ Lody 为 Agent 提供创建或复用其他对话、读取状态和历史、追�
 
 Lody 仍在走向完整的 local-first 支持。
 
+## 加入社区
+
+欢迎加入 Lody 中文用户群，与团队和其他用户交流、反馈问题、了解新功能。
+
+<p align="center">
+  <img src="./packages/components/src/assets/community-feishu-qr.png" alt="Lody 飞书用户群二维码" width="220" />
+</p>
+<p align="center">
+  使用飞书扫描上方二维码加入群聊，或加入我们的 <a href="https://discord.gg/E8mZtMu38s">Discord</a>。
+</p>
+
 ## 仓库结构
 
 - `apps/cli` — 连接机器并运行 Coding Agents

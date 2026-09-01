@@ -66,3 +66,25 @@ export const supportsBuiltinAuthentication = (input: {
   // the env check above for Claude, and means nothing on Codex, Kimi, or Grok.
   return !isAgentBrandId(input.brandId);
 };
+
+/**
+ * True when the config is a third-party ACP provider, which authenticates
+ * through the standard ACP `initialize` → `authenticate` exchange. The methods
+ * are advertised by the agent itself, so support cannot be known for certain
+ * until it is asked — callers pair this with a live `authRequired` signal rather
+ * than offering a sign-in nothing asked for.
+ */
+export const usesAcpProtocolAuthentication = (
+  cliType: AgentConfigCliType | null | undefined
+): boolean => cliType === 'registry' || cliType === 'custom';
+
+/**
+ * True when Lody has any sign-in flow to offer for this config after the agent
+ * reported that authentication is required.
+ */
+export const supportsAuthenticationWhenRequired = (input: {
+  cliType: AgentConfigCliType | null | undefined;
+  agentType: string | null | undefined;
+}): boolean =>
+  usesAcpProtocolAuthentication(input.cliType) ||
+  (input.cliType === 'builtin' && !!input.agentType && isManagedBuiltinAgentType(input.agentType));

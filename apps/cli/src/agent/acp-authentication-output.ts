@@ -42,12 +42,30 @@ function isTrustedAuthorizationUrl(agentType: BuiltinCliType, url: URL): boolean
   return hasDomain(url.hostname, 'kimi.com') && url.pathname.startsWith('/code/authorize_device');
 }
 
-function findAuthorizationUrl(agentType: BuiltinCliType, output: string): URL | undefined {
+// Third-party ACP agents are not pinned providers, so there is no host allowlist
+// to check them against. Require an https URL whose path or query still reads as
+// an authorization endpoint, so an unrelated docs or issue link printed on the
+// same stream is not offered to the user as a sign-in page.
+const AUTHORIZATION_URL_HINT_PATTERN =
+  /(^|[/?&=_-])(oauth|oauth2|authorize|authorization|device|signin|sign-in|login)([/?&=_-]|$)/iu;
+
+function isLikelyAuthorizationUrl(url: URL): boolean {
+  if (url.protocol !== 'https:') return false;
+  return (
+    AUTHORIZATION_URL_HINT_PATTERN.test(url.pathname) ||
+    AUTHORIZATION_URL_HINT_PATTERN.test(url.search)
+  );
+}
+
+function findAuthorizationUrl(
+  isAuthorizationUrl: (url: URL) => boolean,
+  output: string
+): URL | undefined {
   for (const match of output.matchAll(AUTHORIZATION_URL_PATTERN)) {
     const candidate = match[0].replace(/[),.;]+$/u, '');
     try {
       const url = new URL(candidate);
-      if (isTrustedAuthorizationUrl(agentType, url)) return url;
+      if (isAuthorizationUrl(url)) return url;
     } catch {
       // Ignore incomplete URL chunks until the rest of the output arrives.
     }
@@ -64,10 +82,11 @@ function parseExpiresInSeconds(output: string): number | undefined {
 }
 
 function parseAuthorization(
-  agentType: BuiltinCliType,
+  isAuthorizationUrl: (url: URL) => boolean,
+  acceptsAuthorizationCode: boolean,
   output: string
 ): ParsedBuiltinAuthorization | undefined {
-  const authorizationUrl = findAuthorizationUrl(agentType, output);
+  const authorizationUrl = findAuthorizationUrl(isAuthorizationUrl, output);
   if (!authorizationUrl) return undefined;
 
   const userCode =
@@ -76,30 +95,56 @@ function parseAuthorization(
   return {
     authorizationUrl: authorizationUrl.toString(),
     ...(userCode ? { userCode } : {}),
-    ...(agentType === 'claude' ? { acceptsAuthorizationCode: true } : {}),
+    ...(acceptsAuthorizationCode ? { acceptsAuthorizationCode: true } : {}),
     ...(expiresInSeconds !== undefined ? { expiresInSeconds } : {}),
   };
 }
 
 /**
- * Converts pinned provider CLI text into a small UI-safe authorization event.
- * The parser is incremental because URLs and device codes can cross stdio chunks.
+ * Converts bounded agent output into a small UI-safe authorization event. The
+ * parser is incremental because URLs and device codes can cross stdio chunks.
  */
-export class BuiltinAuthenticationOutputParser {
+class AuthorizationOutputParser {
   private output = '';
   private lastAuthorization = '';
 
-  constructor(private readonly agentType: BuiltinCliType) {}
+  constructor(
+    private readonly isAuthorizationUrl: (url: URL) => boolean,
+    private readonly acceptsAuthorizationCode: boolean
+  ) {}
 
   push(chunk: string): ParsedBuiltinAuthorization | undefined {
     this.output = `${this.output}${stripVTControlCharacters(chunk)}`.slice(
       -MAX_AUTHENTICATION_OUTPUT_BUFFER
     );
-    const authorization = parseAuthorization(this.agentType, this.output);
+    const authorization = parseAuthorization(
+      this.isAuthorizationUrl,
+      this.acceptsAuthorizationCode,
+      this.output
+    );
     if (!authorization) return undefined;
     const fingerprint = JSON.stringify(authorization);
     if (fingerprint === this.lastAuthorization) return undefined;
     this.lastAuthorization = fingerprint;
     return authorization;
+  }
+}
+
+/** Pinned provider CLI output, restricted to that provider's allowlisted hosts. */
+export class BuiltinAuthenticationOutputParser extends AuthorizationOutputParser {
+  constructor(agentType: BuiltinCliType) {
+    super((url) => isTrustedAuthorizationUrl(agentType, url), agentType === 'claude');
+  }
+}
+
+/**
+ * Output of a third-party ACP agent authenticating over the protocol. Such an
+ * agent normally opens the browser itself; the URL it prints as a fallback is
+ * surfaced so a headless or remote machine can still complete the sign-in. No
+ * authorization code is ever fed back: the agent's stdin is the JSON-RPC channel.
+ */
+export class AcpAgentAuthorizationOutputParser extends AuthorizationOutputParser {
+  constructor() {
+    super(isLikelyAuthorizationUrl, false);
   }
 }

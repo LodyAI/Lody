@@ -84,6 +84,15 @@ export const getACPErrorUserMessage = (error: ParsedACPError): string => {
 export const isUpstreamApiACPError = (error: ParsedACPError): boolean =>
   /API Error:\s*(?:500|502|503|529)\b/.test(getACPDiagnosticText(error, error));
 
+/**
+ * Codex app-server exposes model-capacity failures as the stable
+ * `serverOverloaded` error kind in RequestError.data. Match the structured
+ * value only: provider copy changes, and a generic HTTP 503 may instead mean a
+ * transport outage that should retain the ordinary upstream-error behavior.
+ */
+export const isProviderOverloadedACPError = (error: ParsedACPError): boolean =>
+  getStringField(error.data, 'codexErrorInfo') === 'serverOverloaded';
+
 export const isAcpSessionStorageIncompatibleError = (error: unknown): boolean => {
   const diagnosticText = getACPDiagnosticText(error);
   return (
@@ -142,6 +151,9 @@ export const mapACPErrorToFailureReason = (error: ParsedACPError): ChatFailedRea
       if (isAgentDisconnectedError(error) || isAcpSessionNotFoundError(error)) {
         return 'agent_disconnected';
       }
+      if (isProviderOverloadedACPError(error)) {
+        return 'acp_provider_overloaded';
+      }
       if (isUpstreamApiACPError(error)) {
         return 'acp_upstream_api_error';
       }
@@ -174,6 +186,9 @@ export const shouldTerminateOnACPError = (
     return true;
   }
   if (failureReason === 'acp_upstream_api_error') {
+    return false;
+  }
+  if (failureReason === 'acp_provider_overloaded') {
     return false;
   }
   return error.code === ACP_ERROR_CODES.INTERNAL_ERROR;

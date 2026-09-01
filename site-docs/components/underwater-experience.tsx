@@ -103,6 +103,7 @@ export type HeroCopy = {
   lead: string;
   secondary: string;
   secondaryHref: string;
+  secondaryExternal?: boolean;
   webAppHref: string;
   labels: PlatformDownloadLabels;
   otherDownloads: string;
@@ -444,6 +445,7 @@ export function UnderwaterExperience({
               copy={{
                 secondary: hero.secondary,
                 secondaryHref: hero.secondaryHref,
+                secondaryExternal: hero.secondaryExternal,
                 webAppHref: hero.webAppHref,
                 labels: hero.labels,
                 otherDownloads: hero.otherDownloads,

@@ -263,7 +263,7 @@ describe('desktop onboarding flow', () => {
     });
   });
 
-  it('continues with the exact durable provider setup id', async () => {
+  it('keeps a pending setup distinct from a completed AgentConfig', async () => {
     const onNext = vi.fn();
     const setup: ProviderSetupTask = {
       v: 1,
@@ -291,7 +291,50 @@ describe('desktop onboarding flow', () => {
           configs={[]}
           setups={[setup]}
           testStatuses={{}}
-          selectedConfigId={setup.id}
+          selectedProviderId={setup.id}
+          noLocalMachine={false}
+          localMachineId={machineId}
+          onEdit={vi.fn()}
+          onTest={vi.fn()}
+          onDelete={vi.fn()}
+          onAdd={vi.fn()}
+          onBack={vi.fn()}
+          onSkip={vi.fn()}
+          onNext={onNext}
+        />
+      );
+    });
+
+    expect(findButton(container, 'Working').disabled).toBe(true);
+
+    await act(async () => {
+      findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onNext).toHaveBeenCalledWith({
+      kind: 'providerSetup',
+      providerSetupId: setup.id,
+      agentName: setup.config.name,
+    });
+  });
+
+  it('continues with an AgentConfig only after it is published', async () => {
+    const onNext = vi.fn();
+    const config: AgentConfigMeta = {
+      id: 'config-ready' as AgentConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    };
+
+    await act(async () => {
+      root?.render(
+        <ProvidersScreenView
+          configs={[config]}
+          testStatuses={{}}
+          selectedProviderId={config.id}
           noLocalMachine={false}
           localMachineId={machineId}
           onEdit={vi.fn()}
@@ -308,7 +351,11 @@ describe('desktop onboarding flow', () => {
     await act(async () => {
       findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(onNext).toHaveBeenCalledWith(setup.id);
+    expect(onNext).toHaveBeenCalledWith({
+      kind: 'agentConfig',
+      agentConfigId: config.id,
+      agentName: config.name,
+    });
   });
 
   it('keeps provider activity compact in the badge and progress button', async () => {

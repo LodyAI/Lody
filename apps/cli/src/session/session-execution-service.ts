@@ -431,7 +431,11 @@ export type SessionExecutionServiceDeps = {
       acpSessionId: ACPSessionId | null;
       agentClient: unknown;
     },
-    config: ApplyModeAndModelConfig
+    config: ApplyModeAndModelConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+    }
   ) => Promise<void>;
   createAssistantEntryForTurn: (
     sessionId: SessionId,
@@ -1222,7 +1226,10 @@ export class SessionExecutionService {
         return preConfigRejection;
       }
       if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig);
+        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
+          sessionDoc,
+          basedOnUserTurnId: options.userTurnId,
+        });
       }
 
       const preSubmitRejection = await rejectBeforeProviderSubmission();
@@ -1846,7 +1853,13 @@ export class SessionExecutionService {
     }
     runtime.prePromptFailureRecorded = true;
     const message = formatErrorMessage(error);
-    if (isGitExecutableNotFoundError(error)) {
+    // A first turn on a brand-new session establishes the ACP session here, so
+    // an agent that requires sign-in fails before the prompt. Keep the specific
+    // reason: it is what lets the client offer the authentication flow instead
+    // of a generic "failed before the agent could start".
+    if (error instanceof AcpAuthenticationRequiredError) {
+      await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
+    } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,
         'turn_pre_prompt_failed',
@@ -3676,10 +3689,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId, triggerReason },
               async () =>
-                await self.deps.applyAcpModeAndModel(targetSession, {
-                  ...acpSessionConfig,
-                  configOptionValues: acpSessionConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  targetSession,
+                  {
+                    ...acpSessionConfig,
+                    configOptionValues: acpSessionConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: executionUserTurnId,
+                  }
+                )
             )
           );
 
@@ -4461,10 +4481,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId },
               async () =>
-                await self.deps.applyAcpModeAndModel(session, {
-                  ...agentConfig,
-                  configOptionValues: agentConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  session,
+                  {
+                    ...agentConfig,
+                    configOptionValues: agentConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: userTurnId,
+                  }
+                )
             )
           );
 
@@ -4893,8 +4920,21 @@ export class SessionExecutionService {
       customAcp: message.customAcp,
       runtimeOverrides: message.runtimeOverrides,
       env: message.env,
+      methodId: message.methodId,
       onProgress,
     });
+
+    // The agent advertises several sign-in methods; the caller re-sends the
+    // request with the one the user picked.
+    if (result.disposition === 'method-required') {
+      return {
+        ...base,
+        success: true,
+        disposition: 'method-required',
+        authRequired: true,
+        authMethods: result.authMethods.map((method) => ({ ...method })),
+      };
+    }
 
     if (result.success && result.disposition === 'authenticated' && message.configId) {
       const refresh = await this.refreshMachineAcpCapabilities({

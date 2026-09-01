@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next';
 import {
   getSessionPullRequestLegacyFields,
   isSessionGoalCleared,
+  isSessionGoalResumable,
   parseGitHubPrNumber,
   sanitizeGoalObjective,
   type GitHubMergeMethod,
@@ -167,9 +168,8 @@ export function GoalChip({
   const showPause =
     goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
   const showResume =
-    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
-  const showClear =
-    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
+    isSessionGoalResumable(goal) && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const durationUnitLabels: DurationUnitLabels = {

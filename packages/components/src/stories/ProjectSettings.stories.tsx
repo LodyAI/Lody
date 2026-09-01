@@ -9,10 +9,12 @@ import {
 } from '@lody/shared';
 import {
   ProjectSettingsView,
+  type AddableProjectMachine,
   type ProjectSettingsSection,
   type ProjectSettingsRow,
   type GithubProjectSettingsSection,
 } from '@/components/settings/project-settings';
+import { SettingsStoryProviders } from './settings-story-shell';
 
 const machineLocal = 'machine-local' as MachineId;
 const machineRemote = 'machine-remote' as MachineId;
@@ -148,20 +150,27 @@ const baseGithubSections: GithubProjectSettingsSection[] = [
   },
 ];
 
+const baseAddableMachines: AddableProjectMachine[] = [
+  { machineId: machineLocal, machineName: 'MacBook Pro', online: true },
+  { machineId: machineRemote, machineName: 'Workstation', online: false },
+];
+
 function StoryWrapper({
   sections = baseSections,
   githubSections = baseGithubSections,
+  addableMachines = baseAddableMachines,
   isLoading = false,
 }: {
   sections?: ProjectSettingsSection[];
   githubSections?: GithubProjectSettingsSection[];
+  addableMachines?: AddableProjectMachine[];
   isLoading?: boolean;
 }) {
   const [currentSections, setCurrentSections] = useState(sections);
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
 
   return (
-    <div className="mx-auto max-w-4xl p-4">
+    <div className="mx-auto h-screen max-w-4xl p-4">
       <ProjectSettingsView
         sections={currentSections}
         githubSections={currentGithubSections}
@@ -177,8 +186,9 @@ function StoryWrapper({
             }))
           );
         }}
-        onAddLocalProject={() => {
-          console.info('Add local project');
+        addableMachines={addableMachines}
+        onAddLocalProject={(machineId) => {
+          console.info('Add folder', machineId ?? '(choose a machine)');
         }}
         onAddGitHubProject={() => {
           console.info('Add GitHub project');
@@ -407,8 +417,15 @@ const meta = {
   title: 'Settings/ProjectSettings',
   component: StoryWrapper,
   parameters: {
-    layout: 'padded',
+    layout: 'fullscreen',
   },
+  decorators: [
+    (Story) => (
+      <SettingsStoryProviders capabilities={['teamSharing']}>
+        <Story />
+      </SettingsStoryProviders>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta<typeof StoryWrapper>;
 
@@ -420,6 +437,39 @@ export const Default: Story = {};
 export const SingleMachine: Story = {
   args: {
     sections: [baseSections[0]!],
+  },
+};
+
+export const InitialHistorySync: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [baseSections[0]!.rows[0]!],
+      },
+    ],
+    githubSections: [],
+  },
+};
+
+export const SyncedEmptyHistory: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [
+          updateHistoryImportState(baseSections[0]!.rows[0]!, storyProviders[0]!, (state) => ({
+            ...state,
+            catalog: {
+              listed: 0,
+              lastListedAt: 0,
+              sessions: [],
+            },
+          })),
+        ],
+      },
+    ],
+    githubSections: [],
   },
 };
 
@@ -479,6 +529,17 @@ export const ManyProjects: Story = {
 export const Empty: Story = {
   args: {
     sections: [],
+    addableMachines: [],
+  },
+};
+
+/** A machine the user can add to but that has no project yet still gets a pill
+    and an in-place add action. */
+export const MachineWithoutProjects: Story = {
+  args: {
+    sections: [],
+    githubSections: [],
+    addableMachines: [baseAddableMachines[0]!],
   },
 };
 

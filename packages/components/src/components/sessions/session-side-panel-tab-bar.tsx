@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 
 export type SessionSidePanelTabItem = {
   id: string;
@@ -132,7 +133,7 @@ type SessionSidePanelTabBarProps = {
 };
 
 const TAB_CLASS =
-  'group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors';
+  `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors ${WINDOW_DRAG_EXEMPT_CLASS}`;
 // Soft cool-gray pills on the white side panel (Linear-like), not heavy slate washes.
 const ACTIVE_TAB_CLASS =
   'bg-foreground/[0.08] text-tab-active-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]';
@@ -213,6 +214,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   endSlot,
   className,
 }: SessionSidePanelTabBarProps) {
+  const windowDragClass = useWindowDragRegionClass();
   const activeTabRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -220,7 +222,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   }, [activeTabId]);
 
   return (
-    <div className={cn('flex min-w-0 items-center gap-1 px-2', className)}>
+    <div className={cn('flex min-w-0 items-center gap-1 px-2', windowDragClass, className)}>
       <ScrollArea
         scrollableX
         horizontalOnly
@@ -318,7 +320,10 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
             type="button"
             disabled={availablePanels.length === 0}
             aria-label={addPanelLabel}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+            className={cn(
+              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
+              WINDOW_DRAG_EXEMPT_CLASS
+            )}
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -337,7 +342,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {endSlot ? <div className="flex shrink-0 items-center">{endSlot}</div> : null}
+      {endSlot ? (
+        <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{endSlot}</div>
+      ) : null}
     </div>
   );
 });

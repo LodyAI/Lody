@@ -16,6 +16,8 @@ import {
 export type LandingHeroDownloadCopy = {
   secondary: string;
   secondaryHref: string;
+  /** Set when `secondaryHref` leaves the site (source repository). */
+  secondaryExternal?: boolean;
   webAppHref: string;
   labels: PlatformDownloadLabels;
   /** Link to the full multi-platform download page. */
@@ -56,7 +58,11 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
         >
           {primary.label}
         </a>
-        <a className="underwater-btn underwater-btn--ghost" href={copy.secondaryHref}>
+        <a
+          className="underwater-btn underwater-btn--ghost"
+          href={copy.secondaryHref}
+          {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
+        >
           {copy.secondary}
         </a>
       </div>

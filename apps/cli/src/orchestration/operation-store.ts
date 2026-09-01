@@ -354,10 +354,12 @@ export const canonicalizeLodyCommand = (value: unknown): string => {
 export const fingerprintLodyCommand = (kind: LodyOperationKind, canonical: string): string =>
   createHash('sha256').update(kind).update('\0').update(canonical).digest('hex');
 
-export const getLodyOperationStorePath = (
-  machineId = process.env.LODY_MCP_MACHINE_ID ?? process.env.LODY_PREVIEW_MCP_MACHINE_ID ?? 'local',
-  homeDir = os.homedir()
-): string => {
+// machineId is deliberately required: an env-derived default here once made the
+// daemon-hosted HTTP MCP transport (whose process has no LODY_MCP_MACHINE_ID)
+// silently fall back to a 'local'-keyed store that no coordinator reconciles,
+// so accepted Operations were never finalized or delivered. Callers must pass
+// the machine id they authenticated (session context, coordinator options).
+export const getLodyOperationStorePath = (machineId: string, homeDir = os.homedir()): string => {
   const machineKey = createHash('sha256').update(machineId).digest('hex').slice(0, 24);
   return path.join(
     getLodyDataDir(undefined, homeDir),
@@ -396,7 +398,7 @@ export class LodyOperationStore {
    * daemon-side coordinator keeps the default and owns maintenance.
    */
   constructor(
-    dbPath = getLodyOperationStorePath(),
+    dbPath: string,
     private readonly now: () => number = Date.now,
     options: { maintenance?: boolean } = {}
   ) {

@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 
 import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 
 const Dialog = DialogPrimitive.Root;
 
@@ -33,7 +34,9 @@ const DialogOverlay = React.forwardRef<
       className
     )}
     {...props}
-  />
+  >
+    <WindowDragStrip />
+  </DialogPrimitive.Overlay>
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
@@ -70,8 +73,6 @@ const DialogContent = React.forwardRef<
       data-lody-dialog-content=""
       className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
       onEscapeKeyDown={(event) => {
-        // Esc first cancels an active IME preedit. Treating the same keydown as
-        // dialog dismissal loses any draft held by a form inside the dialog.
         if (isImeComposingNativeKeyboardEvent(event)) {
           event.preventDefault();
           return;

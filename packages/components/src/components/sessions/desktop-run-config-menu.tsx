@@ -344,6 +344,8 @@ export type DesktopRunConfigMenuProps = {
   showAgentNameInTrigger?: boolean;
   /** Trigger copy while no agent has been selected. */
   emptyAgentLabel?: string;
+  /** Keep the whole run-config menu inert and explain why on hover/focus. */
+  disabledReason?: string;
   agentLocked?: boolean;
   fallbackAgent?: {
     cliType?: AgentConfigCliType | null;
@@ -398,6 +400,7 @@ export function DesktopRunConfigMenu({
   availableAgentConfigs,
   showAgentNameInTrigger = false,
   emptyAgentLabel,
+  disabledReason,
   agentLocked = false,
   fallbackAgent,
   onAgentConfigChange,
@@ -622,52 +625,69 @@ export function DesktopRunConfigMenu({
     fastSelector != null;
   if (!hasAnyRow) return null;
 
+  const runConfigButtonAriaLabel = t('chat.runConfig.buttonAriaLabel', 'Run configuration');
+  const triggerButton = (
+    <button
+      type="button"
+      className={cn(
+        TRIGGER_CLASS,
+        disabledReason &&
+          'cursor-default opacity-70 hover:bg-transparent hover:text-muted-foreground'
+      )}
+      aria-label={runConfigButtonAriaLabel}
+      aria-disabled={disabledReason ? true : undefined}
+    >
+      {selectedRole ? (
+        <span className="shrink-0 text-sm leading-none" aria-hidden="true">
+          {getAgentRoleEmoji(selectedRole)}
+        </span>
+      ) : selectedAgentConfig ? (
+        <AgentIcon
+          cliType={selectedAgentConfig.cliType}
+          agentType={selectedAgentConfig.agentType}
+          brandId={selectedAgentConfig.brandId}
+          env={selectedAgentConfig.env}
+          className="h-4 w-4 shrink-0"
+        />
+      ) : fallbackAgent?.cliType && fallbackAgent.agentType ? (
+        <AgentIcon
+          cliType={fallbackAgent.cliType}
+          agentType={fallbackAgent.agentType}
+          className="h-4 w-4 shrink-0"
+        />
+      ) : (
+        <Bot className="h-4 w-4 shrink-0" aria-hidden="true" />
+      )}
+      {/* A Role names itself and nothing else: it IS the whole run
+          configuration, so its values belong beside the button rather than
+          crowding the one thing there is to click. */}
+      {selectedRole ? (
+        <span className="block min-w-0 max-w-44 truncate text-left">{selectedRole.name}</span>
+      ) : (
+        <>
+          {showAgentNameInTrigger ? (
+            <span className="block min-w-0 max-w-36 truncate text-left">
+              {selectedAgentConfig?.name ?? emptyAgentLabel ?? agentLabel}
+            </span>
+          ) : null}
+          {withFaceDots(configFaceParts, showAgentNameInTrigger)}
+        </>
+      )}
+    </button>
+  );
+
   const menu = (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={TRIGGER_CLASS}
-          aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
-        >
-          {selectedRole ? (
-            <span className="shrink-0 text-sm leading-none" aria-hidden="true">
-              {getAgentRoleEmoji(selectedRole)}
-            </span>
-          ) : selectedAgentConfig ? (
-            <AgentIcon
-              cliType={selectedAgentConfig.cliType}
-              agentType={selectedAgentConfig.agentType}
-              brandId={selectedAgentConfig.brandId}
-              env={selectedAgentConfig.env}
-              className="h-4 w-4 shrink-0"
-            />
-          ) : fallbackAgent?.cliType && fallbackAgent.agentType ? (
-            <AgentIcon
-              cliType={fallbackAgent.cliType}
-              agentType={fallbackAgent.agentType}
-              className="h-4 w-4 shrink-0"
-            />
-          ) : (
-            <Bot className="h-4 w-4 shrink-0" aria-hidden="true" />
-          )}
-          {/* A Role names itself and nothing else: it IS the whole run
-              configuration, so its values belong beside the button rather than
-              crowding the one thing there is to click. */}
-          {selectedRole ? (
-            <span className="block min-w-0 max-w-44 truncate text-left">{selectedRole.name}</span>
-          ) : (
-            <>
-              {showAgentNameInTrigger ? (
-                <span className="block min-w-0 max-w-36 truncate text-left">
-                  {selectedAgentConfig?.name ?? emptyAgentLabel ?? agentLabel}
-                </span>
-              ) : null}
-              {withFaceDots(configFaceParts, showAgentNameInTrigger)}
-            </>
-          )}
-        </button>
-      </DropdownMenuTrigger>
+      {disabledReason ? (
+        <Tooltip delayDuration={300}>
+          {/* A native disabled button cannot reliably trigger hover/focus events.
+              Keep this focusable but outside DropdownMenuTrigger so it stays inert. */}
+          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+          <TooltipContent side="top">{disabledReason}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+      )}
       <DropdownMenuContent align="start" className="min-w-56">
         {onRecentRunConfigSelect ? (
           <RecentRunConfigMenuGroup

@@ -23,6 +23,9 @@ Product-level mention sources built on `src/ui/mention`.
   it. The scanner handles flat `~/<agent>/skills/<skill>/SKILL.md` and catalog
   `~/<agent>/skills/<category>/<skill>/SKILL.md`; paths outside the provider's
   registered roots (e.g. plugin caches) appear only once their dirs are added.
+- A registered entry mapping to no dir (`deepagents`) keeps its empty
+  whitelist; an unregistered agent type gets `null` instead, because an empty
+  `Set` here filters every candidate out rather than restricting nothing.
 - Before send, known `$` skill tokens are expanded in prompt text to
   `use /token [Skill Path](path)`. Project skills use their project-relative
   `SKILL.md` path; home-scoped (`global` + `system`) skills use the CLI-provided
@@ -178,7 +181,11 @@ Product-level mention sources built on `src/ui/mention`.
   tick. It reads the child-inclusive `allActiveSessions` projection, not the
   `sessionListAtom` sidebar rows that hide child tabs: mentioning is an
   addressing surface, and review/task child sessions are exactly what gets
-  referenced. Archived and the composer's own session stay excluded.
+  referenced. Archived and the composer's own session stay excluded. Project
+  scope is a menu-only filter over this complete list: local identity includes
+  machine + local project id, GitHub identity is a normalized repo full name,
+  and projectless chats group together. Never scope hydration, expansion, drag
+  insertion, slug resolution, or child-session addressing.
 - `useMentionPromptExpansion` is the single before-send text transform. With two
   send paths, per-type expansion hooks must compose here, not be wired into both.
 - A candidate describes its side panel through the neutral

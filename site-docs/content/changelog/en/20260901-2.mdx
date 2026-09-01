@@ -1,0 +1,14 @@
+---
+title: '20260901-2'
+version: 0.89.2
+date: 2026-09-01
+description: Fixed session tab navigation, restoration, and rendering issues, and reduced input latency during rapid session switching.
+---
+
+Version 0.89.2
+
+### 🐛 Fixes and Improvements
+
+- Fixed session tabs staying on the intended conversation and recovering correctly while asynchronous data or pending child sessions arrive, rapid switches occur, or sessions are restored.
+- Reduced input latency during session switching by coalescing rapid navigation and moving background work out of the input path.
+- Prevented malformed parent-child session relationships from causing redirect loops and renderer crashes.

@@ -57,6 +57,7 @@ import {
   type AcpConfigOptionSummary,
   type AgentConfigMeta,
   type AgentRoleId,
+  type LocalProjectGitState,
   type LocalProjectId,
   type MachineLegacyMetaFields,
   type MachineId,
@@ -2302,7 +2303,118 @@ export async function readLocalProjectGitStateOnMachine(args: {
   return response;
 }
 
-async function resolveLocalProjectBranchOnMachine(args: {
+/**
+ * Create-time projection of a local project's git state onto the `ProjectRef`
+ * fields the daemon and every GitHub surface later read.
+ */
+type LocalProjectCreateGitContext = {
+  branch?: string;
+  githubRepoFullName?: string;
+};
+
+/**
+ * A local project's `origin` only becomes a Session's repository identity when
+ * the workspace actually enables that repository, which is exactly what desktop
+ * creation does (`chat-landing.tsx`). Matching is case-insensitive and returns
+ * the workspace's spelling so the persisted `repoFullName` is the same string
+ * every repository lookup uses.
+ */
+function selectWorkspaceRepoFullName(
+  githubRepoFullName: string | null | undefined,
+  workspaceRepositories: readonly { fullName: string }[]
+): string | undefined {
+  const repoFullName = normalizeCliValue(githubRepoFullName);
+  if (!repoFullName) {
+    return undefined;
+  }
+  const normalized = repoFullName.toLowerCase();
+  return workspaceRepositories.find((repo) => repo.fullName.toLowerCase() === normalized)?.fullName;
+}
+
+/**
+ * Pure part of local create resolution: branch selection and GitHub identity
+ * read off one git-state snapshot.
+ *
+ * Identity is resolved for direct and worktree local sessions alike, because a
+ * Session's repository is a property of the project rather than of the workdir
+ * mode; without it `createSessionResult` persists no `repoFullName` and the
+ * client hides `Create PR` / `Commit & Push` and skips post-turn PR detection.
+ * An unauthorized or absent `origin` simply leaves the Session local.
+ */
+export function resolveLocalProjectCreateGitContext(args: {
+  gitState: LocalProjectGitState;
+  workspaceRepositories: readonly { fullName: string }[];
+  requestedBranch?: string;
+  useWorktree?: boolean;
+}): LocalProjectCreateGitContext {
+  const requestedBranch = normalizeCliValue(args.requestedBranch);
+  if (!args.gitState.git) {
+    if (args.useWorktree === true) {
+      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
+    }
+    if (requestedBranch) {
+      throw new Error('Cannot use --branch with a local project that is not a git repository.');
+    }
+    return {};
+  }
+  const githubRepoFullName = selectWorkspaceRepoFullName(
+    args.gitState.githubRepoFullName,
+    args.workspaceRepositories
+  );
+  const identity = githubRepoFullName ? { githubRepoFullName } : {};
+  // Keep direct local sessions branchless. The target daemon must use the
+  // directory as it exists at dispatch time rather than switching back to a
+  // branch observed by this remote preflight.
+  if (!requestedBranch && args.useWorktree !== true) {
+    return identity;
+  }
+  if (args.gitState.branches.length === 0) {
+    if (requestedBranch) {
+      throw new Error(`Local project branch not found: ${requestedBranch}`);
+    }
+    throw new Error('The local project does not have a branch to use as a worktree base.');
+  }
+  const branch = resolveBaseBranchPreference({
+    preferredBranch: requestedBranch,
+    baseBranch: args.gitState.currentBranch,
+    fallbackBranch: args.gitState.defaultBranch ?? args.gitState.branches[0],
+  });
+  // Only the remote machine can resolve refs, so map a typed `--branch main`
+  // onto one of the selectors it reported instead of demanding an exact match.
+  const selected = selectLocalProjectBranchSelector(args.gitState.branches, branch);
+  if (!selected) {
+    throw new Error(`Local project branch not found: ${branch}`);
+  }
+  return { branch: selected, ...identity };
+}
+
+/**
+ * Repository identity is best effort: a workspace whose repository list cannot
+ * be read still creates the local Session, just without GitHub actions.
+ */
+async function listWorkspaceGitHubRepositoriesBestEffort(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  requesterUserId?: string;
+}): Promise<{ fullName: string }[]> {
+  try {
+    return await listWorkspaceGitHubRepositoriesForCliToken({
+      token: args.auth.token,
+      workspaceId: args.workspaceId,
+      requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+      enabledOnly: true,
+    });
+  } catch (error) {
+    getLogger('session').warn(
+      `Workspace GitHub repositories unavailable; creating the local session without repository identity: ${formatErrorMessage(
+        error
+      )}`
+    );
+    return [];
+  }
+}
+
+async function resolveLocalProjectCreateGitContextOnMachine(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
@@ -2311,51 +2423,28 @@ async function resolveLocalProjectBranchOnMachine(args: {
   requesterUserId?: string;
   requestedBranch?: string;
   useWorktree?: boolean;
-}): Promise<string | undefined> {
-  // Keep direct local sessions branchless. The target daemon must use the
-  // directory as it exists at dispatch time rather than switching back to a
-  // branch observed by this remote preflight.
-  if (!args.requestedBranch?.trim() && args.useWorktree !== true) {
-    return undefined;
-  }
-
+}): Promise<LocalProjectCreateGitContext> {
   const response = await readLocalProjectGitStateOnMachine(args);
   if (!response.success) {
-    if (args.requestedBranch || args.useWorktree === true) {
+    // Only an explicit branch or a worktree base depends on this read; a direct
+    // local session must still be creatable when the state cannot be read.
+    if (normalizeCliValue(args.requestedBranch) || args.useWorktree === true) {
       throw new Error(response.message ?? response.error);
     }
-    return undefined;
+    return {};
   }
-  if (!response.state.git) {
-    if (args.useWorktree === true) {
-      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
-    }
-    if (args.requestedBranch) {
-      throw new Error('Cannot use --branch with a local project that is not a git repository.');
-    }
-    return undefined;
-  }
-  if (response.state.branches.length === 0) {
-    if (args.requestedBranch?.trim()) {
-      throw new Error(`Local project branch not found: ${args.requestedBranch.trim()}`);
-    }
-    if (args.useWorktree === true) {
-      throw new Error('The local project does not have a branch to use as a worktree base.');
-    }
-    return undefined;
-  }
-  const branch = resolveBaseBranchPreference({
-    preferredBranch: args.requestedBranch,
-    baseBranch: response.state.currentBranch,
-    fallbackBranch: response.state.defaultBranch ?? response.state.branches[0],
+  // Only a project that actually reports a GitHub `origin` needs the workspace
+  // repository list, so a purely local project stays off the network.
+  const workspaceRepositories =
+    response.state.git && normalizeCliValue(response.state.githubRepoFullName)
+      ? await listWorkspaceGitHubRepositoriesBestEffort(args)
+      : [];
+  return resolveLocalProjectCreateGitContext({
+    gitState: response.state,
+    workspaceRepositories,
+    ...(args.requestedBranch ? { requestedBranch: args.requestedBranch } : {}),
+    ...(args.useWorktree !== undefined ? { useWorktree: args.useWorktree } : {}),
   });
-  // Only the remote machine can resolve refs, so map a typed `--branch main`
-  // onto one of the selectors it reported instead of demanding an exact match.
-  const selected = selectLocalProjectBranchSelector(response.state.branches, branch);
-  if (!selected) {
-    throw new Error(`Local project branch not found: ${branch}`);
-  }
-  return selected;
 }
 
 async function resolveLocalProjectRefOnMachineOrThrow(
@@ -2403,7 +2492,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     );
   }
   const project = matches[0]!;
-  const branch = await resolveLocalProjectBranchOnMachine({
+  const { branch, githubRepoFullName } = await resolveLocalProjectCreateGitContextOnMachine({
     auth,
     workspaceId,
     machineId,
@@ -2417,6 +2506,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     kind: 'local',
     localProjectId: project.id,
     ...(branch ? { branch } : {}),
+    ...(githubRepoFullName ? { githubRepoFullName } : {}),
     ...(useWorktree === true ? { useWorktree: true } : {}),
   };
 }

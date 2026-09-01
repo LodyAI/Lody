@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -100,6 +101,7 @@ import {
   isSessionGoalActive,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveVisibleSessionGoal,
   resolveActiveAssistantTurnId,
@@ -153,6 +155,7 @@ import { getAppShareUrl } from '@/lib/app-location';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
+  buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
   PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT,
@@ -194,6 +197,10 @@ import {
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
+import {
+  CAPACITY_RETRY_CONTINUATION_PROMPT,
+  useCapacityAutoRetry,
+} from './use-capacity-auto-retry';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -239,7 +246,7 @@ import { useComposerCycleCommands } from '@/hooks/use-composer-cycle-commands';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
@@ -264,6 +271,7 @@ import {
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
 import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
   extractIssuePRMentionsFromText,
@@ -376,7 +384,6 @@ import {
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
-import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -388,12 +395,10 @@ import {
 } from '@/lib/session-workspace-path';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
-  disableCodexPlanMode,
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
-import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
-import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
+import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 
@@ -1819,17 +1824,11 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
 export type SessionChatInterfaceHandle = {
-  sendQuickMessage: (prompt: string) => void;
-  setInputText: (text: string) => void;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
-  dispatchInputBlocks: (
-    inputBlocks: SessionInputBlock[],
-    options?: DispatchInputBlocksOptions
-  ) => Promise<boolean>;
   copyConversationHistory: () => Promise<void>;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
@@ -1940,6 +1939,16 @@ export const SessionChatInterface = memo(
     },
     ref
   ) {
+    /* Mount/unmount into the crash-report render trace. The 0.89.x #185 crash
+       ends in this component's mount layout effects — a LAYOUT effect (passive
+       ones may never flush inside the crashing cascade) is what proves whether
+       the loop is remounting this surface or lives elsewhere. */
+    useLayoutEffect(() => {
+      recordSessionRenderTrace(`surface mount ${shortTraceId(session.id)}`);
+      return () => {
+        recordSessionRenderTrace(`surface unmount ${shortTraceId(session.id)}`);
+      };
+    }, [session.id]);
     const { t, i18n } = useTranslation();
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();
@@ -2030,15 +2039,70 @@ export const SessionChatInterface = memo(
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      doc: sessionDoc,
+      addHistory: addSessionHistory,
+      pushMessageQueue,
+      removeMessageQueueItem,
+      updateMessageQueueItem,
+      reorderMessageQueueItem,
+      updateHistoryEntry,
+      waitUntilSynced,
+      ready: sessionDocReady,
+      synced: sessionDocSynced,
+      syncState: sessionDocSyncState,
+    } = useSessionDoc(session.id, {
+      enabled: !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
+    });
+    const sessionConversationConfig = useMemo(
+      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
+      [sessionDoc?.history, sessionDoc?.mq]
+    );
+    const sessionRuntimeConfig = useMemo(
+      () =>
+        resolveSessionAcpRuntimeConfig(
+          sessionDoc?.history ?? [],
+          sessionDoc?.mq ?? [],
+          sessionDoc?.acpRuntimeConfig
+        ),
+      [sessionDoc?.acpRuntimeConfig, sessionDoc?.history, sessionDoc?.mq]
+    );
+    // `sourceConfigKey` identifies the durable turn selected by the resolver,
+    // so there is no need to hash its mode/model/option values separately.
+    const sessionConversationConfigRevision = `${session.id}:${
+      sessionConversationConfig.sourceConfigKey ?? ''
+    }`;
+    const sessionConfigPreferences = useMemo(
+      () => ({
+        modeId: sessionConversationConfig.modeId,
+        modelId: sessionConversationConfig.modelId,
+        configOptionValues: sessionConversationConfig.configOptionValues,
+      }),
+      [
+        sessionConversationConfig.configOptionValues,
+        sessionConversationConfig.modeId,
+        sessionConversationConfig.modelId,
+      ]
+    );
+    /* No effects here: user edits are the only stored selection state and the
+       effective values derive per render. The UNVALIDATED candidates feed the
+       capability lookup so the catalog can depend on the selection (Codex
+       reasoning tiers, provisional menu enrichment) without feeding back into
+       the values it validates — the #185 reconcile loop is unrepresentable. */
+    const {
+      selection: sessionConfigSelection,
+      candidates: sessionConfigCandidates,
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
-      replaceConfigOptions: setConfigOptionValues,
-      dispatch: dispatchSessionConfigSelection,
-    } = useAcpSessionConfigSelectionState();
+    } = useAcpSessionConfigSelectionState({
+      enabled: !hideMessageArea && sessionDocReady,
+      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
+      preferenceRevision: sessionConversationConfigRevision,
+      preferences: sessionConfigPreferences,
+      runtimePreferences: sessionRuntimeConfig,
+      preserveUnsentUserEdits: true,
+    });
     const {
       availableCommands,
       capabilityAuthority,
@@ -2054,10 +2118,33 @@ export const SessionChatInterface = memo(
       configId: session.agentConfigId,
       cliType: session.cliType,
       agentType: session.agentType,
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      selectedModeId: sessionConfigCandidates.modeId,
+      selectedModelId: sessionConfigCandidates.modelId,
+      configOptionValues: sessionConfigCandidates.configOptionValues,
     });
+    const sessionSelectorOptions = useMemo(
+      () => ({
+        capabilityAuthority,
+        configOptionSelectors,
+        defaultModeId,
+        defaultModelId,
+        modeOptions,
+        modelOptions,
+      }),
+      [
+        capabilityAuthority,
+        configOptionSelectors,
+        defaultModeId,
+        defaultModelId,
+        modeOptions,
+        modelOptions,
+      ]
+    );
+    const { selectedModeId, selectedModelId, configOptionValues } =
+      useResolvedAcpSessionConfigSelection(sessionConfigSelection, sessionSelectorOptions, {
+        cliType: session.cliType,
+        agentType: session.agentType,
+      });
     useMachineFlockAgentConfigsForMachineIds([session.machineId]);
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
@@ -2271,23 +2358,6 @@ export const SessionChatInterface = memo(
           : undefined,
       [handleChangeOwner, isMultiMember, pendingOwnerUserId, session.userId, workspaceMembers]
     );
-    const {
-      doc: sessionDoc,
-      addHistory: addSessionHistory,
-      pushMessageQueue,
-      removeMessageQueueItem,
-      updateMessageQueueItem,
-      reorderMessageQueueItem,
-      updateHistoryEntry,
-      waitUntilSynced,
-      ready: sessionDocReady,
-      synced: sessionDocSynced,
-      syncState: sessionDocSyncState,
-    } = useSessionDoc(session.id, {
-      enabled: !hideMessageArea,
-      syncEnabled: !hideMessageArea && syncEnabled,
-    });
-
     const [sendingMessageIds, setSendingMessageIds] = useState<ReadonlySet<string>>(new Set());
     const [dismissedProposedPlanDecisionKeys, setDismissedProposedPlanDecisionKeys] = useState<
       ReadonlySet<string>
@@ -2376,57 +2446,21 @@ export const SessionChatInterface = memo(
       TITLE_SYNCING_INDICATOR_DELAY_MS
     );
 
-    const sessionConversationConfig = useMemo(
-      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
-      [sessionDoc?.history, sessionDoc?.mq]
-    );
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
     });
-    // `sourceConfigKey` identifies the durable turn selected by the resolver,
-    // so there is no need to hash its mode/model/option values separately.
-    const sessionConversationConfigRevision = `${session.id}:${
-      sessionConversationConfig.sourceConfigKey ?? ''
-    }`;
-    const sessionConfigPreferences = useMemo(
-      () => ({
-        modeId: sessionConversationConfig.modeId,
-        modelId: sessionConversationConfig.modelId,
-        configOptionValues: sessionConversationConfig.configOptionValues,
-      }),
-      [
-        sessionConversationConfig.configOptionValues,
-        sessionConversationConfig.modeId,
-        sessionConversationConfig.modelId,
-      ]
+    const executionTurnConfigOverrides = useMemo(
+      () =>
+        buildExecutionTurnConfigOverrides({
+          selectedModeId,
+          defaultModeId,
+          modeOptions,
+          configOptionSelectors,
+          configOptionValues,
+        }),
+      [configOptionSelectors, configOptionValues, defaultModeId, modeOptions, selectedModeId]
     );
-    const sessionSelectorOptions = useMemo(
-      () => ({
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      }),
-      [
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      ]
-    );
-    useReconcileAcpSessionConfigSelection({
-      enabled: !hideMessageArea && sessionDocReady,
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
-      preferenceRevision: sessionConversationConfigRevision,
-      preferences: sessionConfigPreferences,
-      selectorOptions: sessionSelectorOptions,
-      dispatch: dispatchSessionConfigSelection,
-    });
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
@@ -3334,20 +3368,6 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
 
-    // Approving "Yes, implement this plan" switches the mode of the RUNNING
-    // turn only — the composer would still say Plan and quietly plan again on
-    // the next send. The permission cards bump this counter when THIS user
-    // approves, so the selector follows.
-    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
-    useEffect(() => {
-      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
-        return;
-      }
-      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
-      if (nextModeId) {
-        handleModeChange(nextModeId);
-      }
-    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({
@@ -3888,6 +3908,17 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    const capacityRetry = useCapacityAutoRetry({
+      sessionId: session.id,
+      history: sessionDoc?.history,
+      canRetry:
+        !isAgentBusy && !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing,
+      onRetry: async () =>
+        await dispatchPrompt(
+          t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
+        ),
+    });
+
     // Resend a user turn the missing-history recovery negatively acknowledged:
     // the row's "Not delivered" label opens a confirmation dialog that calls
     // this with the turn's exact content. It rides the ordinary send path as a
@@ -3938,16 +3969,14 @@ export const SessionChatInterface = memo(
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
-      const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
       pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
-      setConfigOptionValues(nextConfigOptionValues);
 
       const accepted = await dispatchPrompt(
         t('sessions.proposedPlanDecision.executePrompt', 'Implement the plan'),
         {
+          ...executionTurnConfigOverrides,
           forceDirect: true,
-          configOptionValuesOverride: nextConfigOptionValues,
         }
       );
 
@@ -3958,13 +3987,12 @@ export const SessionChatInterface = memo(
           return next;
         });
       } else {
-        setConfigOptionValues(configOptionValues);
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
       pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
+    }, [dispatchPrompt, executionTurnConfigOverrides, latestCompletedProposedPlan, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -4160,8 +4188,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createPrPrompt);
-    }, [captureSessionEvent, createPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCreateDraftPr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4169,8 +4204,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createDraftPrPrompt);
-    }, [captureSessionEvent, createDraftPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createDraftPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createDraftPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCommitAndPush = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4178,8 +4220,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(commitAndPushPrompt);
-    }, [captureSessionEvent, commitAndPushPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(commitAndPushPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      commitAndPushPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleResolveConflicts = useCallback(async () => {
       if (isResolvingConflicts || !latestPr?.url) return;
@@ -4195,7 +4244,8 @@ export const SessionChatInterface = memo(
             repoFullName: latestPrRepoFullName,
             prNumber: latestPrNumber,
             prUrl: latestPr.url,
-          })
+          }),
+          executionTurnConfigOverrides
         );
       } finally {
         setIsResolvingConflicts(false);
@@ -4203,6 +4253,7 @@ export const SessionChatInterface = memo(
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isResolvingConflicts,
       latestPr,
       latestPrNumber,
@@ -4233,7 +4284,7 @@ export const SessionChatInterface = memo(
           toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
           return;
         }
-        const accepted = await dispatchPrompt(prompt);
+        const accepted = await dispatchPrompt(prompt, executionTurnConfigOverrides);
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
@@ -4247,6 +4298,7 @@ export const SessionChatInterface = memo(
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isPrActionPending,
       latestPrRepoFullName,
       refreshActivePrCheckRuns,
@@ -4604,12 +4656,6 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
-        sendQuickMessage: (prompt: string) => {
-          void dispatchPrompt(prompt);
-        },
-        setInputText: (text: string) => {
-          inputAreaRef.current?.setInputText(text);
-        },
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
@@ -4625,7 +4671,6 @@ export const SessionChatInterface = memo(
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
-        dispatchInputBlocks,
         copyConversationHistory: handleCopyConversationHistory,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
@@ -4633,13 +4678,7 @@ export const SessionChatInterface = memo(
           return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
         },
       }),
-      [
-        dispatchInputBlocks,
-        dispatchPrompt,
-        handleCopyConversationHistory,
-        lastCompletedAssistantMessageId,
-        openSearch,
-      ]
+      [handleCopyConversationHistory, lastCompletedAssistantMessageId, openSearch]
     );
 
     const [prevSessionIdForActionReset, setPrevSessionIdForActionReset] = useState(session.id);
@@ -5211,8 +5250,6 @@ export const SessionChatInterface = memo(
     );
     const openInIdePath = openInIdeTarget?.path ?? null;
     const openInIdePathSource = openInIdeTarget?.source ?? null;
-    const shouldShowOpenInIdeButton = Boolean(openInIdePath);
-
     const resolveOpenInIdePath = useCallback(async (): Promise<string | null> => {
       return openInIdePath;
     }, [openInIdePath]);
@@ -5244,7 +5281,7 @@ export const SessionChatInterface = memo(
       typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
     const electronPathLauncherPlatform =
       typeof window !== 'undefined' ? window.__LODY_PLATFORM__?.os : undefined;
-    const pathLauncherOptions = useMemo(
+    const launcherCandidates = useMemo(
       () =>
         getAvailablePathLauncherOptions({
           customLaunchers: pathLauncherPreference.customLaunchers,
@@ -5257,6 +5294,54 @@ export const SessionChatInterface = memo(
         pathLauncherPreference.customLaunchers,
       ]
     );
+    const [availableLauncherIds, setAvailableLauncherIds] = useState(new Set<string>());
+    useEffect(() => {
+      if (!isElectronRendererForPathLaunch || !openInIdePath) {
+        setAvailableLauncherIds(new Set());
+        return undefined;
+      }
+      const services = getIpcServices();
+      if (!services) return undefined;
+
+      let cancelled = false;
+      const launchers = buildPathLauncherProbes(
+        launcherCandidates,
+        openInIdePath,
+        electronPathLauncherPlatform
+      );
+      void services.app
+        .probePathLaunchers({
+          launchers,
+        })
+        .then(
+          (result) => {
+            if (!cancelled) {
+              setAvailableLauncherIds(new Set(result.availableIds));
+            }
+          },
+          () => {
+            // A failed probe must not advertise launchers whose presence could
+            // not be established.
+            if (!cancelled) setAvailableLauncherIds(new Set());
+          }
+        );
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      launcherCandidates,
+      electronPathLauncherPlatform,
+      isElectronRendererForPathLaunch,
+      openInIdePath,
+    ]);
+    const pathLauncherOptions = useMemo(
+      () =>
+        launcherCandidates.filter((launcher) =>
+          availableLauncherIds.has(getPathLauncherId(launcher))
+        ),
+      [availableLauncherIds, launcherCandidates]
+    );
+    const shouldShowOpenInIdeButton = Boolean(openInIdePath) && pathLauncherOptions.length > 0;
     const selectedPathLauncher = useMemo(
       () =>
         resolveSelectedPathLauncher(pathLauncherPreference.selectedLauncherId, pathLauncherOptions),
@@ -5674,6 +5759,7 @@ export const SessionChatInterface = memo(
                             editableLastUserMessageId ? handleEditLastUser : undefined
                           }
                           onResendUndelivered={handleResendUndelivered}
+                          capacityRetry={capacityRetry ?? undefined}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={
@@ -5729,7 +5815,8 @@ export const SessionChatInterface = memo(
                               // PR open, a committed-but-unpushed fix is invisible
                               // to everything that reads the PR head.
                               hasPullRequest: hasExistingPr,
-                            })
+                            }),
+                            executionTurnConfigOverrides
                           );
                         }}
                       />
@@ -5824,6 +5911,7 @@ export const SessionChatInterface = memo(
                       configOptionValues={configOptionValues}
                       isRepoPublic={isRepoPublic}
                       availableCommands={availableCommands}
+                      commandsEnabled={isVisible}
                       freeTurnLimitNotice={freeSessionTurnNotice}
                       queueDisplay={
                         messageQueue.length > 0 ? (

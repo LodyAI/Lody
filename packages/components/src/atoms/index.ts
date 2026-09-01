@@ -18,6 +18,7 @@ export * from './settings-machine-tab';
 export * from './focus-layer';
 export * from './onboarding';
 export * from './bug-report';
+export * from './join-community';
 
 export const userAtom = atom<CurrentUser | null>(readBootstrappedCurrentUser());
 
@@ -28,3 +29,9 @@ export const userAtom = atom<CurrentUser | null>(readBootstrappedCurrentUser());
 // so the transient unauthenticated window mid-login is not mistaken for an
 // expired session and used to abort the in-flight login.
 export const electronDeepLinkSignInInProgressAtom = atom(false);
+
+// Native sign-in finishes in the same WebView lifecycle. Keep root session
+// invalidation fenced from sign-in start through the successful navigation so a
+// late get-session response for the replaced Capacitor credential cannot sign
+// out the newly established session.
+export const nativeSignInInProgressAtom = atom(false);

@@ -85,6 +85,13 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
   crush: skillDirs(['.crush/skills'], ['~/.config/crush/skills']),
   cursor: skillDirs([DEFAULT_PROJECT_SKILL_DIR], ['~/.cursor/skills']),
   deepagents: skillDirs([], []),
+  /* `dsh-skill-filesystem`, mounted by the standard and code presets with no
+     roots configured, discovers the project and user defaults. `minimal` and
+     `cordis` differ, which this per-agent table cannot express. */
+  deepseek: skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.dsh/skills'],
+    ['~/.dsh/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
   devin: skillDirs(
     ['.devin/skills', '.windsurf/skills'],
     [DEFAULT_AGENTS_GLOBAL_SKILL_DIR, '~/.config/devin/skills']
@@ -120,6 +127,12 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
     [DEFAULT_PROJECT_SKILL_DIR, '.goose/skills'],
     ['~/.config/goose/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
   ),
+  /* Grok's skill roots are `.grok`, `.agents`, and — on by default — the
+     `.claude` and `.cursor` compat roots, at every tier. */
+  grok: skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.grok/skills', CLAUDE_PROJECT_SKILL_DIR, '.cursor/skills'],
+    ['~/.grok/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR, CLAUDE_GLOBAL_SKILL_DIR, '~/.cursor/skills']
+  ),
   'hermes-agent': skillDirs(['.hermes/skills'], ['~/.hermes/skills']),
   iflow: skillDirs(['.iflow/skills'], ['~/.iflow/skills']),
   'iflow-cli': skillDirs(['.iflow/skills'], ['~/.iflow/skills']),
@@ -136,9 +149,18 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
   ),
   kiro: skillDirs(['.kiro/skills'], ['~/.kiro/skills']),
   'kiro-cli': skillDirs(['.kiro/skills'], ['~/.kiro/skills']),
-  kimi: skillDirs([DEFAULT_PROJECT_SKILL_DIR, '.kimi/skills'], []),
-  'kimi-code': skillDirs([DEFAULT_PROJECT_SKILL_DIR, '.kimi/skills'], []),
-  'kimi-code-cli': skillDirs([DEFAULT_PROJECT_SKILL_DIR, '.kimi/skills'], []),
+  kimi: skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.kimi-code/skills'],
+    ['~/.kimi-code/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
+  'kimi-code': skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.kimi-code/skills'],
+    ['~/.kimi-code/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
+  'kimi-code-cli': skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.kimi-code/skills'],
+    ['~/.kimi-code/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
   kode: skillDirs(['.kode/skills'], ['~/.kode/skills']),
   lingma: skillDirs(['.lingma/skills'], ['~/.lingma/skills']),
   loaf: skillDirs([DEFAULT_PROJECT_SKILL_DIR], [DEFAULT_AGENTS_GLOBAL_SKILL_DIR]),
@@ -154,8 +176,14 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
     ['~/.config/opencode/skills', CLAUDE_GLOBAL_SKILL_DIR, DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
   ),
   openhands: skillDirs(['.openhands/skills'], ['~/.openhands/skills']),
-  pi: skillDirs([DEFAULT_PROJECT_SKILL_DIR, '.pi/skills'], ['~/.pi/agent/skills']),
-  'pi-acp': skillDirs([DEFAULT_PROJECT_SKILL_DIR, '.pi/skills'], ['~/.pi/agent/skills']),
+  pi: skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.pi/skills'],
+    ['~/.pi/agent/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
+  'pi-acp': skillDirs(
+    [DEFAULT_PROJECT_SKILL_DIR, '.pi/skills'],
+    ['~/.pi/agent/skills', DEFAULT_AGENTS_GLOBAL_SKILL_DIR]
+  ),
   pochi: skillDirs(['.pochi/skills'], ['~/.pochi/skills']),
   promptscript: skillDirs([DEFAULT_PROJECT_SKILL_DIR], []),
   qoder: skillDirs(['.qoder/skills'], ['~/.qoder/skills']),
@@ -189,8 +217,10 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
    v7: project `.agents/skills` is provider-specific, not a universal ACP fallback.
    v8: local/global scans include absolute SKILL.md paths for prompt expansion.
    v9: home scan also surfaces agent built-in `system` skills (codex
-   `~/.codex/skills/.system`) under the new `'system'` scope. */
-export const KNOWN_SKILL_DIRS_VERSION = 9;
+   `~/.codex/skills/.system`) under the new `'system'` scope.
+   v10: grok is registered, and pi/kimi global dirs match their engines
+   (`~/.agents/skills` for both, `.kimi-code` for kimi's brand dirs). */
+export const KNOWN_SKILL_DIRS_VERSION = 10;
 
 export const DEFAULT_PROJECT_SKILLS_CONTENT_BUDGET_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_PROJECT_SKILLS_RESULT_MAX_SKILLS = 5_000;
@@ -341,6 +371,12 @@ export type ProjectSkillFrontmatter = {
 
 export function getSkillScanCandidateDirs(): string[] {
   return ALL_KNOWN_PROJECT_SKILL_DIRS;
+}
+
+/** Whether the table has an entry at all. An entry mapping to no directory
+   (`deepagents`) is registered: it asserts the agent reads none. */
+export function isRegisteredSkillAgentType(agentType: string): boolean {
+  return Object.hasOwn(ACP_SKILL_DIRS_BY_AGENT_TYPE, agentType);
 }
 
 export function getRegisteredSkillDirs(

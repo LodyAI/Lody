@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Folder, FolderOpen, Github, Loader2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Github, Loader2 } from 'lucide-react';
+import type { MachineId } from '@lody/shared';
 import { Switch } from '@/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,7 @@ import {
   getHistoryProviderLabel,
   ProjectHistoryImportPanel,
   type ProjectRowProps,
+  type ProjectSettingsRow,
   type ProjectSettingsViewProps,
   WorktreeSetupEditor,
 } from '@/components/settings/project-settings';
@@ -51,6 +53,8 @@ export function MobileProjectSettings({
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
+  addableMachines,
+  onAddLocalProject,
   initialMachineId,
   initialProjectKey,
 }: ProjectSettingsViewProps) {
@@ -76,10 +80,39 @@ export function MobileProjectSettings({
     (sum, section) => sum + section.rows.length,
     0
   );
-  const useMachineHeadings = orderedSections.length > 1;
+  const visibleAddableMachines = (addableMachines ?? []).filter(
+    (machine) => !initialMachineId || machine.machineId === initialMachineId
+  );
+  const addableMachineIds = new Set(visibleAddableMachines.map((machine) => machine.machineId));
+  /* Machine groups: the sections that have projects, then the machines the user
+     may add a folder to but which have none yet — without them, an empty
+     machine has no add entry point on mobile at all. */
+  const machineGroups: { machineId: MachineId; machineName: string; rows: ProjectSettingsRow[] }[] =
+    [
+      ...orderedSections.map((section) => ({
+        machineId: section.machineId,
+        machineName: section.machineName,
+        rows: section.rows,
+      })),
+      ...visibleAddableMachines
+        .filter(
+          (machine) => !orderedSections.some((section) => section.machineId === machine.machineId)
+        )
+        .map((machine) => ({
+          machineId: machine.machineId,
+          machineName: machine.machineName,
+          rows: [],
+        })),
+    ];
+  const useMachineHeadings = machineGroups.length > 1;
   const fallbackTitle = t('workspace.projects.title', 'Projects');
+  const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
 
-  if ((isLoading || githubProjectsLoading) && totalProjects + totalGithubProjects === 0) {
+  if (
+    (isLoading || githubProjectsLoading) &&
+    totalProjects + totalGithubProjects === 0 &&
+    machineGroups.length === 0
+  ) {
     return (
       <MobileSettingsSection title={fallbackTitle}>
         <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
@@ -90,7 +123,7 @@ export function MobileProjectSettings({
     );
   }
 
-  if (totalProjects + totalGithubProjects === 0) {
+  if (totalProjects + totalGithubProjects === 0 && machineGroups.length === 0) {
     return (
       <MobileSettingsSection title={fallbackTitle}>
         <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
@@ -107,21 +140,21 @@ export function MobileProjectSettings({
 
   return (
     <TooltipProvider delayDuration={200}>
-      {orderedSections.map((section) => (
+      {machineGroups.map((group) => (
         <MobileSettingsSection
-          key={section.machineId}
+          key={group.machineId}
           title={
             useMachineHeadings ? (
               <MobileMachineHeading
-                name={section.machineName}
-                online={onlineMachineIds.has(section.machineId)}
+                name={group.machineName}
+                online={onlineMachineIds.has(group.machineId)}
               />
             ) : (
               fallbackTitle
             )
           }
         >
-          {section.rows.map((row, rowIndex) => (
+          {group.rows.map((row, rowIndex) => (
             <MobileProjectRow
               key={row.key}
               row={row}
@@ -135,6 +168,23 @@ export function MobileProjectSettings({
               onWorktreeCleanupChange={onWorktreeCleanupChange}
             />
           ))}
+          {onAddLocalProject && addableMachineIds.has(group.machineId) ? (
+            <MobileSettingsRow
+              hasDivider={group.rows.length > 0}
+              label={
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <FolderPlus className="h-[1.05rem] w-[1.05rem]" />
+                  </span>
+                  <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                    {addFolderLabel}
+                  </span>
+                </span>
+              }
+              onClick={() => onAddLocalProject(group.machineId)}
+              trailing={<ChevronRight className="h-4 w-4" />}
+            />
+          ) : null}
         </MobileSettingsSection>
       ))}
       {visibleGithubSections.map((section) => (

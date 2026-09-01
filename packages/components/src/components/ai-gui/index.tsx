@@ -24,6 +24,7 @@ import {
   MessageRowView,
   SessionChatStreamView,
   type AssistantMessageAction,
+  type CapacityRetryControl,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
 } from './view';
@@ -56,6 +57,7 @@ function setChatStreamItemsCache(sessionId: SessionId, cache: BuildChatStreamIte
 
 export type {
   AssistantMessageAction,
+  CapacityRetryControl,
   ChatStreamItem,
   EmptySessionItem,
   GoalCommand,
@@ -97,6 +99,8 @@ export interface SessionChatStreamProps {
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  /** Bounded continuation control for the latest provider-capacity failure. */
+  capacityRetry?: CapacityRetryControl;
   forkingAssistantMessageId?: string | null;
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
@@ -116,6 +120,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   onNavigateSession,
   onEditLastUser,
   onResendUndelivered,
+  capacityRetry,
   conversationFontSize,
 }: {
   message: SessionHistoryParsed;
@@ -126,6 +131,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  capacityRetry?: CapacityRetryControl;
   conversationFontSize: ConversationFontSize;
 }) {
   const userInfo = useCloudQuery(
@@ -141,6 +147,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
       onResendUndelivered={onResendUndelivered}
+      capacityRetry={capacityRetry}
       conversationFontSize={conversationFontSize}
     />
   );
@@ -174,6 +181,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onNavigateSession,
       onEditLastUser,
       onResendUndelivered,
+      capacityRetry,
       onLastCompletedAssistantMessageIdChange,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
@@ -240,6 +248,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
             onResendUndelivered={onResendUndelivered}
+            capacityRetry={message.id === capacityRetry?.noticeId ? capacityRetry : undefined}
             conversationFontSize={conversationFontSize}
           />
         );
@@ -250,6 +259,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         lastUserMessageId,
         onEditLastUser,
         onResendUndelivered,
+        capacityRetry,
         stableOnNavigateSession,
         workspaceId,
       ]

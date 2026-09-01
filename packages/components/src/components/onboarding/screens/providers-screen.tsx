@@ -46,6 +46,7 @@ import {
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
+import type { DesktopOnboardingProviderSelection } from '@/atoms/onboarding';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
@@ -65,6 +66,7 @@ import {
 import { labelForAgent } from '@/components/settings/provider-row';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { ProviderSetupRow } from '@/components/settings/provider-setup-row';
+import { ProviderProgressButton } from '@/components/settings/provider-progress-button';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import type { TourConfigurationState } from '../tour/tour-app';
@@ -182,7 +184,7 @@ export interface ProvidersScreenViewProps {
   testActivities?: Record<string, ProviderTestActivity>;
   /** Latest failed probe detail, kept available after its toast disappears. */
   failureReasons?: Record<string, string>;
-  selectedConfigId?: string | null;
+  selectedProviderId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
   localMachineId?: MachineId | null;
@@ -205,7 +207,7 @@ export interface ProvidersScreenViewProps {
   onBack: () => void;
   /** Defer provider setup and jump to the next step. */
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
 }
 
 export function ProvidersScreenView({
@@ -214,7 +216,7 @@ export function ProvidersScreenView({
   testStatuses,
   testActivities = {},
   failureReasons = {},
-  selectedConfigId,
+  selectedProviderId,
   noLocalMachine,
   localMachineId = null,
   localMachine,
@@ -232,8 +234,18 @@ export function ProvidersScreenView({
 }: ProvidersScreenViewProps) {
   const { t } = useTranslation();
   const canProceed = !noLocalMachine && configs.length + setups.length > 0;
-  const resolvedSelectedConfigId = selectedConfigId ?? configs[0]?.id ?? setups[0]?.id ?? null;
-  const previewConfig = configs.find((config) => config.id === resolvedSelectedConfigId);
+  const resolvedSelectedProviderId = selectedProviderId ?? configs[0]?.id ?? setups[0]?.id ?? null;
+  const previewConfig = configs.find((config) => config.id === resolvedSelectedProviderId);
+  const previewSetup = setups.find((setup) => setup.id === resolvedSelectedProviderId);
+  const selectedProvider: DesktopOnboardingProviderSelection | null = previewConfig
+    ? { kind: 'agentConfig', agentConfigId: previewConfig.id, agentName: previewConfig.name }
+    : previewSetup
+      ? {
+          kind: 'providerSetup',
+          providerSetupId: previewSetup.id,
+          agentName: previewSetup.config.name,
+        }
+      : null;
   const previewStatus = previewConfig ? testStatuses[previewConfig.id] : undefined;
   const previewActivity = previewConfig ? testActivities[previewConfig.id] : undefined;
   const previewAgentStatus: TourConfigurationState['agentStatus'] = noLocalMachine
@@ -257,7 +269,7 @@ export function ProvidersScreenView({
       title={t('onboarding.providers.title', 'Connect a coding agent')}
       description={t(
         'onboarding.providers.description',
-        'Add a provider now. Runtime downloads continue in the background, and Lody asks you to sign in when ready.'
+        'Add an Agent now. Lody will continue setup and let you know if anything needs your attention.'
       )}
       previewIdentity={
         previewConfig
@@ -289,8 +301,8 @@ export function ProvidersScreenView({
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
-            onClick={() => resolvedSelectedConfigId && onNext(resolvedSelectedConfigId)}
-            disabled={!canProceed || resolvedSelectedConfigId === null}
+            onClick={() => selectedProvider && onNext(selectedProvider)}
+            disabled={!canProceed || selectedProvider === null}
           />
         </div>
       }
@@ -322,7 +334,7 @@ export function ProvidersScreenView({
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
                   const activity = testActivities[config.id];
                   const activityPercent = getProviderTestActivityPercent(activity);
-                  const selected = config.id === resolvedSelectedConfigId;
+                  const selected = config.id === resolvedSelectedProviderId;
                   return (
                     <motion.div
                       key={config.id}
@@ -385,35 +397,25 @@ export function ProvidersScreenView({
                         <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
                           {t('common.edit', 'Edit')}
                         </Button>
-                        {status !== 'needs-auth' ? (
-                          <Button
-                            variant={
-                              activity ? 'outline' : status === 'passed' ? 'ghost' : 'outline'
+                        {activity ? (
+                          <ProviderProgressButton
+                            percent={activityPercent}
+                            label={
+                              activityPercent !== null
+                                ? `${activityPercent}%`
+                                : t('onboarding.providers.workingAction', 'Working')
                             }
+                          />
+                        ) : status !== 'needs-auth' ? (
+                          <Button
+                            variant={status === 'passed' ? 'ghost' : 'outline'}
                             size="sm"
-                            className={cn(
-                              'relative min-w-[4.5rem] overflow-hidden',
-                              activity && 'disabled:opacity-100'
-                            )}
-                            disabled={Boolean(activity) || noLocalMachine}
+                            disabled={noLocalMachine}
                             onClick={() => onTest(config)}
                           >
-                            {activityPercent !== null ? (
-                              <span
-                                aria-hidden="true"
-                                className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
-                                style={{ width: `${activityPercent}%` }}
-                              />
-                            ) : null}
-                            <span className="relative z-10 tabular-nums">
-                              {activity
-                                ? activityPercent !== null
-                                  ? `${activityPercent}%`
-                                  : t('onboarding.providers.workingAction', 'Working')
-                                : status === 'passed'
-                                  ? t('onboarding.providers.retest', 'Re-test')
-                                  : t('onboarding.providers.test', 'Test')}
-                            </span>
+                            {status === 'passed'
+                              ? t('onboarding.providers.retest', 'Re-test')
+                              : t('onboarding.providers.test', 'Test')}
                           </Button>
                         ) : null}
                         <Button
@@ -462,15 +464,15 @@ export function ProvidersScreenView({
         >
           <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
           {configs.length + setups.length === 0
-            ? t('onboarding.providers.addFirst', 'Add your first provider')
-            : t('onboarding.providers.addAnother', 'Add another provider')}
+            ? t('onboarding.providers.addFirst', 'Add your first Agent')
+            : t('onboarding.providers.addAnother', 'Add another Agent')}
         </button>
 
         {!noLocalMachine && !canProceed ? (
           <p className="text-center text-xs text-muted-foreground/80">
             {t(
               'onboarding.providers.needTested',
-              'Add a provider to continue, or skip and configure later.'
+              'Add an Agent to continue, or skip and configure later.'
             )}
           </p>
         ) : null}
@@ -571,7 +573,7 @@ function AgentShowcase({
 interface ProvidersScreenProps {
   onBack: () => void;
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
   onManagedRuntimeSelected: (agentType: ManagedBuiltinAgentType) => void;
 }
 
@@ -629,7 +631,7 @@ export function ProvidersScreen({
   const [testActivities, setTestActivities] = useState<Record<string, ProviderTestActivity>>({});
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const testRunsRef = useRef(createProviderTestRunRegistry());
-  const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AgentConfigMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -638,9 +640,9 @@ export function ProvidersScreen({
       ...localConfigs.map((config) => config.id),
       ...localSetups.map((setup) => setup.id),
     ]);
-    if (selectedConfigId && availableIds.has(selectedConfigId as AgentConfigId)) return;
-    setSelectedConfigId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
-  }, [localConfigs, localSetups, selectedConfigId]);
+    if (selectedProviderId && availableIds.has(selectedProviderId as AgentConfigId)) return;
+    setSelectedProviderId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
+  }, [localConfigs, localSetups, selectedProviderId]);
 
   const setStatus = (id: AgentConfigId, status: ProviderTestStatus) =>
     setTestStatuses((prev) => ({ ...prev, [id]: status }));
@@ -884,7 +886,7 @@ export function ProvidersScreen({
           } else {
             await createConfig(config);
           }
-          setSelectedConfigId(config.id);
+          setSelectedProviderId(config.id);
         } else {
           invalidateTestRun(dialogMode.config.id);
           await updateConfig({
@@ -984,12 +986,12 @@ export function ProvidersScreen({
         testStatuses={testStatuses}
         testActivities={testActivities}
         failureReasons={failureReasons}
-        selectedConfigId={selectedConfigId}
+        selectedProviderId={selectedProviderId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
         localMachine={localMachine}
         onEdit={(config) => setDialogMode({ kind: 'edit', config })}
-        onSelect={(config) => setSelectedConfigId(config.id)}
+        onSelect={(config) => setSelectedProviderId(config.id)}
         onTest={handleTest}
         onAuthenticated={(config) => {
           clearFailureReason(config.id);

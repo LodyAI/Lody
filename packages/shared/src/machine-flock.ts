@@ -5,10 +5,12 @@ import {
   isBuiltinRuntimeOverrides,
   isBuiltinAgentType,
   isCustomAcpLaunchSpec,
+  isManagedBuiltinAgentType,
   type AcpCapabilityCacheEntry,
   type AgentConfigCliType,
   type AgentType,
   type CliType,
+  type ManagedBuiltinAgentType,
 } from './ai';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
 import type { LocalProjectWorktreeCleanupItem, LocalProjectWorktreeCleanupResult } from './message';
@@ -214,6 +216,23 @@ export type ProviderSetupCancellation = {
   cancelledAt: number;
 };
 
+/**
+ * Record that the user removed a managed builtin provider on this machine.
+ *
+ * Startup auto-registration of builtin providers only knows whether a config is
+ * currently in the list; it cannot tell "never created" from "just removed by the
+ * user". Without this record a removed Kimi/Grok/Claude/Codex comes back on the
+ * next start. Re-adding a provider of the same type must clear the record --
+ * adding it explicitly retracts the earlier removal.
+ *
+ * The provider type lives in the key and the machine is the flock doc itself, so
+ * the value carries only the timestamp.
+ */
+export type BuiltinAgentOptOut = {
+  v: 1;
+  removedAt: number;
+};
+
 export type MachineFlockDotlodyPathKey = ['dotlodyPath'];
 export type MachineFlockArchiveSessionCommandKey = ['cmd', 'archiveSession', SessionId];
 export type MachineFlockDeleteSessionCommandKey = ['cmd', 'deleteSession', SessionId];
@@ -229,6 +248,7 @@ export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellati
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
+export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBuiltinAgentType];
 /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
 export type MachineFlockSessionLaunchConfigKey = ['sessionLaunchConfig', SessionId];
 
@@ -244,6 +264,7 @@ export type MachineFlockKey =
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
   | MachineFlockRateLimitKey
+  | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
 
 export type ParsedMachineFlockKey =
@@ -290,6 +311,11 @@ export type ParsedMachineFlockKey =
       key: MachineFlockRateLimitKey;
       cliType: CliType;
       limitId: string;
+    }
+  | {
+      kind: 'builtinAgentOptOut';
+      key: MachineFlockBuiltinAgentOptOutKey;
+      agentType: ManagedBuiltinAgentType;
     }
   | {
       kind: 'sessionLaunchConfig';
@@ -339,6 +365,10 @@ export const machineFlockKeys = {
     'rateLimit',
     cliType,
     limitId,
+  ],
+  builtinAgentOptOut: (agentType: ManagedBuiltinAgentType): MachineFlockBuiltinAgentOptOutKey => [
+    'builtinAgentOptOut',
+    agentType,
   ],
   /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
   sessionLaunchConfig: (sessionId: SessionId): MachineFlockSessionLaunchConfigKey => [
@@ -459,6 +489,19 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (
+    key.length === 2 &&
+    key[0] === 'builtinAgentOptOut' &&
+    typeof key[1] === 'string' &&
+    isManagedBuiltinAgentType(key[1])
+  ) {
+    return {
+      kind: 'builtinAgentOptOut',
+      key: machineFlockKeys.builtinAgentOptOut(key[1]),
+      agentType: key[1],
+    };
+  }
+
   if (key.length === 2 && key[0] === 'sessionLaunchConfig' && isNonEmptyString(key[1])) {
     const sessionId = key[1] as SessionId;
     return {
@@ -489,6 +532,7 @@ export type MachineFlockRow =
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
+  | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
   | { key: MachineFlockSessionLaunchConfigKey; value: SessionLaunchConfig };
 
 export type MachineFlockRowId = string & { __brand: 'MachineFlockRowId' };
@@ -530,6 +574,7 @@ export type MachineFlockRowFamily =
   | 'agentConfigIndex'
   | 'acpCapability'
   | 'rateLimit'
+  | 'builtinAgentOptOut'
   | 'sessionLaunchConfig';
 
 const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly unknown[]> = {
@@ -544,6 +589,7 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
   rateLimit: ['rateLimit'],
+  builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
 };
 
@@ -629,6 +675,11 @@ const isMachineFlockProviderSetupCancellationRow = (
 const isMachineFlockRateLimitRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockRateLimitKey }> => row.key[0] === 'rateLimit';
+
+const isMachineFlockBuiltinAgentOptOutRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> =>
+  row.key[0] === 'builtinAgentOptOut';
 
 const isMachineFlockSessionLaunchConfigRow = (
   row: MachineFlockRow
@@ -733,8 +784,8 @@ export function applyProviderSetupCancellationToFlock(
     prefixes: [
       machineFlockKeys.providerSetupCancellation(cancellation.id),
       machineFlockKeys.providerSetup(cancellation.id),
-      machineFlockKeys.agentConfig(cancellation.id),
     ],
+    families: ['agentConfig', 'builtinAgentOptOut'],
   });
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
@@ -749,6 +800,12 @@ export function applyProviderSetupCancellationToFlock(
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
   if (config) {
+    // Cancelling a published setup is the user removing this provider, so it needs
+    // the same removal record as deleting it from the list.
+    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+    if (optOut) {
+      flock.set(optOut.key, optOut.value, nowMs);
+    }
     flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
   }
   flock.commit();
@@ -764,6 +821,147 @@ export function getMachineFlockRateLimits(rows: MachineFlockRowMap): Record<stri
     rateLimits[getMachineFlockRateLimitEntryKey(row.key[1], row.key[2])] = row.value;
   }
   return rateLimits;
+}
+
+/** Managed builtin provider types the user removed on this machine, so they must not be auto-registered again. */
+export function getMachineFlockBuiltinAgentOptOuts(
+  rows: MachineFlockRowMap
+): Set<ManagedBuiltinAgentType> {
+  const optedOut = new Set<ManagedBuiltinAgentType>();
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockBuiltinAgentOptOutRow(row)) {
+      continue;
+    }
+    optedOut.add(row.key[1]);
+  }
+  return optedOut;
+}
+
+/** The managed builtin provider type this config points at; returns null for custom, registry, DeepSeek and anything else outside startup auto-registration. */
+export function getBuiltinAgentOptOutAgentType(
+  config: AgentConfigMeta
+): ManagedBuiltinAgentType | null {
+  if (config.cliType !== 'builtin' || !isManagedBuiltinAgentType(config.agentType)) {
+    return null;
+  }
+  return config.agentType;
+}
+
+/**
+ * Whether removing `config` should record a "user removed this provider type" opt-out.
+ *
+ * Only the last config of that type counts: while another config of the same type
+ * remains, nothing was really removed and startup auto-registration will not add
+ * anything back. An existing opt-out is never rewritten -- it carries a timestamp,
+ * so every rewrite broadcasts a change to every peer. A missing row is still
+ * recorded: the removal intent does not depend on the row being there.
+ */
+export function planBuiltinAgentOptOutForDeletedConfig(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta,
+  nowMs: number
+): Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  if (serializeMachineFlockKey(key) in rows) {
+    return null;
+  }
+  const remaining = Object.values(getMachineFlockAgentConfigs(rows)).some(
+    (other) => other.id !== config.id && getBuiltinAgentOptOutAgentType(other) === agentType
+  );
+  if (remaining) {
+    return null;
+  }
+  return {
+    key,
+    value: { v: 1, removedAt: nowMs },
+  };
+}
+
+/**
+ * The opt-out key that writing `config` must retract. Adding a builtin provider
+ * explicitly retracts the earlier removal; otherwise this machine keeps recording
+ * "the user does not want this provider" while the list plainly holds one.
+ * Returns null when there is no opt-out.
+ */
+export function findBuiltinAgentOptOutToRetract(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta
+): MachineFlockBuiltinAgentOptOutKey | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  return serializeMachineFlockKey(key) in rows ? key : null;
+}
+
+/** Write the agentConfig row and retract the same-type opt-out in one commit. Returns whether anything changed. */
+export function writeAgentConfigToFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs?: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    prefixes: [
+      machineFlockKeys.agentConfig(config.id),
+      ...(getBuiltinAgentOptOutAgentType(config) === null
+        ? []
+        : [MACHINE_FLOCK_ROW_FAMILY_PREFIXES.builtinAgentOptOut]),
+    ],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const normalized = parseMachineFlockRow(key, config);
+  if (!normalized) {
+    return false;
+  }
+  const rowChanged = !machineFlockRowsEqual(rows[serializeMachineFlockKey(key)], normalized);
+  const retractKey = findBuiltinAgentOptOutToRetract(rows, config);
+  if (!rowChanged && !retractKey) {
+    return false;
+  }
+  if (rowChanged) {
+    flock.set(normalized.key, normalized.value, nowMs);
+  }
+  if (retractKey) {
+    flock.delete(retractKey, nowMs);
+  }
+  flock.commit();
+  return true;
+}
+
+/**
+ * Delete the agentConfig row and record an opt-out when needed, in one commit.
+ * The delete is a hard delete and leaves no trace of the row, so without a removal
+ * record for a managed builtin provider the next startup auto-registration only
+ * sees "not in the list", treats it as never created and adds it back.
+ * Returns whether anything changed.
+ */
+export function deleteAgentConfigFromFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    families: ['agentConfig', 'builtinAgentOptOut'],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const rowExists = serializeMachineFlockKey(key) in rows;
+  const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+  if (!rowExists && !optOut) {
+    return false;
+  }
+  if (optOut) {
+    flock.set(optOut.key, optOut.value, nowMs);
+  }
+  if (rowExists) {
+    flock.delete(key, nowMs);
+  }
+  flock.commit();
+  return true;
 }
 
 export function getMachineFlockSessionLaunchConfig(
@@ -953,6 +1151,10 @@ export function parseMachineFlockRow(
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
+    case 'builtinAgentOptOut': {
+      const optOut = normalizeBuiltinAgentOptOut(value);
+      return optOut ? { key: parsedKey.key, value: optOut } : undefined;
+    }
     case 'sessionLaunchConfig': {
       const config = normalizeSessionLaunchConfig(value);
       return config ? { key: parsedKey.key, value: config } : undefined;
@@ -1385,6 +1587,18 @@ const normalizeProviderSetupCancellation = (
     machineId: value.machineId as MachineId,
     cancelledAt: value.cancelledAt,
   };
+};
+
+const normalizeBuiltinAgentOptOut = (value: unknown): BuiltinAgentOptOut | undefined => {
+  if (
+    !isRecord(value) ||
+    value.v !== 1 ||
+    typeof value.removedAt !== 'number' ||
+    !Number.isFinite(value.removedAt)
+  ) {
+    return undefined;
+  }
+  return { v: 1, removedAt: value.removedAt };
 };
 
 const normalizeAgentConfigListSummary = (value: unknown): AgentConfigListSummary | undefined => {

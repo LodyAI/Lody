@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMachineFlockRowEvents,
+  applyProviderSetupCancellationToFlock,
   buildMachineArchiveSessionCommand,
   buildMachineDeleteLocalProjectCommand,
   buildMachineDeleteSessionCommand,
+  deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockDotlodyPath,
@@ -24,7 +27,9 @@ import {
   parseMachineFlockKey,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
+  writeAgentConfigToFlock,
   writeMachineFlockRowToFlock,
+  type AgentConfigMeta,
   type MachineFlockKey,
   type MachineFlockWritableFlock,
 } from '../src/machine-flock';
@@ -595,6 +600,160 @@ describe('machine Flock helpers', () => {
       })
     ).toEqual({
       [getRateLimitEntryKey('codex', 'codex_bengalfox')]: row.value,
+    });
+  });
+
+  describe('builtin agent opt-out rows', () => {
+    const machineId = 'machine-1' as MachineId;
+
+    it('round-trips a removal through the flock', () => {
+      const flock = new FakeMachineFlock();
+      const key = machineFlockKeys.builtinAgentOptOut('kimi');
+
+      expect(
+        writeMachineFlockRowToFlock(flock, {
+          key,
+          value: { v: 1, removedAt: 1700 },
+        })
+      ).toBe(true);
+
+      expect(
+        getMachineFlockBuiltinAgentOptOuts(
+          readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+        )
+      ).toEqual(new Set(['kimi']));
+
+      expect(deleteMachineFlockRowFromFlock(flock, key)).toBe(true);
+      expect(
+        getMachineFlockBuiltinAgentOptOuts(
+          readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+        )
+      ).toEqual(new Set());
+    });
+
+    it('rejects a row whose key names a provider type outside startup auto-registration', () => {
+      const flock = new FakeMachineFlock();
+
+      // The provider type lives only in the key, so the key is the single thing
+      // that can be wrong: a type the startup skip logic never checks must not be stored.
+      expect(
+        writeMachineFlockRowToFlock(flock, {
+          key: ['builtinAgentOptOut', 'deepseek'],
+          value: { v: 1, removedAt: 1700 },
+        } as never)
+      ).toBe(false);
+    });
+
+    const kimi = (id: string): AgentConfigMeta =>
+      ({
+        id: id as AgentConfigId,
+        machineId,
+        name: 'Kimi',
+        cliType: 'builtin',
+        agentType: 'kimi',
+        env: {},
+      }) as AgentConfigMeta;
+    const optOuts = (flock: FakeMachineFlock) =>
+      getMachineFlockBuiltinAgentOptOuts(
+        readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+      );
+
+    it('deleting the last config of a type records the opt-out in one commit', () => {
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+      flock.commits = 0;
+
+      expect(deleteAgentConfigFromFlock(flock, kimi('a'), 1700)).toBe(true);
+
+      expect(flock.commits).toBe(1);
+      expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
+      expect(optOuts(flock)).toEqual(new Set(['kimi']));
+    });
+
+    it('deleting one of several configs of a type does not record an opt-out', () => {
+      // One Kimi is left, so the user did not remove Kimi, startup adds nothing back and no
+      // opt-out should be recorded.
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+      writeAgentConfigToFlock(flock, kimi('b'));
+
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+
+      expect(optOuts(flock)).toEqual(new Set());
+    });
+
+    it('does not rewrite an existing opt-out on repeated deletes', () => {
+      // The opt-out carries a timestamp, so a rewrite broadcasts a change to every peer; with
+      // the row already gone and the opt-out already there, nothing must change.
+      const flock = new FakeMachineFlock();
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+
+      expect(deleteAgentConfigFromFlock(flock, kimi('a'), 1800)).toBe(false);
+      expect(
+        flock.rows.get(JSON.stringify(machineFlockKeys.builtinAgentOptOut('kimi')))?.value
+      ).toMatchObject({ removedAt: 1700 });
+    });
+
+    it('writing a config of an opted-out type retracts the opt-out in the same commit', () => {
+      const flock = new FakeMachineFlock();
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+      flock.commits = 0;
+
+      expect(writeAgentConfigToFlock(flock, kimi('b'))).toBe(true);
+
+      expect(flock.commits).toBe(1);
+      expect(optOuts(flock)).toEqual(new Set());
+      expect(
+        Object.keys(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock)))
+      ).toEqual(['b']);
+    });
+
+    it('rewriting an identical config is a no-op', () => {
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+
+      expect(writeAgentConfigToFlock(flock, kimi('a'))).toBe(false);
+    });
+
+    it('cancelling a published provider setup records the opt-out', () => {
+      // Cancelling a published setup is also removing the provider; without the opt-out the CLI
+      // adds it back on the next startup.
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('setup-1'));
+
+      applyProviderSetupCancellationToFlock(flock, {
+        v: 1,
+        id: 'setup-1' as AgentConfigId,
+        machineId,
+        cancelledAt: 1700,
+      });
+
+      expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
+      expect(optOuts(flock)).toEqual(new Set(['kimi']));
+    });
+
+    it('cancelling an unpublished provider setup records no opt-out', () => {
+      // It was never published, so it was never in the list and there is nothing to remove.
+      const flock = new FakeMachineFlock();
+      applyProviderSetupCancellationToFlock(flock, {
+        v: 1,
+        id: 'setup-1' as AgentConfigId,
+        machineId,
+        cancelledAt: 1700,
+      });
+
+      expect(optOuts(flock)).toEqual(new Set());
+    });
+
+    it('rejects an agentType that has no managed runtime', () => {
+      // deepseek is a builtin provider but stays outside startup auto-registration, so it must
+      // have no opt-out record.
+      expect(parseMachineFlockKey(['builtinAgentOptOut', 'deepseek'])).toBeUndefined();
+      expect(parseMachineFlockKey(['builtinAgentOptOut', 'kimi'])).toEqual({
+        kind: 'builtinAgentOptOut',
+        key: machineFlockKeys.builtinAgentOptOut('kimi'),
+        agentType: 'kimi',
+      });
     });
   });
 });

@@ -57,6 +57,16 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   absence. Keep the item/Delivery pending until positive evidence or deadline.
 - Deadlines finish the root with item `TARGET_TIMEOUT` results but never cancel
   target Turns. Operation cancel is the only best-effort remote-cancel path.
+- A pending Delivery still undeliverable 8h after its Operation's deadline is
+  consumed as `expired_stale` without a continuation turn: waking a Session
+  with a completion for work that ended long ago (stranded store, multi-day
+  downtime) surprises the user and spends tokens on a stale result.
+- Store paths are keyed strictly by an explicit machineId
+  (`getLodyOperationStorePath` has no default): the MCP server resolves it from
+  the session context, never from its own process environment. The former
+  env/`'local'` fallback let the daemon-hosted HTTP transport (whose process
+  has no `LODY_MCP_MACHINE_ID`) silently write Operations into a store no
+  coordinator reconciles, so completions were never delivered.
 - `session_create_many` and `session_chat_many` target writes bypass cooperative
   Session/Turn quotas. Preserve the bypass in both MCP-process materialization
   and daemon recovery replay; otherwise quota rejection degrades into a false

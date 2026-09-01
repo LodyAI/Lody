@@ -228,16 +228,22 @@ module.exports = {
   },
   plugins: [
     require('@tailwindcss/container-queries'),
-    function ({ addUtilities }) {
-      const newUtilities = {
+    function ({ addUtilities, addComponents }) {
+      addUtilities({
         '.app-region-drag': {
           '-webkit-app-region': 'drag',
         },
         '.app-region-no-drag': {
           '-webkit-app-region': 'no-drag',
+          'pointer-events': 'auto',
         },
-      };
-      addUtilities(newUtilities);
+      });
+      addComponents({
+        '.app-region-drag :is(button, a, input, textarea, select)': {
+          '-webkit-app-region': 'no-drag',
+          'pointer-events': 'auto',
+        },
+      });
     },
   ],
 };

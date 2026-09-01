@@ -195,7 +195,13 @@ const grokSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
-function StoryShell({ isEmptyConversation }: { isEmptyConversation: boolean }) {
+function StoryShell({
+  isEmptyConversation,
+  machineSelected = true,
+}: {
+  isEmptyConversation: boolean;
+  machineSelected?: boolean;
+}) {
   const store = useMemo(() => {
     const s = createStore();
     s.set(
@@ -217,8 +223,9 @@ function StoryShell({ isEmptyConversation }: { isEmptyConversation: boolean }) {
         {/* Mimic the composer footer row the buttons live in. */}
         <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
-            agentSelection={{ agentId: codexId, machineId }}
-            allowedMachineIds={[machineId]}
+            agentSelection={machineSelected ? { agentId: codexId, machineId } : null}
+            allowedMachineIds={machineSelected ? [machineId] : []}
+            disabledReason={machineSelected ? undefined : 'Select a machine first'}
             agentLocked={!isEmptyConversation}
             onAgentConfigChange={fn()}
             modelOptions={modelOptions}
@@ -376,6 +383,9 @@ type Story = StoryObj<typeof meta>;
 
 export const LockedAgent: Story = { args: { isEmptyConversation: false } };
 export const EmptyConversationAgentPickable: Story = { args: { isEmptyConversation: true } };
+export const MachineRequired: Story = {
+  args: { isEmptyConversation: true, machineSelected: false },
+};
 export const GrokInteractionAndPermission: Story = {
   args: { isEmptyConversation: false },
   render: () => <GrokConfigShell />,

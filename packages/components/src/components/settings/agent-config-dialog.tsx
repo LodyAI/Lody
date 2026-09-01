@@ -15,7 +15,9 @@ import {
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
   serializeCustomAcpLaunchSpec,
+  machineSupportsAcpProtocolAuthentication,
   supportsBuiltinAuthentication,
+  usesAcpProtocolAuthentication,
   usesAcpProvidedSessionTitle,
   REGISTRY_ACP_AGENTS,
   type AgentBrandId,
@@ -965,6 +967,15 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // so a sign-in would do nothing for them. Creating one only surfaces the
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
+  // Registry and custom providers authenticate through the standard ACP
+  // exchange, but only the agent knows whether it has anything to sign into —
+  // so their panel appears once a live probe reported that auth is required.
+  // The exchange runs entirely on the daemon, so a machine that predates it
+  // answers "Authentication is not supported"; do not offer a button that can
+  // only fail.
+  const usesProtocolAuthentication =
+    usesAcpProtocolAuthentication(formData.cliType) &&
+    machineSupportsAcpProtocolAuthentication(machine);
   const showAuthenticationPanel =
     mode.kind === 'edit'
       ? supportsBuiltinAuthentication({
@@ -972,8 +983,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           agentType: formData.agentType,
           brandId: resolvedBrandId,
           env: formData.env,
-        })
-      : authRequired && isManagedBuiltin;
+        }) ||
+        (authRequired && usesProtocolAuthentication)
+      : authRequired && (isManagedBuiltin || usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -2112,6 +2124,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   configId={agentConfigId}
                   cliType={formData.cliType}
                   agentType={formData.agentType}
+                  providerName={formData.name}
+                  customAcp={parsedCustomAcp ?? undefined}
                   runtimeOverrides={formData.runtimeOverrides}
                   env={formData.env}
                   compact

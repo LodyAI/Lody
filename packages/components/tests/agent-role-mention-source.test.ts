@@ -64,6 +64,22 @@ describe('agent role mention work context', () => {
     ).toEqual({ kind: 'machine', machineId: 'machine-2' });
   });
 
+  it('retains local-project pinning while a live provider serves its files', () => {
+    expect(
+      buildAgentRoleMentionContext({
+        mentionSource: {
+          kind: 'provider',
+          localProject: {
+            machineId: 'machine-2' as MachineId,
+            localProjectId: 'p' as LocalProjectId,
+          },
+          githubRepoFullName: 'loro-dev/lody',
+        },
+        currentMachineId: machineId,
+      })
+    ).toEqual({ kind: 'machine', machineId: 'machine-2' });
+  });
+
   it('lets a github project reach every authorized machine', () => {
     const context = buildAgentRoleMentionContext({
       mentionSource: { kind: 'github', repoFullName: 'loro-dev/lody' },

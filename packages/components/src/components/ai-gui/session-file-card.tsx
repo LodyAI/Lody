@@ -39,7 +39,6 @@ const KIND_ICON: Record<SessionFileKind, typeof FileIcon> = {
   binary: FileIcon,
 };
 
-
 export type SessionFileCardProps = {
   file: SessionFilePayload;
   /** Resolved display name of the machine holding the bytes (transport='local'). */
@@ -179,8 +178,11 @@ export function SessionFileCard({
         <span
           className={cn(
             'flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+            /* One rest tone for every icon in a turn — an interactive affordance
+               resting DIMMER than the static chrome around it read as disabled.
+               Hover still brightens it. */
             isInteractive
-              ? 'text-muted-foreground/70 group-hover:bg-background group-hover:text-foreground'
+              ? 'text-muted-foreground group-hover:bg-background group-hover:text-foreground'
               : 'text-muted-foreground'
           )}
         >
@@ -207,8 +209,11 @@ export function SessionFileCardList({
   return (
     <div
       className={cn(
-        'flex w-full flex-col gap-2 px-2 pt-1',
-        align === 'end' ? 'items-end' : 'items-start'
+        'flex w-full flex-col gap-2',
+        /* An assistant attachment (`align="start"`) is a top-level conversation
+           row: the horizontal gutter belongs to `ConversationColumn` and the row
+           gap to `cardSiblingGap`. User attachments keep their own insets. */
+        align === 'end' ? 'items-end px-2 pt-1' : 'items-start'
       )}
     >
       {children}

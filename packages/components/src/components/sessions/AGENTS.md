@@ -94,6 +94,35 @@ Session conversation page chain:
     must stay separate actions. Gated on `useWorkspaceMembers().isMultiMember`:
     a solo workspace has nobody to hand the session to, so no owner UI renders.
     Any member may transfer, mirroring task owner assignment.
+- **The `?tab` search value is the single source of truth for the active
+  conversation tab.** `session-detail.tsx` DERIVES the active tab from the
+  route search (`resolveActiveSessionTab` in `lib/session-tab-url.ts`; drafts
+  encode as their full `draft:<id>` id, children as `session:<id>`) and tab
+  activation NAVIGATES instead of setting state — user-driven switches PUSH so
+  tabs participate in history back; structural rewrites (draft promotion,
+  closing a dead tab) replace. Never reintroduce a mirrored
+  `activeTabSessionId` state or URL↔state sync effects: two stores reconciled
+  by passive effects is exactly the render-loop freeze of #193. The derivation
+  is TOTAL and takes the URL at its word: a `session:` tab the meta replica
+  has not delivered yet stays ACTIVE behind a pending surface, because
+  treating a transient replica gap as "this tab does not exist" is what
+  bounced a just-promoted draft back to the parent (#199 regression). Only
+  positive evidence resolves away from the named tab (an archived or
+  side-panel child, a device-local draft that is provably gone), and NOTHING
+  observes data to
+  rewrite the URL back — the `shouldClearSessionUrlTab` normalizer is
+  deliberately dead. Promotion keeps its `pendingDraftChildSessionIds` entry
+  as a draft→child resolution alias through the send window. The ABSENT value
+  means "no explicit choice" and is reserved for external entries: the session
+  ROUTE's `beforeLoad` fills it from the last-active store as one replace
+  redirect (the route has its own navigation's params, so no workspace-slug
+  staleness to dance around), which is why in-session activation encodes the
+  parent EXPLICITLY as `session:<parentId>` (`formatExplicitSessionTabSearch`)
+  — an absent parent write would be re-restored. Cross-surface "go to session"
+  links keep `formatSessionTabSearch` (parent → absent → restore). Every
+  `session-detail.tsx` URL writer goes through `writeSessionUrlTab`, which
+  drops a write whose captured session no longer matches the current route —
+  an async caller resolving after a switch must not yank the router back.
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
   mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
@@ -326,22 +355,30 @@ Session conversation page chain:
   should adopt it.
   `DesktopRunConfigMenu` gains a **Role** row when the caller passes
   `agentRoles`. It sits ABOVE Agent, since a Role answers every row under it at
-  once. BOTH composers pass it, but they mean different things by it and the
-  difference is load-bearing:
+  once. The callers split by whether a Session exists yet, and that difference
+  is load-bearing:
 
-  - **Chat landing** authorizes the WHOLE Role — machine, agent config, run
-    config, instruction — because it can still move the agent.
-  - **An existing session** (`useSessionAgentRole`) can NOT: its agent, machine,
-    and runtime are fixed. So it offers only Roles bound to an agent of the same
-    TYPE and applies only their RUN CONFIG, which is exactly what transfers:
-    model / reasoning / permission are published per `cliType:agentType`, and
-    they are the values a session can still change every turn. Availability is
-    not consulted there — nothing is going to that Role's machine — and the
-    Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
-    first turn of a session the Role creates. The row is NOT gated on
-    `isEmptyConversation`: those values stay changeable for the whole
-    conversation. `isAgentRoleRunConfigApplied` is the shared value rule;
-    `isComposerAgentRoleApplied` is that rule plus the landing's agent check. With Roles to pick it is a submenu of
+  **Chat landing and a blank child-tab draft** authorize the WHOLE Role —
+  agent config, run config, instruction, and provenance — because no Session
+  exists yet and the Agent can still move. A child tab keeps the parent
+  Session's exact machine/workspace, so its Role list is every Role bound to
+  that machine, across Agent types; selecting one changes the draft Agent.
+  Never route a draft through `selectSessionAgentRoles`: that same-type subset
+  is only correct after a Session exists. The Role id persists with a non-empty
+  draft, its current revision re-seeds the composer after an edit, and its
+  instruction is frozen into the first Turn before draft promotion.
+
+  **An existing session** (`useSessionAgentRole`) can NOT: its agent, machine,
+  and runtime are fixed. So it offers only Roles bound to an agent of the same
+  TYPE and applies only their RUN CONFIG, which is exactly what transfers:
+  model / reasoning / permission are published per `cliType:agentType`, and
+  they are the values a session can still change every turn. Availability is
+  not consulted there — nothing is going to that Role's machine — and the
+  Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
+  first turn of a session the Role creates. The row is NOT gated on
+  `isEmptyConversation`: those values stay changeable for the whole
+  conversation. `isAgentRoleRunConfigApplied` is the shared value rule;
+  `isComposerAgentRoleApplied` is that rule plus the landing's agent check. With Roles to pick it is a submenu of
   `None` + the Roles bound to the machine the chat will start on (a Role's
   `machineId + agentConfigId` are exact, so a Role from another machine could
   only move the chat or fall back) beside a pane stating what the highlighted
@@ -385,9 +422,15 @@ Session conversation page chain:
   the menu the moment it opened; `AgentRoleEditorDialog` is the one editor,
   shared with Settings.
   Picking a Role flows through the SAME preference channel as that agent's
-  remembered defaults (`useReconcileAcpSessionConfigSelection`), never a second
+  remembered defaults (`useAcpSessionConfigSelectionState`), never a second
   apply path — so a pinned value the agent no longer supports falls back visibly
-  there instead of being forced in. The footer names a Role only while
+  there instead of being forced in. That channel is a PURE DERIVATION: user
+  edits are the only stored selection state, and effective values resolve per
+  render (user edit > runtime baseline > turn preference > capability default;
+  a full runtime snapshot owns the non-user config table). Never reintroduce a
+  reducer that stores the resolved selection or an effect that reconciles it —
+  two dispatches disagreeing about a runtime-omitted key plus options rebuilt
+  from the selection was a synchronous #185 render loop on session open. The footer names a Role only while
   `isComposerAgentRoleApplied` still holds (`lib/composer-agent-roles.ts`):
   every value the Role pins is what will run. Moving a knob takes the name away
   rather than clearing the preference, which would re-seed the value just
@@ -424,7 +467,7 @@ Session conversation page chain:
   too; hiding it made the control look absent. `None` still leads the list and
   an unavailable Role is still listed, disabled, with its reason (from the
   shared `AGENT_ROLE_UNAVAILABLE_REASON_KEYS`).
-  The Role editor is a Dialog, so BOTH composers host it outside their menu /
+  The Role editor is a Dialog, so every composer hosts it outside its menu /
   drawer — and the in-session one mounts it only while OPEN, because it reads
   machine visibility and the composer must stay renderable in hosts that do not
   provide that context. The collapsed
@@ -433,9 +476,10 @@ Session conversation page chain:
   the `@` mention pane shows a private/workspace badge: every Role offered is
   one this user may run, so visibility changes nothing about accepting it and is
   a Settings concern. The remembered Role rides in
-  `chatLandingDefaults.agentRoleId` and is restored only once the workspace
-  catalog can answer — before that, "not in the list" means "not loaded yet", so
-  the stored id must not be overwritten with null.
+  `chatLandingDefaults.agentRoleId` on Chat Landing and
+  `DraftSessionTab.agentRoleId` in a non-empty child-tab draft. It is restored
+  only once the workspace catalog can answer — before that, "not in the list"
+  means "not loaded yet", so the stored id must not be overwritten with null.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of
@@ -445,20 +489,20 @@ Session conversation page chain:
   replaying its values. `buildRecentRunConfigItems` drops a Role entry whose
   Role is not in the passed `agentRoles` — a Role never falls back, so a deleted
   or unavailable one must not quietly re-run as loose values.
-  The selected mode is applied per TURN (it becomes the user entry's
-  `inputConfig.modeId`; `resolveSessionConversationConfig` reads the latest turn
-  back as the preference). So approving "Yes, implement this plan" — which only
-  switches the mode of the running ACP turn — must ALSO drop the selector out of
-  plan, or the next send quietly plans again. Driven from the CLICK
-  (`hooks/use-plan-mode-exit-approval.ts` → `atoms/plan-mode-exit.ts`, read by
-  the composer), never from the resolved outcome in history: this selection is
-  per-device local state, so a history-derived signal would unset plan mode for
-  a teammate who just armed it, and would fire again for an OLD approval
-  replaying as the session doc syncs. Every interactive permission surface must
-  call the notifier — there are two (`floating-permission-request.tsx` and the
-  inline card in `../ai-gui/view.tsx`). It exits to the agent's default non-plan
-  mode and deliberately does not infer `acceptEdits` from an `allow_always`
-  answer: that consent was about this plan, not every later turn.
+  Run config has two durable authorities. A user Turn freezes what executes in
+  its `inputConfig`; `resolveSessionConversationConfig` reads the latest accepted
+  or queued Turn. ACP `config_option_update`/`current_mode_update` events update
+  the separate shared `SessionDoc.acpRuntimeConfig` baseline, causally fenced by
+  the driving `userTurnId`. A queued Turn and a newer accepted Turn always beat
+  an older runtime event. Apply that shared baseline only to composer fields the
+  local user has not edited; local unsent choices remain a private draft until
+  send freezes them into a Turn. Never infer runtime config from a permission
+  click or its history outcome: consent is not proof that the agent applied the
+  change, and click-local state does not synchronize collaborators. Explicit
+  execution actions (Implement Plan, Create PR, Commit & Push, conflict/CI/review
+  fixes) are different: they create a new user Turn and must freeze a supported
+  non-Plan mode into that Turn's `inputConfig`; they still must not mutate local
+  composer state as a substitute for agent-confirmed runtime projection.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to
@@ -474,6 +518,7 @@ Session conversation page chain:
   `<input type="file">` on every platform (Windows included — the renderer no
   longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
   routes each selection by MIME into the image or file state machine.
+
 - `floating-permission-request.tsx`: floating permissions + ask-user-question;
   hidden-composer mobile keyboard lift/scroll lives there.
   `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`
@@ -632,7 +677,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   Goal controls are transport-gated: the current `/goal …` prompt bridge is
   Codex-only, so provider-neutral snapshots remain read-only until their advertised
   `_session/goal` method is routed through the session control plane; Stop must never
-  synthesize `pause` for those providers. An `active` goal is persistent session state,
+  synthesize `pause` for those providers. Paused and blocked Codex goals both expose
+  Resume; a blocked goal is waiting for explicit user continuation, not terminal.
+  An `active` goal is persistent session state,
   not proof that an ACP prompt is running: current busy/running UI, message queue routing,
   and completion prompts must use live turn presence only. Active goal state may still
   gate destructive history rewrites and expose an explicit Codex Pause control.
@@ -726,7 +773,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   near-saturated main thread per session switch. Any code path that sets
   `isSidebarOpen` from persisted/URL state rather than from a user action must
   bump `sidebarRestoreSeq` in the same commit (today: the session-switch reset
-  branch and the `?pr=` deep-link effect); `DesktopSessionDetailLayout` then
+  branch and the `?pr=` deep-link RENDER-PHASE adjustment — the restore is
+  deliberately not an effect, so the `?pr` clear effect can never observe
+  pre-restore sidebar state); `DesktopSessionDetailLayout` then
   applies it in one frame and re-arms the transition on the next rAF. User
   toggles (`handleToggleSidebar`, `handleOpenPrTab`, viewer/browser opens) still
   animate and must NOT bump it.

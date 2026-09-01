@@ -16,6 +16,7 @@ export {
   ProvidersScreenView,
   type ProviderTestStatus,
 } from './screens/providers-screen';
+export type { DesktopOnboardingProviderSelection } from '@/atoms/onboarding';
 export type { ProviderTestActivity } from './provider-test-state';
 export {
   ProjectsScreen,
@@ -26,4 +27,4 @@ export {
 export { CeremonyScreen } from './screens/ceremony-screen';
 export { LoginScreen } from './screens/login-screen';
 export { FirstTaskScreen } from './screens/first-task-screen';
-export { SummaryScreen } from './screens/summary-screen';
+export { SummaryScreen, type OnboardingSummaryAgentState } from './screens/summary-screen';

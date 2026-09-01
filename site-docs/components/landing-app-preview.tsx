@@ -184,7 +184,7 @@ void demoI18n.use(initReactI18next).init({
         'chat.projectPicker.searchPlaceholder': '搜索项目',
         'chat.projectPicker.clear': '不在项目中工作',
         'chat.projectPicker.emptyText': '没有找到项目',
-        'chat.contextSwitch.addProject': '添加本地项目',
+        'chat.contextSwitch.addProject': '添加文件夹',
         'repos.connectMore': '连接更多 GitHub 项目',
       },
     },

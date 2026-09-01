@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import queueCurrent from '@/assets/onboarding/intro/queue-current.png';
 import quietWork from '@/assets/onboarding/intro/quiet-work.png';
 import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
 import readyToBegin from '@/assets/onboarding/intro/ready-to-begin.png';
-import { languageAtom } from '@/atoms/settings';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import type { AudioLayers } from './use-onboarding-audio';
@@ -288,9 +286,8 @@ export function IntroSequence({
 }): React.JSX.Element {
   const [current, setCurrent] = useState(0);
   const handoffTimer = useRef<number | null>(null);
-  const { t } = useTranslation();
-  const [language] = useAtom(languageAtom);
-  const chinese = language === 'zh_CN';
+  const { t, i18n } = useTranslation();
+  const chinese = (i18n.resolvedLanguage ?? i18n.language) === 'zh_CN';
   const [departing, setDeparting] = useState(false);
 
   // Remember the beat we came from so its sentence can fade out underneath the

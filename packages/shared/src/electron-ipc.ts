@@ -163,6 +163,21 @@ export const LaunchLocalPathInputSchema = z.discriminatedUnion('kind', [
 
 export type LaunchLocalPathInput = z.infer<typeof LaunchLocalPathInputSchema>;
 
+export const PathLauncherProbeSchema = z
+  .object({
+    launchers: z
+      .array(
+        z
+          .object({
+            launcherId: z.string().trim().min(1).max(200),
+            input: LaunchLocalPathInputSchema,
+          })
+          .strict()
+      )
+      .max(30),
+  })
+  .strict();
+
 export type LaunchLocalPathResult =
   | {
       launched: true;

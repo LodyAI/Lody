@@ -54,13 +54,15 @@
   must use `staticFunctionMiddleware`; client navigation reads the prerendered
   `__tsr/staticServerFnCache` output instead of calling a server endpoint.
   `scripts/generate-sitemap.mjs` writes `public/sitemap.xml` from the same path
-  source. `scripts/generate-llms.mjs` validates docs title/description
-  frontmatter and generates root `public/llms.txt` + `public/llms-full.txt` from
-  the ordered English docs and public blog content. `scripts/generate-rss.mjs`
-  writes `public/rss.xml` (en) and `public/rss-zh.xml` (zh) from the same blog
-  frontmatter, skipping drafts; both feeds are linked from every blog `head()`.
-  Root `public/robots.txt` is also owned here; the App build must not overwrite
-  public-site SEO files.
+  source. `scripts/generate-docs-search.mjs` writes the bilingual, browser-side
+  docs index to `public/docs-search.json`; docs search stays local and must not
+  depend on a runtime API or hosted search service. `scripts/generate-llms.mjs`
+  validates docs title/description frontmatter and generates root
+  `public/llms.txt` + `public/llms-full.txt` from the ordered English docs and
+  public blog content. `scripts/generate-rss.mjs` writes `public/rss.xml` (en)
+  and `public/rss-zh.xml` (zh) from the same blog frontmatter, skipping drafts;
+  both feeds are linked from every blog `head()`. Root `public/robots.txt` is
+  also owned here; the App build must not overwrite public-site SEO files.
 - `prebuild` runs `scripts/clean-output.mjs` before content generation. Keep this:
   stale Next/static prerender files in `out/` can create Vite preview redirect
   loops during TanStack prerender. Downstream deployments that immediately run
@@ -83,7 +85,7 @@
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, Tailwind, React, and preview-only aliases there. The deployable static
   build output is `site-docs/out/client`; do not publish the SSR server bundle.
-- `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/llms.txt`,
+- `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/docs-search.json`, `public/llms.txt`,
   `public/llms-full.txt`, `public/rss.xml`, and `public/rss-zh.xml` are
   generated and ignored. `pretypecheck` runs `tsr generate`; `generate` writes
   the SEO files. Do not edit or format the generated route tree or generated

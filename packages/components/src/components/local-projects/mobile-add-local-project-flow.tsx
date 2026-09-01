@@ -46,7 +46,7 @@ export function MobileAddLocalProjectFlow(args: RemoteDirectoryPickerArgs) {
   const title =
     c.phase === 'machine'
       ? t('localProjects.add.pickMachine', 'Choose a machine')
-      : (c.selectedMachine?.name ?? t('localProjects.add.title', 'Add a local project'));
+      : (c.selectedMachine?.name ?? t('localProjects.add.title', 'Add a folder'));
 
   return (
     <div className="flex h-full min-h-0 flex-col">

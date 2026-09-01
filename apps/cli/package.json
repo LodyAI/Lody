@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
-    "@anthropic-ai/claude-agent-sdk": "0.3.232",
+    "@anthropic-ai/claude-agent-sdk": "0.3.251",
     "@better-auth/api-key": "catalog:",
     "@convex-dev/better-auth": "catalog:",
     "@lody/cli-supervisor": "workspace:*",
@@ -120,7 +120,7 @@
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.14",
     "better-sqlite3": "catalog:",
-    "loro-crdt": "1.14.1",
+    "loro-crdt": "1.15.1",
     "shell-env": "^4.0.3",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"

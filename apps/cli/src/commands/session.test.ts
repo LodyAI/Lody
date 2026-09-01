@@ -8,6 +8,7 @@ import {
   getSessionRoomId,
   type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
+  type LocalProjectGitState,
   type MachineId,
   type MachineMeta,
   type SessionHistoryInput,
@@ -15,7 +16,10 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
+import {
+  createLocalProjectBranchSelector,
+  normalizeLocalProjectRootPath,
+} from '@lody/shared/node/local-project';
 
 import {
   applyAgentRunConfigSelection,
@@ -48,6 +52,7 @@ import {
   resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
   resolveLocalProjectBranchForCreate,
+  resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
   selectLocalProjectsBySelector,
   selectTargetMachineForCreate,
@@ -81,6 +86,24 @@ const createHistoryEntry = (overrides: Partial<SessionHistoryInput> = {}): Sessi
   timestamp: '2026-03-12T00:00:00.000Z',
   items: [],
   fileDiff: [],
+  ...overrides,
+});
+
+const createLocalProjectGitState = (
+  overrides: Partial<Extract<LocalProjectGitState, { git: true }>> = {}
+): LocalProjectGitState => ({
+  git: true,
+  currentBranch: 'main',
+  defaultBranch: 'main',
+  branches: ['main'],
+  githubRepoFullName: 'loro-dev/lody',
+  workingTree: {
+    clean: true,
+    staged: false,
+    unstaged: false,
+    untracked: false,
+    conflicted: false,
+  },
   ...overrides,
 });
 
@@ -1172,6 +1195,107 @@ describe('session command helpers', () => {
     } finally {
       rmSync(rootPath, { recursive: true, force: true });
     }
+  });
+
+  it('binds the workspace GitHub repository of a local project to its session', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main', githubRepoFullName: 'loro-dev/lody' });
+  });
+
+  it('binds the GitHub repository of a direct local session without capturing its branch', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+      })
+    ).toEqual({ githubRepoFullName: 'loro-dev/lody' });
+  });
+
+  it('records the workspace spelling of an origin that differs only in case', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({ githubRepoFullName: 'Loro-Dev/Lody' }),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main', githubRepoFullName: 'loro-dev/lody' });
+  });
+
+  it('keeps a local session local when its origin is not a workspace repository', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        workspaceRepositories: [{ fullName: 'loro-dev/other' }],
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main' });
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({ githubRepoFullName: null }),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main' });
+  });
+
+  it('resolves a requested branch selector alongside the repository identity', () => {
+    const remoteSelector = createLocalProjectBranchSelector({
+      kind: 'remote',
+      remoteName: 'origin',
+      branchName: 'feature/session',
+    });
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({
+          branches: ['main', remoteSelector],
+          currentBranch: 'main',
+        }),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        requestedBranch: 'feature/session',
+      })
+    ).toEqual({ branch: remoteSelector, githubRepoFullName: 'loro-dev/lody' });
+    expect(() =>
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        requestedBranch: 'feature/missing',
+      })
+    ).toThrow('Local project branch not found: feature/missing');
+  });
+
+  it('keeps the non-git local project rules while resolving identity', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: { git: false },
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+      })
+    ).toEqual({});
+    expect(() =>
+      resolveLocalProjectCreateGitContext({
+        gitState: { git: false },
+        workspaceRepositories: [],
+        useWorktree: true,
+      })
+    ).toThrow(/--worktree/);
+    expect(() =>
+      resolveLocalProjectCreateGitContext({
+        gitState: { git: false },
+        workspaceRepositories: [],
+        requestedBranch: 'main',
+      })
+    ).toThrow(/not a git repository/);
+    expect(() =>
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({ branches: [], currentBranch: null }),
+        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
+        useWorktree: true,
+      })
+    ).toThrow(/does not have a branch to use as a worktree base/);
   });
 
   it('downgrades session activity timestamp write failures to warnings', async () => {

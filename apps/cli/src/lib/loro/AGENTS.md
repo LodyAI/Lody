@@ -49,3 +49,11 @@ The dispatch watcher learned this the hard way — twice (reconnect-triggered
 bootstrap scans fanning out over every owned room). Its current contract,
 "session metadata is the activation index", is documented in
 `../../session/AGENTS.md` and applies to any new module that enumerates rooms.
+
+## Shared ACP runtime config contains no secrets
+
+`SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the
+workspace-shared runtime baseline. It must remove every option id matched by
+`isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
+ACP response; otherwise a future agent can persist and broadcast credential-like
+selector values to collaborators.

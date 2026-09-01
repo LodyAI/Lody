@@ -18,8 +18,7 @@ export function useSidebarKeyboardNav(opts: {
   const setNavCallbacks = useSetAtom(sidebarNavCallbacksAtom);
 
   // Publish flat items to the shared atom after commit. Updating the atom during
-  // render can notify subscribers such as SidebarKeyboardHighlight while
-  // LoroAppSidebar is still rendering.
+  // render can notify command consumers while LoroAppSidebar is still rendering.
   const prevFlatItemsRef = useRef<SidebarNavItem[] | null>(null);
   useEffect(() => {
     if (prevFlatItemsRef.current === opts.items) return;

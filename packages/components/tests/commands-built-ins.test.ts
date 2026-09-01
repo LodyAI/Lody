@@ -21,7 +21,7 @@ describe('built-in commands', () => {
     expect(commands.get('session.archiveCurrent')?.title).toBe('Archive Current Chat');
     expect(commands.getDefaultKeybindingsFor('session.archiveCurrent')).toEqual(['$mod+Alt+a']);
     expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+Alt+f']);
-    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['$mod+l']);
+    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual([]);
     // ⌥N works on web too (always a new tab there); ⌘[/⌘] back/forward and the terminal
@@ -34,6 +34,11 @@ describe('built-in commands', () => {
     expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
     // Cyclers with no default binding stay rebindable from the settings page.
     expect(commands.getDefaultKeybindingsFor('session.cycleProvider')).toEqual([]);
+    expect(commands.getDefaultKeybindingsFor('mention.toggleSessionProjectScope')).toEqual([]);
+    expect(commands.get('mention.toggleSessionProjectScope')?.title).toBe(
+      'Toggle Session Mention Project Scope'
+    );
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
     expect(commands.execute('session.archiveCurrent')).toBe(false);
   });
 
@@ -47,6 +52,7 @@ describe('built-in commands', () => {
     registerBuiltInCommands();
 
     expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+f']);
+    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['$mod+l']);
     expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual(['$mod+Shift+.']);
     expect(commands.getDefaultKeybindingsFor('session.previousTab')).toEqual(['$mod+Shift+,']);
     expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual(['$mod+Shift+[']);

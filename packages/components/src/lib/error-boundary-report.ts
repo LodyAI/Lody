@@ -30,6 +30,13 @@ export type ErrorBoundaryReportInput = {
   boundaryName?: string | undefined;
   componentStack?: string | null | undefined;
   environment?: ErrorBoundaryReportEnvironment;
+  /**
+   * Session render trace tail (`lib/session-render-trace.ts`): what the
+   * session surfaces rendered/mounted/navigated right before the crash. This
+   * is what turns a nested-update-limit report (React #185) from "where the
+   * limit tripped" into "what oscillated".
+   */
+  renderTrace?: string | undefined;
 };
 
 export type ErrorBoundaryReport = {
@@ -174,6 +181,9 @@ export function buildErrorBoundaryReport(input: ErrorBoundaryReportInput): Error
 
   const componentStack = input.componentStack?.trim();
   if (componentStack) sections.push(`Component stack:\n${componentStack}`);
+
+  const renderTrace = input.renderTrace?.trim();
+  if (renderTrace) sections.push(`Session render trace:\n${renderTrace}`);
 
   const details = sections.join('\n\n');
   return {

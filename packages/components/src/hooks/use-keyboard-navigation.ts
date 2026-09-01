@@ -1,44 +1,28 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
-  ONLY_CHATS_KEY,
-  focusLayerAtom,
-  sidebarHighlightIndexAtom,
-  sidebarNavItemsAtom,
   sidebarNavCallbacksAtom,
-  type FocusLayer,
-  type SidebarNavCallbacks,
+  sidebarNavItemsAtom,
   type SidebarNavItem,
 } from '@/atoms/focus-layer';
 import { toggleSidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
-import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
+import { useFocusScopeSwitcher } from '@/ui/focus-scope';
 import { useIsMobile } from './use-mobile';
 
-// Re-export types from atoms for convenience
-export type { SidebarNavItem, FocusLayer };
+export type { SidebarNavItem } from '@/atoms/focus-layer';
 
-const SCROLL_STEP = 120;
-
-/**
- * Check if the active element is a text input (textarea, input, contenteditable).
- */
 function isTextInputActive(): boolean {
-  const el = document.activeElement;
-  if (!el) return false;
-  if (el instanceof HTMLTextAreaElement) return true;
-  if (el instanceof HTMLInputElement) {
-    const inputType = el.type.toLowerCase();
-    return ['text', 'search', 'url', 'email', 'password', 'tel', 'number'].includes(inputType);
-  }
-  if (el instanceof HTMLElement && el.isContentEditable) return true;
-  return false;
+  const element = document.activeElement;
+  return (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement ||
+    (element instanceof HTMLElement && element.isContentEditable)
+  );
 }
 
-/**
- * Check if a dropdown/popup/dialog is open by looking for common patterns.
- */
 function isPopupOpen(): boolean {
   return (
     document.querySelector('[data-radix-popper-content-wrapper]') !== null ||
@@ -47,42 +31,9 @@ function isPopupOpen(): boolean {
   );
 }
 
-function focusComposer() {
-  const textarea = document.querySelector<HTMLTextAreaElement>('[data-keyboard-nav="composer"]');
-  textarea?.focus();
-}
-
-function blurComposer() {
-  const textarea = document.querySelector<HTMLTextAreaElement>('[data-keyboard-nav="composer"]');
-  textarea?.blur();
-}
-
-function scrollChatContent(direction: 'up' | 'down') {
-  const container = document.querySelector('.chat-scrollbar');
-  if (container) {
-    container.scrollBy({
-      top: direction === 'up' ? -SCROLL_STEP : SCROLL_STEP,
-      behavior: 'smooth',
-    });
-  }
-}
-
-function toggleGroupCollapsed(cb: SidebarNavCallbacks, groupKey: string) {
-  if (groupKey === ONLY_CHATS_KEY) {
-    cb.onToggleChatsCollapsed();
-  } else {
-    cb.onToggleRepoCollapsed(groupKey);
-  }
-}
-
-/**
- * Main keyboard navigation hook. Must be mounted once at the app root.
- * Reads sidebar items and callbacks from Jotai atoms.
- */
-export function useKeyboardNavigation() {
+/** App-level navigation commands plus the single global focus-scope switcher. */
+export function useKeyboardNavigation(): void {
   const { t } = useTranslation();
-  const [focusLayer, setFocusLayer] = useAtom(focusLayerAtom);
-  const [highlightIndex, setHighlightIndex] = useAtom(sidebarHighlightIndexAtom);
   const flatItems = useAtomValue(sidebarNavItemsAtom);
   const sidebarCallbacks = useAtomValue(sidebarNavCallbacksAtom);
   const toggleSidebarCollapsed = useSetAtom(toggleSidebarCollapsedAtom);
@@ -96,77 +47,104 @@ export function useKeyboardNavigation() {
   const getVisibleSessionIds = useCallback(
     () =>
       flatItemsRef.current
-        .filter((it): it is SidebarNavItem & { kind: 'session' } => it.kind === 'session')
-        .map((it) => it.sessionId),
+        .filter((item): item is SidebarNavItem & { kind: 'session' } => item.kind === 'session')
+        .map((item) => item.sessionId),
     []
   );
 
-  const transitionTo = useCallback(
-    (layer: FocusLayer) => {
-      setFocusLayer(layer);
-      if (layer === 'L1') {
-        const cb = callbacksRef.current;
-        const selectedId = cb?.getSelectedSessionId();
-        if (selectedId) {
-          const items = flatItemsRef.current;
-          const idx = items.findIndex(
-            (item) => item.kind === 'session' && item.sessionId === selectedId
-          );
-          if (idx >= 0) {
-            setHighlightIndex(idx);
-            return;
-          }
-          // Session is hidden (collapsed group or beyond show-more limit).
-          // Find its parent group header so the highlight lands on something meaningful.
-          const groupKey = cb?.getSessionGroupKey?.(selectedId);
-          if (groupKey) {
-            const headerIdx = items.findIndex(
-              (item) =>
-                (item.kind === 'group-header' && item.groupKey === groupKey) ||
-                (item.kind === 'local-project' &&
-                  `${item.machineId}:${item.localProjectId}` === groupKey)
-            );
-            if (headerIdx >= 0) {
-              setHighlightIndex(headerIdx);
-              return;
-            }
-          }
-        }
-        setHighlightIndex((prev) => (prev < 0 && flatItemsRef.current.length > 0 ? 0 : prev));
-      } else if (layer === 'L3') {
-        focusComposer();
-      } else if (layer === 'L2') {
-        blurComposer();
-      }
+  // Switching sessions renders the whole conversation synchronously, which
+  // outlasts the keyboard repeat interval: holding the shortcut queues presses
+  // faster than they can be painted, and every queued one pays a full render
+  // nobody ever sees. `frameRef` is the "a paint is still owed" flag — while it
+  // is set, a press only advances the target, and the pending frame navigates to
+  // wherever the burst got to. One navigation per painted frame, so a lone press
+  // keeps its immediate response and a held key moves as fast as it can render.
+  const pendingSessionRef = useRef<string | null>(null);
+  const navigatedSessionRef = useRef<string | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  const abandonBurst = useCallback(() => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pendingSessionRef.current = null;
+    navigatedSessionRef.current = null;
+  }, []);
+
+  /**
+   * The target a queued burst may still act on, or `null` once the burst has
+   * stopped owning the selection.
+   *
+   * A keyboard burst is only ever an offset from its OWN last navigation, so it
+   * has to yield the moment anything else moves the selection. A sidebar click
+   * leaves the route somewhere the burst did not put it; a workspace switch does
+   * that and replaces the visible rows underneath it. Carrying a stale id into
+   * the queued frame would overwrite the user's choice, or hand
+   * `onNavigateToSession` a session id from the previous workspace and build a
+   * route the target workspace has no session for.
+   */
+  const claimBurstTarget = useCallback(
+    (sessionIds: readonly string[]): string | null => {
+      const target = pendingSessionRef.current;
+      if (target === null) return null;
+      const callbacks = callbacksRef.current;
+      if (!callbacks) return null;
+      if (callbacks.getSelectedSessionId() !== navigatedSessionRef.current) return null;
+      return sessionIds.includes(target) ? target : null;
     },
-    [setFocusLayer, setHighlightIndex]
+    []
   );
+
+  const flushSessionNavigation = useCallback(() => {
+    const callbacks = callbacksRef.current;
+    const target = pendingSessionRef.current;
+    if (!callbacks || target === null) {
+      frameRef.current = null;
+      return;
+    }
+    navigatedSessionRef.current = target;
+    callbacks.onNavigateToSession(target);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      // Re-validate before acting: the paint we were waiting on is also the
+      // window in which a click or a workspace switch can land.
+      if (claimBurstTarget(getVisibleSessionIds()) === null) {
+        abandonBurst();
+        return;
+      }
+      // The burst moved on while this navigation rendered; take the latest.
+      if (pendingSessionRef.current !== navigatedSessionRef.current) flushSessionNavigation();
+    });
+  }, [abandonBurst, claimBurstTarget, getVisibleSessionIds]);
+
+  useEffect(() => () => abandonBurst(), [abandonBurst]);
 
   const navigateVisibleSession = useCallback(
     (direction: 'previous' | 'next') => {
-      const cb = callbacksRef.current;
-      if (!cb) return;
-
+      const callbacks = callbacksRef.current;
+      if (!callbacks) return;
       const sessionIds = getVisibleSessionIds();
-      const currentId = cb.getSelectedSessionId();
       if (sessionIds.length === 0) return;
 
-      const currentIdx = currentId ? sessionIds.indexOf(currentId) : -1;
-      const nextIdx =
+      // Continue the burst only while it still owns the selection. Otherwise it
+      // is dead: drop its queued frame and start again from wherever the route
+      // actually is, so this press gets the ordinary immediate response.
+      const burstTarget = claimBurstTarget(sessionIds);
+      if (burstTarget === null) abandonBurst();
+      const anchorId = burstTarget ?? callbacks.getSelectedSessionId();
+      const currentIndex = anchorId ? sessionIds.indexOf(anchorId) : -1;
+      const nextIndex =
         direction === 'previous'
-          ? currentIdx > 0
-            ? currentIdx - 1
-            : 0
-          : currentIdx < sessionIds.length - 1
-            ? currentIdx + 1
-            : sessionIds.length - 1;
-      const nextId = sessionIds[nextIdx];
-      if (nextId && nextId !== currentId) {
-        cb.onNavigateToSession(nextId);
-      }
+          ? Math.max(0, currentIndex - 1)
+          : Math.min(sessionIds.length - 1, currentIndex + 1);
+      const nextId = sessionIds[nextIndex];
+      if (!nextId || nextId === anchorId) return;
+      pendingSessionRef.current = nextId;
+      if (frameRef.current === null) flushSessionNavigation();
     },
-    [getVisibleSessionIds]
+    [abandonBurst, claimBurstTarget, flushSessionNavigation, getVisibleSessionIds]
   );
+
+  useFocusScopeSwitcher({ enabled: !isMobile });
 
   useCommand({
     id: 'sidebar.toggle',
@@ -203,208 +181,27 @@ export function useKeyboardNavigation() {
     run: () => navigateVisibleSession('next'),
   });
 
-  const handleL1KeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      const items = flatItemsRef.current;
-      const cb = callbacksRef.current;
-      if (!cb) return;
-
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'k': {
-          e.preventDefault();
-          setHighlightIndex((prev) => Math.max(0, prev - 1));
-          break;
-        }
-        case 'ArrowDown':
-        case 'j': {
-          e.preventDefault();
-          setHighlightIndex((prev) => Math.min(items.length - 1, prev + 1));
-          break;
-        }
-        case 'ArrowRight': {
-          e.preventDefault();
-          const item = items[highlightIndex];
-          if (!item) break;
-          if (item.kind === 'group-header' && item.collapsed) {
-            toggleGroupCollapsed(cb, item.groupKey);
-          } else if (item.kind === 'local-project' && item.collapsed) {
-            cb.onToggleLocalProjectCollapsed?.(item.machineId, item.localProjectId);
-          }
-          break;
-        }
-        case 'ArrowLeft': {
-          e.preventDefault();
-          const item = items[highlightIndex];
-          if (!item) break;
-          if (item.kind === 'group-header' && !item.collapsed) {
-            toggleGroupCollapsed(cb, item.groupKey);
-          } else if (item.kind === 'local-project' && !item.collapsed) {
-            cb.onToggleLocalProjectCollapsed?.(item.machineId, item.localProjectId);
-          } else if (item.kind === 'session') {
-            const parentIdx = items.findIndex(
-              (it) =>
-                (it.kind === 'group-header' && it.groupKey === item.groupKey) ||
-                (it.kind === 'local-project' &&
-                  `${it.machineId}:${it.localProjectId}` === item.groupKey)
-            );
-            if (parentIdx >= 0) {
-              setHighlightIndex(parentIdx);
-            }
-          }
-          break;
-        }
-        case 'Enter': {
-          e.preventDefault();
-          const item = items[highlightIndex];
-          if (!item) break;
-          if (item.kind === 'session') {
-            cb.onNavigateToSession(item.sessionId);
-            transitionTo('L2');
-          } else if (item.kind === 'group-header') {
-            toggleGroupCollapsed(cb, item.groupKey);
-          } else if (item.kind === 'show-more') {
-            // Show-more state lives inside SessionList; click the DOM button directly.
-            const btn = document.querySelector<HTMLElement>(
-              `[data-sidebar-show-more="${item.groupKey}"]`
-            );
-            btn?.click();
-          } else if (item.kind === 'local-project') {
-            cb.onToggleLocalProjectCollapsed?.(item.machineId, item.localProjectId);
-          }
-          break;
-        }
-        case 'Escape':
-          break;
-        default:
-          break;
-      }
-    },
-    [highlightIndex, setHighlightIndex, transitionTo]
-  );
-
-  const handleL2KeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'k': {
-          e.preventDefault();
-          scrollChatContent('up');
-          break;
-        }
-        case 'ArrowDown':
-        case 'j': {
-          e.preventDefault();
-          scrollChatContent('down');
-          break;
-        }
-        case 'Enter': {
-          e.preventDefault();
-          transitionTo('L3');
-          break;
-        }
-        case 'Escape': {
-          e.preventDefault();
-          transitionTo('L1');
-          break;
-        }
-        default:
-          break;
-      }
-    },
-    [transitionTo]
-  );
-
-  const handleL3KeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      // Esc just blurs the composer. It must NOT step focus down into the tab bar
-      // (L2 ring) or the sidebar session list (L1 highlight) — those layers should
-      // never auto-engage from the composer. (L1/L2 are only reachable via this
-      // path, so this effectively keeps that roving focus from appearing on its own.)
-      blurComposer();
-    }
-  }, []);
-
-  const handleSingleLetterShortcuts = useCallback(
-    (e: KeyboardEvent): boolean => {
-      const cb = callbacksRef.current;
-      if (!cb) return false;
-
-      switch (e.key) {
-        case 'c': {
-          e.preventDefault();
-          cb.onNavigateToNewSession();
-          setFocusLayer('L3');
-          return true;
-        }
-        default:
-          return false;
-      }
-    },
-    [setFocusLayer]
-  );
-
   useEffect(() => {
     if (isMobile) return undefined;
-
-    const handler = (e: KeyboardEvent) => {
-      // Esc cancels an active IME preedit. It must not also leave the composer
-      // focus layer after the browser/IME has handled that same keydown.
-      if (isImeComposingNativeKeyboardEvent(e)) return;
-      if (isPopupOpen()) return;
-
-      if (e.metaKey || e.ctrlKey) return;
-
-      if (isTextInputActive()) {
-        if (focusLayer !== 'L3') {
-          setFocusLayer('L3');
-        }
-        handleL3KeyDown(e);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== 'c' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        isTextInputActive() ||
+        isPopupOpen()
+      ) {
         return;
       }
-
-      if (focusLayer === 'L1' || focusLayer === 'L2') {
-        if (e.key.length === 1 && !e.altKey && !e.shiftKey) {
-          const handled = handleSingleLetterShortcuts(e);
-          if (handled) return;
-        }
-      }
-
-      if (focusLayer === 'L1') {
-        handleL1KeyDown(e);
-      } else if (focusLayer === 'L2') {
-        handleL2KeyDown(e);
-      } else {
-        handleL3KeyDown(e);
-      }
+      const callbacks = callbacksRef.current;
+      if (!callbacks) return;
+      event.preventDefault();
+      callbacks.onNavigateToNewSession();
     };
-
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [
-    focusLayer,
-    handleL1KeyDown,
-    handleL2KeyDown,
-    handleL3KeyDown,
-    handleSingleLetterShortcuts,
-    isMobile,
-    setFocusLayer,
-  ]);
-
-  // Sync focus layer when user clicks into a text input
-  useEffect(() => {
-    if (isMobile) return undefined;
-
-    const handler = () => {
-      if (isTextInputActive() && focusLayer !== 'L3') {
-        setFocusLayer('L3');
-      }
-    };
-
-    document.addEventListener('focusin', handler);
-    return () => document.removeEventListener('focusin', handler);
-  }, [focusLayer, isMobile, setFocusLayer]);
-
-  return { focusLayer, highlightIndex };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMobile]);
 }

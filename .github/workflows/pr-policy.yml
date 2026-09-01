@@ -1,0 +1,21 @@
+name: PR contribution policy
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+concurrency:
+  group: pr-policy-${{ github.event.pull_request.number || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
+jobs:
+  reconcile:
+    name: Reconcile contribution policy
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/pr-policy-reconcile.yml

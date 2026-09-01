@@ -131,6 +131,45 @@ const rawDataToBuffer = (value: RawData): Buffer => {
   return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
 };
 
+const WEBSOCKET_CLOSE_CODE_NO_STATUS = 1005;
+const WEBSOCKET_CLOSE_CODE_ABNORMAL = 1006;
+
+const isSendableWebSocketCloseCode = (code: number): boolean =>
+  (code >= 1000 &&
+    code <= 1014 &&
+    code !== 1004 &&
+    code !== WEBSOCKET_CLOSE_CODE_NO_STATUS &&
+    code !== WEBSOCKET_CLOSE_CODE_ABNORMAL) ||
+  (code >= 3000 && code <= 4999);
+
+/**
+ * Mirrors a close observed on one side of the proxy onto the other side.
+ *
+ * RFC 6455 section 7.4.1 reserves 1005 and 1006 for local observation, so neither may
+ * appear in a Close frame; `ws` throws synchronously when asked to send one, which
+ * would take down the whole CLI from a TCP callback. Reproduce the observed shape
+ * instead of a status code: an empty Close frame makes the peer observe 1005, and
+ * destroying the connection makes it observe 1006.
+ */
+const mirrorWebSocketClose = (peer: LocalWebSocket, code: number, reason: Buffer): void => {
+  if (peer.readyState === LocalWebSocket.CLOSING || peer.readyState === LocalWebSocket.CLOSED) {
+    return;
+  }
+  if (code === WEBSOCKET_CLOSE_CODE_ABNORMAL) {
+    peer.terminate();
+    return;
+  }
+  if (code === WEBSOCKET_CLOSE_CODE_NO_STATUS) {
+    peer.close();
+    return;
+  }
+  if (!isSendableWebSocketCloseCode(code)) {
+    peer.close(1011, 'Local preview WebSocket closed with an unsendable status code');
+    return;
+  }
+  peer.close(code, reason.toString('utf8'));
+};
+
 export class LocalPreviewProxyManager {
   private readonly records = new Map<SessionId, LocalPreviewProxyRecord>();
 
@@ -376,12 +415,7 @@ export class LocalPreviewProxyManager {
       }
     });
     browserSocket.on('close', (code, reason) => {
-      if (
-        localSocket.readyState === LocalWebSocket.OPEN ||
-        localSocket.readyState === LocalWebSocket.CONNECTING
-      ) {
-        localSocket.close(code, reason.toString('utf8'));
-      }
+      mirrorWebSocketClose(localSocket, code, reason);
     });
     browserSocket.on('error', () => {
       localSocket.terminate();
@@ -399,12 +433,16 @@ export class LocalPreviewProxyManager {
       }
     });
     localSocket.on('close', (code, reason) => {
-      if (browserSocket.readyState === LocalWebSocket.OPEN) {
-        browserSocket.close(code, reason.toString('utf8'));
-      }
+      mirrorWebSocketClose(browserSocket, code, reason);
     });
     localSocket.on('error', (error) => {
       this.deps.logger.debug(`Local preview WebSocket failed: ${formatErrorMessage(error)}`);
+      if (localOpen) {
+        // `ws` always follows an error on an established connection with a close event,
+        // and that close carries what the browser should observe. Reporting 1011 here
+        // would replace an abnormal close with a clean one.
+        return;
+      }
       if (browserSocket.readyState === LocalWebSocket.OPEN) {
         browserSocket.close(1011, 'Local preview WebSocket failed');
       }

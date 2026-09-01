@@ -30,13 +30,13 @@ const makeRole = (overrides: Partial<AgentRole> & Pick<AgentRole, 'id' | 'name'>
   ...overrides,
 });
 
-const makeConfig = (id: string, machineId: string): AgentConfigMeta =>
+const makeConfig = (id: string, machineId: string, agentType = 'codex'): AgentConfigMeta =>
   ({
     id: id as AgentConfigId,
     machineId: machineId as MachineId,
     name: id,
     cliType: 'builtin',
-    agentType: 'codex',
+    agentType,
     env: {},
   }) as AgentConfigMeta;
 
@@ -50,16 +50,25 @@ describe('buildComposerAgentRoleItems', () => {
     name: 'Elsewhere',
     machineId: 'machine-2' as MachineId,
   });
-  const configs = [makeConfig('config-1', 'machine-1')];
+  const writer = makeRole({
+    id: 'r-4' as AgentRoleId,
+    name: 'Writer',
+    agentConfigId: 'config-2' as AgentConfigId,
+  });
+  const configs = [
+    makeConfig('config-1', 'machine-1'),
+    makeConfig('config-2', 'machine-1', 'claude'),
+  ];
 
-  it('offers only the Roles bound to the machine the chat starts on', () => {
+  it('offers every Agent type bound to the machine the chat starts on', () => {
     const items = buildComposerAgentRoleItems({
-      roles: [reviewer, architect, elsewhere],
+      roles: [reviewer, architect, elsewhere, writer],
       machineId: 'machine-1' as MachineId,
       agentConfigs: configs,
       resolveAvailability: () => available,
     });
-    expect(items.map((item) => item.role.id)).toEqual(['r-1', 'r-2']);
+    expect(items.map((item) => item.role.id)).toEqual(['r-1', 'r-2', 'r-4']);
+    expect(items.at(-1)?.agentConfig?.agentType).toBe('claude');
   });
 
   it('offers nothing until a machine is selected', () => {
