@@ -2598,11 +2598,28 @@ const SessionDetail = ({
     urlPrNumber,
   ]);
 
+  /* A child session's root URL redirects to its parent. Corrupted meta can
+     hold a parentSessionId CYCLE (X↔P): following it unguarded redirects
+     forever, remounting every chat surface per hop until React's nested
+     update limit crashes the renderer (#185). A reverse hop of the redirect
+     just taken is always such a cycle — a parent that is itself a child is
+     invalid nesting — so it stays put (the parent-guard early return above
+     renders null) instead of looping. */
+  const lastParentRedirectRef = useRef<{ from: SessionId; to: SessionId } | null>(null);
   useEffect(() => {
     const parentSessionId = activeSession?.parentSessionId;
     if (!parentSessionId || parentSessionId === sessionId) {
       return;
     }
+    const last = lastParentRedirectRef.current;
+    if (last && last.from === parentSessionId && last.to === sessionId) {
+      console.error('Session parentSessionId cycle detected; not following it', {
+        sessionId,
+        parentSessionId,
+      });
+      return;
+    }
+    lastParentRedirectRef.current = { from: sessionId, to: parentSessionId };
     redirectToParentSessionUrl(parentSessionId, sessionId);
   }, [activeSession?.parentSessionId, redirectToParentSessionUrl, sessionId]);
 
