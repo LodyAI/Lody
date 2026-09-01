@@ -97,25 +97,31 @@ Session conversation page chain:
 - **The `?tab` search value is the single source of truth for the active
   conversation tab.** `session-detail.tsx` DERIVES the active tab from the
   route search (`resolveActiveSessionTab` in `lib/session-tab-url.ts`; drafts
-  encode as their full `draft:<id>` id, children as `session:<id>`, the parent
-  as the absent value) and tab activation NAVIGATES (`replace: true`) instead
-  of setting state. Never reintroduce a mirrored `activeTabSessionId` state or
-  URL↔state sync effects: two stores reconciled by passive effects is exactly
-  the render-loop freeze of #193. A tab the URL names but the data cannot
-  resolve renders the parent and activates itself when its meta arrives; only
-  `shouldClearSessionUrlTab` may normalize the URL (one convergent replace,
-  never while child meta is still loading). The only non-user `?tab` write is
-  the entry-scoped last-active-tab restoration, one replace per session entry
-  in a layout effect, claimed by session id so it can never re-fire on the
-  same entry — and claimed only once a slug can actually carry the navigation
-  (`resolveSessionEntryTabRestoration`). That slug is the render-phase
-  `WorkspaceRouteTargetProvider` target with `currentWorkspaceSlugAtom` as
-  provider-less fallback, and EVERY session-detail URL writer uses the same
-  effective slug: the atom is stale at both edges of a workspace transition —
-  null on a cold start (claiming then loses the persisted tab for good) and
-  the PREVIOUS workspace's non-null slug during a cross-workspace client
-  navigation (navigating then sends the restore back into the old
-  workspace).
+  encode as their full `draft:<id>` id, children as `session:<id>`) and tab
+  activation NAVIGATES instead of setting state — user-driven switches PUSH so
+  tabs participate in history back; structural rewrites (draft promotion,
+  closing a dead tab) replace. Never reintroduce a mirrored
+  `activeTabSessionId` state or URL↔state sync effects: two stores reconciled
+  by passive effects is exactly the render-loop freeze of #193. The derivation
+  is TOTAL and takes the URL at its word: a `session:` tab the meta replica
+  has not delivered yet stays ACTIVE behind a pending surface, because
+  treating a transient replica gap as "this tab does not exist" is what
+  bounced a just-promoted draft back to the parent (#199 regression). Only
+  positive evidence resolves away from the named tab (an archived child, a
+  device-local draft that is provably gone), and NOTHING observes data to
+  rewrite the URL back — the `shouldClearSessionUrlTab` normalizer is
+  deliberately dead. Promotion keeps its `pendingDraftChildSessionIds` entry
+  as a draft→child resolution alias through the send window. The ABSENT value
+  means "no explicit choice" and is reserved for external entries: the session
+  ROUTE's `beforeLoad` fills it from the last-active store as one replace
+  redirect (the route has its own navigation's params, so no workspace-slug
+  staleness to dance around), which is why in-session activation encodes the
+  parent EXPLICITLY as `session:<parentId>` (`formatExplicitSessionTabSearch`)
+  — an absent parent write would be re-restored. Cross-surface "go to session"
+  links keep `formatSessionTabSearch` (parent → absent → restore). Every
+  `session-detail.tsx` URL writer goes through `writeSessionUrlTab`, which
+  drops a write whose captured session no longer matches the current route —
+  an async caller resolving after a switch must not yank the router back.
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
   mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff

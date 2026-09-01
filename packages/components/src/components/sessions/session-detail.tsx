@@ -93,7 +93,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -200,7 +199,6 @@ import {
   isDraftSessionTabId,
   mergeTabOrderGroup,
   readPersistedDraftTabs,
-  readStoredLastActiveTabState,
   readStoredTabOrder,
   removeTabOrderId,
   replaceTabOrderId,
@@ -220,20 +218,17 @@ import {
   resolveSessionWorkspacePath,
 } from '@/lib/session-workspace-path';
 import {
+  formatExplicitSessionTabSearch,
   formatSessionTabSearch,
   parseSessionTabSearch,
   resolveActiveSessionTab,
-  shouldClearSessionUrlTab,
   type ParsedSessionTabSearch,
 } from '@/lib/session-tab-url';
 import {
   getSessionNavigationLocation,
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
-import {
-  getSessionDetailInitialTabState,
-  resolveSessionEntryTabRestoration,
-} from '@/lib/session-detail-initial-state';
+import { getSessionDetailInitialTabState } from '@/lib/session-detail-initial-state';
 /* Relative, not `@/providers/*`: the Electron web tsconfig maps only an
    allowlist of `@/` subpaths and has no `@/providers/*` entry, so the alias
    spelling type-checks here but breaks `@lody/electron`. */
@@ -714,7 +709,7 @@ const SessionDetail = ({
   >(new Map());
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
-  const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab);
+  const initialTabState = getSessionDetailInitialTabState(sessionId);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
   /* Bumped whenever `isSidebarOpen` changes because side-panel state was
      RESTORED (session switch, `?pr=` deep link) rather than toggled by the
@@ -944,7 +939,7 @@ const SessionDetail = ({
   const fireDetailNotFoundOnce = useFireOncePerKey<SessionId>();
 
   if (localStateSessionId !== sessionId) {
-    const nextInitialTabState = getSessionDetailInitialTabState(sessionId, urlTab);
+    const nextInitialTabState = getSessionDetailInitialTabState(sessionId);
     detailLoadStartMsRef.current = getPerformanceNowMs();
     sendingDraftIdsRef.current.clear();
     desktopTabFocusRegionRef.current = 'conversation';
@@ -1092,16 +1087,29 @@ const SessionDetail = ({
   // The `?tab` search value is the single source of truth for the active
   // conversation tab; tab activation navigates instead of setting state, so
   // there is no second store to reconcile and no URL/state feedback loop
-  // (#193). `resolveActiveSessionTab` owns the derivation rule.
+  // (#193). `resolveActiveSessionTab` owns the derivation rule: the URL is
+  // taken at its word, so a named child whose meta has not reached the local
+  // replica yet stays active (a pending surface renders below) instead of
+  // bouncing the user back to the parent conversation.
   const activeTabSessionId = useMemo(
     () =>
       resolveActiveSessionTab(parsedUrlTab, {
         parentSessionId: sessionId,
-        childSessionIds: visibleChildSessions.map((s) => s.id),
+        archivedChildSessionIds: archivedChildSessions.map((s) => s.id),
         draftTabIds: draftTabs.map((draft) => draft.id),
+        promotedChildSessionIdsByDraftId: pendingDraftChildSessionIds,
       }),
-    [parsedUrlTab, visibleChildSessions, draftTabs, sessionId]
+    [parsedUrlTab, archivedChildSessions, draftTabs, pendingDraftChildSessionIds, sessionId]
   );
+  // A URL-named child the meta replica has not delivered yet: keep it active
+  // and render a pending surface instead of silently showing the parent.
+  const activeTabIsPendingChild =
+    activeTabSessionId !== sessionId &&
+    !isDraftSessionTabId(activeTabSessionId) &&
+    !visibleChildSessions.some((s) => s.id === activeTabSessionId);
+  // The ordinary pending window (a just-promoted draft) lasts one replica
+  // tick; the delayed flag keeps that from flashing a spinner.
+  const showPendingChildTabState = useDelayedFlag(activeTabIsPendingChild, 300);
   const activeSessionTabId = useMemo<SessionId | null>(() => {
     if (activeTabSessionId === sessionId) return sessionId;
     return visibleChildSessions.find((s) => s.id === activeTabSessionId)?.id ?? null;
@@ -1388,19 +1396,6 @@ const SessionDetail = ({
   // totaling provider entries that can resolve at different times.
   const changesDiffStat = activeSession?.diffStats?.allChange ?? null;
   const activeBrowserSession = activeDraftTab ? null : activeTabSession;
-  /* URL normalization only: `shouldClearSessionUrlTab` owns the rule for
-     removing a `?tab` that provably resolves to the parent. One-directional
-     and convergent — clearing yields `missing`, which is never cleared. */
-  const shouldClearUrlTab = useMemo(
-    () =>
-      shouldClearSessionUrlTab(parsedUrlTab, {
-        parentSessionId: sessionId,
-        childSessionIds: childSessions.map((childSession) => childSession.id),
-        draftTabIds: draftTabs.map((draft) => draft.id),
-        childSessionsResolved: Boolean(activeSession && docMetaCacheReady),
-      }),
-    [activeSession, childSessions, docMetaCacheReady, draftTabs, parsedUrlTab, sessionId]
-  );
   const workspaceOwnerSession = activeTabSession?.parentSessionId
     ? activeSession
     : activeTabSession;
@@ -1579,9 +1574,16 @@ const SessionDetail = ({
   const latestPrNumber = getPullRequestNumber(latestPr);
   const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
 
-  const replaceSessionUrlTab = useCallback(
-    (nextTab: string | undefined) => {
+  const writeSessionUrlTab = useCallback(
+    (nextTab: string | undefined, { push = false }: { push?: boolean } = {}) => {
       if (!workspaceSlug) {
+        return;
+      }
+      /* A `?tab` write is scoped to this session's route. An asynchronous
+         caller resolving after the user already left (a draft send completing
+         mid-switch, a queued replace) must be dropped, not allowed to yank the
+         router back to the session it captured. */
+      if (!router.state.location.pathname.includes(`/sessions/${sessionId}`)) {
         return;
       }
 
@@ -1605,20 +1607,24 @@ const SessionDetail = ({
 
           return { ...prev, tab: nextTab };
         },
-        replace: true,
+        replace: !push,
       });
     },
     [router, sessionId, workspaceSlug]
   );
 
   /* Activating a tab IS a navigation: the handlers below write the `?tab`
-     search value and the active tab derives back out of it. Parent tabs
-     encode as the absent value, drafts as their full `draft:<id>` tab id. */
+     search value and the active tab derives back out of it. Every in-session
+     activation encodes explicitly — the parent as `session:<parentId>`, drafts
+     as their full `draft:<id>` id — because the absent value is reserved for
+     external entries, which the route restores from the last-active store.
+     User-driven switches PUSH so tabs participate in history back; structural
+     rewrites (draft promotion, closing a dead tab) replace. */
   const navigateToSessionTab = useCallback(
-    (tabId: string) => {
-      replaceSessionUrlTab(formatSessionTabSearch(tabId, sessionId));
+    (tabId: string, options?: { push?: boolean }) => {
+      writeSessionUrlTab(formatExplicitSessionTabSearch(tabId), options);
     },
-    [replaceSessionUrlTab, sessionId]
+    [writeSessionUrlTab]
   );
 
   const replaceSessionUrlPr = useCallback(
@@ -1872,7 +1878,7 @@ const SessionDetail = ({
     if (isMobile) {
       setActiveViewerTabId(null);
     }
-    navigateToSessionTab(draft.id);
+    navigateToSessionTab(draft.id, { push: true });
     captureSessionDetailEvent('session/tab_draft_created', {
       draft_tab_id: draft.id,
       source_session_id: activeSession.id,
@@ -1893,13 +1899,14 @@ const SessionDetail = ({
       setDraftTabs((prev) => prev.filter((draft) => draft.id !== draftId));
       setTabOrderState((prev) => removeTabOrderId(prev, draftId));
       if (activeTabSessionId === draftId) {
-        replaceSessionUrlTab(undefined);
+        // Explicit parent, replacing the dead draft URL in place.
+        navigateToSessionTab(sessionId);
       }
       captureSessionDetailEvent('session/tab_draft_closed', {
         draft_tab_id: draftId,
       });
     },
-    [activeTabSessionId, captureSessionDetailEvent, replaceSessionUrlTab, setDraftTabs]
+    [activeTabSessionId, captureSessionDetailEvent, navigateToSessionTab, sessionId, setDraftTabs]
   );
 
   const handleSendDraft = useCallback(
@@ -2019,14 +2026,17 @@ const SessionDetail = ({
           setSessionChatInputTextDraft(childSessionId, payload.preservedInputText);
         }
         setDraftTabs((prev) => prev.filter((draft) => draft.id !== payload.draftId));
-        setPendingDraftChildSessionIds((prev) => {
-          const { [payload.draftId]: _removed, ...rest } = prev;
-          return rest;
-        });
         setTabOrderState((prev) => replaceTabOrderId(prev, payload.draftId, childSessionId));
         if (isMobile) {
           setActiveViewerTabId(null);
         }
+        /* One replace navigation swaps `draft:<id>` for `session:<child>`.
+           The `pendingDraftChildSessionIds` entry deliberately SURVIVES the
+           promotion as a resolution alias: React commits the draft removal
+           before the router commits the new `?tab`, and in that window (and
+           until the child meta reaches the local replica) the URL must keep
+           resolving to the new conversation, never bounce back to the parent.
+           The map resets with the session-switch state reset. */
         navigateToSessionTab(childSessionId);
         void requestSessionDispatch(childSessionId, historyEntry.id, {
           inputConfig: payload.inputConfig,
@@ -2169,8 +2179,9 @@ const SessionDetail = ({
         }
         // Switch to the parent tab only once the close is durable; a failed
         // close keeps the tab selected instead of yanking the user off it.
+        // Explicit parent, replacing the closed tab's URL in place.
         if (tabSessionId === activeTabSessionId) {
-          replaceSessionUrlTab(undefined);
+          navigateToSessionTab(sessionId);
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2191,7 +2202,8 @@ const SessionDetail = ({
       childSessions,
       closeDraftTab,
       deleteSessions,
-      replaceSessionUrlTab,
+      navigateToSessionTab,
+      sessionId,
       t,
     ]
   );
@@ -2582,45 +2594,10 @@ const SessionDetail = ({
     redirectToParentSessionUrl(parentSessionId, sessionId);
   }, [activeSession?.parentSessionId, redirectToParentSessionUrl, sessionId]);
 
-  /* Entry-scoped restoration: arriving on a session with no explicit `?tab`
-     restores the last active tab as ONE replace navigation. This is the only
-     `?tab` write not caused by a user action; claiming the session id keeps
-     it one-shot per entry, so a later user navigation back to the parent (a
-     `missing` value on the same session) is respected rather than
-     re-restored. The claim happens only once a slug can actually carry the
-     navigation, and that slug is the render-phase route target — the slug
-     atom is stale at both edges of a workspace transition (null on a cold
-     start, the previous workspace's slug during a cross-workspace client
-     navigation), and `resolveSessionEntryTabRestoration` owns that ordering
-     rule. Layout effect so the write lands before paint instead of flashing
-     the parent tab for a frame. */
-  const restoredEntryTabSessionIdRef = useRef<SessionId | null>(null);
-  useLayoutEffect(() => {
-    const restoration = resolveSessionEntryTabRestoration({
-      routeTargetSlug: routeTargetWorkspaceSlug,
-      atomWorkspaceSlug,
-      claimedSessionId: restoredEntryTabSessionIdRef.current,
-      sessionId,
-      urlTabKind: parsedUrlTab.kind,
-      readPersistedTabId: () => readStoredLastActiveTabState(sessionId)?.sessionTabId,
-    });
-    if (restoration.kind === 'noop' || restoration.kind === 'defer') {
-      return;
-    }
-    restoredEntryTabSessionIdRef.current = sessionId;
-    if (restoration.kind === 'restore') {
-      /* `restoration.workspaceSlug` and the component-level `workspaceSlug`
-         are the same `routeTargetSlug ?? atomWorkspaceSlug` value, which is
-         what `replaceSessionUrlTab` addresses the navigation with. */
-      replaceSessionUrlTab(restoration.tab);
-    }
-  }, [
-    atomWorkspaceSlug,
-    parsedUrlTab.kind,
-    replaceSessionUrlTab,
-    routeTargetWorkspaceSlug,
-    sessionId,
-  ]);
+  /* Entry-scoped last-active-tab restoration lives in the session ROUTE's
+     `beforeLoad` (one replace redirect before anything renders), not here:
+     the route has this navigation's own params, so the workspace-slug
+     staleness dance and the one-shot claim ref are gone with it. */
 
   /* Mobile keeps one active surface: a `?tab` change dismisses the file
      viewer, matching what explicit tab selection does. Ref-compared so the
@@ -3030,7 +3007,7 @@ const SessionDetail = ({
     (tabSessionId?: SessionId, navigateCandidate = false) => {
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
-        navigateToSessionTab(tabSessionId);
+        navigateToSessionTab(tabSessionId, { push: true });
       }
       if (browserSessionId && navigateCandidate) {
         setBrowserCandidateNavigationRequest({
@@ -3257,7 +3234,8 @@ const SessionDetail = ({
   const handleSessionTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'conversation';
-      navigateToSessionTab(tabId);
+      // A user-driven switch PUSHES so tabs participate in history back.
+      navigateToSessionTab(tabId, { push: true });
       if (isMobile) {
         setActiveViewerTabId(null);
       }
@@ -3872,13 +3850,11 @@ const SessionDetail = ({
   });
 
   useEffect(() => {
-    if (!shouldClearUrlTab) {
+    /* Only a RESOLVED tab is worth remembering: persisting a still-syncing
+       child would make the next entry restore a tab that may never resolve. */
+    if (activeTabIsPendingChild) {
       return;
     }
-    replaceSessionUrlTab(undefined);
-  }, [replaceSessionUrlTab, shouldClearUrlTab]);
-
-  useEffect(() => {
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: activeTabSessionId,
       viewerTab: activeViewerTab,
@@ -3892,6 +3868,7 @@ const SessionDetail = ({
   }, [
     activeSidebarTab,
     activeSideSessionId,
+    activeTabIsPendingChild,
     activeTabSessionId,
     activeViewerTab,
     isSidebarOpen,
@@ -4386,6 +4363,26 @@ const SessionDetail = ({
   if (activeSession.parentSessionId && activeSession.parentSessionId !== sessionId) {
     return null;
   }
+
+  /* The URL names a child tab whose meta has not reached this replica yet
+     (a just-promoted draft, or a tab still syncing from another device).
+     The tab STAYS active — bouncing to the parent is exactly the bug this
+     replaces — and this surface holds the space until its meta arrives. */
+  const pendingChildTabSurface = activeTabIsPendingChild ? (
+    <div className="absolute inset-0 flex h-full flex-col items-center justify-center gap-3">
+      {showPendingChildTabState ? (
+        <>
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => handleSessionTabSelect(sessionId)}>
+            {t('sessions.tabBackToMain', 'Back to main conversation')}
+          </Button>
+        </>
+      ) : null}
+    </div>
+  ) : null;
 
   const deleteConfirmDialog = (
     <Dialog open={deleteConfirmOpen} onOpenChange={(open) => setDeleteConfirmOpen(open)}>
@@ -5024,6 +5021,7 @@ const SessionDetail = ({
               </div>
             );
           })}
+          {!hasActiveViewerTab ? pendingChildTabSurface : null}
           {/* Viewer content — shown when a viewer tab is active (mobile). Solid
               top padding (not scroll-under) so viewer toolbars clear the
               floating frosted header. */}
@@ -5671,6 +5669,7 @@ const SessionDetail = ({
           </div>
         );
       })}
+      {pendingChildTabSurface}
     </SessionMentionDropLayer>
   );
 

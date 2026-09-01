@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatExplicitSessionTabSearch,
   formatSessionTabSearch,
   parseSessionTabSearch,
   resolveActiveSessionTab,
-  shouldClearSessionUrlTab,
 } from '../src/lib/session-tab-url';
 
 const parentSessionId = 'parent-session-id';
@@ -36,7 +36,7 @@ describe('parseSessionTabSearch', () => {
 });
 
 describe('formatSessionTabSearch', () => {
-  it('omits the parent session tab from the URL', () => {
+  it('omits the parent session tab so the route entry restoration can run', () => {
     expect(formatSessionTabSearch(parentSessionId, parentSessionId)).toBeUndefined();
   });
 
@@ -65,25 +65,57 @@ describe('formatSessionTabSearch', () => {
   });
 });
 
+describe('formatExplicitSessionTabSearch', () => {
+  it('encodes the parent explicitly so tab activation is never re-restored', () => {
+    // In-session activation of the parent tab must stay distinguishable from
+    // an external entry with no tab choice — the absent value would be filled
+    // back in by the route's last-active restoration.
+    expect(formatExplicitSessionTabSearch(parentSessionId)).toBe(`session:${parentSessionId}`);
+    expect(parseSessionTabSearch(formatExplicitSessionTabSearch(parentSessionId))).toEqual({
+      kind: 'session',
+      sessionId: parentSessionId,
+    });
+  });
+
+  it('encodes children and drafts like the shared format', () => {
+    expect(formatExplicitSessionTabSearch('child-id')).toBe('session:child-id');
+    expect(formatExplicitSessionTabSearch('draft:d1')).toBe('draft:d1');
+  });
+});
+
 describe('resolveActiveSessionTab', () => {
   const context = {
     parentSessionId,
-    childSessionIds: ['child-a', 'child-b'],
+    archivedChildSessionIds: ['child-archived'],
     draftTabIds: ['draft:d1'],
+    promotedChildSessionIdsByDraftId: {},
   };
 
   it('resolves a missing tab to the parent (external navigation stripping ?tab converges)', () => {
     // #193: navigation that removes `?tab` while a child was active must
     // settle at the parent with no bounce-back write.
     expect(resolveActiveSessionTab({ kind: 'missing' }, context)).toBe(parentSessionId);
-    expect(
-      shouldClearSessionUrlTab({ kind: 'missing' }, { ...context, childSessionsResolved: true })
-    ).toBe(false);
   });
 
-  it('activates a known child session', () => {
-    expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'child-a' }, context)).toBe(
-      'child-a'
+  it('normalizes an explicit parent tab value', () => {
+    expect(resolveActiveSessionTab({ kind: 'session', sessionId: parentSessionId }, context)).toBe(
+      parentSessionId
+    );
+  });
+
+  it('takes the URL at its word for a child the replica has not delivered yet', () => {
+    // A just-promoted draft or a tab syncing from another device: the tab
+    // stays ACTIVE (the caller renders a pending surface) instead of bouncing
+    // back to the parent conversation. Treating a transient replica gap as
+    // "this tab does not exist" is the bug this rule replaces.
+    expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'child-syncing' }, context)).toBe(
+      'child-syncing'
+    );
+  });
+
+  it('resolves an archived child to the parent (positive evidence only)', () => {
+    expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'child-archived' }, context)).toBe(
+      parentSessionId
     );
   });
 
@@ -93,59 +125,35 @@ describe('resolveActiveSessionTab', () => {
     );
   });
 
-  it('falls back to the parent for unresolved children, drafts, and invalid values', () => {
-    expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'gone' }, context)).toBe(
-      parentSessionId
-    );
+  it('follows a promotion alias when the draft is gone', () => {
+    // The send instant: the draft leaves local state before the router commits
+    // `session:<child>`. The alias keeps the new conversation active through
+    // that window with zero frames on the parent.
+    expect(
+      resolveActiveSessionTab(
+        { kind: 'draft', draftId: 'draft:sent' },
+        { ...context, promotedChildSessionIdsByDraftId: { 'draft:sent': 'child-new' } }
+      )
+    ).toBe('child-new');
+  });
+
+  it('prefers a live draft over its promotion alias', () => {
+    // A failed send keeps the draft; retrying reuses the same ids. The live
+    // draft must win so the user stays on the composer, not a dead child.
+    expect(
+      resolveActiveSessionTab(
+        { kind: 'draft', draftId: 'draft:d1' },
+        { ...context, promotedChildSessionIdsByDraftId: { 'draft:d1': 'child-new' } }
+      )
+    ).toBe('draft:d1');
+  });
+
+  it('resolves an unknown draft and invalid values to the parent', () => {
+    // Drafts are device-local, so absence (with no alias) is positive
+    // evidence, unlike a session id.
     expect(resolveActiveSessionTab({ kind: 'draft', draftId: 'draft:gone' }, context)).toBe(
       parentSessionId
     );
     expect(resolveActiveSessionTab({ kind: 'invalid' }, context)).toBe(parentSessionId);
-  });
-
-  it('normalizes an explicit parent tab value', () => {
-    expect(resolveActiveSessionTab({ kind: 'session', sessionId: parentSessionId }, context)).toBe(
-      parentSessionId
-    );
-  });
-});
-
-describe('shouldClearSessionUrlTab', () => {
-  const context = {
-    parentSessionId,
-    childSessionIds: ['child-a'],
-    draftTabIds: ['draft:d1'],
-    childSessionsResolved: true,
-  };
-
-  it('never clears a missing value (clearing converges)', () => {
-    expect(shouldClearSessionUrlTab({ kind: 'missing' }, context)).toBe(false);
-  });
-
-  it('clears invalid and redundant parent values', () => {
-    expect(shouldClearSessionUrlTab({ kind: 'invalid' }, context)).toBe(true);
-    expect(shouldClearSessionUrlTab({ kind: 'session', sessionId: parentSessionId }, context)).toBe(
-      true
-    );
-  });
-
-  it('keeps an unresolved child while child meta is still loading', () => {
-    // A slow meta cache must never strip a valid child tab: the tab renders
-    // the parent as a fallback, but the URL keeps the user's intent.
-    expect(
-      shouldClearSessionUrlTab(
-        { kind: 'session', sessionId: 'child-still-loading' },
-        { ...context, childSessionIds: [], childSessionsResolved: false }
-      )
-    ).toBe(false);
-  });
-
-  it('clears a child the resolved meta cache does not contain', () => {
-    expect(shouldClearSessionUrlTab({ kind: 'session', sessionId: 'gone' }, context)).toBe(true);
-  });
-
-  it('clears an unpersisted draft and keeps a live one', () => {
-    expect(shouldClearSessionUrlTab({ kind: 'draft', draftId: 'draft:d1' }, context)).toBe(false);
-    expect(shouldClearSessionUrlTab({ kind: 'draft', draftId: 'draft:gone' }, context)).toBe(true);
   });
 });
