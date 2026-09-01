@@ -832,6 +832,7 @@ const renderMessageRow = ({
             autoRetryEnabled: true,
             autoRetryExhausted: false,
             retry: action,
+            stopAutoRetry: action,
           }
         : undefined
     }
@@ -1455,6 +1456,12 @@ export const DesktopPlanFlowLight: Story = {
 export const DesktopCapacityRetry: Story = {
   args: { showCapacityRetry: true },
   globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopCapacityRetryChinese: Story = {
+  args: { showCapacityRetry: true },
+  globals: { theme: 'light', locale: 'zh_CN' },
   decorators: [withDesktopViewport],
 };
 

@@ -2107,6 +2107,7 @@
   "sessions.systemNotices.chatFailed.retryIn": "{{seconds}} 秒后重试",
   "sessions.systemNotices.chatFailed.retryNow": "立即重试",
   "sessions.systemNotices.chatFailed.retrying": "正在重试…",
+  "sessions.systemNotices.chatFailed.stopAutoRetry": "停止自动重试",
   "sessions.systemNotices.chatFailed.codeLabel": "错误码",
   "sessions.systemNotices.chatFailed.detailsDescription": "完整的 Agent 错误详情",
   "sessions.systemNotices.resumeFromExternalChatHistory.message": "正在从聊天记录恢复对话，部分上下文可能受限。",

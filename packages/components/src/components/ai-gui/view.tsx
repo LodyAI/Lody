@@ -402,6 +402,7 @@ export interface CapacityRetryControl {
   autoRetryEnabled: boolean;
   autoRetryExhausted: boolean;
   retry: () => void;
+  stopAutoRetry: () => void;
 }
 
 // Exported for focused message/action binding tests.
@@ -2410,36 +2411,47 @@ const ChatFailedNoticeView = ({
 
   const retryAction =
     isProviderOverloaded && capacityRetry ? (
-      <button
-        type="button"
-        className="relative isolate h-7 shrink-0 overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-        disabled={capacityRetry.pending || !capacityRetry.canRetry}
-        onClick={capacityRetry.retry}
-      >
-        {capacityRetry.retryRemainingRatio !== null ? (
-          <span
-            aria-hidden="true"
-            className="absolute inset-y-0 left-0 -z-10 bg-muted-foreground/[0.08] transition-[width] duration-300 ease-linear"
-            style={{ width: `${capacityRetry.retryRemainingRatio * 100}%` }}
-          />
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          className="relative isolate h-7 shrink-0 overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+          disabled={capacityRetry.pending || !capacityRetry.canRetry}
+          onClick={capacityRetry.retry}
+        >
+          {capacityRetry.retryRemainingRatio !== null ? (
+            <span
+              aria-hidden="true"
+              className="absolute inset-y-0 left-0 -z-10 bg-muted-foreground/[0.08] transition-[width] duration-300 ease-linear"
+              style={{ width: `${capacityRetry.retryRemainingRatio * 100}%` }}
+            />
+          ) : null}
+          <span className="relative z-10">
+            {capacityRetry.pending
+              ? t('sessions.systemNotices.chatFailed.retrying', 'Retrying…')
+              : capacityRetry.retryInSeconds !== null
+                ? t('sessions.systemNotices.chatFailed.retryIn', 'Retry in {{seconds}}s', {
+                    seconds: capacityRetry.retryInSeconds,
+                  })
+                : capacityRetry.autoRetryExhausted
+                  ? t('sessions.systemNotices.chatFailed.retryAgain', 'Retry again')
+                  : capacityRetry.autoRetryEnabled
+                    ? t('sessions.systemNotices.chatFailed.retryNow', 'Retry now')
+                    : t(
+                        'sessions.systemNotices.chatFailed.retryAndEnableAuto',
+                        'Retry and auto-retry'
+                      )}
+          </span>
+        </button>
+        {capacityRetry.retryInSeconds !== null ? (
+          <button
+            type="button"
+            className="h-7 shrink-0 rounded-full px-2 text-xs font-normal text-muted-foreground transition-colors hover:bg-muted-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={capacityRetry.stopAutoRetry}
+          >
+            {t('sessions.systemNotices.chatFailed.stopAutoRetry', 'Stop auto-retry')}
+          </button>
         ) : null}
-        <span className="relative z-10">
-          {capacityRetry.pending
-            ? t('sessions.systemNotices.chatFailed.retrying', 'Retrying…')
-            : capacityRetry.retryInSeconds !== null
-              ? t('sessions.systemNotices.chatFailed.retryIn', 'Retry in {{seconds}}s', {
-                  seconds: capacityRetry.retryInSeconds,
-                })
-              : capacityRetry.autoRetryExhausted
-                ? t('sessions.systemNotices.chatFailed.retryAgain', 'Retry again')
-                : capacityRetry.autoRetryEnabled
-                  ? t('sessions.systemNotices.chatFailed.retryNow', 'Retry now')
-                  : t(
-                      'sessions.systemNotices.chatFailed.retryAndEnableAuto',
-                      'Retry and auto-retry'
-                    )}
-        </span>
-      </button>
+      </div>
     ) : null;
 
   return (

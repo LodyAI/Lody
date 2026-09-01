@@ -16,6 +16,7 @@ export type CapacityRetryControl = {
   autoRetryEnabled: boolean;
   autoRetryExhausted: boolean;
   retry: () => void;
+  stopAutoRetry: () => void;
 };
 
 type CapacityRetryHistoryEntry = {
@@ -111,6 +112,12 @@ export function useCapacityAutoRetry(options: {
     void performRetry(noticeId, false);
   }, [canRetry, noticeId, performRetry]);
 
+  const stopAutoRetry = useCallback(() => {
+    setAutoRetryEnabled(false);
+    setRetryInSeconds(null);
+    setRetryRemainingRatio(null);
+  }, []);
+
   const autoRetryExhausted = automaticAttemptsRef.current >= MAX_AUTOMATIC_RETRIES;
 
   useEffect(() => {
@@ -159,5 +166,6 @@ export function useCapacityAutoRetry(options: {
     autoRetryEnabled,
     autoRetryExhausted,
     retry,
+    stopAutoRetry,
   };
 }

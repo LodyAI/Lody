@@ -2107,6 +2107,7 @@
   "sessions.systemNotices.chatFailed.retryIn": "Retry in {{seconds}}s",
   "sessions.systemNotices.chatFailed.retryNow": "Retry now",
   "sessions.systemNotices.chatFailed.retrying": "Retrying…",
+  "sessions.systemNotices.chatFailed.stopAutoRetry": "Stop auto-retry",
   "sessions.systemNotices.chatFailed.codeLabel": "Code",
   "sessions.systemNotices.chatFailed.detailsDescription": "Full agent error details",
   "sessions.systemNotices.resumeFromExternalChatHistory.message": "Resuming conversation from chat history. Some context may be limited.",

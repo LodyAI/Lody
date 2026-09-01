@@ -127,4 +127,38 @@ describe('capacity auto retry', () => {
     await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('lets the user stop automatic retries during a countdown', async () => {
+    const onRetry = vi.fn().mockResolvedValue(true);
+    let history = [capacityFailure('capacity-1')];
+    let control: CapacityRetryControl | null = null;
+
+    function Consumer() {
+      control = useCapacityAutoRetry({
+        sessionId: 'session-1',
+        history,
+        canRetry: true,
+        onRetry,
+      });
+      return null;
+    }
+
+    await act(async () => root.render(<Consumer />));
+    await act(async () => control?.retry());
+    history = [
+      capacityFailure('capacity-1'),
+      { id: 'continuation-1', role: 'user', items: [] },
+      capacityFailure('capacity-2'),
+    ];
+    await act(async () => root.render(<Consumer />));
+    expect(control?.retryInSeconds).toBe(5);
+
+    await act(async () => control?.stopAutoRetry());
+    expect(control?.autoRetryEnabled).toBe(false);
+    expect(control?.retryInSeconds).toBeNull();
+    expect(control?.retryRemainingRatio).toBeNull();
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });
