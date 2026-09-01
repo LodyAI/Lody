@@ -47,7 +47,7 @@ import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { isMac } from '@/lib/commands/platform';
 import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
-import { isSessionContextCompacting } from '@/lib/session-context-compaction';
+import { isSessionContextCompacting, canStopAgentEnabled } from '@/lib/session-context-compaction';
 import { hasFileTransfer, getFilesFromDataTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
@@ -3367,10 +3367,13 @@ export const SessionChatInterface = memo(
       isSessionWorking,
       isGoalActive,
     });
-    const canStopAgent =
-      isContextCompacting ||
-      (isSessionActive && activeAssistantTurnId != null) ||
-      (isGoalActive && canPauseGoal);
+    const canStopAgent = canStopAgentEnabled({
+      isContextCompacting,
+      isSessionActive,
+      activeAssistantTurnId,
+      isGoalActive,
+      canPauseGoal,
+    });
     const latestCompletedProposedPlan = useMemo(
       () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
       [sessionDoc?.history]
