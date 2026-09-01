@@ -347,7 +347,9 @@ export async function discoverChatWorkspaceAlignmentRails(
         if (element.matches('a')) return 'link';
         if (element.matches('input, select, textarea')) return 'field';
         if (element.matches('svg')) return 'svg';
-        return hasDirectText(element) ? 'text' : null;
+        if (!hasDirectText(element)) return null;
+        const text = element.textContent?.trim().replace(/\s+/g, ' ') ?? '';
+        return /^[+\-\u2212\d\s]+$/.test(text) ? 'numeric-text' : 'text';
       };
       const describe = (element: Element, index: number) => {
         const ariaLabel = element.getAttribute('aria-label');

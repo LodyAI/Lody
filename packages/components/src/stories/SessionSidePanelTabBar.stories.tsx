@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
+import { SessionChangesSidebar } from '@/components/sessions/session-changes-sidebar';
 import {
   getSidePanelTabCloseFallback,
   SessionSidePanelEmptyState,
@@ -8,6 +9,7 @@ import {
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
 } from '@/components/sessions/session-side-panel-tab-bar';
+import { CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE } from '@/lib/chat-workspace-geometry';
 import { Button } from '@/ui/button';
 
 const ALL_PANELS: SessionSidePanelOption[] = [
@@ -41,6 +43,13 @@ const INITIAL_TABS: SessionSidePanelTabItem[] = [
     dirty: true,
   },
   { id: 'diff:turn-1', label: 'Conversation Diff', kind: 'diff', closeable: true },
+];
+
+const GEOMETRY_CHANGE_ENTRIES = [
+  { filePath: 'packages/components/src/components/sessions/session-detail.tsx', add: 60, del: 12 },
+  { filePath: 'packages/components/src/lib/chat-workspace-geometry.ts', add: 40, del: 8 },
+  { filePath: 'docs/session-layout.md', add: 60, del: 12 },
+  { filePath: 'docs/geometry-validation.md', add: 40, del: 8 },
 ];
 
 function SidePanelTabBarStory() {
@@ -106,6 +115,61 @@ function SidePanelTabBarStory() {
   );
 }
 
+function RightSidePanelGeometryStory() {
+  const tabs: SessionSidePanelTabItem[] = [
+    { ...ALL_PANELS[1]!, closeable: true },
+    { ...ALL_PANELS[2]!, closeable: true },
+    {
+      id: 'file:src/app.tsx',
+      label: 'app.tsx',
+      kind: 'file',
+      filePath: 'src/app.tsx',
+      closeable: true,
+      dirty: true,
+    },
+  ];
+
+  return (
+    <div
+      data-geometry-fixture-ready="true"
+      className="flex h-screen justify-end bg-background p-2 text-foreground"
+    >
+      <div
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.side-panel' }}
+        className="flex h-full w-[420px] min-w-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-[0_1px_3px_-1px_rgba(15,17,21,0.08),0_1px_2px_rgba(15,17,21,0.04)]"
+      >
+        <SessionSidePanelTabBar
+          tabs={tabs}
+          activeTabId="changes"
+          availablePanels={ALL_PANELS.filter(
+            (panel) => panel.id === 'side-session' || !tabs.some((tab) => tab.id === panel.id)
+          )}
+          onTabSelect={() => {}}
+          onTabClose={() => {}}
+          onPanelOpen={() => {}}
+          addPanelLabel="Add panel"
+          closeTabLabel={(label) => `Close ${label}`}
+          endSlot={
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+              <PanelRight className="h-4 w-4" />
+            </Button>
+          }
+          className="h-11 border-b border-border/50 bg-background"
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <SessionChangesSidebar
+            ready
+            synced
+            changeEntries={GEOMETRY_CHANGE_ENTRIES}
+            changeFilePaths={GEOMETRY_CHANGE_ENTRIES.map((entry) => entry.filePath)}
+            onOpenChangesDiff={() => {}}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sessions/SessionSidePanelTabBar',
   component: SessionSidePanelTabBar,
@@ -160,4 +224,8 @@ export const EmptyState: Story = {
       </div>
     </div>
   ),
+};
+
+export const GeometryReport: Story = {
+  render: () => <RightSidePanelGeometryStory />,
 };

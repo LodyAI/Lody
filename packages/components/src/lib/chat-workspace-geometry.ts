@@ -1213,6 +1213,8 @@ function selectPreferredAlignmentRailAnchor(
     return representative?.members.map((member) => member.kind) ?? [];
   });
   const textShare = kinds.filter((kind) => kind === 'text').length / Math.max(1, kinds.length);
+  const numericTextShare =
+    kinds.filter((kind) => kind === 'numeric-text').length / Math.max(1, kinds.length);
   const normalizedLines = (anchor: AlignmentRailCandidateAnchor) =>
     observations.flatMap(({ family, scope }) => {
       const rail = family.rails.find((candidate) => candidate.anchor === anchor);
@@ -1220,6 +1222,7 @@ function selectPreferredAlignmentRailAnchor(
     });
   const starts = normalizedLines('inline-start');
   const ends = normalizedLines('inline-end');
+  if (numericTextShare >= 0.5 && ends.length > 0) return 'inline-end';
   if (textShare >= 0.5 && starts.length > 0) return 'inline-start';
   if (ends.length > 0 && median(ends) >= 0.72) return 'inline-end';
   if (starts.length > 0 && median(starts) <= 0.28) return 'inline-start';

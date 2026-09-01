@@ -141,6 +141,7 @@ const DISCOVERY_SCOPE_LABELS: Readonly<Record<string, string>> = {
   'session.messages': '消息列表',
   'session.page': '会话页整体',
   'session.permission': '权限确认区',
+  'session.side-panel': '右侧栏整体',
   'sidebar.group:__only_chats__': 'Sidebar Chats 会话分组',
   'sidebar.local-projects:geometry': 'Sidebar 本地项目与会话列表',
   'sidebar.shell': 'Sidebar 整体工作区',
@@ -150,6 +151,7 @@ const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
   'Chat Session / Agent Question': 'Chat Session / Agent 提问态',
   'Chat Session / Idle': 'Chat Session / 空闲态',
   'Chat Session / Permission': 'Chat Session / 权限确认态',
+  'Chat Session / Right Sidebar': 'Chat Session / 右侧栏',
   'Chat Session / Working': 'Chat Session / 工作态（冻结帧）',
   'Workspace / Chat Landing': 'Workspace / Chat Landing',
 };
@@ -1163,6 +1165,52 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery: sessionRailDiscovery,
     });
   }
+
+  const rightSidebarResponse = await page.goto(
+    `${storybookOrigin}/iframe.html?id=sessions-sessionsidepaneltabbar--geometry-report&viewMode=story`
+  );
+  expect(rightSidebarResponse?.ok()).toBeTruthy();
+  await enableReportCaptureMode(page);
+  const rightSidebarRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
+    aggregateScopes: ['session.side-panel'],
+  });
+  expect(
+    rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')
+  ).toBe(true);
+  const rightSidebarDetails = createDiscoveryDetails({
+    surface: 'Chat Session / Right Sidebar',
+    idPrefix: 'session-right-sidebar',
+    viewport,
+    railDiscovery: rightSidebarRailDiscovery,
+  });
+  expect(rightSidebarDetails.length).toBeGreaterThan(0);
+  for (const detail of rightSidebarDetails) {
+    await page.screenshot({
+      path: path.join(outputDirectory, detail.images.clean),
+      clip: detail.clip,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'device',
+    });
+  }
+  for (const detail of rightSidebarDetails) {
+    await showOnlyDetailSemanticGuides(page, detail);
+    await page.screenshot({
+      path: path.join(outputDirectory, detail.images.annotated),
+      clip: detail.clip,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'device',
+    });
+  }
+  sessionDetails.push(...rightSidebarDetails);
+  discoverySurfaces.push({
+    captureId: 'session-right-sidebar:1440x900',
+    contractDomain: 'session',
+    surface: 'Chat Session / Right Sidebar',
+    viewport,
+    railDiscovery: rightSidebarRailDiscovery,
+  });
 
   const details = [...workspaceDetails, ...sessionDetails]
     .map((detail, sourceIndex) => ({ detail, sourceIndex }))

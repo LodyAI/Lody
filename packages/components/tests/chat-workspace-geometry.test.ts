@@ -546,6 +546,43 @@ describe('conversation, spacing, and semantic baselines', () => {
     });
   });
 
+  it('selects the trailing edge for repeated numeric text', () => {
+    const rows = [
+      { id: 'one-digit', left: 80, right: 100 },
+      { id: 'two-digits', left: 72, right: 100 },
+      { id: 'three-digits', left: 64, right: 100 },
+    ];
+    const candidates: AlignmentRailCandidate[] = rows.flatMap((row, index) => {
+      const common = {
+        elementId: row.id,
+        rowId: `row-${index + 1}`,
+        kind: 'numeric-text',
+        yStart: index * 32,
+        yEnd: index * 32 + 20,
+      };
+      return [
+        { ...common, anchor: 'inline-start' as const, coordinate: row.left },
+        { ...common, anchor: 'inline-end' as const, coordinate: row.right },
+      ];
+    });
+
+    const rails = selectCanonicalAlignmentRails(discoverAlignmentRails(candidates), {
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 120,
+    });
+
+    expect(rails).toEqual([
+      expect.objectContaining({
+        anchor: 'inline-end',
+        line: 100,
+        support: 3,
+        outliers: [],
+      }),
+    ]);
+  });
+
   it('does not let nested boxes on one row manufacture rail support', () => {
     const result = discoverAlignmentRails(
       [

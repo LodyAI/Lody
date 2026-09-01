@@ -57,6 +57,8 @@ mobile surfaces.
   rail's span relative to its containing scope rather than the minimum-span admission threshold. Flow
   text may contribute start/end edges but never a center rail because its box center changes
   with content and wrapping; center evidence comes from controls with an explicit geometry.
+  Numeric text, including signed diff statistics, canonically uses its trailing edge so changing
+  digit counts do not manufacture leading-edge outliers in right-aligned columns.
   Discovery must not read semantic-alignment attributes: it derives visual rows and their
   direct layout slots from ordinary DOM topology, including transparent hover controls that
   still occupy layout. It preserves each slot's start/center/end family until all captures
@@ -67,8 +69,9 @@ mobile surfaces.
   discovered rail or proposal is not layout intent and cannot pass or fail the gate until
   a contract compiler binds it to stable
   semantic members and review promotes it into a named rule. Geometry-report capture covers
-  Sidebar plus session states that materially change visible geometry; it does not duplicate an
-  isomorphic conversation layout solely for a transient interaction such as mention drop.
+  the workspace Sidebar, the production-composed session right sidebar, and session states that
+  materially change visible geometry; it does not duplicate an isomorphic conversation layout
+  solely for a transient interaction such as mention drop.
   Violation images label every deviating member in place with its human-readable role, physical
   direction, measured offset, actual anchor, and a leader to the rendered element; a bare
   internal member id or an unlabelled shared line is not an actionable design finding.
