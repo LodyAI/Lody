@@ -14,6 +14,7 @@ import {
 import {
   isAgentRoleRunConfigApplied,
   isComposerAgentRoleApplied,
+  resolveProgrammaticTurnAgentRole,
   selectSessionAgentRoles,
 } from '../src/lib/composer-agent-roles';
 
@@ -47,8 +48,7 @@ describe('selectSessionAgentRoles', () => {
     name: 'Reviewer',
     agentConfigId: 'codex-1' as AgentConfigId,
   });
-  // Same TYPE, other config, other machine: its run-config values are published
-  // per cliType:agentType, so they still mean something for this session.
+  // Same provider type, but a different machine/config binding.
   const codexElsewhere = makeRole({
     id: 'r-codex-2' as AgentRoleId,
     name: 'Auditor',
@@ -65,21 +65,26 @@ describe('selectSessionAgentRoles', () => {
     config('codex-2', 'codex', 'machine-2'),
     config('claude-1', 'claude'),
   ];
+  const resolveAvailability = () => ({ kind: 'available' as const });
 
-  it('offers every Role bound to an agent of the same type, on any machine', () => {
+  it('offers only Roles bound to the existing Session machine and provider', () => {
     const items = selectSessionAgentRoles({
       roles: [codexHere, codexElsewhere, claude],
-      agentType: 'codex',
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'codex-1' as AgentConfigId,
       agentConfigs,
+      resolveAvailability,
     });
-    expect(items.map((item) => item.role.id)).toEqual(['r-codex-2', 'r-codex']);
+    expect(items.map((item) => item.role.id)).toEqual(['r-codex']);
   });
 
-  it('drops a Role bound to another agent type — its values would not transfer', () => {
+  it('drops a Role bound to another provider on the same machine', () => {
     const items = selectSessionAgentRoles({
       roles: [claude],
-      agentType: 'codex',
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'codex-1' as AgentConfigId,
       agentConfigs,
+      resolveAvailability,
     });
     expect(items).toEqual([]);
   });
@@ -90,26 +95,71 @@ describe('selectSessionAgentRoles', () => {
       name: 'Orphan',
       agentConfigId: 'deleted' as AgentConfigId,
     });
-    expect(selectSessionAgentRoles({ roles: [orphan], agentType: 'codex', agentConfigs })).toEqual(
-      []
-    );
+    expect(
+      selectSessionAgentRoles({
+        roles: [orphan],
+        machineId: 'machine-1' as MachineId,
+        agentConfigId: 'deleted' as AgentConfigId,
+        agentConfigs,
+        resolveAvailability,
+      })
+    ).toEqual([]);
   });
 
-  it('offers nothing until the session reports its agent type', () => {
-    expect(selectSessionAgentRoles({ roles: [codexHere], agentType: null, agentConfigs })).toEqual(
-      []
-    );
+  it('offers nothing until the session reports its exact provider binding', () => {
+    expect(
+      selectSessionAgentRoles({
+        roles: [codexHere],
+        machineId: 'machine-1' as MachineId,
+        agentConfigId: null,
+        agentConfigs,
+        resolveAvailability,
+      })
+    ).toEqual([]);
   });
 
-  // Nothing is going to that Role's machine, so its availability is not what is
-  // being asked of it here.
-  it('does not consult availability, because the binding is not executed', () => {
+  it('preserves resolved availability so a stale Role cannot be selected', () => {
     const items = selectSessionAgentRoles({
-      roles: [codexElsewhere],
-      agentType: 'codex',
+      roles: [codexHere],
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'codex-1' as AgentConfigId,
       agentConfigs,
+      resolveAvailability: () => ({ kind: 'unavailable', reason: 'machine_offline' }),
     });
-    expect(items[0]?.availability).toEqual({ kind: 'available' });
+    expect(items[0]?.availability).toEqual({
+      kind: 'unavailable',
+      reason: 'machine_offline',
+    });
+  });
+});
+
+describe('resolveProgrammaticTurnAgentRole', () => {
+  const durableRoleId = 'role-durable' as AgentRoleId;
+  const composerRoleId = 'role-composer' as AgentRoleId;
+
+  it('inherits the committed composer selection before the older durable Turn', () => {
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        composer: { agentRoleId: composerRoleId, agentRoleRevision: 3 },
+        durableRoleId,
+        durableRoleRevision: 2,
+      })
+    ).toEqual({ agentRoleId: composerRoleId, agentRoleRevision: 3 });
+  });
+
+  it('preserves explicit None and falls back to durable metadata when the composer is absent', () => {
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        requested: null,
+        composer: { agentRoleId: composerRoleId, agentRoleRevision: 3 },
+        durableRoleId,
+        durableRoleRevision: 2,
+      })
+    ).toBeNull();
+    expect(resolveProgrammaticTurnAgentRole({ durableRoleId, durableRoleRevision: 2 })).toEqual({
+      agentRoleId: durableRoleId,
+      agentRoleRevision: 2,
+    });
   });
 });
 

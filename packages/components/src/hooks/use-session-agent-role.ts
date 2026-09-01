@@ -1,8 +1,12 @@
-import { useCallback, useMemo, useState } from 'react';
-import { useAtomValue } from 'jotai';
-import type { AgentRoleId, SessionId } from '@lody/shared';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
+import type { AgentConfigId, AgentRoleId, MachineId, SessionId } from '@lody/shared';
 
 import { getAllAgentConfigAtom } from '@/atoms/agents';
+import {
+  sessionAgentRoleDurableSnapshotAtomFamily,
+  sessionAgentRoleSelectionAtomFamily,
+} from '@/atoms/session-agent-roles';
 import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
@@ -13,13 +17,19 @@ import {
   isAgentRoleRunConfigApplied,
   selectSessionAgentRoles,
   type ComposerAgentRoleItem,
+  type SessionTurnAgentRoleSelection,
 } from '@/lib/composer-agent-roles';
-import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
+import {
+  useAgentRoleAvailability,
+  useWorkspaceAgentRoles,
+} from '@/hooks/use-workspace-agent-roles';
 
 export type SessionAgentRoleControl = {
   items: ComposerAgentRoleItem[];
   /** The Role this session's run config still IS, not merely the last picked. */
   selectedRoleId: AgentRoleId | null;
+  /** Three-state Turn metadata: undefined=legacy/unknown, null=explicit None. */
+  turnSelection?: SessionTurnAgentRoleSelection;
   onSelect: (roleId: AgentRoleId | null) => void;
 };
 
@@ -27,21 +37,29 @@ export type SessionAgentRoleControl = {
  * The Role row for an EXISTING session's composer.
  *
  * A live session's agent is fixed, so this is deliberately not the landing's
- * feature. It offers only Roles bound to an agent of the same TYPE and applies
- * only their RUN CONFIG — model, reasoning, permission, and whatever else that
- * agent publishes — because those are exactly the values that transfer between
- * configs of one type and exactly the values a session can still change per
- * turn. The Role's machine, config, and instruction are not applied and are not
- * claimed to be.
+ * feature. It offers only Roles bound to the Session's exact machine and Agent
+ * Config (its model provider), and applies only their RUN CONFIG — model,
+ * reasoning, permission, and whatever else that agent publishes — because
+ * those are exactly the values a session can still change per turn. The Role's
+ * machine, config, and instruction are not applied and are not claimed to be.
  *
  * Applied by calling the composer's own change callbacks rather than through a
  * preference channel: this surface has no reconcile pass to seed, and a value
- * the agent does not support is skipped rather than forced in.
+ * the agent does not support is skipped rather than forced in. An unsent picked
+ * Role lives in session-keyed app state because navigation unmounts this
+ * composer; accepted choices live in synchronized Turn inputConfig.
  */
 export function useSessionAgentRole({
   sessionId,
   provenanceRoleId,
-  agentType,
+  provenanceRoleRevision,
+  durableRoleId,
+  durableRoleRevision,
+  durableSourceTurnKey,
+  durableKnownSourceTurnKeys = [],
+  durableRoleReady = true,
+  machineId,
+  agentConfigId,
   modelOptions,
   selectedModelId,
   onModelChange,
@@ -55,7 +73,18 @@ export function useSessionAgentRole({
   sessionId: SessionId;
   /** Role that created this session; seeds only the composer's display name. */
   provenanceRoleId?: AgentRoleId;
-  agentType: string | null | undefined;
+  provenanceRoleRevision?: number;
+  /** Latest accepted/queued Turn selection. Null is explicit None. */
+  durableRoleId?: AgentRoleId | null;
+  durableRoleRevision?: number;
+  /** Stable logical Turn identity used to fence local unsent choices. */
+  durableSourceTurnKey?: string;
+  /** Logical Turns visible when the latest durable snapshot was resolved. */
+  durableKnownSourceTurnKeys?: readonly string[];
+  /** False while the Session document is hydrating after a remount. */
+  durableRoleReady?: boolean;
+  machineId: MachineId | null | undefined;
+  agentConfigId: AgentConfigId | null | undefined;
   modelOptions: ReadonlyArray<AcpSessionSelectOption>;
   selectedModelId: string | null;
   onModelChange?: (value: string) => void;
@@ -66,27 +95,113 @@ export function useSessionAgentRole({
   configOptionValues: Record<string, AcpConfigOptionValue | undefined> | undefined;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
 }): SessionAgentRoleControl {
-  const { roles } = useWorkspaceAgentRoles();
+  const { roles, synced: agentRolesSynced } = useWorkspaceAgentRoles();
+  const scopedRoles = useMemo(
+    () =>
+      machineId && agentConfigId
+        ? roles.filter(
+            (role) => role.machineId === machineId && role.agentConfigId === agentConfigId
+          )
+        : [],
+    [agentConfigId, machineId, roles]
+  );
+  const { resolve: resolveAvailability } = useAgentRoleAvailability(scopedRoles);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+  const resolvedItems = useMemo(
+    () =>
+      selectSessionAgentRoles({
+        roles: scopedRoles,
+        machineId,
+        agentConfigId,
+        agentConfigs,
+        resolveAvailability,
+      }),
+    [agentConfigId, agentConfigs, machineId, resolveAvailability, scopedRoles]
+  );
   const items = useMemo(
-    () => selectSessionAgentRoles({ roles, agentType, agentConfigs }),
-    [agentConfigs, agentType, roles]
+    () =>
+      durableRoleReady
+        ? resolvedItems
+        : resolvedItems.map((item) => ({ ...item, availability: { kind: 'unknown' } as const })),
+    [durableRoleReady, resolvedItems]
   );
 
   /* Which Role was picked, as a NAME. A newly created session starts with its
      provenance Role, while an explicit choice (including None) overrides that
-     seed for this mounted session. Scoping the override keeps a reused composer
-     from carrying one session's Role into another. Whether the Role still
-     describes the run config is derived below, so a knob moved by hand takes
-     the name away on its own. */
-  const [selectionOverride, setSelectionOverride] = useState<{
-    sessionId: SessionId;
-    roleId: AgentRoleId | null;
-  } | null>(null);
+     seed in session-keyed app state. Whether the Role still describes the run
+     config is derived below, so a knob moved by hand takes the name away on its
+     own. */
+  const [selectionOverride, setSelectionOverride] = useAtom(
+    sessionAgentRoleSelectionAtomFamily(sessionId)
+  );
+  const [durableSnapshot, setDurableSnapshot] = useAtom(
+    sessionAgentRoleDurableSnapshotAtomFamily(sessionId)
+  );
+  const hydratedTurnKey = durableSourceTurnKey ?? null;
+  const hydratedKnownTurnKeys = useMemo(
+    () =>
+      durableKnownSourceTurnKeys.length > 0
+        ? durableKnownSourceTurnKeys
+        : hydratedTurnKey
+          ? [hydratedTurnKey]
+          : [],
+    [durableKnownSourceTurnKeys, hydratedTurnKey]
+  );
+  const effectiveKnownTurnKeys = durableRoleReady
+    ? hydratedKnownTurnKeys
+    : (durableSnapshot?.knownTurnKeys ??
+      selectionOverride?.basedOnTurnKeys ??
+      hydratedKnownTurnKeys);
+  const effectiveDurableRoleId =
+    !durableRoleReady && durableSnapshot ? durableSnapshot.roleId : durableRoleId;
+  const effectiveDurableRoleRevision =
+    !durableRoleReady && durableSnapshot ? durableSnapshot.roleRevision : durableRoleRevision;
+  useEffect(() => {
+    if (!durableRoleReady) return;
+    setDurableSnapshot((current) => {
+      if (
+        current &&
+        current.roleId === durableRoleId &&
+        current.roleRevision === durableRoleRevision &&
+        current.currentTurnKey === hydratedTurnKey &&
+        current.knownTurnKeys.length === hydratedKnownTurnKeys.length &&
+        current.knownTurnKeys.every((key, index) => key === hydratedKnownTurnKeys[index])
+      ) {
+        return current;
+      }
+      return {
+        roleId: durableRoleId,
+        roleRevision: durableRoleRevision,
+        currentTurnKey: hydratedTurnKey,
+        knownTurnKeys: hydratedKnownTurnKeys,
+      };
+    });
+  }, [
+    durableRoleId,
+    durableRoleReady,
+    durableRoleRevision,
+    hydratedKnownTurnKeys,
+    hydratedTurnKey,
+    setDurableSnapshot,
+  ]);
+  const selectionOverrideIsCurrent =
+    !selectionOverride ||
+    effectiveKnownTurnKeys.every((key) => selectionOverride.basedOnTurnKeys.includes(key));
   const pickedRoleId =
-    selectionOverride?.sessionId === sessionId
+    selectionOverride && (!durableRoleReady || selectionOverrideIsCurrent)
       ? selectionOverride.roleId
-      : (provenanceRoleId ?? null);
+      : effectiveDurableRoleId !== undefined
+        ? effectiveDurableRoleId
+        : (provenanceRoleId ?? null);
+  useEffect(() => {
+    if (!durableRoleReady || !selectionOverride || selectionOverrideIsCurrent) {
+      return;
+    }
+    // A newer durable Turn permanently consumes this draft. Otherwise deleting
+    // a queued Turn could return the resolver to an older source and resurrect
+    // a choice that was already sent or superseded.
+    setSelectionOverride(undefined);
+  }, [durableRoleReady, selectionOverride, selectionOverrideIsCurrent, setSelectionOverride]);
   const selection = useMemo(
     () => ({
       modeId: selectedModeId,
@@ -99,20 +214,46 @@ export function useSessionAgentRole({
     if (!pickedRoleId) return null;
     const role = items.find((item) => item.role.id === pickedRoleId)?.role;
     if (!role) return null;
-    return isAgentRoleRunConfigApplied(role, selection) ? role.id : null;
-  }, [items, pickedRoleId, selection]);
+    return !durableRoleReady || isAgentRoleRunConfigApplied(role, selection) ? role.id : null;
+  }, [durableRoleReady, items, pickedRoleId, selection]);
+  const pickedItem = pickedRoleId ? items.find((item) => item.role.id === pickedRoleId) : undefined;
+  const storedPickedRevision =
+    effectiveDurableRoleId === pickedRoleId
+      ? effectiveDurableRoleRevision
+      : provenanceRoleId === pickedRoleId
+        ? provenanceRoleRevision
+        : undefined;
+  const turnSelection: SessionTurnAgentRoleSelection =
+    selectedRoleId && pickedItem
+      ? {
+          agentRoleId: selectedRoleId,
+          agentRoleRevision: pickedItem.role.revision,
+        }
+      : pickedRoleId === null
+        ? null
+        : pickedItem
+          ? // A manual run-config change means this is no longer that Role.
+            null
+          : !agentRolesSynced || scopedRoles.some((role) => role.id === pickedRoleId)
+            ? typeof storedPickedRevision === 'number'
+              ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
+              : undefined
+            : // The synchronized catalog authoritatively no longer contains it.
+              null;
 
   const onSelect = useCallback(
     (roleId: AgentRoleId | null) => {
       if (roleId === null) {
         // Clears the NAME, not the configuration: the values are the user's own
         // now, and rolling them back would undo choices they never asked to undo.
-        setSelectionOverride({ sessionId, roleId: null });
+        if (!durableRoleReady) return;
+        setSelectionOverride({ roleId: null, basedOnTurnKeys: effectiveKnownTurnKeys });
         return;
       }
-      const role = items.find((item) => item.role.id === roleId)?.role;
-      if (!role) return;
-      setSelectionOverride({ sessionId, roleId });
+      const item = items.find((candidate) => candidate.role.id === roleId);
+      if (!item || item.availability.kind !== 'available') return;
+      const { role } = item;
+      setSelectionOverride({ roleId, basedOnTurnKeys: effectiveKnownTurnKeys });
 
       const { modelId, modeId, configOptionValues: pinned } = role.runConfig;
       if (modelId && modelOptions.some((option) => option.value === modelId)) {
@@ -132,15 +273,17 @@ export function useSessionAgentRole({
     },
     [
       configOptionSelectors,
+      durableRoleReady,
+      effectiveKnownTurnKeys,
       items,
       modeOptions,
       modelOptions,
       onConfigOptionChange,
       onModeChange,
       onModelChange,
-      sessionId,
+      setSelectionOverride,
     ]
   );
 
-  return { items, selectedRoleId, onSelect };
+  return { items, selectedRoleId, turnSelection, onSelect };
 }

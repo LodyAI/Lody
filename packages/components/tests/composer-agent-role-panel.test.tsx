@@ -220,7 +220,11 @@ describe('ComposerAgentRolePanel', () => {
     const view = await render({
       items: [{ ...reviewer, availability: { kind: 'unknown' } }],
     });
+    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
+      node.textContent?.includes('Code Reviewer')
+    );
     expect(view.textContent).toContain('Checking availability');
     expect(view.textContent).not.toContain('Unavailable');
+    expect(row?.getAttribute('data-disabled')).not.toBeNull();
   });
 });

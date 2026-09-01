@@ -83,7 +83,7 @@ export function ComposerAgentRolePanel({
                Role whose configuration you may want to read. */
             <div key={role.id} onPointerEnter={() => setPreviewRoleId(role.id)}>
               <DropdownMenuItem
-                disabled={availability.kind === 'unavailable'}
+                disabled={availability.kind !== 'available'}
                 role="menuitemradio"
                 aria-checked={role.id === selectedRoleId}
                 className="items-start gap-2"

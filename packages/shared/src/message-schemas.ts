@@ -9,7 +9,7 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
-import type { SessionId } from './ids';
+import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema } from './session-orchestration';
@@ -357,6 +357,8 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -376,6 +378,8 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -471,6 +475,23 @@ export const normalizeSessionTurnInputConfig = (
   const taskToolsEnabled = maybeParseField(z.boolean(), record.taskToolsEnabled);
   if (taskToolsEnabled !== undefined) {
     normalized.taskToolsEnabled = taskToolsEnabled;
+  }
+
+  if (record.agentRoleId === null) {
+    normalized.agentRoleId = null;
+  } else {
+    const agentRoleId = trimOptionalString(record.agentRoleId);
+    if (agentRoleId) {
+      normalized.agentRoleId = agentRoleId as AgentRoleId;
+    }
+  }
+
+  const agentRoleRevision = maybeParseField(
+    z.number().int().nonnegative(),
+    record.agentRoleRevision
+  );
+  if (agentRoleRevision !== undefined) {
+    normalized.agentRoleRevision = agentRoleRevision;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);

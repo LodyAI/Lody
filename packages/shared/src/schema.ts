@@ -442,6 +442,16 @@ const issuePrMentionSchema = schema.LoroMap({
   number: schema.Number(),
 });
 
+// Loro Mirror passes null through transforms without invoking encode/decode.
+// The transform therefore gives this optional string its domain-level explicit
+// None state while retaining a primitive string in the CRDT when an id exists.
+const agentRoleIdSchema = schema
+  .String<AgentRoleId>({ required: false })
+  .transform<AgentRoleId | null>({
+    decode: (value) => value,
+    encode: (value) => value,
+  });
+
 const acpSessionConfigSchema = schema
   .LoroMap(
     {
@@ -459,6 +469,9 @@ const acpSessionConfigSchema = schema
       mcpServerIds: schema.Any({ required: false }),
       /** Whether the built-in Lody Task MCP tools are mounted for this Turn. */
       taskToolsEnabled: schema.Boolean({ required: false }),
+      /** Agent Role selected for this Turn; null is explicit None. */
+      agentRoleId: agentRoleIdSchema,
+      agentRoleRevision: schema.Number({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }

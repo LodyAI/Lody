@@ -7,7 +7,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
-import type { AgentConfigId, McpServerId, SessionId } from './ids';
+import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
@@ -1576,6 +1576,15 @@ export type ACPSessionConfig = {
   mcpServerIds?: McpServerId[];
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
+  /**
+   * Agent Role identity selected in the composer for this Turn. Null is an
+   * explicit None selection; absence is legacy/unknown. This is provenance for
+   * restoring synchronized composer state, not an instruction to re-resolve the
+   * mutable Role catalog during execution.
+   */
+  agentRoleId?: AgentRoleId | null;
+  /** Catalog revision whose values were frozen into this Turn. */
+  agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;

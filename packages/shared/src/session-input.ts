@@ -12,7 +12,7 @@ import type {
 } from './ai';
 import { isSessionFileSourcePath } from './ai';
 import type { SessionHistoryInput } from './schema';
-import type { McpServerId } from './ids';
+import type { AgentRoleId, McpServerId } from './ids';
 import { reanchorMessageTextSpansForTrim, sanitizeMessageTextSpans } from './message-text-spans';
 import {
   AgentConfigCliTypeSchema,
@@ -62,11 +62,89 @@ export type SessionConversationConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
   taskToolsEnabled?: boolean;
+  /** Null is an explicit None; undefined means the selected Turn predates this field. */
+  agentRoleId?: AgentRoleId | null;
+  agentRoleRevision?: number;
+};
+
+type SessionConversationSource = {
+  value: unknown;
+  configKey: string;
+  /** Stable across queue -> history promotion for the same logical Turn. */
+  turnKey: string;
+};
+
+const collectSessionConversationSources = (
+  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
+): SessionConversationSource[] => {
+  const sources: SessionConversationSource[] = [];
+  for (let index = messageQueue.length - 1; index >= 0; index -= 1) {
+    const item = messageQueue[index];
+    const itemId = typeof item?.$cid === 'string' ? item.$cid : String(index);
+    const userTurnId =
+      typeof item?.userTurnId === 'string' && item.userTurnId.trim()
+        ? item.userTurnId.trim()
+        : null;
+    sources.push({
+      value: item?.acpSessionConfig,
+      configKey: `queue:${itemId}`,
+      // Matches both renderer-native steer and CLI promotion fallback ids.
+      turnKey: `turn:${userTurnId ?? `queued-${itemId}`}`,
+    });
+  }
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry?.role !== 'user') continue;
+    sources.push({
+      value: entry.inputConfig,
+      configKey: `history:${entry.id}`,
+      turnKey: `turn:${entry.id}`,
+    });
+  }
+  return sources;
+};
+
+export type SessionConversationSourceFence = {
+  /** Latest logical accepted/queued user Turn. */
+  currentTurnKey?: string;
+  /** Every logical user Turn visible when a local composer draft is made. */
+  knownTurnKeys: string[];
+};
+
+/**
+ * Causal fence for unsent composer state.
+ *
+ * A queue row and its promoted history entry share one Turn key. Keeping the
+ * whole currently known lineage lets queue deletion/reordering fall back to an
+ * older known Turn without pretending that a newer Turn superseded the draft.
+ */
+export const resolveSessionConversationSourceFence = (
+  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
+): SessionConversationSourceFence => {
+  const sources = collectSessionConversationSources(history, messageQueue);
+  return {
+    ...(sources[0] ? { currentTurnKey: sources[0].turnKey } : {}),
+    knownTurnKeys: [...new Set(sources.map((source) => source.turnKey))],
+  };
 };
 
 export const resolveSessionConversationConfig = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
-  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
 ): SessionConversationConfig => {
   const resolveConfig = (
     value: unknown,
@@ -88,25 +166,35 @@ export const resolveSessionConversationConfig = (
       ...(typeof inputConfig.taskToolsEnabled === 'boolean'
         ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
         : {}),
+      ...(inputConfig.agentRoleId !== undefined ? { agentRoleId: inputConfig.agentRoleId } : {}),
+      ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
+        ? { agentRoleRevision: inputConfig.agentRoleRevision }
+        : {}),
     };
   };
 
-  const latestQueuedIndex = messageQueue.length - 1;
-  if (latestQueuedIndex >= 0) {
-    const item = messageQueue[latestQueuedIndex];
-    const itemId = typeof item?.$cid === 'string' ? item.$cid : String(latestQueuedIndex);
-    return resolveConfig(item?.acpSessionConfig, `queue:${itemId}`) ?? {};
-  }
+  const sources = collectSessionConversationSources(history, messageQueue);
 
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry?.role !== 'user') {
-      continue;
-    }
-    return resolveConfig(entry.inputConfig, `history:${entry.id}`) ?? {};
-  }
+  const latest = sources[0];
+  if (!latest) return {};
+  const resolved = resolveConfig(latest.value, latest.configKey) ?? {};
+  if (resolved.agentRoleId !== undefined) return resolved;
 
-  return {};
+  // Role selection is sticky across legacy and non-composer Turn producers
+  // that predate this metadata. The first explicit value (including null)
+  // wins; the latest source key still fences unsent local composer drafts.
+  for (const source of sources.slice(1)) {
+    const older = normalizeSessionTurnInputConfig(source.value);
+    if (!older || older.agentRoleId === undefined) continue;
+    return {
+      ...resolved,
+      agentRoleId: older.agentRoleId,
+      ...(older.agentRoleId !== null && older.agentRoleRevision !== undefined
+        ? { agentRoleRevision: older.agentRoleRevision }
+        : {}),
+    };
+  }
+  return resolved;
 };
 
 const normalizeRuntimeConfigOptionValues = (
@@ -540,6 +628,8 @@ export const buildSessionTurnInputConfig = (args: {
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
   taskToolsEnabled?: boolean;
+  agentRoleId?: AgentRoleId | null;
+  agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
@@ -560,6 +650,10 @@ export const buildSessionTurnInputConfig = (args: {
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
     ...(args.taskToolsEnabled !== undefined
       ? { taskToolsEnabled: args.taskToolsEnabled === true }
+      : {}),
+    ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
+    ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined
+      ? { agentRoleRevision: args.agentRoleRevision }
       : {}),
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,

@@ -34,6 +34,80 @@ export type ComposerAgentRoleItem = {
   >;
 };
 
+export type SessionTurnAgentRoleSelection =
+  | {
+      agentRoleId: AgentRoleId;
+      agentRoleRevision: number;
+    }
+  | null
+  | undefined;
+
+export type ComposerRunConfigOverrides = {
+  modeIdOverride?: string | null;
+  modelIdOverride?: string | null;
+  configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+};
+
+/**
+ * Resolve the Role metadata for a programmatic Turn (retry, Goal, PR action,
+ * etc.). Undefined means inherit; null remains an explicit None selection.
+ */
+export function resolveProgrammaticTurnAgentRole({
+  requested,
+  composer,
+  durableRoleId,
+  durableRoleRevision,
+}: {
+  requested?: SessionTurnAgentRoleSelection;
+  composer?: SessionTurnAgentRoleSelection;
+  durableRoleId?: AgentRoleId | null;
+  durableRoleRevision?: number;
+}): SessionTurnAgentRoleSelection {
+  if (requested !== undefined) return requested;
+  if (composer !== undefined) return composer;
+  if (durableRoleId === null) return null;
+  return durableRoleId && typeof durableRoleRevision === 'number'
+    ? { agentRoleId: durableRoleId, agentRoleRevision: durableRoleRevision }
+    : undefined;
+}
+
+/**
+ * Revalidate an inherited Role against the actual run config a programmatic
+ * Turn will freeze. Execute-plan and similar actions deliberately override
+ * Plan/mode values; keeping the old Role id beside those different values
+ * would make the Turn claim a configuration it is not running.
+ *
+ * A catalog-pending Role may still be carried when the run config is untouched.
+ * Once an override exists we must be able to verify the current Role row, or
+ * conservatively freeze explicit None.
+ */
+export function resolveTurnAgentRoleForRunConfig({
+  turnSelection,
+  role,
+  current,
+  overrides,
+}: {
+  turnSelection: SessionTurnAgentRoleSelection;
+  role: AgentRole | undefined;
+  current: ComposerRunConfigValues;
+  overrides?: ComposerRunConfigOverrides;
+}): SessionTurnAgentRoleSelection {
+  if (turnSelection === null || turnSelection === undefined) return turnSelection;
+  const hasOverride =
+    overrides?.modeIdOverride !== undefined ||
+    overrides?.modelIdOverride !== undefined ||
+    overrides?.configOptionValuesOverride !== undefined;
+  if (!hasOverride) return turnSelection;
+  if (!role || role.id !== turnSelection.agentRoleId) return null;
+
+  const effective: ComposerRunConfigValues = {
+    modeId: overrides?.modeIdOverride !== undefined ? overrides.modeIdOverride : current.modeId,
+    modelId: overrides?.modelIdOverride !== undefined ? overrides.modelIdOverride : current.modelId,
+    configOptionValues: overrides?.configOptionValuesOverride ?? current.configOptionValues,
+  };
+  return isAgentRoleRunConfigApplied(role, effective) ? turnSelection : null;
+}
+
 /**
  * The Roles the composer offers for the machine the chat will start on.
  *
@@ -192,16 +266,16 @@ export function isComposerAgentRoleApplied(
 }
 
 /**
- * The Roles an EXISTING session may reuse: those bound to an agent of the same
- * type.
+ * The Roles an EXISTING session may reuse: those bound to its exact machine
+ * and Agent Config (the model-provider binding shown in the composer).
  *
  * A live session's agent is fixed — its machine, its config, its whole
  * runtime — so a Role cannot be executed there the way the landing executes
  * one. What DOES transfer is the run configuration: model, reasoning, and
- * permission options are published per `cliType:agentType`, so a Role authored
- * against another config of the same TYPE pins values this session's agent
- * understands. That is the whole offer here, and it is why availability is not
- * consulted: nothing is going to that Role's machine.
+ * permission options. Keeping the offer on the exact binding avoids presenting
+ * a Role whose provider credentials, capability set, or machine availability do
+ * not describe the running Session. Unavailable Roles remain visible and
+ * disabled with their real reason, just like the new-chat menu.
  *
  * The Role's instruction is NOT part of it. A Role's prompt prefix belongs to
  * the FIRST turn of a session it creates; replaying it into an ongoing
@@ -209,23 +283,26 @@ export function isComposerAgentRoleApplied(
  */
 export function selectSessionAgentRoles({
   roles,
-  agentType,
+  machineId,
+  agentConfigId,
   agentConfigs,
+  resolveAvailability,
 }: {
   roles: readonly AgentRole[];
-  /** The running session's agent type; roles bound to another type are dropped. */
-  agentType: string | null | undefined;
+  /** Existing Sessions stay on this exact machine and provider binding. */
+  machineId: MachineId | null | undefined;
+  agentConfigId: AgentConfigMeta['id'] | null | undefined;
   agentConfigs: readonly AgentConfigMeta[];
+  resolveAvailability: (role: AgentRole) => AgentRoleAvailability;
 }): ComposerAgentRoleItem[] {
-  if (!agentType) return [];
+  if (!machineId || !agentConfigId) return [];
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return roles
     .flatMap((role) => {
+      if (role.machineId !== machineId || role.agentConfigId !== agentConfigId) return [];
       const agentConfig = configById.get(role.agentConfigId);
-      if (agentConfig?.agentType !== agentType) return [];
-      // Availability describes whether the Role could RUN on its own machine,
-      // which is not what is being asked of it here.
-      return [{ role, availability: { kind: 'available' } as const, agentConfig }];
+      if (!agentConfig || agentConfig.machineId !== machineId) return [];
+      return [{ role, availability: resolveAvailability(role), agentConfig }];
     })
     .sort((left, right) => left.role.name.localeCompare(right.role.name));
 }

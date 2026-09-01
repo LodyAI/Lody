@@ -14,6 +14,7 @@ import {
   buildComposerAgentRoleItems,
   doesAgentRolePinPermissionMode,
   isComposerAgentRoleApplied,
+  resolveTurnAgentRoleForRunConfig,
   resolvePendingAgentRoleSelection,
 } from '../src/lib/composer-agent-roles';
 
@@ -174,6 +175,45 @@ describe('isComposerAgentRoleApplied', () => {
       })
     ).toBe(false);
     expect(isComposerAgentRoleApplied(role, { ...matching, agentSelection: null })).toBe(false);
+  });
+});
+
+describe('resolveTurnAgentRoleForRunConfig', () => {
+  const role = makeRole({
+    id: 'r-1' as AgentRoleId,
+    name: 'Planner',
+    runConfig: { modeId: 'plan', configOptionValues: { collaboration_mode: 'plan' } },
+  });
+  const turnSelection = { agentRoleId: role.id, agentRoleRevision: role.revision };
+  const current = {
+    modeId: 'plan',
+    modelId: null,
+    configOptionValues: { collaboration_mode: 'plan' },
+  };
+
+  it('freezes explicit None when execute-plan overrides a pinned Role value', () => {
+    expect(
+      resolveTurnAgentRoleForRunConfig({
+        turnSelection,
+        role,
+        current,
+        overrides: {
+          modeIdOverride: 'default',
+          configOptionValuesOverride: { collaboration_mode: 'default' },
+        },
+      })
+    ).toBeNull();
+  });
+
+  it('keeps the Role when an override leaves all pinned values applied', () => {
+    expect(
+      resolveTurnAgentRoleForRunConfig({
+        turnSelection,
+        role,
+        current,
+        overrides: { configOptionValuesOverride: { collaboration_mode: 'plan', fast: true } },
+      })
+    ).toEqual(turnSelection);
   });
 });
 

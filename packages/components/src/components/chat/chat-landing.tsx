@@ -3049,6 +3049,8 @@ function WorkspaceChatLanding({
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
         taskToolsEnabled: tasksFeatureEnabled,
+        agentRoleId: activeAgentRole?.id ?? null,
+        agentRoleRevision: activeAgentRole?.revision,
       });
       const pendingHistoryEntry = buildPendingUserHistoryEntry({
         userId,

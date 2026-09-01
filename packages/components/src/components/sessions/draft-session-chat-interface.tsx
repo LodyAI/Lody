@@ -535,6 +535,8 @@ export const DraftSessionChatInterface = memo(
                 : undefined,
               mcpServerIds: mcpSelection.selectedIds,
               taskToolsEnabled: tasksFeatureEnabled,
+              agentRoleId: activeAgentRole?.id ?? null,
+              agentRoleRevision: activeAgentRole?.revision,
             }),
           };
         },
