@@ -5,6 +5,7 @@ import type { OrchestrationSectionCopy } from './landing-orchestration-section';
 import type { PowerSectionCopy } from './landing-power-section';
 import type { SubscriptionsSectionCopy } from './landing-subscriptions-section';
 import { founderCallUrl } from '@site/lib/founder-call';
+import { GITHUB_REPO_URL } from '@site/lib/github';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 import { UnderwaterExperience } from './underwater-experience';
@@ -27,9 +28,10 @@ type LandingCopy = {
     words: string[];
     suffix: string;
     lead: string;
-    /** Ghost secondary (usually Web App). */
+    /** Ghost secondary (source repository). */
     secondary: string;
     secondaryHref: string;
+    secondaryExternal?: boolean;
     webAppHref: string;
     /** Shared with closing CTA for platform-aware primary download. */
     labels: LandingCtaCopy['labels'];
@@ -131,7 +133,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       lead: 'Desktop, phone, browser. Same workspace',
       allPlatforms: 'All platforms',
       allPlatformsHref: '/download',
-      webApp: 'Web app',
+      github: 'GitHub',
+      githubHref: GITHUB_REPO_URL,
       webAppHref: '/login',
       bookCall: 'Book a founder call',
       bookCallHref: founderCallUrl('landing'),
@@ -152,8 +155,9 @@ const copy: Record<LandingLocale, LandingCopy> = {
       words: [],
       suffix: '',
       lead: 'Shared sessions, live diffs, and one control plane — so your team and agents stay in sync',
-      secondary: 'Web App',
-      secondaryHref: '/login',
+      secondary: 'GitHub',
+      secondaryHref: GITHUB_REPO_URL,
+      secondaryExternal: true,
       webAppHref: '/login',
       otherDownloads: 'Other download options',
       otherDownloadsHref: '/download',
@@ -253,7 +257,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       lead: '桌面、手机、浏览器。同一工作区',
       allPlatforms: '全部平台',
       allPlatformsHref: '/zh/download',
-      webApp: 'Web App',
+      github: 'GitHub',
+      githubHref: GITHUB_REPO_URL,
       webAppHref: '/login',
       bookCall: '和创始人聊聊',
       bookCallHref: founderCallUrl('landing'),
@@ -274,8 +279,9 @@ const copy: Record<LandingLocale, LandingCopy> = {
       words: [],
       suffix: '和团队共用 Coding Agents',
       lead: '共享会话、实时差异、统一控制面 — 团队与 Agents 始终同步',
-      secondary: 'Web App',
-      secondaryHref: '/login',
+      secondary: 'GitHub',
+      secondaryHref: GITHUB_REPO_URL,
+      secondaryExternal: true,
       webAppHref: '/login',
       otherDownloads: '其他下载方式',
       otherDownloadsHref: '/zh/download',

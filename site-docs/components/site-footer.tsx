@@ -5,11 +5,11 @@
  */
 
 import { founderCallUrl } from '@site/lib/founder-call';
+import { GITHUB_REPO_URL } from '@site/lib/github';
 
 export type SiteFooterLocale = 'en' | 'zh';
 
 const X_HREF = 'https://x.com/lody_ai';
-const GITHUB_HREF = 'https://github.com/LodyAI/Lody';
 
 const copy = {
   en: {
@@ -48,7 +48,7 @@ export function SiteFooter({ locale }: { locale: SiteFooterLocale }) {
           </a>
           <a href={t.termsHref}>{t.terms}</a>
           <a href={t.privacyHref}>{t.privacy}</a>
-          <a href={GITHUB_HREF} rel="noreferrer" target="_blank">
+          <a href={GITHUB_REPO_URL} rel="noreferrer" target="_blank">
             GitHub
           </a>
           <a href={X_HREF} rel="noreferrer" target="_blank">
