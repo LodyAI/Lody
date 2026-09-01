@@ -89,15 +89,7 @@ import {
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
 import {
@@ -2560,16 +2552,27 @@ const SessionDetail = ({
     }
   }, [isMobile, replaceSessionUrlBrowser, urlBrowser]);
 
-  // Sync ?pr=<number> URL param into the desktop sidebar. The mobile path reads
-  // `urlPrNumber` directly for its full-screen drawer.
+  // Sync ?pr=<number> URL param with the desktop sidebar. The mobile path
+  // reads `urlPrNumber` directly for its full-screen drawer.
   //
-  // This can only run once `latestPr` has resolved from the session doc, so on
-  // a deep link it lands a commit or two AFTER the switch — the panel would
-  // otherwise animate open from whatever width the session the user just left
-  // had. It is a restore, not a user action: bump `sidebarRestoreSeq` so the
-  // layout applies it in one frame. Applied once per (session, PR number);
-  // re-running on every `latestPr` identity change would reopen a panel the
-  // user had closed.
+  // ONE effect owns both directions on purpose. As two sibling effects (a
+  // restore and a clear) sharing the same precondition, both armed in the same
+  // commit — the first where `latestPr` resolves — and the clear then read the
+  // restore's target state BEFORE it landed (sidebar still closed, persisted
+  // viewer tab still active), stripping a fresh `?pr` deep link. Ordered
+  // branches in a single writer make that unrepresentable: the restore commit
+  // returns before the clear branch can evaluate stale state, and the next run
+  // sees the restored sidebar.
+  //
+  // The restore can only run once `latestPr` has resolved from the session
+  // doc, so on a deep link it lands a commit or two AFTER the switch — the
+  // panel would otherwise animate open from whatever width the session the
+  // user just left had. It is a restore, not a user action: bump
+  // `sidebarRestoreSeq` so the layout applies it in one frame. Applied once
+  // per (session, PR number); re-running on every `latestPr` identity change
+  // would reopen a panel the user had closed. Once restored, a user switching
+  // away from the PR tab (or closing the sidebar) clears `?pr` so the URL
+  // stays consistent.
   useEffect(() => {
     if (isMobile) return;
     if (!urlPrNumber) {
@@ -2577,26 +2580,18 @@ const SessionDetail = ({
       return;
     }
     if (!latestPr || !repoFullName || urlPrNumber !== latestPrNumber) return;
-    if (restoredPrSidebarRef.current === urlPrNumber) return;
-    restoredPrSidebarRef.current = urlPrNumber;
-    setSidebarRestoreSeq((seq) => seq + 1);
-    setIsSidebarOpen(true);
-    activateSidebarTab('pr');
-  }, [activateSidebarTab, isMobile, latestPr, latestPrNumber, repoFullName, urlPrNumber]);
-
-  // When the user switches away from the PR sidebar tab (or closes the sidebar)
-  // on desktop, clear the ?pr= param so the URL stays consistent. We skip
-  // clearing while the session data is still loading so deep-linking into
-  // `?pr=42` survives the first render (where `latestPr` is still null and
-  // `activeSidebarTab` hasn't been synced to 'pr' yet).
-  useEffect(() => {
-    if (isMobile) return;
-    if (urlPrNumber === undefined) return;
-    if (!latestPr || !repoFullName || urlPrNumber !== latestPrNumber) return;
+    if (restoredPrSidebarRef.current !== urlPrNumber) {
+      restoredPrSidebarRef.current = urlPrNumber;
+      setSidebarRestoreSeq((seq) => seq + 1);
+      setIsSidebarOpen(true);
+      activateSidebarTab('pr');
+      return;
+    }
     if (!isSidebarOpen || activeSidebarTab !== 'pr' || activeViewerTabId !== null) {
       replaceSessionUrlPr(undefined);
     }
   }, [
+    activateSidebarTab,
     activeSidebarTab,
     activeViewerTabId,
     isMobile,

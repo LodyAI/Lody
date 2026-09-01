@@ -82,6 +82,15 @@ export function useChatLandingDefaults({
 }: UseChatLandingDefaultsArgs) {
   const initializedRef = useRef(false);
   const initializedWorkspaceIdRef = useRef<string | null>(null);
+  /* The contextType restore is ONE-SHOT per workspace entry, independent of
+     `initializedRef`. The load effect re-runs (without latching) on its
+     wait-for-data early returns, and chat-landing's auto-switch effect moves
+     `contextType` away from a context whose backing collection is empty under
+     a DIFFERENT readiness guard — re-writing the stored context on every
+     pre-init run turned that disagreement into an unbounded write ping-pong
+     (`contextType` is a dep of this effect, so each write re-arms it). Restore
+     once; after that the auto-switch rules own the field. */
+  const restoredContextTypeRef = useRef(false);
   const [canPersist, setCanPersist] = useState(false);
   const [repoDefaultsReady, setRepoDefaultsReady] = useState(false);
 
@@ -89,6 +98,7 @@ export function useChatLandingDefaults({
     if (initializedWorkspaceIdRef.current === workspaceId) return;
     initializedWorkspaceIdRef.current = workspaceId;
     initializedRef.current = false;
+    restoredContextTypeRef.current = false;
     setCanPersist(false);
     setRepoDefaultsReady(false);
   }, [workspaceId]);
@@ -99,8 +109,10 @@ export function useChatLandingDefaults({
     if (!workspaceId) return;
 
     const stored = readChatLandingDefaults(workspaceId);
+    const contextTypeRestorePending =
+      shouldRestoreContextType && Boolean(stored?.contextType) && !restoredContextTypeRef.current;
     const effectiveContextType =
-      shouldRestoreContextType && stored?.contextType ? stored.contextType : contextType;
+      contextTypeRestorePending && stored?.contextType ? stored.contextType : contextType;
     const storedLocalMachineId = stored?.localMachineId as MachineId | null | undefined;
     const storedLocalProjectId = stored?.localProjectId as LocalProjectId | null | undefined;
     const requiredMachineId =
@@ -111,8 +123,11 @@ export function useChatLandingDefaults({
     const isRepoReady = !hasStoredRepo || repositories !== undefined;
     setRepoDefaultsReady(isRepoReady);
 
-    if (shouldRestoreContextType && stored?.contextType && stored.contextType !== contextType) {
-      setContextType(stored.contextType);
+    if (contextTypeRestorePending && stored?.contextType) {
+      restoredContextTypeRef.current = true;
+      if (stored.contextType !== contextType) {
+        setContextType(stored.contextType);
+      }
     }
 
     // Apply local project selection
