@@ -32,7 +32,7 @@ describe('getSessionDetailInitialTabState', () => {
     // an absent value in before the component renders. Local storage owns the
     // panels, which restore regardless of how `?tab` arrived.
     expect(
-      getSessionDetailInitialTabState(parentSessionId, {
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
         readPersistedState: () => persistedProviderFileState,
       })
     ).toEqual({
@@ -47,9 +47,47 @@ describe('getSessionDetailInitialTabState', () => {
     });
   });
 
+  it('keeps the restored viewer idle for an explicit conversation deep link on one-active-surface hosts', () => {
+    // Mobile shows one surface at a time: an opened-by or shared link naming
+    // `session:<child>` must land on that conversation, not under the
+    // restored full-screen viewer. The viewer stays as an open tab.
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'session:url-child', {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      })
+    ).toEqual({
+      viewerTabs: [persistedProviderFileState.viewerTab],
+      activeViewerTabId: null,
+      sidePanel: persistedProviderFileState.sidePanel,
+    });
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'draft:draft-uuid', {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      }).activeViewerTabId
+    ).toBeNull();
+    // No explicit conversation target (entry restoration will fill the tab):
+    // the viewer stays active exactly as the user left it.
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      }).activeViewerTabId
+    ).toBe('file:file-1');
+  });
+
+  it('keeps the viewer active for explicit deep links on desktop (side panel is a second surface)', () => {
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'session:url-child', {
+        readPersistedState: () => persistedProviderFileState,
+      }).activeViewerTabId
+    ).toBe('file:file-1');
+  });
+
   it('defaults everything when nothing is persisted', () => {
     expect(
-      getSessionDetailInitialTabState(parentSessionId, {
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
         readPersistedState: () => null,
       })
     ).toEqual({
@@ -66,7 +104,7 @@ describe('getSessionDetailInitialTabState', () => {
 
   it('defaults the side panel state when older persisted state has no side panel entry', () => {
     expect(
-      getSessionDetailInitialTabState(parentSessionId, {
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
         readPersistedState: () => ({
           sessionTabId: 'child-session',
           viewerTab: null,

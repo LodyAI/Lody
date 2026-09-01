@@ -199,6 +199,7 @@ import {
   isDraftSessionTabId,
   mergeTabOrderGroup,
   readPersistedDraftTabs,
+  readStoredLastActiveTabState,
   readStoredTabOrder,
   removeTabOrderId,
   replaceTabOrderId,
@@ -709,7 +710,9 @@ const SessionDetail = ({
   >(new Map());
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
-  const initialTabState = getSessionDetailInitialTabState(sessionId);
+  const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
+    oneActiveSurface: isMobile,
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
   /* Bumped whenever `isSidebarOpen` changes because side-panel state was
      RESTORED (session switch, `?pr=` deep link) rather than toggled by the
@@ -939,7 +942,9 @@ const SessionDetail = ({
   const fireDetailNotFoundOnce = useFireOncePerKey<SessionId>();
 
   if (localStateSessionId !== sessionId) {
-    const nextInitialTabState = getSessionDetailInitialTabState(sessionId);
+    const nextInitialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
+      oneActiveSurface: isMobile,
+    });
     detailLoadStartMsRef.current = getPerformanceNowMs();
     sendingDraftIdsRef.current.clear();
     desktopTabFocusRegionRef.current = 'conversation';
@@ -3758,8 +3763,14 @@ const SessionDetail = ({
     title: t('commands.session.toggleCurrentPinned', 'Toggle Current Chat Pinned'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.toggleCurrentPinned'),
+    /* While the URL-named child is still pending, `activeTabSession` falls
+       back to the parent for display; mutating commands must not take that
+       fallback as their target while the UI says a child is active. */
     when: () =>
-      Boolean(activeTabSession) && !activeDraftTab && activeTabSession?.isArchived !== true,
+      Boolean(activeTabSession) &&
+      !activeDraftTab &&
+      !activeTabIsPendingChild &&
+      activeTabSession?.isArchived !== true,
     run: handleToggleCurrentSessionPinned,
   });
 
@@ -3855,8 +3866,12 @@ const SessionDetail = ({
     title: t('commands.session.renameCurrent', 'Rename Current Chat'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.renameCurrent'),
+    /* Same pending-child rule as toggleCurrentPinned above. */
     when: () =>
-      Boolean(activeTabSession) && !activeDraftTab && activeTabSession?.isArchived !== true,
+      Boolean(activeTabSession) &&
+      !activeDraftTab &&
+      !activeTabIsPendingChild &&
+      activeTabSession?.isArchived !== true,
     run: handleRenameCurrentSession,
   });
 
@@ -3879,13 +3894,16 @@ const SessionDetail = ({
   });
 
   useEffect(() => {
-    /* Only a RESOLVED tab is worth remembering: persisting a still-syncing
-       child would make the next entry restore a tab that may never resolve. */
-    if (activeTabIsPendingChild) {
-      return;
-    }
+    /* Only a RESOLVED tab is worth remembering as last-active: persisting a
+       still-syncing child would make the next entry restore a tab that may
+       never resolve. Panel and viewer changes made while it loads are still
+       the user's, so the write happens regardless — the conversation slot
+       just keeps its previously stored value until the child resolves. */
+    const persistedSessionTabId = activeTabIsPendingChild
+      ? (readStoredLastActiveTabState(sessionId)?.sessionTabId ?? sessionId)
+      : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
-      sessionTabId: activeTabSessionId,
+      sessionTabId: persistedSessionTabId,
       viewerTab: activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
