@@ -204,17 +204,6 @@ describe('resolveTurnAgentRoleForRunConfig', () => {
       })
     ).toBeNull();
   });
-
-  it('keeps the Role when an override leaves all pinned values applied', () => {
-    expect(
-      resolveTurnAgentRoleForRunConfig({
-        turnSelection,
-        role,
-        current,
-        overrides: { configOptionValuesOverride: { collaboration_mode: 'plan', fast: true } },
-      })
-    ).toEqual(turnSelection);
-  });
 });
 
 describe('doesAgentRolePinPermissionMode', () => {

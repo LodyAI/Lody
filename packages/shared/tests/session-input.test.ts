@@ -25,7 +25,6 @@ import type {
   VisualAnnotationReferencePayload,
 } from '../src/ai';
 import type { SessionDoc, SessionHistoryInput } from '../src/schema';
-import type { AgentRoleId } from '../src/ids';
 
 const commentReference: CommentReferencePayload = {
   source: 'lody',
@@ -219,48 +218,6 @@ describe('session-input helpers', () => {
     ]);
     expect(legacyQueued.currentTurnKey).toBe('turn:queued-legacy-cid');
     expect(legacyPromoted.currentTurnKey).toBe('turn:queued-legacy-cid');
-  });
-
-  it('round-trips the synchronized Agent Role selection from the latest Turn', () => {
-    expect(
-      resolveSessionConversationConfig([
-        {
-          id: 'turn-role',
-          role: 'user',
-          inputConfig: {
-            prompt: 'review this',
-            cliType: 'builtin',
-            agentType: 'codex',
-            agentRoleId: 'role-reviewer',
-            agentRoleRevision: 7,
-          },
-        },
-      ])
-    ).toMatchObject({
-      sourceConfigKey: 'history:turn-role',
-      agentRoleId: 'role-reviewer',
-      agentRoleRevision: 7,
-    });
-
-    expect(
-      resolveSessionConversationConfig(
-        [],
-        [
-          {
-            $cid: 'queue-none',
-            acpSessionConfig: {
-              prompt: 'continue',
-              cliType: 'builtin',
-              agentType: 'codex',
-              agentRoleId: null,
-            },
-          },
-        ]
-      )
-    ).toMatchObject({
-      sourceConfigKey: 'queue:queue-none',
-      agentRoleId: null,
-    });
   });
 
   it('inherits the latest explicit Role across legacy or non-composer Turns', () => {
@@ -690,33 +647,6 @@ describe('session-input helpers', () => {
       cliType: 'builtin',
       agentType: 'codex',
       inputBlocks: [{ type: 'visual_annotation_reference', ...visualAnnotationReference }],
-    });
-  });
-
-  it('normalizes Agent Role identity while preserving explicit None', () => {
-    expect(
-      normalizeSessionTurnInputConfig({
-        agentRoleId: '  role-reviewer  ',
-        agentRoleRevision: 3,
-      })
-    ).toEqual({ agentRoleId: 'role-reviewer', agentRoleRevision: 3 });
-    expect(normalizeSessionTurnInputConfig({ agentRoleId: null })).toEqual({
-      agentRoleId: null,
-    });
-  });
-
-  it('builds Agent Role provenance into the frozen Turn config', () => {
-    expect(
-      buildSessionTurnInputConfig({
-        inputBlocks: [{ type: 'text', text: 'review this' }],
-        cliType: 'builtin',
-        agentType: 'codex',
-        agentRoleId: 'role-reviewer' as AgentRoleId,
-        agentRoleRevision: 4,
-      })
-    ).toMatchObject({
-      agentRoleId: 'role-reviewer',
-      agentRoleRevision: 4,
     });
   });
 

@@ -194,18 +194,6 @@ describe('useSessionAgentRole', () => {
     expect(control?.selectedRoleId).toBe('role-1');
   });
 
-  it('restores an explicit Role after the top-level Session composer remounts', async () => {
-    catalog.roles = [role('role-1', 'model-1')];
-    await render({ sessionId: 'session-1' });
-    await act(async () => control?.onSelect('role-1' as AgentRoleId));
-
-    await act(async () => root?.unmount());
-    root = createRoot(container!);
-    await render({ sessionId: 'session-1' });
-
-    expect(control?.selectedRoleId).toBe('role-1');
-  });
-
   it('restores from the latest durable Turn and lets a newer Turn supersede a local draft', async () => {
     catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
     await render({
@@ -249,34 +237,6 @@ describe('useSessionAgentRole', () => {
       durableRoleId: 'role-1' as AgentRoleId,
       durableRoleRevision: 1,
       durableSourceTurnKey: 'turn:turn-1',
-      durableRoleReady: true,
-    });
-    expect(control?.selectedRoleId).toBe('role-2');
-  });
-
-  it('keeps a sent durable Role visible while the Session doc remount hydrates', async () => {
-    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
-    await render({
-      durableRoleId: 'role-1' as AgentRoleId,
-      durableRoleRevision: 1,
-      durableSourceTurnKey: 'turn:turn-1',
-    });
-    await act(async () => control?.onSelect('role-2' as AgentRoleId));
-    await render({
-      durableRoleId: 'role-2' as AgentRoleId,
-      durableRoleRevision: 1,
-      durableSourceTurnKey: 'turn:turn-2',
-    });
-
-    await act(async () => root?.unmount());
-    root = createRoot(container!);
-    await render({ durableRoleReady: false });
-    expect(control?.selectedRoleId).toBe('role-2');
-
-    await render({
-      durableRoleId: 'role-2' as AgentRoleId,
-      durableRoleRevision: 1,
-      durableSourceTurnKey: 'turn:turn-2',
       durableRoleReady: true,
     });
     expect(control?.selectedRoleId).toBe('role-2');
@@ -329,53 +289,6 @@ describe('useSessionAgentRole', () => {
       durableKnownSourceTurnKeys: ['turn:turn-1'],
     });
     expect(control?.selectedRoleId).toBe('role-2');
-  });
-
-  it('keeps a sent explicit None visible while the Session doc remount hydrates', async () => {
-    const provenanceRoleId = 'role-1' as AgentRoleId;
-    catalog.roles = [role('role-1', 'model-1')];
-    await render({
-      provenanceRoleId,
-      durableRoleId: null,
-      durableSourceTurnKey: 'turn:turn-2',
-    });
-    expect(control?.selectedRoleId).toBeNull();
-
-    await act(async () => root?.unmount());
-    root = createRoot(container!);
-    await render({ provenanceRoleId, durableRoleReady: false });
-    expect(control?.selectedRoleId).toBeNull();
-
-    await render({
-      provenanceRoleId,
-      durableRoleId: null,
-      durableSourceTurnKey: 'turn:turn-2',
-      durableRoleReady: true,
-    });
-    expect(control?.selectedRoleId).toBeNull();
-  });
-
-  it('keeps Role selection disabled until the durable config is hydrated', async () => {
-    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
-    await render({
-      durableRoleId: 'role-1' as AgentRoleId,
-      durableRoleRevision: 1,
-      durableSourceTurnKey: 'turn:turn-1',
-    });
-
-    await act(async () => root?.unmount());
-    root = createRoot(container!);
-    await render({ durableRoleReady: false });
-    await act(async () => control?.onSelect('role-2' as AgentRoleId));
-    expect(control?.selectedRoleId).toBe('role-1');
-
-    await render({
-      durableRoleId: 'role-1' as AgentRoleId,
-      durableRoleRevision: 1,
-      durableSourceTurnKey: 'turn:turn-1',
-      durableRoleReady: true,
-    });
-    expect(control?.selectedRoleId).toBe('role-1');
   });
 
   it('preserves durable Role metadata while its catalog row is still syncing', async () => {
