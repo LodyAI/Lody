@@ -111,8 +111,9 @@ work) and a hover preview.
   span-per-word compositor cost is unbounded on long turns.
 - `chat_failed` raw errors use a modal; extraction/copy live in `chat-failed-error-report.ts`.
 - Capacity retry targets only the latest notice: first click consents; bounded countdowns send a
-  new continuation turn, never replay the failed input. Every visible countdown keeps a stop-auto-
-  retry action beside the immediate-retry action so consent stays reversible.
+  new continuation turn, never replay the failed input. During a visible countdown, the countdown
+  control reveals its stop-auto-retry action on hover or keyboard focus and shows that action
+  directly on touch devices so consent stays reversible without adding a second control.
 - Terminal persistence and legacy preview bounds live in
   `context/terminal-output-lifecycle.md`. Never send full legacy output through
   ANSI parsing, search, or React rendering.
