@@ -27,6 +27,7 @@ import {
   SessionImagePayloadSchema,
 } from '../src/message-schemas';
 import type { SessionImagePayload } from '../src/ai';
+import { ACP_AUTHENTICATION_FORM_MAX_BYTES } from '../src/acp-authentication-limits';
 import type { SessionId } from '../src/ids';
 
 describe('branded id schemas', () => {
@@ -476,6 +477,38 @@ describe('message-schemas machine ACP authentication', () => {
             },
           ],
         },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects a form whose valid individual fields exceed the total byte budget', () => {
+    const options = Array.from({ length: 20 }, (_, index) => ({
+      value: `${String(index).padStart(2, '0')}-${'x'.repeat(16_380)}`,
+      label: `Option ${index}`,
+    }));
+    const form = {
+      fields: [
+        {
+          id: 'account',
+          type: 'select',
+          label: 'Account',
+          required: true,
+          options,
+        },
+      ],
+    };
+    expect(new TextEncoder().encode(JSON.stringify(form)).byteLength).toBeGreaterThan(
+      ACP_AUTHENTICATION_FORM_MAX_BYTES
+    );
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        type: 'machine/acp-authentication-progress',
+        machineId: 'machine-1',
+        requestId: 'auth-1',
+        agentType: 'custom-agent',
+        status: 'input-required',
+        interactionId: 'form-1',
+        form,
       }).success
     ).toBe(false);
   });

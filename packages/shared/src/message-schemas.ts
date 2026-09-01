@@ -15,6 +15,16 @@ import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema } from './session-orchestration';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 import { normalizeMcpServerIdSelection } from './workspace-mcp';
+import {
+  ACP_AUTH_FORM_FIELD_MAX_COUNT,
+  ACP_AUTH_ID_MAX_LENGTH,
+  ACP_AUTH_LABEL_MAX_LENGTH,
+  ACP_AUTH_METHOD_MAX_COUNT,
+  ACP_AUTH_SELECT_OPTION_MAX_COUNT,
+  ACP_AUTH_TEXT_MAX_LENGTH,
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  isAcpAuthenticationFormWithinByteLimit,
+} from './acp-authentication-limits';
 
 // ============================================
 // BASE ID TYPE SCHEMAS
@@ -1154,64 +1164,73 @@ const AcpModelSchema = z
 const MachineAcpAuthMethodSummarySchema = z
   .object({
     type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().trim().min(1).max(1024).optional(),
-    name: z.string().max(4096).optional(),
-    description: z.string().max(16_384).optional(),
-    args: z.array(z.string().max(4096)).max(64).optional(),
+    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
   })
   .strict();
 
 const MachineAcpAuthenticationFormFieldSchema = z.discriminatedUnion('type', [
   z
     .object({
-      id: z.string().trim().min(1).max(1024),
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
       type: z.literal('text'),
-      label: z.string().trim().min(1).max(4096),
-      description: z.string().max(16_384).optional(),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
       required: z.boolean(),
-      defaultValue: z.string().max(16_384).optional(),
+      defaultValue: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
     })
     .strict(),
   z
     .object({
-      id: z.string().trim().min(1).max(1024),
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
       type: z.literal('secret'),
-      label: z.string().trim().min(1).max(4096),
-      description: z.string().max(16_384).optional(),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
       required: z.boolean(),
     })
     .strict(),
   z
     .object({
-      id: z.string().trim().min(1).max(1024),
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
       type: z.literal('select'),
-      label: z.string().trim().min(1).max(4096),
-      description: z.string().max(16_384).optional(),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
       required: z.boolean(),
       options: z
         .array(
           z
             .object({
-              value: z.string().min(1).max(16_384),
-              label: z.string().trim().min(1).max(4096),
+              value: z.string().min(1).max(ACP_AUTH_TEXT_MAX_LENGTH),
+              label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
             })
             .strict()
         )
         .min(1)
-        .max(256),
-      defaultValue: z.string().max(16_384).optional(),
+        .max(ACP_AUTH_SELECT_OPTION_MAX_COUNT),
+      defaultValue: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
     })
     .strict(),
 ]);
 
 const MachineAcpAuthenticationFormSchema = z
   .object({
-    title: z.string().max(4096).optional(),
-    description: z.string().max(16_384).optional(),
-    fields: z.array(MachineAcpAuthenticationFormFieldSchema).min(1).max(32),
+    title: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    fields: z
+      .array(MachineAcpAuthenticationFormFieldSchema)
+      .min(1)
+      .max(ACP_AUTH_FORM_FIELD_MAX_COUNT),
   })
   .strict()
   .superRefine((value, context) => {
+    if (!isAcpAuthenticationFormWithinByteLimit(value)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Authentication form exceeds the serialized size limit',
+      });
+    }
     const fieldIds = new Set<string>();
     value.fields.forEach((field, fieldIndex) => {
       if (fieldIds.has(field.id)) {
@@ -1287,7 +1306,10 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
       )
       .optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     error: z.string().optional(),
   })
   .strict();
@@ -1297,12 +1319,12 @@ export const MachineAcpAuthenticateRequestSchema = z
     type: z.literal('machine/acp-authenticate'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
-    requestId: z.string().trim().min(1).max(1024),
+    requestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
     action: z.enum(['start', 'cancel', 'submit-code', 'submit-input']),
-    authenticationRequestId: z.string().trim().min(1).max(1024).optional(),
-    authorizationCode: z.string().trim().min(1).max(4096).optional(),
-    methodId: z.string().trim().min(1).max(1024).optional(),
-    interactionId: z.string().trim().min(1).max(1024).optional(),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
     authenticationInput: z.string().min(1).max(65536).optional(),
     configId: AgentConfigIdSchema.optional(),
     cliType: AgentConfigCliTypeSchema,
@@ -1372,7 +1394,10 @@ export const MachineAcpAuthenticateResponseSchema = z
     ]),
     capabilitiesRefreshed: z.boolean().optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     error: z.string().optional(),
   })
   .strict();
@@ -1393,14 +1418,17 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
       'cancelled',
       'error',
     ]),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).max(32).optional(),
-    interactionId: z.string().trim().min(1).max(1024).optional(),
-    message: z.string().max(16_384).optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
+    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    message: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
     form: MachineAcpAuthenticationFormSchema.optional(),
     authorizationUrl: z
       .string()
       .url()
-      .max(8192)
+      .max(ACP_AUTHORIZATION_URL_MAX_LENGTH)
       .refine((value) => {
         const protocol = new URL(value).protocol;
         return protocol === 'https:' || protocol === 'http:';

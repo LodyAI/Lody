@@ -58,7 +58,7 @@ const getLodyMeta = (meta: unknown): Record<string, unknown> | null => {
   return isRecord(lody) ? lody : null;
 };
 
-const getLodyElicitationMeta = (meta: unknown): Record<string, unknown> | null => {
+export const getLodyElicitationMeta = (meta: unknown): Record<string, unknown> | null => {
   const lody = getLodyMeta(meta);
   const elicitation = lody?.elicitation;
   return isRecord(elicitation) && elicitation.version === 1 ? elicitation : null;

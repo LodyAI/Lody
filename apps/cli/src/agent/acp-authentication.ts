@@ -13,15 +13,28 @@ import type {
   MachineAcpAuthenticationForm,
 } from '@lody/shared';
 import {
+  ACP_AUTHENTICATION_FORM_MAX_BYTES,
+  ACP_AUTH_FORM_FIELD_MAX_COUNT,
+  ACP_AUTH_ID_MAX_LENGTH,
+  ACP_AUTH_LABEL_MAX_LENGTH,
+  ACP_AUTH_METHOD_MAX_COUNT,
+  ACP_AUTH_SELECT_OPTION_MAX_COUNT,
+  ACP_AUTH_TEXT_MAX_LENGTH,
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  getLodyElicitationMeta,
   getManagedBuiltinRuntimeByAgentType,
   hasBuiltinEnvAuthentication,
+  isAcpAuthenticationFormWithinByteLimit,
   isManagedBuiltinAgentType,
 } from '@lody/shared';
 
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { BuiltinAuthenticationOutputParser } from './acp-authentication-output';
+import {
+  AcpAgentAuthorizationOutputParser,
+  BuiltinAuthenticationOutputParser,
+} from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
@@ -79,13 +92,6 @@ export type AcpAuthenticationResult =
 const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 285_000;
 const DEFAULT_TERMINATION_GRACE_MS = 3_000;
 const DEFAULT_STATUS_PROBE_TIMEOUT_MS = 15_000;
-const MAX_AUTH_METHODS = 32;
-const MAX_AUTH_FORM_FIELDS = 32;
-const MAX_AUTH_SELECT_OPTIONS = 256;
-const MAX_AUTH_ID_LENGTH = 1024;
-const MAX_AUTH_LABEL_LENGTH = 4096;
-const MAX_AUTH_TEXT_LENGTH = 16_384;
-const MAX_AUTHORIZATION_URL_LENGTH = 8192;
 
 const BUILTIN_AUTH_METHODS = {
   kimi: [
@@ -147,7 +153,7 @@ const AcpAuthenticationInteractionInputSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('accept'),
-      methodId: z.string().trim().min(1).max(MAX_AUTH_ID_LENGTH).optional(),
+      methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
       content: z.record(z.string(), z.unknown()).optional(),
     })
     .strict(),
@@ -187,7 +193,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     : null;
 
 function isAllowedAuthorizationUrl(value: string): boolean {
-  if (value.length > MAX_AUTHORIZATION_URL_LENGTH) return false;
+  if (value.length > ACP_AUTHORIZATION_URL_MAX_LENGTH) return false;
   try {
     const protocol = new URL(value).protocol;
     return protocol === 'https:' || protocol === 'http:';
@@ -204,10 +210,12 @@ function toAuthenticationForm(
   const properties = asRecord(schema?.properties);
   if (!rawRequest || rawRequest.mode !== 'form' || !schema || !properties) return null;
   const propertyEntries = Object.entries(properties);
-  if (propertyEntries.length === 0 || propertyEntries.length > MAX_AUTH_FORM_FIELDS) return null;
+  if (propertyEntries.length === 0 || propertyEntries.length > ACP_AUTH_FORM_FIELD_MAX_COUNT) {
+    return null;
+  }
   if (
-    (typeof schema.title === 'string' && schema.title.length > MAX_AUTH_LABEL_LENGTH) ||
-    (typeof schema.description === 'string' && schema.description.length > MAX_AUTH_TEXT_LENGTH)
+    (typeof schema.title === 'string' && schema.title.length > ACP_AUTH_LABEL_MAX_LENGTH) ||
+    (typeof schema.description === 'string' && schema.description.length > ACP_AUTH_TEXT_MAX_LENGTH)
   ) {
     return null;
   }
@@ -227,21 +235,24 @@ function toAuthenticationForm(
     const description = typeof property.description === 'string' ? property.description : undefined;
     if (
       !id.trim() ||
-      id.length > MAX_AUTH_ID_LENGTH ||
+      id.length > ACP_AUTH_ID_MAX_LENGTH ||
       !label.trim() ||
-      label.length > MAX_AUTH_LABEL_LENGTH ||
-      (description?.length ?? 0) > MAX_AUTH_TEXT_LENGTH
+      label.length > ACP_AUTH_LABEL_MAX_LENGTH ||
+      (description?.length ?? 0) > ACP_AUTH_TEXT_MAX_LENGTH
     ) {
       return null;
     }
     const meta = asRecord(property._meta);
     const secret =
-      meta?.secret === true || meta?.sensitive === true || property.format === 'password';
+      getLodyElicitationMeta(property._meta)?.secret === true ||
+      meta?.secret === true ||
+      meta?.sensitive === true ||
+      property.format === 'password';
     // Defaults travel in retained Machine RPC progress. Never copy a secret
     // default into that durable progress stream, even if the provider supplied one.
     const defaultValue =
       !secret && typeof property.default === 'string' ? property.default : undefined;
-    if ((defaultValue?.length ?? 0) > MAX_AUTH_TEXT_LENGTH) return null;
+    if ((defaultValue?.length ?? 0) > ACP_AUTH_TEXT_MAX_LENGTH) return null;
     if (
       (property.oneOf !== undefined && !Array.isArray(property.oneOf)) ||
       (property.enum !== undefined && !Array.isArray(property.enum))
@@ -271,12 +282,12 @@ function toAuthenticationForm(
     const options = titledOptions.length > 0 ? titledOptions : enumOptions;
     if (
       ((Array.isArray(property.oneOf) || Array.isArray(property.enum)) && options.length === 0) ||
-      options.length > MAX_AUTH_SELECT_OPTIONS ||
+      options.length > ACP_AUTH_SELECT_OPTION_MAX_COUNT ||
       options.some(
         (option) =>
           option === null ||
-          option.value.length > MAX_AUTH_TEXT_LENGTH ||
-          option.label.length > MAX_AUTH_LABEL_LENGTH
+          option.value.length > ACP_AUTH_TEXT_MAX_LENGTH ||
+          option.label.length > ACP_AUTH_LABEL_MAX_LENGTH
       )
     ) {
       return null;
@@ -292,25 +303,39 @@ function toAuthenticationForm(
         id,
         type: 'select',
         label,
-        description,
+        ...(description !== undefined ? { description } : {}),
         required: required.has(id),
         options: options.filter((option): option is { value: string; label: string } => !!option),
-        defaultValue,
+        ...(defaultValue !== undefined ? { defaultValue } : {}),
       });
       continue;
     }
     fields.push(
       secret
-        ? { id, type: 'secret', label, description, required: required.has(id) }
-        : { id, type: 'text', label, description, required: required.has(id), defaultValue }
+        ? {
+            id,
+            type: 'secret',
+            label,
+            ...(description !== undefined ? { description } : {}),
+            required: required.has(id),
+          }
+        : {
+            id,
+            type: 'text',
+            label,
+            ...(description !== undefined ? { description } : {}),
+            required: required.has(id),
+            ...(defaultValue !== undefined ? { defaultValue } : {}),
+          }
     );
   }
   if (fields.length === 0) return null;
-  return {
+  const form = {
     title: typeof schema.title === 'string' ? schema.title : undefined,
     description: typeof schema.description === 'string' ? schema.description : undefined,
     fields,
   };
+  return isAcpAuthenticationFormWithinByteLimit(form) ? form : null;
 }
 
 function getAuthMethodType(method: AuthMethod): 'agent' | 'env_var' | 'terminal' {
@@ -818,6 +843,10 @@ export class AcpAuthenticationManager {
       env: options.env,
       resolveLoginShellEnv: this.resolveLoginShellEnv,
     });
+    // The process stdout is the ACP JSON-RPC channel. In a headless shell,
+    // TERM can make browser launchers fall back to w3m/lynx and render HTML
+    // onto stdout, corrupting that channel.
+    delete env.TERM;
     running.abortController.signal.throwIfAborted();
     let lastStderrTail = '';
     await withAcpSessionStartSlot(
@@ -852,11 +881,16 @@ export class AcpAuthenticationManager {
             running.child = child;
             running.terminating = false;
             child.stderr?.setEncoding('utf8');
+            const authorizationParser = new AcpAgentAuthorizationOutputParser();
             child.stderr?.on('data', (chunk: string) => {
               // Keep only an in-memory tail for the existing npx recovery
               // classifier. Authentication process output is never forwarded
               // into retained Machine RPC progress.
               lastStderrTail = appendStderrTail(lastStderrTail, chunk);
+              const authorization = authorizationParser.push(chunk);
+              if (authorization && isAllowedAuthorizationUrl(authorization.authorizationUrl)) {
+                options.onProgress?.({ status: 'authorization', ...authorization });
+              }
             });
             const startupMonitor = createAcpStartupMonitor(
               {
@@ -906,7 +940,7 @@ export class AcpAuthenticationManager {
                       interactionId,
                       message:
                         typeof raw.message === 'string'
-                          ? raw.message.slice(0, MAX_AUTH_TEXT_LENGTH)
+                          ? raw.message.slice(0, ACP_AUTH_TEXT_MAX_LENGTH)
                           : undefined,
                       requiresAuthorizationConsent: true,
                     });
@@ -917,7 +951,7 @@ export class AcpAuthenticationManager {
                   }
                   const form = toAuthenticationForm(params);
                   if (!form) {
-                    const error = `${options.agentType} requested an unsupported authentication form. Lody currently supports text, secret, and single-select fields.`;
+                    const error = `${options.agentType} requested an unsupported authentication form or one larger than Lody's ${ACP_AUTHENTICATION_FORM_MAX_BYTES / 1024} KiB limit. Lody currently supports text, secret, and single-select fields.`;
                     interactionError = error;
                     this.logger.debug(`[acp-auth] ${error}`);
                     options.onProgress?.({ status: 'error', error });
@@ -931,7 +965,7 @@ export class AcpAuthenticationManager {
                     interactionId,
                     message:
                       typeof raw?.message === 'string'
-                        ? raw.message.slice(0, MAX_AUTH_TEXT_LENGTH)
+                        ? raw.message.slice(0, ACP_AUTH_TEXT_MAX_LENGTH)
                         : `Enter the information requested by ${options.agentType}`,
                     form,
                   });
@@ -979,13 +1013,13 @@ export class AcpAuthenticationManager {
                     );
                   }
                   if (
-                    methods.length > MAX_AUTH_METHODS ||
+                    methods.length > ACP_AUTH_METHOD_MAX_COUNT ||
                     new Set(methods.map((method) => method.id)).size !== methods.length ||
                     methods.some(
                       (method) =>
                         typeof method.id !== 'string' ||
                         !method.id.trim() ||
-                        method.id.length > MAX_AUTH_ID_LENGTH
+                        method.id.length > ACP_AUTH_ID_MAX_LENGTH
                     )
                   ) {
                     throw new Error(

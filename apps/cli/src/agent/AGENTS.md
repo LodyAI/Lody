@@ -187,9 +187,13 @@ arrive: context/message-flow.md "Upstream".
   stay on the original long-running request and permit only one pending interaction;
   replies carry an interaction id and use the encrypted authentication-input path on
   remote Machines. URL schemes, method/form sizes, ids, labels, options, and defaults
-  are bounded before they enter progress. Never forward raw third-party process output
-  or secret defaults into retained progress. The process is always stopped before
-  success returns, and cancellation or timeout during cleanup must still win.
+  are bounded before they enter progress; the form also has a shared serialized-byte
+  budget so individually valid dimensions cannot multiply into an oversized RPC payload.
+  Never forward raw third-party process output or secret defaults into retained progress.
+  The real-process authentication test keeps method selection, versioned secret metadata,
+  form submission, URL parsing, protocol stdout integrity, and process cleanup on one
+  spawned ACP connection. The process is always stopped before success returns, and
+  cancellation or timeout during cleanup must still win.
 - `acp-binary-manager.ts` — registry binary-distribution agents. It follows the same
   consumer-lease cancellation rule as managed runtimes: one shared install, abort only after
   the last consumer leaves, and never reuse an aborted generation while it is cleaning up. Tar

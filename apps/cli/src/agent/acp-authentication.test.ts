@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
+import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -660,6 +661,48 @@ describe('AcpAuthenticationManager', () => {
     expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'authorization' }));
   });
 
+  it('does not forward an oversized fallback authorization URL from ACP stderr', async () => {
+    const child = createFakeChild();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    child.stdin = stdin;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    const authorizationUrl = `https://provider.example.test/oauth?state=${'x'.repeat(
+      ACP_AUTHORIZATION_URL_MAX_LENGTH
+    )}`;
+    expect(authorizationUrl.length).toBeGreaterThan(ACP_AUTHORIZATION_URL_MAX_LENGTH);
+    const agent = acp
+      .agent({ name: 'test-oversized-stderr-url-agent' })
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+        protocolVersion: params.protocolVersion,
+        authMethods: [{ id: 'oauth', name: 'OAuth' }],
+      }))
+      .onRequest(acp.methods.agent.authenticate, async () => {
+        child.stderr?.write(`Open ${authorizationUrl}\n`);
+        return {};
+      });
+    agent.connect(
+      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+    );
+    const progress = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => child) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+
+    await expect(
+      manager.authenticate({
+        requestId: 'auth-oversized-stderr-url',
+        cliType: 'custom',
+        agentType: 'custom-oversized-stderr-url',
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: progress,
+      })
+    ).resolves.toEqual({ success: true, disposition: 'authenticated' });
+    expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'authorization' }));
+  });
+
   it.each([
     {
       method: { id: 'legacy-env', name: 'Legacy environment', type: 'env_var' as const },
@@ -716,6 +759,7 @@ describe('AcpAuthenticationManager', () => {
   it.each([
     {
       name: 'field type',
+      expectedError: 'text, secret, and single-select',
       requestedSchema: {
         type: 'object' as const,
         properties: { attempts: { type: 'number' as const, title: 'Attempts' } },
@@ -723,67 +767,88 @@ describe('AcpAuthenticationManager', () => {
     },
     {
       name: 'empty field id',
+      expectedError: 'text, secret, and single-select',
       requestedSchema: {
         type: 'object' as const,
         properties: { '': { type: 'string' as const, title: 'Token' } },
       },
     },
-  ])('reports and declines an unsupported ACP form $name', async ({ requestedSchema }) => {
-    const child = createFakeChild();
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
-    const agent = acp
-      .agent({ name: 'test-unsupported-form-agent' })
-      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-        protocolVersion: params.protocolVersion,
-        authMethods: [{ id: 'oauth', name: 'OAuth' }],
-      }))
-      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
-        const reply = await client.request(acp.methods.client.elicitation.create, {
-          mode: 'form',
-          requestId,
-          message: 'Unsupported form',
-          requestedSchema,
+    {
+      name: 'serialized size',
+      expectedError: '256 KiB limit',
+      requestedSchema: {
+        type: 'object' as const,
+        properties: {
+          account: {
+            type: 'string' as const,
+            title: 'Account',
+            enum: Array.from(
+              { length: 20 },
+              (_, index) => `${String(index).padStart(2, '0')}-${'x'.repeat(16_380)}`
+            ),
+          },
+        },
+      },
+    },
+  ])(
+    'reports and declines an unsupported ACP form $name',
+    async ({ requestedSchema, expectedError }) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+      const agent = acp
+        .agent({ name: 'test-unsupported-form-agent' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+          protocolVersion: params.protocolVersion,
+          authMethods: [{ id: 'oauth', name: 'OAuth' }],
+        }))
+        .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+          const reply = await client.request(acp.methods.client.elicitation.create, {
+            mode: 'form',
+            requestId,
+            message: 'Unsupported form',
+            requestedSchema,
+          });
+          elicitationReply.resolve(reply);
+          return {};
         });
-        elicitationReply.resolve(reply);
-        return {};
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+      const progress = vi.fn();
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: vi.fn(() => child) as never,
+        resolveLoginShellEnv: async () => ({}),
       });
-    agent.connect(
-      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
-    );
-    const progress = vi.fn();
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      spawnProcess: vi.fn(() => child) as never,
-      resolveLoginShellEnv: async () => ({}),
-    });
 
-    const authentication = manager.authenticate({
-      requestId: 'auth-unsupported-form',
-      cliType: 'custom',
-      agentType: 'custom-form',
-      customAcp: { command: '/test/custom-acp', args: [] },
-      onProgress: progress,
-    });
+      const authentication = manager.authenticate({
+        requestId: 'auth-unsupported-form',
+        cliType: 'custom',
+        agentType: 'custom-form',
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: progress,
+      });
 
-    await expect(elicitationReply.promise).resolves.toEqual({ action: 'decline' });
-    await expect(authentication).resolves.toEqual(
-      expect.objectContaining({
-        success: false,
-        disposition: 'error',
-        error: expect.stringContaining('unsupported authentication form'),
-      })
-    );
-    expect(progress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'error',
-        error: expect.stringContaining('text, secret, and single-select'),
-      })
-    );
-  });
+      await expect(elicitationReply.promise).resolves.toEqual({ action: 'decline' });
+      await expect(authentication).resolves.toEqual(
+        expect.objectContaining({
+          success: false,
+          disposition: 'error',
+          error: expect.stringContaining('unsupported authentication form'),
+        })
+      );
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'error',
+          error: expect.stringContaining(expectedError),
+        })
+      );
+    }
+  );
 });
 
 describe('probeBuiltinAuthentication', () => {
