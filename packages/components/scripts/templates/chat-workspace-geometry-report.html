@@ -462,6 +462,8 @@
 
       const violations = report.details.filter((d) => d.kind === 'violation');
       const candidates = report.details.filter((d) => d.kind === 'candidate');
+      const reviewCandidates = candidates.filter((d) => d.requiresReview);
+      const stableCandidates = candidates.filter((d) => !d.requiresReview);
       const jitters = report.details.filter((d) => d.kind === 'jitter');
       const insufficient = report.details.filter((d) => d.kind === 'insufficient');
 
@@ -486,9 +488,10 @@
       const filters = [
         ['all', '全部', report.details.length, null],
         ['violation', '违规', violations.length, 'dot--fail'],
+        ['review', '待确认', reviewCandidates.length, 'dot--candidate'],
         ['jitter', '亚像素抖动', jitters.length, 'dot--candidate'],
         ['insufficient', '证据不足', insufficient.length, 'dot--insufficient'],
-        ['candidate', '候选轨', candidates.length, 'dot--candidate'],
+        ['stable', '稳定候选轨', stableCandidates.length, 'dot--candidate'],
       ];
 
       function applyFilter(kind) {
@@ -496,7 +499,14 @@
           chip.setAttribute('aria-pressed', String(chip.dataset.filter === kind));
         }
         for (const review of reviewsEl.children) {
-          review.hidden = kind !== 'all' && review.dataset.kind !== kind;
+          const matches =
+            kind === 'all' ||
+            review.dataset.kind === kind ||
+            (kind === 'review' && review.dataset.requiresReview === 'true') ||
+            (kind === 'stable' &&
+              review.dataset.kind === 'candidate' &&
+              review.dataset.requiresReview === 'false');
+          review.hidden = !matches;
         }
       }
 
@@ -546,7 +556,8 @@
         const review = document.createElement('article');
         review.className = 'detail-review';
         review.dataset.kind = detail.kind;
-        const open = detail.kind === 'violation';
+        review.dataset.requiresReview = String(Boolean(detail.requiresReview));
+        const open = detail.kind === 'violation' || Boolean(detail.requiresReview);
         review.dataset.open = String(open);
 
         const toggle = document.createElement('button');

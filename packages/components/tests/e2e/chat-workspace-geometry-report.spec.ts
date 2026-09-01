@@ -31,6 +31,7 @@ const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:600
 
 type ReportDetail = Readonly<{
   kind: 'violation' | 'candidate' | 'jitter' | 'insufficient';
+  requiresReview: boolean;
   id: string;
   title: string;
   description: string;
@@ -63,6 +64,14 @@ type ReportDetail = Readonly<{
     }>[];
   }>;
 }>;
+
+function reportDetailPriority(detail: ReportDetail): number {
+  if (detail.kind === 'violation') return 0;
+  if (detail.kind === 'candidate' && detail.requiresReview) return 1;
+  if (detail.kind === 'insufficient') return 2;
+  if (detail.kind === 'jitter') return 3;
+  return 4;
+}
 
 function clampClip(rect: GeometryRect, viewport: Readonly<{ width: number; height: number }>) {
   const x = Math.max(0, Math.floor(rect.x));
@@ -564,6 +573,7 @@ function createReportDetails({
             : `证据不足 · 仅 ${entry.members.length} 个可测元素`;
       return {
         kind,
+        requiresReview: false,
         id,
         title: semanticAlignmentTitle(entry),
         description: `${contextText ? `“${contextText}” · ` : ''}${
@@ -624,6 +634,7 @@ function createReportDetails({
             : `证据不足 · 仅 ${entry.members.length} 个可测元素`;
       return {
         kind,
+        requiresReview: false,
         id,
         title: `Sidebar / ${instance}`,
         description: `text baseline · ${entry.members.map((member) => member.name).join(' ↔ ')}`,
@@ -693,6 +704,7 @@ function createDiscoveryDetails({
 
       return {
         kind: 'candidate',
+        requiresReview: hasAnnotations,
         id,
         title: `${discoverySurfaceLabel(surface)} · ${discoveryScopeLabel(scope)} · ${regionLabels[region]}`,
         description: hasAnnotations
@@ -1113,8 +1125,24 @@ test('captures the visual geometry report', async ({ browser }) => {
     });
   }
 
-  const details = [...workspaceDetails, ...sessionDetails];
+  const details = [...workspaceDetails, ...sessionDetails]
+    .map((detail, sourceIndex) => ({ detail, sourceIndex }))
+    .sort(
+      (left, right) =>
+        reportDetailPriority(left.detail) - reportDetailPriority(right.detail) ||
+        left.sourceIndex - right.sourceIndex
+    )
+    .map(({ detail }) => detail);
   expect(details.length).toBeGreaterThan(0);
+  const reviewCandidateIndexes = details.flatMap((detail, index) =>
+    detail.kind === 'candidate' && detail.requiresReview ? [index] : []
+  );
+  const stableCandidateIndexes = details.flatMap((detail, index) =>
+    detail.kind === 'candidate' && !detail.requiresReview ? [index] : []
+  );
+  expect(reviewCandidateIndexes.length).toBeGreaterThan(0);
+  expect(stableCandidateIndexes.length).toBeGreaterThan(0);
+  expect(Math.max(...reviewCandidateIndexes)).toBeLessThan(Math.min(...stableCandidateIndexes));
   const scopeKey = (
     contractDomain: 'workspace' | 'session',
     scope: BrowserAlignmentRailDiscoveryScope
@@ -1180,15 +1208,18 @@ test('captures the visual geometry report', async ({ browser }) => {
     discoverySurfaces,
     contractProposals,
     geometryViolations,
-    details: details.map(({ kind, id, title, description, finding, clip, images }) => ({
-      kind,
-      id,
-      title,
-      description,
-      finding,
-      clip,
-      images,
-    })),
+    details: details.map(
+      ({ kind, requiresReview, id, title, description, finding, clip, images }) => ({
+        kind,
+        requiresReview,
+        id,
+        title,
+        description,
+        finding,
+        clip,
+        images,
+      })
+    ),
   };
 
   await writeFile(
