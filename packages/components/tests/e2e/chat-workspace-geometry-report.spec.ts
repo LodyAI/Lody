@@ -1123,6 +1123,22 @@ test('captures the visual geometry report', async ({ browser }) => {
       expect(messageLeadingRails?.description).toContain('暂无偏离元素');
       expect(messageLeadingRails?.overlay.semanticAnnotations).toHaveLength(0);
     }
+    if (story.idPrefix === 'session-working') {
+      const messageLeadingRails = storyDetails.find(
+        (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
+      );
+      expect(messageLeadingRails?.overlay.discoveredRails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ line: 368 }),
+          expect.objectContaining({ line: 369 }),
+        ])
+      );
+      expect(messageLeadingRails?.overlay.semanticAnnotations).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: expect.stringContaining('Render checkpoint') }),
+        ])
+      );
+    }
 
     for (const detail of storyDetails) {
       await page.screenshot({

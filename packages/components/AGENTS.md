@@ -51,6 +51,8 @@ mobile surfaces.
   legitimate two-row visual level into a nearby rail merely because a broader rail has more support.
   A rail established by one rendered primitive kind accepts only that kind; cross-kind attachment
   requires mixed support on the rail itself so a coincidentally nearby icon is not judged by a text rail.
+  Coordinate peaks merge only within the inlier tolerance. Two repeated peaks one CSS pixel apart are
+  distinct visual levels; do not median them into one rail and report the smaller peak as misaligned.
   Members outside the inlier tolerance are reported as outliers, and confidence includes the
   rail's span relative to its containing scope rather than the minimum-span admission threshold. Flow
   text may contribute start/end edges but never a center rail because its box center changes

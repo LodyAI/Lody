@@ -367,6 +367,36 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(rails.every((rail) => rail.outliers.length === 0)).toBe(true);
   });
 
+  it('keeps adjacent repeated visual levels separate at one pixel', () => {
+    const candidates = [
+      ...[0, 160, 320].map((yStart, index) => ({
+        elementId: `section-copy-${index + 1}`,
+        rowId: `section-copy-row-${index + 1}`,
+        coordinate: 100,
+        yStart,
+      })),
+      ...[32, 64, 96, 192, 224, 256].map((yStart, index) => ({
+        elementId: `table-cell-${index + 1}`,
+        rowId: `table-cell-row-${index + 1}`,
+        coordinate: 101,
+        yStart,
+      })),
+    ].map((candidate) => ({
+      ...candidate,
+      kind: 'text',
+      anchor: 'inline-start' as const,
+      yEnd: candidate.yStart + 20,
+    }));
+
+    const rails = discoverAlignmentRails(candidates, {
+      mergeTolerance: 8,
+      minSupport: 2,
+    });
+
+    expect(rails.map((rail) => rail.line).sort((left, right) => left - right)).toEqual([100, 101]);
+    expect(rails.every((rail) => rail.outliers.length === 0)).toBe(true);
+  });
+
   it('does not attach an unrelated icon to a text-only rail', () => {
     const rails = discoverAlignmentRails(
       [

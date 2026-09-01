@@ -1059,7 +1059,7 @@ export function discoverAlignmentRails(
     );
 
     const modeClusters: AlignmentRailCandidate[][] = [];
-    const maximumModeSpan = inlierTolerance * 2;
+    const maximumModeSpan = inlierTolerance;
     for (const candidate of ordered) {
       const currentMode = modeClusters.at(-1);
       const modeStart = currentMode?.[0]?.coordinate;
