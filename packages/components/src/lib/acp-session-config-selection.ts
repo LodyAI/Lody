@@ -49,19 +49,21 @@ export type AcpSessionConfigSelectionAction =
       defaultModelId: string | null;
       configOptionSelectors: AcpConfigOptionSelector[];
       preserveUnsentUserEdits?: boolean;
+      /**
+       * The agent's own reported baseline for the accepted turn, folded in by
+       * the SAME action rather than a second dispatch. The two rules disagree
+       * by design — stored preferences seed keys the runtime never mentions,
+       * and a runtime snapshot owns the key set for the turn it is based on —
+       * so applying them alternately makes the selection alternate too: one
+       * pass re-adds a preference-only option, the next drops it again. One
+       * pass, resolved in a fixed order, has a fixed point.
+       */
+      runtimePreferences?: AcpSessionConfigPreferences | null;
     }
   | { type: 'select-mode'; value: string | null }
   | { type: 'select-model'; value: string | null }
   | { type: 'select-config-option'; configId: string; value: AcpConfigOptionValue }
-  | { type: 'replace-config-options'; values: Record<string, AcpConfigOptionValue> }
-  | {
-      type: 'apply-runtime-preferences';
-      preferences: AcpSessionConfigPreferences;
-      capabilityAuthority: AcpCapabilityAuthority;
-      modeOptions: AcpSessionSelectOption[];
-      modelOptions: AcpSessionSelectOption[];
-      configOptionSelectors: AcpConfigOptionSelector[];
-    };
+  | { type: 'replace-config-options'; values: Record<string, AcpConfigOptionValue> };
 
 const isSelectValueValid = (
   options: AcpSessionSelectOption[],
@@ -251,65 +253,62 @@ const preserveUnsentUserEdits = (
   return { ...next, mode, model, configOptions };
 };
 
-export function reduceAcpSessionConfigSelection(
-  state: AcpSessionConfigSelectionState,
-  action: AcpSessionConfigSelectionAction
-): AcpSessionConfigSelectionState {
-  if (action.type === 'select-mode') {
-    return { ...state, mode: { value: action.value, origin: 'user' } };
-  }
-  if (action.type === 'select-model') {
-    return { ...state, model: { value: action.value, origin: 'user' } };
-  }
-  if (action.type === 'select-config-option') {
-    return {
-      ...state,
-      configOptions: {
-        ...state.configOptions,
-        [action.configId]: { value: action.value, origin: 'user' },
-      },
-    };
-  }
-  if (action.type === 'replace-config-options') {
-    return {
-      ...state,
-      configOptions: Object.fromEntries(
-        Object.entries(action.values).map(([configId, value]) => [
-          configId,
-          { value, origin: 'user' as const },
-        ])
-      ),
-    };
-  }
-  if (action.type === 'apply-runtime-preferences') {
-    if (!state.targetKey) {
-      return state;
-    }
-    const mode = applyRuntimeSelectPreference(
-      state.mode,
-      action.preferences.modeId,
-      action.modeOptions,
-      action.capabilityAuthority
-    );
-    const model = applyRuntimeSelectPreference(
-      state.model,
-      action.preferences.modelId,
-      action.modelOptions,
-      action.capabilityAuthority
-    );
-    const configOptions = applyRuntimeConfigPreferences(
-      state.configOptions,
-      action.preferences,
-      action.configOptionSelectors,
-      action.capabilityAuthority
-    );
-    return areSelectionFieldsEqual(state.mode, mode) &&
-      areSelectionFieldsEqual(state.model, model) &&
-      state.configOptions === configOptions
-      ? state
-      : { ...state, mode, model, configOptions };
-  }
+type AcpSelectorCapabilities = {
+  capabilityAuthority: AcpCapabilityAuthority;
+  modeOptions: AcpSessionSelectOption[];
+  modelOptions: AcpSessionSelectOption[];
+  configOptionSelectors: AcpConfigOptionSelector[];
+};
 
+const applyRuntimePreferences = (
+  state: AcpSessionConfigSelectionState,
+  preferences: AcpSessionConfigPreferences,
+  capabilities: AcpSelectorCapabilities
+): AcpSessionConfigSelectionState => {
+  if (!state.targetKey) {
+    return state;
+  }
+  const mode = applyRuntimeSelectPreference(
+    state.mode,
+    preferences.modeId,
+    capabilities.modeOptions,
+    capabilities.capabilityAuthority
+  );
+  const model = applyRuntimeSelectPreference(
+    state.model,
+    preferences.modelId,
+    capabilities.modelOptions,
+    capabilities.capabilityAuthority
+  );
+  const configOptions = applyRuntimeConfigPreferences(
+    state.configOptions,
+    preferences,
+    capabilities.configOptionSelectors,
+    capabilities.capabilityAuthority
+  );
+  return areSelectionFieldsEqual(state.mode, mode) &&
+    areSelectionFieldsEqual(state.model, model) &&
+    state.configOptions === configOptions
+    ? state
+    : { ...state, mode, model, configOptions };
+};
+
+const areSelectionStatesEqual = (
+  left: AcpSessionConfigSelectionState,
+  right: AcpSessionConfigSelectionState
+): boolean =>
+  left === right ||
+  (left.targetKey === right.targetKey &&
+    left.preferenceRevision === right.preferenceRevision &&
+    left.capabilityAuthority === right.capabilityAuthority &&
+    areSelectionFieldsEqual(left.mode, right.mode) &&
+    areSelectionFieldsEqual(left.model, right.model) &&
+    areConfigOptionFieldsEqual(left.configOptions, right.configOptions));
+
+const reconcileSelection = (
+  state: AcpSessionConfigSelectionState,
+  action: Extract<AcpSessionConfigSelectionAction, { type: 'reconcile' }>
+): AcpSessionConfigSelectionState => {
   if (!action.targetKey) {
     const empty = createEmptyAcpSessionConfigSelectionState();
     return state.targetKey === null && state.preferenceRevision === action.preferenceRevision
@@ -411,6 +410,48 @@ export function reduceAcpSessionConfigSelection(
     model,
     configOptions,
   };
+};
+
+export function reduceAcpSessionConfigSelection(
+  state: AcpSessionConfigSelectionState,
+  action: AcpSessionConfigSelectionAction
+): AcpSessionConfigSelectionState {
+  if (action.type === 'select-mode') {
+    return { ...state, mode: { value: action.value, origin: 'user' } };
+  }
+  if (action.type === 'select-model') {
+    return { ...state, model: { value: action.value, origin: 'user' } };
+  }
+  if (action.type === 'select-config-option') {
+    return {
+      ...state,
+      configOptions: {
+        ...state.configOptions,
+        [action.configId]: { value: action.value, origin: 'user' },
+      },
+    };
+  }
+  if (action.type === 'replace-config-options') {
+    return {
+      ...state,
+      configOptions: Object.fromEntries(
+        Object.entries(action.values).map(([configId, value]) => [
+          configId,
+          { value, origin: 'user' as const },
+        ])
+      ),
+    };
+  }
+  const reconciled = reconcileSelection(state, action);
+  const next = action.runtimePreferences
+    ? applyRuntimePreferences(reconciled, action.runtimePreferences, action)
+    : reconciled;
+  // A reconcile applied to its own result must return the SAME state object.
+  // The composer feeds this selection back into the selector options it
+  // reconciles against, so a reconcile that keeps producing a new state keeps
+  // re-running the layout effect that dispatched it, until React gives up with
+  // "Maximum update depth exceeded".
+  return areSelectionStatesEqual(state, next) ? state : next;
 }
 
 export const getAcpSessionConfigOptionValues = (

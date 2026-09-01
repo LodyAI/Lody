@@ -66,6 +66,12 @@ export function useReconcileAcpSessionConfigSelection({
   selectorOptions: AcpSelectorOptions;
   dispatch: ReturnType<typeof useAcpSessionConfigSelectionState>['dispatch'];
 }) {
+  // ONE dispatch. The selection this writes is what `selectorOptions` is built
+  // from, so every state change re-runs this effect: a second dispatch that
+  // undoes part of the first (the runtime snapshot owns the config-option key
+  // set, stored preferences seed it) makes the pair alternate forever instead
+  // of settling. Folding the runtime baseline into the same action gives the
+  // effect a fixed point, which is what ends the cascade.
   useLayoutEffect(() => {
     if (!enabled) return;
     dispatch({
@@ -74,15 +80,9 @@ export function useReconcileAcpSessionConfigSelection({
       preferenceRevision,
       preferences,
       preserveUnsentUserEdits,
+      runtimePreferences,
       ...selectorOptions,
     });
-    if (runtimePreferences) {
-      dispatch({
-        type: 'apply-runtime-preferences',
-        preferences: runtimePreferences,
-        ...selectorOptions,
-      });
-    }
   }, [
     dispatch,
     enabled,

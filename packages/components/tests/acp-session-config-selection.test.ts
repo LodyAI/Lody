@@ -172,23 +172,13 @@ describe('ACP session config reconciliation', () => {
       capabilityAuthority: 'authoritative' as const,
       configOptionSelectors: selectors,
     };
-    const runtimeAction: AcpSessionConfigSelectionAction = {
-      type: 'apply-runtime-preferences',
-      preferences: { configOptionValues: { collaboration_mode: 'default' } },
-      capabilityAuthority: 'authoritative',
-      modeOptions: [],
-      modelOptions: [{ value: 'gpt-5.5', label: '5.5' }],
-      configOptionSelectors: selectors,
+    const withRuntime = {
+      ...initialAction,
+      runtimePreferences: { configOptionValues: { collaboration_mode: 'default' } },
     };
 
-    const firstClient = reduceAcpSessionConfigSelection(
-      reconcile(createEmptyAcpSessionConfigSelectionState(), initialAction),
-      runtimeAction
-    );
-    const secondClient = reduceAcpSessionConfigSelection(
-      reconcile(createEmptyAcpSessionConfigSelectionState(), initialAction),
-      runtimeAction
-    );
+    const firstClient = reconcile(createEmptyAcpSessionConfigSelectionState(), withRuntime);
+    const secondClient = reconcile(createEmptyAcpSessionConfigSelectionState(), withRuntime);
 
     expect(getAcpSessionConfigOptionValues(firstClient)).toEqual({
       collaboration_mode: 'default',
@@ -233,14 +223,14 @@ describe('ACP session config reconciliation', () => {
       configId: 'reasoning_effort',
       value: 'high',
     });
-    const updated = reduceAcpSessionConfigSelection(locallyEdited, {
-      type: 'apply-runtime-preferences',
+    const updated = reconcile(locallyEdited, {
       preferences: {
+        configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'low' },
+      },
+      runtimePreferences: {
         configOptionValues: { collaboration_mode: 'default', reasoning_effort: 'low' },
       },
       capabilityAuthority: 'authoritative',
-      modeOptions: [],
-      modelOptions: [{ value: 'gpt-5.5', label: '5.5' }],
       configOptionSelectors: selectors,
     });
 
@@ -301,16 +291,12 @@ describe('ACP session config reconciliation', () => {
   });
 
   it('removes non-user options omitted from a full runtime snapshot', () => {
-    const seeded = reconcile(createEmptyAcpSessionConfigSelectionState(), {
+    const updated = reconcile(createEmptyAcpSessionConfigSelectionState(), {
       preferences: { configOptionValues: { removed_option: 'enabled' } },
-    });
-    const updated = reduceAcpSessionConfigSelection(seeded, {
-      type: 'apply-runtime-preferences',
-      preferences: { configOptionValues: {} },
+      runtimePreferences: { configOptionValues: {} },
       capabilityAuthority: 'provisional',
-      modeOptions: [],
       modelOptions: [],
-      configOptionSelectors: [],
+      defaultModelId: null,
     });
 
     expect(getAcpSessionConfigOptionValues(updated)).toEqual({});

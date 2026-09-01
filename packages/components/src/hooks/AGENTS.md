@@ -109,3 +109,16 @@ this file; edit `AGENTS.md` only.
   during an owed frame it only advances the target. A switch renders
   synchronously for longer than the key repeat, so a held shortcut otherwise
   queues renders nobody sees. Not a time-based debounce.
+- `use-acp-session-config-selection.ts` reconciles the composer selection in ONE
+  dispatch, and that dispatch must be a fixed point: reconciling its own result
+  has to return the same state object. The selection feeds the selector options
+  the reconcile validates against (`useSessionAcpSelectorContext`), so the layout
+  effect re-runs on its own output — a reconcile that keeps producing a new state
+  re-renders the conversation until React aborts with "Maximum update depth
+  exceeded". The agent's runtime baseline therefore travels as
+  `runtimePreferences` ON the reconcile action rather than a second dispatch: the
+  two rules disagree by design (stored turn preferences seed keys the runtime
+  never reports; a runtime snapshot owns the key set for its turn), so applied
+  alternately they alternate the selection forever. Coverage:
+  `tests/acp-session-config-selection-fixed-point.test.tsx`.
+

@@ -82,13 +82,21 @@ const createComposerState = (): AcpSessionConfigSelectionState =>
     ...selectorOptions,
   });
 
+/**
+ * What the composer dispatches once the agent publishes its baseline: the same
+ * reconcile it already runs, now carrying the runtime snapshot. The two are one
+ * action on purpose — see `use-acp-session-config-selection.ts`.
+ */
 const applyRuntime = (
   state: AcpSessionConfigSelectionState,
-  preferences: AcpSessionConfigPreferences
+  runtimePreferences: AcpSessionConfigPreferences
 ): AcpSessionConfigSelectionState =>
   reduceAcpSessionConfigSelection(state, {
-    type: 'apply-runtime-preferences',
-    preferences,
+    type: 'reconcile',
+    targetKey: 'session:codex',
+    preferenceRevision: `history:${userTurnId}`,
+    preferences: sharedPlanLow,
+    runtimePreferences,
     ...selectorOptions,
   });
 
