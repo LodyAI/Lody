@@ -3368,7 +3368,9 @@ export const SessionChatInterface = memo(
       isGoalActive,
     });
     const canStopAgent =
-      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
+      isContextCompacting ||
+      (isSessionActive && activeAssistantTurnId != null) ||
+      (isGoalActive && canPauseGoal);
     const latestCompletedProposedPlan = useMemo(
       () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
       [sessionDoc?.history]
