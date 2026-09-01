@@ -332,7 +332,6 @@ import {
   type CodeCollabV2WorkspaceResolveOptions,
   type CodeCollabV2WorkspaceResolver,
 } from '@/lib/code-collab/code-collab-v2-service';
-import { resolveCodeCollabLocalProjectWorkspaceRoot } from '@/lib/code-collab/code-collab-workspace-root';
 import { FilePreviewService } from '@/lib/file-preview/file-preview-service';
 import {
   CodeCollabV2DiffStore,
@@ -6249,26 +6248,65 @@ export class MessageHandler {
         };
       }
       const isLocalWorktree = meta.isWorktree === true || project.useWorktree === true;
-      const workspaceRoot = resolveCodeCollabLocalProjectWorkspaceRoot({
-        originalRootPath,
-        ownerSessionId,
-        isWorktree: isLocalWorktree,
-        logger: this.logger,
-      });
-      if (!workspaceRoot) {
+      if (!isLocalWorktree) {
         return {
-          ok: false,
-          error: 'workspace_unavailable',
-          message: 'Session worktree is unavailable.',
+          ok: true,
+          workspaceRoot: originalRootPath,
+          source: `local-project:${project.localProjectId}`,
+          ...ownerSessionIdField(ownerSessionId),
         };
       }
+
+      const worktreeManager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
+        source: { kind: 'local-shared', originalRootPath },
+        logger: this.logger,
+      });
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      // Fork metadata is persisted before asynchronous worktree creation starts. Never fall
+      // back to originalRootPath here: it is the shared main checkout, so All Changes would
+      // show another checkout's edits. Wait for the session, then recheck the worktree manager.
+      this.logCodeCollabDebug(
+        `[${sessionId}] Code Collab v2 workspace resolution waiting for local worktree ownerSessionId=${ownerSessionId} project=${project.localProjectId}`
+      );
+      const waited = await waitForSessionWorkspaceRoot({
+        targetSessionId: ownerSessionId,
+        activeSource:
+          ownerSessionId === sessionId
+            ? 'active-session-after-wait'
+            : `active-parent-session:${ownerSessionId}`,
+        pendingSource:
+          ownerSessionId === sessionId
+            ? 'pending-session-after-wait'
+            : `pending-parent-session:${ownerSessionId}`,
+        timeoutMs: CODE_COLLAB_WORKSPACE_WAIT_TIMEOUT_MS,
+      });
+      if (waited) {
+        return waited.ok ? { ...waited, ...ownerSessionIdField(ownerSessionId) } : waited;
+      }
+
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing-after-wait:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
       return {
-        ok: true,
-        workspaceRoot,
-        source: isLocalWorktree
-          ? `local-worktree-existing:${ownerSessionId}`
-          : `local-project:${project.localProjectId}`,
-        ...ownerSessionIdField(ownerSessionId),
+        ok: false,
+        error: 'session_initializing',
+        message:
+          'Session workspace is still being prepared. Code Collab will start after the session is ready.',
       };
     }
 
