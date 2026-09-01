@@ -15,6 +15,7 @@ import { TooltipProvider } from '@/ui';
 import { RuntimeProvider } from '../providers/runtime-provider';
 import { markStartupNavigationForEagerSync } from '../providers/startup-network-idle';
 import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
+import { scheduleIdleTask } from '../lib/idle-task';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { isMissingEmail } from '@lody/shared';
@@ -259,7 +260,11 @@ function RootLocationEffects() {
 
   useEffect(() => {
     markStartupNavigationForEagerSync();
-    trackDeferredPostHogPageView(location.href);
+    // Page views are telemetry, so they wait for idle rather than extending the
+    // keydown task that navigated. Cancelling on href change also collapses a
+    // burst of session switches into the one view the user landed on.
+    const href = location.href;
+    return scheduleIdleTask(() => trackDeferredPostHogPageView(href));
   }, [location.href]);
 
   useEffect(() => {

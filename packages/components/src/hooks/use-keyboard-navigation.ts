@@ -52,6 +52,41 @@ export function useKeyboardNavigation(): void {
     []
   );
 
+  // Switching sessions renders the whole conversation synchronously, which
+  // outlasts the keyboard repeat interval: holding the shortcut queues presses
+  // faster than they can be painted, and every queued one pays a full render
+  // nobody ever sees. `frameRef` is the "a paint is still owed" flag — while it
+  // is set, a press only advances the target, and the pending frame navigates to
+  // wherever the burst got to. One navigation per painted frame, so a lone press
+  // keeps its immediate response and a held key moves as fast as it can render.
+  const pendingSessionRef = useRef<string | null>(null);
+  const navigatedSessionRef = useRef<string | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  const flushSessionNavigation = useCallback(() => {
+    const callbacks = callbacksRef.current;
+    const target = pendingSessionRef.current;
+    if (!callbacks || target === null) {
+      frameRef.current = null;
+      return;
+    }
+    navigatedSessionRef.current = target;
+    callbacks.onNavigateToSession(target);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      // The burst moved on while this navigation rendered; take the latest.
+      if (pendingSessionRef.current !== navigatedSessionRef.current) flushSessionNavigation();
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    },
+    []
+  );
+
   const navigateVisibleSession = useCallback(
     (direction: 'previous' | 'next') => {
       const callbacks = callbacksRef.current;
@@ -59,16 +94,25 @@ export function useKeyboardNavigation(): void {
       const sessionIds = getVisibleSessionIds();
       if (sessionIds.length === 0) return;
 
-      const currentId = callbacks.getSelectedSessionId();
-      const currentIndex = currentId ? sessionIds.indexOf(currentId) : -1;
+      // No paint is owed, so this press starts a burst rather than continuing
+      // one: re-anchor on the route, which has committed by now, and drop a
+      // pending target left over from a selection the user has since changed.
+      if (frameRef.current === null) pendingSessionRef.current = null;
+      const anchorId =
+        pendingSessionRef.current !== null && sessionIds.includes(pendingSessionRef.current)
+          ? pendingSessionRef.current
+          : callbacks.getSelectedSessionId();
+      const currentIndex = anchorId ? sessionIds.indexOf(anchorId) : -1;
       const nextIndex =
         direction === 'previous'
           ? Math.max(0, currentIndex - 1)
           : Math.min(sessionIds.length - 1, currentIndex + 1);
       const nextId = sessionIds[nextIndex];
-      if (nextId && nextId !== currentId) callbacks.onNavigateToSession(nextId);
+      if (!nextId || nextId === anchorId) return;
+      pendingSessionRef.current = nextId;
+      if (frameRef.current === null) flushSessionNavigation();
     },
-    [getVisibleSessionIds]
+    [flushSessionNavigation, getVisibleSessionIds]
   );
 
   useFocusScopeSwitcher({ enabled: !isMobile });

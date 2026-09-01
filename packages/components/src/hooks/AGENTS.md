@@ -99,3 +99,13 @@ this file; edit `AGENTS.md` only.
   recreated resource restarts its local revision counter. Local-machine RPC
   snapshots seed the shared resource before it becomes visible, so first paint
   stays local while later Flock events remain deduplicated across mounts.
+- `use-safe-area-insets.ts` is ONE module-level store. `DropdownMenuContent` and
+  `PopoverContent` run it even when closed, so a session switch mounts hundreds
+  of subscribers and a per-instance `getComputedStyle` forces a full-document
+  style recalculation after the commit dirtied style. Keep the snapshot identity
+  stable while values hold; keep the resize listeners for the document's life.
+- `use-keyboard-navigation.ts` issues at most one session navigation per painted
+  frame: with no frame outstanding a press navigates and re-anchors on the route,
+  during an owed frame it only advances the target. A switch renders
+  synchronously for longer than the key repeat, so a held shortcut otherwise
+  queues renders nobody sees. Not a time-based debounce.
