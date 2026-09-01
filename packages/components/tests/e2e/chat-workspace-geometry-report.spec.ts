@@ -149,7 +149,6 @@ const DISCOVERY_SCOPE_LABELS: Readonly<Record<string, string>> = {
 const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
   'Chat Session / Agent Question': 'Chat Session / Agent 提问态',
   'Chat Session / Idle': 'Chat Session / 空闲态',
-  'Chat Session / Mention Drop': 'Chat Session / 会话引用拖放态',
   'Chat Session / Permission': 'Chat Session / 权限确认态',
   'Chat Session / Working': 'Chat Session / 工作态（冻结帧）',
   'Workspace / Chat Landing': 'Workspace / Chat Landing',
@@ -1079,11 +1078,6 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: 'Chat Session / Agent Question',
       idPrefix: 'session-question',
       storyId: 'sessions-sessionconversationpage--desktop-agent-question',
-    },
-    {
-      surface: 'Chat Session / Mention Drop',
-      idPrefix: 'session-mention-drop',
-      storyId: 'sessions-sessionconversationpage--desktop-session-mention-drop',
     },
   ] as const;
 

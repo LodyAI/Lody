@@ -66,8 +66,10 @@ mobile surfaces.
   normalized position across captures may become evidence-backed contract proposals. A
   discovered rail or proposal is not layout intent and cannot pass or fail the gate until
   a contract compiler binds it to stable
-  semantic members and review promotes it into a named rule. Geometry-report violation
-  images label every deviating member in place with its human-readable role, physical
+  semantic members and review promotes it into a named rule. Geometry-report capture covers
+  Sidebar plus session states that materially change visible geometry; it does not duplicate an
+  isomorphic conversation layout solely for a transient interaction such as mention drop.
+  Violation images label every deviating member in place with its human-readable role, physical
   direction, measured offset, actual anchor, and a leader to the rendered element; a bare
   internal member id or an unlabelled shared line is not an actionable design finding.
   Discovery cards use product-region names rather than scope ids, count unique rendered
