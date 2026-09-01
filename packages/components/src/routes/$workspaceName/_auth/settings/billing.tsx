@@ -6,7 +6,7 @@ export const Route = createFileRoute('/$workspaceName/_auth/settings/billing')({
   component: BillingSettingsRoute,
 });
 
-export function BillingSettingsRoute() {
+function BillingSettingsRoute() {
   const { workspaceName } = Route.useParams();
 
   if (isNativeAppShell()) {

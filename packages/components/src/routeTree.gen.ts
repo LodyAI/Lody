@@ -9,97 +9,57 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as NotFoundRouteImport } from './routes/notFound'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as EmailVerifiedRouteImport } from './routes/email-verified'
-import { Route as DeviceRouteImport } from './routes/device'
-import { Route as CompleteEmailRouteImport } from './routes/complete-email'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as CompleteEmailRouteImport } from './routes/complete-email'
+import { Route as DeviceRouteImport } from './routes/device'
+import { Route as EmailVerifiedRouteImport } from './routes/email-verified'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as NotFoundRouteImport } from './routes/notFound'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index'
-import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create'
-import { Route as JoinTokenRouteImport } from './routes/join/$token'
-import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId'
-import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install'
-import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return'
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth'
-import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings'
-import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions'
-import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat'
+import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return'
+import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install'
+import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId'
+import { Route as JoinTokenRouteImport } from './routes/join/$token'
+import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create'
 import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive'
-import { Route as WorkspaceNameAuthTasksIndexRouteImport } from './routes/$workspaceName/_auth/tasks.index'
-import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index'
-import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId'
-import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace'
-import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats'
-import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects'
-import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences'
-import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people'
-import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines'
-import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp'
-import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines'
-import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts'
-import { Route as WorkspaceNameAuthSettingsGithubRouteImport } from './routes/$workspaceName/_auth/settings/github'
-import { Route as WorkspaceNameAuthSettingsGeneralRouteImport } from './routes/$workspaceName/_auth/settings/general'
-import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices'
-import { Route as WorkspaceNameAuthSettingsBillingRouteImport } from './routes/$workspaceName/_auth/settings/billing'
-import { Route as WorkspaceNameAuthSettingsAppearanceRouteImport } from './routes/$workspaceName/_auth/settings/appearance'
-import { Route as WorkspaceNameAuthSettingsAiUsageRouteImport } from './routes/$workspaceName/_auth/settings/ai-usage'
-import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents'
-import { Route as WorkspaceNameAuthSettingsAgentRolesRouteImport } from './routes/$workspaceName/_auth/settings/agent-roles'
-import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config'
-import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account'
-import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about'
+import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat'
+import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions'
+import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings'
 import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId'
+import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index'
+import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about'
+import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account'
+import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config'
+import { Route as WorkspaceNameAuthSettingsAgentRolesRouteImport } from './routes/$workspaceName/_auth/settings/agent-roles'
+import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents'
+import { Route as WorkspaceNameAuthSettingsAiUsageRouteImport } from './routes/$workspaceName/_auth/settings/ai-usage'
+import { Route as WorkspaceNameAuthSettingsAppearanceRouteImport } from './routes/$workspaceName/_auth/settings/appearance'
+import { Route as WorkspaceNameAuthSettingsBillingRouteImport } from './routes/$workspaceName/_auth/settings/billing'
+import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices'
+import { Route as WorkspaceNameAuthSettingsGeneralRouteImport } from './routes/$workspaceName/_auth/settings/general'
+import { Route as WorkspaceNameAuthSettingsGithubRouteImport } from './routes/$workspaceName/_auth/settings/github'
+import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts'
+import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines'
+import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp'
+import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines'
+import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people'
+import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences'
+import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects'
+import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats'
+import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace'
+import { Route as WorkspaceNameAuthTasksIndexRouteImport } from './routes/$workspaceName/_auth/tasks.index'
+import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId'
 import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId'
 
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NotFoundRoute = NotFoundRouteImport.update({
-  id: '/notFound',
-  path: '/notFound',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EmailVerifiedRoute = EmailVerifiedRouteImport.update({
-  id: '/email-verified',
-  path: '/email-verified',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DeviceRoute = DeviceRouteImport.update({
-  id: '/device',
-  path: '/device',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CompleteEmailRoute = CompleteEmailRouteImport.update({
-  id: '/complete-email',
-  path: '/complete-email',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceNameRoute = WorkspaceNameRouteImport.update({
@@ -107,9 +67,49 @@ const WorkspaceNameRoute = WorkspaceNameRouteImport.update({
   path: '/$workspaceName',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompleteEmailRoute = CompleteEmailRouteImport.update({
+  id: '/complete-email',
+  path: '/complete-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeviceRoute = DeviceRouteImport.update({
+  id: '/device',
+  path: '/device',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmailVerifiedRoute = EmailVerifiedRouteImport.update({
+  id: '/email-verified',
+  path: '/email-verified',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotFoundRoute = NotFoundRouteImport.update({
+  id: '/notFound',
+  path: '/notFound',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
@@ -117,19 +117,13 @@ const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkspaceNameRoute,
 } as any)
-const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
-  id: '/workspace/create',
-  path: '/workspace/create',
-  getParentRoute: () => rootRouteImport,
+const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
+  id: '/_auth',
+  getParentRoute: () => WorkspaceNameRoute,
 } as any)
-const JoinTokenRoute = JoinTokenRouteImport.update({
-  id: '/join/$token',
-  path: '/join/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
-  id: '/invite/$invitationId',
-  path: '/invite/$invitationId',
+const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
+  id: '/desktop/checkout-return',
+  path: '/desktop/checkout-return',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DesktopGithubInstallRoute = DesktopGithubInstallRouteImport.update({
@@ -137,31 +131,20 @@ const DesktopGithubInstallRoute = DesktopGithubInstallRouteImport.update({
   path: '/desktop/github-install',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
-  id: '/desktop/checkout-return',
-  path: '/desktop/checkout-return',
+const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
+  id: '/invite/$invitationId',
+  path: '/invite/$invitationId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
-  id: '/_auth',
-  getParentRoute: () => WorkspaceNameRoute,
+const JoinTokenRoute = JoinTokenRouteImport.update({
+  id: '/join/$token',
+  path: '/join/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspaceNameAuthSettingsRoute =
-  WorkspaceNameAuthSettingsRouteImport.update({
-    id: '/settings',
-    path: '/settings',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthSessionsRoute =
-  WorkspaceNameAuthSessionsRouteImport.update({
-    id: '/sessions',
-    path: '/sessions',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => WorkspaceNameAuthRoute,
+const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
+  id: '/workspace/create',
+  path: '/workspace/create',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceNameAuthArchiveRoute =
   WorkspaceNameAuthArchiveRouteImport.update({
@@ -169,136 +152,33 @@ const WorkspaceNameAuthArchiveRoute =
     path: '/archive',
     getParentRoute: () => WorkspaceNameAuthRoute,
   } as any)
-const WorkspaceNameAuthTasksIndexRoute =
-  WorkspaceNameAuthTasksIndexRouteImport.update({
-    id: '/tasks/',
-    path: '/tasks/',
+const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any)
+const WorkspaceNameAuthSessionsRoute =
+  WorkspaceNameAuthSessionsRouteImport.update({
+    id: '/sessions',
+    path: '/sessions',
     getParentRoute: () => WorkspaceNameAuthRoute,
+  } as any)
+const WorkspaceNameAuthSettingsRoute =
+  WorkspaceNameAuthSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => WorkspaceNameAuthRoute,
+  } as any)
+const WorkspaceNameAuthSessionsSessionIdRoute =
+  WorkspaceNameAuthSessionsSessionIdRouteImport.update({
+    id: '/$sessionId',
+    path: '/$sessionId',
+    getParentRoute: () => WorkspaceNameAuthSessionsRoute,
   } as any)
 const WorkspaceNameAuthSettingsIndexRoute =
   WorkspaceNameAuthSettingsIndexRouteImport.update({
     id: '/',
     path: '/',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthTasksTaskIdRoute =
-  WorkspaceNameAuthTasksTaskIdRouteImport.update({
-    id: '/tasks/$taskId',
-    path: '/tasks/$taskId',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthSettingsWorkspaceRoute =
-  WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
-    id: '/workspace',
-    path: '/workspace',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsStatsRoute =
-  WorkspaceNameAuthSettingsStatsRouteImport.update({
-    id: '/stats',
-    path: '/stats',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsProjectsRoute =
-  WorkspaceNameAuthSettingsProjectsRouteImport.update({
-    id: '/projects',
-    path: '/projects',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsPreferencesRoute =
-  WorkspaceNameAuthSettingsPreferencesRouteImport.update({
-    id: '/preferences',
-    path: '/preferences',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsPeopleRoute =
-  WorkspaceNameAuthSettingsPeopleRouteImport.update({
-    id: '/people',
-    path: '/people',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsMyMachinesRoute =
-  WorkspaceNameAuthSettingsMyMachinesRouteImport.update({
-    id: '/my-machines',
-    path: '/my-machines',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsMcpRoute =
-  WorkspaceNameAuthSettingsMcpRouteImport.update({
-    id: '/mcp',
-    path: '/mcp',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsMachinesRoute =
-  WorkspaceNameAuthSettingsMachinesRouteImport.update({
-    id: '/machines',
-    path: '/machines',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsKeyboardShortcutsRoute =
-  WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport.update({
-    id: '/keyboard-shortcuts',
-    path: '/keyboard-shortcuts',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsGithubRoute =
-  WorkspaceNameAuthSettingsGithubRouteImport.update({
-    id: '/github',
-    path: '/github',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsGeneralRoute =
-  WorkspaceNameAuthSettingsGeneralRouteImport.update({
-    id: '/general',
-    path: '/general',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsDevicesRoute =
-  WorkspaceNameAuthSettingsDevicesRouteImport.update({
-    id: '/devices',
-    path: '/devices',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsBillingRoute =
-  WorkspaceNameAuthSettingsBillingRouteImport.update({
-    id: '/billing',
-    path: '/billing',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAppearanceRoute =
-  WorkspaceNameAuthSettingsAppearanceRouteImport.update({
-    id: '/appearance',
-    path: '/appearance',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAiUsageRoute =
-  WorkspaceNameAuthSettingsAiUsageRouteImport.update({
-    id: '/ai-usage',
-    path: '/ai-usage',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAgentsRoute =
-  WorkspaceNameAuthSettingsAgentsRouteImport.update({
-    id: '/agents',
-    path: '/agents',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAgentRolesRoute =
-  WorkspaceNameAuthSettingsAgentRolesRouteImport.update({
-    id: '/agent-roles',
-    path: '/agent-roles',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAgentConfigRoute =
-  WorkspaceNameAuthSettingsAgentConfigRouteImport.update({
-    id: '/agent-config',
-    path: '/agent-config',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAccountRoute =
-  WorkspaceNameAuthSettingsAccountRouteImport.update({
-    id: '/account',
-    path: '/account',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any)
 const WorkspaceNameAuthSettingsAboutRoute =
@@ -307,11 +187,131 @@ const WorkspaceNameAuthSettingsAboutRoute =
     path: '/about',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any)
-const WorkspaceNameAuthSessionsSessionIdRoute =
-  WorkspaceNameAuthSessionsSessionIdRouteImport.update({
-    id: '/$sessionId',
-    path: '/$sessionId',
-    getParentRoute: () => WorkspaceNameAuthSessionsRoute,
+const WorkspaceNameAuthSettingsAccountRoute =
+  WorkspaceNameAuthSettingsAccountRouteImport.update({
+    id: '/account',
+    path: '/account',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsAgentConfigRoute =
+  WorkspaceNameAuthSettingsAgentConfigRouteImport.update({
+    id: '/agent-config',
+    path: '/agent-config',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsAgentRolesRoute =
+  WorkspaceNameAuthSettingsAgentRolesRouteImport.update({
+    id: '/agent-roles',
+    path: '/agent-roles',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsAgentsRoute =
+  WorkspaceNameAuthSettingsAgentsRouteImport.update({
+    id: '/agents',
+    path: '/agents',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsAiUsageRoute =
+  WorkspaceNameAuthSettingsAiUsageRouteImport.update({
+    id: '/ai-usage',
+    path: '/ai-usage',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsAppearanceRoute =
+  WorkspaceNameAuthSettingsAppearanceRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsBillingRoute =
+  WorkspaceNameAuthSettingsBillingRouteImport.update({
+    id: '/billing',
+    path: '/billing',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsDevicesRoute =
+  WorkspaceNameAuthSettingsDevicesRouteImport.update({
+    id: '/devices',
+    path: '/devices',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsGeneralRoute =
+  WorkspaceNameAuthSettingsGeneralRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsGithubRoute =
+  WorkspaceNameAuthSettingsGithubRouteImport.update({
+    id: '/github',
+    path: '/github',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsKeyboardShortcutsRoute =
+  WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport.update({
+    id: '/keyboard-shortcuts',
+    path: '/keyboard-shortcuts',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsMachinesRoute =
+  WorkspaceNameAuthSettingsMachinesRouteImport.update({
+    id: '/machines',
+    path: '/machines',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsMcpRoute =
+  WorkspaceNameAuthSettingsMcpRouteImport.update({
+    id: '/mcp',
+    path: '/mcp',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsMyMachinesRoute =
+  WorkspaceNameAuthSettingsMyMachinesRouteImport.update({
+    id: '/my-machines',
+    path: '/my-machines',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsPeopleRoute =
+  WorkspaceNameAuthSettingsPeopleRouteImport.update({
+    id: '/people',
+    path: '/people',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsPreferencesRoute =
+  WorkspaceNameAuthSettingsPreferencesRouteImport.update({
+    id: '/preferences',
+    path: '/preferences',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsProjectsRoute =
+  WorkspaceNameAuthSettingsProjectsRouteImport.update({
+    id: '/projects',
+    path: '/projects',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsStatsRoute =
+  WorkspaceNameAuthSettingsStatsRouteImport.update({
+    id: '/stats',
+    path: '/stats',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsWorkspaceRoute =
+  WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
+    id: '/workspace',
+    path: '/workspace',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthTasksIndexRoute =
+  WorkspaceNameAuthTasksIndexRouteImport.update({
+    id: '/tasks/',
+    path: '/tasks/',
+    getParentRoute: () => WorkspaceNameAuthRoute,
+  } as any)
+const WorkspaceNameAuthTasksTaskIdRoute =
+  WorkspaceNameAuthTasksTaskIdRouteImport.update({
+    id: '/tasks/$taskId',
+    path: '/tasks/$taskId',
+    getParentRoute: () => WorkspaceNameAuthRoute,
   } as any)
 const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport.update({
@@ -322,7 +322,7 @@ const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/$workspaceName': typeof WorkspaceNameAuthRouteWithChildren
+  '/$workspaceName': typeof WorkspaceNameRouteWithChildren
   '/app': typeof AppRoute
   '/complete-email': typeof CompleteEmailRoute
   '/device': typeof DeviceRoute
@@ -631,67 +631,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/notFound': {
-      id: '/notFound'
-      path: '/notFound'
-      fullPath: '/notFound'
-      preLoaderRoute: typeof NotFoundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/email-verified': {
-      id: '/email-verified'
-      path: '/email-verified'
-      fullPath: '/email-verified'
-      preLoaderRoute: typeof EmailVerifiedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/device': {
-      id: '/device'
-      path: '/device'
-      fullPath: '/device'
-      preLoaderRoute: typeof DeviceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/complete-email': {
-      id: '/complete-email'
-      path: '/complete-email'
-      fullPath: '/complete-email'
-      preLoaderRoute: typeof CompleteEmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$workspaceName': {
@@ -701,11 +645,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/complete-email': {
+      id: '/complete-email'
+      path: '/complete-email'
+      fullPath: '/complete-email'
+      preLoaderRoute: typeof CompleteEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/device': {
+      id: '/device'
+      path: '/device'
+      fullPath: '/device'
+      preLoaderRoute: typeof DeviceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/email-verified': {
+      id: '/email-verified'
+      path: '/email-verified'
+      fullPath: '/email-verified'
+      preLoaderRoute: typeof EmailVerifiedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notFound': {
+      id: '/notFound'
+      path: '/notFound'
+      fullPath: '/notFound'
+      preLoaderRoute: typeof NotFoundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$workspaceName/': {
@@ -715,25 +715,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameIndexRouteImport
       parentRoute: typeof WorkspaceNameRoute
     }
-    '/workspace/create': {
-      id: '/workspace/create'
-      path: '/workspace/create'
-      fullPath: '/workspace/create'
-      preLoaderRoute: typeof WorkspaceCreateRouteImport
-      parentRoute: typeof rootRouteImport
+    '/$workspaceName/_auth': {
+      id: '/$workspaceName/_auth'
+      path: ''
+      fullPath: '/$workspaceName'
+      preLoaderRoute: typeof WorkspaceNameAuthRouteImport
+      parentRoute: typeof WorkspaceNameRoute
     }
-    '/join/$token': {
-      id: '/join/$token'
-      path: '/join/$token'
-      fullPath: '/join/$token'
-      preLoaderRoute: typeof JoinTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/invite/$invitationId': {
-      id: '/invite/$invitationId'
-      path: '/invite/$invitationId'
-      fullPath: '/invite/$invitationId'
-      preLoaderRoute: typeof InviteInvitationIdRouteImport
+    '/desktop/checkout-return': {
+      id: '/desktop/checkout-return'
+      path: '/desktop/checkout-return'
+      fullPath: '/desktop/checkout-return'
+      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desktop/github-install': {
@@ -743,32 +736,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DesktopGithubInstallRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/desktop/checkout-return': {
-      id: '/desktop/checkout-return'
-      path: '/desktop/checkout-return'
-      fullPath: '/desktop/checkout-return'
-      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport
+    '/invite/$invitationId': {
+      id: '/invite/$invitationId'
+      path: '/invite/$invitationId'
+      fullPath: '/invite/$invitationId'
+      preLoaderRoute: typeof InviteInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/$workspaceName/_auth': {
-      id: '/$workspaceName/_auth'
-      path: ''
-      fullPath: '/$workspaceName'
-      preLoaderRoute: typeof WorkspaceNameAuthRouteImport
-      parentRoute: typeof WorkspaceNameRoute
+    '/join/$token': {
+      id: '/join/$token'
+      path: '/join/$token'
+      fullPath: '/join/$token'
+      preLoaderRoute: typeof JoinTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$workspaceName/_auth/settings': {
-      id: '/$workspaceName/_auth/settings'
-      path: '/settings'
-      fullPath: '/$workspaceName/settings'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
+    '/workspace/create': {
+      id: '/workspace/create'
+      path: '/workspace/create'
+      fullPath: '/workspace/create'
+      preLoaderRoute: typeof WorkspaceCreateRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$workspaceName/_auth/sessions': {
-      id: '/$workspaceName/_auth/sessions'
-      path: '/sessions'
-      fullPath: '/$workspaceName/sessions'
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport
+    '/$workspaceName/_auth/archive': {
+      id: '/$workspaceName/_auth/archive'
+      path: '/archive'
+      fullPath: '/$workspaceName/archive'
+      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport
       parentRoute: typeof WorkspaceNameAuthRoute
     }
     '/$workspaceName/_auth/chat': {
@@ -778,165 +771,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthChatRouteImport
       parentRoute: typeof WorkspaceNameAuthRoute
     }
-    '/$workspaceName/_auth/archive': {
-      id: '/$workspaceName/_auth/archive'
-      path: '/archive'
-      fullPath: '/$workspaceName/archive'
-      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport
+    '/$workspaceName/_auth/sessions': {
+      id: '/$workspaceName/_auth/sessions'
+      path: '/sessions'
+      fullPath: '/$workspaceName/sessions'
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport
       parentRoute: typeof WorkspaceNameAuthRoute
     }
-    '/$workspaceName/_auth/tasks/': {
-      id: '/$workspaceName/_auth/tasks/'
-      path: '/tasks'
-      fullPath: '/$workspaceName/tasks/'
-      preLoaderRoute: typeof WorkspaceNameAuthTasksIndexRouteImport
+    '/$workspaceName/_auth/settings': {
+      id: '/$workspaceName/_auth/settings'
+      path: '/settings'
+      fullPath: '/$workspaceName/settings'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport
       parentRoute: typeof WorkspaceNameAuthRoute
+    }
+    '/$workspaceName/_auth/sessions/$sessionId': {
+      id: '/$workspaceName/_auth/sessions/$sessionId'
+      path: '/$sessionId'
+      fullPath: '/$workspaceName/sessions/$sessionId'
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport
+      parentRoute: typeof WorkspaceNameAuthSessionsRoute
     }
     '/$workspaceName/_auth/settings/': {
       id: '/$workspaceName/_auth/settings/'
       path: '/'
       fullPath: '/$workspaceName/settings/'
       preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/tasks/$taskId': {
-      id: '/$workspaceName/_auth/tasks/$taskId'
-      path: '/tasks/$taskId'
-      fullPath: '/$workspaceName/tasks/$taskId'
-      preLoaderRoute: typeof WorkspaceNameAuthTasksTaskIdRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
-    '/$workspaceName/_auth/settings/workspace': {
-      id: '/$workspaceName/_auth/settings/workspace'
-      path: '/workspace'
-      fullPath: '/$workspaceName/settings/workspace'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/stats': {
-      id: '/$workspaceName/_auth/settings/stats'
-      path: '/stats'
-      fullPath: '/$workspaceName/settings/stats'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/projects': {
-      id: '/$workspaceName/_auth/settings/projects'
-      path: '/projects'
-      fullPath: '/$workspaceName/settings/projects'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/preferences': {
-      id: '/$workspaceName/_auth/settings/preferences'
-      path: '/preferences'
-      fullPath: '/$workspaceName/settings/preferences'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/people': {
-      id: '/$workspaceName/_auth/settings/people'
-      path: '/people'
-      fullPath: '/$workspaceName/settings/people'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/my-machines': {
-      id: '/$workspaceName/_auth/settings/my-machines'
-      path: '/my-machines'
-      fullPath: '/$workspaceName/settings/my-machines'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/mcp': {
-      id: '/$workspaceName/_auth/settings/mcp'
-      path: '/mcp'
-      fullPath: '/$workspaceName/settings/mcp'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/machines': {
-      id: '/$workspaceName/_auth/settings/machines'
-      path: '/machines'
-      fullPath: '/$workspaceName/settings/machines'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
-      id: '/$workspaceName/_auth/settings/keyboard-shortcuts'
-      path: '/keyboard-shortcuts'
-      fullPath: '/$workspaceName/settings/keyboard-shortcuts'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/github': {
-      id: '/$workspaceName/_auth/settings/github'
-      path: '/github'
-      fullPath: '/$workspaceName/settings/github'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/general': {
-      id: '/$workspaceName/_auth/settings/general'
-      path: '/general'
-      fullPath: '/$workspaceName/settings/general'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/devices': {
-      id: '/$workspaceName/_auth/settings/devices'
-      path: '/devices'
-      fullPath: '/$workspaceName/settings/devices'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/billing': {
-      id: '/$workspaceName/_auth/settings/billing'
-      path: '/billing'
-      fullPath: '/$workspaceName/settings/billing'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/appearance': {
-      id: '/$workspaceName/_auth/settings/appearance'
-      path: '/appearance'
-      fullPath: '/$workspaceName/settings/appearance'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/ai-usage': {
-      id: '/$workspaceName/_auth/settings/ai-usage'
-      path: '/ai-usage'
-      fullPath: '/$workspaceName/settings/ai-usage'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/agents': {
-      id: '/$workspaceName/_auth/settings/agents'
-      path: '/agents'
-      fullPath: '/$workspaceName/settings/agents'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/agent-roles': {
-      id: '/$workspaceName/_auth/settings/agent-roles'
-      path: '/agent-roles'
-      fullPath: '/$workspaceName/settings/agent-roles'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/agent-config': {
-      id: '/$workspaceName/_auth/settings/agent-config'
-      path: '/agent-config'
-      fullPath: '/$workspaceName/settings/agent-config'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
-    '/$workspaceName/_auth/settings/account': {
-      id: '/$workspaceName/_auth/settings/account'
-      path: '/account'
-      fullPath: '/$workspaceName/settings/account'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountRouteImport
       parentRoute: typeof WorkspaceNameAuthSettingsRoute
     }
     '/$workspaceName/_auth/settings/about': {
@@ -946,12 +806,152 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutRouteImport
       parentRoute: typeof WorkspaceNameAuthSettingsRoute
     }
-    '/$workspaceName/_auth/sessions/$sessionId': {
-      id: '/$workspaceName/_auth/sessions/$sessionId'
-      path: '/$sessionId'
-      fullPath: '/$workspaceName/sessions/$sessionId'
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport
-      parentRoute: typeof WorkspaceNameAuthSessionsRoute
+    '/$workspaceName/_auth/settings/account': {
+      id: '/$workspaceName/_auth/settings/account'
+      path: '/account'
+      fullPath: '/$workspaceName/settings/account'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/agent-config': {
+      id: '/$workspaceName/_auth/settings/agent-config'
+      path: '/agent-config'
+      fullPath: '/$workspaceName/settings/agent-config'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/agent-roles': {
+      id: '/$workspaceName/_auth/settings/agent-roles'
+      path: '/agent-roles'
+      fullPath: '/$workspaceName/settings/agent-roles'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/agents': {
+      id: '/$workspaceName/_auth/settings/agents'
+      path: '/agents'
+      fullPath: '/$workspaceName/settings/agents'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/ai-usage': {
+      id: '/$workspaceName/_auth/settings/ai-usage'
+      path: '/ai-usage'
+      fullPath: '/$workspaceName/settings/ai-usage'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/appearance': {
+      id: '/$workspaceName/_auth/settings/appearance'
+      path: '/appearance'
+      fullPath: '/$workspaceName/settings/appearance'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/billing': {
+      id: '/$workspaceName/_auth/settings/billing'
+      path: '/billing'
+      fullPath: '/$workspaceName/settings/billing'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/devices': {
+      id: '/$workspaceName/_auth/settings/devices'
+      path: '/devices'
+      fullPath: '/$workspaceName/settings/devices'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/general': {
+      id: '/$workspaceName/_auth/settings/general'
+      path: '/general'
+      fullPath: '/$workspaceName/settings/general'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/github': {
+      id: '/$workspaceName/_auth/settings/github'
+      path: '/github'
+      fullPath: '/$workspaceName/settings/github'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/keyboard-shortcuts': {
+      id: '/$workspaceName/_auth/settings/keyboard-shortcuts'
+      path: '/keyboard-shortcuts'
+      fullPath: '/$workspaceName/settings/keyboard-shortcuts'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/machines': {
+      id: '/$workspaceName/_auth/settings/machines'
+      path: '/machines'
+      fullPath: '/$workspaceName/settings/machines'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/mcp': {
+      id: '/$workspaceName/_auth/settings/mcp'
+      path: '/mcp'
+      fullPath: '/$workspaceName/settings/mcp'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/my-machines': {
+      id: '/$workspaceName/_auth/settings/my-machines'
+      path: '/my-machines'
+      fullPath: '/$workspaceName/settings/my-machines'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/people': {
+      id: '/$workspaceName/_auth/settings/people'
+      path: '/people'
+      fullPath: '/$workspaceName/settings/people'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/preferences': {
+      id: '/$workspaceName/_auth/settings/preferences'
+      path: '/preferences'
+      fullPath: '/$workspaceName/settings/preferences'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/projects': {
+      id: '/$workspaceName/_auth/settings/projects'
+      path: '/projects'
+      fullPath: '/$workspaceName/settings/projects'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/stats': {
+      id: '/$workspaceName/_auth/settings/stats'
+      path: '/stats'
+      fullPath: '/$workspaceName/settings/stats'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/settings/workspace': {
+      id: '/$workspaceName/_auth/settings/workspace'
+      path: '/workspace'
+      fullPath: '/$workspaceName/settings/workspace'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
+    '/$workspaceName/_auth/tasks/': {
+      id: '/$workspaceName/_auth/tasks/'
+      path: '/tasks'
+      fullPath: '/$workspaceName/tasks/'
+      preLoaderRoute: typeof WorkspaceNameAuthTasksIndexRouteImport
+      parentRoute: typeof WorkspaceNameAuthRoute
+    }
+    '/$workspaceName/_auth/tasks/$taskId': {
+      id: '/$workspaceName/_auth/tasks/$taskId'
+      path: '/tasks/$taskId'
+      fullPath: '/$workspaceName/tasks/$taskId'
+      preLoaderRoute: typeof WorkspaceNameAuthTasksTaskIdRouteImport
+      parentRoute: typeof WorkspaceNameAuthRoute
     }
     '/$workspaceName/_auth/local/$machineId/$localProjectId': {
       id: '/$workspaceName/_auth/local/$machineId/$localProjectId'

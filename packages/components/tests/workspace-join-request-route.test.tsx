@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from 'react';
+import type { ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../src/i18n';
@@ -17,10 +18,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  createFileRoute: () => (options: Record<string, unknown>) => ({
-    ...options,
-    useParams: () => ({ token: 'open-token' }),
-  }),
+  createFileRoute: () => (options: Record<string, unknown>) => {
+    return {
+      ...options,
+      options,
+      useParams: () => ({ token: 'open-token' }),
+    };
+  },
   useNavigate: () => mocks.navigate,
 }));
 
@@ -42,7 +46,9 @@ vi.mock('../src/lib/auth', () => ({
   signOutWithoutRedirect: (...args: unknown[]) => mocks.signOutWithoutRedirect(...args),
 }));
 
-import { WorkspaceJoinRequestRoute } from '../src/routes/join/$token';
+import { Route } from '../src/routes/join/$token';
+
+const WorkspaceJoinRequestRoute = Route.options.component as ComponentType;
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

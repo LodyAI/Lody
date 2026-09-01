@@ -10,7 +10,7 @@ import {
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
 import '@lody/components/tailwind/index.css'
-import { jotaiStore } from '@lody/components/lib'
+import { jotaiStore } from '@lody/components/lib/utils'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
 import { getIpcServices } from '@lody/components/lib/electron-ipc-client'

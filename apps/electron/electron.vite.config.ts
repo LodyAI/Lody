@@ -1,9 +1,11 @@
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import wasm from 'vite-plugin-wasm'
 import tailwindcss from '@tailwindcss/vite'
 import {
@@ -76,6 +78,33 @@ function previewPublicBaseDomainHtmlPlugin(baseDomain: string): Plugin {
   }
 }
 
+/**
+ * Test-only observability for the real Electron renderer Rollup graph. The
+ * artifact is written outside the output directory so production builds never
+ * ship graph metadata.
+ */
+function routeBundleGraphPlugin(outputPath: string): Plugin {
+  return {
+    name: 'lody-route-bundle-graph',
+    apply: 'build',
+    generateBundle(_, bundle) {
+      const chunks = Object.values(bundle).filter((output) => output.type === 'chunk')
+      const graph = {
+        chunks: chunks.map((chunk) => ({
+          fileName: chunk.fileName,
+          facadeModuleId: chunk.facadeModuleId,
+          imports: chunk.imports,
+          dynamicImports: chunk.dynamicImports,
+          moduleIds: chunk.moduleIds,
+          rawBytes: Buffer.byteLength(chunk.code),
+          gzipBytes: gzipSync(chunk.code).byteLength
+        }))
+      }
+      fs.writeFileSync(outputPath, JSON.stringify(graph, null, 2))
+    }
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
@@ -84,6 +113,7 @@ export default defineConfig(({ mode }) => {
 
   const buildEnv = { ...OSS_BUILD_ENV }
   const previewPublicBaseDomain = buildEnv.VITE_PREVIEW_PUBLIC_BASE_DOMAIN
+  const routeBundleGraphOutputPath = process.env.LODY_ROUTE_BUNDLE_GRAPH_PATH
   const viteEnvDefine = {
     ...buildViteEnvDefine(buildEnv),
     'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain)
@@ -188,13 +218,23 @@ export default defineConfig(({ mode }) => {
         previewPublicBaseDomainHtmlPlugin(previewPublicBaseDomain),
         tailwindcss(),
         loroCrdtWasmUrlWorkaround(),
+        // The router is consumed from @lody/components source, so this host
+        // (not the package's own Vite config) must transform route modules.
+        // Keep this before React, as required by TanStack Router.
+        tanstackRouter({
+          target: 'react',
+          autoCodeSplitting: true,
+          routesDirectory: resolve(__dirname, '../../packages/components/src/routes'),
+          generatedRouteTree: resolve(__dirname, '../../packages/components/src/routeTree.gen.ts')
+        }),
         react(),
         wasm(),
         // The desktop app must work with no network, so the emoji picker's
         // dataset ships in the bundle instead of being fetched from a CDN.
         emojibaseAssetsPlugin(),
         rendererBundleAliasPlugin(),
-        mermaidLazyBoundaryGuardPlugin()
+        mermaidLazyBoundaryGuardPlugin(),
+        ...(routeBundleGraphOutputPath ? [routeBundleGraphPlugin(routeBundleGraphOutputPath)] : [])
       ]
     }
   }

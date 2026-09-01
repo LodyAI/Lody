@@ -2,13 +2,18 @@
 
 Parent `AGENTS.md` files also apply.
 
-## Lightweight hosted entries
+## Public/auth route boundaries
 
-- Public/auth entry points that bypass the full product router import route-agnostic
-  surfaces. Keep host navigation behind callback props so those surfaces do not import
-  the route tree, `RuntimeProvider`, or workspace Flock document implementation. When
-  an auth transition selects the destination, the host owns both the non-redirecting
-  auth action and navigation so an auth helper cannot discard route-specific state.
+- Public/auth pages remain ordinary TanStack file routes under the product router; do
+  not add a separate React entry, root lifecycle, empty workspace provider, or URL
+  dispatcher for a lightweight page. The global layout may own auth, Cloud API, i18n,
+  and PostHog; `RuntimeProvider` and workspace Flock state begin at the
+  `/$workspaceName` layout.
+- Hosts that consume `@lody/components/router` register the TanStack Router Vite plugin
+  before React with this package's routes directory and generated route tree. Keep a
+  route's component local unless another route truly imports it: the plugin can then
+  emit the component chunk, so a new public/auth route inherits the light closure from
+  its layout without bootstrap changes.
 
 ## Keyboard navigation
 

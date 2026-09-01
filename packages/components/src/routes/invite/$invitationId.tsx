@@ -36,7 +36,7 @@ function isEmailVerificationRequiredError(
  * 接受邀请页面组件
  * 处理工作空间邀请的接受流程
  */
-export function AcceptInvitationComponent() {
+function AcceptInvitationComponent() {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const signOut = useAuthSignOut();

@@ -7,7 +7,7 @@ export const Route = createFileRoute('/join/$token')({
   component: WorkspaceJoinRequestRoute,
 });
 
-export function WorkspaceJoinRequestRoute() {
+function WorkspaceJoinRequestRoute() {
   const { token } = Route.useParams();
   const navigate = useNavigate();
   const authClient = useAuthClient();

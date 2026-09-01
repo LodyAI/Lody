@@ -4,7 +4,7 @@ export const Route = createFileRoute('/$workspaceName/_auth/sessions')({
   component: SessionsRoute,
 });
 
-export function SessionsRoute() {
+function SessionsRoute() {
   const matchRoute = useMatchRoute();
   const { workspaceName } = Route.useParams();
 

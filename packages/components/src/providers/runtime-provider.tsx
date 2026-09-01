@@ -21,7 +21,7 @@ import {
   runtimeInitializingAtom,
   browserOnlineAtom,
 } from '@/atoms/control-connection';
-import { API_BASE_URL } from '@/lib';
+import { API_BASE_URL } from '@/lib/api-base-url';
 import { getCachedWorkspaceId } from '@/lib/local-storage-cache';
 import { usePostHog } from '@posthog/react';
 import { createWorkspaceRuntime } from './create-workspace-runtime';
@@ -266,7 +266,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           },
           ...(telemetryEnabled
             ? {
-                onAnalyticsEvent: (event: { name: string; properties?: Record<string, unknown> }) => {
+                onAnalyticsEvent: (event: {
+                  name: string;
+                  properties?: Record<string, unknown>;
+                }) => {
                   capturePostHogEvent(postHogRef.current, event.name, event.properties);
                 },
               }

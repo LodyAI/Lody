@@ -9,7 +9,7 @@ import {
   createLodyAuthClient,
   type LodyAuthClient
 } from '@lody/components/lib/auth'
-import { getAppWindowLocation } from '@lody/components/lib'
+import { getAppWindowLocation } from '@lody/components/lib/app-location'
 import { readStoredAuthToken } from '@lody/components/lib/auth-bootstrap'
 import { capturePostHogSingleton } from '@lody/components/lib/mobile-resume-analytics'
 import { persistNativeAuthSessionResult as persistAuthSessionResult } from '@lody/components/lib/native-auth-session-sync'

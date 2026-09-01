@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import i18next from 'i18next';
 import { syncTime, createServerTimeFetcher } from '@lody/shared';
 import { usePlatformCapability } from '@lody/platform/react';
-import { API_BASE_URL } from '../lib';
+import { API_BASE_URL } from '../lib/api-base-url';
 import { commands, registerBuiltInCommands } from '../lib/commands';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';

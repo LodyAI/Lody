@@ -27,6 +27,7 @@ import {
 } from '@lody/shared';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { WorkspaceRouteTargetProvider } from '../providers/workspace-route-target';
+import { RuntimeProvider } from '../providers/runtime-provider';
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,
@@ -98,7 +99,9 @@ function WorkspaceGuardRoute() {
   // runtime effects converge. Descendants use it to reject previous-scope data.
   return (
     <WorkspaceRouteTargetProvider slug={workspaceName}>
-      {isLocalAppPlatform() ? <LocalWorkspaceGuardRoute /> : <CloudWorkspaceGuardRoute />}
+      <RuntimeProvider>
+        {isLocalAppPlatform() ? <LocalWorkspaceGuardRoute /> : <CloudWorkspaceGuardRoute />}
+      </RuntimeProvider>
     </WorkspaceRouteTargetProvider>
   );
 }

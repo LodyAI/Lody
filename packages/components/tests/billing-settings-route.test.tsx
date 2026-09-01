@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, createElement } from 'react';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +15,7 @@ const originalInnerWidth = window.innerWidth;
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: { component: () => ReactNode }) => ({
     ...options,
+    options,
     useParams: () => routerState,
   }),
   Navigate: (props: Record<string, unknown>) => {
@@ -27,7 +28,9 @@ vi.mock('../src/components/settings/billing-setting', () => ({
   BillingSettingsComponent: () => createElement('p', null, 'billing-settings'),
 }));
 
-import { BillingSettingsRoute } from '../src/routes/$workspaceName/_auth/settings/billing';
+import { Route } from '../src/routes/$workspaceName/_auth/settings/billing';
+
+const BillingSettingsRoute = Route.options.component as ComponentType;
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

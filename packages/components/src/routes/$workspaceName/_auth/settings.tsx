@@ -37,7 +37,7 @@ function isSettingsListPath(pathname: string, workspaceName: string): boolean {
   return pathname === `/${workspaceName}/settings` || pathname === `/${workspaceName}/settings/`;
 }
 
-export function SettingsLayoutComponent() {
+function SettingsLayoutComponent() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
@@ -122,9 +122,7 @@ export function SettingsLayoutComponent() {
     if (isMobile) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
-      typeof locationSearch.machine === 'string'
-        ? (locationSearch.machine as MachineId)
-        : null
+      typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
     );
     setSettingsProjectTarget(
       typeof locationSearch.project === 'string' ? locationSearch.project : null
@@ -175,8 +173,8 @@ export function SettingsLayoutComponent() {
   const mobileTitle = settingsListPage
     ? t('settings.title')
     : activeTab
-    ? t(activeTab.labelKey)
-    : t('settings.title');
+      ? t(activeTab.labelKey)
+      : t('settings.title');
 
   /* Workspace tabbar (本地 / GitHub / Chat / 设置) navigates back to the
      chat landing for the first three tabs; the 设置 tab is a no-op

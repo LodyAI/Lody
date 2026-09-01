@@ -12,7 +12,6 @@ import { LanguageProvider } from '../i18n';
 import { Toaster } from '@/ui/sonner';
 import { NotFound } from '@/components/not-found';
 import { TooltipProvider } from '@/ui';
-import { RuntimeProvider } from '../providers/runtime-provider';
 import { markStartupNavigationForEagerSync } from '../providers/startup-network-idle';
 import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
 import { scheduleIdleTask } from '../lib/idle-task';
@@ -214,13 +213,12 @@ function RootApp() {
             <LanguageProvider>
               <>
                 <Toaster />
-                <RuntimeProvider>
-                  {/* Location-driven effects and the Outlet boundary subscribe to
-                      router state in these two small components, so a navigation
-                      no longer re-renders the whole provider stack above. */}
-                  <RootLocationEffects />
-                  <RootOutletBoundary />
-                </RuntimeProvider>
+                {/* Location-driven effects and the Outlet boundary subscribe to
+                    router state in these two small components, so a navigation
+                    no longer re-renders the whole provider stack above. Workspace
+                    runtime ownership starts at the workspace route layout. */}
+                <RootLocationEffects />
+                <RootOutletBoundary />
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>
