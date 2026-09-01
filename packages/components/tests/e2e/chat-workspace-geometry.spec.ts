@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import {
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
   CHAT_WORKSPACE_GEOMETRY_SPEC,
+  CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
   resolveMainPaneGridRange,
   validateChatWorkspaceGeometry,
 } from '../../src/lib/chat-workspace-geometry';
@@ -10,6 +11,7 @@ import {
   auditChatWorkspaceSemanticAlignments,
   auditChatWorkspaceSemanticBaselines,
   auditChatWorkspaceSpacing,
+  discoverChatWorkspaceAlignmentRails,
   formatGeometryViolations,
   measureSettledChatWorkspace,
   requireGeometryRect,
@@ -108,6 +110,33 @@ for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
     await context.close();
   });
 }
+
+test('alignment rails are discovered without manual scope attributes', async ({ page }) => {
+  test.setTimeout(60_000);
+  const response = await page.goto(
+    '/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story'
+  );
+  expect(response?.ok()).toBeTruthy();
+  await expect(page.locator('[data-geometry-fixture-ready="true"]')).toBeAttached({
+    timeout: 30_000,
+  });
+  await page
+    .locator(`[${CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE}]`)
+    .evaluateAll((elements, attribute) => {
+      for (const element of elements) element.removeAttribute(attribute);
+    }, CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE);
+
+  const discovery = await discoverChatWorkspaceAlignmentRails(page);
+  expect(discovery.filter((scope) => scope.source === 'hint')).toEqual([]);
+  expect(
+    discovery.some(
+      (scope) =>
+        scope.source === 'auto' &&
+        (scope.topology?.instanceCount ?? 0) >= 3 &&
+        scope.rails.length > 0
+    )
+  ).toBe(true);
+});
 
 if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {
   test('geometry audit exposes every guide and diagnostic without hover', async ({ page }) => {

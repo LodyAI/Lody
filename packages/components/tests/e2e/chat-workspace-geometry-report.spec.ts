@@ -9,6 +9,7 @@ import {
   CHAT_WORKSPACE_GEOMETRY_SPEC,
   calculateMainPaneGrid,
   calculateSidebarGrid,
+  inferAlignmentRailContractProposals,
   type GeometryRect,
   validateChatWorkspaceGeometry,
 } from '../../src/lib/chat-workspace-geometry';
@@ -141,19 +142,61 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
         zIndex: '2147483646',
       });
       for (const rail of rails) {
-        const yStart = Math.min(...rail.members.map((member) => member.yStart));
-        const yEnd = Math.max(...rail.members.map((member) => member.yEnd));
-        const line = document.createElement('div');
-        Object.assign(line.style, {
-          position: 'absolute',
-          left: `${rail.line}px`,
-          top: `${yStart}px`,
-          width: '1.5px',
-          height: `${yEnd - yStart}px`,
-          background: 'rgb(244 63 94 / 0.7)',
-          boxShadow: '0 0 0 0.5px rgb(255 255 255 / 0.64)',
-        });
-        overlay.append(line);
+        const orderedMembers = [...rail.members].sort(
+          (left, right) => left.yStart - right.yStart || left.yEnd - right.yEnd
+        );
+        const centers = orderedMembers.map(
+          (member) => member.yStart + (member.yEnd - member.yStart) / 2
+        );
+        const gaps = centers
+          .slice(1)
+          .map((center, index) => center - (centers[index] ?? center))
+          .sort((left, right) => left - right);
+        const medianGap = gaps[Math.floor(gaps.length / 2)] ?? 0;
+        const segmentGap = Math.max(48, medianGap * 2.25);
+        const segments: Array<typeof orderedMembers> = [];
+        for (const member of orderedMembers) {
+          const segment = segments.at(-1);
+          const previous = segment?.at(-1);
+          if (
+            !segment ||
+            !previous ||
+            member.yStart + member.yEnd - previous.yStart - previous.yEnd <= segmentGap * 2
+          ) {
+            if (segment) segment.push(member);
+            else segments.push([member]);
+          } else {
+            segments.push([member]);
+          }
+        }
+        for (const segment of segments) {
+          const yStart = Math.min(...segment.map((member) => member.yStart));
+          const yEnd = Math.max(...segment.map((member) => member.yEnd));
+          const line = document.createElement('div');
+          Object.assign(line.style, {
+            position: 'absolute',
+            left: `${rail.line}px`,
+            top: `${yStart}px`,
+            width: '1.5px',
+            height: `${Math.max(1, yEnd - yStart)}px`,
+            background: 'rgb(244 63 94 / 0.58)',
+            boxShadow: '0 0 0 0.5px rgb(255 255 255 / 0.58)',
+          });
+          overlay.append(line);
+        }
+        for (const member of rail.members.filter((candidate) => !candidate.outlier)) {
+          const y = member.yStart + (member.yEnd - member.yStart) / 2;
+          const tick = document.createElement('div');
+          Object.assign(tick.style, {
+            position: 'absolute',
+            left: `${rail.line - 2}px`,
+            top: `${y - 0.75}px`,
+            width: '5.5px',
+            height: '1.5px',
+            background: 'rgb(244 63 94 / 0.86)',
+          });
+          overlay.append(tick);
+        }
         for (const member of rail.members.filter((candidate) => candidate.outlier)) {
           const y = member.yStart + (member.yEnd - member.yStart) / 2;
           const connector = document.createElement('div');
@@ -268,15 +311,22 @@ function createDiscoveryDetails({
       outliers.length > 0
         ? `CANDIDATE · ${outliers.length} offsets · max ${formatSignedOffset(maxOffset)}`
         : 'CANDIDATE · stable support · no offset';
+    const scopeLabel =
+      scope.source === 'auto'
+        ? `Auto repeated region · ${scope.topology?.instanceCount ?? 0} instances`
+        : scope.scope;
+    const topologyEvidence = scope.topology
+      ? ` · topology ${Number((scope.topology.confidence * 100).toFixed(1))}%`
+      : '';
 
     return [
       {
         kind: 'candidate',
         id,
-        title: `${surface} / ${scope.scope}`,
+        title: `${surface} / ${scopeLabel}`,
         description:
           `${scope.rails.length} candidate rails · ${scope.candidateCount} anchors sampled` +
-          ` · ${outliers.length} outliers`,
+          ` · ${outliers.length} outliers${topologyEvidence}`,
         finding,
         clip: clampClip(
           {
@@ -514,6 +564,17 @@ test('captures the visual geometry report', async ({ browser }) => {
 
   const details = [...workspaceDetails, ...sessionDetails];
   expect(details.length).toBeGreaterThan(0);
+  const contractProposals = inferAlignmentRailContractProposals(
+    discoverySurfaces.flatMap(({ surface, railDiscovery: scopes }) =>
+      scopes.map((scope) => ({
+        captureId: surface,
+        scopeKey: scope.topology ? `auto:${scope.topology.signature}` : `hint:${scope.scope}`,
+        scopeRect: scope.rect,
+        rails: scope.rails,
+      }))
+    )
+  );
+  expect(contractProposals.length).toBeGreaterThan(0);
 
   const reportData = {
     generatedAt: new Date().toISOString(),
@@ -526,6 +587,7 @@ test('captures the visual geometry report', async ({ browser }) => {
     semanticAlignments,
     semanticBaselines,
     discoverySurfaces,
+    contractProposals,
     geometryViolations,
     details: details.map(({ kind, id, title, description, finding, clip, images }) => ({
       kind,

@@ -212,7 +212,8 @@
     <script>
       const report = __GEOMETRY_REPORT_DATA__;
       const details = document.getElementById('detail-reviews');
-      document.getElementById('status').textContent = `${report.details.length} FINDINGS`;
+      document.getElementById('status').textContent =
+        `${report.details.length} FINDINGS · ${report.contractProposals.length} PROPOSALS`;
       document.getElementById('timestamp').textContent = new Date(
         report.generatedAt
       ).toLocaleString();

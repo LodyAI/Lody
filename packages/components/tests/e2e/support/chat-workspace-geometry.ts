@@ -12,6 +12,7 @@ import {
   evaluateSemanticAlignmentGroup,
   evaluateSemanticBaselineGroup,
   discoverAlignmentRails,
+  discoverRepeatedLayoutScopes,
   isSpacingRhythmMultiple,
   type ChatWorkspaceSpacingAuditProperty,
   type ChatWorkspaceGeometryAnchor,
@@ -20,6 +21,7 @@ import {
   type GeometryViolation,
   type AlignmentRailCandidate,
   type DiscoveredAlignmentRail,
+  type LayoutTopologyNode,
   type SemanticAlignmentAnchor,
   type SemanticAlignmentAxis,
   type SemanticAlignmentPolicy,
@@ -73,9 +75,15 @@ export type BrowserSemanticAlignmentEntry = Readonly<{
 
 export type BrowserAlignmentRailDiscoveryScope = Readonly<{
   scope: string;
+  source: 'hint' | 'auto';
   rect: GeometryRect;
   candidateCount: number;
   rails: readonly DiscoveredAlignmentRail[];
+  topology?: Readonly<{
+    signature: string;
+    instanceCount: number;
+    confidence: number;
+  }>;
 }>;
 
 const anchorValues = Object.values(CHAT_WORKSPACE_GEOMETRY_ANCHORS);
@@ -298,17 +306,19 @@ export async function discoverChatWorkspaceAlignmentRails(
   page: Page,
   options: Readonly<{ aggregateScopes?: readonly string[] }> = {}
 ): Promise<readonly BrowserAlignmentRailDiscoveryScope[]> {
-  const scopes = await page.evaluate(
+  const snapshot = await page.evaluate(
     ({ discoveryAttribute, alignmentAttributes, aggregateScopes }) => {
-      const isVisible = (element: Element) => {
+      const isRendered = (element: Element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
         return (
-          rect.width > 0 &&
-          rect.height > 0 &&
           style.display !== 'none' &&
           style.visibility !== 'hidden' &&
-          Number.parseFloat(style.opacity || '1') > 0
+          Number.parseFloat(style.opacity || '1') > 0 &&
+          rect.right >= 0 &&
+          rect.bottom >= 0 &&
+          rect.left <= innerWidth &&
+          rect.top <= innerHeight
         );
       };
       const hasDirectText = (element: Element) =>
@@ -319,6 +329,14 @@ export async function discoverChatWorkspaceAlignmentRails(
         element.matches(
           `button, a, input, select, textarea, svg, [${alignmentAttributes.member}]`
         ) || hasDirectText(element);
+      const candidateKind = (element: Element) => {
+        if (element.hasAttribute(alignmentAttributes.member)) return 'semantic-member';
+        if (element.matches('button, [role="button"]')) return 'button';
+        if (element.matches('a')) return 'link';
+        if (element.matches('input, select, textarea')) return 'field';
+        if (element.matches('svg')) return 'svg';
+        return hasDirectText(element) ? 'text' : null;
+      };
       const describe = (element: Element, index: number) => {
         const semanticMember = element.getAttribute(alignmentAttributes.member);
         const ariaLabel = element.getAttribute('aria-label');
@@ -329,67 +347,105 @@ export async function discoverChatWorkspaceAlignmentRails(
         return `${index + 1}:${label}`;
       };
 
-      return Array.from(document.querySelectorAll<Element>(`[${discoveryAttribute}]`)).map(
-        (scopeElement) => {
-          const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
-          const aggregateNestedScopes = aggregateScopes.includes(scope);
-          const scopeRect = scopeElement.getBoundingClientRect();
-          const elements = Array.from(scopeElement.querySelectorAll<Element>('*')).filter(
-            (element) =>
-              (aggregateNestedScopes ||
-                element.closest(`[${discoveryAttribute}]`) === scopeElement) &&
-              !element.closest('[data-geometry-devtool]') &&
-              isVisible(element) &&
-              isCandidate(element)
-          );
-          const candidates = elements.flatMap((element, index) => {
-            const rect = element.getBoundingClientRect();
-            const instance = element
-              .closest(`[${alignmentAttributes.instance}]`)
-              ?.getAttribute(alignmentAttributes.instance);
-            const rowId =
-              instance ??
-              `y:${Number((rect.top + rect.height / 2).toFixed(2))}:${Number(rect.height.toFixed(2))}`;
-            const elementId = describe(element, index);
-            return [
-              {
-                elementId,
-                rowId,
-                anchor: 'inline-start' as const,
-                coordinate: rect.left,
-                yStart: rect.top,
-                yEnd: rect.bottom,
-              },
-              {
-                elementId,
-                rowId,
-                anchor: 'inline-center' as const,
-                coordinate: rect.left + rect.width / 2,
-                yStart: rect.top,
-                yEnd: rect.bottom,
-              },
-              {
-                elementId,
-                rowId,
-                anchor: 'inline-end' as const,
-                coordinate: rect.right,
-                yStart: rect.top,
-                yEnd: rect.bottom,
-              },
-            ];
-          });
-          return {
-            scope,
-            rect: {
-              x: scopeRect.x,
-              y: scopeRect.y,
-              width: scopeRect.width,
-              height: scopeRect.height,
+      const manualScopes = Array.from(
+        document.querySelectorAll<Element>(`[${discoveryAttribute}]`)
+      ).map((scopeElement) => {
+        const scope = scopeElement.getAttribute(discoveryAttribute) ?? 'unnamed';
+        const aggregateNestedScopes = aggregateScopes.includes(scope);
+        const scopeRect = scopeElement.getBoundingClientRect();
+        const elements = Array.from(scopeElement.querySelectorAll<Element>('*')).filter(
+          (element) =>
+            (aggregateNestedScopes ||
+              element.closest(`[${discoveryAttribute}]`) === scopeElement) &&
+            !element.closest('[data-geometry-devtool]') &&
+            isRendered(element) &&
+            element.getBoundingClientRect().width > 0 &&
+            element.getBoundingClientRect().height > 0 &&
+            isCandidate(element)
+        );
+        const candidates = elements.flatMap((element, index) => {
+          const rect = element.getBoundingClientRect();
+          const instance = element
+            .closest(`[${alignmentAttributes.instance}]`)
+            ?.getAttribute(alignmentAttributes.instance);
+          const rowId =
+            instance ??
+            `visual-row:${Number((Math.round((rect.top + rect.height / 2) * 2) / 2).toFixed(1))}`;
+          const elementId = describe(element, index);
+          return [
+            {
+              elementId,
+              rowId,
+              anchor: 'inline-start' as const,
+              coordinate: rect.left,
+              yStart: rect.top,
+              yEnd: rect.bottom,
             },
-            candidates,
-          };
-        }
+            {
+              elementId,
+              rowId,
+              anchor: 'inline-center' as const,
+              coordinate: rect.left + rect.width / 2,
+              yStart: rect.top,
+              yEnd: rect.bottom,
+            },
+            {
+              elementId,
+              rowId,
+              anchor: 'inline-end' as const,
+              coordinate: rect.right,
+              yStart: rect.top,
+              yEnd: rect.bottom,
+            },
+          ];
+        });
+        return {
+          scope,
+          rect: {
+            x: scopeRect.x,
+            y: scopeRect.y,
+            width: scopeRect.width,
+            height: scopeRect.height,
+          },
+          candidates,
+        };
+      });
+
+      const topologyElements = Array.from(document.body.querySelectorAll<Element>('*')).filter(
+        (element) => !element.closest('[data-geometry-devtool]') && isRendered(element)
       );
+      const idByElement = new Map(
+        topologyElements.map((element, index) => [element, `dom-${index + 1}`] as const)
+      );
+      const topologyNodes = topologyElements.map((element, index) => {
+        const rect = element.getBoundingClientRect();
+        let parent = element.parentElement;
+        while (parent && !idByElement.has(parent)) parent = parent.parentElement;
+        let depth = 0;
+        for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          depth += 1;
+        }
+        return {
+          id: idByElement.get(element) ?? `dom-${index + 1}`,
+          parentId: parent ? (idByElement.get(parent) ?? null) : null,
+          order: element.parentElement
+            ? Array.prototype.indexOf.call(element.parentElement.children, element)
+            : index,
+          depth,
+          tag: element.tagName.toLowerCase(),
+          role: element.getAttribute('role'),
+          candidateKind: candidateKind(element),
+          elementId: isCandidate(element) ? describe(element, index) : null,
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        };
+      });
+
+      return { manualScopes, topologyNodes };
     },
     {
       discoveryAttribute: CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
@@ -398,12 +454,81 @@ export async function discoverChatWorkspaceAlignmentRails(
     }
   );
 
-  return scopes.map(({ scope, rect, candidates }) => ({
-    scope,
-    rect,
-    candidateCount: candidates.length,
-    rails: discoverAlignmentRails(candidates as readonly AlignmentRailCandidate[]),
-  }));
+  const manualScopes: BrowserAlignmentRailDiscoveryScope[] = snapshot.manualScopes.map(
+    ({ scope, rect, candidates }) => ({
+      scope,
+      source: 'hint',
+      rect,
+      candidateCount: candidates.length,
+      rails: discoverAlignmentRails(candidates as readonly AlignmentRailCandidate[]),
+    })
+  );
+
+  type BrowserTopologyNode = LayoutTopologyNode & Readonly<{ elementId: string | null }>;
+  const topologyNodes = snapshot.topologyNodes as readonly BrowserTopologyNode[];
+  const topologyById = new Map(topologyNodes.map((node) => [node.id, node]));
+  const autoScopes = discoverRepeatedLayoutScopes(topologyNodes).map(
+    (autoScope): BrowserAlignmentRailDiscoveryScope => {
+      const instanceIds = new Set(autoScope.instanceIds);
+      const candidates = topologyNodes.flatMap((node): readonly AlignmentRailCandidate[] => {
+        if (
+          !node.elementId ||
+          node.candidateKind === null ||
+          node.rect.width <= 0 ||
+          node.rect.height <= 0
+        ) {
+          return [];
+        }
+        let ancestor: BrowserTopologyNode | undefined = node;
+        while (ancestor && !instanceIds.has(ancestor.id)) {
+          ancestor = ancestor.parentId ? topologyById.get(ancestor.parentId) : undefined;
+        }
+        if (!ancestor) return [];
+        const yStart = node.rect.y;
+        const yEnd = node.rect.y + node.rect.height;
+        return [
+          {
+            elementId: node.elementId,
+            rowId: `${autoScope.id}:${ancestor.id}`,
+            anchor: 'inline-start',
+            coordinate: node.rect.x,
+            yStart,
+            yEnd,
+          },
+          {
+            elementId: node.elementId,
+            rowId: `${autoScope.id}:${ancestor.id}`,
+            anchor: 'inline-center',
+            coordinate: node.rect.x + node.rect.width / 2,
+            yStart,
+            yEnd,
+          },
+          {
+            elementId: node.elementId,
+            rowId: `${autoScope.id}:${ancestor.id}`,
+            anchor: 'inline-end',
+            coordinate: node.rect.x + node.rect.width,
+            yStart,
+            yEnd,
+          },
+        ];
+      });
+      return {
+        scope: autoScope.id,
+        source: 'auto',
+        rect: autoScope.rect,
+        candidateCount: candidates.length,
+        rails: discoverAlignmentRails(candidates),
+        topology: {
+          signature: autoScope.signature,
+          instanceCount: autoScope.instanceIds.length,
+          confidence: autoScope.confidence,
+        },
+      };
+    }
+  );
+
+  return [...manualScopes, ...autoScopes];
 }
 
 export async function auditChatWorkspaceSemanticAlignments(

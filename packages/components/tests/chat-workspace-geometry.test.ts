@@ -8,6 +8,8 @@ import {
   calculateMainPaneGrid,
   calculateSidebarGrid,
   discoverAlignmentRails,
+  discoverRepeatedLayoutScopes,
+  inferAlignmentRailContractProposals,
   evaluateSemanticAlignmentGroup,
   evaluateSemanticBaselineGroup,
   isSpacingRhythmMultiple,
@@ -15,6 +17,7 @@ import {
   resolveMainPaneGridRange,
   validateChatWorkspaceGeometry,
   type ChatWorkspaceGeometrySnapshot,
+  type LayoutTopologyNode,
 } from '../src/lib/chat-workspace-geometry';
 
 const anchors = CHAT_WORKSPACE_GEOMETRY_ANCHORS;
@@ -268,6 +271,165 @@ describe('conversation, spacing, and semantic baselines', () => {
     );
 
     expect(result).toEqual([]);
+  });
+
+  it('discovers repeated sibling subtrees as automatic layout scopes', () => {
+    const nodes: LayoutTopologyNode[] = [
+      {
+        id: 'list',
+        parentId: null,
+        order: 0,
+        depth: 0,
+        tag: 'div',
+        role: 'list',
+        candidateKind: null,
+        rect: { x: 20, y: 20, width: 280, height: 160 },
+      },
+    ];
+    for (let index = 0; index < 4; index += 1) {
+      const rowId = `row-${index + 1}`;
+      nodes.push(
+        {
+          id: rowId,
+          parentId: 'list',
+          order: index,
+          depth: 1,
+          tag: 'div',
+          role: 'listitem',
+          candidateKind: null,
+          rect: { x: 20, y: 20 + index * 40, width: 280, height: 32 },
+        },
+        {
+          id: `${rowId}-icon`,
+          parentId: rowId,
+          order: 0,
+          depth: 2,
+          tag: 'svg',
+          role: null,
+          candidateKind: 'svg',
+          rect: { x: 32, y: 28 + index * 40, width: 16, height: 16 },
+        },
+        {
+          id: `${rowId}-label`,
+          parentId: rowId,
+          order: 1,
+          depth: 2,
+          tag: 'span',
+          role: null,
+          candidateKind: 'text',
+          rect: { x: 60, y: 26 + index * 40, width: 160, height: 20 },
+        }
+      );
+    }
+
+    expect(discoverRepeatedLayoutScopes(nodes)).toEqual([
+      expect.objectContaining({
+        parentId: 'list',
+        instanceIds: ['row-1', 'row-2', 'row-3', 'row-4'],
+        similarity: 1,
+        confidence: 1,
+      }),
+    ]);
+  });
+
+  it('does not mistake one horizontal toolbar for repeated rows', () => {
+    const nodes: LayoutTopologyNode[] = [
+      {
+        id: 'toolbar',
+        parentId: null,
+        order: 0,
+        depth: 0,
+        tag: 'div',
+        role: 'toolbar',
+        candidateKind: null,
+        rect: { x: 20, y: 20, width: 200, height: 32 },
+      },
+      ...[0, 1, 2].map(
+        (index): LayoutTopologyNode => ({
+          id: `action-${index}`,
+          parentId: 'toolbar',
+          order: index,
+          depth: 1,
+          tag: 'button',
+          role: null,
+          candidateKind: 'button',
+          rect: { x: 20 + index * 40, y: 20, width: 32, height: 32 },
+        })
+      ),
+    ];
+
+    expect(discoverRepeatedLayoutScopes(nodes)).toEqual([]);
+  });
+
+  it('infers a proposal when one topology rail survives multiple captures', () => {
+    const rail = (line: number) => ({
+      anchor: 'inline-start' as const,
+      line,
+      support: 4,
+      sampleSize: 4,
+      verticalSpan: 120,
+      confidence: 1,
+      members: [],
+      outliers: [],
+    });
+
+    expect(
+      inferAlignmentRailContractProposals([
+        {
+          captureId: 'idle-1280',
+          scopeKey: 'auto:repeated-session-row',
+          scopeRect: { x: 0, y: 0, width: 200, height: 400 },
+          rails: [rail(40)],
+        },
+        {
+          captureId: 'permission-1440',
+          scopeKey: 'auto:repeated-session-row',
+          scopeRect: { x: 100, y: 0, width: 400, height: 500 },
+          rails: [rail(180)],
+        },
+      ])
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'alignment-rail',
+        scopeKey: 'auto:repeated-session-row',
+        anchor: 'inline-start',
+        normalizedLine: 0.2,
+        confidence: 1,
+        policy: 'proposal',
+        evidence: expect.objectContaining({
+          captureIds: ['idle-1280', 'permission-1440'],
+          captureCoverage: 1,
+          support: 8,
+          sampleSize: 8,
+          outlierCount: 0,
+          maxNormalizedResidual: 0,
+        }),
+      }),
+    ]);
+  });
+
+  it('does not promote a rail observed in only one capture into a proposal', () => {
+    expect(
+      inferAlignmentRailContractProposals([
+        {
+          captureId: 'only-state',
+          scopeKey: 'auto:one-state',
+          scopeRect: { x: 0, y: 0, width: 320, height: 400 },
+          rails: [
+            {
+              anchor: 'inline-end',
+              line: 300,
+              support: 5,
+              sampleSize: 5,
+              verticalSpan: 160,
+              confidence: 1,
+              members: [],
+              outliers: [],
+            },
+          ],
+        },
+      ])
+    ).toEqual([]);
   });
 });
 

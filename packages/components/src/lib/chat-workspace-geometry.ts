@@ -350,6 +350,67 @@ export type DiscoveredAlignmentRail = Readonly<{
   outliers: readonly Readonly<AlignmentRailCandidate & { delta: number; outlier: true }>[];
 }>;
 
+export type LayoutTopologyNode = Readonly<{
+  id: string;
+  parentId: string | null;
+  order: number;
+  depth: number;
+  tag: string;
+  role: string | null;
+  candidateKind: string | null;
+  rect: GeometryRect;
+}>;
+
+export type RepeatedLayoutScope = Readonly<{
+  id: string;
+  signature: string;
+  parentId: string;
+  instanceIds: readonly string[];
+  rect: GeometryRect;
+  similarity: number;
+  confidence: number;
+}>;
+
+export type RepeatedLayoutScopeDiscoveryOptions = Readonly<{
+  minInstances?: number;
+  minSimilarity?: number;
+  minVerticalSpan?: number;
+  tokenDepth?: number;
+  maxScopes?: number;
+}>;
+
+export type AlignmentRailCapture = Readonly<{
+  captureId: string;
+  scopeKey: string;
+  scopeRect: GeometryRect;
+  rails: readonly DiscoveredAlignmentRail[];
+}>;
+
+export type AlignmentRailContractProposal = Readonly<{
+  id: string;
+  kind: 'alignment-rail';
+  scopeKey: string;
+  anchor: AlignmentRailCandidateAnchor;
+  normalizedLine: number;
+  normalizedTolerance: number;
+  confidence: number;
+  policy: 'proposal';
+  evidence: Readonly<{
+    captureIds: readonly string[];
+    captureCoverage: number;
+    support: number;
+    sampleSize: number;
+    outlierCount: number;
+    maxNormalizedResidual: number;
+  }>;
+}>;
+
+export type AlignmentRailContractInferenceOptions = Readonly<{
+  minCaptures?: number;
+  mergeTolerance?: number;
+  minConfidence?: number;
+}>;
+
 export type ChatWorkspaceGeometryValidationOptions = Readonly<{
   sidebar: 'expanded' | 'collapsed';
   tolerance?: number;
@@ -675,6 +736,214 @@ export function evaluateSemanticAlignmentGroup(
   };
 }
 
+function stableGeometryHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function unionGeometryRects(rects: readonly GeometryRect[]): GeometryRect {
+  const left = Math.min(...rects.map((rect) => rect.x));
+  const top = Math.min(...rects.map((rect) => rect.y));
+  const maxX = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
+  return { x: left, y: top, width: maxX - left, height: maxY - top };
+}
+
+function multisetSimilarity(
+  first: ReadonlyMap<string, number>,
+  second: ReadonlyMap<string, number>
+) {
+  const keys = new Set([...first.keys(), ...second.keys()]);
+  let intersection = 0;
+  let total = 0;
+  for (const key of keys) {
+    const firstCount = first.get(key) ?? 0;
+    const secondCount = second.get(key) ?? 0;
+    intersection += Math.min(firstCount, secondCount);
+    total += firstCount + secondCount;
+  }
+  return total === 0 ? 0 : (2 * intersection) / total;
+}
+
+/**
+ * Find vertically repeated sibling subtrees without product-specific selectors.
+ * Text and CSS classes are deliberately absent from the topology signature:
+ * repeated rows may contain different content while retaining the same slots.
+ */
+export function discoverRepeatedLayoutScopes(
+  nodes: readonly LayoutTopologyNode[],
+  options: RepeatedLayoutScopeDiscoveryOptions = {}
+): readonly RepeatedLayoutScope[] {
+  const minInstances = options.minInstances ?? 3;
+  const minSimilarity = options.minSimilarity ?? 0.72;
+  const minVerticalSpan = options.minVerticalSpan ?? 48;
+  const tokenDepth = options.tokenDepth ?? 3;
+  const maxScopes = options.maxScopes ?? 12;
+  if (!Number.isInteger(minInstances) || minInstances < 3) {
+    throw new RangeError('minInstances must be an integer of at least three');
+  }
+  if (!Number.isFinite(minSimilarity) || minSimilarity < 0 || minSimilarity > 1) {
+    throw new RangeError('minSimilarity must be between zero and one');
+  }
+  if (!Number.isFinite(minVerticalSpan) || minVerticalSpan < 0) {
+    throw new RangeError('minVerticalSpan must be a finite, non-negative number');
+  }
+  if (!Number.isInteger(tokenDepth) || tokenDepth < 1) {
+    throw new RangeError('tokenDepth must be a positive integer');
+  }
+  if (!Number.isInteger(maxScopes) || maxScopes < 1) {
+    throw new RangeError('maxScopes must be a positive integer');
+  }
+
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const childrenByParent = new Map<string, LayoutTopologyNode[]>();
+  for (const node of nodes) {
+    if (node.parentId === null) continue;
+    const siblings = childrenByParent.get(node.parentId) ?? [];
+    siblings.push(node);
+    childrenByParent.set(node.parentId, siblings);
+  }
+  for (const siblings of childrenByParent.values()) {
+    siblings.sort(
+      (first, second) => first.order - second.order || first.id.localeCompare(second.id)
+    );
+  }
+
+  const tokenCache = new Map<string, ReadonlyMap<string, number>>();
+  const topologyTokens = (rootId: string): ReadonlyMap<string, number> => {
+    const cached = tokenCache.get(rootId);
+    if (cached) return cached;
+    const root = byId.get(rootId);
+    if (!root) return new Map();
+    const tokens = new Map<string, number>();
+    const queue: Array<Readonly<{ node: LayoutTopologyNode; relativeDepth: number }>> = [
+      { node: root, relativeDepth: 0 },
+    ];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      const { node, relativeDepth } = current;
+      const token = [relativeDepth, node.tag, node.role ?? '', node.candidateKind ?? ''].join(':');
+      tokens.set(token, (tokens.get(token) ?? 0) + 1);
+      if (relativeDepth >= tokenDepth) continue;
+      for (const child of childrenByParent.get(node.id) ?? []) {
+        queue.push({ node: child, relativeDepth: relativeDepth + 1 });
+      }
+    }
+    tokenCache.set(rootId, tokens);
+    return tokens;
+  };
+
+  const candidateDescendantCache = new Map<string, boolean>();
+  const hasCandidateDescendant = (rootId: string): boolean => {
+    const cached = candidateDescendantCache.get(rootId);
+    if (cached !== undefined) return cached;
+    const root = byId.get(rootId);
+    const result =
+      (root?.candidateKind ?? null) !== null ||
+      (childrenByParent.get(rootId) ?? []).some((child) => hasCandidateDescendant(child.id));
+    candidateDescendantCache.set(rootId, result);
+    return result;
+  };
+
+  const proposals: RepeatedLayoutScope[] = [];
+  for (const [parentId, siblings] of childrenByParent) {
+    const eligible = siblings.filter(
+      (node) => node.rect.width > 0 && node.rect.height > 0 && hasCandidateDescendant(node.id)
+    );
+    const assigned = new Set<string>();
+    let groupIndex = 0;
+    for (const seed of eligible) {
+      if (assigned.has(seed.id)) continue;
+      const seedTokens = topologyTokens(seed.id);
+      const instances = eligible.filter(
+        (candidate) =>
+          !assigned.has(candidate.id) &&
+          multisetSimilarity(seedTokens, topologyTokens(candidate.id)) >= minSimilarity
+      );
+      if (instances.length < minInstances) continue;
+      const ordered = [...instances].sort(
+        (first, second) =>
+          first.rect.y - second.rect.y || first.rect.x - second.rect.x || first.order - second.order
+      );
+      const distinctCenters = new Set(
+        ordered.map((node) => Number((node.rect.y + node.rect.height / 2).toFixed(1)))
+      );
+      if (distinctCenters.size < minInstances) continue;
+      const rect = unionGeometryRects(ordered.map((node) => node.rect));
+      if (rect.height < minVerticalSpan) continue;
+
+      const referenceLeft = median(ordered.map((node) => node.rect.x));
+      const referenceWidth = median(ordered.map((node) => node.rect.width));
+      const geometryMatches = ordered.filter((node) => {
+        const widthRatio =
+          referenceWidth === 0
+            ? 0
+            : Math.min(node.rect.width, referenceWidth) / Math.max(node.rect.width, referenceWidth);
+        return (
+          widthRatio >= 0.6 &&
+          Math.abs(node.rect.x - referenceLeft) <= Math.max(8, referenceWidth * 0.2)
+        );
+      }).length;
+      if (geometryMatches < minInstances) continue;
+
+      const similarities = ordered.map((node) =>
+        multisetSimilarity(seedTokens, topologyTokens(node.id))
+      );
+      const similarity = similarities.reduce((sum, value) => sum + value, 0) / similarities.length;
+      const geometryConfidence = geometryMatches / ordered.length;
+      const parent = byId.get(parentId);
+      const structureSignature = [...seedTokens.entries()]
+        .sort(([first], [second]) => first.localeCompare(second))
+        .map(([token, count]) => `${token}*${count}`)
+        .join('|');
+      const context: string[] = [];
+      for (let ancestor = parent; ancestor && context.length < 4; ) {
+        context.unshift(`${ancestor.tag}[${ancestor.role ?? ''}]`);
+        ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined;
+      }
+      const signature = `${context.join('>')}::${structureSignature}`;
+      const id = `auto.repeated:${parent?.tag ?? 'root'}:${stableGeometryHash(signature)}:${parentId}:${groupIndex}`;
+      groupIndex += 1;
+      proposals.push({
+        id,
+        signature,
+        parentId,
+        instanceIds: ordered.map((node) => node.id),
+        rect,
+        similarity,
+        confidence: similarity * geometryConfidence,
+      });
+      ordered.forEach((node) => assigned.add(node.id));
+    }
+  }
+
+  return proposals
+    .sort((first, second) => {
+      const firstDepth = byId.get(first.parentId)?.depth ?? 0;
+      const secondDepth = byId.get(second.parentId)?.depth ?? 0;
+      return (
+        second.confidence - first.confidence ||
+        second.instanceIds.length - first.instanceIds.length ||
+        secondDepth - firstDepth ||
+        first.id.localeCompare(second.id)
+      );
+    })
+    .filter((scope, index, scopes) => {
+      const members = new Set(scope.instanceIds);
+      return !scopes.slice(0, index).some((existing) => {
+        if (existing.parentId !== scope.parentId) return false;
+        const overlap = existing.instanceIds.filter((id) => members.has(id)).length;
+        return overlap / Math.min(existing.instanceIds.length, scope.instanceIds.length) > 0.5;
+      });
+    })
+    .slice(0, maxScopes);
+}
+
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((first, second) => first - second);
   const middle = Math.floor(sorted.length / 2);
@@ -825,6 +1094,148 @@ export function discoverAlignmentRails(
       second.support - first.support ||
       first.line - second.line ||
       first.anchor.localeCompare(second.anchor)
+  );
+}
+
+/**
+ * Infer cross-capture alignment proposals from normalized rail positions. The
+ * result carries evidence but no enforcement policy; a later contract compiler
+ * must bind a proposal to stable semantic members before CI may enforce it.
+ */
+export function inferAlignmentRailContractProposals(
+  captures: readonly AlignmentRailCapture[],
+  options: AlignmentRailContractInferenceOptions = {}
+): readonly AlignmentRailContractProposal[] {
+  const minCaptures = options.minCaptures ?? 2;
+  const mergeTolerance = options.mergeTolerance ?? 0.01;
+  const minConfidence = options.minConfidence ?? 0.7;
+  if (!Number.isInteger(minCaptures) || minCaptures < 2) {
+    throw new RangeError('minCaptures must be an integer of at least two');
+  }
+  if (!Number.isFinite(mergeTolerance) || mergeTolerance <= 0 || mergeTolerance > 1) {
+    throw new RangeError('mergeTolerance must be greater than zero and at most one');
+  }
+  if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
+    throw new RangeError('minConfidence must be between zero and one');
+  }
+
+  type Observation = Readonly<{
+    captureId: string;
+    scopeKey: string;
+    anchor: AlignmentRailCandidateAnchor;
+    normalizedLine: number;
+    rail: DiscoveredAlignmentRail;
+  }>;
+  const captureIdsByScope = new Map<string, Set<string>>();
+  const observationsByGroup = new Map<string, Observation[]>();
+  for (const capture of captures) {
+    if (!capture.captureId || !capture.scopeKey) {
+      throw new RangeError('Alignment rail captures require captureId and scopeKey');
+    }
+    if (!Number.isFinite(capture.scopeRect.width) || capture.scopeRect.width <= 0) {
+      throw new RangeError(`${capture.captureId}.${capture.scopeKey} must have positive width`);
+    }
+    const scopeCaptures = captureIdsByScope.get(capture.scopeKey) ?? new Set<string>();
+    scopeCaptures.add(capture.captureId);
+    captureIdsByScope.set(capture.scopeKey, scopeCaptures);
+    for (const rail of capture.rails) {
+      const normalizedLine = (rail.line - capture.scopeRect.x) / capture.scopeRect.width;
+      if (!Number.isFinite(normalizedLine)) continue;
+      const groupKey = `${capture.scopeKey}\u0000${rail.anchor}`;
+      const observations = observationsByGroup.get(groupKey) ?? [];
+      observations.push({
+        captureId: capture.captureId,
+        scopeKey: capture.scopeKey,
+        anchor: rail.anchor,
+        normalizedLine,
+        rail,
+      });
+      observationsByGroup.set(groupKey, observations);
+    }
+  }
+
+  const proposals: AlignmentRailContractProposal[] = [];
+  for (const observations of observationsByGroup.values()) {
+    const clusters: Observation[][] = [];
+    const ordered = [...observations].sort(
+      (first, second) =>
+        first.normalizedLine - second.normalizedLine ||
+        first.captureId.localeCompare(second.captureId)
+    );
+    for (const observation of ordered) {
+      let target: Observation[] | undefined;
+      let targetDistance = Number.POSITIVE_INFINITY;
+      for (const cluster of clusters) {
+        const line = median(cluster.map((member) => member.normalizedLine));
+        const distance = Math.abs(observation.normalizedLine - line);
+        if (distance <= mergeTolerance && distance < targetDistance) {
+          target = cluster;
+          targetDistance = distance;
+        }
+      }
+      if (target) target.push(observation);
+      else clusters.push([observation]);
+    }
+
+    for (const cluster of clusters) {
+      const initialLine = median(cluster.map((member) => member.normalizedLine));
+      const byCapture = new Map<string, Observation>();
+      for (const observation of cluster) {
+        const existing = byCapture.get(observation.captureId);
+        if (
+          !existing ||
+          Math.abs(observation.normalizedLine - initialLine) <
+            Math.abs(existing.normalizedLine - initialLine)
+        ) {
+          byCapture.set(observation.captureId, observation);
+        }
+      }
+      const evidence = [...byCapture.values()];
+      if (evidence.length < minCaptures) continue;
+      const first = evidence[0];
+      if (!first) continue;
+      const normalizedLine = median(evidence.map((member) => member.normalizedLine));
+      const maxNormalizedResidual = Math.max(
+        ...evidence.map((member) => Math.abs(member.normalizedLine - normalizedLine))
+      );
+      const scopeCaptureCount = captureIdsByScope.get(first.scopeKey)?.size ?? evidence.length;
+      const captureCoverage = evidence.length / scopeCaptureCount;
+      const meanRailConfidence =
+        evidence.reduce((sum, member) => sum + member.rail.confidence, 0) / evidence.length;
+      const residualConfidence = Math.max(0, 1 - maxNormalizedResidual / mergeTolerance);
+      const confidence = meanRailConfidence * captureCoverage * residualConfidence;
+      if (confidence < minConfidence) continue;
+      const captureIds = evidence.map((member) => member.captureId).sort();
+      const proposalKey = [first.scopeKey, first.anchor, Number(normalizedLine.toFixed(4))].join(
+        ':'
+      );
+      proposals.push({
+        id: `alignment-rail:${stableGeometryHash(proposalKey)}`,
+        kind: 'alignment-rail',
+        scopeKey: first.scopeKey,
+        anchor: first.anchor,
+        normalizedLine,
+        normalizedTolerance: mergeTolerance,
+        confidence,
+        policy: 'proposal',
+        evidence: {
+          captureIds,
+          captureCoverage,
+          support: evidence.reduce((sum, member) => sum + member.rail.support, 0),
+          sampleSize: evidence.reduce((sum, member) => sum + member.rail.sampleSize, 0),
+          outlierCount: evidence.reduce((sum, member) => sum + member.rail.outliers.length, 0),
+          maxNormalizedResidual,
+        },
+      });
+    }
+  }
+
+  return proposals.sort(
+    (first, second) =>
+      second.confidence - first.confidence ||
+      second.evidence.captureIds.length - first.evidence.captureIds.length ||
+      first.scopeKey.localeCompare(second.scopeKey) ||
+      first.normalizedLine - second.normalizedLine
   );
 }
 

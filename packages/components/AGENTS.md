@@ -33,11 +33,16 @@ mobile surfaces.
   the complete member spread, never DOM order. Padding, margin, gap, and line-height
   multiples are spacing diagnostics, never alignment violations. Diagnostic debt
   remains non-blocking until a rule is explicitly promoted into the Playwright gate.
-  Alignment-rail discovery is an earlier, heuristic stage: scoped visible DOM boxes
-  contribute start/center/end candidates, repeated X coordinates form median rails,
-  and members outside the inlier tolerance are reported as outliers. A discovered
-  rail is not layout intent and cannot pass or fail the gate until review promotes
-  it into a named rule.
+  Alignment-rail discovery is an earlier, heuristic stage. It mines repeated sibling
+  subtrees from DOM topology and geometry; each repeated subtree instance contributes
+  at most one member to a start/center/end rail, so a control and its nested icon cannot
+  manufacture support. `data-geometry-discovery-scope` remains an optional hint for
+  named or aggregate regions, never a prerequisite for discovery. Repeated X coordinates
+  form median rails and members outside the inlier tolerance are reported as outliers.
+  Rails with the same topology signature and normalized position across captures may
+  become evidence-backed contract proposals. A discovered rail or proposal is not layout
+  intent and cannot pass or fail the gate until a contract compiler binds it to stable
+  semantic members and review promotes it into a named rule.
 - `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its
   two copy strings on i18n rather than the registry's inline English. Its dataset
   SHIPS WITH THE APP: `frimousse` otherwise fetches
