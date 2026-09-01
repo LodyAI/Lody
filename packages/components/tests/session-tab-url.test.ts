@@ -86,7 +86,7 @@ describe('formatExplicitSessionTabSearch', () => {
 describe('resolveActiveSessionTab', () => {
   const context = {
     parentSessionId,
-    archivedChildSessionIds: ['child-archived'],
+    childSessionIdsResolvedToParent: ['child-archived', 'side-chat-1'],
     draftTabIds: ['draft:d1'],
     promotedChildSessionIdsByDraftId: {},
   };
@@ -113,8 +113,13 @@ describe('resolveActiveSessionTab', () => {
     );
   });
 
-  it('resolves an archived child to the parent (positive evidence only)', () => {
+  it('resolves an archived or side-panel child to the parent (positive evidence only)', () => {
     expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'child-archived' }, context)).toBe(
+      parentSessionId
+    );
+    // A side chat renders in the right panel and never owns a top tab, so a
+    // URL addressing one (an opened-by link) must not hold a pending surface.
+    expect(resolveActiveSessionTab({ kind: 'session', sessionId: 'side-chat-1' }, context)).toBe(
       parentSessionId
     );
   });

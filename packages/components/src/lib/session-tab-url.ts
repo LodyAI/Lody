@@ -74,8 +74,12 @@ export const formatExplicitSessionTabSearch = (tabId: string): string =>
 
 export type SessionTabResolutionContext = {
   parentSessionId: string;
-  /** Children with POSITIVE evidence they cannot be an active tab anymore. */
-  archivedChildSessionIds: readonly string[];
+  /**
+   * Children with POSITIVE evidence they cannot be an active TOP tab: archived
+   * children, and side-panel children (side chats render in the right panel
+   * and never own a top-tab surface).
+   */
+  childSessionIdsResolvedToParent: readonly string[];
   draftTabIds: readonly string[];
   /**
    * Promotion aliases: draft tab id → the child Session it durably became.
@@ -92,9 +96,10 @@ export type SessionTabResolutionContext = {
  * its meta arrives) instead of falling back to the parent — treating a
  * transient replica gap as "this tab does not exist" is exactly what made a
  * fresh child tab bounce back to the parent conversation. Only positive
- * evidence resolves away from the named tab: an archived child renders the
- * parent, and a draft absent from local state is provably gone (drafts are
- * device-local) unless a promotion alias redirects it to its child. Pure:
+ * evidence resolves away from the named tab: an archived or side-panel child
+ * renders the parent, and a draft absent from local state is provably gone
+ * (drafts are device-local) unless a promotion alias redirects it to its
+ * child. Pure:
  * activating a tab is the caller's navigation concern, and nothing here ever
  * writes the URL back.
  */
@@ -106,7 +111,7 @@ export const resolveActiveSessionTab = (
     if (parsed.sessionId === context.parentSessionId) {
       return context.parentSessionId;
     }
-    if (context.archivedChildSessionIds.includes(parsed.sessionId)) {
+    if (context.childSessionIdsResolvedToParent.includes(parsed.sessionId)) {
       return context.parentSessionId;
     }
     return parsed.sessionId;

@@ -107,8 +107,9 @@ Session conversation page chain:
   has not delivered yet stays ACTIVE behind a pending surface, because
   treating a transient replica gap as "this tab does not exist" is what
   bounced a just-promoted draft back to the parent (#199 regression). Only
-  positive evidence resolves away from the named tab (an archived child, a
-  device-local draft that is provably gone), and NOTHING observes data to
+  positive evidence resolves away from the named tab (an archived or
+  side-panel child, a device-local draft that is provably gone), and NOTHING
+  observes data to
   rewrite the URL back — the `shouldClearSessionUrlTab` normalizer is
   deliberately dead. Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value

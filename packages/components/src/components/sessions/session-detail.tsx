@@ -1095,11 +1095,23 @@ const SessionDetail = ({
     () =>
       resolveActiveSessionTab(parsedUrlTab, {
         parentSessionId: sessionId,
-        archivedChildSessionIds: archivedChildSessions.map((s) => s.id),
+        // Side chats never own a top tab, so a URL addressing one (an
+        // opened-by link to a side-chat session) renders the parent.
+        childSessionIdsResolvedToParent: [
+          ...archivedChildSessions.map((s) => s.id),
+          ...sideSessions.map((s) => s.id),
+        ],
         draftTabIds: draftTabs.map((draft) => draft.id),
         promotedChildSessionIdsByDraftId: pendingDraftChildSessionIds,
       }),
-    [parsedUrlTab, archivedChildSessions, draftTabs, pendingDraftChildSessionIds, sessionId]
+    [
+      parsedUrlTab,
+      archivedChildSessions,
+      draftTabs,
+      pendingDraftChildSessionIds,
+      sessionId,
+      sideSessions,
+    ]
   );
   // A URL-named child the meta replica has not delivered yet: keep it active
   // and render a pending surface instead of silently showing the parent.
