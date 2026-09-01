@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { promisify } from 'util';
 
 import {
+  type AcpConfigOptionSummary,
   type AcpSessionNotification,
   type ACPSessionId,
   type AcpConfigOptionValue,
@@ -289,6 +290,101 @@ export type GenerateTitleOptions = {
   titleConfig?: TitleGenerationConfig;
 };
 
+export const resolveTitleConfigOptionValues = (
+  cliType: AgentConfigCliType,
+  agentType: AgentType,
+  configOptions: AcpConfigOptionSummary[],
+  configuredValues?: Record<string, AcpConfigOptionValue>
+): Record<string, AcpConfigOptionValue> => {
+  const automaticValues = computeTitleGenerationDefaults(cliType, agentType, configOptions);
+  const resolvedValues = { ...automaticValues };
+  for (const [key, value] of Object.entries(configuredValues ?? {})) {
+    const automaticValue = automaticValues[key];
+    const option = configOptions.find((candidate) => candidate.id === key);
+    const configuredValueIsAvailable =
+      option?.type === 'boolean'
+        ? typeof value === 'boolean'
+        : option?.type === 'select'
+          ? typeof value === 'string' &&
+            option.options.some((candidate) => candidate.value === value)
+          : false;
+    if (automaticValue === undefined || configuredValueIsAvailable) {
+      resolvedValues[key] = value;
+    }
+  }
+  return resolvedValues;
+};
+
+export async function applyResolvedTitleConfigOptions(options: {
+  client: TitleConfigClient;
+  acpSessionId: ACPSessionId;
+  cliType: AgentConfigCliType;
+  agentType: AgentType;
+  sessionResponse: unknown;
+  configuredValues?: Record<string, AcpConfigOptionValue>;
+  logger: Logger;
+}): Promise<void> {
+  const sessionResponse = options.sessionResponse as {
+    configOptions?: SessionConfigOption[] | null;
+  };
+  const initialConfigOptions = sessionResponse.configOptions ?? [];
+  const modelConfigOption = initialConfigOptions.find((option) => option.category === 'model');
+  const legacyModelState = readLegacySessionModelState(options.sessionResponse);
+  const modelKey = modelConfigOption?.id ?? (legacyModelState ? 'model' : undefined);
+  const configuredModelValue = modelKey ? options.configuredValues?.[modelKey] : undefined;
+  let configOptionsForDefaults = normalizeConfigOptions(initialConfigOptions) ?? [];
+  let configOptionsForApplication = initialConfigOptions;
+  let modelApplied = false;
+
+  if (
+    modelConfigOption &&
+    configuredModelValue !== undefined &&
+    canApplyConfigOptionValue(modelConfigOption, configuredModelValue)
+  ) {
+    const updatedConfigOptions = await options.client.setSessionConfigOption(
+      options.acpSessionId,
+      modelConfigOption.id,
+      configuredModelValue
+    );
+    modelApplied = true;
+    if (updatedConfigOptions) {
+      configOptionsForDefaults = normalizeConfigOptions(updatedConfigOptions) ?? [];
+      configOptionsForApplication = updatedConfigOptions;
+    }
+  } else if (
+    !modelConfigOption &&
+    modelKey === 'model' &&
+    typeof configuredModelValue === 'string' &&
+    legacyModelState?.availableModels.some((model) => model.modelId === configuredModelValue)
+  ) {
+    await options.client.unstable_setSessionModel(options.acpSessionId, configuredModelValue);
+    modelApplied = true;
+    // The legacy model API does not return the new model's option vocabulary.
+    configOptionsForDefaults = [];
+  }
+
+  const configOptionValues = resolveTitleConfigOptionValues(
+    options.cliType,
+    options.agentType,
+    configOptionsForDefaults,
+    options.configuredValues
+  );
+  if (modelApplied && modelKey) {
+    delete configOptionValues[modelKey];
+  }
+  if (Object.keys(configOptionValues).length === 0) {
+    return;
+  }
+
+  await applyTitleConfigOptions({
+    client: options.client,
+    acpSessionId: options.acpSessionId,
+    sessionResponse: { configOptions: configOptionsForApplication },
+    configOptionValues,
+    logger: options.logger,
+  });
+}
+
 export const generateTitleIsolated = async (
   options: GenerateTitleOptions
 ): Promise<string | null> => {
@@ -334,26 +430,16 @@ export const generateTitleIsolated = async (
     try {
       const prompt = buildTitlePrompt(options.taskPrompt);
 
-      const configuredValues = options.titleConfig?.configOptionValues;
-      const configOptionValues =
-        configuredValues && Object.keys(configuredValues).length > 0
-          ? configuredValues
-          : computeTitleGenerationDefaults(
-              options.cliType,
-              options.agentType,
-              normalizeConfigOptions(sessionResponse.configOptions) ?? []
-            );
-
-      if (configOptionValues) {
-        if (client) {
-          await applyTitleConfigOptions({
-            client,
-            acpSessionId,
-            sessionResponse,
-            configOptionValues,
-            logger: options.logger,
-          });
-        }
+      if (client) {
+        await applyResolvedTitleConfigOptions({
+          client,
+          acpSessionId,
+          cliType: options.cliType,
+          agentType: options.agentType,
+          sessionResponse,
+          configuredValues: options.titleConfig?.configOptionValues,
+          logger: options.logger,
+        });
       }
 
       options.logger.debug(`[title-generator] Sending title prompt (acpSessionId=${acpSessionId})`);

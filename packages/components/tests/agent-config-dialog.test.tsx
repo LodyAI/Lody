@@ -26,6 +26,15 @@ const claudeConfigId = 'claude-config' as AgentConfigId;
 const codexConfigId = 'codex-config' as AgentConfigId;
 type RefreshCapabilities = ComponentProps<typeof AgentConfigDialog>['onRefreshCapabilities'];
 
+class TestPointerEvent extends MouseEvent {
+  readonly pointerType: string;
+
+  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? '';
+  }
+}
+
 /** Omits `protocolCapabilities` by default, so the machine reads as legacy. */
 const createMachine = (
   name: string,
@@ -95,14 +104,14 @@ const createCodexMachine = (): MachineViewMeta => ({
   },
 });
 
-const getOptionButtons = (): HTMLButtonElement[] =>
-  Array.from(document.body.querySelectorAll<HTMLButtonElement>('button[role="option"]'));
+const getOptions = (): HTMLElement[] =>
+  Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'));
 
-const getSelectedOption = (): HTMLButtonElement | undefined =>
-  getOptionButtons().find((button) => button.getAttribute('aria-selected') === 'true');
+const getSelectedOption = (): HTMLElement | undefined =>
+  getOptions().find((option) => option.getAttribute('aria-selected') === 'true');
 
-const getOptionByText = (text: string): HTMLButtonElement => {
-  const option = getOptionButtons().find((button) => button.textContent?.includes(text));
+const getOptionByText = (text: string): HTMLElement => {
+  const option = getOptions().find((element) => element.textContent?.includes(text));
   if (!option) {
     throw new Error(`Expected option containing text "${text}"`);
   }
@@ -148,6 +157,14 @@ describe('AgentConfigDialog', () => {
         dispatchEvent: vi.fn(),
       })),
     });
+    Object.defineProperty(globalThis, 'PointerEvent', {
+      configurable: true,
+      value: TestPointerEvent,
+    });
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -204,7 +221,7 @@ describe('AgentConfigDialog', () => {
     await renderDialog(mode, createMachine('Workstation'));
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
-      getOptionButtons()
+      getOptions()
         .slice(0, 5)
         .map((option) => option.textContent)
     ).toEqual([
@@ -735,7 +752,90 @@ describe('AgentConfigDialog', () => {
     expect(findSignInAgainButton()).toBeUndefined();
   });
 
-  it('saves a normalized title reasoning effort after the title model changes', async () => {
+  it('does not persist automatic title defaults on an unrelated save', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const config = {
+      id: codexConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    } as AgentConfigMeta;
+
+    await renderDialog({ kind: 'edit', config }, createCodexMachine(), onSubmit);
+
+    expect(document.body.textContent).toContain('Automatic (5.6 Sol)');
+    expect(document.body.textContent).toContain('Automatic (low)');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Save'
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: undefined,
+      })
+    );
+  });
+
+  it('removes an explicit title override when Automatic is selected', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const config = {
+      id: codexConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+      titleGeneration: { configOptionValues: { model: 'gpt-5.6-other' } },
+    } as AgentConfigMeta;
+
+    await renderDialog({ kind: 'edit', config }, createCodexMachine(), onSubmit);
+
+    const titleSectionTrigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Title generation'
+    );
+    const modelSelect =
+      titleSectionTrigger?.parentElement?.parentElement?.querySelector<HTMLElement>(
+        'button[role="combobox"]'
+      );
+    expect(modelSelect).toBeDefined();
+    await act(async () => {
+      modelSelect?.dispatchEvent(
+        new TestPointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerType: 'mouse',
+        })
+      );
+    });
+    const automaticOption = getOptionByText('Automatic (5.6 Sol)');
+    await act(async () => {
+      automaticOption.focus();
+      automaticOption.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
+    });
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Save'
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: undefined,
+      })
+    );
+  });
+
+  it('preserves an unavailable explicit title value on an unrelated save', async () => {
     const onSubmit = vi.fn(async () => {});
     const config = {
       id: codexConfigId,
@@ -770,9 +870,47 @@ describe('AgentConfigDialog', () => {
         titleGeneration: {
           configOptionValues: {
             model: 'gpt-5.6-other',
-            reasoning_effort: 'medium',
+            reasoning_effort: 'ultra',
           },
         },
+      })
+    );
+  });
+
+  it('preserves an explicit value that collides with the Automatic UI token', async () => {
+    const collisionValue = '__lody_title_config_automatic__';
+    const machine = createCodexMachine();
+    const capabilities = machine.acpCapabilities?.[getAcpCapabilityCacheKey(codexConfigId)];
+    const modelOption = capabilities?.configOptions.find((option) => option.id === 'model');
+    if (!modelOption || modelOption.type !== 'select') {
+      throw new Error('Expected Codex model selector');
+    }
+    modelOption.options.push({ value: collisionValue, name: 'Collision model' });
+    const onSubmit = vi.fn(async () => {});
+    const config = {
+      id: codexConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+      titleGeneration: { configOptionValues: { model: collisionValue } },
+    } as AgentConfigMeta;
+
+    await renderDialog({ kind: 'edit', config }, machine, onSubmit);
+
+    expect(document.body.textContent).toContain('Collision model');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Save'
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: { configOptionValues: { model: collisionValue } },
       })
     );
   });

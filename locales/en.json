@@ -2416,6 +2416,8 @@
   "settings.agent.dialog.testCapabilitiesShort": "Test",
   "settings.agent.dialog.title.create": "New provider",
   "settings.agent.dialog.title.edit": "Edit {{name}}",
+  "settings.agent.dialog.titleGenerationAutomaticValue": "Automatic ({{value}})",
+  "settings.agent.dialog.titleGenerationUnavailableValue": "Unavailable ({{value}})",
   "settings.agent.machineTabs.filter.label": "Filter machines",
   "settings.agent.machineTabs.filter.mine": "My machines",
   "settings.agent.machineTabs.filter.noMatch": "No machines match these filters.",

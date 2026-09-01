@@ -53,9 +53,9 @@ describe('computeTitleGenerationDefaults', () => {
     ]),
   ];
 
-  it('selects the last-listed model for claude', () => {
+  it('leaves the Claude model at the provider default', () => {
     const result = computeTitleGenerationDefaults('builtin', 'claude', claudeOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
+    expect(result).not.toHaveProperty('model');
   });
 
   it('selects the least-privileged mode for claude', () => {
@@ -63,9 +63,9 @@ describe('computeTitleGenerationDefaults', () => {
     expect(result['mode']).toBe('plan');
   });
 
-  it('selects the last-listed codex model', () => {
+  it('leaves the Codex model at the provider default', () => {
     const result = computeTitleGenerationDefaults('builtin', 'codex', codexOptions);
-    expect(result['model']).toBe('gpt-5.3-codex-spark');
+    expect(result).not.toHaveProperty('model');
   });
 
   it('selects read-only mode for codex when available', () => {
@@ -78,32 +78,63 @@ describe('computeTitleGenerationDefaults', () => {
     expect(result['reasoning_effort']).toBe('low');
   });
 
-  it('uses the last-listed model when no static preferred option exists', () => {
-    const noHaikuOptions: AcpConfigOptionSummary[] = [
-      makeOption('model', 'model', 'claude-sonnet-4-5-20250514', [
-        { value: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5' },
-        { value: 'claude-opus-4-0-20250514', name: 'Claude Opus 4' },
-      ]),
-    ];
-    const result = computeTitleGenerationDefaults('builtin', 'claude', noHaikuOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
-  });
-
-  it('uses the same runtime selection for other ACP agents', () => {
+  it('does not infer model preference from option order for registry agents', () => {
     const options: AcpConfigOptionSummary[] = [
-      makeOption('model', 'model', 'some-model', [
-        { value: 'some-model', name: 'Some Model' },
-        { value: 'other-model', name: 'Other Model' },
+      makeOption('amp-mode', 'model', 'medium', [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+        { value: 'ultra', name: 'Ultra' },
       ]),
     ];
     const result = computeTitleGenerationDefaults('registry', 'custom-agent', options);
-    expect(result['model']).toBe('other-model');
+    expect(result).not.toHaveProperty('amp-mode');
+
+    options[0] = makeOption('amp-mode', 'model', 'medium', [
+      { value: 'ultra', name: 'Ultra' },
+      { value: 'low', name: 'Low' },
+      { value: 'high', name: 'High' },
+      { value: 'medium', name: 'Medium' },
+    ]);
+    expect(computeTitleGenerationDefaults('registry', 'custom-agent', options)).not.toHaveProperty(
+      'amp-mode'
+    );
   });
 
   it('treats Interactive Claude as a registry provider, not a builtin default source', () => {
     const result = computeTitleGenerationDefaults('registry', 'claude-p', claudeOptions);
-    expect(result['model']).toBe('claude-opus-4-0-20250514');
+    expect(result).not.toHaveProperty('model');
     expect(result['mode']).toBe('plan');
+  });
+
+  it('leaves unknown mode and reasoning vocabularies unchanged', () => {
+    const options: AcpConfigOptionSummary[] = [
+      makeOption('permission', 'mode', 'balanced', [
+        { value: 'balanced', name: 'Balanced' },
+        { value: 'trusted', name: 'Trusted' },
+      ]),
+      makeOption('depth', 'thought_level', 'standard', [
+        { value: 'standard', name: 'Standard' },
+        { value: 'deep', name: 'Deep' },
+      ]),
+    ];
+
+    expect(computeTitleGenerationDefaults('registry', 'custom-agent', options)).toEqual({});
+  });
+
+  it('does not recognize known words embedded inside unknown values', () => {
+    const options: AcpConfigOptionSummary[] = [
+      makeOption('permission', 'mode', 'balanced', [
+        { value: 'autonomous', name: 'Autonomous' },
+        { value: 'planner', name: 'Planner' },
+      ]),
+      makeOption('depth', 'thought_level', 'standard', [
+        { value: 'shallow', name: 'Shallow' },
+        { value: 'highlighted', name: 'Highlighted' },
+      ]),
+    ];
+
+    expect(computeTitleGenerationDefaults('registry', 'custom-agent', options)).toEqual({});
   });
 
   it('returns empty object for empty configOptions', () => {

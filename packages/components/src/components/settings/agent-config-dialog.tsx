@@ -8,7 +8,6 @@ import {
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
   getStaticBuiltinAcpCapabilities,
-  getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
   isManagedBuiltinAgentType,
@@ -736,28 +735,6 @@ function buildPresetEnv(
   return env;
 }
 
-// Presets skip the capability-probe + title-generation form path that built-in
-// agents use, so `formData.titleGeneration` is never populated through the UI.
-// Without this, saving a preset agent persists `titleGeneration: undefined`
-// and chatting with it later fails the "title generation not configured" gate
-// in chat-landing. Use the same static built-in defaults the CLI applies in
-// `createAgentConfig` so preset agents work immediately on the first turn,
-// before the CLI's capability-probe backfill has a chance to run.
-function buildPresetTitleGeneration(
-  cliType: AgentConfigCliType,
-  agentType: AgentType,
-  existing: TitleGenerationConfig | undefined
-): TitleGenerationConfig | undefined {
-  const existingValues = existing?.configOptionValues;
-  if (existingValues && Object.keys(existingValues).length > 0) {
-    return existing;
-  }
-  if (cliType !== 'builtin') return existing;
-  const defaults = getBuiltinTitleGenerationDefaults(agentType);
-  if (!defaults || Object.keys(defaults).length === 0) return existing;
-  return { ...existing, configOptionValues: defaults };
-}
-
 function buildPresetInjectedEnvPreview(
   preset: PresetDefinition,
   mode: PresetCredentialMode | undefined,
@@ -899,7 +876,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     mode.kind === 'edit' ? 'form' : 'picker'
   );
   const isNarrowLayout = useNarrowDialogLayout();
-  const titleDefaultsAppliedRef = useRef(false);
   const latestProbeEnvRef = useRef(formData.env);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const machineRef = useRef(machine);
@@ -926,7 +902,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       setBinaryError(null);
       setQuery('');
       setMobileView(mode.kind === 'edit' ? 'form' : 'picker');
-      titleDefaultsAppliedRef.current = false;
       // For an existing custom config whose cached capabilities still match the
       // saved command, pre-seed the tested key so a minor edit (e.g. the name)
       // doesn't force a re-test. Any other case starts un-tested.
@@ -1204,6 +1179,26 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     acpProvidesSessionTitle,
     selectedTitleModelId,
   ]);
+  const automaticTitleValues = useMemo(
+    () =>
+      computeTitleGenerationDefaults(
+        formData.cliType,
+        formData.agentType,
+        titleSelectors.map((selector) => ({
+          id: selector.configId,
+          name: selector.label,
+          description: selector.description,
+          category: selector.category,
+          type: selector.type,
+          currentValue: selector.currentValue,
+          options: selector.options.map((option) => ({
+            value: option.value,
+            name: option.label ?? option.value,
+          })),
+        }))
+      ),
+    [formData.cliType, formData.agentType, titleSelectors]
+  );
 
   // Capability refresh is a real runtime probe. The dialog never starts it just
   // to render static builtin defaults; probeTick is bumped by Create or explicit
@@ -1306,76 +1301,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     }
   };
 
-  useEffect(() => {
-    if (isPreset) return;
-    if (titleSelectors.length === 0 || titleDefaultsAppliedRef.current) return;
-    titleDefaultsAppliedRef.current = true;
-    const summaries = titleSelectors.map((sel) => ({
-      id: sel.configId,
-      name: sel.label,
-      description: sel.description,
-      category: sel.category,
-      type: sel.type,
-      currentValue: sel.currentValue,
-      options: sel.options.map((o) => ({ value: o.value, name: o.label ?? o.value })),
-    }));
-    const defaults = computeTitleGenerationDefaults(
-      formData.cliType,
-      formData.agentType,
-      summaries
-    );
-    if (Object.keys(defaults).length === 0) return;
-    const existing = formData.titleGeneration?.configOptionValues ?? {};
-    const merged = { ...defaults, ...existing };
-    if (Object.keys(existing).length === Object.keys(merged).length) return;
-    setFormData((prev) => ({
-      ...prev,
-      titleGeneration: { ...prev.titleGeneration, configOptionValues: merged },
-    }));
-  }, [
-    isPreset,
-    titleSelectors,
-    formData.cliType,
-    formData.agentType,
-    formData.titleGeneration?.configOptionValues,
-  ]);
-
-  useEffect(() => {
-    if (isPreset || titleSelectors.length === 0) return;
-    const values = formData.titleGeneration?.configOptionValues;
-    if (!values) return;
-    const hasInvalidValue = titleSelectors.some((selector) => {
-      const value = values[selector.configId];
-      return (
-        value !== undefined &&
-        !isConfigOptionValueValid(selector, value) &&
-        value !== selector.currentValue
-      );
-    });
-    if (!hasInvalidValue) return;
-
-    setFormData((prev) => {
-      const currentValues = prev.titleGeneration?.configOptionValues ?? {};
-      let nextValues = currentValues;
-      for (const selector of titleSelectors) {
-        const value = currentValues[selector.configId];
-        if (
-          value !== undefined &&
-          !isConfigOptionValueValid(selector, value) &&
-          value !== selector.currentValue
-        ) {
-          if (nextValues === currentValues) nextValues = { ...currentValues };
-          nextValues[selector.configId] = selector.currentValue;
-        }
-      }
-      if (nextValues === currentValues) return prev;
-      return {
-        ...prev,
-        titleGeneration: { ...prev.titleGeneration, configOptionValues: nextValues },
-      };
-    });
-  }, [isPreset, titleSelectors, formData.titleGeneration?.configOptionValues]);
-
   const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekApiKey(formData.env) : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
@@ -1403,7 +1328,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   const selectOption = (opt: AgentTypeOption) => {
-    titleDefaultsAppliedRef.current = false;
     setManuallyTested(false);
     setAuthRequired(false);
     setProbeError(null);
@@ -1597,11 +1521,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         env = buildPresetEnv(activePreset, activeCredentialMode, formData);
       }
       const agentType = formData.agentType as AgentType;
-      const titleGeneration = acpProvidesSessionTitle
-        ? undefined
-        : isPreset
-          ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
-          : formData.titleGeneration;
+      const titleConfigOptionValues = formData.titleGeneration?.configOptionValues;
+      const explicitTitleGeneration =
+        titleConfigOptionValues && Object.keys(titleConfigOptionValues).length > 0
+          ? { configOptionValues: titleConfigOptionValues }
+          : undefined;
+      const titleGeneration = acpProvidesSessionTitle ? undefined : explicitTitleGeneration;
       await onSubmit({
         id: agentConfigId,
         name: formData.name.trim(),
@@ -1630,7 +1555,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     backgroundManagedBuiltinSetup,
     formData,
     isCustom,
-    isPreset,
     onOpenChange,
     onSubmit,
     parsedCustomAcp,
@@ -2233,17 +2157,24 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 <TitleGenerationFields
                   selectors={titleSelectors}
                   values={formData.titleGeneration?.configOptionValues}
+                  automaticValues={automaticTitleValues}
                   onChange={(configId, value) => {
-                    const nextValues = {
-                      ...formData.titleGeneration?.configOptionValues,
-                      [configId]: value,
-                    };
-                    setFormData({
-                      ...formData,
-                      titleGeneration: {
-                        ...formData.titleGeneration,
-                        configOptionValues: nextValues,
-                      },
+                    setFormData((previous) => {
+                      const nextValues = {
+                        ...previous.titleGeneration?.configOptionValues,
+                      };
+                      if (value === undefined) {
+                        delete nextValues[configId];
+                      } else {
+                        nextValues[configId] = value;
+                      }
+                      return {
+                        ...previous,
+                        titleGeneration:
+                          Object.keys(nextValues).length > 0
+                            ? { configOptionValues: nextValues }
+                            : undefined,
+                      };
                     });
                   }}
                 />
@@ -2971,14 +2902,33 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
   );
 }
 
+const TITLE_CONFIG_AUTOMATIC_VALUE_BASE = '__lody_title_config_automatic__';
+
+const getTitleConfigAutomaticValue = (
+  selector: AcpConfigOptionSelector,
+  stored: AcpConfigOptionValue | undefined
+): string => {
+  const explicitValues = new Set([
+    ...(selector.type === 'select' ? selector.options.map((option) => option.value) : []),
+    ...(typeof stored === 'string' ? [stored] : []),
+  ]);
+  let automaticValue = TITLE_CONFIG_AUTOMATIC_VALUE_BASE;
+  while (explicitValues.has(automaticValue)) {
+    automaticValue = `_${automaticValue}`;
+  }
+  return automaticValue;
+};
+
 function TitleGenerationFields({
   selectors,
   values,
+  automaticValues,
   onChange,
 }: {
   selectors: AcpConfigOptionSelector[];
   values: Record<string, AcpConfigOptionValue> | undefined;
-  onChange: (configId: string, value: AcpConfigOptionValue) => void;
+  automaticValues: Record<string, AcpConfigOptionValue>;
+  onChange: (configId: string, value: AcpConfigOptionValue | undefined) => void;
 }) {
   const { t } = useTranslation();
   if (selectors.length === 0) return null;
@@ -2986,29 +2936,60 @@ function TitleGenerationFields({
     <div className="space-y-2 pt-1">
       {selectors.map((sel) => {
         const stored = values?.[sel.configId];
+        const automaticSelectValue = getTitleConfigAutomaticValue(sel, stored);
+        const automaticValue = automaticValues[sel.configId] ?? sel.currentValue;
+        const automaticLabel = t(
+          'settings.agent.dialog.titleGenerationAutomaticValue',
+          'Automatic ({{value}})',
+          {
+            value:
+              sel.type === 'select'
+                ? (sel.options.find((option) => option.value === automaticValue)?.label ??
+                  String(automaticValue))
+                : automaticValue
+                  ? t('agents.booleanEnabled', 'Enabled')
+                  : t('agents.booleanDisabled', 'Disabled'),
+          }
+        );
         if (sel.type === 'boolean') {
-          const isEnabled = (stored ?? sel.currentValue) === true;
           return (
             <div
               key={sel.configId}
               className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
             >
               <Label className="text-xs text-muted-foreground">{sel.label}</Label>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-8 w-fit gap-1 rounded-md px-2 text-xs"
-                onClick={() => onChange(sel.configId, !isEnabled)}
-                aria-pressed={isEnabled}
+              <Select
+                value={
+                  stored === true ? 'enabled' : stored === false ? 'disabled' : automaticSelectValue
+                }
+                onValueChange={(value) =>
+                  onChange(
+                    sel.configId,
+                    value === automaticSelectValue ? undefined : value === 'enabled'
+                  )
+                }
               >
-                {isEnabled ? <Check className="h-3 w-3" /> : null}
-                {isEnabled
-                  ? t('agents.booleanEnabled', 'Enabled')
-                  : t('agents.booleanDisabled', 'Disabled')}
-              </Button>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={automaticSelectValue} className="text-xs">
+                    {automaticLabel}
+                  </SelectItem>
+                  <SelectItem value="enabled" className="text-xs">
+                    {t('agents.booleanEnabled', 'Enabled')}
+                  </SelectItem>
+                  <SelectItem value="disabled" className="text-xs">
+                    {t('agents.booleanDisabled', 'Disabled')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           );
         }
+        const storedIsAvailable = isConfigOptionValueValid(sel, stored);
+        const unavailableStoredValue =
+          typeof stored === 'string' && !storedIsAvailable ? stored : undefined;
         return (
           <div
             key={sel.configId}
@@ -3016,13 +2997,27 @@ function TitleGenerationFields({
           >
             <Label className="text-xs text-muted-foreground">{sel.label}</Label>
             <Select
-              value={(stored as string | undefined) ?? sel.currentValue}
-              onValueChange={(value) => onChange(sel.configId, value)}
+              value={typeof stored === 'string' ? stored : automaticSelectValue}
+              onValueChange={(value) =>
+                onChange(sel.configId, value === automaticSelectValue ? undefined : value)
+              }
             >
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={automaticSelectValue} className="text-xs">
+                  {automaticLabel}
+                </SelectItem>
+                {unavailableStoredValue ? (
+                  <SelectItem value={unavailableStoredValue} className="text-xs">
+                    {t(
+                      'settings.agent.dialog.titleGenerationUnavailableValue',
+                      'Unavailable ({{value}})',
+                      { value: unavailableStoredValue }
+                    )}
+                  </SelectItem>
+                ) : null}
                 {sel.options.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value} className="text-xs">
                     {opt.label}

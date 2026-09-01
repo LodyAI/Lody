@@ -113,7 +113,7 @@ export type SessionStatusType = SessionStatus['type'];
  * Configuration for automatic session title generation.
  */
 export type TitleGenerationConfig = {
-  /** Config option values to set on the title-generation ACP session (e.g. model, reasoning_effort). */
+  /** Sparse, explicit config overrides for the title-generation ACP session. Missing keys stay automatic. */
   configOptionValues?: Record<string, AcpConfigOptionValue>;
 };
 
@@ -147,7 +147,7 @@ export type AgentConfigMeta = {
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env: Record<string, string>;
   prompt?: string;
-  /** Title generation settings. When set, enables automatic title generation for this agent. */
+  /** Optional explicit overrides for automatic title generation. */
   titleGeneration?: TitleGenerationConfig;
   /**
    * Provider brand this config was created for (e.g. a "DeepSeek over Claude Code"
