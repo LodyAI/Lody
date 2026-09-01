@@ -677,6 +677,11 @@ export const AgentFileLinks: Story = {
   render: (args) => wrap(<MarkdownRenderer {...args} />),
 };
 
+export const AgentFileLinksWithOpenAction: Story = {
+  ...AgentFileLinks,
+  render: (args) => wrap(<MarkdownRenderer {...args} onAgentFileLinkClick={() => undefined} />),
+};
+
 const mermaidPhoneText = [
   'The run below is the shape a keeper agent reports back:',
   '',
