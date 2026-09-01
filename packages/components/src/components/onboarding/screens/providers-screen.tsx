@@ -79,6 +79,7 @@ import {
   providerTestActivityFromProgress,
   type ProviderTestActivity,
 } from '../provider-test-state';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
 
@@ -584,6 +585,7 @@ export function ProvidersScreen({
   onManagedRuntimeSelected,
 }: ProvidersScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -720,6 +722,12 @@ export function ProvidersScreen({
           console.error(
             '[onboarding] Local agent restart is unavailable while waiting for provider setup'
           );
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'local_agent_recovery',
+            failure_code: 'restart_unavailable',
+            retryable: true,
+          });
           toast.error(
             t(
               'onboarding.providers.localAgentUnreachable',
@@ -729,17 +737,33 @@ export function ProvidersScreen({
           return;
         }
 
+        const restartStartedAtMs = analytics.now();
+        analytics.capture('onboarding/operation_started', {
+          step: 'providers',
+          operation: 'local_agent_restart',
+        });
         void restart()
           .then((result) => {
             if (cancelled) return;
             if (!result.ok) {
               throw new Error(result.error || 'restart_failed');
             }
+            analytics.capture('onboarding/operation_succeeded', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+            });
             secondTimeoutId = window.setTimeout(() => {
               if (cancelled) return;
               console.error(
                 '[onboarding] Local agent remained unreachable after an automatic restart'
               );
+              analytics.capture('onboarding/operation_failed', {
+                step: 'providers',
+                operation: 'local_agent_recovery',
+                failure_code: 'local_agent_unreachable',
+                retryable: true,
+              });
               toast.error(
                 t(
                   'onboarding.providers.localAgentUnreachable',
@@ -751,6 +775,13 @@ export function ProvidersScreen({
           .catch((error) => {
             if (cancelled) return;
             console.error('[onboarding] Failed to restart the local agent:', error);
+            analytics.capture('onboarding/operation_failed', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              failure_code: 'local_agent_restart_failed',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+              retryable: true,
+            });
             toast.error(
               t(
                 'onboarding.providers.localAgentUnreachable',
@@ -767,7 +798,7 @@ export function ProvidersScreen({
       if (firstTimeoutId !== null) window.clearTimeout(firstTimeoutId);
       if (secondTimeoutId !== null) window.clearTimeout(secondTimeoutId);
     };
-  }, [localMachine, localProbeAttempted, t]);
+  }, [analytics, localMachine, localProbeAttempted, t]);
 
   const refreshCapabilities = useCallback(
     async (args: {
@@ -825,6 +856,11 @@ export function ProvidersScreen({
   const handleTest = useCallback(
     (config: AgentConfigMeta) => {
       const run = testRunsRef.current.start(config.id);
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_test',
+      });
       setTestActivities((prev) => ({
         ...prev,
         [config.id]: { phase: 'checking-runtime' },
@@ -851,9 +887,22 @@ export function ProvidersScreen({
           clearTestActivity(config.id);
           clearFailureReason(config.id);
           setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'providers',
+            operation: 'agent_test',
+            result: response.authRequired ? 'needs_auth' : 'passed',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
         } catch (error) {
           if (!testRunsRef.current.finish(config.id, run)) return;
           console.error(`[onboarding] Failed to test Agent ${config.name}:`, error);
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'agent_test',
+            failure_code: 'agent_test_failed',
+            duration_ms: analytics.durationSince(startedAtMs),
+            retryable: true,
+          });
           clearTestActivity(config.id);
           const failureReason = error instanceof Error ? error.message : String(error);
           setFailureReasons((prev) => ({ ...prev, [config.id]: failureReason }));
@@ -867,12 +916,20 @@ export function ProvidersScreen({
         }
       })();
     },
-    [clearFailureReason, clearTestActivity, refreshCapabilities, t]
+    [analytics, clearFailureReason, clearTestActivity, refreshCapabilities, t]
   );
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
       if (!localMachineId || !dialogMode) return;
+      const operation =
+        dialogMode.kind === 'edit'
+          ? 'agent_config_update'
+          : payload.backgroundSetup
+            ? 'agent_setup_create'
+            : 'agent_config_create';
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', { step: 'providers', operation });
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -916,8 +973,20 @@ export function ProvidersScreen({
           clearFailureReason(dialogMode.config.id);
           setStatus(dialogMode.config.id, 'untested');
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('[onboarding] Failed to save Agent configuration:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation,
+          failure_code: `${operation}_failed`,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           dialogMode.kind === 'create'
             ? t('agents.createConfigError', 'Failed to create configuration')
@@ -927,6 +996,7 @@ export function ProvidersScreen({
       }
     },
     [
+      analytics,
       clearFailureReason,
       createConfig,
       createSetup,
@@ -940,36 +1010,78 @@ export function ProvidersScreen({
 
   const handleRetrySetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_retry_request',
+        attempt: setup.attempt + 1,
+      });
       try {
         await retrySetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('[onboarding] Failed to retry Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          failure_code: 'agent_setup_retry_failed',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.retryFailed', 'Could not retry provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [retrySetup, t]
+    [analytics, retrySetup, t]
   );
 
   const handleDeleteSetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_cancel',
+      });
       try {
         await deleteSetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('[onboarding] Failed to cancel Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          failure_code: 'agent_setup_cancel_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [deleteSetup, t]
+    [analytics, deleteSetup, t]
   );
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'providers',
+      operation: 'agent_config_delete',
+    });
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
@@ -980,8 +1092,20 @@ export function ProvidersScreen({
         return rest;
       });
       setPendingDelete(null);
+      analytics.capture('onboarding/operation_succeeded', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        duration_ms: analytics.durationSince(startedAtMs),
+      });
     } catch (error) {
       console.error('[onboarding] Failed to delete Agent configuration:', error);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        failure_code: 'agent_config_delete_failed',
+        duration_ms: analytics.durationSince(startedAtMs),
+        retryable: true,
+      });
       toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'), {
         description: error instanceof Error ? error.message : String(error),
       });

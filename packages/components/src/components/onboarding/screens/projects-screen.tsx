@@ -25,6 +25,7 @@ import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { openExternalUrl } from '@/lib/native-browser';
 import { Button } from '@/ui/button';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export interface ProjectsScreenLocalEntry {
   key: string;
@@ -231,6 +232,7 @@ interface ProjectsScreenProps {
 
 export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -306,6 +308,11 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
 
   const handleAddLocalProject = useCallback(() => {
     if (!canImportLocal || !selectLocalProjectDirectory) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'local_project_import',
+    });
     void (async () => {
       try {
         setImporting(true);
@@ -315,7 +322,15 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
           selectDirectory: selectLocalProjectDirectory,
           timeoutMessage: t('localProjects.add.timeout', 'The machine did not respond in time.'),
         });
-        if (!result) return;
+        if (!result) {
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'projects',
+            operation: 'local_project_import',
+            result: 'cancelled',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
+          return;
+        }
         setSelectedProject({
           kind: 'local',
           machineId: result.machineId,
@@ -330,17 +345,43 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
             homeDir: window.__LODY_PLATFORM__?.homeDir,
           });
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'local_project_import',
+          result: 'imported',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('Failed to import local project', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'local_project_import',
+          failure_code: 'local_project_import_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('onboarding.projects.localImportFailed', 'Could not add the local project.'));
       } finally {
         setImporting(false);
       }
     })();
-  }, [canImportLocal, selectLocalProjectDirectory, runtime, setLocalProbeResult, t, workspaceId]);
+  }, [
+    analytics,
+    canImportLocal,
+    selectLocalProjectDirectory,
+    runtime,
+    setLocalProbeResult,
+    t,
+    workspaceId,
+  ]);
 
   const handleConnectGitHub = useCallback(() => {
     if (workspaceId === null) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'github_install',
+    });
     setConnectingGitHub(true);
     void (async () => {
       try {
@@ -353,12 +394,25 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
         });
         const installUrl = `https://github.com/apps/${githubAppName}/installations/new?state=${encodeURIComponent(state)}`;
         const opened = await openExternalUrl(installUrl);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'github_install',
+          result: opened ? 'external_browser' : 'current_window',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
         if (!opened) {
           // Final fallback: navigate the current window so the user is not stranded.
           window.location.assign(installUrl);
         }
       } catch (error) {
         console.error('[onboarding] Failed to start GitHub installation:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'github_install',
+          failure_code: 'github_install_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           t('settings.integrations.github.connectFailed', 'Failed to start GitHub installation'),
           {
@@ -372,7 +426,15 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
         setConnectingGitHub(false);
       }
     })();
-  }, [createGitHubInstallState, getConvexErrorMessage, isElectron, t, workspaceId, workspaceSlug]);
+  }, [
+    analytics,
+    createGitHubInstallState,
+    getConvexErrorMessage,
+    isElectron,
+    t,
+    workspaceId,
+    workspaceSlug,
+  ]);
 
   const local: ProjectsScreenLocalEntry[] = useMemo(
     () =>

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { usePlatformSession } from '@lody/platform/react';
 import { ExternalLink, Loader2, LogIn } from 'lucide-react';
 import { Button } from '@/ui/button';
 import { OnboardingBackButton, OnboardingShell } from '../onboarding-shell';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 type ElectronBrowserSignInClient = {
   signIn: {
@@ -19,13 +20,23 @@ export function LoginScreen({ onBack, onNext }: { onBack: () => void; onNext: ()
   const { t } = useTranslation();
   const { authClient } = useRouter().options.context;
   const session = usePlatformSession();
+  const analytics = useOnboardingAnalytics();
+  const signInAttemptRef = useRef(0);
+  const signInSucceededRef = useRef(false);
   const [openingBrowser, setOpeningBrowser] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkStale, setCheckStale] = useState(false);
 
   useEffect(() => {
-    if (session.status === 'authenticated') onNext();
-  }, [onNext, session.status]);
+    if (session.status !== 'authenticated' || signInSucceededRef.current) return;
+    signInSucceededRef.current = true;
+    analytics.capture('onboarding/operation_succeeded', {
+      step: 'login',
+      operation: 'browser_sign_in',
+      attempt: signInAttemptRef.current || null,
+    });
+    onNext();
+  }, [analytics, onNext, session.status]);
 
   const checking = session.status === 'loading';
   useEffect(() => {
@@ -33,26 +44,47 @@ export function LoginScreen({ onBack, onNext }: { onBack: () => void; onNext: ()
       setCheckStale(false);
       return undefined;
     }
-    const timer = setTimeout(() => setCheckStale(true), SESSION_CHECK_STALE_MS);
+    const timer = setTimeout(() => {
+      setCheckStale(true);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'login',
+        operation: 'session_check',
+        failure_code: 'session_check_slow',
+        retryable: true,
+      });
+    }, SESSION_CHECK_STALE_MS);
     return () => clearTimeout(timer);
-  }, [checking]);
+  }, [analytics, checking]);
   // A stale check unlocks the screen: waiting forever helps no one, and
   // sign-in still works — the authenticated effect advances regardless.
   const locked = checking && !checkStale;
 
   const handleSignIn = useCallback(() => {
+    const attempt = ++signInAttemptRef.current;
     setOpeningBrowser(true);
     setError(null);
+    analytics.capture('onboarding/operation_started', {
+      step: 'login',
+      operation: 'browser_sign_in',
+      attempt,
+    });
     void (authClient as unknown as ElectronBrowserSignInClient).signIn
       .social({
         callbackURL: '/onboarding',
       })
       .catch((signInError: unknown) => {
         console.error('[onboarding] Failed to start browser sign-in:', signInError);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'login',
+          operation: 'browser_sign_in',
+          failure_code: 'browser_sign_in_failed',
+          attempt,
+          retryable: true,
+        });
         setOpeningBrowser(false);
         setError(signInError instanceof Error ? signInError.message : String(signInError));
       });
-  }, [authClient]);
+  }, [analytics, authClient]);
 
   return (
     <OnboardingShell

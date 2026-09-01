@@ -26,11 +26,18 @@ import { ProjectsScreen } from './screens/projects-screen';
 import { FirstTaskScreen } from './screens/first-task-screen';
 import { SummaryScreen } from './screens/summary-screen';
 import { useOnboardingBuiltinRuntimePrefetch } from './use-onboarding-builtin-runtime-prefetch';
+import {
+  useOnboardingAnalytics,
+  type DesktopOnboardingTraceProperties,
+} from './onboarding-analytics';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
 export type DesktopOnboardingCompletion = {
   sessionId?: string;
   workspaceSlug?: string;
+  entryPoint?: 'first_task' | 'first_task_skip' | 'summary';
+  sourceStep?: DesktopOnboardingResumePhase;
+  sourceStepDurationMs?: number | null;
 };
 
 export function resolveDesktopOnboardingSummaryAgent(
@@ -83,8 +90,10 @@ export function OnboardingOverlay({
   const [preferredBuiltinRuntime, setPreferredBuiltinRuntime] =
     useState<ManagedBuiltinAgentType | null>(null);
   const onboardingAudio = useOnboardingAudio();
+  const analytics = useOnboardingAnalytics();
   const { stop: stopOnboardingAudio } = onboardingAudio;
   const audioHandoffStoppedRef = useRef(false);
+  const providerSetupTraceRef = useRef<string | null>(null);
   useOnboardingBuiltinRuntimePrefetch(preferredBuiltinRuntime);
 
   const steps = useMemo(
@@ -104,20 +113,47 @@ export function OnboardingOverlay({
         : steps,
     [draft.provider?.kind, phase, steps]
   );
+  const stepStartedAtRef = useRef(analytics.now());
+  const flowStartedCapturedRef = useRef(false);
+  const viewedPhaseRef = useRef<DesktopOnboardingResumePhase | null>(null);
+  const captureStepExit = useCallback(
+    (
+      action: 'continue' | 'back' | 'skip' | 'authenticated' | 'complete',
+      nextStep: DesktopOnboardingResumePhase | 'product',
+      properties?: DesktopOnboardingTraceProperties
+    ) => {
+      analytics.capture('onboarding/step_exited', {
+        step: phase,
+        next_step: nextStep,
+        action,
+        duration_ms: analytics.durationSince(stepStartedAtRef.current),
+        ...properties,
+      });
+    },
+    [analytics, phase]
+  );
   const advanceTo = useCallback(
-    (next: DesktopOnboardingResumePhase) => setPersistedPhase(next),
-    [setPersistedPhase]
+    (
+      next: DesktopOnboardingResumePhase,
+      action: 'continue' | 'back' | 'skip' | 'authenticated' = 'continue',
+      properties?: DesktopOnboardingTraceProperties
+    ) => {
+      captureStepExit(action, next, properties);
+      setPersistedPhase(next);
+    },
+    [captureStepExit, setPersistedPhase]
   );
   const goAfterCeremony = useCallback(
-    () => advanceTo(cloudAccount ? 'login' : multiWorkspace ? 'workspace' : 'providers'),
+    () =>
+      advanceTo(cloudAccount ? 'login' : multiWorkspace ? 'workspace' : 'providers', 'continue'),
     [advanceTo, cloudAccount, multiWorkspace]
   );
   const goAfterLogin = useCallback(
-    () => advanceTo(multiWorkspace ? 'workspace' : 'providers'),
+    () => advanceTo(multiWorkspace ? 'workspace' : 'providers', 'authenticated'),
     [advanceTo, multiWorkspace]
   );
   const goBeforeProviders = useCallback(
-    () => advanceTo(multiWorkspace ? 'workspace' : cloudAccount ? 'login' : 'ceremony'),
+    () => advanceTo(multiWorkspace ? 'workspace' : cloudAccount ? 'login' : 'ceremony', 'back'),
     [advanceTo, cloudAccount, multiWorkspace]
   );
 
@@ -147,15 +183,100 @@ export function OnboardingOverlay({
       : providerSetups.find((setup) => setup.id === selectedSetupId && setup.status === 'failed');
 
   useEffect(() => {
-    if (!failedProviderSetup) return;
-    console.error('[onboarding] Agent setup failed:', {
-      id: failedProviderSetup.id,
-      machineId: failedProviderSetup.machineId,
-      agentName: failedProviderSetup.config.name,
-      failureCode: failedProviderSetup.failureCode,
-      attempt: failedProviderSetup.attempt,
+    if (!flowStartedCapturedRef.current) {
+      flowStartedCapturedRef.current = true;
+      analytics.capture(
+        persistedPhase === null ? 'onboarding/flow_started' : 'onboarding/flow_resumed',
+        {
+          initial_step: phase,
+          resumed: persistedPhase !== null,
+          cloud_account: cloudAccount,
+          multi_workspace: multiWorkspace,
+        }
+      );
+    }
+    if (viewedPhaseRef.current === phase) return;
+    viewedPhaseRef.current = phase;
+    stepStartedAtRef.current = analytics.now();
+    const stepIndex = visibleSteps.indexOf(phase);
+    analytics.capture('onboarding/step_viewed', {
+      step: phase,
+      step_index: stepIndex === -1 ? null : stepIndex + 1,
+      step_count: visibleSteps.length,
+      provider_selection_kind: draft.provider?.kind ?? 'none',
+      project_kind: draft.project?.kind ?? 'none',
+      agent_state: phase === 'summary' ? summaryAgent.state : undefined,
     });
-  }, [failedProviderSetup]);
+  }, [
+    analytics,
+    cloudAccount,
+    draft.project?.kind,
+    draft.provider?.kind,
+    multiWorkspace,
+    persistedPhase,
+    phase,
+    summaryAgent.state,
+    visibleSteps,
+  ]);
+
+  useEffect(() => {
+    if (selectedSetupId === null) {
+      providerSetupTraceRef.current = null;
+      return;
+    }
+    const traceKey = `${selectedSetupId}:${summaryAgent.state}:${failedProviderSetup?.attempt ?? 0}`;
+    if (providerSetupTraceRef.current === traceKey) return;
+    providerSetupTraceRef.current = traceKey;
+    if (summaryAgent.state === 'preparing') {
+      analytics.capture('onboarding/operation_started', {
+        step: phase,
+        operation: 'agent_setup',
+        attempt: failedProviderSetup?.attempt ?? null,
+      });
+      return;
+    }
+    if (summaryAgent.state === 'ready') {
+      analytics.capture('onboarding/operation_succeeded', {
+        step: phase,
+        operation: 'agent_setup',
+      });
+      return;
+    }
+    if (failedProviderSetup) {
+      console.error('[onboarding] Agent setup failed:', {
+        id: failedProviderSetup.id,
+        machineId: failedProviderSetup.machineId,
+        agentName: failedProviderSetup.config.name,
+        failureCode: failedProviderSetup.failureCode,
+        attempt: failedProviderSetup.attempt,
+      });
+      analytics.capture('onboarding/operation_failed', {
+        step: phase,
+        operation: 'agent_setup',
+        failure_code: failedProviderSetup.failureCode ?? 'agent_setup_failed',
+        attempt: failedProviderSetup.attempt,
+        retryable: true,
+      });
+      return;
+    }
+    analytics.capture('onboarding/operation_failed', {
+      step: phase,
+      operation: 'agent_setup',
+      failure_code: 'agent_setup_missing',
+      retryable: false,
+    });
+  }, [analytics, failedProviderSetup, phase, selectedSetupId, summaryAgent.state]);
+
+  const completeOnboarding = useCallback(
+    async (entryPoint: NonNullable<DesktopOnboardingCompletion['entryPoint']>) => {
+      return onCompleted({
+        entryPoint,
+        sourceStep: phase,
+        sourceStepDurationMs: analytics.durationSince(stepStartedAtRef.current),
+      });
+    },
+    [analytics, onCompleted, phase]
+  );
 
   useEffect(() => {
     if (phase === 'ceremony') {
@@ -177,11 +298,13 @@ export function OnboardingOverlay({
         onFinish={goAfterCeremony}
       />
     ),
-    login: <LoginScreen key="login" onBack={() => advanceTo('ceremony')} onNext={goAfterLogin} />,
+    login: (
+      <LoginScreen key="login" onBack={() => advanceTo('ceremony', 'back')} onNext={goAfterLogin} />
+    ),
     workspace: (
       <WorkspaceScreen
         key="workspace"
-        onBack={() => advanceTo(cloudAccount ? 'login' : 'ceremony')}
+        onBack={() => advanceTo(cloudAccount ? 'login' : 'ceremony', 'back')}
         onNext={() => advanceTo('providers')}
       />
     ),
@@ -191,11 +314,11 @@ export function OnboardingOverlay({
         onBack={goBeforeProviders}
         onSkip={() => {
           setDraft({ provider: null, project: null });
-          advanceTo('summary');
+          advanceTo('summary', 'skip', { provider_selection_kind: 'none' });
         }}
         onNext={(provider) => {
           setDraft({ provider, project: null });
-          advanceTo('projects');
+          advanceTo('projects', 'continue', { provider_selection_kind: provider.kind });
         }}
         onManagedRuntimeSelected={setPreferredBuiltinRuntime}
       />
@@ -203,17 +326,19 @@ export function OnboardingOverlay({
     projects: (
       <ProjectsScreen
         key="projects"
-        onBack={() => advanceTo('providers')}
+        onBack={() => advanceTo('providers', 'back')}
         onSkip={() => {
           setDraft((previous) => ({ ...previous, project: null }));
-          advanceTo('summary');
+          advanceTo('summary', 'skip', { project_kind: 'none' });
         }}
         onComplete={(project) => {
           setDraft((previous) => ({ ...previous, project }));
           advanceTo(
             project.kind === 'local' && draft.provider?.kind === 'agentConfig'
               ? 'firstTask'
-              : 'summary'
+              : 'summary',
+            'continue',
+            { project_kind: project.kind }
           );
         }}
       />
@@ -224,7 +349,7 @@ export function OnboardingOverlay({
           key="firstTask"
           agentConfigId={draft.provider.agentConfigId}
           project={draft.project}
-          onBack={() => advanceTo('projects')}
+          onBack={() => advanceTo('projects', 'back')}
           onAgentConfigChange={(config) => {
             setDraft((previous) => ({
               ...previous,
@@ -236,10 +361,10 @@ export function OnboardingOverlay({
             }));
           }}
           onSkip={() => {
-            void onCompleted({});
+            void completeOnboarding('first_task_skip');
           }}
           onContinue={() => {
-            return onCompleted({});
+            return completeOnboarding('first_task');
           }}
         />
       ) : null,
@@ -253,9 +378,9 @@ export function OnboardingOverlay({
         onRetryAgent={
           failedProviderSetup ? () => retryProviderSetup(failedProviderSetup.id) : undefined
         }
-        onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
+        onBack={() => advanceTo(draft.project ? 'projects' : 'providers', 'back')}
         onComplete={() => {
-          void onCompleted({});
+          void completeOnboarding('summary');
         }}
       />
     ),

@@ -21,6 +21,7 @@ import {
   type WorkspaceSlugRuleError,
 } from '@/lib/workspace';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 type SlugError = 'required' | WorkspaceSlugRuleError | 'unavailable';
 
@@ -545,12 +546,22 @@ function releaseWorkspaceWrite(owner: object, write: Promise<unknown>): void {
 
 function WorkspaceSlugAvailabilityProbe({
   slug,
+  attempt,
   onResolved,
 }: {
   slug: string;
+  attempt: number;
   onResolved: (slug: string, available: boolean) => void;
 }) {
+  const analytics = useOnboardingAnalytics();
   const availability = useCloudQuery(cloudOperations.auth.isWorkspaceSlugAvailable, { slug });
+  useEffect(() => {
+    analytics.capture('onboarding/operation_started', {
+      step: 'workspace',
+      operation: 'slug_availability_check',
+      attempt,
+    });
+  }, [analytics, attempt]);
   useEffect(() => {
     if (availability !== undefined) onResolved(slug, availability.available);
   }, [availability, onResolved, slug]);
@@ -559,6 +570,7 @@ function WorkspaceSlugAvailabilityProbe({
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const platform = usePlatform();
   const workspaceState = usePlatformWorkspaces();
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
@@ -603,10 +615,16 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   useEffect(() => {
     if (workspaceState.status === 'error') {
       console.error('[onboarding] Failed to load workspaces:', workspaceState.message);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'workspace',
+        operation: 'workspace_list',
+        failure_code: 'workspace_list_failed',
+        retryable: Boolean(platform.workspaces.retry),
+      });
       return;
     }
     setWorkspaceRetryError(null);
-  }, [workspaceState]);
+  }, [analytics, platform.workspaces.retry, workspaceState]);
 
   const handleRetryWorkspaces = useCallback(() => {
     if (retryingWorkspaces) return;
@@ -619,15 +637,31 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     }
     setRetryingWorkspaces(true);
     setWorkspaceRetryError(null);
+    analytics.capture('onboarding/operation_started', {
+      step: 'workspace',
+      operation: 'workspace_list_retry',
+    });
     void retry()
+      .then(() => {
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'workspace',
+          operation: 'workspace_list_retry',
+        });
+      })
       .catch((error: unknown) => {
         console.error('[onboarding] Failed to retry workspace loading:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'workspace',
+          operation: 'workspace_list_retry',
+          failure_code: 'workspace_list_retry_failed',
+          retryable: true,
+        });
         setWorkspaceRetryError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setRetryingWorkspaces(false);
       });
-  }, [platform.workspaces, retryingWorkspaces]);
+  }, [analytics, platform.workspaces, retryingWorkspaces]);
 
   // A write can outlive this phase after Back. Re-entering the step must join
   // that write instead of issuing a competing setActive mutation.
@@ -707,23 +741,46 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const newSlugAvailable = matchingSlugAvailability?.status === 'available';
   const newSlugCheckError =
     matchingSlugAvailability?.status === 'error' ? matchingSlugAvailability.message : null;
-  const handleSlugAvailabilityResolved = useCallback((slug: string, available: boolean) => {
-    setSlugAvailability({ slug, status: available ? 'available' : 'unavailable' });
-  }, []);
+  const handleSlugAvailabilityResolved = useCallback(
+    (slug: string, available: boolean) => {
+      setSlugAvailability({ slug, status: available ? 'available' : 'unavailable' });
+      analytics.capture('onboarding/operation_succeeded', {
+        step: 'workspace',
+        operation: 'slug_availability_check',
+        attempt: slugCheckAttempt + 1,
+        available,
+      });
+    },
+    [analytics, slugCheckAttempt]
+  );
   const handleRetrySlugCheck = useCallback(() => {
     if (!canCheckAvailability) return;
     setSlugAvailability({ slug: newSlug, status: 'checking' });
+    analytics.capture('onboarding/operation_succeeded', {
+      step: 'workspace',
+      operation: 'slug_availability_retry_request',
+      attempt: slugCheckAttempt + 2,
+    });
     setSlugCheckAttempt((attempt) => attempt + 1);
-  }, [canCheckAvailability, newSlug]);
+  }, [analytics, canCheckAvailability, newSlug, slugCheckAttempt]);
   const [newSlugCheckSlow, setNewSlugCheckSlow] = useState(false);
   useEffect(() => {
     if (!newSlugChecking) {
       setNewSlugCheckSlow(false);
       return undefined;
     }
-    const timer = setTimeout(() => setNewSlugCheckSlow(true), SLUG_CHECK_SLOW_MS);
+    const timer = setTimeout(() => {
+      setNewSlugCheckSlow(true);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'workspace',
+        operation: 'slug_availability_check',
+        failure_code: 'slug_check_slow',
+        attempt: slugCheckAttempt + 1,
+        retryable: true,
+      });
+    }, SLUG_CHECK_SLOW_MS);
     return () => clearTimeout(timer);
-  }, [newSlugChecking, slugCheckAttempt]);
+  }, [analytics, newSlugChecking, slugCheckAttempt]);
 
   const newSlugError = useMemo<SlugError | null>(() => {
     if (!creating) return null;
@@ -751,6 +808,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     setWritePending(true);
     commitWorkspaceContext(null);
     const attempt = ++writeAttemptRef.current;
+    analytics.capture('onboarding/operation_started', {
+      step: 'workspace',
+      operation: 'workspace_switch',
+      attempt,
+    });
     const switchWrite = trackWorkspaceWrite(
       platform.workspaces,
       platform.workspaces.setActive(selectedWorkspaceId)
@@ -764,6 +826,13 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         )
       );
       console.error('[onboarding] Workspace switch timed out:', error);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'workspace',
+        operation: 'workspace_switch',
+        failure_code: 'workspace_switch_timed_out',
+        attempt,
+        retryable: true,
+      });
       writeAttemptRef.current += 1;
       releaseWorkspaceWrite(platform.workspaces, switchWrite);
       setSaving(false);
@@ -779,6 +848,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         if (writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'workspace',
+          operation: 'workspace_switch',
+          attempt,
+        });
         commitWorkspaceContext(target);
         onNext();
       },
@@ -788,6 +862,13 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         setSaving(false);
         setWritePending(false);
         console.error('[onboarding] Failed to switch workspace:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'workspace',
+          operation: 'workspace_switch',
+          failure_code: 'workspace_switch_failed',
+          attempt,
+          retryable: true,
+        });
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
@@ -798,6 +879,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   }, [
     activeWorkspace,
     activeWorkspaceId,
+    analytics,
     commitWorkspaceContext,
     onNext,
     platform.workspaces,
@@ -824,6 +906,12 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     setCreateError(null);
     commitWorkspaceContext(null);
     const attempt = ++writeAttemptRef.current;
+    const operation = repairingWorkspace ? 'workspace_slug_repair' : 'workspace_create';
+    analytics.capture('onboarding/operation_started', {
+      step: 'workspace',
+      operation,
+      attempt,
+    });
     const createWrite = trackWorkspaceWrite(
       platform.workspaces,
       (async () => {
@@ -859,6 +947,15 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
           : '[onboarding] Workspace creation timed out:',
         error
       );
+      analytics.capture('onboarding/operation_failed', {
+        step: 'workspace',
+        operation,
+        failure_code: repairingWorkspace
+          ? 'workspace_slug_repair_timed_out'
+          : 'workspace_create_timed_out',
+        attempt,
+        retryable: true,
+      });
       writeAttemptRef.current += 1;
       releaseWorkspaceWrite(platform.workspaces, createWrite);
       setSaving(false);
@@ -871,6 +968,11 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         if (!created || writeAttemptRef.current !== attempt) return;
         setSaving(false);
         setWritePending(false);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'workspace',
+          operation,
+          attempt,
+        });
         commitWorkspaceContext({
           id: created.id,
           name: created.name,
@@ -889,6 +991,15 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
             : '[onboarding] Failed to create workspace:',
           error
         );
+        analytics.capture('onboarding/operation_failed', {
+          step: 'workspace',
+          operation,
+          failure_code: repairingWorkspace
+            ? 'workspace_slug_repair_failed'
+            : 'workspace_create_failed',
+          attempt,
+          retryable: true,
+        });
         commitWorkspaceContext(activeWorkspace);
         // The error stays inline in the form: a toast disappears and leaves a
         // user with no workspaces without any visible way forward.
@@ -897,6 +1008,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     );
   }, [
     activeWorkspace,
+    analytics,
     commitWorkspaceContext,
     newName,
     newSlug,
@@ -921,12 +1033,20 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
           propagateAuthErrors={false}
           onError={(error) => {
             console.error('[onboarding] Failed to verify workspace handle:', error);
+            analytics.capture('onboarding/operation_failed', {
+              step: 'workspace',
+              operation: 'slug_availability_check',
+              failure_code: 'slug_check_failed',
+              attempt: slugCheckAttempt + 1,
+              retryable: true,
+            });
             setSlugAvailability({ slug: newSlug, status: 'error', message: error.message });
           }}
         >
           <WorkspaceSlugAvailabilityProbe
             key={`${newSlug}:${slugCheckAttempt}`}
             slug={newSlug}
+            attempt={slugCheckAttempt + 1}
             onResolved={handleSlugAvailabilityResolved}
           />
         </ErrorBoundary>
