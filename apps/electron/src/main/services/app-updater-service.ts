@@ -1,3 +1,5 @@
+import { appendFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type {
@@ -42,6 +44,25 @@ function readVersionPrereleaseChannel(version: string): string | undefined {
   return normalized
 }
 
+// electron-updater defaults to `console`, and a packaged desktop app has no
+// terminal attached, so every install failure it reports is lost. Keep the
+// updater's own log next to the app data instead.
+function createUpdaterLogger() {
+  const logPath = join(app.getPath('userData'), 'updater.log')
+  const write = (level: string, message: unknown): void => {
+    try {
+      appendFileSync(logPath, `${new Date().toISOString()} [${level}] ${String(message)}\n`)
+    } catch {
+      // Logging must never break the update flow.
+    }
+  }
+  return {
+    info: (message: unknown) => write('info', message),
+    warn: (message: unknown) => write('warn', message),
+    error: (message: unknown) => write('error', message)
+  }
+}
+
 export class AppUpdaterService {
   private state: ElectronUpdaterState = {
     phase: 'idle',
@@ -70,6 +91,7 @@ export class AppUpdaterService {
       return
     }
 
+    autoUpdater.logger = createUpdaterLogger()
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = false
 
@@ -154,6 +176,18 @@ export class AppUpdaterService {
       // Ensure macOS close handlers don't hide windows and block updater-triggered quit.
       setAppQuitting(true)
       autoUpdater.quitAndInstall(false, true)
+      // electron-updater reports install failures through its `error` event and
+      // returns normally, so a plain `ok: true` here would leave the renderer
+      // spinning on an install that never started. The event listener is
+      // synchronous, so a failure is already recorded in state by now.
+      const stateAfterInstall = this.getState()
+      if (stateAfterInstall.phase === 'error') {
+        setAppQuitting(false)
+        return {
+          ok: false,
+          error: stateAfterInstall.error ?? 'update_install_failed'
+        }
+      }
       return { ok: true }
     } catch (error) {
       setAppQuitting(false)
