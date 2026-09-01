@@ -773,7 +773,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   near-saturated main thread per session switch. Any code path that sets
   `isSidebarOpen` from persisted/URL state rather than from a user action must
   bump `sidebarRestoreSeq` in the same commit (today: the session-switch reset
-  branch and the `?pr=` deep-link effect); `DesktopSessionDetailLayout` then
+  branch and the `?pr=` deep-link RENDER-PHASE adjustment — the restore is
+  deliberately not an effect, so the `?pr` clear effect can never observe
+  pre-restore sidebar state); `DesktopSessionDetailLayout` then
   applies it in one frame and re-arms the transition on the next rAF. User
   toggles (`handleToggleSidebar`, `handleOpenPrTab`, viewer/browser opens) still
   animate and must NOT bump it.
