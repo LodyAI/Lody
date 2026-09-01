@@ -1,7 +1,9 @@
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
   isConfigOptionValueValid,
+  normalizeCodexReasoningEffortSelectors,
   type AcpConfigOptionSelector,
+  type AcpSelectorTarget,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 
@@ -211,10 +213,19 @@ const resolveSelectField = (
  * disagreement that used to oscillate). Authoritative capabilities validate
  * every value; non-authoritative ones keep stored values verbatim, unknown
  * keys included. Selector fallbacks seed only the no-runtime path.
+ *
+ * The MODEL resolves before the config table because model-dependent selectors
+ * (Codex reasoning tiers) arrive normalized for the UNVALIDATED candidate
+ * model. When authoritative validation moves the model — a capability refresh
+ * removed the persisted/runtime one — that stale normalization would leave
+ * extended reasoning values valid and dispatchable for a model that does not
+ * support them, so `target` re-normalizes the selectors against the RESOLVED
+ * model (the normalizer converges under repeated application).
  */
 export const resolveAcpSessionConfigSelection = (
   inputs: AcpSessionConfigSelectionInputs,
-  selectorOptions: AcpSessionSelectorOptionsInput
+  selectorOptions: AcpSessionSelectorOptionsInput,
+  target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType'>
 ): ResolvedAcpSessionConfigSelection => {
   const { edits, preferences, runtimePreferences } = inputs;
   const {
@@ -225,6 +236,30 @@ export const resolveAcpSessionConfigSelection = (
     defaultModelId,
     configOptionSelectors,
   } = selectorOptions;
+
+  const selectedModeId = resolveSelectField(
+    edits.mode,
+    runtimePreferences?.modeId,
+    preferences.modeId,
+    modeOptions,
+    defaultModeId,
+    capabilityAuthority
+  );
+  const selectedModelId = resolveSelectField(
+    edits.model,
+    runtimePreferences?.modelId,
+    preferences.modelId,
+    modelOptions,
+    defaultModelId,
+    capabilityAuthority
+  );
+  const selectors = target
+    ? normalizeCodexReasoningEffortSelectors(configOptionSelectors, {
+        cliType: target.cliType,
+        agentType: target.agentType,
+        selectedModelId,
+      })
+    : configOptionSelectors;
 
   const runtimeTable = runtimePreferences?.configOptionValues;
   const baseTable = runtimeTable ?? preferences.configOptionValues ?? {};
@@ -238,7 +273,7 @@ export const resolveAcpSessionConfigSelection = (
   if (capabilityAuthority !== 'authoritative') {
     Object.assign(configOptionValues, baseTable);
     if (!runtimeTable) {
-      for (const selector of configOptionSelectors) {
+      for (const selector of selectors) {
         if (!(selector.configId in configOptionValues)) {
           configOptionValues[selector.configId] = selector.currentValue;
         }
@@ -248,7 +283,7 @@ export const resolveAcpSessionConfigSelection = (
   } else {
     // Authoritative: only cataloged selectors exist and invalid stored values
     // fall through the chain.
-    for (const selector of configOptionSelectors) {
+    for (const selector of selectors) {
       const configId = selector.configId;
       const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
       if (isConfigOptionValueValid(selector, editValue)) {
@@ -269,25 +304,7 @@ export const resolveAcpSessionConfigSelection = (
     }
   }
 
-  return {
-    selectedModeId: resolveSelectField(
-      edits.mode,
-      runtimePreferences?.modeId,
-      preferences.modeId,
-      modeOptions,
-      defaultModeId,
-      capabilityAuthority
-    ),
-    selectedModelId: resolveSelectField(
-      edits.model,
-      runtimePreferences?.modelId,
-      preferences.modelId,
-      modelOptions,
-      defaultModelId,
-      capabilityAuthority
-    ),
-    configOptionValues,
-  };
+  return { selectedModeId, selectedModelId, configOptionValues };
 };
 
 export const filterAcpSessionConfigOptionValues = (

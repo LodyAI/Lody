@@ -13,6 +13,7 @@ import {
   type AcpSessionUserConfigEdits,
   type ResolvedAcpSessionConfigSelection,
 } from '@/lib/acp-session-config-selection';
+import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options';
 
 /**
  * ACP run-config selection with NO effects. The only stored state is the
@@ -173,10 +174,17 @@ export function useAcpSessionConfigSelectionState({
 
 export function useResolvedAcpSessionConfigSelection(
   selection: AcpSessionConfigSelectionInputs,
-  selectorOptions: AcpSessionSelectorOptionsInput
+  selectorOptions: AcpSessionSelectorOptionsInput,
+  /**
+   * Agent identity for model-dependent selector normalization (Codex reasoning
+   * tiers follow the RESOLVED model, not the unvalidated candidate).
+   */
+  target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType'>
 ): ResolvedAcpSessionConfigSelection {
+  const cliType = target?.cliType ?? null;
+  const agentType = target?.agentType ?? null;
   return useMemo(
-    () => resolveAcpSessionConfigSelection(selection, selectorOptions),
-    [selection, selectorOptions]
+    () => resolveAcpSessionConfigSelection(selection, selectorOptions, { cliType, agentType }),
+    [agentType, cliType, selection, selectorOptions]
   );
 }

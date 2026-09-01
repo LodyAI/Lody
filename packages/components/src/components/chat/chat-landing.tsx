@@ -1668,7 +1668,10 @@ function WorkspaceChatLanding({
   });
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
   const { selectedModeId, selectedModelId, configOptionValues } =
-    useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions);
+    useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+      cliType: selectedConfig?.cliType,
+      agentType: selectedConfig?.agentType,
+    });
   const dispatchConfigOptionValues = useMemo(
     () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
     [configOptionSelectors, configOptionValues]

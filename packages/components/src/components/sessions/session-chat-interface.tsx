@@ -2141,7 +2141,10 @@ export const SessionChatInterface = memo(
       ]
     );
     const { selectedModeId, selectedModelId, configOptionValues } =
-      useResolvedAcpSessionConfigSelection(sessionConfigSelection, sessionSelectorOptions);
+      useResolvedAcpSessionConfigSelection(sessionConfigSelection, sessionSelectorOptions, {
+        cliType: session.cliType,
+        agentType: session.agentType,
+      });
     useMachineFlockAgentConfigsForMachineIds([session.machineId]);
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),

@@ -251,6 +251,48 @@ describe('ACP session config derivation', () => {
     }
   });
 
+  it('normalizes model-dependent selectors against the RESOLVED model', () => {
+    /* An authoritative capability refresh removed the persisted extended Codex
+       model (`gpt-5.6-sol`). The selector catalog was built for that stale
+       CANDIDATE, so the reasoning selector still carries the extended tiers —
+       without re-normalization, `max` would stay valid and dispatchable after
+       the model resolved to one that does not support it. */
+    const staleNormalizedReasoningSelector = {
+      configId: 'reasoning_effort',
+      label: 'Reasoning effort',
+      type: 'select' as const,
+      currentValue: 'medium',
+      options: [
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'max', label: 'Max' },
+        { value: 'ultra', label: 'Ultra' },
+      ],
+    };
+    const resolved = resolveAcpSessionConfigSelection(
+      {
+        edits: emptyEdits,
+        preferences: {
+          modelId: 'gpt-5.6-sol',
+          configOptionValues: { reasoning_effort: 'max' },
+        },
+      },
+      {
+        capabilityAuthority: 'authoritative',
+        modeOptions: [],
+        modelOptions: [{ value: 'gpt-5.5', label: '5.5' }],
+        defaultModeId: null,
+        defaultModelId: 'gpt-5.5',
+        configOptionSelectors: [staleNormalizedReasoningSelector],
+      },
+      { cliType: 'builtin', agentType: 'codex' }
+    );
+    expect(resolved.selectedModelId).toBe('gpt-5.5');
+    // `max` is not a reasoning tier of the resolved model: the stale
+    // preference falls through to the normalized selector's own value.
+    expect(resolved.configOptionValues.reasoning_effort).toBe('medium');
+  });
+
   it('builds unvalidated candidates from the same chain', () => {
     expect(
       buildAcpSessionConfigCandidates({
