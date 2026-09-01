@@ -7,16 +7,31 @@
     <style>
       :root {
         color-scheme: light dark;
+        --bg: light-dark(#fafafa, #0a0a0a);
+        --surface: light-dark(#ffffff, #141414);
+        --border: light-dark(rgba(0, 0, 0, 0.09), rgba(255, 255, 255, 0.09));
+        --border-strong: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.18));
+        --text: light-dark(#171717, #ededed);
+        --text-muted: light-dark(#737373, #8f8f8f);
+        --text-faint: light-dark(#a3a3a3, #5c5c5c);
+        --hover: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.05));
+        --fail: light-dark(#dc2626, #f87171);
+        --fail-soft: light-dark(rgba(220, 38, 38, 0.08), rgba(248, 113, 113, 0.12));
+        --candidate: light-dark(#b45309, #fbbf24);
+        --candidate-soft: light-dark(rgba(180, 83, 9, 0.08), rgba(251, 191, 36, 0.1));
         font-family:
-          Inter,
           ui-sans-serif,
           system-ui,
           -apple-system,
-          BlinkMacSystemFont,
           'Segoe UI',
+          'Helvetica Neue',
+          'PingFang SC',
+          'Hiragino Sans GB',
+          'Microsoft YaHei',
           sans-serif;
-        background: light-dark(#f6f7f8, #09090b);
-        color: light-dark(#18181b, #f4f4f5);
+        background: var(--bg);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
       }
 
       * {
@@ -27,165 +42,375 @@
         margin: 0;
       }
 
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-feature-settings: 'tnum';
+      }
+
       .report {
-        width: min(1480px, 100%);
+        width: min(1240px, 100%);
         margin-inline: auto;
-        padding: 32px;
+        padding: 56px 32px 96px;
       }
 
-      .report-header,
-      .section-header,
-      .detail-heading,
-      figcaption {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-      }
+      /* ---------- header ---------- */
 
-      h1,
-      h2,
-      h3,
-      p {
-        margin: 0;
-        letter-spacing: 0;
+      .eyebrow {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-faint);
       }
 
       h1 {
-        font-size: 28px;
+        margin: 10px 0 0;
+        font-size: 30px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+        text-wrap: balance;
       }
 
-      h2 {
-        font-size: 17px;
+      .meta {
+        margin-top: 12px;
+        font-size: 12.5px;
+        color: var(--text-muted);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
       }
 
-      h3 {
-        font-size: 15px;
-      }
-
-      .subtitle,
-      .timestamp,
-      .detail-description,
-      figcaption {
-        color: light-dark(#71717a, #a1a1aa);
-      }
-
-      .subtitle {
-        margin-top: 8px;
-        font-size: 13px;
-      }
-
-      .status,
-      .detail-finding {
-        color: light-dark(#be123c, #fda4af);
-        font:
-          650 12px/1.35 ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          monospace;
-      }
-
-      .status {
-        border: 1px solid light-dark(#fecdd3, #881337);
-        border-radius: 8px;
-        background: light-dark(#fff1f2, #4c0519);
-        padding: 8px 10px;
-      }
-
-      section {
-        margin-top: 32px;
-      }
-
-      .detail-reviews {
-        margin-top: 14px;
-        border-block: 1px solid light-dark(#d4d4d8, #3f3f46);
-      }
-
-      .detail-review {
-        padding-block: 24px;
-      }
-
-      .detail-review + .detail-review {
-        border-top: 1px solid light-dark(#e4e4e7, #27272a);
-      }
-
-      .detail-heading {
-        align-items: end;
-        margin-bottom: 12px;
-      }
-
-      .detail-description {
-        margin-top: 5px;
+      .meta .mono {
         font-size: 12px;
       }
 
+      /* ---------- summary / filter ---------- */
+
+      .toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        margin-top: 28px;
+        padding-block: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+
+      .chip {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-muted);
+        border-radius: 999px;
+        padding: 5px 12px;
+        font: inherit;
+        font-size: 12.5px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        transition:
+          color 120ms ease,
+          border-color 120ms ease,
+          background-color 120ms ease;
+      }
+
+      .chip:hover {
+        color: var(--text);
+        border-color: var(--border-strong);
+      }
+
+      .chip[aria-pressed='true'] {
+        color: var(--text);
+        background: var(--surface);
+        border-color: var(--border-strong);
+      }
+
+      .chip .count {
+        font-size: 11.5px;
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .dot--fail {
+        color: var(--fail);
+      }
+
+      .dot--candidate {
+        color: var(--candidate);
+      }
+
+      .toolbar-end {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--text-faint);
+      }
+
+      /* ---------- detail list ---------- */
+
+      .detail-reviews {
+        border-top: 1px solid var(--border);
+      }
+
+      .detail-review {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .detail-review[hidden] {
+        display: none;
+      }
+
+      .detail-toggle {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        width: 100%;
+        padding: 18px 4px;
+        cursor: pointer;
+        display: grid;
+        grid-template-columns: 28px 10px minmax(0, 1fr) auto 20px;
+        align-items: baseline;
+        gap: 14px;
+        border-radius: 4px;
+        transition: background-color 120ms ease;
+      }
+
+      .detail-toggle:hover {
+        background: var(--hover);
+      }
+
+      .detail-index {
+        font-size: 12px;
+        color: var(--text-faint);
+      }
+
+      .detail-toggle .dot {
+        align-self: center;
+      }
+
+      .detail-title {
+        font-size: 14.5px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+      }
+
+      .detail-description {
+        margin-top: 3px;
+        font-size: 12.5px;
+        color: var(--text-muted);
+        text-wrap: pretty;
+      }
+
       .detail-finding {
-        text-align: right;
+        font-size: 12px;
+        line-height: 1.5;
+        padding: 4px 10px;
+        border-radius: 6px;
+        max-width: 46ch;
+        text-align: left;
+      }
+
+      .detail-review[data-kind='violation'] .detail-finding {
+        color: var(--fail);
+        background: var(--fail-soft);
       }
 
       .detail-review[data-kind='candidate'] .detail-finding {
-        color: light-dark(#a16207, #facc15);
+        color: var(--candidate);
+        background: var(--candidate-soft);
+      }
+
+      .chevron {
+        align-self: center;
+        width: 14px;
+        height: 14px;
+        color: var(--text-faint);
+        transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .detail-toggle[aria-expanded='true'] .chevron {
+        transform: rotate(90deg);
+      }
+
+      /* expanding region: grid-rows trick keeps the animation compositor-cheap */
+
+      .detail-body {
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .detail-review[data-open='true'] .detail-body {
+        grid-template-rows: 1fr;
+      }
+
+      .detail-body-inner {
+        overflow: hidden;
+        min-height: 0;
       }
 
       .detail-pair {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        gap: 16px;
+        padding: 4px 4px 26px 52px;
       }
 
       figure {
         margin: 0;
-        padding: 8px;
-        border: 1px solid light-dark(#e4e4e7, #27272a);
-        border-radius: 8px;
-        background: light-dark(#ffffff, #18181b);
       }
 
-      figure img {
+      .figure-frame {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #ffffff;
+        cursor: zoom-in;
+        padding: 0;
+        display: block;
+        width: 100%;
+        appearance: none;
+      }
+
+      .figure-frame img {
         display: block;
         width: 100%;
         height: auto;
-        border: 1px solid light-dark(#e4e4e7, #3f3f46);
-        border-radius: 6px;
-        background: #ffffff;
+        transition: opacity 160ms ease;
+      }
+
+      .figure-frame:hover img {
+        opacity: 0.85;
       }
 
       figcaption {
-        padding: 9px 3px 1px;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 2px 0;
         font-size: 12px;
-      }
-
-      figcaption strong {
-        color: light-dark(#18181b, #f4f4f5);
+        color: var(--text-muted);
       }
 
       figcaption a {
-        color: inherit;
+        color: var(--text-faint);
+        text-decoration: none;
+        white-space: nowrap;
+        transition: color 120ms ease;
       }
 
-      @media (max-width: 920px) {
+      figcaption a:hover {
+        color: var(--text);
+      }
+
+      /* ---------- lightbox ---------- */
+
+      dialog.lightbox {
+        border: 0;
+        padding: 0;
+        background: transparent;
+        max-width: min(92vw, 1600px);
+        max-height: 92vh;
+      }
+
+      dialog.lightbox::backdrop {
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: blur(6px);
+      }
+
+      dialog.lightbox[open] {
+        animation: lightbox-in 160ms cubic-bezier(0.2, 0, 0.2, 1);
+      }
+
+      @keyframes lightbox-in {
+        from {
+          opacity: 0;
+          transform: scale(0.97);
+        }
+      }
+
+      .lightbox img {
+        display: block;
+        max-width: 100%;
+        max-height: 84vh;
+        border-radius: 8px;
+      }
+
+      .lightbox figcaption {
+        color: rgba(255, 255, 255, 0.65);
+      }
+
+      .lightbox figcaption a {
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      .lightbox figcaption a:hover {
+        color: #ffffff;
+      }
+
+      /* ---------- entrance ---------- */
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+
+      .report-header,
+      .toolbar {
+        animation: rise 360ms cubic-bezier(0.2, 0, 0.2, 1) both;
+      }
+
+      .toolbar {
+        animation-delay: 60ms;
+      }
+
+      @media (max-width: 860px) {
         .report {
-          padding: 20px;
+          padding: 36px 20px 64px;
         }
 
-        .report-header,
-        .detail-heading {
-          align-items: flex-start;
-          flex-direction: column;
+        .detail-toggle {
+          grid-template-columns: 10px minmax(0, 1fr) 20px;
+        }
+
+        .detail-index,
+        .detail-finding {
+          grid-column: 2;
         }
 
         .detail-finding {
-          text-align: left;
+          margin-top: 8px;
+          justify-self: start;
         }
 
         .detail-pair {
           grid-template-columns: 1fr;
+          padding-left: 4px;
         }
       }
 
-      @media (max-width: 560px) {
-        .report {
-          padding: 14px;
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
         }
       }
     </style>
@@ -193,76 +418,194 @@
   <body>
     <main class="report">
       <header class="report-header">
-        <div>
-          <h1>几何对齐报告</h1>
-          <p class="subtitle">已确认的语义线违规与待确认的候选轨；每项都有原图和标注图。</p>
-        </div>
-        <span class="status" id="status"></span>
+        <p class="eyebrow">Lody · Geometry Report</p>
+        <h1>几何对齐报告</h1>
+        <p class="meta" id="meta"></p>
       </header>
 
-      <section aria-labelledby="violations-title">
-        <div class="section-header">
-          <h2 id="violations-title">逐项检查</h2>
-          <span class="timestamp" id="timestamp"></span>
-        </div>
-        <div class="detail-reviews" id="detail-reviews"></div>
-      </section>
+      <div class="toolbar" id="toolbar" role="group" aria-label="按类型筛选"></div>
+
+      <div class="detail-reviews" id="detail-reviews"></div>
     </main>
+
+    <dialog class="lightbox" id="lightbox" aria-label="截图预览">
+      <figure>
+        <img id="lightbox-image" alt="" />
+        <figcaption>
+          <span id="lightbox-caption"></span>
+          <a id="lightbox-link" href="#" target="_blank" rel="noreferrer">打开 2× PNG ↗</a>
+        </figcaption>
+      </figure>
+    </dialog>
 
     <script>
       const report = __GEOMETRY_REPORT_DATA__;
-      const details = document.getElementById('detail-reviews');
-      document.getElementById('status').textContent =
-        `${report.details.length} 组检查 · ${report.contractProposals.length} 个 Contract 候选`;
-      document.getElementById('timestamp').textContent = new Date(
-        report.generatedAt
-      ).toLocaleString();
 
-      report.details.forEach((detail) => {
+      const chevronSvg =
+        '<svg class="chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+        '<path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+      const violations = report.details.filter((d) => d.kind === 'violation');
+      const candidates = report.details.filter((d) => d.kind === 'candidate');
+
+      document.getElementById('meta').replaceChildren(
+        ...[
+          new Date(report.generatedAt).toLocaleString(),
+          `${report.viewport.width} × ${report.viewport.height}`,
+          `${report.details.length} 组检查`,
+          `${report.contractProposals.length} 个 Contract 候选`,
+        ].map((text) => {
+          const span = document.createElement('span');
+          span.className = 'mono';
+          span.textContent = text;
+          return span;
+        })
+      );
+
+      // ---------- filter ----------
+
+      const reviewsEl = document.getElementById('detail-reviews');
+      const toolbar = document.getElementById('toolbar');
+      const filters = [
+        ['all', '全部', report.details.length, null],
+        ['violation', '违规', violations.length, 'dot--fail'],
+        ['candidate', '候选轨', candidates.length, 'dot--candidate'],
+      ];
+
+      function applyFilter(kind) {
+        for (const chip of toolbar.querySelectorAll('.chip')) {
+          chip.setAttribute('aria-pressed', String(chip.dataset.filter === kind));
+        }
+        for (const review of reviewsEl.children) {
+          review.hidden = kind !== 'all' && review.dataset.kind !== kind;
+        }
+      }
+
+      for (const [kind, label, count, dotClass] of filters) {
+        if (count === 0) continue;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip';
+        chip.dataset.filter = kind;
+        chip.setAttribute('aria-pressed', String(kind === 'all'));
+        if (dotClass) {
+          const dot = document.createElement('span');
+          dot.className = `dot ${dotClass}`;
+          chip.append(dot);
+        }
+        chip.append(label, ' ');
+        const countSpan = document.createElement('span');
+        countSpan.className = 'count mono';
+        countSpan.textContent = count;
+        chip.append(countSpan);
+        chip.addEventListener('click', () => applyFilter(kind));
+        toolbar.append(chip);
+      }
+
+      // ---------- lightbox ----------
+
+      const lightbox = document.getElementById('lightbox');
+      const lightboxImage = document.getElementById('lightbox-image');
+      const lightboxCaption = document.getElementById('lightbox-caption');
+      const lightboxLink = document.getElementById('lightbox-link');
+
+      function openLightbox(source, label, alt) {
+        lightboxImage.src = source;
+        lightboxImage.alt = alt;
+        lightboxCaption.textContent = label;
+        lightboxLink.href = source;
+        lightbox.showModal();
+      }
+
+      lightbox.addEventListener('click', (event) => {
+        if (event.target === lightbox) lightbox.close();
+      });
+
+      // ---------- detail rows ----------
+
+      report.details.forEach((detail, index) => {
         const review = document.createElement('article');
         review.className = 'detail-review';
         review.dataset.kind = detail.kind;
+        const open = detail.kind === 'violation';
+        review.dataset.open = String(open);
 
-        const heading = document.createElement('div');
-        heading.className = 'detail-heading';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'detail-toggle';
+        toggle.setAttribute('aria-expanded', String(open));
+
+        const indexSpan = document.createElement('span');
+        indexSpan.className = 'detail-index mono';
+        indexSpan.textContent = String(index + 1).padStart(2, '0');
+
+        const dot = document.createElement('span');
+        dot.className = `dot ${detail.kind === 'violation' ? 'dot--fail' : 'dot--candidate'}`;
+
         const copy = document.createElement('div');
-        const title = document.createElement('h3');
+        const title = document.createElement('div');
+        title.className = 'detail-title';
         title.textContent = detail.title;
         const description = document.createElement('p');
         description.className = 'detail-description';
         description.textContent = detail.description;
         copy.append(title, description);
-        const finding = document.createElement('span');
-        finding.className = 'detail-finding';
-        finding.textContent = detail.finding;
-        heading.append(copy, finding);
 
+        const finding = document.createElement('span');
+        finding.className = 'detail-finding mono';
+        finding.textContent = detail.finding;
+
+        toggle.append(indexSpan, dot, copy, finding);
+        toggle.insertAdjacentHTML('beforeend', chevronSvg);
+
+        const body = document.createElement('div');
+        body.className = 'detail-body';
+        const inner = document.createElement('div');
+        inner.className = 'detail-body-inner';
         const pair = document.createElement('div');
         pair.className = 'detail-pair';
+
         const annotatedLabel = detail.kind === 'candidate' ? '候选轨与偏移' : '失败语义线';
         for (const [label, source, alt] of [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
           [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
         ]) {
           const figure = document.createElement('figure');
+          const frame = document.createElement('button');
+          frame.type = 'button';
+          frame.className = 'figure-frame';
+          frame.setAttribute('aria-label', `放大查看：${label}`);
           const image = document.createElement('img');
+          image.loading = 'lazy';
           image.src = source;
           image.alt = alt;
+          frame.append(image);
+          frame.addEventListener('click', () => openLightbox(source, `${detail.title} · ${label}`, alt));
           const caption = document.createElement('figcaption');
-          const captionLabel = document.createElement('strong');
+          const captionLabel = document.createElement('span');
           captionLabel.textContent = label;
           const link = document.createElement('a');
           link.href = source;
           link.target = '_blank';
           link.rel = 'noreferrer';
-          link.textContent = '打开 2× PNG';
+          link.textContent = '打开 2× PNG ↗';
           caption.append(captionLabel, link);
-          figure.append(image, caption);
+          figure.append(frame, caption);
           pair.append(figure);
         }
 
-        review.append(heading, pair);
-        details.append(review);
+        inner.append(pair);
+        body.append(inner);
+
+        toggle.addEventListener('click', () => {
+          const next = review.dataset.open !== 'true';
+          review.dataset.open = String(next);
+          toggle.setAttribute('aria-expanded', String(next));
+        });
+
+        review.append(toggle, body);
+        reviewsEl.append(review);
       });
     </script>
   </body>
