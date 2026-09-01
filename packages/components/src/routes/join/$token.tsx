@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { WorkspaceJoinRequestSurface } from '@/components/pages/workspace-join-request-surface';
-import { signOutWithoutRedirect } from '@/lib/auth';
-import { useAuthClient } from '@/providers/convex-provider';
+import { signOutWithoutRedirect } from '../../lib/auth';
+import { useAuthClient } from '../../providers/convex-provider';
 
 export const Route = createFileRoute('/join/$token')({
   component: WorkspaceJoinRequestRoute,
