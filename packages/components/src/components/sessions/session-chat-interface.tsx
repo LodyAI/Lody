@@ -196,7 +196,10 @@ import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
-import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-state';
+import {
+  resolveSessionInfoBarGitHubActionIds,
+  shouldDisableSessionInfoBarGitHubActionForHydration,
+} from './session-info-action-state';
 import {
   canPauseGoalThroughPromptBridge,
   getPromptBridgeGoalCommands,
@@ -4552,38 +4555,45 @@ export const SessionChatInterface = memo(
         prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
       }).map((actionId) => {
+        const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
+          actionId,
+          sessionDocReady
+        );
         switch (actionId) {
           case 'create-pr':
             return {
               id: actionId,
               label: t('sessions.createPr', 'Create PR'),
               onClick: handleCreatePr,
+              disabled: disabledForHydration,
             };
           case 'create-draft-pr':
             return {
               id: actionId,
               label: t('sessions.createDraftPr', 'Create Draft PR'),
               onClick: handleCreateDraftPr,
+              disabled: disabledForHydration,
             };
           case 'commit-and-push':
             return {
               id: actionId,
               label: t('sessions.commitAndPush', 'Commit & Push'),
               onClick: handleCommitAndPush,
+              disabled: disabledForHydration,
             };
           case 'resolve-conflicts':
             return {
               id: actionId,
               label: t('sessions.resolveConflicts', 'Resolve Conflicts'),
               onClick: () => void handleResolveConflicts(),
-              disabled: isResolvingConflicts,
+              disabled: disabledForHydration || isResolvingConflicts,
             };
           case 'fix-ci-errors':
             return {
               id: actionId,
               label: t('sessions.fixCiErrors', 'Fix CI Errors'),
               onClick: () => void handleFixCiErrors(),
-              disabled: isPrActionPending,
+              disabled: disabledForHydration || isPrActionPending,
             };
           case 'ready-for-review':
             return {
@@ -4630,6 +4640,7 @@ export const SessionChatInterface = memo(
       isActivePrMarkingReady,
       preferredMergeMethod,
       isActivePrMerging,
+      sessionDocReady,
       t,
       workspaceDirty,
       hasChanges,
@@ -4646,7 +4657,7 @@ export const SessionChatInterface = memo(
     useEffect(() => {
       setResolveConflictsAction({
         run: () => void handleResolveConflicts(),
-        pending: isResolvingConflicts,
+        pending: !sessionDocReady || isResolvingConflicts,
         available: resolveConflictsAvailable,
       });
       return () => setResolveConflictsAction(null);
@@ -4655,6 +4666,7 @@ export const SessionChatInterface = memo(
       handleResolveConflicts,
       isResolvingConflicts,
       resolveConflictsAvailable,
+      sessionDocReady,
     ]);
 
     const headerBrowserSession =

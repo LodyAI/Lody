@@ -301,7 +301,6 @@ export function selectSessionAgentRoles({
     .flatMap((role) => {
       if (role.machineId !== machineId || role.agentConfigId !== agentConfigId) return [];
       const agentConfig = configById.get(role.agentConfigId);
-      if (!agentConfig || agentConfig.machineId !== machineId) return [];
       return [{ role, availability: resolveAvailability(role), agentConfig }];
     })
     .sort((left, right) => left.role.name.localeCompare(right.role.name));

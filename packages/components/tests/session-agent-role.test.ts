@@ -89,21 +89,26 @@ describe('selectSessionAgentRoles', () => {
     expect(items).toEqual([]);
   });
 
-  it('drops a Role whose config is gone rather than guessing its type', () => {
+  it('keeps an exact-binding Role visible when its config is gone', () => {
     const orphan = makeRole({
       id: 'r-orphan' as AgentRoleId,
       name: 'Orphan',
       agentConfigId: 'deleted' as AgentConfigId,
     });
-    expect(
-      selectSessionAgentRoles({
-        roles: [orphan],
-        machineId: 'machine-1' as MachineId,
-        agentConfigId: 'deleted' as AgentConfigId,
-        agentConfigs,
-        resolveAvailability,
-      })
-    ).toEqual([]);
+    const items = selectSessionAgentRoles({
+      roles: [orphan],
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'deleted' as AgentConfigId,
+      agentConfigs,
+      resolveAvailability: () => ({ kind: 'unavailable', reason: 'agent_config_missing' }),
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.role).toBe(orphan);
+    expect(items[0]?.agentConfig).toBeUndefined();
+    expect(items[0]?.availability).toEqual({
+      kind: 'unavailable',
+      reason: 'agent_config_missing',
+    });
   });
 
   it('offers nothing until the session reports its exact provider binding', () => {
