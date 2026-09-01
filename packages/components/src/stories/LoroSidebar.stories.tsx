@@ -1115,12 +1115,17 @@ function ProductionLikeTopContent({
                     defaultSessionTitle="Untitled"
                     selectedSessionId={null}
                     removeProjectLabel="Remove folder"
+                    newChatLabel="New chat in this project"
                     archiveTooltipLabel="Archive"
                     archiveActionLabel="Archive"
                     archiveConfirmLabel="Confirm"
                     isMobile={isMobile}
                     toggleLabel="Toggle"
                     onNavigateProject={() => {}}
+                    onNewChatInProject={() => {}}
+                    onOpenProjectSettings={() => {}}
+                    onRevealProject={() => {}}
+                    onArchiveProjectChats={() => {}}
                     onNavigateSession={() => {}}
                     onArchive={() => {}}
                     collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1168,12 +1173,16 @@ function ProductionLikeTopContent({
                   defaultSessionTitle="Untitled"
                   selectedSessionId={null}
                   removeProjectLabel="Remove folder"
+                  newChatLabel="New chat in this project"
                   archiveTooltipLabel="Archive"
                   archiveActionLabel="Archive"
                   archiveConfirmLabel="Confirm"
                   isMobile={isMobile}
                   toggleLabel="Toggle"
                   onNavigateProject={() => {}}
+                  onNewChatInProject={() => {}}
+                  onOpenProjectSettings={() => {}}
+                  onArchiveProjectChats={() => {}}
                   onNavigateSession={() => {}}
                   onArchive={() => {}}
                   collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
