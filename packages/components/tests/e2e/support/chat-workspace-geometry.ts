@@ -52,7 +52,13 @@ export type BrowserSemanticBaselineEntry = Readonly<{
   line: number;
   spread: number;
   aligned: boolean;
-  members: readonly Readonly<{ name: string; coordinate: number; delta: number }>[];
+  members: readonly Readonly<{
+    name: string;
+    text: string | null;
+    coordinate: number;
+    delta: number;
+    rect: GeometryRect;
+  }>[];
 }>;
 
 export type BrowserSemanticAlignmentEntry = Readonly<{
@@ -67,6 +73,7 @@ export type BrowserSemanticAlignmentEntry = Readonly<{
   spread: number;
   members: readonly Readonly<{
     name: string;
+    text: string | null;
     coordinate: number;
     delta: number;
     rect: GeometryRect;
@@ -633,6 +640,7 @@ export async function auditChatWorkspaceSemanticAlignments(
             const rect = element.getBoundingClientRect();
             return {
               name: describe(element),
+              text: element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) || null,
               coordinate: coordinate(element, rule.anchor),
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             };
@@ -680,6 +688,7 @@ export async function auditChatWorkspaceSemanticAlignments(
       spread: result.spread,
       members: result.members.map((member, index) => ({
         ...member,
+        text: measurement.members[index]?.text ?? null,
         rect: measurement.members[index]?.rect ?? { x: 0, y: 0, width: 0, height: 0 },
       })),
     };
@@ -746,9 +755,17 @@ export async function auditChatWorkspaceSemanticBaselines(
               mode,
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
               members: elements.map((element) => {
+                const memberRect = element.getBoundingClientRect();
                 return {
                   name: element.getAttribute(baselineAttributes.member) || describe(element),
+                  text: element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) || null,
                   coordinate: textBaseline(element),
+                  rect: {
+                    x: memberRect.x,
+                    y: memberRect.y,
+                    width: memberRect.width,
+                    height: memberRect.height,
+                  },
                 };
               }),
             },
@@ -777,7 +794,11 @@ export async function auditChatWorkspaceSemanticBaselines(
       line: result.line,
       spread: result.spread,
       aligned: result.aligned,
-      members: result.members,
+      members: result.members.map((member, index) => ({
+        ...member,
+        text: measurement.members[index]?.text ?? null,
+        rect: measurement.members[index]?.rect ?? { x: 0, y: 0, width: 0, height: 0 },
+      })),
     };
   });
 }
