@@ -40,10 +40,16 @@ mobile surfaces.
   subtrees from DOM topology and geometry; each repeated subtree instance contributes
   at most one member to a start/center/end rail, so a control and its nested icon cannot
   manufacture support. `data-geometry-discovery-scope` remains an optional hint for
-  named or aggregate regions, never a prerequisite for discovery. Coordinate-ordered
-  one-dimensional clusters form median rails independent of DOM order; members outside
-  the inlier tolerance are reported as outliers, and confidence includes the rail's span
-  relative to its containing scope rather than the minimum-span admission threshold. Flow
+  named or aggregate regions, never a prerequisite for discovery. Coordinate modes with
+  repeated row support establish rails independent of DOM order before nearby singleton
+  observations attach to the nearest mode; intermediate coordinates must not chain distinct
+  indentation levels together. Broad visual-row scans partition candidates by the measured row
+  container start, so a parent heading and its nested list do not judge each other; automatic
+  repeated-subtree scopes remain the check for a whole shifted row. A rail is a finite Y-axis
+  segment spanning its repeated support, extended at each end by one typical member height;
+  coincidental X coordinates in distant headers, footers, or modules do not become outliers.
+  Members outside the inlier tolerance are reported as outliers, and confidence includes the
+  rail's span relative to its containing scope rather than the minimum-span admission threshold. Flow
   text may contribute start/end edges but never a center rail because its box center changes
   with content and wrapping; center evidence comes from controls with an explicit geometry.
   Discovery must not read semantic-alignment attributes: it derives visual rows and their

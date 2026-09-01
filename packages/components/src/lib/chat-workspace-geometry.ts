@@ -335,6 +335,8 @@ export type AlignmentRailCandidate = Readonly<{
   elementId: string;
   /** Stable row identity so nested boxes on one row cannot inflate support. */
   rowId: string;
+  /** Optional geometry-derived row start used to keep indentation levels separate. */
+  rowStart?: number;
   /** Geometry-derived visual role; semantic contract names never enter discovery. */
   kind?: string;
   anchor: AlignmentRailCandidateAnchor;
@@ -344,7 +346,7 @@ export type AlignmentRailCandidate = Readonly<{
 }>;
 
 export type AlignmentRailDiscoveryOptions = Readonly<{
-  /** Maximum distance at which a candidate can join a possible rail. */
+  /** Maximum distance at which a candidate can attach to a stable rail mode. */
   mergeTolerance?: number;
   /** Maximum distance from the median at which a member supports the rail. */
   inlierTolerance?: number;
@@ -995,11 +997,14 @@ function median(values: readonly number[]): number {
 
 /**
  * Discover repeated horizontal alignment rails without assigning layout intent.
- * Candidates are clustered independently by anchor kind, then scored against
- * the cluster median. Flow text can define start or end edges, but its box
- * center is content-dependent and cannot define a center rail. The result is
- * diagnostic only: callers decide whether a reviewed rail should later become
- * an explicit semantic contract.
+ * Candidates are grouped independently by anchor kind. Repeated coordinate
+ * modes establish rails before nearby singleton observations are attached to
+ * the nearest mode. This keeps stable indentation levels separate even when
+ * intermediate coordinates would otherwise chain them into one cluster. Flow
+ * text can define start or end edges, but its box center is content-dependent
+ * and cannot define a center rail. The result is diagnostic only: callers
+ * decide whether a reviewed rail should later become an explicit semantic
+ * contract.
  */
 export function discoverAlignmentRails(
   candidates: readonly AlignmentRailCandidate[],
@@ -1031,6 +1036,7 @@ export function discoverAlignmentRails(
       !Number.isFinite(candidate.coordinate) ||
       !Number.isFinite(candidate.yStart) ||
       !Number.isFinite(candidate.yEnd) ||
+      (candidate.rowStart !== undefined && !Number.isFinite(candidate.rowStart)) ||
       candidate.yEnd < candidate.yStart
     ) {
       throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
@@ -1045,9 +1051,50 @@ export function discoverAlignmentRails(
     byAnchor.set(candidate.anchor, members);
   }
 
-  const rails: DiscoveredAlignmentRail[] = [];
+  const discoveryGroups: Readonly<{
+    anchor: AlignmentRailCandidateAnchor;
+    candidates: AlignmentRailCandidate[];
+  }>[] = [];
   for (const [anchor, anchorCandidates] of byAnchor) {
-    const clusters: AlignmentRailCandidate[][] = [];
+    const withoutRowStart = anchorCandidates.filter(
+      (candidate) => candidate.rowStart === undefined
+    );
+    if (withoutRowStart.length > 0) discoveryGroups.push({ anchor, candidates: withoutRowStart });
+    const orderedByRowStart = anchorCandidates
+      .filter(
+        (candidate): candidate is AlignmentRailCandidate & { rowStart: number } =>
+          candidate.rowStart !== undefined
+      )
+      .sort(
+        (first, second) =>
+          first.rowStart - second.rowStart ||
+          first.yStart - second.yStart ||
+          first.elementId.localeCompare(second.elementId)
+      );
+    const rowStartClusters: AlignmentRailCandidate[][] = [];
+    for (const candidate of orderedByRowStart) {
+      const currentCluster = rowStartClusters.at(-1);
+      const clusterStart = currentCluster?.[0]?.rowStart;
+      if (
+        !currentCluster ||
+        clusterStart === undefined ||
+        (candidate.rowStart ?? clusterStart) - clusterStart > inlierTolerance * 2
+      ) {
+        rowStartClusters.push([candidate]);
+      } else {
+        currentCluster.push(candidate);
+      }
+    }
+    discoveryGroups.push(
+      ...rowStartClusters.map((clusterCandidates) => ({
+        anchor,
+        candidates: clusterCandidates,
+      }))
+    );
+  }
+
+  const rails: DiscoveredAlignmentRail[] = [];
+  for (const { anchor, candidates: anchorCandidates } of discoveryGroups) {
     const ordered = [...anchorCandidates].sort(
       (first, second) =>
         first.coordinate - second.coordinate ||
@@ -1055,36 +1102,26 @@ export function discoverAlignmentRails(
         first.elementId.localeCompare(second.elementId)
     );
 
+    const modeClusters: AlignmentRailCandidate[][] = [];
+    const maximumModeSpan = inlierTolerance * 2;
     for (const candidate of ordered) {
-      const target = clusters.at(-1);
-      const previousCoordinate = target?.at(-1)?.coordinate;
+      const currentMode = modeClusters.at(-1);
+      const modeStart = currentMode?.[0]?.coordinate;
       if (
-        !target ||
-        previousCoordinate === undefined ||
-        candidate.coordinate - previousCoordinate > mergeTolerance
+        !currentMode ||
+        modeStart === undefined ||
+        candidate.coordinate - modeStart > maximumModeSpan
       ) {
-        clusters.push([candidate]);
-        continue;
-      }
-      const existingIndex = target.findIndex((member) => member.rowId === candidate.rowId);
-      if (existingIndex < 0) {
-        target.push(candidate);
-        continue;
-      }
-      const targetLine = median(target.map((member) => member.coordinate));
-      const existing = target[existingIndex];
-      if (
-        existing &&
-        Math.abs(candidate.coordinate - targetLine) < Math.abs(existing.coordinate - targetLine)
-      ) {
-        target[existingIndex] = candidate;
+        modeClusters.push([candidate]);
+      } else {
+        currentMode.push(candidate);
       }
     }
 
-    for (const cluster of clusters) {
-      const initialLine = median(cluster.map((member) => member.coordinate));
+    const stableModes = modeClusters.flatMap((mode) => {
+      const initialLine = median(mode.map((member) => member.coordinate));
       const uniqueByRow = new Map<string, AlignmentRailCandidate>();
-      for (const candidate of cluster) {
+      for (const candidate of mode) {
         const current = uniqueByRow.get(candidate.rowId);
         if (
           !current ||
@@ -1095,9 +1132,49 @@ export function discoverAlignmentRails(
       }
       const uniqueCandidates = [...uniqueByRow.values()];
       const line = median(uniqueCandidates.map((member) => member.coordinate));
-      const members = uniqueCandidates
+      const supporters = uniqueCandidates.filter(
+        (member) => Math.abs(member.coordinate - line) <= inlierTolerance
+      );
+      if (supporters.length < minSupport) return [];
+      const yStart = Math.min(...supporters.map((member) => member.yStart));
+      const yEnd = Math.max(...supporters.map((member) => member.yEnd));
+      const verticalSpan = yEnd - yStart;
+      if (verticalSpan < minVerticalSpan) return [];
+      const attachmentPadding = median(supporters.map((member) => member.yEnd - member.yStart));
+      return [{ line, verticalSpan, yStart, yEnd, attachmentPadding }];
+    });
+
+    const assignedByMode = stableModes.map(() => [] as AlignmentRailCandidate[]);
+    for (const candidate of ordered) {
+      let nearestModeIndex = -1;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const [modeIndex, mode] of stableModes.entries()) {
+        const distance = Math.abs(candidate.coordinate - mode.line);
+        const intersectsRailSegment =
+          candidate.yEnd >= mode.yStart - mode.attachmentPadding &&
+          candidate.yStart <= mode.yEnd + mode.attachmentPadding;
+        if (intersectsRailSegment && distance <= mergeTolerance && distance < nearestDistance) {
+          nearestModeIndex = modeIndex;
+          nearestDistance = distance;
+        }
+      }
+      if (nearestModeIndex >= 0) assignedByMode[nearestModeIndex]?.push(candidate);
+    }
+
+    for (const [modeIndex, mode] of stableModes.entries()) {
+      const uniqueByRow = new Map<string, AlignmentRailCandidate>();
+      for (const candidate of assignedByMode[modeIndex] ?? []) {
+        const current = uniqueByRow.get(candidate.rowId);
+        if (
+          !current ||
+          Math.abs(candidate.coordinate - mode.line) < Math.abs(current.coordinate - mode.line)
+        ) {
+          uniqueByRow.set(candidate.rowId, candidate);
+        }
+      }
+      const members = [...uniqueByRow.values()]
         .map((member) => {
-          const delta = Math.abs(member.coordinate - line);
+          const delta = Math.abs(member.coordinate - mode.line);
           return { ...member, delta, outlier: delta > inlierTolerance };
         })
         .sort(
@@ -1107,23 +1184,19 @@ export function discoverAlignmentRails(
             first.elementId.localeCompare(second.elementId)
         );
       const support = members.filter((member) => !member.outlier).length;
-      const yStart = Math.min(...members.map((member) => member.yStart));
-      const yEnd = Math.max(...members.map((member) => member.yEnd));
-      const verticalSpan = members.length === 0 ? 0 : yEnd - yStart;
-      if (support < minSupport || verticalSpan < minVerticalSpan) continue;
       const confidence =
         (support / members.length) *
-        (scopeHeight === undefined ? 1 : Math.min(1, verticalSpan / scopeHeight));
+        (scopeHeight === undefined ? 1 : Math.min(1, mode.verticalSpan / scopeHeight));
       const outliers = members.filter(
         (member): member is AlignmentRailCandidate & { delta: number; outlier: true } =>
           member.outlier
       );
       rails.push({
         anchor,
-        line,
+        line: mode.line,
         support,
         sampleSize: members.length,
-        verticalSpan,
+        verticalSpan: mode.verticalSpan,
         confidence,
         members,
         outliers,

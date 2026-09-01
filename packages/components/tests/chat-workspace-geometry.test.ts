@@ -303,6 +303,97 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(reversed).toEqual(forward);
   });
 
+  it('keeps repeated indentation modes separate across intermediate coordinates', () => {
+    const candidates = [
+      ...[0, 40, 80].map((yStart, index) => ({
+        elementId: `body-${index + 1}`,
+        rowId: `body-row-${index + 1}`,
+        coordinate: 100,
+        yStart,
+      })),
+      {
+        elementId: 'intermediate-control',
+        rowId: 'intermediate-row',
+        coordinate: 108,
+        yStart: 120,
+      },
+      ...[160, 200, 240].map((yStart, index) => ({
+        elementId: `indented-${index + 1}`,
+        rowId: `indented-row-${index + 1}`,
+        coordinate: 116,
+        yStart,
+      })),
+    ].map((candidate) => ({
+      ...candidate,
+      anchor: 'inline-start' as const,
+      yEnd: candidate.yStart + 20,
+    }));
+
+    const rails = discoverAlignmentRails(candidates, { mergeTolerance: 12 });
+
+    expect(rails.map((rail) => rail.line).sort((left, right) => left - right)).toEqual([100, 116]);
+    expect(rails.find((rail) => rail.line === 100)?.outliers).toEqual([
+      expect.objectContaining({ elementId: 'intermediate-control', delta: 8 }),
+    ]);
+    expect(rails.find((rail) => rail.line === 116)?.outliers).toEqual([]);
+  });
+
+  it('does not attach distant regions to a finite rail segment', () => {
+    const rails = discoverAlignmentRails(
+      [
+        ...[100, 140, 180].map((yStart, index) => ({
+          elementId: `list-item-${index + 1}`,
+          rowId: `list-row-${index + 1}`,
+          coordinate: 100,
+          yStart,
+        })),
+        {
+          elementId: 'unrelated-footer',
+          rowId: 'footer-row',
+          coordinate: 108,
+          yStart: 500,
+        },
+      ].map((candidate) => ({
+        ...candidate,
+        anchor: 'inline-start' as const,
+        yEnd: candidate.yStart + 20,
+      })),
+      { mergeTolerance: 12 }
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
+  });
+
+  it('does not compare a parent row with a nested indentation level', () => {
+    const rails = discoverAlignmentRails(
+      [
+        ...[40, 80, 120].map((yStart, index) => ({
+          elementId: `nested-item-${index + 1}`,
+          rowId: `nested-row-${index + 1}`,
+          rowStart: 40,
+          coordinate: 100,
+          yStart,
+        })),
+        {
+          elementId: 'parent-heading',
+          rowId: 'parent-row',
+          rowStart: 20,
+          coordinate: 92,
+          yStart: 0,
+        },
+      ].map((candidate) => ({
+        ...candidate,
+        anchor: 'inline-start' as const,
+        yEnd: candidate.yStart + 20,
+      })),
+      { mergeTolerance: 12 }
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
+  });
+
   it('scores vertical coverage relative to the containing scope', () => {
     const rails = discoverAlignmentRails(
       [0, 20, 40].map((yStart, index) => ({
@@ -382,9 +473,8 @@ describe('conversation, spacing, and semantic baselines', () => {
       anchor: 'inline-end',
       line: 266,
       support: 5,
-      sampleSize: 8,
+      sampleSize: 7,
       outliers: [
-        { elementId: 'section-action', coordinate: 267, delta: 1 },
         { elementId: 'project-action', coordinate: 262, delta: 4 },
         { elementId: 'new-session-action', coordinate: 275, delta: 9 },
       ],

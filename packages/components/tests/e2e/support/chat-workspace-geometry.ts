@@ -458,6 +458,7 @@ export async function discoverChatWorkspaceAlignmentRails(
             const common = {
               elementId,
               rowId: `visual-row:${Number(rowCenter.toFixed(1))}:${Number(row.rect.x.toFixed(1))}`,
+              rowStart: row.rect.left,
               kind,
               yStart: rect.top,
               yEnd: rect.bottom,

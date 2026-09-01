@@ -924,8 +924,8 @@ test('captures the visual geometry report', async ({ browser }) => {
   const sidebarDiscovery = workspaceDiscoveryDetails.find(
     (detail) => detail.title.includes('Sidebar 整体工作区') && detail.title.includes('尾部区')
   );
-  expect(sidebarDiscovery?.description).toMatch(/\b3 个待确认元素$/);
-  expect(sidebarDiscovery?.overlay.semanticAnnotations).toHaveLength(3);
+  expect(sidebarDiscovery?.description).toContain('暂无偏离元素');
+  expect(sidebarDiscovery?.overlay.semanticAnnotations).toHaveLength(0);
   expect(
     sidebarDiscovery?.overlay.discoveredRails.some((rail) => Math.abs(rail.line - 266) <= 0.5)
   ).toBe(true);
@@ -1161,9 +1161,10 @@ test('captures the visual geometry report', async ({ browser }) => {
   const stableCandidateIndexes = details.flatMap((detail, index) =>
     detail.kind === 'candidate' && !detail.requiresReview ? [index] : []
   );
-  expect(reviewCandidateIndexes.length).toBeGreaterThan(0);
   expect(stableCandidateIndexes.length).toBeGreaterThan(0);
-  expect(Math.max(...reviewCandidateIndexes)).toBeLessThan(Math.min(...stableCandidateIndexes));
+  if (reviewCandidateIndexes.length > 0) {
+    expect(Math.max(...reviewCandidateIndexes)).toBeLessThan(Math.min(...stableCandidateIndexes));
+  }
   const scopeKey = (
     contractDomain: 'workspace' | 'session',
     scope: BrowserAlignmentRailDiscoveryScope
