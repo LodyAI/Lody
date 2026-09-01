@@ -28,8 +28,14 @@ const MARKDOWN =
 describe('agent file links in finished turns', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
+  const writeText = vi.fn(() => Promise.resolve());
 
   beforeEach(() => {
+    writeText.mockClear();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -66,6 +72,39 @@ describe('agent file links in finished turns', () => {
     // The enumeration commas must not be left dangling next to a hole.
     expect(container?.textContent).toContain(
       '改动落在 README.md、conductor.json、oss-revision.json 三个文件。'
+    );
+  });
+
+  it('keeps opening on the file label and exposes a separate copy-path action', async () => {
+    const onAgentFileLinkClick = vi.fn();
+    await act(async () => {
+      root?.render(
+        createElement(MarkdownRenderer, {
+          text: '[README.md](/srv/workspaces/demo-app/README.md:8)',
+          isStreaming: false,
+          onAgentFileLinkClick,
+        })
+      );
+    });
+
+    const openButton = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open agent file: /srv/workspaces/demo-app/README.md"]'
+    );
+    const copyButton = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy agent file path: /srv/workspaces/demo-app/README.md"]'
+    );
+
+    expect(openButton).toBeTruthy();
+    expect(copyButton).toBeTruthy();
+
+    act(() => openButton?.click());
+    expect(onAgentFileLinkClick).toHaveBeenCalledWith('/srv/workspaces/demo-app/README.md:8');
+
+    await act(async () => copyButton?.click());
+    expect(writeText).toHaveBeenCalledWith('/srv/workspaces/demo-app/README.md');
+    expect(onAgentFileLinkClick).toHaveBeenCalledTimes(1);
+    expect(copyButton?.getAttribute('aria-label')).toBe(
+      'Copied: /srv/workspaces/demo-app/README.md'
     );
   });
 });
