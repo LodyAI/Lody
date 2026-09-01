@@ -4,23 +4,17 @@ all policy findings share one seven-day correction period. A change over 200
 lines (additions + deletions) without its prior Issue adds a size-specific finding.
 Same-repository branches do not create an Issue solely for contribution intake.
 
-Creating or linking an Issue is not permission to implement the change. Wait
-for a Lody maintainer to explicitly agree on the scope and approach before
-starting implementation or opening the PR. Automation checks only the Issue
-reference; maintainers decide whether prior agreement is sufficient.
-
-Agents authoring fork-based contributions MUST explain these consequences to the
-author-side user before implementation: a newly created Issue is not approval
-and work must wait for explicit maintainer agreement; Context handoff is public
-and cannot use N/A or redacted answers; an invalid body is closed after seven
-days and must then be resubmitted. Do not claim notice or agreement happened
-unless it did.
+The Issue is for tracking context; maintainers review the contribution through
+the normal PR process. Context handoff is public and cannot use N/A or redacted
+answers; an invalid body is closed after seven days and must then be resubmitted.
 -->
 
 ## Related issue
 
 <!--
-Required for fork PRs. Same-repository branches may leave this empty.
+Required for fork PRs. Same-repository branches may leave this empty. Link the
+Issue that provides context for the contribution; prior approval is not
+required.
 Use `Closes #123` when merging this PR should close the Issue. Use `Refs #123`
 only when the Issue must remain open. A bare `#123` or full Lody Issue URL is
 normalized to `Closes #123` by the PR policy workflow.

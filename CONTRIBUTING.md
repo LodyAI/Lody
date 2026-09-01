@@ -16,7 +16,7 @@ By submitting a pull request, patch, or other contribution to Lody, you agree to
 
 1. Search existing issues and pull requests to avoid duplicate work.
 2. Report reproducible problems with the [bug report form](https://github.com/LodyAI/Lody/issues/new?template=01-bug-report.yml), or propose improvements with the [feature request form](https://github.com/LodyAI/Lody/issues/new?template=02-feature-request.yml).
-3. Before implementing a fork-based contribution, wait for a Lody maintainer to explicitly agree on the scope and approach in the Issue. Creating an Issue yourself is not approval. Same-repository branches do not require an Issue solely for contribution intake.
+3. For a fork-based contribution, use an existing Issue when one provides useful context. Same-repository branches do not require an Issue solely for contribution intake.
 4. Do not report security vulnerabilities in a public issue; follow the [security policy](./SECURITY.md) instead.
 
 Keep the selected Issue Form structure, required answers, confirmations, and `[Bug]` or `[Feature Request]` title prefix. Issues that do not conform are marked `status:needs-issue-body` with a warning until corrected. Only repository owners and automated bots are exempt; regular organization members must also use the forms.
@@ -81,7 +81,7 @@ This variable is optional. Never commit the generated data or credentials.
 
 5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Every fork-based pull request must reference a Lody Issue and fill in the problem, summary, test plan, and Context handoff. Use `Closes #123` when merging the PR should close the Issue, and `Refs #123` only when it must remain open. A bare `#123` or full Lody Issue URL in `Related issue` defaults to `Closes #123`. The handoff gives the maintainers' reviewing Agent concise, PR-specific review focus, decisions to challenge, plausible failures or evidence gaps, and a public summary of the authoring context. Every field is required; `N/A` and redacted answers are rejected because they do not provide enough context for a safe review.
 
-If an Agent prepares a fork-based contribution, it must tell the author-side user before implementation that creating an Issue is not approval and wait for explicit maintainer agreement. It must also explain that the Context handoff is public and an invalid PR receives seven days to be corrected before closure. The Agent must not claim that notice or maintainer agreement exists unless it actually does. An Agent preparing a same-repository branch must not create an Issue solely to satisfy contribution intake.
+If an Agent prepares a fork-based contribution, it must explain that the Context handoff is public and an invalid PR receives seven days to be corrected before closure. An Agent preparing a same-repository branch must not create an Issue solely to satisfy contribution intake.
 
 A fork-based pull request that does not meet the contribution requirements is marked `status:needs-pr-attention`. All findings share one comment and one seven-day correction period. A change over 200 additions plus deletions without its prior Issue reference adds a size-specific finding rather than a separate status. A valid edit clears the managed state automatically.
 
