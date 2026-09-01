@@ -443,6 +443,29 @@ function buildTitleGenerationConfig(options: {
   return { configOptionValues };
 }
 
+/**
+ * Build the `machine/acp-capabilities-refresh` dispatch payload from a stored
+ * agent config. Extracted so the payload construction is independently testable
+ * — the full command action requires mocking the entire daemon boundary.
+ */
+export function buildRefreshCapabilitiesPayload(
+  config: AgentConfigMeta,
+  machineId: MachineId,
+  workspaceId: WorkspaceId
+) {
+  return {
+    type: 'machine/acp-capabilities-refresh' as const,
+    machineId,
+    workspaceId,
+    configId: config.id,
+    cliType: config.cliType,
+    agentType: config.agentType,
+    customAcp: config.customAcp,
+    runtimeOverrides: config.runtimeOverrides,
+    env: config.env,
+  };
+}
+
 const agentConfigListCommand = new Command('list')
   .description('List agent configs in a workspace')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
@@ -547,13 +570,6 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
       const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
 
       await withWorkspaceManager(auth, workspace, 'agent-config', async (manager) => {
-        const config = resolveAgentConfigSelector(
-          await listAgentConfigsForWorkspace(manager, workspace.id as WorkspaceId),
-          {
-            selector,
-            envSelector: process.env.LODY_AGENT_CONFIG_ID,
-          }
-        );
         const machines = await listMachineMetasForWorkspace(manager);
         const machine = resolveMachineOrThrow(machines, {
           selector: options.machine,
@@ -566,6 +582,20 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             `Remote machine capability refresh is not implemented in CLI yet. Current machine: ${auth.machineId}`
           );
         }
+
+        // Resolve the machine first, then filter configs so a selector cannot
+        // pick a config belonging to another machine and execute its launch
+        // spec locally.
+        const config = resolveAgentConfigSelector(
+          (await listAgentConfigsForWorkspace(manager, workspace.id as WorkspaceId)).filter(
+            (c) => c.machineId === machine.id
+          ),
+          {
+            selector,
+            envSelector: process.env.LODY_AGENT_CONFIG_ID,
+          }
+        );
+
         // Presence-based liveness; a null snapshot (presence room unavailable)
         // falls through to the local dispatch, which fails with its own error
         // if the daemon is actually down.
@@ -575,17 +605,9 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
         }
 
         const response = extractRefreshResponse(
-          await dispatchLocalControl({
-            type: 'machine/acp-capabilities-refresh',
-            machineId: machine.id,
-            workspaceId: workspace.id as WorkspaceId,
-            configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            env: config.env,
-          })
+          await dispatchLocalControl(
+            buildRefreshCapabilitiesPayload(config, machine.id, workspace.id as WorkspaceId)
+          )
         );
 
         if (!response.success) {
