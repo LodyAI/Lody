@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -270,6 +271,7 @@ import {
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
 import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
   extractIssuePRMentionsFromText,
@@ -1937,6 +1939,16 @@ export const SessionChatInterface = memo(
     },
     ref
   ) {
+    /* Mount/unmount into the crash-report render trace. The 0.89.x #185 crash
+       ends in this component's mount layout effects — a LAYOUT effect (passive
+       ones may never flush inside the crashing cascade) is what proves whether
+       the loop is remounting this surface or lives elsewhere. */
+    useLayoutEffect(() => {
+      recordSessionRenderTrace(`surface mount ${shortTraceId(session.id)}`);
+      return () => {
+        recordSessionRenderTrace(`surface unmount ${shortTraceId(session.id)}`);
+      };
+    }, [session.id]);
     const { t, i18n } = useTranslation();
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();

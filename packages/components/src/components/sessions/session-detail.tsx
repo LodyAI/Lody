@@ -230,6 +230,7 @@ import {
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
 import { getSessionDetailInitialTabState } from '@/lib/session-detail-initial-state';
+import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 /* Relative, not `@/providers/*`: the Electron web tsconfig maps only an
    allowlist of `@/` subpaths and has no `@/providers/*` entry, so the alias
    spelling type-checks here but breaks `@lody/electron`. */
@@ -1601,8 +1602,12 @@ const SessionDetail = ({
          mid-switch, a queued replace) must be dropped, not allowed to yank the
          router back to the session it captured. */
       if (!router.state.location.pathname.includes(`/sessions/${sessionId}`)) {
+        recordSessionRenderTrace(`nav-dropped s=${shortTraceId(sessionId)} tab=${nextTab ?? '∅'}`);
         return;
       }
+      recordSessionRenderTrace(
+        `nav s=${shortTraceId(sessionId)} tab=${nextTab ?? '∅'} ${push ? 'push' : 'replace'}`
+      );
 
       void router.navigate({
         to: '/$workspaceName/sessions/$sessionId',
@@ -2618,6 +2623,9 @@ const SessionDetail = ({
     }
     const last = lastParentRedirectRef.current;
     if (last && last.from === parentSessionId && last.to === sessionId) {
+      recordSessionRenderTrace(
+        `parent-cycle s=${shortTraceId(sessionId)} parent=${shortTraceId(parentSessionId)}`
+      );
       console.error('Session parentSessionId cycle detected; not following it', {
         sessionId,
         parentSessionId,
@@ -2625,6 +2633,9 @@ const SessionDetail = ({
       return;
     }
     lastParentRedirectRef.current = { from: sessionId, to: parentSessionId };
+    recordSessionRenderTrace(
+      `parent-redirect s=${shortTraceId(sessionId)} parent=${shortTraceId(parentSessionId)}`
+    );
     redirectToParentSessionUrl(parentSessionId, sessionId);
   }, [activeSession?.parentSessionId, redirectToParentSessionUrl, sessionId]);
 
@@ -4354,6 +4365,22 @@ const SessionDetail = ({
     visibleLocalProjectKeys,
     visibleMachineIds,
   ]);
+
+  /* One compact line per SessionDetail render into the crash-report ring
+     buffer (`session-render-trace.ts`): a React #185 report shows only where
+     the nested-update limit tripped; this shows what oscillated. Consecutive
+     identical lines collapse, so steady-state renders cost one repeat bump. */
+  recordSessionRenderTrace(
+    `detail s=${shortTraceId(sessionId)} tab=${urlTab ?? '∅'} active=${shortTraceId(
+      activeTabSessionId
+    )}${activeTabIsPendingChild ? '(pending)' : ''} children=[${visibleChildSessions
+      .map((s) => shortTraceId(s.id))
+      .join(',')}] side=${sideSessions.length} archived=${archivedChildSessions.length} drafts=${
+      draftTabs.length
+    } meta=${activeSession ? 'y' : 'n'} presence=${sessionPresenceState} ready=${
+      docMetaCacheReady ? 'y' : 'n'
+    }`
+  );
 
   useEffect(() => {
     if (sessionPresenceState === 'loading') {
