@@ -426,6 +426,43 @@ describe('conversation, spacing, and semantic baselines', () => {
     expect(rails[0]).toMatchObject({ line: 100, support: 3, sampleSize: 3, outliers: [] });
   });
 
+  it('does not attach a layout box to a nearby ink rail', () => {
+    const rails = discoverAlignmentRails(
+      [
+        ...[0, 32, 64].map((yStart, index) => ({
+          elementId: `visible-label-${index + 1}`,
+          rowId: `text-row-${index + 1}`,
+          kind: 'text',
+          space: 'ink' as const,
+          coordinate: 26,
+          yStart,
+        })),
+        {
+          elementId: 'section-hit-target',
+          rowId: 'section-row',
+          kind: 'button',
+          space: 'layout-box' as const,
+          coordinate: 17,
+          yStart: 96,
+        },
+      ].map((candidate) => ({
+        ...candidate,
+        anchor: 'inline-start' as const,
+        yEnd: candidate.yStart + 20,
+      })),
+      { mergeTolerance: 12 }
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]).toMatchObject({
+      space: 'ink',
+      line: 26,
+      support: 3,
+      sampleSize: 3,
+      outliers: [],
+    });
+  });
+
   it('keeps distant visual regions eligible for a nearby rail', () => {
     const rails = discoverAlignmentRails(
       [

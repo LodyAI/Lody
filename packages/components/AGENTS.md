@@ -59,6 +59,10 @@ mobile surfaces.
   with content and wrapping; center evidence comes from controls with an explicit geometry.
   Numeric text, including signed diff statistics, canonically uses its trailing edge so changing
   digit counts do not manufacture leading-edge outliers in right-aligned columns.
+  Alignment discovery measures visible primitives in ink space: text through rendered `Range`
+  bounds, SVGs through transformed path bounds, and images through their painted boxes. A padded
+  control or container is a separate layout-box observation and must never cluster with an ink
+  rail; spacing diagnostics own padding, margin, border, and gap measurements.
   Discovery must not read semantic-alignment attributes: it derives visual rows and their
   direct layout slots from ordinary DOM topology, including transparent hover controls that
   still occupy layout. It preserves each slot's start/center/end family until all captures

@@ -165,28 +165,32 @@ test('sidebar trailing rail is inferred without semantic alignment attributes', 
     }, CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE);
 
   const discovery = await discoverChatWorkspaceAlignmentRails(page);
-  const trailingRail = discovery
+  const autoRails = discovery
     .filter((scope) => scope.source === 'auto')
-    .flatMap((scope) => scope.rails)
-    .find(
-      (rail) =>
-        rail.anchor === 'inline-end' &&
-        Math.abs(rail.line - 266) <= 0.5 &&
-        rail.outliers.some((member) => member.coordinate === 267) &&
-        rail.outliers.some((member) => member.coordinate === 262) &&
-        rail.outliers.some((member) => member.coordinate === 275)
-    );
+    .flatMap((scope) => scope.rails);
+  const trailingRail = autoRails.find(
+    (rail) =>
+      rail.anchor === 'inline-end' &&
+      rail.space === 'ink' &&
+      rail.members.some((member) => member.elementId.endsWith(':Archive')) &&
+      rail.outliers.some((member) => member.elementId.endsWith(':Remove project'))
+  );
 
   expect(trailingRail).toMatchObject({
-    line: 266,
-    support: 8,
-    sampleSize: 11,
-    outliers: [
-      { coordinate: 267, delta: 1 },
-      { coordinate: 262, delta: 4 },
-      { coordinate: 275, delta: 9 },
-    ],
+    anchor: 'inline-end',
+    space: 'ink',
   });
+  expect(trailingRail?.support).toBeGreaterThanOrEqual(3);
+  expect(
+    trailingRail?.outliers.some(
+      (member) => member.elementId.endsWith(':Remove project') && Math.abs(member.delta) > 1
+    )
+  ).toBe(true);
+  expect(
+    autoRails.some((rail) =>
+      rail.members.some((member) => member.elementId.includes('Toggle local projects'))
+    )
+  ).toBe(false);
 });
 
 if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {

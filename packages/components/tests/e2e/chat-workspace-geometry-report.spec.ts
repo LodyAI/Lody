@@ -187,7 +187,7 @@ function discoverySurfaceLabel(surface: string): string {
 }
 
 function discoveryElementLabel(elementId: string, rowId: string, coordinate: number): string {
-  const rawLabel = elementId.replace(/^\d+(?:\.\d+)?:/, '');
+  const rawLabel = elementId.replace(/^\d+(?:\.\d+)*:/, '');
   if (rawLabel === 'svg') {
     if (rowId.includes('sidebar-')) {
       return coordinate > 160 ? '会话行尾图标' : '会话行首图标';
@@ -927,8 +927,24 @@ test('captures the visual geometry report', async ({ browser }) => {
   );
   expect(sidebarDiscovery?.description).toContain('待确认元素');
   expect(sidebarDiscovery?.overlay.semanticAnnotations.length).toBeGreaterThan(0);
+  const localProjectsDiscovery = railDiscovery.find(
+    (scope) => scope.scope === 'sidebar.local-projects:geometry'
+  );
   expect(
-    sidebarDiscovery?.overlay.discoveredRails.some((rail) => Math.abs(rail.line - 266) <= 0.5)
+    localProjectsDiscovery?.rails.some((rail) =>
+      rail.members.some(
+        (member) =>
+          member.space === 'ink' &&
+          member.kind === 'text' &&
+          member.elementId.endsWith(':lody') &&
+          Math.abs(member.coordinate - 48) <= 0.5
+      )
+    )
+  ).toBe(true);
+  expect(
+    localProjectsDiscovery?.rails.every((rail) =>
+      rail.members.every((member) => !member.elementId.includes('Toggle local projects'))
+    )
   ).toBe(true);
   const workspaceDetails = [...semanticDetails, ...workspaceDiscoveryDetails];
 
@@ -1115,7 +1131,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       const messageLeadingRails = storyDetails.find(
         (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
       );
-      expect(messageLeadingRails?.description).toContain('3 条候选对齐轨');
+      expect(messageLeadingRails?.overlay.discoveredRails.length).toBeGreaterThanOrEqual(3);
       expect(messageLeadingRails?.description).toContain('暂无偏离元素');
       expect(messageLeadingRails?.overlay.semanticAnnotations).toHaveLength(0);
     }
@@ -1123,12 +1139,21 @@ test('captures the visual geometry report', async ({ browser }) => {
       const messageLeadingRails = storyDetails.find(
         (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
       );
-      expect(messageLeadingRails?.overlay.discoveredRails).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ line: 368 }),
-          expect.objectContaining({ line: 369 }),
-        ])
-      );
+      const leadingLines =
+        messageLeadingRails?.overlay.discoveredRails
+          .map((rail) => rail.line)
+          .sort((first, second) => first - second) ?? [];
+      expect(leadingLines.length).toBeGreaterThanOrEqual(2);
+      expect(
+        leadingLines.some((line, index) =>
+          leadingLines.slice(index + 1).some((otherLine) => otherLine - line >= 16)
+        )
+      ).toBe(true);
+      expect(
+        leadingLines.some((line, index) =>
+          leadingLines.slice(index + 1).some((otherLine) => Math.abs(otherLine - line) <= 1)
+        )
+      ).toBe(false);
       expect(messageLeadingRails?.overlay.semanticAnnotations).not.toEqual(
         expect.arrayContaining([
           expect.objectContaining({ label: expect.stringContaining('Render checkpoint') }),
@@ -1174,9 +1199,9 @@ test('captures the visual geometry report', async ({ browser }) => {
   const rightSidebarRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
     aggregateScopes: ['session.side-panel'],
   });
-  expect(
-    rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')
-  ).toBe(true);
+  expect(rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')).toBe(
+    true
+  );
   const rightSidebarDetails = createDiscoveryDetails({
     surface: 'Chat Session / Right Sidebar',
     idPrefix: 'session-right-sidebar',

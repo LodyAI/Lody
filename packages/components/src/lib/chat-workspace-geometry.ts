@@ -330,6 +330,7 @@ export type SemanticAlignmentGroupResult = Readonly<{
 }>;
 
 export type AlignmentRailCandidateAnchor = 'inline-start' | 'inline-center' | 'inline-end';
+export type AlignmentRailCandidateSpace = 'ink' | 'layout-box';
 
 export type AlignmentRailCandidate = Readonly<{
   elementId: string;
@@ -337,6 +338,8 @@ export type AlignmentRailCandidate = Readonly<{
   rowId: string;
   /** Geometry-derived visual role; semantic contract names never enter discovery. */
   kind?: string;
+  /** Candidates from different coordinate spaces never establish or join the same rail. */
+  space?: AlignmentRailCandidateSpace;
   anchor: AlignmentRailCandidateAnchor;
   coordinate: number;
   yStart: number;
@@ -356,6 +359,7 @@ export type AlignmentRailDiscoveryOptions = Readonly<{
 
 export type DiscoveredAlignmentRail = Readonly<{
   anchor: AlignmentRailCandidateAnchor;
+  space?: AlignmentRailCandidateSpace;
   line: number;
   support: number;
   sampleSize: number;
@@ -995,7 +999,7 @@ function median(values: readonly number[]): number {
 
 /**
  * Discover repeated horizontal alignment rails without assigning layout intent.
- * Candidates are grouped independently by anchor kind. Repeated coordinate
+ * Candidates are grouped independently by anchor kind and coordinate space. Repeated coordinate
  * modes establish rails before nearby singleton observations are attached to
  * the nearest compatible mode. A rail supported by one visual primitive kind
  * only accepts that kind; a rail with mixed support may accept mixed kinds.
@@ -1041,16 +1045,21 @@ export function discoverAlignmentRails(
     }
   }
 
-  const byAnchor = new Map<AlignmentRailCandidateAnchor, AlignmentRailCandidate[]>();
+  const byAnchorAndSpace = new Map<string, AlignmentRailCandidate[]>();
   for (const candidate of candidates) {
     if (candidate.kind === 'text' && candidate.anchor === 'inline-center') continue;
-    const members = byAnchor.get(candidate.anchor) ?? [];
+    const key = `${candidate.anchor}\u0000${candidate.space ?? 'layout-box'}`;
+    const members = byAnchorAndSpace.get(key) ?? [];
     members.push(candidate);
-    byAnchor.set(candidate.anchor, members);
+    byAnchorAndSpace.set(key, members);
   }
 
   const rails: DiscoveredAlignmentRail[] = [];
-  for (const [anchor, anchorCandidates] of byAnchor) {
+  for (const anchorCandidates of byAnchorAndSpace.values()) {
+    const firstCandidate = anchorCandidates[0];
+    if (!firstCandidate) continue;
+    const anchor = firstCandidate.anchor;
+    const space = firstCandidate.space;
     const ordered = [...anchorCandidates].sort(
       (first, second) =>
         first.coordinate - second.coordinate ||
@@ -1112,7 +1121,9 @@ export function discoverAlignmentRails(
       for (const [modeIndex, mode] of stableModes.entries()) {
         const distance = Math.abs(candidate.coordinate - mode.line);
         const kindCompatible =
-          candidate.kind === undefined || mode.kinds.size === 0 || mode.kinds.size > 1 ||
+          candidate.kind === undefined ||
+          mode.kinds.size === 0 ||
+          mode.kinds.size > 1 ||
           mode.kinds.has(candidate.kind);
         if (kindCompatible && distance <= mergeTolerance && distance < nearestDistance) {
           nearestModeIndex = modeIndex;
@@ -1154,6 +1165,7 @@ export function discoverAlignmentRails(
       );
       rails.push({
         anchor,
+        ...(space ? { space } : {}),
         line: mode.line,
         support,
         sampleSize: members.length,
@@ -1191,6 +1203,9 @@ export function groupAlignmentRailFamilies(
   for (const rail of rails) {
     const family = families.find(
       (candidateFamily) =>
+        candidateFamily.rails.every(
+          (candidate) => (candidate.space ?? 'layout-box') === (rail.space ?? 'layout-box')
+        ) &&
         !candidateFamily.rails.some((candidate) => candidate.anchor === rail.anchor) &&
         candidateFamily.rails.some((candidate) => overlap(candidate, rail) >= 0.75)
     );

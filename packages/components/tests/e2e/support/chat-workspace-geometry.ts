@@ -339,26 +339,183 @@ export async function discoverChatWorkspaceAlignmentRails(
         Array.from(element.childNodes).some(
           (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
         );
-      const isCandidate = (element: Element) =>
-        element.matches('button, [role="button"], a, input, select, textarea, svg') ||
-        hasDirectText(element);
       const candidateKind = (element: Element) => {
         if (element.matches('button, [role="button"]')) return 'button';
         if (element.matches('a')) return 'link';
         if (element.matches('input, select, textarea')) return 'field';
         if (element.matches('svg')) return 'svg';
+        if (element.matches('img')) return 'image';
         if (!hasDirectText(element)) return null;
         const text = element.textContent?.trim().replace(/\s+/g, ' ') ?? '';
         return /^[+\-\u2212\d\s]+$/.test(text) ? 'numeric-text' : 'text';
       };
-      const describe = (element: Element, index: number) => {
-        const ariaLabel = element.getAttribute('aria-label');
-        const dataId = element.getAttribute('data-id');
-        const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 48);
-        const label = (ariaLabel ?? dataId ?? text) || element.tagName.toLowerCase();
-        return `${index + 1}:${label}`;
+      type VisualPrimitive = Readonly<{
+        element: Element;
+        label: string;
+        kind: string;
+        space: 'ink' | 'layout-box';
+        rect: Readonly<{ x: number; y: number; width: number; height: number }>;
+      }>;
+      const plainRect = (rect: DOMRectReadOnly) => ({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      });
+      const unionRects = (rects: readonly DOMRectReadOnly[]) => {
+        if (rects.length === 0) return null;
+        const left = Math.min(...rects.map((rect) => rect.left));
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const right = Math.max(...rects.map((rect) => rect.right));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        return { x: left, y: top, width: right - left, height: bottom - top };
       };
-
+      const directText = (element: Element) =>
+        Array.from(element.childNodes)
+          .filter(
+            (node): node is Text =>
+              node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim())
+          )
+          .map((node) => node.textContent?.trim() ?? '')
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      const measureDirectText = (element: Element) => {
+        const rects = Array.from(element.childNodes).flatMap((node) => {
+          if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return [];
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return Array.from(range.getClientRects()).filter(
+            (rect) => rect.width > 0 && rect.height > 0
+          );
+        });
+        return unionRects(rects);
+      };
+      const measureSvgInk = (element: Element) => {
+        if (!(element instanceof SVGGraphicsElement)) {
+          return plainRect(element.getBoundingClientRect());
+        }
+        try {
+          const box = element.getBBox();
+          const matrix = element.getScreenCTM();
+          if (!matrix || box.width <= 0 || box.height <= 0) {
+            return plainRect(element.getBoundingClientRect());
+          }
+          const points = [
+            new DOMPoint(box.x, box.y),
+            new DOMPoint(box.x + box.width, box.y),
+            new DOMPoint(box.x, box.y + box.height),
+            new DOMPoint(box.x + box.width, box.y + box.height),
+          ].map((point) => point.matrixTransform(matrix));
+          const left = Math.min(...points.map((point) => point.x));
+          const top = Math.min(...points.map((point) => point.y));
+          const right = Math.max(...points.map((point) => point.x));
+          const bottom = Math.max(...points.map((point) => point.y));
+          return { x: left, y: top, width: right - left, height: bottom - top };
+        } catch {
+          return plainRect(element.getBoundingClientRect());
+        }
+      };
+      const primitiveLabel = (element: Element, boundary: Element) => {
+        const text = directText(element);
+        if (text) return text.slice(0, 48);
+        for (let owner: Element | null = element; owner; owner = owner.parentElement) {
+          const label =
+            owner.getAttribute('aria-label') ??
+            owner.getAttribute('data-id') ??
+            owner.getAttribute('title');
+          if (label?.trim()) return label.trim().slice(0, 48);
+          if (owner === boundary) break;
+        }
+        return element.tagName.toLowerCase();
+      };
+      const directVisualPrimitive = (
+        element: Element,
+        boundary: Element
+      ): VisualPrimitive | null => {
+        const text = directText(element);
+        if (text) {
+          const rect = measureDirectText(element);
+          if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+          return {
+            element,
+            label: text.slice(0, 48),
+            kind: /^[+\-\u2212\d\s]+$/.test(text) ? 'numeric-text' : 'text',
+            space: 'ink',
+            rect,
+          };
+        }
+        if (element.matches('svg')) {
+          const rect = measureSvgInk(element);
+          if (rect.width <= 0 || rect.height <= 0) return null;
+          return {
+            element,
+            label: primitiveLabel(element, boundary),
+            kind: 'svg',
+            space: 'ink',
+            rect,
+          };
+        }
+        if (element.matches('img')) {
+          const rect = plainRect(element.getBoundingClientRect());
+          if (rect.width <= 0 || rect.height <= 0) return null;
+          return {
+            element,
+            label: primitiveLabel(element, boundary),
+            kind: 'image',
+            space: 'ink',
+            rect,
+          };
+        }
+        if (element.matches('input, select, textarea')) {
+          const rect = plainRect(element.getBoundingClientRect());
+          if (rect.width <= 0 || rect.height <= 0) return null;
+          return {
+            element,
+            label: primitiveLabel(element, boundary),
+            kind: 'field',
+            space: 'layout-box',
+            rect,
+          };
+        }
+        return null;
+      };
+      const visualPrimitivesWithin = (element: Element): readonly VisualPrimitive[] => {
+        const descendants = [element, ...element.querySelectorAll<Element>('*')].filter(
+          (candidate) => isRendered(candidate)
+        );
+        const primitives = descendants.flatMap((candidate) => {
+          const primitive = directVisualPrimitive(candidate, element);
+          return primitive ? [primitive] : [];
+        });
+        if (primitives.length > 0) return primitives;
+        if (!element.matches('button, [role="button"], a')) return [];
+        const rect = plainRect(element.getBoundingClientRect());
+        if (rect.width <= 0 || rect.height <= 0) return [];
+        return [
+          {
+            element,
+            label: primitiveLabel(element, element),
+            kind: element.matches('a') ? 'link' : 'button',
+            space: 'layout-box',
+            rect,
+          },
+        ];
+      };
+      const visualPrimitiveForElement = (
+        element: Element,
+        boundary: Element
+      ): VisualPrimitive | null => {
+        const direct = directVisualPrimitive(element, boundary);
+        if (direct) return direct;
+        if (!element.matches('button, [role="button"], a')) return null;
+        const hasVisualDescendant = Array.from(element.querySelectorAll<Element>('*')).some(
+          (descendant) =>
+            isRendered(descendant) && directVisualPrimitive(descendant, element) !== null
+        );
+        if (hasVisualDescendant) return null;
+        return visualPrimitivesWithin(element)[0] ?? null;
+      };
       const elementDepth = (element: Element) => {
         let depth = 0;
         for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
@@ -438,87 +595,79 @@ export async function discoverChatWorkspaceAlignmentRails(
         const candidates = rows.flatMap((row, rowIndex) => {
           const rowCenter = row.rect.top + row.rect.height / 2;
           return row.slots.flatMap((slot, slotIndex) => {
-            const rect = slot.getBoundingClientRect();
-            const labelledDescendant = slot.querySelector<Element>(
-              '[aria-label], button, [role="button"], a, input, select, textarea'
-            );
-            const labelSource =
-              slot.getAttribute('aria-label') || labelledDescendant?.getAttribute('aria-label');
-            const text = slot.textContent?.trim().replace(/\s+/g, ' ').slice(0, 48);
-            const elementId = `${rowIndex + 1}.${slotIndex + 1}:${
-              labelSource || text || slot.tagName.toLowerCase()
-            }`;
-            const kind =
-              candidateKind(slot) ??
-              (slot.querySelector('button, [role="button"], a, input, select, textarea')
-                ? 'button'
-                : slot.querySelector('svg')
-                  ? 'svg'
-                  : text
-                    ? 'text'
-                    : 'slot');
-            const common = {
-              elementId,
-              rowId: `visual-row:${Number(rowCenter.toFixed(1))}:${Number(row.rect.x.toFixed(1))}`,
-              kind,
-              yStart: rect.top,
-              yEnd: rect.bottom,
-            };
-            return [
-              { ...common, anchor: 'inline-start' as const, coordinate: rect.left },
-              {
-                ...common,
-                anchor: 'inline-center' as const,
-                coordinate: rect.left + rect.width / 2,
-              },
-              { ...common, anchor: 'inline-end' as const, coordinate: rect.right },
-            ];
+            return visualPrimitivesWithin(slot).flatMap((primitive, primitiveIndex) => {
+              const { rect } = primitive;
+              const elementId = `${rowIndex + 1}.${slotIndex + 1}.${primitiveIndex + 1}:${
+                primitive.label
+              }`;
+              const common = {
+                elementId,
+                rowId: `visual-row:${Number(rowCenter.toFixed(1))}:${Number(row.rect.x.toFixed(1))}`,
+                kind: primitive.kind,
+                space: primitive.space,
+                yStart: rect.y,
+                yEnd: rect.y + rect.height,
+              };
+              return [
+                { ...common, anchor: 'inline-start' as const, coordinate: rect.x },
+                {
+                  ...common,
+                  anchor: 'inline-center' as const,
+                  coordinate: rect.x + rect.width / 2,
+                },
+                {
+                  ...common,
+                  anchor: 'inline-end' as const,
+                  coordinate: rect.x + rect.width,
+                },
+              ];
+            });
           });
         });
 
-        const atomsOutsideRows = elements.filter((element) => {
-          if (element === scopeElement || !isCandidate(element)) return false;
-          if (
-            Array.from(element.querySelectorAll<Element>('*')).some(
-              (descendant) => isRendered(descendant) && isCandidate(descendant)
-            )
-          ) {
-            return false;
-          }
-          const rect = element.getBoundingClientRect();
-          const center = rect.top + rect.height / 2;
+        const atomsOutsideRows = elements.flatMap((element) => {
+          if (element === scopeElement) return [];
+          const primitive = directVisualPrimitive(element, scopeElement);
+          if (!primitive) return [];
+          const center = primitive.rect.y + primitive.rect.height / 2;
           const belongsToVisualRow = rows.some((row) => {
             const rowCenter = row.rect.top + row.rect.height / 2;
-            const overlapsRow = rect.right >= row.rect.left && rect.left <= row.rect.right;
+            const primitiveRight = primitive.rect.x + primitive.rect.width;
+            const overlapsRow =
+              primitiveRight >= row.rect.left && primitive.rect.x <= row.rect.right;
             return (
               row.element.contains(element) ||
               element.contains(row.element) ||
               (Math.abs(center - rowCenter) <= 1 && overlapsRow)
             );
           });
-          return !belongsToVisualRow;
+          return belongsToVisualRow ? [] : [primitive];
         });
         candidates.push(
-          ...atomsOutsideRows.flatMap((element, index) => {
-            const rect = element.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) return [];
+          ...atomsOutsideRows.flatMap((primitive, index) => {
+            const { rect } = primitive;
             const common = {
-              elementId: describe(element, index),
-              rowId: `visual-row:${Number((rect.top + rect.height / 2).toFixed(1))}:${Number(
+              elementId: `${index + 1}:${primitive.label}`,
+              rowId: `visual-row:${Number((rect.y + rect.height / 2).toFixed(1))}:${Number(
                 rect.x.toFixed(1)
               )}`,
-              kind: candidateKind(element) ?? 'atom',
-              yStart: rect.top,
-              yEnd: rect.bottom,
+              kind: primitive.kind,
+              space: primitive.space,
+              yStart: rect.y,
+              yEnd: rect.y + rect.height,
             };
             return [
-              { ...common, anchor: 'inline-start' as const, coordinate: rect.left },
+              { ...common, anchor: 'inline-start' as const, coordinate: rect.x },
               {
                 ...common,
                 anchor: 'inline-center' as const,
-                coordinate: rect.left + rect.width / 2,
+                coordinate: rect.x + rect.width / 2,
               },
-              { ...common, anchor: 'inline-end' as const, coordinate: rect.right },
+              {
+                ...common,
+                anchor: 'inline-end' as const,
+                coordinate: rect.x + rect.width,
+              },
             ];
           })
         );
@@ -587,6 +736,7 @@ export async function discoverChatWorkspaceAlignmentRails(
       );
       const topologyNodes = topologyElements.map((element, index) => {
         const rect = element.getBoundingClientRect();
+        const primitive = visualPrimitiveForElement(element, document.body);
         let parent = element.parentElement;
         while (parent && !idByElement.has(parent)) parent = parent.parentElement;
         let depth = 0;
@@ -603,7 +753,14 @@ export async function discoverChatWorkspaceAlignmentRails(
           tag: element.tagName.toLowerCase(),
           role: element.getAttribute('role'),
           candidateKind: candidateKind(element),
-          elementId: isCandidate(element) ? describe(element, index) : null,
+          elementId: primitive ? `${index + 1}:${primitive.label}` : null,
+          primitive: primitive
+            ? {
+                kind: primitive.kind,
+                space: primitive.space,
+                rect: primitive.rect,
+              }
+            : null,
           rect: {
             x: rect.x,
             y: rect.y,
@@ -680,7 +837,15 @@ export async function discoverChatWorkspaceAlignmentRails(
       },
     }));
 
-  type BrowserTopologyNode = LayoutTopologyNode & Readonly<{ elementId: string | null }>;
+  type BrowserTopologyNode = LayoutTopologyNode &
+    Readonly<{
+      elementId: string | null;
+      primitive: Readonly<{
+        kind: string;
+        space: 'ink' | 'layout-box';
+        rect: GeometryRect;
+      }> | null;
+    }>;
   const topologyNodes = snapshot.topologyNodes as readonly BrowserTopologyNode[];
   const topologyById = new Map(topologyNodes.map((node) => [node.id, node]));
   const autoScopes = discoverRepeatedLayoutScopes(topologyNodes).map(
@@ -689,9 +854,9 @@ export async function discoverChatWorkspaceAlignmentRails(
       const candidates = topologyNodes.flatMap((node): readonly AlignmentRailCandidate[] => {
         if (
           !node.elementId ||
-          node.candidateKind === null ||
-          node.rect.width <= 0 ||
-          node.rect.height <= 0
+          !node.primitive ||
+          node.primitive.rect.width <= 0 ||
+          node.primitive.rect.height <= 0
         ) {
           return [];
         }
@@ -700,33 +865,37 @@ export async function discoverChatWorkspaceAlignmentRails(
           ancestor = ancestor.parentId ? topologyById.get(ancestor.parentId) : undefined;
         }
         if (!ancestor) return [];
-        const yStart = node.rect.y;
-        const yEnd = node.rect.y + node.rect.height;
+        const { rect } = node.primitive;
+        const yStart = rect.y;
+        const yEnd = rect.y + rect.height;
         return [
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
-            kind: node.candidateKind ?? undefined,
+            kind: node.primitive.kind,
+            space: node.primitive.space,
             anchor: 'inline-start',
-            coordinate: node.rect.x,
+            coordinate: rect.x,
             yStart,
             yEnd,
           },
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
-            kind: node.candidateKind ?? undefined,
+            kind: node.primitive.kind,
+            space: node.primitive.space,
             anchor: 'inline-center',
-            coordinate: node.rect.x + node.rect.width / 2,
+            coordinate: rect.x + rect.width / 2,
             yStart,
             yEnd,
           },
           {
             elementId: node.elementId,
             rowId: `${autoScope.id}:${ancestor.id}`,
-            kind: node.candidateKind ?? undefined,
+            kind: node.primitive.kind,
+            space: node.primitive.space,
             anchor: 'inline-end',
-            coordinate: node.rect.x + node.rect.width,
+            coordinate: rect.x + rect.width,
             yStart,
             yEnd,
           },
