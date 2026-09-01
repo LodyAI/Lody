@@ -241,40 +241,20 @@ export function WorkspaceScreenView({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="onboarding-workspace-slug">
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="onboarding-workspace-slug" className="whitespace-nowrap">
                   {t('organization.workspaceSlug', 'Handle')}
                 </Label>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  {canResetSlug ? (
-                    <button
-                      type="button"
-                      className="hover:text-foreground"
-                      onClick={onResetNewSlug}
-                      disabled={writePending}
-                    >
-                      {t('organization.workspaceSlugReset', 'Reset')}
-                    </button>
-                  ) : null}
-                  {newSlugChecking && !newSlugCheckSlow ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      {t('organization.workspaceSlugChecking', 'Checking…')}
-                    </span>
-                  ) : newSlugChecking && newSlugCheckSlow ? (
-                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      {t(
-                        'organization.workspaceSlugCheckingSlow',
-                        'Network is taking longer than expected. Still checking…'
-                      )}
-                    </span>
-                  ) : !newSlugError && newSlug.length > 0 ? (
-                    <span className="text-primary">
-                      {t('organization.workspaceSlugAvailable', 'Available')}
-                    </span>
-                  ) : null}
-                </div>
+                {canResetSlug ? (
+                  <button
+                    type="button"
+                    className="shrink-0 whitespace-nowrap text-xs text-muted-foreground hover:text-foreground"
+                    onClick={onResetNewSlug}
+                    disabled={writePending}
+                  >
+                    {t('organization.workspaceSlugReset', 'Reset')}
+                  </button>
+                ) : null}
               </div>
               <Input
                 id="onboarding-workspace-slug"
@@ -284,7 +264,28 @@ export function WorkspaceScreenView({
                 disabled={writePending}
                 className={newSlugError ? 'border-destructive' : ''}
               />
-              {slugErrorText ? <p className="text-xs text-destructive">{slugErrorText}</p> : null}
+              {slugErrorText ? (
+                <p className="text-xs text-destructive">{slugErrorText}</p>
+              ) : newSlugChecking ? (
+                <p
+                  role="status"
+                  className="flex max-w-full items-start gap-1.5 text-xs leading-5 text-muted-foreground"
+                >
+                  <Loader2 className="mt-1 size-3 shrink-0 animate-spin" />
+                  <span className="min-w-0 break-words">
+                    {newSlugCheckSlow
+                      ? t(
+                          'organization.workspaceSlugCheckingSlow',
+                          'Network is taking longer than expected. Still checking…'
+                        )
+                      : t('organization.workspaceSlugChecking', 'Checking…')}
+                  </span>
+                </p>
+              ) : newSlug.length > 0 ? (
+                <p role="status" className="text-xs text-primary">
+                  {t('organization.workspaceSlugAvailable', 'Available')}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground/80">
                 {t(
                   'onboarding.workspace.slugHint',
