@@ -11,7 +11,7 @@
       "import": "./src/router.tsx",
       "types": "./src/router.tsx"
     },
-    "./components/pages/workspace-join-request-surface": {
+    "./join": {
       "import": "./src/components/pages/workspace-join-request-surface.tsx",
       "types": "./src/components/pages/workspace-join-request-surface.tsx"
     },
