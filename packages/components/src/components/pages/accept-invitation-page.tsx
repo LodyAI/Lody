@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 // Placeholder workspace avatar until per-workspace avatars are supported.
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
@@ -105,7 +105,7 @@ export function AcceptInvitationPage({
                 )}
               </Description>
               {roleLabel ? <InvitationRole role={roleLabel} /> : null}
-              <Button onClick={onAccept} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onAccept} className="mt-6 w-full">
                 {t('invite.idle.accept', 'Accept invitation')}
               </Button>
             </>
@@ -142,7 +142,7 @@ export function AcceptInvitationPage({
                   />
                 </p>
               ) : null}
-              <Button onClick={onContinue} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onContinue} className="mt-6 w-full">
                 {t('invite.authRequired.continue', 'Continue with invited email')}
               </Button>
             </>
@@ -168,10 +168,10 @@ export function AcceptInvitationPage({
                 />
               </Description>
               {roleLabel ? <InvitationRole role={roleLabel} /> : null}
-              <Button onClick={onSwitchAccount} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onSwitchAccount} className="mt-6 w-full">
                 {t('invite.accountMismatch.switch', 'Switch account')}
               </Button>
-              <Button onClick={onBackHome} variant="ghost" size="lg" className="mt-2 h-10 w-full">
+              <Button size="large" onClick={onBackHome} variant="ghost" className="mt-2 w-full">
                 {t('invite.error.backButton', 'Back to home')}
               </Button>
             </>
@@ -186,7 +186,7 @@ export function AcceptInvitationPage({
                   'For security, verify the email address named by this invitation before accepting it.'
                 )}
               </Description>
-              <Button onClick={onVerifyEmail} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onVerifyEmail} className="mt-6 w-full">
                 {t('invite.verificationRequired.continue', 'Continue to verification')}
               </Button>
             </>
@@ -212,7 +212,7 @@ export function AcceptInvitationPage({
               <Description>
                 {errorMessage || t('invite.error.notFound', 'Invitation not found or expired.')}
               </Description>
-              <Button onClick={onBackHome} variant="outline" size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onBackHome} variant="secondary" className="mt-6 w-full">
                 {t('invite.error.backButton', 'Back to home')}
               </Button>
             </>

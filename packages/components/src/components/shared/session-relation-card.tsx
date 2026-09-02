@@ -1,7 +1,7 @@
 import type { ElementType } from 'react';
 import { ArrowUpRight, GitBranchPlus } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 export function SessionRelationCard({
@@ -42,9 +42,9 @@ export function SessionRelationCard({
       </div>
       <Button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 shrink-0 self-end gap-1.5 px-2.5 text-xs sm:self-auto"
+        variant="secondary"
+        size="small"
+        className="shrink-0 self-end sm:self-auto"
         disabled={!onAction}
         onClick={onAction}
       >

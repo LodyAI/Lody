@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { TaskTabBar, type TaskTabItem } from '@/components/tasks/task-tab-bar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const meta = {
   title: 'Tasks/TaskTabBar',
@@ -50,7 +50,7 @@ function InteractiveBar({
       }}
       rightSlot={
         activeTaskId === null ? (
-          <Button size="sm">
+          <Button size="small">
             <Plus className="h-4 w-4" />
             New task
           </Button>

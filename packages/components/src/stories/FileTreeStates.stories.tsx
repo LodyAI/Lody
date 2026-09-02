@@ -4,7 +4,7 @@ import {
   FileTreeSkeleton,
   FileTreeStatePanel,
 } from '@/components/sessions/components/file-tree-states';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const meta = {
   title: 'Sessions/FileTreeStates',
@@ -66,7 +66,7 @@ export const ErrorWithRetry: Story = {
       title="Couldn't load files"
       description="Permission denied while reading the project directory."
       action={
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="secondary" size="small">
           <RefreshCw className="h-3.5 w-3.5" />
           Try again
         </Button>

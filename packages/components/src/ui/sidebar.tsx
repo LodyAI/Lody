@@ -5,7 +5,7 @@ import { PanelLeftIcon } from 'lucide-react';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Separator } from '@/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/ui/sheet';
@@ -238,15 +238,16 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
-      size="icon"
-      className={cn('size-7', className)}
+      size="small"
+      icon
+      className={cn(className)}
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <PanelLeftIcon className="size-4" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );

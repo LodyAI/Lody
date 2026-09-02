@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Pin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { SessionHistoryParsed } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { ConversationColumn } from '@/components/shared/conversation-column';
@@ -61,7 +61,7 @@ export const SessionPin = memo(function SessionPin({
         <Button
           type="button"
           variant="ghost"
-          className="flex-1 min-w-0 truncate h-auto py-2 px-0 text-sm text-left text-foreground/80 cursor-pointer hover:text-foreground hover:bg-transparent transition-colors justify-start"
+          className="flex-1 min-w-0 truncate text-left cursor-pointer justify-start"
           onClick={handleClick}
           title={pinnedText}
         >
@@ -70,8 +70,9 @@ export const SessionPin = memo(function SessionPin({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="shrink-0 h-6 w-6 text-muted-foreground hover:text-foreground"
+          size="mini"
+          icon
+          className="shrink-0"
           onClick={onUnpin}
           aria-label={t('sessions.pin.unpin', 'Unpin message')}
         >

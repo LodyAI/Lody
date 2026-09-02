@@ -657,8 +657,7 @@ function CloudBillingSettings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('billing.cancelDialogKeep')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            <AlertDialogAction variant="destructive"
               onClick={() => void handleSetCancelAtPeriodEnd(true)}
             >
               {t('billing.cancelDialogConfirm')}

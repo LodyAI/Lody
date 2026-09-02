@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ReviewAgentSetupDialog } from '@/components/sessions/auto-review-info';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 function Harness() {
   const [open, setOpen] = useState(true);

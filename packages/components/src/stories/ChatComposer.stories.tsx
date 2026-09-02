@@ -10,7 +10,7 @@ import {
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
 import { Card, CardContent } from '@/ui/card';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
@@ -78,10 +78,8 @@ const repoOptions: OptionSelectorOption<string>[] = [
 
 const samplePastedText = [
   'Design brief:',
-  '',
   'Users often paste full logs or PR descriptions into the composer before asking a focused question.',
   'We should keep that context available without letting the textarea grow so tall that the actual prompt disappears.',
-  '',
   'Requirements:',
   '- Show a compact summary block with the pasted character count.',
   '- Let users inspect the full content on hover or tap.',
@@ -264,10 +262,11 @@ function DemoComposer({
     variant !== 'dialog' ? (
       <Button
         type="button"
-        size="icon"
         variant="ghost"
         aria-label="Send"
-        className={cn(primaryActionClassName, 'h-6 w-6')}
+        size="mini"
+        icon
+        className={cn(primaryActionClassName)}
       >
         <ArrowUp className="h-4 w-4" />
       </Button>

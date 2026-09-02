@@ -147,14 +147,11 @@ const STREAM_CHUNKS = Array.from({ length: STREAM_CHUNK_TOTAL }, (_, index) => {
   const item = index + 1;
   if (item % 12 === 0) {
     return [
-      '',
       `### Render checkpoint ${item / 12}`,
-      '',
       '| Surface | Observation |',
       '| --- | --- |',
       `| Message stream | chunk ${item} appended |`,
       '| Working status | indicator remains active |',
-      '',
     ].join('\n');
   }
   if (item % 5 === 0) {
@@ -386,11 +383,9 @@ const baseMessages = (): SessionHistoryParsed[] => [
         type: 'text',
         text: [
           'I found the production page pieces:',
-          '',
           '- `SessionTabBar` owns the thread tabs.',
           '- `SessionChatStreamView` renders the conversation.',
           '- `SessionChatInputArea` owns the composer and mode/model controls.',
-          '',
           'I will keep the story wired to those components instead of making a separate mock page.',
         ].join('\n'),
       },
@@ -426,7 +421,6 @@ const buildWorkingHistory = (streamChunkCount: number): SessionHistoryParsed[] =
             type: 'text',
             text: [
               `Synthetic completed turn ${turn}.`,
-              '',
               '- Read the current message projection.',
               '- Compared the virtual rows and sticky-scroll state.',
               '- Kept this fixture synthetic so it is safe to commit.',
@@ -465,7 +459,6 @@ const buildWorkingHistory = (streamChunkCount: number): SessionHistoryParsed[] =
           type: 'text',
           text: [
             'I am reproducing the streaming render workload in the complete conversation page.',
-            '',
             'The Story keeps the real message list, composer, info bar, tab bar, and working indicator mounted.',
             ...STREAM_CHUNKS.slice(0, streamChunkCount),
           ].join('\n'),
@@ -563,19 +556,14 @@ const questionToolCall = (): MessageContent => ({
 
 const PLAN_MARKDOWN = [
   '## Goal',
-  '',
   'Give every framed block in a turn the same panel, and put every row on one left rail.',
-  '',
   '## Steps',
-  '',
   '1. Move the frame / header / body tokens into `conversation-panel.ts` so the',
   '   header always carries the raised fill and the body never does.',
   '2. Drop the per-shell horizontal pads (`ToolCallCard`, attachments, the',
   '   permission card) so top-level rows share the column edge.',
   '3. Collapse a settled permission to one line; keep the pending card actionable.',
-  '',
   '## Risk',
-  '',
   'The terminal paints its own VS Code surface, so its header has to step off',
   '**that** colour rather than the frame.',
 ].join('\n');
@@ -714,7 +702,6 @@ const buildPlanHistory = (): SessionHistoryParsed[] => [
         type: 'text',
         text: [
           'Every framed block now uses one panel: the header carries the raised fill and the body sits on the frame.',
-          '',
           'Measured against the column edge, all top-level rows start at 0 and the header step is +12 in dark / -13 in light.',
         ].join('\n'),
       },

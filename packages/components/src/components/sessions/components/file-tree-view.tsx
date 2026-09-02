@@ -813,7 +813,7 @@ const AutoFileTreeView = ({
           localError ?? t('sessions.localProject.files.loadFailed', 'Failed to load files.')
         }
         action={
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleRetryLocalFiles}>
+          <Button variant="secondary" size="small" onClick={handleRetryLocalFiles}>
             <RefreshCw className="h-3.5 w-3.5" />
             {t('sessions.codeSession.files.retry', 'Try again')}
           </Button>

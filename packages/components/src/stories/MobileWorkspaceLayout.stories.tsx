@@ -6,7 +6,7 @@ import {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
 } from '@/components/workspace-layout-utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /* MobileWorkspaceLayout in production wires `<LoroAppSidebar>` directly,
    which depends on workspace / user / connection atoms not available in
@@ -35,7 +35,7 @@ function StoryShell({ initialOpen = false }: { initialOpen?: boolean }) {
           <div className={getMobileMainLayoutContentClassName()}>
             <div className="min-h-0 flex-1 overflow-hidden">
               <header className="flex h-14 items-center gap-2 border-b px-4">
-                <Button size="sm" variant="ghost" onClick={() => setDrawerOpen(true)}>
+                <Button variant="ghost" size="small" onClick={() => setDrawerOpen(true)}>
                   打开抽屉
                 </Button>
                 <div className="text-sm font-medium">MobileWorkspaceLayout shell</div>
@@ -43,9 +43,9 @@ function StoryShell({ initialOpen = false }: { initialOpen?: boolean }) {
               <div className="space-y-3 p-4 text-sm text-muted-foreground">
                 <p>
                   这是 <code>MobileWorkspaceLayout</code> 的视觉外壳:左侧抽屉
-                  <code>MobileSidebarDrawer</code> + 右侧内容区。在生产代码里
-                  抽屉装载的是 <code>LoroAppSidebar</code>(依赖整套 workspace /
-                  connection / sessions atoms),Storybook 里用 mock 占位。
+                  <code>MobileSidebarDrawer</code> + 右侧内容区。在生产代码里 抽屉装载的是{' '}
+                  <code>LoroAppSidebar</code>(依赖整套 workspace / connection / sessions
+                  atoms),Storybook 里用 mock 占位。
                 </p>
                 <div className="rounded-xl border border-border/40 bg-card p-3">
                   路由会把页面内容塞进这里的 ErrorBoundary。

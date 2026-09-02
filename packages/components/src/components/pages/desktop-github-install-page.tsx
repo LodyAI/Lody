@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Github, Loader2 } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
@@ -41,11 +41,11 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
           </CardHeader>
           <CardContent className="px-8 pb-9">
             {deepLink ? (
-              <Button asChild className="h-11 w-full text-[0.9375rem]">
-                <a href={deepLink}>{openLabel}</a>
+              <Button render={<a href={deepLink} />} size="large" className="w-full">
+                {openLabel}
               </Button>
             ) : (
-              <Button className="h-11 w-full text-[0.9375rem]" disabled>
+              <Button size="large" className="w-full" disabled>
                 {openLabel}
               </Button>
             )}

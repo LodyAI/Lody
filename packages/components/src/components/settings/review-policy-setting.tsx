@@ -40,7 +40,7 @@ import {
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Switch } from '@/ui/switch';
 import { Textarea } from '@/ui/textarea';
@@ -199,20 +199,20 @@ function ReviewerMachineRow({
               {t('settings.review.noAgentsOnMachine', 'No agents are configured on this machine.')}
             </span>
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="outline" onClick={onOpenAgentSettings}>
+              <Button variant="secondary" size="small" onClick={onOpenAgentSettings}>
                 {t('settings.review.configureAgents', 'Configure agents')}
               </Button>
               {reviewerConfig ? (
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  className="h-7 w-7 text-muted-foreground"
                   title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
                   aria-label={t(
                     'settings.review.removeConfiguration',
                     'Remove reviewer configuration'
                   )}
+                  size="small"
+                  icon
                   onClick={() => onDelete(machine.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -292,21 +292,21 @@ function ReviewerMachineRow({
                 {configured
                   ? t('settings.review.configured', 'Configured')
                   : reviewerConfig
-                  ? t('settings.review.agentRemoved', 'Reviewer unavailable')
-                  : t('settings.review.notConfigured', 'Not configured')}
+                    ? t('settings.review.agentRemoved', 'Reviewer unavailable')
+                    : t('settings.review.notConfigured', 'Not configured')}
               </span>
 
               {reviewerConfig ? (
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  className="h-7 w-7 text-muted-foreground"
                   title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
                   aria-label={t(
                     'settings.review.removeConfiguration',
                     'Remove reviewer configuration'
                   )}
+                  size="small"
+                  icon
                   onClick={() => onDelete(machine.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />

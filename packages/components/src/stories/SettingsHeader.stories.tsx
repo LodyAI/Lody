@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { SettingsHeader } from '@/components/settings/settings-header';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Save } from 'lucide-react';
 
 /**
@@ -49,7 +49,7 @@ export const WithActions: Story = {
   args: {
     title: 'Profile Settings',
     actions: (
-      <Button size="sm" variant="ghost">
+      <Button variant="ghost" size="small">
         <Save className="h-4 w-4" />
       </Button>
     ),
@@ -109,7 +109,7 @@ export const DarkMode: Story = {
   args: {
     title: 'General Settings',
     actions: (
-      <Button size="sm" variant="ghost">
+      <Button variant="ghost" size="small">
         <Save className="h-4 w-4" />
       </Button>
     ),

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useRouter } from '@tanstack/react-router';
 import { cn } from '@/lib/utils';
 import { useAtomValue } from 'jotai';
@@ -43,7 +43,7 @@ export function SettingsHeader({ title, onBack, actions, className }: SettingsHe
     >
       <div className="flex h-14 items-center px-4">
         {/* 返回按钮 */}
-        <Button variant="ghost" size="icon" className="mr-2" onClick={handleBack}>
+        <Button variant="ghost" icon className="mr-2" onClick={handleBack}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
 

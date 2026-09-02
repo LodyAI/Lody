@@ -23,7 +23,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { openExternalUrl } from '@/lib/native-browser';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 
@@ -114,12 +114,7 @@ export function ProjectsScreenView({
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.projects.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton

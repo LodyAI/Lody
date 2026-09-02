@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
@@ -46,8 +46,13 @@ export function DesktopCheckoutReturnPage({
           </div>
         </CardHeader>
         <CardContent className="px-8 pb-9">
-          <Button asChild={!!deepLink} className="h-11 w-full text-[0.9375rem]" disabled={!deepLink}>
-            {deepLink ? <a href={deepLink}>{openLabel}</a> : <span>{openLabel}</span>}
+          <Button
+            render={deepLink ? <a href={deepLink} /> : undefined}
+            size="large"
+            className="w-full"
+            disabled={!deepLink}
+          >
+            {openLabel}
           </Button>
         </CardContent>
       </Card>

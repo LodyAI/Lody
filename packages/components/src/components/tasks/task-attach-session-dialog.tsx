@@ -2,14 +2,8 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MessagesSquare, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Input } from '@/ui/input';
 import { ScrollArea } from '@/ui/scroll-area';
 import { TASKS_SURFACE_CLASS } from './tasks-surface';
@@ -135,7 +129,7 @@ export function TaskAttachSessionDialog({
         </ScrollArea>
 
         <div className="flex justify-end">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {t('common.cancel', 'Cancel')}
           </Button>
         </div>

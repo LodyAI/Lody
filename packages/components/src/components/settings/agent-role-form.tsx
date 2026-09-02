@@ -18,7 +18,7 @@ import {
   type AgentRoleRunConfigIssue,
 } from '@/lib/agent-role-form';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
@@ -313,10 +313,16 @@ export function AgentRoleForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={submitting}
+          onClick={onCancel}
+        >
           {t('common.cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={submitting || errors.length > 0}>
+        <Button type="submit" size="small" disabled={submitting || errors.length > 0}>
           {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
           {isEditing ? t('common.save') : t('settings.agentRoles.form.create')}
         </Button>
@@ -390,8 +396,8 @@ function AgentRoleEmojiField({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-7 w-full justify-start text-xs text-muted-foreground"
+              size="small"
+              className="w-full justify-start"
               onClick={() => {
                 onChange('');
                 setOpen(false);

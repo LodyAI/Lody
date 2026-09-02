@@ -5,7 +5,7 @@ import quietWork from '@/assets/onboarding/intro/quiet-work.png';
 import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
 import readyToBegin from '@/assets/onboarding/intro/ready-to-begin.png';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { AudioLayers } from './use-onboarding-audio';
 import { playClick, playCut, playReveal, playSelect } from './ui-sounds';
 
@@ -391,10 +391,10 @@ export function IntroSequence({
           <div className="mt-[clamp(18px,2.6vh,32px)] flex h-11 items-center">
             {beat.final ? (
               <Button
-                size="lg"
+                size="large"
                 disabled={departing}
                 autoFocus
-                className="lody-intro-motion rounded-md bg-slate-950 px-6 text-white hover:bg-slate-800"
+                className="lody-intro-motion"
                 style={{ animation: `lody-intro-copy-in 520ms ${INTRO_EASE} 300ms both` }}
                 onClick={beginSetup}
               >

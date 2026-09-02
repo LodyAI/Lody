@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
@@ -482,7 +482,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       ref={ref}
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className={cn(getLoroSidebarFooterIconButtonClassName(isMobile, active), className)}
       {...buttonProps}
     >

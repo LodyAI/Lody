@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Progress } from '@/ui/progress';
 import { cn } from '@/lib/utils';
 import type { UpdateBannerState } from '@/lib/electron-update-banner';
@@ -64,11 +64,11 @@ export function SidebarUpdateBanner({
         {t('sidebar.updateReady.changelog', 'View changelog')}
       </button>
       <div className="mt-2 flex items-center justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5" onClick={onLater}>
+        <Button type="button" variant="ghost" size="small" onClick={onLater}>
           {t('sidebar.updateReady.later', 'Later')}
         </Button>
         {isDownloading ? null : (
-          <Button type="button" size="sm" className="h-7 px-2.5" onClick={onRestart}>
+          <Button type="button" size="small" onClick={onRestart}>
             {isRestarting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
             {t('sidebar.updateReady.restart', 'Update & Restart')}
           </Button>

@@ -1,3 +1,4 @@
+@layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
 @import 'tw-animate-css';

@@ -296,7 +296,7 @@ export function BillingSettingsView({
             </p>
           </div>
           {onCancelExternalCheckout ? (
-            <Button size="sm" variant="ghost" onClick={onCancelExternalCheckout}>
+            <Button variant="ghost" size="small" onClick={onCancelExternalCheckout}>
               {t('billing.externalCheckoutDismiss')}
             </Button>
           ) : null}
@@ -460,10 +460,10 @@ export function BillingSettingsView({
                 </span>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
                   aria-label={t('billing.switchBillingInterval')}
                   title={t('billing.switchBillingInterval')}
+                  size="small"
+                  icon
                   onClick={() => onIntervalChange(interval === 'year' ? 'month' : 'year')}
                 >
                   <ArrowLeftRight className="h-3.5 w-3.5" />
@@ -609,8 +609,8 @@ export function BillingSettingsView({
               spellCheck={false}
             />
             <Button
-              size="sm"
-              variant="outline"
+              variant="secondary"
+              size="small"
               disabled={redeemPending || checkoutInProgress || !code.trim()}
               onClick={() => onRedeemCode(code.trim())}
             >
@@ -711,7 +711,7 @@ export function BillingSettingsView({
             {invoicesError ? (
               <div className="flex flex-wrap items-center gap-3">
                 <p className="text-sm text-muted-foreground">{t('billing.historyError')}</p>
-                <Button size="sm" variant="outline" onClick={onRetryInvoices}>
+                <Button variant="secondary" size="small" onClick={onRetryInvoices}>
                   {t('billing.historyRetry')}
                 </Button>
               </div>

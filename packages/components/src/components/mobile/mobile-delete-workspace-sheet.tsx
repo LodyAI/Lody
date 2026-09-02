@@ -2,14 +2,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerTitle,
-} from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { cn } from '@/lib/utils';
@@ -117,8 +111,7 @@ export function MobileDeleteWorkspaceSheet({
           <DrawerDescription className="px-4 pb-3 text-[0.78rem] leading-relaxed text-muted-foreground">
             {t('workspace.danger.deleteWorkspace.confirmDescription', {
               workspace: workspaceName,
-              defaultValue:
-                'Permanently delete "{{workspace}}". This action cannot be undone.',
+              defaultValue: 'Permanently delete "{{workspace}}". This action cannot be undone.',
             })}
           </DrawerDescription>
 
@@ -179,7 +172,7 @@ export function MobileDeleteWorkspaceSheet({
           >
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               className="flex-1"
               onClick={() => onOpenChange(false)}
               disabled={isDeleting}

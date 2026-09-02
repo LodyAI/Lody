@@ -102,7 +102,7 @@ import {
   type SessionListRepoState,
   type SessionListRow,
 } from '@/components/session-list';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TooltipProvider } from '@/ui/tooltip';
 import {
   CODEX_COLLABORATION_MODE_CONFIG_ID,
@@ -485,12 +485,10 @@ function buildLodyPrHistory(locale: LandingLocale): SessionHistoryParsed[] {
           text: isZh
             ? [
                 '确认根因：选中态的 `outline` 画在盒子外侧，但横向留白在 `ScrollArea` root 上，内部 Radix viewport 是真正的裁剪边界，所以左右 1px 被削掉。',
-                '',
                 '修法是把横向 gutter 移到 viewport：列表行仍保持相同位置，滚动条位置不变，但 outline 有空间完整绘制。',
               ].join('\n')
             : [
                 'Root cause confirmed: the selected-state `outline` is painted outside the row box, while the horizontal gutter lived on the `ScrollArea` root. The inner Radix viewport is the actual clipping boundary, so the left and right 1px outline was shaved off.',
-                '',
                 'The fix is to move the horizontal gutter to the viewport: rows keep the same visual position, the scrollbar position is unchanged, and the outline has room to render fully.',
               ].join('\n'),
         },
@@ -553,14 +551,12 @@ function buildLodyPrHistory(locale: LandingLocale): SessionHistoryParsed[] {
           text: isZh
             ? [
                 'PR 已创建：**https://github.com/loro-dev/lody/pull/2564**',
-                '',
                 '- 分支：`feat/selection-highlight-clipping` -> `main`',
                 '- 提交：`fix: stop sidebar selection outline being clipped on the sides`',
                 '- 改动：只修改 `loro-sidebar.tsx`，把横向 gutter 移到 viewport，避免选中高亮左右被裁剪。',
               ].join('\n')
             : [
                 'PR created: **https://github.com/loro-dev/lody/pull/2564**',
-                '',
                 '- Branch: `feat/selection-highlight-clipping` -> `main`',
                 '- Commit: `fix: stop sidebar selection outline being clipped on the sides`',
                 '- Change: only `loro-sidebar.tsx`, moving the horizontal gutter to the viewport so selected highlights are not clipped on the sides.',
@@ -577,16 +573,12 @@ function buildLodyPrHistory(locale: LandingLocale): SessionHistoryParsed[] {
           text: isZh
             ? [
                 '远端状态也确认好了。提交 `119f8827` 已在 `origin/feat/selection-highlight-clipping` 上，PR #2564 就是基于这个提交创建的。',
-                '',
                 '之前看起来像没 push，是因为本地分支还在跟踪 `origin/main`。我已经把 upstream 设置到正确的远端分支，`git status` 现在显示本地和远端一致。',
-                '',
                 '没有剩余内容需要 push。',
               ].join('\n')
             : [
                 'Remote state is confirmed. Commit `119f8827` is on `origin/feat/selection-highlight-clipping`, and PR #2564 was created from that commit.',
-                '',
                 'It only looked unpushed because the local branch was still tracking `origin/main`. I set the upstream to the correct remote branch, and `git status` now shows the branch is even with the remote.',
-                '',
                 'Nothing left to push.',
               ].join('\n'),
         },
@@ -666,20 +658,16 @@ function buildFontSizePlanHistory(locale: LandingLocale): SessionHistoryParsed[]
           text: isZh
             ? [
                 '计划已经收敛到 3 个落点：',
-                '',
                 '- 偏好状态：在 `packages/components/src/atoms/settings.ts` 增加 `chatFontSize` 档位，建议用 Small / Default / Large / Extra Large 这类离散值。',
                 '- 设置入口：桌面 `general-setting.tsx` 和移动 `mobile-general-settings.tsx` 都接入同一组 i18n 文案和选项。',
                 '- 渲染入口：从会话流把字号传到 Markdown、普通用户文本和工具内容；字号变化时触发虚拟列表重新测量。',
-                '',
                 '还需要你确认一个产品选择：字号配置应该只影响消息正文，还是同时影响工具输出、terminal 和 thinking block？',
               ].join('\n')
             : [
                 'The plan narrows to 3 implementation points:',
-                '',
                 '- Preference state: add a `chatFontSize` setting in `packages/components/src/atoms/settings.ts`, preferably as discrete Small / Default / Large / Extra Large values.',
                 '- Settings entry points: wire the same i18n labels and options into desktop `general-setting.tsx` and mobile `mobile-general-settings.tsx`.',
                 '- Rendering entry point: pass the size from the session stream into Markdown, plain user text, and tool content; trigger virtual-list remeasurement when it changes.',
-                '',
                 'One product choice still needs confirmation: should the font-size setting affect only message body text, or should it also affect tool output, terminal output, and thinking blocks?',
               ].join('\n'),
         },
@@ -762,18 +750,14 @@ function buildLodyFeedbackHistory(locale: LandingLocale): SessionHistoryParsed[]
           text: isZh
             ? [
                 '已修复第一版：',
-                '',
                 '- `src/server/services/admin.ts`：重排只改 `sortOrder`；只有跨状态列移动时才刷新 `updatedAt`。',
                 '- `src/features/admin/api.ts`：乐观更新同步改为只在状态变化时更新本地 `updatedAt`。',
-                '',
                 '验证已通过：`pnpm lint`、`pnpm exec tsc --noEmit`、`pnpm build`。',
               ].join('\n')
             : [
                 'First fix completed:',
-                '',
                 '- `src/server/services/admin.ts`: reorder now only changes `sortOrder`; `updatedAt` changes only when an item moves across status columns.',
                 '- `src/features/admin/api.ts`: the optimistic update now mirrors that behavior and only changes local `updatedAt` on status changes.',
-                '',
                 'Checks passed: `pnpm lint`, `pnpm exec tsc --noEmit`, and `pnpm build`.',
               ].join('\n'),
         },
@@ -820,14 +804,12 @@ function buildLodyFeedbackHistory(locale: LandingLocale): SessionHistoryParsed[]
           text: isZh
             ? [
                 '已创建 draft PR：**https://github.com/loro-dev/lody-feedback/pull/64**',
-                '',
                 '- 分支：`codex/fix-roadmap-updated-at`',
                 '- 提交：`7a830ad fix roadmap updated timestamps`',
                 '- 验证：`pnpm lint`、`pnpm exec tsc --noEmit`、`pnpm build` 都已通过。',
               ].join('\n')
             : [
                 'Draft PR created: **https://github.com/loro-dev/lody-feedback/pull/64**',
-                '',
                 '- Branch: `codex/fix-roadmap-updated-at`',
                 '- Commit: `7a830ad fix roadmap updated timestamps`',
                 '- Verification: `pnpm lint`, `pnpm exec tsc --noEmit`, and `pnpm build` all passed.',
@@ -888,16 +870,12 @@ function buildLodyFeedbackHistory(locale: LandingLocale): SessionHistoryParsed[]
           text: isZh
             ? [
                 '已按这个语义修正并推送到同一个 PR：**https://github.com/loro-dev/lody-feedback/pull/64**',
-                '',
                 '现在 roadmap 卡片的 `updatedAt` 来自关联 issue/post 的 `feedback_posts.updated_at`，不是 `roadmap_items.updated_at`。跨列移动会更新 issue 自身的 `updatedAt`；纯排序不会更新。',
-                '',
                 '追加提交：`3650547 use issue updated time for roadmap`。验证仍然通过：`pnpm lint`、`pnpm exec tsc --noEmit`、`pnpm build`。',
               ].join('\n')
             : [
                 'Adjusted the semantics and pushed to the same PR: **https://github.com/loro-dev/lody-feedback/pull/64**',
-                '',
                 'Roadmap card `updatedAt` now comes from the linked issue/post `feedback_posts.updated_at`, not `roadmap_items.updated_at`. Moving across columns updates the issue itself; pure sorting does not.',
-                '',
                 'Follow-up commit: `3650547 use issue updated time for roadmap`. Checks still pass: `pnpm lint`, `pnpm exec tsc --noEmit`, and `pnpm build`.',
               ].join('\n'),
         },
@@ -1006,12 +984,10 @@ function buildMobileAcpKeyboardHistory(locale: LandingLocale): SessionHistoryPar
           text: isZh
             ? [
                 'Storybook 几何验证通过：dialog 底部停在键盘上方，footer 不重叠键盘，env textarea 完整落在滚动容器可见区域内。',
-                '',
                 '我还加了 `transition-none`，避免键盘高度变化时 dialog 高度过渡导致滚动测量拿到旧布局。',
               ].join('\n')
             : [
                 'Storybook geometry verification passed: the dialog bottom stops above the keyboard, the footer does not overlap it, and the env textarea stays fully visible inside the scroller.',
-                '',
                 'I also added `transition-none` so keyboard-height changes do not animate the dialog height and break scroll measurement.',
               ].join('\n'),
         },
@@ -1037,24 +1013,20 @@ function buildMobileAcpKeyboardHistory(locale: LandingLocale): SessionHistoryPar
           text: isZh
             ? [
                 '完成，PR 已创建：**https://github.com/loro-dev/lody/pull/2520**',
-                '',
                 '改动要点：',
                 '- 移动端 `AgentConfigDialog` 按 `--native-keyboard-height` 缩短高度，底部停在键盘上方。',
                 '- 自定义 prompt / env 表单滚动区接入 keyboard-aware scroll。',
                 '- 修正共享 hook：直接滚动传入的容器，避免 textarea 被固定 footer 裁掉。',
                 '- 把 ACP provider 配置入口补到 `packages/components/AGENTS.md`，后续定位更快。',
-                '',
                 '验证已跑：`corepack pnpm install`、`corepack pnpm check`、`corepack pnpm --filter @lody/components typecheck`，以及 Storybook `MobileEdit` + Playwright 模拟 320px 键盘高度。',
               ].join('\n')
             : [
                 'Done, PR created: **https://github.com/loro-dev/lody/pull/2520**',
-                '',
                 'Changes:',
                 '- Mobile `AgentConfigDialog` shrinks by `--native-keyboard-height` so its bottom stops above the keyboard.',
                 '- Custom prompt / env form scrollers use keyboard-aware scroll.',
                 '- The shared hook now scrolls the provided container directly, avoiding textarea clipping behind the fixed footer.',
                 '- Added the ACP provider config entry to `packages/components/AGENTS.md` for faster future discovery.',
-                '',
                 'Verification: `corepack pnpm install`, `corepack pnpm check`, `corepack pnpm --filter @lody/components typecheck`, plus Storybook `MobileEdit` with Playwright simulating a 320px keyboard.',
               ].join('\n'),
         },
@@ -2217,8 +2189,9 @@ function DesktopSessionPreview({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
       data-demo="toggle-panel"
+      size="small"
+      icon
       onClick={diffDemo ? diffDemo.onToggleSecondary : onToggleSecondary}
       aria-label={
         secondaryOpen
@@ -2229,7 +2202,7 @@ function DesktopSessionPreview({
             ? '显示侧边栏'
             : 'Show sidebar'
       }
-      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !secondaryOpen && 'mr-[9px]')}
+      className={cn('shrink-0', !secondaryOpen && 'mr-[9px]')}
     >
       <PanelRight className="h-4 w-4" />
     </Button>
@@ -2244,8 +2217,9 @@ function DesktopSessionPreview({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 text-muted-foreground"
+        size="small"
+        icon
+        className="shrink-0"
         aria-label={isZh ? '在编辑器中打开' : 'Open in editor'}
         onClick={() => undefined}
       >
@@ -2254,8 +2228,9 @@ function DesktopSessionPreview({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 text-muted-foreground"
+        size="small"
+        icon
+        className="shrink-0"
         aria-label={isZh ? '更多操作' : 'More actions'}
         onClick={() => undefined}
       >
@@ -2815,11 +2790,9 @@ const DEMO_COPY: Record<LandingLocale, { promptText: string; reply: string; bran
       branchLabel: 'Branch',
       reply: [
         'Lody is a local-first workspace for running coding agents:',
-        '',
         '- **Parallel agents** — every task gets its own isolated git worktree, so multiple agents build side by side without stepping on each other.',
         '- **Live everywhere** — conversations, diffs, and terminal output sync in real time to desktop, browser, and phone.',
         '- **One control plane** — start, review, and merge agent work from any device.',
-        '',
         'This session is running in a fresh worktree created from `main`, so nothing I do here touches your working directory.',
       ].join('\n'),
     },
@@ -2828,11 +2801,9 @@ const DEMO_COPY: Record<LandingLocale, { promptText: string; reply: string; bran
       branchLabel: '分支',
       reply: [
         'Lody 是一个本地优先的 AI 编程协作工作台：',
-        '',
         '- **并行 Agent** — 每个任务都在独立的 git worktree 里进行，多个 Agent 同时开发互不干扰。',
         '- **实时同步** — 对话、diff、终端输出实时同步到桌面、浏览器和手机。',
         '- **统一控制面** — 在任何设备上启动、审查、合并 Agent 的工作。',
-        '',
         '当前会话就运行在从 `main` 创建的全新 worktree 里，我在这里做的任何改动都不会影响你的工作目录。',
       ].join('\n'),
     },
@@ -2894,10 +2865,8 @@ const DESIGN_DEMO_COPY: Record<
       "I'll start the landing page dev server and report it as this session's preview candidate.",
     turn2Text: [
       'The dev server is up:',
-      '',
       '- Local: **http://127.0.0.1:3002/**',
       "- Reported as this session's preview candidate via `lody_report_preview_candidate`.",
-      '',
       'Click the Browser action above the composer to open it in Lody.',
     ].join('\n'),
     comment: 'Remove "desktop, browser, or phone"',
@@ -2910,10 +2879,8 @@ const DESIGN_DEMO_COPY: Record<
     turn2Intro: '我来启动 landing page 的开发服务器，并把它上报为当前会话的预览候选。',
     turn2Text: [
       '开发服务器已经启动：',
-      '',
       '- 本地地址：**http://127.0.0.1:3002/**',
       '- 已通过 `lody_report_preview_candidate` 上报为当前会话的预览候选。',
-      '',
       '点击输入框上方信息栏的浏览器按钮，即可在 Lody 中打开。',
     ].join('\n'),
     comment: '删除 desktop, browser, or phone',
@@ -4149,12 +4116,12 @@ export function LandingAppPreview({
   const sessionPrimaryAction = (
     <Button
       type="button"
-      size="icon"
       variant="ghost"
+      size="small"
+      icon
       className={cn(
         // Desktop session send chip; mobile overrides below.
-        'h-7 w-7 rounded-md border shadow-xs transition-all',
-        'border-primary/[0.28] bg-primary/[0.14] text-foreground hover:bg-primary/[0.22] hover:text-foreground active:translate-y-[1px]'
+        'border-primary/[0.28] bg-primary/[0.14] hover:bg-primary/[0.22] active:translate-y-[1px]'
       )}
       disabled={reply.trim().length === 0 && designAnnotationItems.length === 0}
       aria-label="Send"
@@ -4167,12 +4134,9 @@ export function LandingAppPreview({
   const mobileSessionPrimaryAction = (
     <Button
       type="button"
-      size="icon"
       variant="ghost"
-      className={cn(
-        'h-8 w-8 rounded-full shadow-xs transition-all',
-        'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-      )}
+      icon
+      className={cn('bg-foreground active:translate-y-[1px]')}
       disabled={reply.trim().length === 0}
       aria-label="Send"
     >

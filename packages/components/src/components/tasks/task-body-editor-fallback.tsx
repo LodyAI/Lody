@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, Pencil, Quote } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import type { TaskBodyEditorProps } from './task-body-editor';
@@ -185,14 +185,14 @@ export default function TaskBodyEditorFallback({
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-end gap-1">
         {mode === 'edit' && onQuoteSelection ? (
-          <Button size="sm" variant="ghost" onClick={handleQuote}>
+          <Button variant="ghost" size="small" onClick={handleQuote}>
             <Quote className="h-3.5 w-3.5" />
             {t('tasks.body.quote', 'Quote selection')}
           </Button>
         ) : null}
         <Button
-          size="sm"
           variant="ghost"
+          size="small"
           onClick={() => setMode(mode === 'edit' ? 'preview' : 'edit')}
         >
           {mode === 'edit' ? (

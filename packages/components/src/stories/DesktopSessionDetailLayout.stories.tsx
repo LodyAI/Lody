@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /* The layout persists panel sizes under this key (autoSaveId); clear it so
    every story starts from its declared defaultSizes, not a previous drag. */
@@ -70,10 +70,10 @@ function LayoutHarness({
   return (
     <div className="flex h-screen flex-col gap-2 bg-muted/30 p-4">
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={openPrTab}>
+        <Button size="small" onClick={openPrTab}>
           Open PR tab
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setSidebarOpen(false)}>
+        <Button variant="secondary" size="small" onClick={() => setSidebarOpen(false)}>
           Close sidebar
         </Button>
         <span className="text-xs text-muted-foreground">container: {containerWidthPx}px</span>

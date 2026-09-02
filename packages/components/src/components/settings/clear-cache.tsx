@@ -78,7 +78,7 @@ export function ClearCacheConfirmDialog({
               onConfirm();
             }}
             disabled={isClearing}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            variant="destructive"
           >
             {isClearing ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

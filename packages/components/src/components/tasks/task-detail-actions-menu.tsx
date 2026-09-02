@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, Copy, Link2, MoreHorizontal } from 'lucide-react';
 import type { TaskId } from '@lody/shared';
 import { useTaskDoc } from '@/hooks/use-task-doc';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,12 +66,7 @@ export function TaskDetailActionsMenu({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-              aria-label={t('tasks.actions.more', 'More actions')}
-            >
+            <Button variant="ghost" aria-label={t('tasks.actions.more', 'More actions')} icon>
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>

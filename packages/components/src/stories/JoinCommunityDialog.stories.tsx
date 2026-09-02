@@ -47,13 +47,13 @@ export const SettingsAboutRow: StoryObj = {
           <JoinCommunityButton />
         </CompactRow>
         <CompactRow label="Download apps">
-          <Button variant="outline" size="sm" className="h-7 px-2.5">
+          <Button variant="secondary" size="small">
             <ExternalLink className="mr-1 h-3.5 w-3.5" />
             Open download page
           </Button>
         </CompactRow>
         <CompactRow label="Website">
-          <Button variant="outline" size="sm" className="h-7 px-2.5">
+          <Button variant="secondary" size="small">
             <ExternalLink className="mr-1 h-3.5 w-3.5" />
             Visit website
           </Button>

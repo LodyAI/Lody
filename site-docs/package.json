@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@lody/components": "workspace:*",
+    "@lody/ui": "workspace:*",
     "@lody/shared": "workspace:*",
     "@number-flow/react": "^0.6.2",
     "@pierre/diffs": "^1.0.5",
@@ -39,6 +40,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@stylexjs/unplugin": "0.19.0",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/router-cli": "^1.167.18",
     "@tanstack/router-plugin": "^1.168.19",

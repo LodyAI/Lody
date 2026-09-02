@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CheckCircle2, KeyRound, Loader2 } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/ui/alert';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Label } from '@/ui/label';
 import { PasswordInput } from '@/ui/password-input';

@@ -44,7 +44,6 @@ export const LongRawPayload: Story = {
     summary: 'Unhandled exception while starting the agent',
     message: [
       'Internal error: Unhandled exception while starting the agent',
-      '',
       ...Array.from(
         { length: 40 },
         (_, index) =>

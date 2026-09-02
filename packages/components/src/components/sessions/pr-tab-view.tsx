@@ -40,7 +40,7 @@ import {
   isPullRequestMergeabilityPending,
 } from '@/lib/github-pr-details-state';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@/ui/skeleton';
 import { Textarea } from '@/ui/textarea';
@@ -314,13 +314,7 @@ function ChecksPermissionNotice({
         </p>
       </div>
       {onGrantChecksPermission && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={onGrantChecksPermission}
-          className="h-6 gap-1 text-[11px]"
-        >
+        <Button type="button" variant="secondary" size="small" onClick={onGrantChecksPermission}>
           <Github className="h-3 w-3" />
           {t('sessions.prTab.checksPermissionCta', 'Update permissions')}
         </Button>
@@ -342,7 +336,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
         <p className="min-w-0 flex-1">
           {t(
             'sessions.prTab.mergeConflictNotice',
-            "This branch has conflicts with the base branch — resolve them before it can be merged."
+            'This branch has conflicts with the base branch — resolve them before it can be merged.'
           )}
         </p>
       </section>
@@ -700,10 +694,10 @@ function PrHeaderActionButton({
       <div data-pr-merge-action="" className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMerge(mergeMethod)}
           disabled={busy}
-          className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN, 'rounded-r-none border-transparent')}
+          className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN)}
         >
           {isMerging ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -716,10 +710,10 @@ function PrHeaderActionButton({
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={busy}
               aria-label={t('sessions.prTab.moreActions', 'More actions')}
-              className={cn('h-7 rounded-l-none px-1.5', PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
+              className={cn(PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
             >
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
@@ -733,7 +727,11 @@ function PrHeaderActionButton({
               onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
             >
               {HEADER_MERGE_METHODS.map((method) => (
-                <DropdownMenuRadioItem key={method.value} value={method.value} className="items-start">
+                <DropdownMenuRadioItem
+                  key={method.value}
+                  value={method.value}
+                  className="items-start"
+                >
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-sm font-medium">
                       {t(method.labelKey, method.labelFallback)}
@@ -771,12 +769,12 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          variant="secondary"
+          size="small"
           onClick={canResolve ? onResolveConflicts : undefined}
           disabled={!canResolve}
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {resolving ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -790,11 +788,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="secondary"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className="h-7 rounded-l-none border-l px-1.5"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -821,11 +818,11 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          variant="secondary"
+          size="small"
           disabled
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {kind === 'checking' ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -839,11 +836,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="secondary"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className="h-7 rounded-l-none border-l px-1.5"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -863,10 +859,10 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMarkReadyForReview()}
           disabled={busy}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {isMarkingReady ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -880,10 +876,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className={cn('h-7 rounded-l-none px-1.5', PR_SPLIT_DIVIDER)}
+                className={cn(PR_SPLIT_DIVIDER)}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -902,8 +898,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onSetState?.('open')}
         disabled={busy}
         className={PR_ACTION_BTN}
@@ -926,8 +922,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onDeleteBranch?.()}
         disabled={busy}
         className={PR_ACTION_BTN}
@@ -947,8 +943,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onSetState?.('closed')}
         disabled={busy}
         className={cn(PR_ACTION_BTN, 'text-status-danger')}
@@ -1048,13 +1044,7 @@ function Composer({
         disabled={isPending}
       />
       <div className="flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => void submit()}
-          disabled={!canSubmit}
-          className="gap-1"
-        >
+        <Button type="button" size="small" onClick={() => void submit()} disabled={!canSubmit}>
           {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {t('sessions.prTab.composerSubmit', 'Comment')}
         </Button>
@@ -1081,31 +1071,31 @@ function BranchRow({ pr }: { pr: GitHubPullRequestDetails }) {
     <div className="border-b border-border px-4 py-2">
       <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-        <span className="uppercase tracking-wide text-muted-foreground/80">
-          {t('sessions.prTab.base', 'base')}
+          <span className="uppercase tracking-wide text-muted-foreground/80">
+            {t('sessions.prTab.base', 'base')}
+          </span>
+          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
+            {pr.baseRef}
+          </code>
+          <InlineCopyButton
+            value={pr.baseRef}
+            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
+          />
         </span>
-        <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-          {pr.baseRef}
-        </code>
-        <InlineCopyButton
-          value={pr.baseRef}
-          label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-        />
-      </span>
-      <span aria-hidden className="text-muted-foreground/60">
-        ←
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <span className="uppercase tracking-wide text-muted-foreground/80">
-          {t('sessions.prTab.head', 'head')}
+        <span aria-hidden className="text-muted-foreground/60">
+          ←
         </span>
-        <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-          {pr.headRef}
-        </code>
-        <InlineCopyButton
-          value={pr.headRef}
-          label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-        />
+        <span className="inline-flex items-center gap-1">
+          <span className="uppercase tracking-wide text-muted-foreground/80">
+            {t('sessions.prTab.head', 'head')}
+          </span>
+          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
+            {pr.headRef}
+          </code>
+          <InlineCopyButton
+            value={pr.headRef}
+            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
+          />
         </span>
       </div>
     </div>
@@ -1176,13 +1166,7 @@ export const PrTabView = memo(function PrTabView({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {onRefresh && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onRefresh}
-                className="h-6 text-[11px]"
-              >
+              <Button type="button" variant="secondary" size="small" onClick={onRefresh}>
                 {t('sessions.prTab.retry', 'Retry')}
               </Button>
             )}
@@ -1267,9 +1251,9 @@ export const PrTabView = memo(function PrTabView({
             data && <ChecksSection summary={data.checkRuns} />
           )}
 
-          {(mergeKind === 'conflict' ||
-            mergeKind === 'blocked' ||
-            mergeKind === 'checking') && <MergeStatusNotice kind={mergeKind} />}
+          {(mergeKind === 'conflict' || mergeKind === 'blocked' || mergeKind === 'checking') && (
+            <MergeStatusNotice kind={mergeKind} />
+          )}
 
           <section className={cn(embedded ? 'space-y-2' : 'space-y-3')}>
             {conversation.length > 0 && (
@@ -1326,19 +1310,12 @@ export const PrTabView = memo(function PrTabView({
         onDeleteBranch={onDeleteBranch}
         onResolveConflicts={onResolveConflicts}
         isResolvingConflicts={isResolvingConflicts}
-        menuContentClassName={
-          embedded ? 'lody-app-preview-portal-dark' : undefined
-        }
+        menuContentClassName={embedded ? 'lody-app-preview-portal-dark' : undefined}
       />
     ) : null;
 
   return (
-    <div
-      className={cn(
-        'flex h-full min-h-0 flex-col bg-background',
-        className
-      )}
-    >
+    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
       {embedded ? (
         /* Landing: slim bar — badge + merge only (no branch row / github chrome). */
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5">
@@ -1363,8 +1340,8 @@ export const PrTabView = memo(function PrTabView({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  size="small"
+                  icon
                   onClick={onRefresh}
                   aria-label={t('sessions.prTab.refresh', 'Refresh')}
                   title={t('sessions.prTab.refresh', 'Refresh')}
@@ -1378,20 +1355,20 @@ export const PrTabView = memo(function PrTabView({
                 </Button>
               )}
               <Button
-                asChild
+                render={
+                  <a
+                    href={badgeMeta.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+                  />
+                }
                 variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground"
                 title={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+                size="small"
+                icon
               >
-                <a
-                  href={badgeMeta.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
-                >
-                  <Github className="h-3.5 w-3.5" />
-                </a>
+                <Github className="h-3.5 w-3.5" />
               </Button>
               {mergeAction}
             </div>

@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -164,7 +164,7 @@ export function MachinePairingDialog({
                 <p className="text-sm text-destructive">
                   {t('machinePairing.createFailed', 'Could not create a connection request.')}
                 </p>
-                <Button variant="outline" onClick={onRetry}>
+                <Button variant="secondary" onClick={onRetry}>
                   {t('common.retry', 'Retry')}
                 </Button>
               </div>
@@ -187,7 +187,7 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
-                  <Button className="mt-3 w-full gap-2" onClick={downloadDesktop}>
+                  <Button className="mt-3 w-full" onClick={downloadDesktop}>
                     <Download className="h-4 w-4" aria-hidden="true" />
                     {t('machinePairing.downloadDesktop', 'Download Lody Desktop')}
                   </Button>
@@ -223,8 +223,8 @@ export function MachinePairingDialog({
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon"
-                          className="absolute right-1.5 top-1.5 h-8 w-8"
+                          icon
+                          className="absolute right-1.5 top-1.5"
                           onClick={() => void copyCommand()}
                           aria-label={t('machinePairing.copyCommand', 'Copy command')}
                         >
@@ -269,7 +269,7 @@ export function MachinePairingDialog({
                     ? t('machinePairing.cancelled', 'This connection request was cancelled.')
                     : t('machinePairing.expired', 'This connection request has expired.')}
                 </p>
-                <Button variant="outline" onClick={onRetry}>
+                <Button variant="secondary" onClick={onRetry}>
                   {t('machinePairing.createNew', 'Create a new request')}
                 </Button>
               </div>

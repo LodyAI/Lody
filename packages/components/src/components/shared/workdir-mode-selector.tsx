@@ -2,7 +2,7 @@ import { Check, ChevronDown, Folder, GitBranch } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,7 +88,6 @@ const modeIcon = {
 } as const;
 
 export function WorkdirModeSelector({
-  tone,
   mode,
   onModeChange,
   worktreeAvailable,
@@ -99,7 +98,6 @@ export function WorkdirModeSelector({
   const readOnly = !onModeChange;
   const selectedMode = mode === 'worktree' && worktreeAvailable ? 'worktree' : 'local';
   const SelectedIcon = modeIcon[selectedMode];
-  const isDark = tone === 'dark';
   const options: Array<{
     value: WorkdirMode;
     label: string;
@@ -126,14 +124,13 @@ export function WorkdirModeSelector({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="small"
       disabled={readOnly}
       aria-label={t('chat.workdir.selectorLabel', 'Working directory mode')}
       className={cn(
-        'h-6 min-w-0 shrink select-none gap-1 rounded-[4px] px-2 text-muted-foreground',
-        'hover:bg-muted/60 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
-        isDark && 'text-foreground/70',
-        readOnly && 'cursor-default opacity-80 hover:bg-transparent hover:text-muted-foreground'
+        'min-w-0 shrink select-none',
+        'focus-visible:ring-0 focus-visible:ring-offset-0',
+        readOnly && 'cursor-default opacity-80'
       )}
     >
       <SelectedIcon className="h-3.5 w-3.5 shrink-0" />

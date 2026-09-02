@@ -3,7 +3,7 @@
  * 当用户访问不存在的页面时显示
  */
 import { useNavigate } from '@tanstack/react-router';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Home, ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -48,12 +48,12 @@ export function NotFound() {
         </p>
 
         <div className="flex justify-center gap-4">
-          <Button variant="outline" onClick={handleGoBack} className="flex items-center gap-2">
+          <Button variant="secondary" onClick={handleGoBack} className="flex">
             <ArrowLeft className="h-4 w-4" />
             {t('notFound.goBack', 'Go Back')}
           </Button>
 
-          <Button onClick={handleGoHome} className="flex items-center gap-2">
+          <Button onClick={handleGoHome} className="flex">
             <Home className="h-4 w-4" />
             {t('notFound.goHome', 'Go Home')}
           </Button>

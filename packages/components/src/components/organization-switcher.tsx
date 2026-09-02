@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -82,10 +82,7 @@ function CloudOrganizationSwitcher() {
   const isMobile = useIsMobile();
   // Paid workspaces only (free ones are omitted by the query); keyed by the
   // better-auth organization id, which is what billing uses as workspaceId.
-  const paidPlanTiers = useCloudQuery(
-    cloudOperations.billing.getMyPaidWorkspacePlanTiers,
-    {}
-  );
+  const paidPlanTiers = useCloudQuery(cloudOperations.billing.getMyPaidWorkspacePlanTiers, {});
   const planTierByWorkspaceId = useMemo(
     () => new Map((paidPlanTiers ?? []).map((entry) => [entry.workspaceId, entry.planTier])),
     [paidPlanTiers]
@@ -151,7 +148,7 @@ function CloudOrganizationSwitcher() {
       <div className="flex items-center gap-1 w-full">
         <DropdownMenu modal={!isMobile} open={open} onOpenChange={setOpen}>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="flex-1 justify-between px-3 py-2" disabled={loading}>
+            <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
               <div className="flex items-center gap-3">
                 <WorkspaceAvatar
                   workspace={{
@@ -315,7 +312,7 @@ function CloudOrganizationSwitcher() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={creating}>
+            <Button variant="secondary" onClick={() => setDialogOpen(false)} disabled={creating}>
               {t('common.cancel')}
             </Button>
             <Button

@@ -6,7 +6,7 @@ import {
   SessionForkDestinationPopover,
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 function ForkTrigger({
   worktreeAvailability,
@@ -24,13 +24,7 @@ function ForkTrigger({
         worktreeAvailability={worktreeAvailability}
         onSelect={(destination) => setLastChoice(destination)}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-          aria-label="Fork session"
-        >
+        <Button type="button" variant="ghost" aria-label="Fork session" size="small" icon>
           <GitFork className="h-3.5 w-3.5" />
         </Button>
       </SessionForkDestinationPopover>

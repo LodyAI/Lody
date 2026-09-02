@@ -167,9 +167,8 @@ export function OpenSourceAttributionsDialog({
     >
       <DialogTrigger asChild>
         <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2.5"
+          variant="secondary"
+          size="small"
           onClick={(event) => {
             event.preventDefault();
             clearOpenTimer();

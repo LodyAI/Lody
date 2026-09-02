@@ -9,12 +9,18 @@ import {
   MobileInlineMenu,
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const machineOptions: MobileInlinePickerOption[] = [
   { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor className="h-3.5 w-3.5" /> },
   { value: 'lab-m2', label: 'lab-m2', icon: <Monitor className="h-3.5 w-3.5" /> },
-  { value: 'mini-offline', label: 'mini-offline', icon: <Monitor className="h-3.5 w-3.5" />, disabled: true, disabledReason: 'Offline' },
+  {
+    value: 'mini-offline',
+    label: 'mini-offline',
+    icon: <Monitor className="h-3.5 w-3.5" />,
+    disabled: true,
+    disabledReason: 'Offline',
+  },
 ];
 
 const repoOptions: MobileInlinePickerOption[] = Array.from({ length: 12 }).map((_, i) => ({
@@ -26,7 +32,11 @@ const repoOptions: MobileInlinePickerOption[] = Array.from({ length: 12 }).map((
 
 const branchOptions: MobileInlinePickerOption[] = [
   { value: 'main', label: 'main', icon: <GitBranch className="h-3.5 w-3.5" /> },
-  { value: 'feat/x', label: 'feat/audit-mobile-coupling', icon: <GitBranch className="h-3.5 w-3.5" /> },
+  {
+    value: 'feat/x',
+    label: 'feat/audit-mobile-coupling',
+    icon: <GitBranch className="h-3.5 w-3.5" />,
+  },
 ];
 
 function StandaloneShell() {
@@ -128,7 +138,9 @@ function CoordinatorRowShell({ searchable = false }: { searchable?: boolean }) {
                   triggerContent={
                     <>
                       <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">{repoOptions.find((o) => o.value === repo)?.label}</span>
+                      <span className="truncate">
+                        {repoOptions.find((o) => o.value === repo)?.label}
+                      </span>
                     </>
                   }
                 />

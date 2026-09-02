@@ -1,5 +1,7 @@
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tailwindcss from '@tailwindcss/vite';
+import stylex from '@stylexjs/unplugin';
+import { stylexOptions } from '../packages/ui/stylex-options';
 import react from '@vitejs/plugin-react';
 import mdx from 'fumadocs-mdx/vite';
 import path from 'node:path';
@@ -41,9 +43,7 @@ function forceSingletonDeps(): Plugin {
     name: 'site-docs-force-singleton-deps',
     enforce: 'pre',
     async resolveId(source, _importer, options) {
-      const hit = SINGLETON_DEPS.some(
-        (dep) => source === dep || source.startsWith(`${dep}/`)
-      );
+      const hit = SINGLETON_DEPS.some((dep) => source === dep || source.startsWith(`${dep}/`));
       if (!hit) return null;
       return this.resolve(source, importer, { ...options, skipSelf: true });
     },
@@ -69,8 +69,7 @@ function createBrowserLoroBuildForClientPlugin(): Plugin {
 
 const isStructurallyRunnableEnvironment = (
   environment: DevEnvironment | undefined
-): environment is RunnableDevEnvironment =>
-  environment !== undefined && 'runner' in environment;
+): environment is RunnableDevEnvironment => environment !== undefined && 'runner' in environment;
 
 /**
  * TanStack Start normally adds this handler itself. In this workspace pnpm
@@ -216,6 +215,7 @@ export default defineConfig({
     installStartDevServerMiddleware(),
     mdx(),
     tailwindcss(),
+    stylex.vite(stylexOptions),
     react(),
   ],
   ssr: {
@@ -242,13 +242,7 @@ export default defineConfig({
     // Do not flatten loro-mirror ahead of resolution: its pre-bundle follows
     // its peer dependency directly to Loro's development bundler entry.
     exclude: ['loro-mirror', 'loro-crdt'],
-    include: [
-      'debug',
-      'next-themes',
-      'react-i18next',
-      'i18next',
-      '@number-flow/react',
-    ],
+    include: ['debug', 'next-themes', 'react-i18next', 'i18next', '@number-flow/react'],
   },
   build: {
     outDir: 'out',

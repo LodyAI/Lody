@@ -42,7 +42,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { isMac } from '@/lib/commands/platform';
@@ -805,9 +805,10 @@ export function SessionHistoryButton({
 
   const trigger = (
     <Button
-      variant={compact ? 'ghost' : 'outline'}
-      size={compact ? 'icon' : 'sm'}
-      className={cn('shrink-0', compact ? 'h-8 w-8' : '')}
+      variant={compact ? 'ghost' : 'secondary'}
+      size="small"
+      icon={compact}
+      className="shrink-0"
       disabled={historySessions.length === 0}
     >
       <History className={cn('h-4 w-4', compact ? '' : 'mr-2')} />
@@ -1144,8 +1145,9 @@ export function SessionHeaderMenu({
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground"
+            size="small"
+            icon
+            className="shrink-0"
             aria-label={t('sessions.moreActions', 'More actions')}
           >
             <Ellipsis className="h-4 w-4" />
@@ -1599,8 +1601,9 @@ export function SessionSearchBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        size="small"
+        icon
+        className="shrink-0 disabled:pointer-events-none"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
@@ -1697,8 +1700,9 @@ export function SessionSearchBar({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                size="small"
+                icon
+                className="shrink-0"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
               >
@@ -5594,22 +5598,16 @@ export const SessionChatInterface = memo(
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
           <div className="flex items-center">
-            <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
-              variant="outline"
-              size="sm"
-              onClick={handleOpenInIde}
-            >
+            <Button size="small" variant="secondary" onClick={handleOpenInIde}>
               <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
               <span className="text-xs">{selectedPathLauncher.label}</span>
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  className="h-6 px-1 py-1 rounded-l-none"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
                   aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
+                  size="small"
                 >
                   <ChevronDown className="h-3 w-3" />
                 </Button>

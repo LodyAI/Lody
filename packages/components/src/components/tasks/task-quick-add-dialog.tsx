@@ -15,7 +15,7 @@ import {
 import { taskLabelPillStyle } from './task-label-presentation';
 import type { UnifiedLocalProjectOption } from '@/components/chat/unified-project-selector';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import {
@@ -284,7 +284,9 @@ export function TaskQuickAddDialog({
                 >
                   <presentation.Icon className={cn('h-3.5 w-3.5', presentation.className)} />
                   {t(presentation.labelKey, presentation.labelFallback)}
-                  {presentation.status === status ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
+                  {presentation.status === status ? (
+                    <Check className="ml-auto h-3.5 w-3.5" />
+                  ) : null}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -310,7 +312,10 @@ export function TaskQuickAddDialog({
               style={tasksMenuSurfaceStyle}
             >
               {TASK_PRIORITY_PRESENTATION.map((option) => (
-                <DropdownMenuItem key={option.priority} onSelect={() => setPriority(option.priority)}>
+                <DropdownMenuItem
+                  key={option.priority}
+                  onSelect={() => setPriority(option.priority)}
+                >
                   <option.Icon className={cn('h-3.5 w-3.5', option.className)} />
                   {t(option.labelKey, option.labelFallback)}
                   {option.priority === priority ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
@@ -326,9 +331,7 @@ export function TaskQuickAddDialog({
                 disabled={submitting}
                 icon={<Tag className="h-3.5 w-3.5" />}
               >
-                {labels.length > 0
-                  ? labels.join(', ')
-                  : t('tasks.properties.labels', 'Labels')}
+                {labels.length > 0 ? labels.join(', ') : t('tasks.properties.labels', 'Labels')}
               </ChipButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -446,10 +449,10 @@ export function TaskQuickAddDialog({
             {t('tasks.quickAdd.createMore', 'Create more')}
           </label>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
+            <Button variant="secondary" size="small" onClick={onClose} disabled={submitting}>
               {t('common.cancel', 'Cancel')}
             </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+            <Button size="small" onClick={handleSubmit} disabled={submitting}>
               {t('tasks.quickAdd.create', 'Create')}
               <Kbd className="ml-1.5 hidden sm:inline-flex">⌘↵</Kbd>
             </Button>

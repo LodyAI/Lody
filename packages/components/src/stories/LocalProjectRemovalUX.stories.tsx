@@ -19,7 +19,7 @@ import { LoroSidebar, type LoroSidebarNavKey } from '@/components/loro-sidebar';
 import { MobileHomeScreen } from '@/components/mobile/mobile-home-screen';
 import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Toaster } from '@/ui/sonner';
 
@@ -198,11 +198,11 @@ function ProjectConversationPane() {
           <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
             <p className="min-h-12 text-sm text-muted-foreground">继续讨论这个项目…</p>
             <div className="mt-2 flex items-center justify-between">
-              <Button variant="ghost" size="sm" className="text-muted-foreground">
+              <Button variant="ghost" size="small">
                 <FolderPlus className="h-4 w-4" />
                 Lody Desktop
               </Button>
-              <Button size="sm">发送</Button>
+              <Button size="small">发送</Button>
             </div>
           </div>
         </div>
@@ -409,7 +409,7 @@ function RemovedProjectArchive() {
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input className="pl-9" placeholder="搜索归档对话" />
               </div>
-              <Button variant="outline" size="icon" aria-label="筛选归档对话">
+              <Button variant="secondary" aria-label="筛选归档对话" icon>
                 <SlidersHorizontal className="h-4 w-4" />
               </Button>
             </div>

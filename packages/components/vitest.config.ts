@@ -1,14 +1,22 @@
+import stylex from '@stylexjs/unplugin';
 import { defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
 import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-workarounds';
+import { stylexOptions } from '../ui/stylex-options';
 
 export default defineConfig({
   define: {
     'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify('mylody.app'),
   },
-  plugins: [loroCrdtWasmUrlWorkaround(), tsconfigPaths(), wasm(), topLevelAwait()],
+  plugins: [
+    loroCrdtWasmUrlWorkaround(),
+    tsconfigPaths(),
+    wasm(),
+    topLevelAwait(),
+    stylex.rollup({ ...stylexOptions, dev: false }),
+  ],
   test: {
     // `src/**` is included so a test written next to its module runs instead of
     // silently never running. Two such files had accumulated under `src/lib`,

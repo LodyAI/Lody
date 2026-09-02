@@ -13,7 +13,6 @@ function crashError(): Error {
 }
 
 const COMPONENT_STACK = [
-  '',
   '    at SessionChatHeader (session-chat-interface.tsx:5192:21)',
   '    at ErrorBoundary (error-boundary.tsx:116:1)',
   '    at RootOutlet',

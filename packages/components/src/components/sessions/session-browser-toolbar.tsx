@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -54,8 +54,8 @@ function ToolbarButton({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8 shrink-0', className)}
+          icon
+          className={cn('shrink-0', className)}
           aria-label={label}
           {...props}
         >

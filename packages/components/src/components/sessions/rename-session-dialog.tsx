@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -159,11 +159,11 @@ export function RenameSessionDialogView({
         </div>
 
         <DialogFooter className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
-          <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
+          <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
-            size="sm"
+            size="small"
             onClick={() => {
               void handleSubmit();
             }}

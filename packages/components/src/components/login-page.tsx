@@ -6,7 +6,7 @@ import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
 import { electronDeepLinkSignInInProgressAtom, nativeSignInInProgressAtom } from '@/atoms';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { PasswordInput } from '@/ui/password-input';
@@ -482,35 +482,35 @@ const PROVIDER_CONFIG: {
   icon: React.ComponentType;
   labelKey: string;
   labelDefault: string;
-  variant: 'default' | 'outline';
+  variant: 'primary' | 'secondary';
 }[] = [
   {
     id: 'github',
     icon: GitHubIcon,
     labelKey: 'login.githubSignIn',
     labelDefault: 'Continue with GitHub',
-    variant: 'default',
+    variant: 'primary',
   },
   {
     id: 'google',
     icon: GoogleIcon,
     labelKey: 'login.googleSignIn',
     labelDefault: 'Continue with Google',
-    variant: 'outline',
+    variant: 'secondary',
   },
   {
     id: 'apple',
     icon: AppleIcon,
     labelKey: 'login.appleSignIn',
     labelDefault: 'Continue with Apple',
-    variant: 'outline',
+    variant: 'secondary',
   },
   {
     id: 'discord',
     icon: DiscordIcon,
     labelKey: 'login.discordSignIn',
     labelDefault: 'Continue with Discord',
-    variant: 'outline',
+    variant: 'secondary',
   },
 ];
 
@@ -1291,10 +1291,11 @@ export function LoginPage({
         return (
           <Button
             key={provider.id}
+            size="large"
             onClick={() => {
               void handleSocialLogin(provider.id);
             }}
-            className="h-10 w-full"
+            className="w-full"
             disabled={isButtonsDisabled}
             variant={provider.variant}
           >
@@ -1317,15 +1318,16 @@ export function LoginPage({
 
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
+            size="large"
             onClick={handleEnterEmailView}
-            className="h-10 w-full"
+            className="w-full"
             disabled={isButtonsDisabled}
           >
             <SocialLoginButtonContent
               icon={
                 <ProviderIcon>
-                  <Mail strokeWidth={1.75} />
+                  <Mail strokeWidth={1.75} className="size-4" />
                 </ProviderIcon>
               }
               label={emailEntryLabel}
@@ -1515,7 +1517,7 @@ export function LoginPage({
             ) : null}
           </div>
 
-          <Button type="submit" className="mt-1 h-10 w-full" disabled={isButtonsDisabled}>
+          <Button type="submit" size="large" className="mt-1 w-full" disabled={isButtonsDisabled}>
             {isEmailSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1603,8 +1605,9 @@ export function LoginPage({
       className="flex flex-col gap-3"
     >
       <Button
+        size="large"
         onClick={() => void handleElectronBrowserLogin()}
-        className="h-10 w-full"
+        className="w-full"
         disabled={isButtonsDisabled}
       >
         <SocialLoginButtonContent
@@ -1626,15 +1629,16 @@ export function LoginPage({
       {isDevElectronEmailPasswordLoginEnabled ? (
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
+          size="large"
           onClick={handleEnterEmailView}
-          className="h-10 w-full"
+          className="w-full"
           disabled={isButtonsDisabled}
         >
           <SocialLoginButtonContent
             icon={
               <ProviderIcon>
-                <Mail strokeWidth={1.75} />
+                <Mail strokeWidth={1.75} className="size-4" />
               </ProviderIcon>
             }
             label={emailEntryLabel}

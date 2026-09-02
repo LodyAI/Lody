@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   Dialog,
   DialogClose,
@@ -128,11 +128,11 @@ export function ChatFailedDetailDialog({
 
         <DialogFooter className="gap-2">
           <DialogClose asChild>
-            <Button type="button" variant="ghost" size="sm">
+            <Button type="button" variant="ghost" size="small">
               {t('common.close', 'Close')}
             </Button>
           </DialogClose>
-          <Button type="button" variant="outline" size="sm" onClick={handleCopy}>
+          <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
             {copied ? (
               <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
             ) : (

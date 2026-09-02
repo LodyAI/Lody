@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { BaseHeader } from '@/components/page-headers/base-header';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Plus, Filter, Search } from 'lucide-react';
 import { Input } from '@/ui/input';
 
@@ -42,11 +42,11 @@ export const Default: Story = {
     title: 'Page Title',
     actions: (
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm">
+        <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           Filter
         </Button>
-        <Button size="sm">
+        <Button size="small">
           <Plus className="mr-2 h-4 w-4" />
           New Item
         </Button>
@@ -64,10 +64,10 @@ export const Mobile: Story = {
     title: 'A Very Long Page Title That Should Be Truncated',
     actions: (
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="ghost">
+        <Button variant="ghost" size="small">
           <Filter className="h-4 w-4" />
         </Button>
-        <Button size="sm">
+        <Button size="small">
           <Plus className="h-4 w-4" />
         </Button>
       </div>
@@ -93,11 +93,11 @@ export const WithSearch: Story = {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search..." className="w-64 pl-9" />
         </div>
-        <Button variant="outline" size="sm">
+        <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           <span className="hidden sm:inline">Filter</span>
         </Button>
-        <Button size="sm">
+        <Button size="small">
           <Plus className="mr-2 h-4 w-4" />
           <span className="hidden sm:inline">New Session</span>
           <span className="sm:hidden">New</span>
@@ -126,11 +126,11 @@ export const Tablet: Story = {
     title: 'Projects',
     actions: (
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm">
+        <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           <span className="hidden sm:inline">Filter</span>
         </Button>
-        <Button size="sm">
+        <Button size="small">
           <Plus className="mr-2 h-4 w-4" />
           <span className="hidden sm:inline">New Project</span>
           <span className="sm:hidden">New</span>
@@ -153,11 +153,11 @@ export const DarkMode: Story = {
     title: 'Dark Mode Header',
     actions: (
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm">
+        <Button variant="secondary" size="small">
           <Filter className="mr-2 h-4 w-4" />
           Filter
         </Button>
-        <Button size="sm">
+        <Button size="small">
           <Plus className="mr-2 h-4 w-4" />
           New Item
         </Button>

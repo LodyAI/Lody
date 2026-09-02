@@ -45,7 +45,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
-import { Button, type ButtonProps } from '@/ui/button';
+import { Button, type ButtonProps } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import {
   DropdownMenu,
@@ -637,9 +637,9 @@ function ProjectSettingsDesktop({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   title={addFolderToMachineTitle}
-                  className="h-6 gap-1 rounded-full border border-border/60 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+                  size="small"
+                  shape="pill"
                   onClick={addToSelectedMachine}
                 >
                   <FolderPlus className="h-3.5 w-3.5" />
@@ -674,10 +674,9 @@ function ProjectSettingsDesktop({
                   {addToSelectedMachine ? (
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
+                      variant="secondary"
                       title={addFolderToMachineTitle}
-                      className="h-7 gap-1 px-2 text-xs"
+                      size="small"
                       onClick={addToSelectedMachine}
                     >
                       <FolderPlus className="h-3.5 w-3.5" />
@@ -794,7 +793,8 @@ function ProjectAddMenu({
         <Button
           type="button"
           variant={variant ?? 'ghost'}
-          size={size ?? 'icon'}
+          size={size}
+          icon
           className={className}
           aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
           title={t('workspace.projects.addProjectMenu', 'Add project')}
@@ -1589,7 +1589,7 @@ export function ProjectHistoryImportPanel({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
+                      size="small"
                       className={historyActionButtonClass}
                       disabled={state.isSyncing || state.isImporting}
                       onClick={() => {
@@ -1615,7 +1615,7 @@ export function ProjectHistoryImportPanel({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="small"
                 className={historyActionButtonClass}
                 disabled={
                   state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
@@ -1733,7 +1733,7 @@ export function ProjectHistoryImportPanel({
             {state.canSync ? (
               <Button
                 type="button"
-                size="sm"
+                size="small"
                 className="mt-4"
                 disabled={state.isSyncing || state.isImporting || !onSyncHistory}
                 onClick={() => {
@@ -1829,7 +1829,7 @@ export function ProjectHistoryImportPanel({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="sm"
+                        size="small"
                         className={historyActionButtonClass}
                         disabled={!canResolveConflict}
                         onClick={(event) => {
@@ -1877,8 +1877,7 @@ export function ProjectHistoryImportPanel({
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmConflictReplace}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmConflictReplace} variant="destructive"
             >
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
             </AlertDialogAction>

@@ -17,7 +17,7 @@ import {
   type ProviderSetupTask,
 } from '@lody/shared';
 import { toast } from 'sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Badge } from '@/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -291,12 +291,7 @@ export function ProvidersScreenView({
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
@@ -393,7 +388,7 @@ export function ProvidersScreenView({
                         />
                       </button>
                       <div className="flex shrink-0 items-center gap-1 pr-3">
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
+                        <Button variant="ghost" size="small" onClick={() => onEdit(config)}>
                           {t('common.edit', 'Edit')}
                         </Button>
                         {activity ? (
@@ -407,8 +402,8 @@ export function ProvidersScreenView({
                           />
                         ) : status !== 'needs-auth' ? (
                           <Button
-                            variant={status === 'passed' ? 'ghost' : 'outline'}
-                            size="sm"
+                            variant={status === 'passed' ? 'ghost' : 'secondary'}
+                            size="small"
                             disabled={noLocalMachine}
                             onClick={() => onTest(config)}
                           >
@@ -419,9 +414,9 @@ export function ProvidersScreenView({
                         ) : null}
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           aria-label={t('common.delete', 'Delete')}
+                          icon
+                          tone="destructive"
                           onClick={() => onDelete(config)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1203,7 +1198,7 @@ export function ProvidersScreen({
                 event.preventDefault();
                 void handleConfirmDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('common.delete', 'Delete')}

@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { PlatformContext } from '@lody/platform/react';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';
 import { DEFAULT_TOUR_IDENTITY, type TourIdentity } from './tour/tour-fixtures';
 import type { TourAppTracks, TourConfigurationState } from './tour/tour-app';
@@ -591,15 +591,14 @@ export function OnboardingBackButton({ onClick, disabled, label }: OnboardingBac
   return (
     <Button
       variant="ghost"
-      size="lg"
       onMouseEnter={() => playHover()}
+      size="large"
       onClick={() => {
         // Going back falls in pitch, as it does everywhere else in the flow.
         playBack();
         onClick();
       }}
       disabled={disabled}
-      className="gap-2"
     >
       <ArrowLeft className="h-4 w-4" />
       {label ?? t('common.back', 'Back')}
@@ -630,8 +629,8 @@ export function OnboardingNextButton({
   const text = label ?? (isFinish ? t('common.finish', 'Finish') : t('common.next', 'Next'));
   return (
     <Button
-      size="lg"
       onMouseEnter={() => playHover()}
+      size="large"
       onClick={() => {
         // Advancing rises; the last step gets the confirming click instead.
         if (isFinish) playClick();
@@ -639,7 +638,6 @@ export function OnboardingNextButton({
         onClick();
       }}
       disabled={disabled}
-      className="gap-2"
     >
       {loading === true ? (
         <Loader2 className="h-4 w-4 animate-spin" />

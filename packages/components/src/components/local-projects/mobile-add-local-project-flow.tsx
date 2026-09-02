@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Skeleton } from '@/ui/skeleton';
 import {
@@ -327,7 +327,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             title={errorView.title}
             description={errorView.description}
             action={
-              <Button type="button" variant="outline" onClick={c.retry} className="h-10 gap-1.5">
+              <Button type="button" variant="secondary" size="large" onClick={c.retry}>
                 <RefreshCw className="h-4 w-4" />
                 {t('common.retry', 'Retry')}
               </Button>
@@ -386,7 +386,8 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
         ) : null}
         <Button
           type="button"
-          className="h-12 w-full gap-2 text-[1rem]"
+          size="large"
+          className="w-full"
           disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
           onClick={() => void c.addCurrentFolder()}
         >

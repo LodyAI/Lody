@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { File as FileViewer, type FileProps } from '@pierre/diffs/react';
@@ -25,7 +25,6 @@ type Story = StoryObj<typeof meta>;
 
 const markdownSample = [
   'Markdown code path:',
-  '',
   '```ts',
   'const greet = (name: string) => {',
   '  return `Hello, ${name}`;',
@@ -68,7 +67,6 @@ const fileViewerFile: FileProps<undefined>['file'] = {
     '  if (status === "error") {',
     '    return { label: "Needs attention", tone: "danger" };',
     '  }',
-    '',
     '  return { label: "Ready", tone: "success" };',
     '}',
   ].join('\n'),
@@ -117,7 +115,7 @@ function VSCodeThemeProbe() {
           <section className="space-y-3 border border-border bg-background p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Button>Primary action</Button>
-              <Button variant="outline">Outline action</Button>
+              <Button variant="secondary">Outline action</Button>
               <Button variant="secondary">Secondary action</Button>
             </div>
             <Input placeholder="Focus border / input background" />

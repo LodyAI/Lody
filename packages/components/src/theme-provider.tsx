@@ -22,7 +22,11 @@ import {
   type LodyResolvedVSCodeTheme,
 } from '@/lib/vscode-theme';
 
+import { forcedThemeClassNames } from '@lody/ui/theme';
+
 export type Theme = 'dark' | 'light' | 'system';
+
+const FORCED_STYLEX_CLASSES = [...forcedThemeClassNames('light'), ...forcedThemeClassNames('dark')];
 export type ResolvedTheme = 'light' | 'dark';
 
 export const THEME_CYCLE_ORDER: readonly Theme[] = ['light', 'dark', 'system'];
@@ -144,8 +148,9 @@ function LodyThemeProvider({
   useIsomorphicLayoutEffect(() => {
     const root = window.document.documentElement;
 
-    root.classList.remove('light', 'dark');
+    root.classList.remove('light', 'dark', ...FORCED_STYLEX_CLASSES);
     root.classList.add(resolvedTheme);
+    if (theme !== 'system') root.classList.add(...forcedThemeClassNames(resolvedTheme));
     root.style.colorScheme = theme === 'system' ? 'light dark' : resolvedTheme;
   }, [resolvedTheme, theme]);
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Loader2, Shield, User } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
@@ -181,8 +181,8 @@ export function InviteMemberDialog({
 
         <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
           <Button
-            variant="outline"
-            size="sm"
+            variant="secondary"
+            size="small"
             onClick={() => onOpenChange(false)}
             disabled={inviting}
           >
@@ -193,7 +193,7 @@ export function InviteMemberDialog({
             billingUiAvailable &&
             onOpenBilling && (
               <Button
-                size="sm"
+                size="small"
                 onClick={() => {
                   onOpenChange(false);
                   onOpenBilling();
@@ -204,7 +204,7 @@ export function InviteMemberDialog({
               </Button>
             )
           ) : (
-            <Button size="sm" onClick={submit} disabled={!email.trim() || inviting}>
+            <Button size="small" onClick={submit} disabled={!email.trim() || inviting}>
               {inviting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               {inviting ? t('common.inviting') : t('common.invite')}
             </Button>

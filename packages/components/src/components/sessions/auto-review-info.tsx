@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /**
  * The contract the user reads once.
@@ -129,11 +129,11 @@ export function AutoReviewConfirmDialog({
         <AutoReviewContract budget={budget} />
 
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="secondary" size="small" onClick={() => onOpenChange(false)}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
-            size="sm"
+            size="small"
             onClick={() => {
               onConfirm();
               onOpenChange(false);
@@ -179,11 +179,11 @@ export function ReviewAgentSetupDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="secondary" size="small" onClick={() => onOpenChange(false)}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
-            size="sm"
+            size="small"
             onClick={() => {
               onOpenChange(false);
               onOpenSettings();

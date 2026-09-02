@@ -7,7 +7,7 @@ import { AlertCircle, Check, Download, Loader2, RefreshCw, X } from 'lucide-reac
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -390,9 +390,9 @@ export function MobileAcpHistorySheet({
                             <div className="px-4 pb-3 pl-12">
                               <Button
                                 type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 rounded-full px-3 text-[0.75rem]"
+                                variant="secondary"
+                                size="small"
+                                shape="pill"
                                 disabled={!canResolveConflict}
                                 onClick={() => {
                                   if (!canResolveConflict) return;
@@ -431,8 +431,8 @@ export function MobileAcpHistorySheet({
               >
                 <Button
                   type="button"
-                  className="w-full gap-2"
-                  size="lg"
+                  size="large"
+                  className="w-full"
                   disabled={!importEnabled}
                   onClick={() => {
                     void onImportHistory(row, state.provider);
@@ -477,8 +477,7 @@ export function MobileAcpHistorySheet({
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmConflictReplace}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmConflictReplace} variant="destructive"
             >
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
             </AlertDialogAction>

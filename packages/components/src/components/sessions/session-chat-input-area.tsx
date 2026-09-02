@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import { ArrowUp, Loader2 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
@@ -2436,17 +2436,13 @@ export const SessionChatInputArea = memo(
     const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
     const primaryActionNode = showStopButton ? (
       <Button
+        icon
         onClick={() => {
           void onStop();
         }}
         variant="ghost"
-        size="icon"
         aria-label={t('sessions.stop')}
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
+        className={cn(primaryActionSizeClassName, 'bg-foreground active:translate-y-[1px]')}
       >
         <span
           className={cn('rounded-[3px] bg-current', isMobile ? 'h-3 w-3' : 'h-2.5 w-2.5')}
@@ -2456,8 +2452,8 @@ export const SessionChatInputArea = memo(
     ) : (
       <Button
         type="button"
-        size="icon"
         variant="ghost"
+        icon
         onClick={() => void sendMessage('button')}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
@@ -2465,11 +2461,7 @@ export const SessionChatInputArea = memo(
             ? externalHistorySyncLabel
             : t('sessions.send')
         }
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
+        className={cn(primaryActionSizeClassName, 'bg-foreground active:translate-y-[1px]')}
       >
         {submissionPending || hasBlockingImages || isExternalHistoryRefreshing ? (
           <Loader2 className={isMobile ? 'h-5 w-5 animate-spin' : 'h-4 w-4 animate-spin'} />

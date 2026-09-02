@@ -28,7 +28,7 @@ import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
@@ -1655,10 +1655,11 @@ function UsageDayDetailPanel({
         className="relative rounded-lg bg-muted/40 p-4"
       >
         <Button
-          size="icon"
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          size="mini"
+          icon
+          className="absolute right-2 top-2"
           onClick={onClose}
         >
           <X className="h-3.5 w-3.5" />
@@ -2300,11 +2301,11 @@ export function UsageCalendarVisualization({
                 <TooltipTrigger asChild>
                   <PopoverTrigger asChild>
                     <Button
-                      size="icon"
                       variant="ghost"
                       aria-label={t('workspace.usage.skyline.shareCard')}
+                      icon
                     >
-                      <Share2 />
+                      <Share2 className="size-4" />
                     </Button>
                   </PopoverTrigger>
                 </TooltipTrigger>
@@ -2340,8 +2341,8 @@ export function UsageCalendarVisualization({
                   </div>
                   <div className="mt-3 flex justify-end">
                     <Button
-                      size="sm"
-                      variant="outline"
+                      variant="secondary"
+                      size="small"
                       disabled={isSharePreviewLoading}
                       onClick={() => void shareCard()}
                     >
@@ -2488,21 +2489,21 @@ export function UsageCalendarVisualization({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      size="icon"
                       variant="ghost"
+                      icon
                       onClick={() => void copyAscii()}
                       aria-label={t('workspace.usage.skyline.copyAscii')}
                     >
-                      <Copy />
+                      <Copy className="size-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{t('workspace.usage.skyline.copyAscii')}</TooltipContent>
                 </Tooltip>
-                <Button size="sm" variant="outline" onClick={exportAscii}>
+                <Button variant="secondary" size="small" onClick={exportAscii}>
                   <Download className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadAscii')}
                 </Button>
-                <Button size="sm" onClick={exportStl}>
+                <Button size="small" onClick={exportStl}>
                   <Box className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadBinaryStl')}
                 </Button>

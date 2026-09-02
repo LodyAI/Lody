@@ -20,7 +20,7 @@ import {
   getServerNow,
 } from '@lody/shared';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -494,12 +494,13 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         {!isReadonly && mode.kind === 'interactive' ? (
           <Button
             type="button"
-            size="icon"
             variant="ghost"
+            size="mini"
+            icon
             disabled={disabled && !mode.isPendingCancel}
             onClick={mode.onCancel}
             aria-label={t('sessions.cancel', 'Cancel')}
-            className="-mr-1 mt-0.5 h-5 w-5 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
+            className="-mr-1 mt-0.5 shrink-0"
           >
             {mode.isPendingCancel ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -640,11 +641,10 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
           <div className="mt-2">
             <Button
               type="button"
-              size="sm"
               variant="secondary"
+              size="small"
               disabled={disabled || !canSubmit}
               onClick={() => mode.kind === 'interactive' && submit(drafts)}
-              className="h-8 gap-1.5 px-3 text-xs"
             >
               {mode.kind === 'interactive' && mode.isPendingSubmit ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -661,11 +661,11 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         <div className="flex items-center justify-between gap-2 border-t border-border/40 bg-transparent px-3 py-1">
           <Button
             type="button"
-            size="sm"
             variant="ghost"
+            size="small"
             disabled={isFirst}
             onClick={goPrev}
-            className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            className="disabled:opacity-50"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
             {t('sessions.askQuestion.prev', 'Prev')}
@@ -676,11 +676,11 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
           {isReadonly ? (
             <Button
               type="button"
-              size="sm"
               variant="ghost"
+              size="small"
               disabled={isLast}
               onClick={goNext}
-              className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              className="disabled:opacity-50"
             >
               {t('sessions.askQuestion.next', 'Next')}
               <ChevronRight className="h-3.5 w-3.5" />
@@ -688,11 +688,10 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
           ) : isLast ? (
             <Button
               type="button"
-              size="sm"
               variant="secondary"
+              size="small"
               disabled={disabled || !canSubmit}
               onClick={() => mode.kind === 'interactive' && submit(drafts)}
-              className="h-6 gap-1.5 px-3 text-xs"
             >
               {mode.kind === 'interactive' && mode.isPendingSubmit ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -704,14 +703,11 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
           ) : (
             <Button
               type="button"
-              size="sm"
               variant="ghost"
+              size="small"
               disabled={!canGoNext}
               onClick={goNext}
-              className={cn(
-                'h-6 gap-1 px-2 text-xs',
-                canGoNext ? 'text-foreground hover:text-foreground' : 'text-muted-foreground'
-              )}
+              className={cn(canGoNext ? '' : '')}
             >
               {t('sessions.askQuestion.next', 'Next')}
               <ChevronRight className="h-3.5 w-3.5" />

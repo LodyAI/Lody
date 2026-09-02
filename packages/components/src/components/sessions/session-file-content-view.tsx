@@ -77,7 +77,7 @@ import {
   type SessionFileLiveSyncStatus,
   type SessionFileSaveStatus,
 } from '@/hooks/use-code-collab-save-text';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -1907,18 +1907,12 @@ export function SessionFileConflictActionRow({
       <span className="ml-auto flex gap-1.5">
         {pendingOverride ? (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => setPendingOverride(false)}
-            >
+            <Button variant="ghost" size="small" onClick={() => setPendingOverride(false)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
-              size="sm"
               variant="destructive"
-              className="h-6 px-2 text-[11px]"
+              size="small"
               onClick={() => {
                 setPendingOverride(false);
                 void onResolveConflict('override');
@@ -1930,37 +1924,33 @@ export function SessionFileConflictActionRow({
         ) : (
           <>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictDiscardHint',
                 'Throw away your local edits and reload from disk.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('discard')}
             >
               {t('sessions.fileSave.conflictDiscard', 'Discard my edits')}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictMarkersHint',
                 'Reload with <<<<<<< / >>>>>>> conflict markers so you can resolve by hand.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('load_with_conflicts')}
             >
               {t('sessions.fileSave.conflictMarkers', 'Insert conflict markers')}
             </Button>
             <Button
-              size="sm"
-              variant="default"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictOverrideHint',
                 'Replace the disk version with your edits. Concurrent changes will be lost.'
               )}
+              size="small"
               onClick={() => setPendingOverride(true)}
             >
               {t('sessions.fileSave.conflictOverride', 'Overwrite disk')}
@@ -2003,7 +1993,7 @@ function SessionFileLspPanel({
     <div className="flex flex-col gap-1 border-t border-border bg-muted/30 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{actionLabel}</span>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
+        <Button variant="ghost" size="small" onClick={onDismiss}>
           {t('sessions.lsp.dismiss', 'Dismiss')}
         </Button>
       </div>

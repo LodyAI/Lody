@@ -7,7 +7,7 @@ import type { PersistedMentionRange } from '@/components/mentions/mention-persis
 import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -343,12 +343,13 @@ export function ChatLandingView({
     <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
       <Button
         type="button"
-        size="icon"
         variant="ghost"
+        size="mini"
+        icon
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
-        className={cn(primaryActionButtonClassName, isMobile ? 'h-6 w-6' : 'h-7 w-7')}
+        className={cn(primaryActionButtonClassName, isMobile ? '' : '')}
       >
         {submissionPending ? (
           <Loader2 className="h-4 w-4 animate-spin" />

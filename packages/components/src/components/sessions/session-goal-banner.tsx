@@ -11,7 +11,7 @@ import {
 import { ChevronDown, Clock, Loader2, Pause, Play, Target, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
 import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
@@ -63,18 +63,14 @@ export const GoalActionButton = ({
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
+      variant="secondary"
+      size="small"
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'h-7 gap-1.5 rounded-md px-2.5 text-xs font-medium',
-        'bg-background/70 backdrop-blur-xs',
         tone === 'success' &&
           'border-status-success/40 text-status-success hover:text-status-success hover:bg-status-success/10',
-        tone === 'danger' &&
-          'border-destructive/40 text-destructive hover:text-destructive hover:bg-destructive/10',
-        tone === 'default' && 'text-foreground/80 hover:text-foreground'
+        tone === 'danger' && 'text-destructive'
       )}
     >
       {loading ? (
@@ -311,11 +307,12 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
+                size="small"
+                icon
                 onClick={() => onDismiss(goal)}
                 aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                 title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                className="shrink-0"
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </Button>

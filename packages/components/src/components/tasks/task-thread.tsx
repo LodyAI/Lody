@@ -18,7 +18,7 @@ import {
 } from '@lody/shared';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import {
@@ -414,9 +414,10 @@ export function TaskThread({
           ) : null}
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <Button
-              size="icon"
               variant="ghost"
-              className="h-7 w-7 shrink-0"
+              size="small"
+              icon
+              className="shrink-0"
               disabled={disabled || uploadingImages || !onImagePaste}
               onClick={() => imageInputRef.current?.click()}
               aria-label={t('tasks.thread.addImage', 'Add image')}
@@ -428,9 +429,10 @@ export function TaskThread({
               )}
             </Button>
             <Button
-              size="icon"
-              variant={draft.trim() ? 'default' : 'ghost'}
-              className="h-7 w-7 shrink-0"
+              variant={draft.trim() ? 'primary' : 'ghost'}
+              size="small"
+              icon
+              className="shrink-0"
               disabled={disabled || uploadingImages || !draft.trim()}
               onClick={handleSubmit}
               aria-label={t('tasks.thread.send', 'Comment')}

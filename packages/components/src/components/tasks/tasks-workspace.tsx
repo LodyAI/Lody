@@ -30,7 +30,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useTaskActions } from '@/hooks/use-task-actions';
 import { useTaskSessionRollups } from '@/hooks/use-task-session-rollup';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -196,12 +196,7 @@ function DesktopTasksWorkspace({ activeTaskId }: { activeTaskId: TaskId | null }
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  aria-label={t('tasks.filter.label', 'Filter')}
-                >
+                <Button variant="ghost" aria-label={t('tasks.filter.label', 'Filter')} icon>
                   <ListFilter className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -516,13 +511,13 @@ export function TasksListBody({
   const mobileActions = (
     <div className="flex items-center gap-1">
       <Button
-        size="sm"
-        variant={needsYouOnly ? 'default' : 'outline'}
+        variant={needsYouOnly ? 'primary' : 'secondary'}
+        size="small"
         onClick={() => setNeedsYouOnly(!needsYouOnly)}
       >
         {t('tasks.needsYou', 'Needs you')}
       </Button>
-      <Button size="sm" onClick={() => handleQuickAdd()}>
+      <Button size="small" onClick={() => handleQuickAdd()}>
         <Plus className="h-4 w-4" />
         {t('tasks.newTask', 'New task')}
       </Button>

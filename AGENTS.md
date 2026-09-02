@@ -88,9 +88,10 @@ after changing package scope or cloud/local composition.
 ## Project map
 
 `apps/cli` (agent, persistence, Machine RPC), `apps/electron` (desktop +
-bundled CLI), `packages/components` (shared UI), `packages/platform` (ports),
-`packages/cloud-api` (optional-cloud DTOs), `packages/shared` (schemas),
-`packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`, `site-docs`.
+bundled CLI), `packages/{components,ui}` (shared UI), `packages/platform`
+(ports), `packages/cloud-api` (optional-cloud DTOs), `packages/shared`
+(schemas), `packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`,
+`site-docs`.
 
 ## Checks and commits
 

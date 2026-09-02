@@ -25,7 +25,7 @@ import type {
 } from '@lody/shared/visual-annotation-inspector';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { VisualAnnotationReferenceCard } from '@/components/ai-gui/visual-annotation-reference-card';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 
 const storySessionId = 'session-storybook-visual-annotation' as SessionId;
@@ -693,8 +693,8 @@ function VisualAnnotationInspectorHarness() {
             </div>
             <Button
               type="button"
-              size="sm"
-              variant={annotationMode ? 'default' : 'outline'}
+              variant={annotationMode ? 'primary' : 'secondary'}
+              size="small"
               onClick={() => {
                 const next = !annotationMode;
                 setAnnotationMode(next);
@@ -707,10 +707,20 @@ function VisualAnnotationInspectorHarness() {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => scrollPreviewTo(0)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={() => scrollPreviewTo(0)}
+            >
               Scroll top
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => scrollPreviewTo(760)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={() => scrollPreviewTo(760)}
+            >
               Below fold
             </Button>
           </div>
@@ -742,7 +752,7 @@ function VisualAnnotationInspectorHarness() {
                   placeholder="Write a comment for this selected target..."
                   className="min-h-20 bg-white text-sm"
                 />
-                <Button type="button" size="sm" className="w-full" onClick={completeComment}>
+                <Button type="button" size="small" className="w-full" onClick={completeComment}>
                   <Check className="h-3.5 w-3.5" />
                   Add comment
                 </Button>
@@ -813,15 +823,15 @@ function VisualAnnotationInspectorHarness() {
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="secondary"
+                size="small"
                 disabled={pendingCount === 0}
                 onClick={stagePending}
               >
                 <SendHorizontal className="h-3.5 w-3.5" />
                 Stage all
               </Button>
-              <Button type="button" size="sm" variant="outline" onClick={resetHarness}>
+              <Button type="button" variant="secondary" size="small" onClick={resetHarness}>
                 {comments.length > 0 || selectedPayload ? (
                   <Trash2 className="h-3.5 w-3.5" />
                 ) : (
@@ -854,9 +864,8 @@ function VisualAnnotationInspectorHarness() {
                       />
                       <Button
                         type="button"
-                        size="icon"
                         variant="ghost"
-                        className="h-8 w-8"
+                        icon
                         onClick={() => removeStagedReference(reference.commentId)}
                       >
                         <X className="h-3.5 w-3.5" />
@@ -865,14 +874,14 @@ function VisualAnnotationInspectorHarness() {
                   ))}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" size="sm" onClick={sendStagedReferences}>
+                  <Button type="button" size="small" onClick={sendStagedReferences}>
                     <SendHorizontal className="h-3.5 w-3.5" />
                     Send
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
-                    variant="outline"
+                    variant="secondary"
+                    size="small"
                     onClick={() => setStagedReferences([])}
                   >
                     Clear

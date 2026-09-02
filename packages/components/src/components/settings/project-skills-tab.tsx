@@ -12,7 +12,7 @@ import {
   type ProjectSkillsSource,
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -84,7 +84,13 @@ export function ProjectSkillsView({
           title={t('workspace.projects.skills.errorTitle', "Couldn't load skills")}
           body={error}
           action={
-            <Button type="button" variant="outline" size="sm" className="mt-1" onClick={onRefresh}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              className="mt-1"
+              onClick={onRefresh}
+            >
               <RefreshCw className="h-3.5 w-3.5" />
               {t('workspace.projects.skills.retry', 'Retry')}
             </Button>
@@ -145,8 +151,8 @@ export function ProjectSkillsView({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+          size="small"
+          className="shrink-0"
           disabled={isRefreshing}
           onClick={onRefresh}
         >

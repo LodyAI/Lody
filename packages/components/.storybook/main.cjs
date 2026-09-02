@@ -1,4 +1,6 @@
 const tailwindcss = require('@tailwindcss/vite').default;
+const stylex = require('@stylexjs/unplugin').default;
+const { stylexOptions } = require('../../ui/stylex-options.ts');
 const { loadEnv } = require('vite');
 const { resolve } = require('node:path');
 const wasm = require('vite-plugin-wasm').default;
@@ -33,6 +35,7 @@ const config = {
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
+    viteConfig.plugins.push(stylex.vite(stylexOptions));
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Switch } from '@/ui/switch';
 import {
   developerModeEnabledAtom,
@@ -230,8 +230,7 @@ export function MobileAboutSettings() {
           >
             {isDownloaded ? (
               <Button
-                size="sm"
-                className="h-8 px-3"
+                size="small"
                 onClick={() => {
                   void handleQuitAndInstall();
                 }}
@@ -246,9 +245,8 @@ export function MobileAboutSettings() {
               </Button>
             ) : (
               <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3"
+                variant="secondary"
+                size="small"
                 onClick={() => {
                   void handleCheckForUpdates();
                 }}

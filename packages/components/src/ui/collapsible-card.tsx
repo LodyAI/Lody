@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 
 import { ChevronDown } from 'lucide-react';
 import * as Collapsible from '@radix-ui/react-collapsible';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { CopyButton } from './copy-button';
 import { clamp } from '@/lib/clamp';
 
@@ -67,12 +67,7 @@ const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
           className
         )}
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 hover:bg-transparent"
-          aria-label="Toggle section"
-        >
+        <Button variant="ghost" aria-label="Toggle section" size="mini" icon>
           <ChevronDown
             className="h-4 w-4 transition-transform duration-200 [[data-state=closed]_&]:-rotate-90"
             aria-hidden="true"

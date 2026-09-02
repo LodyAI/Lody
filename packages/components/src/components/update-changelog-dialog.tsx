@@ -80,12 +80,12 @@ export function UpdateChangelogDialog({
         )}
         <DialogFooter>
           {!notes ? (
-            <Button variant="outline" size="sm" onClick={onOpenChangelogSite}>
+            <Button variant="secondary" size="small" onClick={onOpenChangelogSite}>
               <ExternalLink className="mr-1 h-3.5 w-3.5" />
               {t('updates.changelog.openWebsite', 'Open changelog website')}
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => onOpenChange(false)}>
+          <Button size="small" onClick={() => onOpenChange(false)}>
             {t('common.close', 'Close')}
           </Button>
         </DialogFooter>

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 
 export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
@@ -66,8 +66,8 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             </SelectContent>
           </Select>
           <Button
-            size="sm"
-            variant={activeLink ? 'ghost' : 'default'}
+            variant={activeLink ? 'ghost' : 'primary'}
+            size="small"
             disabled={busyAction !== null}
             onClick={() =>
               void run('rotate', () =>
@@ -100,10 +100,10 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             })}
           </span>
           <Button
-            size="icon"
             variant="ghost"
-            className="h-7 w-7"
             aria-label={t('joinRequest.admin.copy', 'Copy link')}
+            size="small"
+            icon
             onClick={() => {
               void navigator.clipboard
                 .writeText(joinUrl)
@@ -113,9 +113,9 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             <Copy className="h-3.5 w-3.5" />
           </Button>
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 text-xs text-destructive hover:text-destructive"
+            size="small"
+            tone="destructive"
             disabled={busyAction !== null}
             onClick={() =>
               void run('revoke', () => revokeLink({ workspaceId, linkId: activeLink.id }))
@@ -154,10 +154,10 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button
-                    size="icon"
                     variant="ghost"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
                     aria-label={t('joinRequest.admin.reject', 'Reject')}
+                    icon
+                    tone="destructive"
                     disabled={busyAction !== null}
                     onClick={() =>
                       void run(`reject:${request.id}`, () =>
@@ -172,9 +172,8 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
                     )}
                   </Button>
                   <Button
-                    size="icon"
-                    className="h-8 w-8"
                     aria-label={t('joinRequest.admin.approve', 'Approve')}
+                    icon
                     disabled={busyAction !== null}
                     onClick={() =>
                       void run(`approve:${request.id}`, () =>

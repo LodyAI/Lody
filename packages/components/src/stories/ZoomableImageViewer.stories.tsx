@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /**
  * The one full-screen image viewer in the app. Chat image blocks

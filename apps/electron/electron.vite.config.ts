@@ -6,6 +6,7 @@ import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import tailwindcss from '@tailwindcss/vite'
+import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
@@ -17,6 +18,7 @@ import {
   rendererBundleAliasPlugin,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
+import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
 
 function getGitCommitHash(): string {
@@ -187,6 +189,7 @@ export default defineConfig(({ mode }) => {
       plugins: [
         previewPublicBaseDomainHtmlPlugin(previewPublicBaseDomain),
         tailwindcss(),
+        stylex.vite(stylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

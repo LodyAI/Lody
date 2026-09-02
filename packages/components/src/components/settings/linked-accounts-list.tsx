@@ -6,7 +6,7 @@ import type { IconType } from 'react-icons';
 import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
 import { FcGoogle } from 'react-icons/fc';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -49,10 +49,25 @@ const PROVIDERS: {
    * Kept as literal strings so Tailwind's JIT emits them. */
   hoverClassName?: string;
 }[] = [
-  { id: 'github', Icon: SiGithub, boundClassName: 'text-foreground', hoverClassName: 'group-hover:text-foreground' },
+  {
+    id: 'github',
+    Icon: SiGithub,
+    boundClassName: 'text-foreground',
+    hoverClassName: 'group-hover:text-foreground',
+  },
   { id: 'google', Icon: FcGoogle, flat: true },
-  { id: 'apple', Icon: SiApple, boundClassName: 'text-foreground', hoverClassName: 'group-hover:text-foreground' },
-  { id: 'discord', Icon: SiDiscord, boundClassName: 'text-[#5865F2]', hoverClassName: 'group-hover:text-[#5865F2]' },
+  {
+    id: 'apple',
+    Icon: SiApple,
+    boundClassName: 'text-foreground',
+    hoverClassName: 'group-hover:text-foreground',
+  },
+  {
+    id: 'discord',
+    Icon: SiDiscord,
+    boundClassName: 'text-[#5865F2]',
+    hoverClassName: 'group-hover:text-[#5865F2]',
+  },
 ];
 
 export function LinkedAccountsList({
@@ -67,7 +82,10 @@ export function LinkedAccountsList({
   const boundProviders = new Set(accounts.map((account) => account.providerId));
 
   const providerLabel = (providerId: string): string =>
-    t(`settings.profile.providers.${providerId}`, providerId.charAt(0).toUpperCase() + providerId.slice(1));
+    t(
+      `settings.profile.providers.${providerId}`,
+      providerId.charAt(0).toUpperCase() + providerId.slice(1)
+    );
 
   const iconClassName = (
     bound: boolean,
@@ -185,15 +203,15 @@ export function LinkedAccountsList({
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               onClick={() => setPendingProviderId(null)}
               disabled={isConnecting}
             >
               {t('common.cancel')}
             </Button>
             <Button
-              size="sm"
+              size="small"
               onClick={() => {
                 void handleConfirmConnect();
               }}

@@ -5,7 +5,7 @@ import { enUS, zhCN } from 'date-fns/locale';
 import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
 
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
@@ -139,7 +139,7 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   const { t } = useTranslation();
 
   return (
-    <Button variant="outline" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={onRetry}>
+    <Button variant="secondary" size="small" className="shrink-0" onClick={onRetry}>
       {t('codexReset.retry', 'Try again')}
     </Button>
   );

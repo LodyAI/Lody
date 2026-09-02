@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Clock3, Loader2, Minus, RotateCcw, XCircle } from 'lucide-react';
 import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 
@@ -115,9 +115,8 @@ export function SummaryScreen({
           </div>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="gap-2"
+            variant="secondary"
+            size="small"
             disabled={retryingAgent}
             onClick={() => {
               if (retryingAgent) return;

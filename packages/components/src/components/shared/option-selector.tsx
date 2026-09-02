@@ -10,7 +10,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { ChevronDown, Check } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import {
   Command,
@@ -311,7 +311,7 @@ export function OptionSelector<TValue extends string | number = string>({
           type="button"
           variant="ghost"
           className={cn(
-            'w-auto select-none justify-between gap-2 rounded-1 border border-transparent px-3 font-medium text-foreground hover:foreground/70',
+            'w-auto select-none justify-between rounded-1 hover:foreground/70',
             sizeClassMap[size],
             disabled && 'opacity-50 pointer-events-none',
             className

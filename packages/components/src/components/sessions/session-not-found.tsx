@@ -1,5 +1,5 @@
 import { useRouter } from '@tanstack/react-router';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { ArrowLeft, MessageSquareOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -54,7 +54,7 @@ export function SessionNotFound({ onBack }: SessionNotFoundProps) {
           )}
         </p>
 
-        <Button onClick={handleBack} variant="outline" className="gap-2">
+        <Button onClick={handleBack} variant="secondary">
           <ArrowLeft className="h-4 w-4" />
           {t('sessions.notFound.backToList', 'Back to Sessions')}
         </Button>

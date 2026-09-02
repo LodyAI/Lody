@@ -11,7 +11,7 @@ import {
 import type { MachineOnlineStatus } from '@/atoms/presence';
 import type { UnifiedLocalProjectOption } from '@/components/chat/unified-project-selector';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,10 +20,7 @@ import {
 } from '@/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import {
-  getTaskStatusPresentation,
-  TASK_STATUS_PRESENTATION,
-} from './task-status-presentation';
+import { getTaskStatusPresentation, TASK_STATUS_PRESENTATION } from './task-status-presentation';
 import {
   getTaskPriorityPresentation,
   TASK_PRIORITY_PRESENTATION,
@@ -149,10 +146,7 @@ function PropertyButton({
         <button
           type="button"
           disabled={disabled}
-          className={cn(
-            propertyRowClass,
-            hasValue ? 'text-foreground' : 'text-muted-foreground'
-          )}
+          className={cn(propertyRowClass, hasValue ? 'text-foreground' : 'text-muted-foreground')}
         >
           {leading ?? <Icon className={cn('h-3.5 w-3.5 shrink-0 opacity-70', iconClassName)} />}
           {valueContent != null ? (
@@ -288,10 +282,7 @@ export function TaskPropertiesPanel({
               style={tasksMenuSurfaceStyle}
             >
               {TASK_STATUS_PRESENTATION.map((option) => (
-                <DropdownMenuItem
-                  key={option.status}
-                  onClick={() => onStatusChange(option.status)}
-                >
+                <DropdownMenuItem key={option.status} onClick={() => onStatusChange(option.status)}>
                   <option.Icon className={cn('h-3.5 w-3.5', option.className)} />
                   {t(option.labelKey, option.labelFallback)}
                 </DropdownMenuItem>
@@ -304,11 +295,7 @@ export function TaskPropertiesPanel({
             value={ownerName}
             placeholder={t('tasks.properties.owner', 'Owner')}
             disabled={disabled}
-            leading={
-              owner ? (
-                <TaskOwnerAvatar owner={owner} />
-              ) : undefined
-            }
+            leading={owner ? <TaskOwnerAvatar owner={owner} /> : undefined}
           >
             <DropdownMenuContent
               align="start"
@@ -343,9 +330,7 @@ export function TaskPropertiesPanel({
             icon={priorityPresentation.Icon}
             iconClassName={priorityPresentation.className}
             value={
-              priority
-                ? t(priorityPresentation.labelKey, priorityPresentation.labelFallback)
-                : null
+              priority ? t(priorityPresentation.labelKey, priorityPresentation.labelFallback) : null
             }
             placeholder={t('tasks.properties.priority', 'Priority')}
             disabled={disabled}
@@ -449,11 +434,11 @@ export function TaskPropertiesPanel({
                 <TooltipTrigger asChild>
                   <span>
                     <Button
-                      size="icon"
                       // Only a ready, manual task gets the solid primary: a
                       // green Run that cannot fire reads as broken.
-                      variant={canRun && !hasActiveSession && !delegatedTo ? 'default' : 'ghost'}
-                      className="h-8 w-8 shrink-0"
+                      variant={canRun && !hasActiveSession && !delegatedTo ? 'primary' : 'ghost'}
+                      icon
+                      className="shrink-0"
                       // Delegated tasks are started by the scheduler, so the
                       // button becomes a state readout rather than an action.
                       disabled={disabled || running || !canRun || Boolean(delegatedTo)}
@@ -489,9 +474,9 @@ export function TaskPropertiesPanel({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      size="icon"
                       variant="ghost"
-                      className="h-8 w-5 shrink-0 px-0 text-muted-foreground"
+                      icon
+                      className="shrink-0"
                       disabled={disabled || (!agent && !delegatedTo)}
                       aria-label={t('tasks.properties.autoRun', 'Execution')}
                     >

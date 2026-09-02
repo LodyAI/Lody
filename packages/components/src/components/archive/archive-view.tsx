@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import {
   Dialog,
@@ -1489,12 +1489,7 @@ export function ArchiveView() {
         {isMobile ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 shrink-0 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-              >
+              <Button type="button" variant="secondary" size="small" className="shrink-0">
                 <span className="max-w-[6.5rem] truncate">{scopeLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
               </Button>
@@ -1520,12 +1515,7 @@ export function ArchiveView() {
       <div className="flex shrink-0 items-center gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-            >
+            <Button type="button" variant="secondary" size="small">
               {groupMode === 'flat' ? (
                 <List className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
               ) : (
@@ -1554,12 +1544,7 @@ export function ArchiveView() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-            >
+            <Button type="button" variant="secondary" size="small">
               {sortMode === 'title' ? (
                 <ArrowDownAZ className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
               ) : sortMode === 'oldest' ? (
@@ -1661,7 +1646,7 @@ export function ArchiveView() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteConfirmSession(null)}>
+            <Button variant="secondary" onClick={() => setDeleteConfirmSession(null)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
@@ -1705,7 +1690,7 @@ export function ArchiveView() {
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               disabled={bulkActionInFlight === 'delete'}
               onClick={() => setBulkDeleteConfirmOpen(false)}
             >

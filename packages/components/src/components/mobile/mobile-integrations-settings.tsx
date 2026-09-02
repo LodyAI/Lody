@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Badge } from '@/ui/badge';
 import { ArrowUpRight, Book, Github, Loader2, Search } from 'lucide-react';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
@@ -88,7 +88,9 @@ function MobileCloudIntegrationsSettings() {
   const setPersonalOperationPreference = useCloudMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(cloudOperations.github.refreshPersonalGitHubProfile);
+  const refreshPersonalGitHubProfile = useCloudAction(
+    cloudOperations.github.refreshPersonalGitHubProfile
+  );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -349,9 +351,7 @@ function MobileCloudIntegrationsSettings() {
           >
             {canManage ? (
               <Button
-                size="sm"
-                className="inline-flex items-center gap-1 whitespace-nowrap"
-                variant="default"
+                size="small"
                 onClick={() => {
                   void handleConnectGitHub();
                 }}

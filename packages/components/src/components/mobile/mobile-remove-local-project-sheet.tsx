@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, X } from 'lucide-react';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import { cn } from '@/lib/utils';
 
@@ -265,7 +265,7 @@ export function MobileRemoveLocalProjectSheet({
           >
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               className="flex-1"
               onClick={() => onOpenChange(false)}
               disabled={isRemoving}

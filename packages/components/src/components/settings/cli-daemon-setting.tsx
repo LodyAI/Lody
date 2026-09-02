@@ -2,7 +2,7 @@ import { Loader2, Play, RotateCcw, Square } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ElectronCliState } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { CompactRow } from './compact-layout';
 
@@ -58,9 +58,8 @@ export function CliDaemonSetting() {
           </span>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
+            variant="secondary"
+            size="small"
             disabled={busy || !localAgentEnabled}
             onClick={() => void restart()}
           >
@@ -75,9 +74,9 @@ export function CliDaemonSetting() {
           </Button>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 border-status-danger/30 px-2 text-xs text-status-danger hover:bg-status-danger/10 hover:text-status-danger disabled:text-muted-foreground/60"
+            variant="secondary"
+            size="small"
+            tone="destructive"
             disabled={busy || isStopped}
             onClick={() => void terminate()}
           >

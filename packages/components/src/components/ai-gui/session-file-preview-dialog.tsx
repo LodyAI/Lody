@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Check, Copy, Download, FileWarning, Loader2, X } from 'lucide-react';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog, DialogClose, DialogContentWithoutClose, DialogTitle } from '@/ui/dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
@@ -100,8 +100,8 @@ export function SessionFilePreviewPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground hover:text-foreground"
+            size="small"
+            icon
             onClick={handleCopy}
             disabled={status.kind !== 'loaded'}
             aria-label={t('common.copy', 'Copy')}
@@ -111,8 +111,8 @@ export function SessionFilePreviewPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground hover:text-foreground"
+            size="small"
+            icon
             onClick={() => onDownload(file)}
             disabled={isDownloading}
             aria-label={t('sessions.fileDownload', 'Download')}
@@ -131,9 +131,9 @@ export function SessionFilePreviewPanel({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground"
               aria-label={t('common.close', 'Close')}
+              size="small"
+              icon
             >
               <X className="size-4" />
             </Button>
@@ -153,8 +153,8 @@ export function SessionFilePreviewPanel({
           <Button
             type="button"
             variant="secondary"
-            size="sm"
-            className="h-6 shrink-0 px-2.5 text-xs"
+            size="small"
+            className="shrink-0"
             onClick={() => onDownload(file)}
             disabled={isDownloading}
           >
@@ -177,7 +177,7 @@ export function SessionFilePreviewPanel({
           <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
             <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
             <span>{status.message}</span>
-            <Button type="button" variant="secondary" size="sm" onClick={() => onDownload(file)}>
+            <Button type="button" variant="secondary" size="small" onClick={() => onDownload(file)}>
               {t('sessions.fileDownload', 'Download')}
             </Button>
           </div>

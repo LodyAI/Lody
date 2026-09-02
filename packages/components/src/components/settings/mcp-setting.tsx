@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Switch } from '@/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -151,9 +151,9 @@ export function McpSetting() {
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 aria-label={addLabel}
+                size="small"
+                icon
                 onClick={() => openEditor({ mode: 'add' })}
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -167,7 +167,7 @@ export function McpSetting() {
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
             <Plug className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
             <p className="mt-2 text-muted-foreground">{t('settings.mcp.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={() => openEditor({ mode: 'add' })}>
+            <Button size="small" className="mt-3" onClick={() => openEditor({ mode: 'add' })}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {addLabel}
             </Button>
@@ -247,8 +247,7 @@ export function McpSetting() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              disabled={removing}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removing} variant="destructive"
               onClick={(event) => {
                 event.preventDefault();
                 void confirmRemoval();
@@ -326,10 +325,11 @@ export function McpServerRow({
           </label>
           <Button
             type="button"
-            size="icon"
             variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             aria-label={t('common.remove')}
+            size="small"
+            icon
+            tone="destructive"
             onClick={onRemove}
           >
             <Trash2 className="h-3.5 w-3.5" />

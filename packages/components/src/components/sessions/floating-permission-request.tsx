@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -247,12 +247,12 @@ export function PermissionRequestCard({
             return (
               <Button
                 key={option.optionId}
-                size="sm"
                 type="button"
+                size="small"
                 disabled={disabled}
                 variant="ghost"
                 className={cn(
-                  'h-auto min-h-8 w-full min-w-0 items-start justify-start gap-2 whitespace-normal break-words rounded-md px-3 py-1.5 text-left text-xs leading-5 transition-colors',
+                  'w-full min-w-0 items-start justify-start whitespace-normal break-words text-left',
                   toneClass
                 )}
                 onClick={() => onSelect(option.optionId)}

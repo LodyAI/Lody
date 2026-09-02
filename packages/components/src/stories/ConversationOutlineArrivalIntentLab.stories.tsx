@@ -8,7 +8,7 @@ import {
 } from '@/components/ai-gui/conversation-outline-rail';
 import { DEFAULT_ARRIVAL_INTENT_CONFIG } from '@/components/ai-gui/conversation-outline-arrival-intent';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const meta = {
   title: 'Sessions/ConversationOutlineRail/ArrivalIntentLab',
@@ -304,49 +304,49 @@ function ArrivalIntentLab() {
 
         <div className="flex flex-wrap gap-2 border-b border-border py-4">
           {recording ? (
-            <Button size="sm" variant="outline" onClick={stopCapture}>
-              <Square /> Stop
+            <Button variant="secondary" size="small" onClick={stopCapture}>
+              <Square className="size-4" /> Stop
             </Button>
           ) : (
-            <Button size="sm" onClick={startCapture}>
-              <Circle /> Record
+            <Button size="small" onClick={startCapture}>
+              <Circle className="size-4" /> Record
             </Button>
           )}
           <Button
-            size="sm"
-            variant="outline"
+            variant="secondary"
+            size="small"
             disabled={!latestTrial}
             onClick={() => labelLatestTrial('intended')}
           >
-            <Check /> Intended
+            <Check className="size-4" /> Intended
           </Button>
           <Button
-            size="sm"
-            variant="outline"
+            variant="secondary"
+            size="small"
             disabled={!latestTrial}
             onClick={() => labelLatestTrial('accidental')}
           >
-            <X /> Accidental
+            <X className="size-4" /> Accidental
           </Button>
           <Button
-            size="icon"
             variant="ghost"
+            icon
             disabled={eventCount === 0}
             aria-label="Export capture"
             title="Export capture"
             onClick={exportCapture}
           >
-            <Download />
+            <Download className="size-4" />
           </Button>
           <Button
-            size="icon"
             variant="ghost"
+            icon
             disabled={eventCount === 0}
             aria-label="Clear capture"
             title="Clear capture"
             onClick={clearCapture}
           >
-            <Trash2 />
+            <Trash2 className="size-4" />
           </Button>
         </div>
 

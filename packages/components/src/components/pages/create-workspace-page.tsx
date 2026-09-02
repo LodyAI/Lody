@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -67,10 +67,10 @@ export function CreateWorkspacePage({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="small"
             onClick={onBackToWorkspace}
             disabled={creating}
-            className="mb-3 -ml-2 gap-2 text-muted-foreground hover:text-foreground"
+            className="mb-3 -ml-2"
           >
             <ArrowLeft className="h-4 w-4" />
             {t('organization.backToPreviousWorkspace', 'Back to previous workspace')}
@@ -226,6 +226,7 @@ export function CreateWorkspacePage({
               ) : null}
 
               <Button
+                size="large"
                 onClick={onSubmit}
                 disabled={
                   creating ||
@@ -235,7 +236,6 @@ export function CreateWorkspacePage({
                   !slugAvailable
                 }
                 className="w-full"
-                size="lg"
               >
                 {creating ? (
                   <span className="flex items-center">

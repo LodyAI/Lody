@@ -22,7 +22,7 @@ import {
   MobileModelPickerLabel,
   mobileModelPickerTriggerClassName,
 } from '@/components/mobile/mobile-session-composer-footer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
@@ -228,10 +228,11 @@ function MockComposer({
           </div>
           <Button
             type="button"
-            size="icon"
-            variant="ghost"
+            variant="primary"
             aria-label="Send"
-            className="ml-2 h-8 w-8 shrink-0 rounded-full bg-foreground text-background shadow-xs transition-all hover:bg-foreground/90 hover:text-background"
+            icon
+            shape="pill"
+            className="ml-2 shrink-0"
           >
             <ArrowUp className="h-5 w-5" />
           </Button>

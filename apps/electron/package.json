@@ -51,10 +51,12 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@stylexjs/unplugin": "0.19.0",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@lody/components": "workspace:*",
+    "@lody/ui": "workspace:*",
     "@lody/configs": "workspace:*",
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/vite": "^4.3.0",

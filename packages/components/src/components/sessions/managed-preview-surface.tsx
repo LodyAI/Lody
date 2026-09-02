@@ -44,7 +44,7 @@ import {
 } from '@lody/shared/preview-comment-types';
 
 import { userAtom } from '@/atoms';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { toast } from 'sonner';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
@@ -741,8 +741,9 @@ export function ManagedPreviewSurface({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
+              size="mini"
+              icon
+              className="shrink-0"
               aria-label={t('common.cancel', 'Cancel')}
               onClick={() => {
                 setSelectedTarget(null);
@@ -762,7 +763,7 @@ export function ManagedPreviewSurface({
           <div className="mt-2 flex justify-end">
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={!draftBody.trim() || submitting}
               onClick={() => void submitDraft()}
             >

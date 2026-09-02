@@ -8,7 +8,7 @@ import {
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
 } from '@/components/sessions/session-side-panel-tab-bar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'side-session', label: 'Side Chat', kind: 'session' },
@@ -92,7 +92,7 @@ function SidePanelTabBarStory() {
           addPanelLabel="Add panel"
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+            <Button variant="ghost" size="small" icon>
               <PanelRight className="h-4 w-4" />
             </Button>
           }
@@ -143,7 +143,7 @@ export const EmptyState: Story = {
           addPanelLabel="Add panel"
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+            <Button variant="ghost" size="small" icon>
               <PanelRight className="h-4 w-4" />
             </Button>
           }

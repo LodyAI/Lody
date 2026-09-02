@@ -17,7 +17,7 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Badge } from '@/ui/badge';
@@ -604,8 +604,7 @@ export function AccountSettingsPure({
           <CompactRow label={t('settings.account.signOut')}>
             <Button
               variant="ghost"
-              size="sm"
-              className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
+              size="small"
               onClick={() => {
                 void onSignOut();
               }}
@@ -691,8 +690,8 @@ export function AccountSettingsPure({
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => {
                     void onCopyGeneratedCliApiKey?.();
                   }}
@@ -719,8 +718,8 @@ export function AccountSettingsPure({
             )}
             <DialogFooter>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 onClick={() => handleCliApiKeyDialogOpenChange(false)}
                 disabled={isCreatingCliApiKey}
               >
@@ -728,7 +727,7 @@ export function AccountSettingsPure({
               </Button>
               {!hasGeneratedCliApiKey && (
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleCreateCliApiKey();
                   }}
@@ -772,7 +771,7 @@ export function AccountSettingsPure({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                variant="destructive"
               >
                 {revokingCliApiKeyId ? (
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -793,9 +792,9 @@ export function AccountSettingsPure({
           actions={
             hasAdminPermission && (
               <Button
-                size="icon"
                 variant="ghost"
                 aria-label={t('workspace.members.invite')}
+                icon
                 onClick={() => setInviteDialogOpen(true)}
               >
                 <UserPlus className="h-4 w-4" />
@@ -869,8 +868,9 @@ export function AccountSettingsPure({
                   {isEditable && (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      size="small"
+                      icon
+                      tone="destructive"
                       onClick={() => {
                         setUserToDelete(member.id);
                         setDeleteUserDialogOpen(true);
@@ -908,8 +908,7 @@ export function AccountSettingsPure({
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                    size="small"
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
                     }}
@@ -920,8 +919,9 @@ export function AccountSettingsPure({
                   {hasAdminPermission && (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      size="small"
+                      icon
+                      tone="destructive"
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
                         void (async () => {
@@ -970,8 +970,8 @@ export function AccountSettingsPure({
           actions={
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-auto bg-foreground/[0.06] px-2 text-foreground hover:bg-foreground/[0.1]"
+              size="small"
+              className="w-auto"
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
@@ -1042,8 +1042,8 @@ export function AccountSettingsPure({
                   </div>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    size="small"
+                    tone="destructive"
                     onClick={() => setCliApiKeyToRevoke(apiKey)}
                     disabled={revokingCliApiKeyId === apiKey.id}
                   >
@@ -1071,8 +1071,8 @@ export function AccountSettingsPure({
             >
               <Button
                 variant="ghost"
-                size="sm"
-                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                size="small"
+                tone="destructive"
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {t('workspace.danger.leaveWorkspace.button')}
@@ -1086,8 +1086,8 @@ export function AccountSettingsPure({
             >
               <Button
                 variant="ghost"
-                size="sm"
-                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                size="small"
+                tone="destructive"
                 onClick={() => {
                   // A live subscription blocks deletion outright; surface the
                   // guidance dialog instead of the type-to-confirm flow (the
@@ -1138,7 +1138,7 @@ export function AccountSettingsPure({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {t('common.remove')}
             </AlertDialogAction>
@@ -1172,7 +1172,7 @@ export function AccountSettingsPure({
                 })();
               }}
               disabled={isLeaving}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {isLeaving ? (
                 <>
@@ -1259,7 +1259,7 @@ export function AccountSettingsPure({
           </div>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteDialogOpen(false);
                 setDeleteConfirmText('');
@@ -1344,7 +1344,7 @@ export function AccountSettingsPure({
           </div>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteAccountDialogOpen(false);
                 setDeleteAccountConfirmText('');

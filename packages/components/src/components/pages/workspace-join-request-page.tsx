@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
 
@@ -86,7 +86,7 @@ export function WorkspaceJoinRequestPage({
                   'Sign in or create an account to request access. You can use any verified email.'
                 )}
               </Message>
-              <Button className="mt-6 h-10 w-full" onClick={onContinue}>
+              <Button size="large" className="mt-6 w-full" onClick={onContinue}>
                 {t('joinRequest.continue', 'Continue')}
               </Button>
             </>
@@ -98,7 +98,7 @@ export function WorkspaceJoinRequestPage({
                   email: currentEmail || '',
                 })}
               </Message>
-              <Button className="mt-6 h-10 w-full" onClick={onVerifyEmail}>
+              <Button size="large" className="mt-6 w-full" onClick={onVerifyEmail}>
                 {t('joinRequest.verifyAction', 'Verify email')}
               </Button>
             </>
@@ -134,7 +134,8 @@ export function WorkspaceJoinRequestPage({
                 })}
               </p>
               <Button
-                className="mt-5 h-10 w-full"
+                size="large"
+                className="mt-5 w-full"
                 disabled={!reason.trim() || state === 'submitting'}
                 onClick={onSubmit}
               >
@@ -156,7 +157,7 @@ export function WorkspaceJoinRequestPage({
                   ? t('joinRequest.approved', 'Your request was approved.')
                   : t('joinRequest.alreadyMember', 'You are already a member of this workspace.')}
               </Message>
-              <Button className="mt-6 h-10 w-full" onClick={onOpenWorkspace}>
+              <Button size="large" className="mt-6 w-full" onClick={onOpenWorkspace}>
                 {t('joinRequest.openWorkspace', 'Open workspace')}
               </Button>
             </>

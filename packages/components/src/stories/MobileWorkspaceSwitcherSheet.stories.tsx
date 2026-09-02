@@ -6,7 +6,7 @@ import {
   MobileWorkspaceSwitcherSheet,
   type MobileWorkspaceSwitcherWorkspace,
 } from '@/components/mobile/mobile-workspace-switcher-sheet';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const workspaces: MobileWorkspaceSwitcherWorkspace[] = [
   { id: 'lody', name: 'Lody', isActive: true },
