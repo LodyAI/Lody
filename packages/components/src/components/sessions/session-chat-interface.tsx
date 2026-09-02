@@ -3370,7 +3370,7 @@ export const SessionChatInterface = memo(
     const canStopAgent = canStopAgentEnabled({
       isContextCompacting,
       isSessionActive,
-      activeAssistantTurnId,
+      activeAssistantTurnId: activeAssistantTurnId ?? null,
       isGoalActive,
       canPauseGoal,
     });
