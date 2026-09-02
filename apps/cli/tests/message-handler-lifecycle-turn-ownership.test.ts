@@ -8,54 +8,31 @@
  * emits `terminated` while the visible turn is still in its deferred window
  * (`ownsACPUpdates === false`, because visible dispatch does not claim ACP
  * routing until its prompt starts). The old handler answered that event with a
- * no-turnId `finalizeACPState`, which cleared the turn; the fallback's
- * `activateTurnACPUpdateTarget` then silently no-opped against an idle turn and
- * every one of the 505 seconds of agent output was dropped, after which the turn
- * was recorded as `agent_no_output`.
+ * no-turnId `finalizeACPState`, which cleared the turn; the fallback's routing
+ * claim then found an idle turn, and every one of the 505 seconds of agent
+ * output was dropped, after which the turn was recorded as `agent_no_output`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoroRepo } from 'loro-repo';
 
 import type {
   AcpSessionNotification,
   MessageContent,
   SessionHistoryInput,
   SessionId,
-  WorkspaceId,
 } from '@lody/shared';
 
-import { MessageHandler } from '../src/lib/message-handler';
-import { SessionDocument } from '../src/lib/loro/doc';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import type { SessionDocument } from '../src/lib/loro/doc';
 import type { CodeCollabV2Service } from '../src/lib/code-collab/code-collab-v2-service';
-import type { ISession, SessionManager } from '../src/session/session-manager';
+import type { ISession } from '../src/session/session-manager';
 import type {
   SessionExecutionService,
   SessionExecutionSnapshot,
 } from '../src/session/session-execution-service';
 import type { SessionActivePresenceController } from '../src/lib/loro/session-active-presence';
-import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
-import { createTestCloudPort } from './test-cloud-port';
-
-const createSilentLogger = (): Logger => ({
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  success: () => {},
-  debug: () => {},
-  setLevel: () => {},
-  child: () => createSilentLogger(),
-  close: async () => {},
-});
+import { createMessageHandlerHarness, destroyRepoOnRealTimers } from './message-handler-harness';
 
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
-
-type LifecycleListeners = {
-  error?: (event: { sessionId: SessionId; error: Error; session: ISession }) => void;
-  exit?: (event: { sessionId: SessionId; exitCode: number; session: ISession }) => void;
-  terminated?: (event: { sessionId: SessionId; exitCode?: number; session: ISession }) => void;
-};
 
 type MessageHandlerHost = {
   beginConversationTurn(
@@ -84,68 +61,8 @@ type MessageHandlerHost = {
   sessionActivePresence: SessionActivePresenceController;
 };
 
-// loro-repo resolves create()/destroy() on the real clock (native async), not the
-// timers vitest fakes — run repo setup/teardown on real timers.
-const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
-  if (vi.isFakeTimers()) {
-    vi.useRealTimers();
-  }
-  await repo.destroy();
-};
-
 const createHarness = async (sessionId: SessionId) => {
-  const logger = createSilentLogger();
-  const fakeTimersActive = vi.isFakeTimers();
-  if (fakeTimersActive) {
-    vi.useRealTimers();
-  }
-  const repo = await LoroRepo.create({});
-  const doc = new SessionDocument(repo, sessionId);
-  await doc.initOffline();
-  if (fakeTimersActive) {
-    vi.useFakeTimers();
-  }
-
-  const workspaceDocument = {
-    isTransportConnected: vi.fn(() => true),
-    markMachineFlockDocDirty: vi.fn(),
-    registerMachine: vi.fn(),
-    repo: {
-      watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-      getDocMeta: vi.fn(async () => ({
-        meta: { needToArchiveSessions: {}, needToDeleteSessions: {} },
-      })),
-    },
-    getOrCreateSessionDoc: vi.fn(async () => doc),
-  };
-
-  const listeners: LifecycleListeners = {};
-  const sessionManager = {
-    on: vi.fn((event: string, listener: unknown) => {
-      if (event === 'error' || event === 'exit' || event === 'terminated') {
-        (listeners as Record<string, unknown>)[event] = listener;
-      }
-    }),
-    setRequestPermissionHandler: vi.fn(),
-    getSession: vi.fn(() => null),
-    cleanUp: vi.fn(async () => {}),
-  };
-
-  const handler = new MessageHandler(
-    sessionManager as unknown as SessionManager,
-    workspaceDocument as unknown as LoroDocumentManager,
-    logger,
-    {
-      token: 't',
-      workspaceId: 'ws-1' as WorkspaceId,
-      userId: 'u-1',
-      machineId: 'm-1',
-      machineName: 'machine',
-      cliVersion: '0.0.0',
-      cloudPort: createTestCloudPort(),
-    }
-  );
-
+  const { repo, doc, handler, listeners } = await createMessageHandlerHarness(sessionId);
   const host = handler as unknown as MessageHandlerHost;
 
   // The lifecycle listeners ask the execution service whether a turn runtime is
@@ -168,16 +85,7 @@ const createHarness = async (sessionId: SessionId) => {
   const clearPresence = vi.spyOn(host.sessionActivePresence, 'clear').mockImplementation(() => {});
   const setStatus = vi.spyOn(doc, 'setStatus');
 
-  return {
-    repo,
-    doc,
-    host,
-    listeners,
-    setActiveTurn,
-    releaseWatch,
-    clearPresence,
-    setStatus,
-  };
+  return { repo, doc, host, listeners, setActiveTurn, releaseWatch, clearPresence, setStatus };
 };
 
 const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification => ({
@@ -189,6 +97,8 @@ const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification 
 });
 
 const deadSession = (sessionId: SessionId): ISession => ({ sessionId }) as unknown as ISession;
+
+declare const listenersShape: Awaited<ReturnType<typeof createHarness>>['listeners'];
 
 const readItems = (entry: SessionHistoryInput | undefined): MessageContent[] =>
   Array.isArray(entry?.items) ? (entry.items as unknown as MessageContent[]) : [];
@@ -286,6 +196,60 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
 
       const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
       expect(readItems(assistant)).toEqual([{ type: 'text', text: 'real answer' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it.each([
+    [
+      'error',
+      (l: typeof listenersShape, sessionId: SessionId) =>
+        l.error?.({
+          sessionId,
+          error: new Error('resource limit'),
+          session: deadSession(sessionId),
+        }),
+    ],
+    [
+      'exit',
+      (l: typeof listenersShape, sessionId: SessionId) =>
+        l.exit?.({ sessionId, exitCode: 1, session: deadSession(sessionId) }),
+    ],
+    [
+      'terminated',
+      (l: typeof listenersShape, sessionId: SessionId) =>
+        l.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) }),
+    ],
+  ])('drains buffered output on `%s` without ending an owned turn', async (kind, fire) => {
+    // All three listeners, not just `terminated`: a resource-limit violation
+    // arrives as `error`, and an in-session AI command exit arrives as `exit`.
+    // While a turn is owned they may only flush what is already buffered —
+    // the flush has to actually happen (nothing else drains it here), and
+    // none of presence/status/turn-state may be touched.
+    const sessionId = `s-drain-${kind}` as SessionId;
+    const userTurnId = `user-${kind}`;
+    const { repo, doc, host, listeners, setActiveTurn, releaseWatch, clearPresence, setStatus } =
+      await createHarness(sessionId);
+
+    try {
+      setActiveTurn(true, `assistant:${userTurnId}`);
+      const turnId = host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'buffered before the event'));
+
+      fire(listeners, sessionId);
+      await vi.advanceTimersByTimeAsync(50);
+
+      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
+      expect(readItems(assistant)).toEqual([{ type: 'text', text: 'buffered before the event' }]);
+      expect(assistant?.finished).not.toBe(true);
+      expect(releaseWatch).not.toHaveBeenCalled();
+      expect(clearPresence).not.toHaveBeenCalled();
+      expect(setStatus).not.toHaveBeenCalled();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

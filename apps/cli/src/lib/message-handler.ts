@@ -4748,7 +4748,6 @@ export class MessageHandler {
         sessionId,
         update,
         {
-          reason: 'finalized_turn_target',
           assistantEntryId: target.assistantEntryId,
           turnEpoch: target.turnEpoch,
         }
@@ -5001,7 +5000,8 @@ export class MessageHandler {
     sessionId: SessionId,
     notification: AcpSessionNotification,
     extra: {
-      reason: ACPUpdateDropReason | 'finalized_turn_target';
+      /** Only the drop event needs one; the late-route event name says it already. */
+      reason?: ACPUpdateDropReason;
       assistantEntryId?: string;
       turnEpoch?: number;
     }
@@ -5013,7 +5013,7 @@ export class MessageHandler {
         workspace_id: this.workspaceId,
         session_id: sessionId,
         session_update: notification.update.sessionUpdate,
-        reason: extra.reason,
+        ...(extra.reason ? { reason: extra.reason } : {}),
         turn_phase: this.store.getTurnPhase(sessionId),
         ...(extra.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
         ...(typeof turnEpoch === 'number' ? { turn_epoch: turnEpoch } : {}),

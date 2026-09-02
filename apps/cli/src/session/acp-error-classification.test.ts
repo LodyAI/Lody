@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACP_ERROR_CODES,
+  AgentSessionClosedError,
   getACPErrorUserMessage,
   isAcpSessionStorageIncompatibleError,
   isAuthenticationRequiredACPError,
@@ -241,5 +242,31 @@ describe('ACP error classification', () => {
         hasPromptOutput: true,
       })
     ).toBe(false);
+  });
+
+  it('never auto-recovers a prompt whose Session instance was closed', () => {
+    // `AgentSessionClosedError` classifies as `agent_disconnected` so the turn is
+    // reported correctly, but it must NOT be treated as a stale connection: that
+    // prompt was already accepted by a live agent, and Lody cannot see every side
+    // effect it may have produced, so replaying it can repeat work.
+    const closed = new AgentSessionClosedError('session-1', 'terminated');
+
+    expect(isAgentDisconnectedError(closed)).toBe(true);
+    expect(
+      shouldRecoverStaleACPConnectionPrompt({
+        error: closed,
+        alreadyAttempted: false,
+        hasPromptOutput: false,
+      })
+    ).toBe(false);
+
+    // A genuine stale-connection rejection with the same classification still is.
+    expect(
+      shouldRecoverStaleACPConnectionPrompt({
+        error: new Error('ACP connection closed'),
+        alreadyAttempted: false,
+        hasPromptOutput: false,
+      })
+    ).toBe(true);
   });
 });
