@@ -82,6 +82,9 @@ const CHIP_BUTTON_CLASS_NAME =
  */
 const CHIP_INLINE_ICON_CLASS_NAME = 'mr-1 inline-block align-middle';
 
+/** Keep the icon's unbreakable prefix on Unicode grapheme boundaries. */
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 /**
  * How much of the label is tied to the glyph.
  *
@@ -132,9 +135,9 @@ function MessageTextChip({
       className: cn(MENTION_ICON_CLASS_NAME, !isBoxed && CHIP_INLINE_ICON_CLASS_NAME),
     })
   );
-  // Splitting by code point rather than by index so a surrogate pair or a
-  // combining mark cannot be cut in half.
-  const labelChars = Array.from(label);
+  // Split by grapheme rather than code point so a surrogate pair, combining
+  // mark, variation selector, or ZWJ sequence cannot be cut in half.
+  const labelChars = Array.from(GRAPHEME_SEGMENTER.segment(label), ({ segment }) => segment);
   const head = labelChars.slice(0, CHIP_UNBREAKABLE_HEAD_CHARS).join('');
   const tail = labelChars.slice(CHIP_UNBREAKABLE_HEAD_CHARS).join('');
   // Truncation belongs to the boxed form alone: a wrapping label has nowhere to
