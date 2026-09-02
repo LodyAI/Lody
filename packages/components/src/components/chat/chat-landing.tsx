@@ -218,7 +218,10 @@ import {
   useVisibleSessionMetas,
 } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
-import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
+import {
+  getLocalProjectVisibilityKey,
+  type VisibleLocalProjectEntry,
+} from '@/lib/visible-local-project-index';
 import { shouldShowSessionSharing } from '@/lib/session-sharing';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -243,6 +246,7 @@ import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
   buildUnifiedLocalProjectOptions,
+  compareUnifiedProjectOptions,
   type LocalProjectSelection,
   type UnifiedProjectSelection,
 } from './unified-project-selector';
@@ -705,6 +709,38 @@ function WorkspaceChatLanding({
      archive toggle picks the archived list explicitly when needed
      (see `mobileHomeChats` / `mobileProjectConversations`). */
   const visibleSessions = visibleActiveSessions;
+  const projectRecency = useMemo(
+    () => getChatLandingProjectRecency(visibleSessions),
+    [visibleSessions]
+  );
+  const compareVisibleLocalProjects = useCallback(
+    (left: VisibleLocalProjectEntry, right: VisibleLocalProjectEntry) => {
+      if (isMobile) {
+        return compareChatLandingLocalProjectByRecency(left, right, projectRecency.byProject);
+      }
+      return compareUnifiedProjectOptions(
+        {
+          label: left.project.name,
+          value: left.key,
+          lastUsedAt:
+            projectRecency.byProject.get(left.key) ??
+            left.project.lastOpenedAtMs ??
+            left.project.createdAtMs ??
+            undefined,
+        },
+        {
+          label: right.project.name,
+          value: right.key,
+          lastUsedAt:
+            projectRecency.byProject.get(right.key) ??
+            right.project.lastOpenedAtMs ??
+            right.project.createdAtMs ??
+            undefined,
+        }
+      );
+    },
+    [isMobile, projectRecency.byProject]
+  );
   const liveSessionStatuses = useMemo(() => {
     const next = new Map<string, SessionStatus>();
     for (const session of visibleAllActiveSessions) {
@@ -929,24 +965,12 @@ function WorkspaceChatLanding({
     return machineId && machines.has(machineId) ? machineId : null;
   }, [localProbeResult?.machineId, machines]);
 
-  const isOwnVisibleMachine = useCallback(
-    (machineId: MachineId) => {
-      if (visibleLocalMachineId === machineId) return true;
-      const access = accessByMachineId.get(machineId);
-      return Boolean(userId && access?.ownerUserId === userId);
-    },
-    [accessByMachineId, userId, visibleLocalMachineId]
-  );
-
   const hasLocalProjects = visibleLocalProjectMap.size > 0;
   const localProjectCount = visibleLocalProjectMap.size;
 
   // ── Context type (Local Projects vs GitHub Worktrees) ──
   const [contextType, setContextType] = useState<SessionContextType>(
-    () =>
-      preSelectedContext ??
-      readChatLandingDefaults(workspaceId)?.contextType ??
-      (isMobile ? 'github' : 'chat')
+    () => preSelectedContext ?? readChatLandingDefaults(workspaceId)?.contextType ?? 'local'
   );
   const analyticsProjectKind = contextType === 'chat' ? null : contextType;
 
@@ -1249,17 +1273,17 @@ function WorkspaceChatLanding({
   );
   const getFirstVisibleLocalProjectForMachine = useCallback(
     (machineId: MachineId): LocalProjectSelection | null => {
-      for (const entry of visibleLocalProjectMap.values()) {
-        if (entry.machineId === machineId) {
-          return {
-            machineId,
+      const entry = [...visibleLocalProjectMap.values()]
+        .filter((candidate) => candidate.machineId === machineId)
+        .sort(compareVisibleLocalProjects)[0];
+      return entry
+        ? {
+            machineId: entry.machineId,
             localProjectId: entry.project.id,
-          };
-        }
-      }
-      return null;
+          }
+        : null;
     },
-    [visibleLocalProjectMap]
+    [compareVisibleLocalProjects, visibleLocalProjectMap]
   );
   const handleSelectedLocalBranchChange = useCallback((nextBranch: string | null) => {
     const currentProject = selectedLocalProjectRef.current;
@@ -1523,7 +1547,7 @@ function WorkspaceChatLanding({
     if (localProjectAvailability !== 'unavailable') return;
     toast.error(t('sidebar.localProjects.forbidden', 'Local project is not available'));
     handleSelectedLocalProjectChange(null);
-    setContextType(hasGitHubRepos ? 'github' : 'chat');
+    setContextType(hasLocalProjects ? 'local' : hasGitHubRepos ? 'github' : 'chat');
   }, [
     contextType,
     accessByMachineId,
@@ -1536,6 +1560,7 @@ function WorkspaceChatLanding({
     visibleLocalProjectAccess,
     visibleLocalProjectsLoading,
     isMetaRoomFirstSyncPending,
+    hasLocalProjects,
     hasGitHubRepos,
     t,
     handleSelectedLocalProjectChange,
@@ -2117,36 +2142,17 @@ function WorkspaceChatLanding({
   useEffect(() => {
     if (!defaultsReady) return;
     if (contextType !== 'local' || selectedLocalProject) return;
-    if (selectedMachineId) {
-      const machineProject = getFirstVisibleLocalProjectForMachine(selectedMachineId);
-      if (machineProject) {
-        handleSelectedLocalProjectChange(machineProject);
-      }
-      return;
-    }
-    // Bias the default to an own-machine project when one exists, falling
-    // back to the first shared project so teammates still get a selection.
-    let fallback: { machineId: MachineId; localProjectId: LocalProjectId } | null = null;
-    for (const entry of visibleLocalProjectMap.values()) {
-      const candidate = {
-        machineId: entry.machineId,
-        localProjectId: entry.project.id,
-      };
-      if (isOwnVisibleMachine(entry.machineId)) {
-        handleSelectedLocalProjectChange(candidate);
-        return;
-      }
-      if (!fallback) fallback = candidate;
-    }
-    if (fallback) {
-      handleSelectedLocalProjectChange(fallback);
+    const firstProject = [...visibleLocalProjectMap.values()].sort(compareVisibleLocalProjects)[0];
+    if (firstProject) {
+      handleSelectedLocalProjectChange({
+        machineId: firstProject.machineId,
+        localProjectId: firstProject.project.id,
+      });
     }
   }, [
     contextType,
     defaultsReady,
-    getFirstVisibleLocalProjectForMachine,
-    isOwnVisibleMachine,
-    selectedMachineId,
+    compareVisibleLocalProjects,
     visibleLocalProjectMap,
     selectedLocalProject,
     handleSelectedLocalProjectChange,
@@ -3434,10 +3440,7 @@ function WorkspaceChatLanding({
       </div>
     ) : null;
 
-  const mobileSheetRecency = useMemo(
-    () => getChatLandingProjectRecency(visibleSessions),
-    [visibleSessions]
-  );
+  const mobileSheetRecency = projectRecency;
 
   const desktopProjectSelection = useMemo<UnifiedProjectSelection>(() => {
     if (contextType === 'local' && selectedLocalProject) {

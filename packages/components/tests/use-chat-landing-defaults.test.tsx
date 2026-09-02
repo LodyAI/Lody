@@ -117,6 +117,35 @@ describe('contextType restore vs auto-switch (write ping-pong regression)', () =
   let lastContextType: 'local' | 'github' | 'chat' = 'chat';
   const noop = () => {};
 
+  function DefaultContextTypeProbe() {
+    const [contextType, setContextType] = useState<'local' | 'github' | 'chat'>('chat');
+    useChatLandingDefaults({
+      workspaceId: 'ws-default-context',
+      shouldRestoreContextType: true,
+      contextType,
+      setContextType,
+      executorConfigs: [],
+      machines: new Map(),
+      selectableMachines: new Map(),
+      visibleMachinesLoading: false,
+      docMetaCacheReady: true,
+      repositories: [],
+      selectedAgent: null,
+      setSelectedAgent: noop,
+      selectedMachineId: null,
+      selectedRepo: undefined,
+      setSelectedRepo: noop,
+      selectedBranch: null,
+      setSelectedBranch: noop,
+      selectedLocalProject: null,
+      setSelectedLocalProject: noop,
+      selectedLocalBranch: null,
+      setSelectedLocalBranch: noop,
+    });
+    lastContextType = contextType;
+    return null;
+  }
+
   /* Chat landing in miniature: the defaults hook restores the stored
      contextType while the sibling auto-switch effect moves a context whose
      backing collection is empty. The two writers run under DIFFERENT
@@ -161,6 +190,20 @@ describe('contextType restore vs auto-switch (write ping-pong regression)', () =
     lastContextType = contextType;
     return null;
   }
+
+  it('defaults to local when the workspace has no stored context type', () => {
+    localStorage.clear();
+    lastContextType = 'chat';
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<DefaultContextTypeProbe />);
+    });
+    expect(lastContextType).toBe('local');
+    act(() => root.unmount());
+    container.remove();
+  });
 
   it('restores once and lets the auto-switch settle instead of ping-ponging', () => {
     localStorage.clear();
