@@ -283,6 +283,24 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `stopReason` (cron, `ScheduleWakeup`, deferred work), and those must still reach the
   Loro doc. The target is cleared only when a new turn owns ACP updates (normally
   `beginTurn()`, but visible dispatch defers until prompt start) or replay suppression.
+  INVARIANT: a SessionManager lifecycle event (`error`/`exit`/`terminated`) must NEVER
+  end a turn the `SessionExecutionService` still owns
+  (`executionService.getExecutionSnapshot(id).hasActiveTurn`). While a turn is owned, a
+  listener may only call `drainACPBuffers` (flush ACP + usage, idempotent) and report the
+  closed instance; it must not clear session presence, write `status: idle`, release the
+  Code Collab workspace watch, or touch turn state. Never reach for `finalizeACPState`
+  there — its `finally` unconditionally clears the turn, destroying the routing key the
+  live turn's remaining output still needs. Combined with the deferred window that dropped
+  a 505-second turn's 82 message chunks and then recorded `agent_no_output`, because a
+  resume fallback terminates the FAILED Session instance while the turn continues on its
+  replacement. Ownership is INSTANCE identity, never the session id: lifecycle events
+  carry the exact `Session` that produced them, and
+  `SessionExecutionService.onSessionInstanceClosed` acts only when
+  `runtime.session === instance`. Drop telemetry
+  (`out_of_turn_acp_update_without_target`) carries `reason`/`turn_phase`/`turn_epoch`,
+  because "no turn at all" and "a live turn that has not claimed routing yet" are
+  otherwise the same event and only the second is a bug. Regression coverage:
+  `tests/message-handler-lifecycle-turn-ownership.test.ts`.
   This is what lets the web derive the "session will continue" panel from the Cron/ScheduleWakeup
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in
   `SessionMeta`, not a new history item); see `@lody/shared`

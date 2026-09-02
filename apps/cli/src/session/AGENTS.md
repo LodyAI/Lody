@@ -155,6 +155,13 @@ delegation proofs or a shared-machine gate without a new product and security de
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for
   turn A can overwrite the activation for turn B that arrived during an awaited
   history mutation, leaving B pending and permanently unwatched.
+  INVARIANT: the no-turnId `finalizeACPState` overload stamps `finished=true` on
+  whichever assistant entry is last and then unconditionally clears turn state, so only
+  the turn's OWNER may call it. Process lifecycle listeners must not — see the
+  lifecycle invariant in `../lib/AGENTS.md`; they drain buffers and report the closed
+  Session INSTANCE through `onSessionInstanceClosed`, which acts only when
+  `runtime.session === instance` so a resume fallback terminating the failed instance
+  cannot end the live turn running on its replacement.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
@@ -173,7 +180,14 @@ delegation proofs or a shared-machine gate without a new product and security de
   `acp_internal_error`. Continue-session prompt recovery may terminate and restore
   the ACP session once before retrying the same prompt, but only when no ACP output
   has buffered/flushed for that assistant turn; after visible output, never replay
-  the user prompt automatically.
+  the user prompt automatically. That gate fails CLOSED: an absent
+  `hasPromptOutputForTurn` dep, or a session whose transient state is already gone,
+  reads as "may already have acted" and refuses the replay. Unobservable is not the
+  same as "nothing happened", and the observable signal is incomplete anyway —
+  permission requests and `fs/write_text_file` are separate JSON-RPC requests that
+  never reach `enqueueACPUpdate`, so a replay can re-run tools the agent already ran.
+  `AgentSessionClosedError` is excluded from recovery outright: that prompt was
+  accepted by a live agent whose process then died.
   DeepSeek Harness persistence compression mismatches are a distinct
   `acp_session_storage_incompatible` failure, not a generic internal error; keep
   matching narrow to the backend's artifact/compression diagnostic.
@@ -188,7 +202,11 @@ delegation proofs or a shared-machine gate without a new product and security de
   and skips the completion notification. It still runs the full finalization
   (diff stats, PR detection, auto-commit) and still ADVANCES the dispatch pointer:
   the prompt was delivered, so re-dispatching would spin the same silent failure.
-  A missing `hasPromptOutputForTurn` dep fails open — never accuse a turn on a guess.
+  A missing dep fails OPEN here and only here: `observePromptOutputForTurn` returns
+  `undefined` for an unobservable turn and the guard declines to accuse it. Do not
+  confuse this with the replay gate above, which needs the opposite default — the two
+  read the same observation and take opposite conservative answers, which is why they
+  are separate accessors.
   Code Collab v1 turn markers and history fileDiff capture were removed. v2 may
   persist exact per-turn path/add/del caches derived from the CLI-local ACP evidence
   store after ACP finalization; diff content still comes only from the CLI store.

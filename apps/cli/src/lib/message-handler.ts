@@ -670,6 +670,17 @@ export type MessageDispatchContext = {
 };
 
 type ControlMessage = LocalSessionControlRequestValidated;
+
+/**
+ * Why an incoming ACP update had no assistant-entry target. `turn_not_owning_acp_updates`
+ * is the interesting one: a live visible turn defers ACP ownership until its prompt
+ * starts, so output arriving in that window has nowhere to go.
+ */
+type ACPUpdateDropReason =
+  | 'session_state_missing'
+  | 'turn_idle_without_late_target'
+  | 'turn_not_owning_acp_updates';
+
 type ConversationTurnGateContext = {
   dispatchSource?: SessionDispatchSource;
   sessionDoc: SessionDocument;
@@ -3718,11 +3729,30 @@ export class MessageHandler {
       this.handleImageGenerationEnd(sessionId, event);
     });
 
-    // Session error: flush ACP updates first, then set to idle (error is turn-level, recorded in history).
+    // INVARIANT: a process lifecycle event must never end a turn the
+    // `SessionExecutionService` still owns. Turn state, session presence, the
+    // idle status write, and the Code Collab workspace watch all belong to the
+    // turn owner; a listener that takes them anyway kills the routing target of
+    // a live turn (a resume fallback terminates the FAILED Session instance
+    // while the turn continues on a new one). All a listener may do while a turn
+    // is running is `drainACPBuffers` plus telling the execution service which
+    // exact instance closed, so the owning fiber can end its own turn.
     this.sessionManager.on('error', (event) => {
       void (async () => {
         this.logger.error(`[${event.sessionId}] Session error event received:`, event);
         const sessionId = event.sessionId;
+        const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+        this.executionService.onSessionInstanceClosed(sessionId, event.session, 'error');
+        // Symmetric with exit/terminated: a late event for a GC-cleaned session
+        // must not rebuild its transient state.
+        if (!this.store.has(sessionId)) {
+          this.logger.debug(`[${sessionId}] Ignoring error event for GC-cleaned session`);
+          return;
+        }
+        if (turnWasActive) {
+          await this.drainACPBuffers(sessionId);
+          return;
+        }
         this.clearSessionActivePresence(sessionId);
         await this.finalizeACPState(sessionId);
         await this.flushSessionUsage(sessionId);
@@ -3732,13 +3762,18 @@ export class MessageHandler {
       })();
     });
 
-    // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
+        const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+        this.executionService.onSessionInstanceClosed(sessionId, exit.session, 'exit');
         if (!this.store.has(sessionId)) {
           this.logger.debug(`[${sessionId}] Ignoring exit event for GC-cleaned session`);
+          return;
+        }
+        if (turnWasActive) {
+          await this.drainACPBuffers(sessionId);
           return;
         }
         this.clearSessionActivePresence(sessionId);
@@ -3750,17 +3785,30 @@ export class MessageHandler {
       })();
     });
 
-    // Session termination can race with exit/error; always flush ACP updates first.
-    // Skip if session was already cleaned by GC to avoid re-creating transient state.
+    // Session termination can race with exit/error, so everything below has to
+    // tolerate running twice (resource-limit violations emit `error` and then
+    // `terminated`).
     this.sessionManager.on('terminated', (event) => {
-      this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
+      const sessionId = event.sessionId;
+      const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+      this.executionService.onSessionInstanceClosed(sessionId, event.session, 'terminated');
+      if (!turnWasActive) {
+        // Releasing the watch cuts Code Collab off from the workspace. That is
+        // correct once nothing is running, but during a resume fallback this
+        // event names a dead instance while the turn keeps editing files through
+        // its replacement. The watch's own idle timer reclaims it either way.
+        this.codeCollabV2Service.releaseWorkspaceWatchForOwner(sessionId);
+      }
       void (async () => {
-        const sessionId = event.sessionId;
         if (!this.store.has(sessionId)) {
           this.logger.debug(`[${sessionId}] Ignoring terminated event for GC-cleaned session`);
           return;
         }
         try {
+          if (turnWasActive) {
+            await this.drainACPBuffers(sessionId);
+            return;
+          }
           this.clearSessionActivePresence(sessionId);
           await this.finalizeACPState(sessionId);
           await this.flushSessionUsage(sessionId);
@@ -4685,9 +4733,12 @@ export class MessageHandler {
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
     if (!target) {
-      this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
+      const reason = this.describeACPUpdateDropReason(sessionId);
+      this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update, {
+        reason,
+      });
       this.logger.debug(
-        `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate})`
+        `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate}, reason=${reason}, turnPhase=${this.store.getTurnPhase(sessionId)})`
       );
       return;
     }
@@ -4697,6 +4748,7 @@ export class MessageHandler {
         sessionId,
         update,
         {
+          reason: 'finalized_turn_target',
           assistantEntryId: target.assistantEntryId,
           turnEpoch: target.turnEpoch,
         }
@@ -4927,20 +4979,44 @@ export class MessageHandler {
     });
   }
 
+  /**
+   * Why an ACP update found no routing target. Without this the drop counter is
+   * uninterpretable: "no turn at all" and "a live turn that has not claimed ACP
+   * routing yet" are the same event today, and only the second one is a bug.
+   */
+  private describeACPUpdateDropReason(sessionId: SessionId): ACPUpdateDropReason {
+    if (!this.store.has(sessionId)) {
+      return 'session_state_missing';
+    }
+    if (this.store.getTurnPhase(sessionId) === 'idle') {
+      return 'turn_idle_without_late_target';
+    }
+    // A non-idle turn with no resolvable target can only mean the turn has not
+    // taken ACP ownership yet (deferred until prompt start).
+    return 'turn_not_owning_acp_updates';
+  }
+
   private captureACPUpdateInvariant(
     eventName: 'late_acp_update_routed_to_finalized_turn' | 'out_of_turn_acp_update_without_target',
     sessionId: SessionId,
     notification: AcpSessionNotification,
-    extra?: { assistantEntryId?: string; turnEpoch?: number }
+    extra: {
+      reason: ACPUpdateDropReason | 'finalized_turn_target';
+      assistantEntryId?: string;
+      turnEpoch?: number;
+    }
   ): void {
+    const turnEpoch = extra.turnEpoch ?? this.store.getTurnEpoch(sessionId);
     captureCli(
       eventName,
       {
         workspace_id: this.workspaceId,
         session_id: sessionId,
         session_update: notification.update.sessionUpdate,
-        ...(extra?.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
-        ...(typeof extra?.turnEpoch === 'number' ? { turn_epoch: extra.turnEpoch } : {}),
+        reason: extra.reason,
+        turn_phase: this.store.getTurnPhase(sessionId),
+        ...(extra.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
+        ...(typeof turnEpoch === 'number' ? { turn_epoch: turnEpoch } : {}),
       },
       { tier: 'C' }
     );
@@ -5778,6 +5854,32 @@ export class MessageHandler {
         `[${sessionId}] Failed to persist late Code Collab v2 evidence for turn ${turnId}: ${formatErrorMessage(error)}`
       );
       this.scheduleCodeCollabTurnRetry(sessionId, turnId);
+    }
+  }
+
+  /**
+   * Write out what is already buffered, and nothing else.
+   *
+   * This is what a process lifecycle listener is allowed to do while the
+   * `SessionExecutionService` still owns a turn. It deliberately does NOT reuse
+   * `finalizeACPState`: that one snapshots the routing target across a long
+   * await chain, stamps `finished=true` on the assistant entry, and its `finally`
+   * unconditionally clears the turn — for a live turn that destroys the routing
+   * key its remaining output needs, which is exactly how a 505-second turn's
+   * 82 message chunks were dropped and then reported as `agent_no_output`.
+   *
+   * Must stay idempotent: a resource-limit violation fires `error` and then
+   * `terminated`, so this runs twice for one failure.
+   */
+  private async drainACPBuffers(sessionId: SessionId): Promise<void> {
+    try {
+      await this.flushACPUpdatesNow(sessionId);
+      // Also drains buffered context-window usage.
+      await this.flushSessionUsage(sessionId);
+    } catch (error) {
+      this.logger.error(
+        `[${sessionId}] Failed to drain ACP buffers for a session whose turn is still active: ${formatErrorMessage(error)}`
+      );
     }
   }
 
@@ -9873,7 +9975,11 @@ export class MessageHandler {
    */
   private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
     if (!this.store.has(sessionId)) {
-      return false;
+      // No transient state means we cannot observe anything about this turn, and
+      // this guard's only caller replays a user prompt. Unobservable must read as
+      // "may already have acted" — `observePromptOutputForTurn` is the accessor
+      // for callers that need to tell "nothing happened" from "cannot tell".
+      return true;
     }
     const state = this.store.get(sessionId);
     const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);

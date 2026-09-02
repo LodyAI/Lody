@@ -110,6 +110,8 @@ import {
   isGitExecutableNotFoundError,
 } from './worktree/git-process-error';
 import {
+  AgentSessionClosedError,
+  type AgentSessionCloseCause,
   getACPErrorUserMessage,
   isAgentDisconnectedError,
   mapACPErrorToFailureReason,
@@ -239,6 +241,12 @@ type TurnRuntimeState = {
   yieldedFinalization: Promise<void>;
   pendingSession?: Promise<ISession>;
   fiber?: Fiber.RuntimeFiber<unknown, unknown>;
+  /**
+   * Installed while this turn is waiting on an ACP prompt. `onSessionInstanceClosed`
+   * calls it when the exact Session instance the prompt runs on is closed, so the
+   * wait fails instead of hanging on a promise the dead process will never settle.
+   */
+  failPromptOnSessionClose?: (error: unknown) => void;
 };
 
 export type SessionExecutionSnapshot = {
@@ -688,6 +696,70 @@ export class SessionExecutionService {
       successorReady,
       signalSuccessor,
     };
+  }
+
+  /**
+   * Wait for the prompt tail, but stop waiting if the Session instance it runs
+   * on is closed underneath us. An ACP process that dies (or is terminated by a
+   * resource-limit failure) leaves `agentClient.prompt` pending forever, and the
+   * turn owner is the only party allowed to end its own turn — so the lifecycle
+   * listener hands the close here rather than finalizing the turn itself.
+   */
+  private async awaitPromptTailWithInstanceCloseGuard(
+    runtime: TurnRuntimeState,
+    tail: Promise<void>
+  ): Promise<void> {
+    let failOnClose!: (error: unknown) => void;
+    const closed = new Promise<never>((_resolve, reject) => {
+      failOnClose = reject;
+    });
+    runtime.failPromptOnSessionClose = failOnClose;
+    try {
+      // Promise.race subscribes to both, so neither branch can become an
+      // unhandled rejection once the other one wins.
+      await Promise.race([tail, closed]);
+    } finally {
+      runtime.failPromptOnSessionClose = undefined;
+    }
+  }
+
+  /**
+   * The Session instance `sessionId` was running on has closed. Only the turn
+   * that actually owns that instance may act on it: during a resume fallback the
+   * failed instance is terminated while the live turn is being rebound to a new
+   * one, and finalizing on the id alone is what silently dropped a whole turn of
+   * agent output. Ownership is instance identity, never the session id.
+   */
+  onSessionInstanceClosed(
+    sessionId: SessionId,
+    instance: ISession | undefined,
+    cause: AgentSessionCloseCause
+  ): boolean {
+    if (!instance) {
+      return false;
+    }
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime || runtime.session !== instance) {
+      return false;
+    }
+    // Cancel and turn-error paths terminate the session themselves as part of
+    // their own teardown; they own the outcome and must not be re-reported as a
+    // disconnect. Only a prompt still waiting on the dead process needs rescuing.
+    if (!runtime.promptInFlight || runtime.cancelRequested || runtime.cancelFinalized) {
+      return false;
+    }
+    const failPrompt = runtime.failPromptOnSessionClose;
+    if (!failPrompt) {
+      return false;
+    }
+    // Resource-limit violations arrive as `error` and then `terminated`; the
+    // second one must be a no-op.
+    runtime.failPromptOnSessionClose = undefined;
+    this.deps.logger.warn(
+      `[${sessionId}] Agent session instance closed (${cause}) while turn ${runtime.turnId} was prompting; failing the turn as disconnected`
+    );
+    failPrompt(new AgentSessionClosedError(sessionId, cause));
+    return true;
   }
 
   private async awaitPromptHandoffTail(
@@ -2771,7 +2843,10 @@ export class SessionExecutionService {
                                 signal,
                               }),
                             });
-                            await self.awaitPromptHandoffTail(runtime, initialRun);
+                            await self.awaitPromptTailWithInstanceCloseGuard(
+                              runtime,
+                              self.awaitPromptHandoffTail(runtime, initialRun)
+                            );
                           }
                         )
                       )
@@ -3786,8 +3861,13 @@ export class SessionExecutionService {
           prompt(promptBlocks).pipe(
             Effect.catchAll((error) =>
               Effect.gen(function* () {
+                // Fail CLOSED when the dependency is not wired: an unobservable
+                // turn must be treated as one that may already have acted, or
+                // the replay re-runs tools the agent already executed. (The
+                // no-output guard needs the opposite default — see
+                // `turnProducedVisibleOutput`.)
                 const hasPromptOutput =
-                  self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? false;
+                  self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? true;
                 if (
                   runtime.turnId !== turnId ||
                   !shouldRecoverStaleACPConnectionPrompt({

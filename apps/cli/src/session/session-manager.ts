@@ -410,7 +410,25 @@ export type AgentStartConfig = {
   deferAcpSessionIdPersistence?: boolean;
 };
 
-export type SessionTerminatedEvent = {
+/**
+ * A `Session` INSTANCE is not the same thing as a `sessionId`. One Lody session
+ * is served by several instances over its life (idle restore, resume fallback
+ * after `loadSession` fails, the one stale-ACP prompt retry), and a failed
+ * `createAgent` terminates a brand new instance that never ran anything.
+ *
+ * Lifecycle events therefore carry the exact instance that produced them, so a
+ * consumer asking "did the agent MY turn is running on die?" compares instances
+ * instead of matching on the id and finalizing a live turn owned by a different
+ * instance.
+ */
+export type SessionInstanceEvent = {
+  session: ISession;
+};
+
+export type SessionManagerErrorEvent = SessionErrorEvent & SessionInstanceEvent;
+export type SessionManagerExitEvent = SessionExitEvent & SessionInstanceEvent;
+
+export type SessionTerminatedEvent = SessionInstanceEvent & {
   sessionId: SessionId;
   exitCode?: number;
   [key: string]: unknown;
@@ -419,8 +437,8 @@ export type SessionTerminatedEvent = {
 interface SessionManagerEvents {
   create: (sessionId: SessionId, exec: ISession) => void;
   output: (output: SessionOutputEvent) => void;
-  error: (error: SessionErrorEvent) => void;
-  exit: (exit: SessionExitEvent) => void;
+  error: (error: SessionManagerErrorEvent) => void;
+  exit: (exit: SessionManagerExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
   onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
   onUsageUpdate: (event: {
@@ -2244,13 +2262,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     });
 
     session.on('error', (event: SessionErrorEvent) => {
-      this.emit('error', event);
+      this.emit('error', { ...event, session });
     });
 
     session.on('exit', (event: SessionExitEvent) => {
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
-      this.emit('exit', event);
+      this.emit('exit', { ...event, session });
     });
 
     session.on('terminated', (event: SessionExitEvent) => {
@@ -2259,6 +2277,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,
+        session,
       };
       this.emit('terminated', terminatedEvent);
     });
