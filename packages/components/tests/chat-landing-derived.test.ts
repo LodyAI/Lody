@@ -414,7 +414,7 @@ describe('getChatLandingInitialDataLoading', () => {
         isVisibleMachinesLoading: false,
         isDocMetaCacheReady: false,
         localMachineStateAttempted: true,
-        hasSelectableMachine: true,
+        hasSelectableMachine: false,
       })
     ).toBe(true);
 
@@ -427,6 +427,21 @@ describe('getChatLandingInitialDataLoading', () => {
         hasSelectableMachine: true,
       })
     ).toBe(true);
+  });
+
+  it('does not hold the selector shut for the whole doc-metadata bootstrap scan', () => {
+    // A cold start with many sessions keeps the doc-meta cache "not ready" for
+    // as long as the bootstrap scan runs. Once a selectable machine exists the
+    // user can already choose one, and neither empty-state hint can fire.
+    expect(
+      getChatLandingInitialDataLoading({
+        isRuntimeInitializing: false,
+        isVisibleMachinesLoading: false,
+        isDocMetaCacheReady: false,
+        localMachineStateAttempted: true,
+        hasSelectableMachine: true,
+      })
+    ).toBe(false);
   });
 
   it('continues initial loading while machine visibility is pending and no local option exists', () => {

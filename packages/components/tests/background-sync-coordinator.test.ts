@@ -3,9 +3,12 @@ import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shar
 import {
   createBackgroundSyncCoordinator,
   resolveEagerSyncPolicy,
+  EAGER_SYNC_PRIORITY_RUNNING,
+  MOBILE_EAGER_SYNC_STAGES,
   type BackgroundSyncCoordinatorDeps,
   type EagerSyncHighWaterStore,
   type EagerSyncPolicy,
+  type EagerSyncStage,
   type PrefetchOutcome,
   type SessionActivitySnapshot,
 } from '../src/providers/background-sync-coordinator';
@@ -190,6 +193,29 @@ function createFakeVisibilitySource(initial: SessionId[] = []) {
   };
 }
 
+function createFakeInteractionSource() {
+  let interacting = false;
+  const subscribers = new Set<() => void>();
+  return {
+    set: (next: boolean) => {
+      if (interacting === next) {
+        return;
+      }
+      interacting = next;
+      for (const subscriber of Array.from(subscribers)) {
+        subscriber();
+      }
+    },
+    view: {
+      isInteracting: () => interacting,
+      subscribe: (onChange: () => void) => {
+        subscribers.add(onChange);
+        return () => subscribers.delete(onChange);
+      },
+    },
+  };
+}
+
 const RUNNING: SessionStatus = { type: 'running' };
 
 function setup(
@@ -198,6 +224,7 @@ function setup(
     policy?: Partial<EagerSyncPolicy>;
     highWaterStore?: EagerSyncHighWaterStore;
     visibility?: BackgroundSyncCoordinatorDeps['visibility'];
+    interaction?: BackgroundSyncCoordinatorDeps['interaction'];
   } = {}
 ) {
   const time = createFakeTime();
@@ -225,13 +252,14 @@ function setup(
     policy,
     highWaterStore: options.highWaterStore,
     visibility: options.visibility,
+    interaction: options.interaction,
   };
   const coordinator = createBackgroundSyncCoordinator(deps);
   return { coordinator, time, registry, env, activity, prefetcher, policy };
 }
 
 describe('createBackgroundSyncCoordinator', () => {
-  it('uses a bounded web policy and full desktop/mobile policy', () => {
+  it('uses a bounded web policy and a full desktop policy', () => {
     expect(resolveEagerSyncPolicy('web')).toMatchObject({
       concurrency: 2,
       batchSize: 4,
@@ -246,7 +274,37 @@ describe('createBackgroundSyncCoordinator', () => {
       candidateWindow: Number.POSITIVE_INFINITY,
       maxWarmDocs: 96,
     });
-    expect(resolveEagerSyncPolicy('mobile')).toBe(resolveEagerSyncPolicy('desktop'));
+    expect(resolveEagerSyncPolicy('desktop').stages).toBeUndefined();
+  });
+
+  it('gives mobile its own gentler, progressively widening policy', () => {
+    const mobile = resolveEagerSyncPolicy('mobile');
+    const desktop = resolveEagerSyncPolicy('desktop');
+
+    // A phone has one main thread and every prefetch deserializes a doc on it.
+    expect(mobile).toMatchObject({
+      concurrency: 1,
+      batchSize: 3,
+      batchCooldownMs: 3_000,
+      maxWarmDocs: 12,
+    });
+    expect(mobile.concurrency).toBeLessThan(desktop.concurrency);
+    expect(mobile.batchCooldownMs).toBeGreaterThan(desktop.batchCooldownMs);
+    expect(mobile.maxWarmDocs).toBeLessThan(desktop.maxWarmDocs);
+
+    // It starts on the on-screen/pinned/running set, widens monotonically, and
+    // still reaches full coverage at the top of the ladder.
+    const stages = mobile.stages ?? [];
+    expect(stages.length).toBeGreaterThan(1);
+    expect(stages[0]?.minPriority).toBe(EAGER_SYNC_PRIORITY_RUNNING);
+    expect(stages[0]?.candidateWindow).toBeLessThan(desktop.candidateWindow);
+    for (let i = 1; i < stages.length; i++) {
+      expect(stages[i].candidateWindow).toBeGreaterThan(stages[i - 1].candidateWindow);
+      expect(stages[i].minPriority).toBeLessThanOrEqual(stages[i - 1].minPriority);
+    }
+    expect(stages[stages.length - 1]?.minPriority).toBe(0);
+    expect(stages[stages.length - 1]?.candidateWindow).toBe(Number.POSITIVE_INFINITY);
+    expect(MOBILE_EAGER_SYNC_STAGES).toBe(stages);
   });
 
   it('prefetches a recently-active session on start', async () => {
@@ -616,6 +674,220 @@ describe('createBackgroundSyncCoordinator', () => {
     time.advance(policy.prefetchTimeoutMs);
     await tick();
     expect(coordinator.getState().inFlight).toEqual([]);
+  });
+
+  it('starts on the first stage and only widens after the queue drains and idles', async () => {
+    const visibility = createFakeVisibilitySource([sid('visible')]);
+    const stages: EagerSyncStage[] = [
+      { minPriority: EAGER_SYNC_PRIORITY_RUNNING, candidateWindow: 4, holdMs: 5_000 },
+      { minPriority: 0, candidateWindow: 3, holdMs: 10_000 },
+      { minPriority: 0, candidateWindow: Number.POSITIVE_INFINITY, holdMs: 0 },
+    ];
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('visible'), lastMessageAt: 10 },
+        { sessionId: sid('unread'), lastMessageAt: 400, lastReadAt: 1 },
+        { sessionId: sid('quiet-new'), lastMessageAt: 300, lastReadAt: 300 },
+        { sessionId: sid('quiet-old'), lastMessageAt: 200, lastReadAt: 200 },
+      ],
+      policy: { concurrency: 1, stages },
+      visibility: visibility.view,
+    });
+
+    coordinator.start();
+    await tick();
+    // Stage 0: only the on-screen session qualifies, despite three sessions
+    // having strictly newer activity.
+    expect(prefetcher.calls).toEqual([sid('visible')]);
+    expect(coordinator.getState().stage).toBe(0);
+
+    // Still in flight → the hold has not even started.
+    time.advance(5_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(0);
+
+    prefetcher.resolve(sid('visible'), 'synced');
+    await tick();
+    expect(coordinator.getState().stage).toBe(0);
+
+    time.advance(4_999);
+    await tick();
+    expect(coordinator.getState().stage).toBe(0);
+    expect(prefetcher.calls).toEqual([sid('visible')]);
+
+    time.advance(1);
+    await tick();
+    // Stage 1: the priority floor drops, so unread/quiet sessions inside the
+    // window qualify — but the window still excludes the tail.
+    expect(coordinator.getState().stage).toBe(1);
+    expect(prefetcher.calls).toEqual([sid('visible'), sid('unread')]);
+
+    prefetcher.resolve(sid('unread'), 'synced');
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('visible'), sid('unread'), sid('quiet-new')]);
+
+    prefetcher.resolve(sid('quiet-new'), 'synced');
+    await tick();
+    time.advance(10_000);
+    await tick();
+    // Stage 2: unbounded window picks up the tail.
+    expect(coordinator.getState().stage).toBe(2);
+    expect(prefetcher.calls).toEqual([
+      sid('visible'),
+      sid('unread'),
+      sid('quiet-new'),
+      sid('quiet-old'),
+    ]);
+  });
+
+  it('holds the ladder while work keeps arriving on the current stage', async () => {
+    const stages: EagerSyncStage[] = [
+      { minPriority: 0, candidateWindow: 1, holdMs: 1_000 },
+      { minPriority: 0, candidateWindow: Number.POSITIVE_INFINITY, holdMs: 0 },
+    ];
+    const { coordinator, prefetcher, activity, time } = setup({
+      activity: [{ sessionId: sid('a'), lastMessageAt: 100 }],
+      policy: { concurrency: 1, stages },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+
+    // Hold armed, but new top-of-window activity re-fills the queue before it
+    // elapses → the stage must not advance on the wall clock alone.
+    time.advance(999);
+    activity.emit({ sessionId: sid('a'), lastMessageAt: 200 });
+    await tick();
+    time.advance(1);
+    await tick();
+    expect(coordinator.getState().stage).toBe(0);
+
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+    time.advance(1_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(1);
+  });
+
+  it('restarts the ladder after a background/offline pause', async () => {
+    const visibility = createFakeVisibilitySource([sid('visible')]);
+    const stages: EagerSyncStage[] = [
+      { minPriority: EAGER_SYNC_PRIORITY_RUNNING, candidateWindow: 4, holdMs: 1_000 },
+      { minPriority: 0, candidateWindow: Number.POSITIVE_INFINITY, holdMs: 0 },
+    ];
+    const { coordinator, prefetcher, env, activity, time } = setup({
+      activity: [{ sessionId: sid('visible'), lastMessageAt: 10 }],
+      policy: { concurrency: 1, stages },
+      visibility: visibility.view,
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('visible'), 'synced');
+    await tick();
+    time.advance(1_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(1);
+
+    env.set({ visible: false });
+    await tick();
+    activity.emit({ sessionId: sid('quiet'), lastMessageAt: 500, lastReadAt: 500 });
+    await tick();
+
+    env.set({ visible: true });
+    await tick();
+    // Coming back is a fresh cold start: the quiet session does not clear the
+    // stage-0 floor, so nothing new is prefetched until the ladder climbs again.
+    expect(coordinator.getState().stage).toBe(0);
+    expect(prefetcher.calls).toEqual([sid('visible')]);
+
+    time.advance(1_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(1);
+    expect(prefetcher.calls).toEqual([sid('visible'), sid('quiet')]);
+  });
+
+  it('starts no prefetch while the user is interacting, and resumes when they stop', async () => {
+    const interaction = createFakeInteractionSource();
+    const { coordinator, prefetcher, activity } = setup({
+      activity: [{ sessionId: sid('a'), lastMessageAt: 100 }],
+      interaction: interaction.view,
+    });
+
+    interaction.set(true);
+    coordinator.start();
+    await tick();
+    expect(prefetcher.calls).toEqual([]);
+    expect(coordinator.getState().queued).toEqual([sid('a')]);
+
+    activity.emit({ sessionId: sid('b'), lastMessageAt: 200 });
+    await tick();
+    expect(prefetcher.calls).toEqual([]);
+
+    interaction.set(false);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('b'), sid('a')]);
+  });
+
+  it('leaves an in-flight prefetch running when interaction starts', async () => {
+    const interaction = createFakeInteractionSource();
+    const { coordinator, prefetcher } = setup({
+      activity: [
+        { sessionId: sid('a'), lastMessageAt: 200 },
+        { sessionId: sid('b'), lastMessageAt: 100 },
+      ],
+      policy: { concurrency: 1 },
+      interaction: interaction.view,
+    });
+
+    coordinator.start();
+    await tick();
+    expect(coordinator.getState().inFlight).toEqual([sid('a')]);
+
+    // Aborting here would only cost a fresh room join later; it buys no frame back.
+    interaction.set(true);
+    await tick();
+    expect(coordinator.getState().inFlight).toEqual([sid('a')]);
+
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a')]);
+  });
+
+  it('does not widen the candidate scope while the user is interacting', async () => {
+    const interaction = createFakeInteractionSource();
+    const stages: EagerSyncStage[] = [
+      { minPriority: 0, candidateWindow: 1, holdMs: 1_000 },
+      { minPriority: 0, candidateWindow: Number.POSITIVE_INFINITY, holdMs: 0 },
+    ];
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('a'), lastMessageAt: 200 },
+        { sessionId: sid('b'), lastMessageAt: 100 },
+      ],
+      policy: { concurrency: 1, stages },
+      interaction: interaction.view,
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+
+    interaction.set(true);
+    time.advance(10_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(0);
+    expect(prefetcher.calls).toEqual([sid('a')]);
+
+    interaction.set(false);
+    await tick();
+    time.advance(1_000);
+    await tick();
+    expect(coordinator.getState().stage).toBe(1);
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b')]);
   });
 
   it('stop() clears the queue and aborts in-flight work', async () => {

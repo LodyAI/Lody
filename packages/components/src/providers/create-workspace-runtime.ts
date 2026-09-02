@@ -107,6 +107,11 @@ import { WorkspaceLocalMachineMonitorTransport } from './workspace-local-machine
 import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
+import {
+  bindEagerSyncInteractionSignalToDom,
+  createEagerSyncInteractionSignal,
+  type EagerSyncInteractionSignal,
+} from './eager-sync-interaction';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import { listDocMetaEntries } from '@/lib/doc-meta-batch';
 import {
@@ -576,6 +581,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let backgroundSyncCoordinator: BackgroundSyncCoordinator | null = null;
   let backgroundSyncCoordinatorStartPromise: Promise<void> | null = null;
   let backgroundSyncHighWaterStore: EagerSyncHighWaterCache | null = null;
+  let backgroundSyncInteraction: EagerSyncInteractionSignal | null = null;
+  let unbindBackgroundSyncInteraction: (() => void) | null = null;
   let cancelDelayedBackgroundSyncStart: (() => void) | null = null;
   let startBackgroundSyncCoordinator: () => void = () => {};
 
@@ -4142,6 +4149,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   };
 
+  const disposeBackgroundSyncInteraction = () => {
+    unbindBackgroundSyncInteraction?.();
+    unbindBackgroundSyncInteraction = null;
+    backgroundSyncInteraction?.dispose();
+    backgroundSyncInteraction = null;
+  };
+
   const beginBackgroundSyncCoordinator = () => {
     if (backgroundSyncCoordinator || backgroundSyncCoordinatorStartPromise || disposePromise) {
       return;
@@ -4177,6 +4191,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         return;
       }
       backgroundSyncHighWaterStore = highWaterStore;
+      const interactionSignal = createEagerSyncInteractionSignal();
+      backgroundSyncInteraction = interactionSignal;
+      unbindBackgroundSyncInteraction = bindEagerSyncInteractionSignalToDom(interactionSignal);
 
       backgroundSyncCoordinator = createBackgroundSyncCoordinator({
         activitySource: {
@@ -4257,6 +4274,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             };
           },
         },
+        // Prefetching deserializes a doc on the main thread, so it waits its
+        // turn behind whatever the user is doing with their hands.
+        interaction: interactionSignal,
         clock: { now: () => Date.now() },
         scheduler: {
           setTimeout: (handler, ms) => setTimeout(handler, ms),
@@ -4273,6 +4293,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (backgroundSyncHighWaterStore === highWaterStore) {
           backgroundSyncHighWaterStore = null;
         }
+        disposeBackgroundSyncInteraction();
         return;
       }
       coordinator.start();
@@ -4286,6 +4307,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         backgroundSyncCoordinator = null;
         backgroundSyncHighWaterStore?.close();
         backgroundSyncHighWaterStore = null;
+        disposeBackgroundSyncInteraction();
       })
       .finally(() => {
         backgroundSyncCoordinatorStartPromise = null;
@@ -4333,6 +4355,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       backgroundSyncCoordinator = null;
       backgroundSyncHighWaterStore?.close();
       backgroundSyncHighWaterStore = null;
+      disposeBackgroundSyncInteraction();
       localReconnectLoop?.stop();
       cloudReconnectLoop?.stop();
       if (reconnectBackstopTimer) {

@@ -388,7 +388,19 @@ export function getChatLandingInitialDataLoading({
   localMachineStateAttempted,
   hasSelectableMachine,
 }: ChatLandingInitialDataLoadingArgs): boolean {
-  if (isRuntimeInitializing || !isDocMetaCacheReady || !localMachineStateAttempted) {
+  if (isRuntimeInitializing || !localMachineStateAttempted) {
+    return true;
+  }
+
+  // The doc-metadata cache only becomes "ready" once the full bootstrap scan
+  // finishes, which on a cold start with many sessions takes long enough that
+  // gating on it alone disables the machine selector for the entire sync. It is
+  // a guard against empty-state flashes, not a prerequisite for choosing a
+  // machine: a selectable machine already implies at least one reachable
+  // machine AND at least one agent config, so neither empty-state hint can
+  // fire. With one in hand the user may pick and start typing while the rest of
+  // the workspace is still streaming in.
+  if (!isDocMetaCacheReady && !hasSelectableMachine) {
     return true;
   }
 

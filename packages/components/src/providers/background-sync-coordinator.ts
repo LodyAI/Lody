@@ -19,6 +19,16 @@ import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shar
  * - Candidate scope depends on the surface: native/electron can eventually
  *   warm all candidates, while web stays bounded to the highest-priority set.
  *   All surfaces use bounded concurrency plus batch cooldowns.
+ * - A surface may widen that scope PROGRESSIVELY instead of all at once
+ *   (`policy.stages`): the coordinator starts on the smallest, highest-priority
+ *   set and only steps outward once the queue has drained and stayed idle. On a
+ *   phone this is the difference between "the app is usable while it syncs" and
+ *   "the app is busy deserializing every doc it has ever seen".
+ * - Prefetching yields to the user (`deps.interaction`). Opening a doc
+ *   deserializes it on the main thread, so while the user is scrolling or
+ *   typing the coordinator starts nothing new. It does not abort in-flight
+ *   work for interaction: that would cost a fresh room join later without
+ *   making the main thread any quieter now.
  */
 
 /** Minimal view of a session's metadata the coordinator reasons about. */
@@ -78,6 +88,15 @@ export interface BackgroundSyncCoordinatorDeps {
     /** Fires when the UI-visible session set changes. Returns an unsubscribe fn. */
     subscribe(onChange: () => void): () => void;
   };
+  /**
+   * Optional "the user is busy right now" signal (scrolling, typing, dragging).
+   * While it reports true the coordinator starts no new prefetches.
+   */
+  interaction?: {
+    isInteracting(): boolean;
+    /** Fires when the interacting/idle state flips. Returns an unsubscribe fn. */
+    subscribe(onChange: () => void): () => void;
+  };
   clock: { now(): number };
   scheduler: {
     setTimeout(handler: () => void, ms: number): unknown;
@@ -103,12 +122,46 @@ export interface EagerSyncPolicy {
   candidateWindow: number;
   /** Abort a prefetch that has not settled within this window. */
   prefetchTimeoutMs: number;
+  /**
+   * Optional progressive ladder over the candidate scope. While present, the
+   * ACTIVE stage supplies the candidate window and priority floor in place of
+   * `candidateWindow`; absent means a single static stage of `candidateWindow`
+   * with no floor, which is the historical behavior.
+   */
+  stages?: readonly EagerSyncStage[];
+}
+
+/** One rung of a progressive candidate-scope ladder. */
+export interface EagerSyncStage {
+  /**
+   * Minimum `priorityOf()` a candidate must reach in this stage. `0` admits
+   * every non-archived session; `EAGER_SYNC_PRIORITY_RUNNING` narrows to the
+   * pinned / UI-visible / running set.
+   */
+  minPriority: number;
+  /** Candidate cap for this stage; `Infinity` means all candidates. */
+  candidateWindow: number;
+  /**
+   * How long the queue must stay drained AND idle before stepping to the next
+   * stage. Unused on the last stage.
+   */
+  holdMs: number;
 }
 
 export type EagerSyncSurface = 'web' | 'desktop' | 'mobile';
 
+/**
+ * Candidate priority weights. Exported so a stage's `minPriority` names the set
+ * it admits instead of hard-coding a magic number.
+ */
+export const EAGER_SYNC_PRIORITY_PINNED = 100;
+export const EAGER_SYNC_PRIORITY_VISIBLE = 10;
+export const EAGER_SYNC_PRIORITY_RUNNING = 2;
+export const EAGER_SYNC_PRIORITY_UNREAD = 1;
+
 export const WEB_EAGER_SYNC_CANDIDATE_WINDOW = 20;
 export const FULL_EAGER_SYNC_CANDIDATE_WINDOW = Number.POSITIVE_INFINITY;
+export const MOBILE_EAGER_SYNC_CANDIDATE_WINDOW = 12;
 
 export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   concurrency: 2,
@@ -130,15 +183,65 @@ export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   prefetchTimeoutMs: 20_000,
 };
 
+/**
+ * Mobile ladder. A phone reaches the same eventual coverage as desktop, but it
+ * gets there one rung at a time so the first seconds after launch belong to the
+ * user: only what is on screen, pinned, or actively running is warmed up front.
+ */
+export const MOBILE_EAGER_SYNC_STAGES: readonly EagerSyncStage[] = [
+  // On screen / pinned / running only — the sessions a user opens next.
+  { minPriority: EAGER_SYNC_PRIORITY_RUNNING, candidateWindow: 6, holdMs: 5_000 },
+  // The recent list the user actually scrolls.
+  { minPriority: 0, candidateWindow: MOBILE_EAGER_SYNC_CANDIDATE_WINDOW, holdMs: 15_000 },
+  { minPriority: 0, candidateWindow: 30, holdMs: 30_000 },
+  // Eventually everything, at one prefetch at a time. `holdMs` is unused here.
+  { minPriority: 0, candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW, holdMs: 0 },
+];
+
+/**
+ * Mobile is NOT desktop with a smaller screen: every prefetch deserializes a
+ * Loro doc on the one main thread a phone has, so the desktop policy's wide,
+ * fast, deeply-resident warm-up is felt as the app being frozen until sync
+ * finishes. Hence concurrency 1 (never two deserializations racing a frame),
+ * long batch cooldowns (breathing room for rendering), a small resident cap
+ * (catch-up is durable in IndexedDB; the in-memory doc is not worth holding),
+ * and a staged candidate scope.
+ */
+export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
+  concurrency: 1,
+  batchSize: 3,
+  batchCooldownMs: 3_000,
+  freshnessTtlMs: 15_000,
+  maxWarmDocs: 12,
+  // Superseded by `stages` while they are set; kept as the stage-less fallback.
+  candidateWindow: MOBILE_EAGER_SYNC_CANDIDATE_WINDOW,
+  prefetchTimeoutMs: 20_000,
+  stages: MOBILE_EAGER_SYNC_STAGES,
+};
+
 export const DEFAULT_EAGER_SYNC_POLICY = WEB_EAGER_SYNC_POLICY;
 
-export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy =>
-  surface === 'web' ? WEB_EAGER_SYNC_POLICY : FULL_EAGER_SYNC_POLICY;
+export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy => {
+  switch (surface) {
+    case 'web':
+      return WEB_EAGER_SYNC_POLICY;
+    case 'mobile':
+      return MOBILE_EAGER_SYNC_POLICY;
+    default:
+      return FULL_EAGER_SYNC_POLICY;
+  }
+};
 
 export interface BackgroundSyncCoordinator {
   start(): void;
   stop(): void;
-  getState(): { queued: SessionId[]; inFlight: SessionId[]; warmed: SessionId[] };
+  getState(): {
+    queued: SessionId[];
+    inFlight: SessionId[];
+    warmed: SessionId[];
+    /** Index into `policy.stages`; always 0 when the policy has no ladder. */
+    stage: number;
+  };
   /** Manual nudge (e.g. sidebar hover): prefetch now, bypassing the burst window. */
   requestPrefetch(sessionId: SessionId): void;
 }
@@ -155,6 +258,7 @@ export function createBackgroundSyncCoordinator(
     prefetcher,
     env,
     visibility,
+    interaction,
     clock,
     scheduler,
     policy,
@@ -167,6 +271,9 @@ export function createBackgroundSyncCoordinator(
   let drainScheduled = false;
   let startedInCurrentBatch = 0;
   let batchCooldownHandle: unknown | null = null;
+  // Progressive candidate scope: index into `policy.stages` (0 when there are none).
+  let stageIndex = 0;
+  let stageAdvanceHandle: unknown | null = null;
 
   // Most recent snapshot per session — the trailing re-evaluation re-runs against
   // this so we don't miss the tail of a burst.
@@ -218,22 +325,30 @@ export function createBackgroundSyncCoordinator(
   };
 
   const priorityOf = (snap: SessionActivitySnapshot): number => {
-    const pinnedBoost = snap.isPinned ? 100 : 0;
-    const visibleBoost = visibility?.isVisible(snap.sessionId) ? 10 : 0;
+    const pinnedBoost = snap.isPinned ? EAGER_SYNC_PRIORITY_PINNED : 0;
+    const visibleBoost = visibility?.isVisible(snap.sessionId) ? EAGER_SYNC_PRIORITY_VISIBLE : 0;
     const activityBoost = (() => {
       if (isRunningStatus(snap.status)) {
-        return 2;
+        return EAGER_SYNC_PRIORITY_RUNNING;
       }
       if (
         snap.lastMessageAt != null &&
         (snap.lastReadAt == null || snap.lastMessageAt > snap.lastReadAt)
       ) {
-        return 1;
+        return EAGER_SYNC_PRIORITY_UNREAD;
       }
       return 0;
     })();
     return pinnedBoost + visibleBoost + activityBoost;
   };
+
+  const isInteracting = (): boolean => interaction?.isInteracting() === true;
+
+  const stages =
+    policy.stages && policy.stages.length > 0 ? (policy.stages as readonly EagerSyncStage[]) : null;
+
+  const getActiveStage = (): EagerSyncStage | undefined =>
+    stages ? stages[Math.min(stageIndex, stages.length - 1)] : undefined;
 
   const comparePrefetchPriority = (
     left: SessionActivitySnapshot,
@@ -253,11 +368,22 @@ export function createBackgroundSyncCoordinator(
   const getBatchSize = (): number => Math.max(1, Math.floor(policy.batchSize));
 
   const getCandidateLimit = (): number | null => {
-    if (!Number.isFinite(policy.candidateWindow)) {
+    const window = getActiveStage()?.candidateWindow ?? policy.candidateWindow;
+    if (!Number.isFinite(window)) {
       return null;
     }
-    return Math.max(0, Math.floor(policy.candidateWindow));
+    return Math.max(0, Math.floor(window));
   };
+
+  const getMinPriority = (): number => Math.max(0, getActiveStage()?.minPriority ?? 0);
+
+  /**
+   * Is the current scope narrower than "every known session"? A bounded scope
+   * has to be recomputed as a whole (activity reorders it), so callers re-seed
+   * instead of evaluating one session in isolation.
+   */
+  const isCandidateScopeBounded = (): boolean =>
+    getCandidateLimit() != null || getMinPriority() > 0;
 
   const listCandidateSnapshots = (): SessionActivitySnapshot[] => {
     const snapshots = new Map<SessionId, SessionActivitySnapshot>();
@@ -267,11 +393,53 @@ export function createBackgroundSyncCoordinator(
     for (const snap of latest.values()) {
       snapshots.set(snap.sessionId, snap);
     }
+    const minPriority = getMinPriority();
     const candidates = Array.from(snapshots.values())
-      .filter((snap) => !snap.isArchived && snap.lastMessageAt != null)
+      .filter(
+        (snap) =>
+          !snap.isArchived && snap.lastMessageAt != null && priorityOf(snap) >= minPriority
+      )
       .sort(comparePrefetchPriority);
     const limit = getCandidateLimit();
     return limit == null ? candidates : candidates.slice(0, limit);
+  };
+
+  const clearStageAdvance = () => {
+    if (stageAdvanceHandle !== null) {
+      scheduler.clearTimeout(stageAdvanceHandle);
+      stageAdvanceHandle = null;
+    }
+  };
+
+  /** No queued work, nothing in flight, and not inside a batch cooldown. */
+  const isDrainIdle = (): boolean =>
+    queued.size === 0 && inFlight.size === 0 && batchCooldownHandle === null;
+
+  const canAdvanceStage = (): boolean =>
+    started && !paused && !isInteracting() && stages != null && stageIndex < stages.length - 1;
+
+  /**
+   * Widen the candidate scope one rung, but only after the current rung has
+   * fully drained and the app has then stayed idle for the stage's hold. A
+   * stage never advances on a wall-clock schedule alone: if work is still
+   * queued, in flight, or the user is interacting, the ladder waits.
+   */
+  const armStageAdvance = () => {
+    if (stageAdvanceHandle !== null || !canAdvanceStage() || !isDrainIdle()) {
+      return;
+    }
+    const holdMs = Math.max(0, getActiveStage()?.holdMs ?? 0);
+    stageAdvanceHandle = scheduler.setTimeout(() => {
+      stageAdvanceHandle = null;
+      if (!canAdvanceStage() || !isDrainIdle()) {
+        // Busy again — the next drain-to-idle re-arms from the same stage.
+        return;
+      }
+      stageIndex += 1;
+      logger?.debug('[eager-sync] widened candidate scope to stage', stageIndex);
+      seedFromList();
+      scheduleDrain();
+    }, holdMs);
   };
 
   const clearBatchCooldown = () => {
@@ -462,6 +630,13 @@ export function createBackgroundSyncCoordinator(
     if (!started || paused) {
       return;
     }
+    if (isInteracting()) {
+      // Every prefetch deserializes a Loro doc on the main thread, so starting
+      // one under the user's finger is exactly the stall this coordinator
+      // exists to avoid. In-flight work is deliberately left running: aborting
+      // it only buys a fresh room join later, not a quieter frame now.
+      return;
+    }
     if (batchCooldownHandle !== null) {
       return;
     }
@@ -478,6 +653,7 @@ export function createBackgroundSyncCoordinator(
     }
     if (queued.size === 0) {
       resetBatchWindow();
+      armStageAdvance();
       return;
     }
     if (startedInCurrentBatch >= batchSize) {
@@ -501,7 +677,7 @@ export function createBackgroundSyncCoordinator(
 
   const handleActivity = (snap: SessionActivitySnapshot) => {
     latest.set(snap.sessionId, snap);
-    if (getCandidateLimit() != null) {
+    if (isCandidateScopeBounded()) {
       seedFromList();
       scheduleDrain();
       return;
@@ -511,8 +687,9 @@ export function createBackgroundSyncCoordinator(
 
   const seedFromList = () => {
     const candidates = listCandidateSnapshots();
-    const allowed =
-      getCandidateLimit() == null ? null : new Set(candidates.map((snap) => snap.sessionId));
+    const allowed = isCandidateScopeBounded()
+      ? new Set(candidates.map((snap) => snap.sessionId))
+      : null;
     if (allowed) {
       for (const sessionId of Array.from(queued.keys())) {
         if (!allowed.has(sessionId)) {
@@ -541,14 +718,34 @@ export function createBackgroundSyncCoordinator(
     if (!active && !paused) {
       paused = true;
       resetBatchWindow();
+      clearStageAdvance();
       abortAllInFlight();
       logger?.debug('[eager-sync] paused (offline/hidden)');
     } else if (active && paused) {
       paused = false;
+      // Coming back from offline/background is a fresh cold start as far as the
+      // user is concerned, so the ladder restarts too: what is on screen,
+      // pinned, or running is warmed before anything else widens again.
+      // Already-synced sessions are skipped by the high-water mark, so this
+      // costs a re-sort, not re-work.
+      stageIndex = 0;
       logger?.debug('[eager-sync] resumed');
       seedFromList();
       scheduleDrain();
     }
+  };
+
+  const onInteractionChange = () => {
+    if (!started || paused) {
+      return;
+    }
+    if (isInteracting()) {
+      // Hold the ladder where it is; idle time under the user's finger is not
+      // idle time.
+      clearStageAdvance();
+      return;
+    }
+    scheduleDrain();
   };
 
   const onRegistryChange = () => {
@@ -568,6 +765,9 @@ export function createBackgroundSyncCoordinator(
       if (visibility) {
         unsubscribers.push(visibility.subscribe(onVisibilityChange));
       }
+      if (interaction) {
+        unsubscribers.push(interaction.subscribe(onInteractionChange));
+      }
       unsubscribers.push(registry.subscribe(onRegistryChange));
       seedFromList();
       scheduleDrain();
@@ -585,6 +785,7 @@ export function createBackgroundSyncCoordinator(
         scheduler.clearTimeout(handle);
       }
       resetBatchWindow();
+      clearStageAdvance();
       trailingTimers.clear();
       queued.clear();
     },
@@ -593,6 +794,7 @@ export function createBackgroundSyncCoordinator(
         queued: Array.from(queued.keys()),
         inFlight: Array.from(inFlight),
         warmed: Array.from(warmed),
+        stage: stageIndex,
       };
     },
     requestPrefetch(sessionId: SessionId) {
