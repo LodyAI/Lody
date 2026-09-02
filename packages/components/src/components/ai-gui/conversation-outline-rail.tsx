@@ -685,10 +685,10 @@ export function ConversationOutlineRail({
         >
           {hoveredEntry === null ? null : (
             <>
-              <div className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">
+              <div className="line-clamp-3 text-[13px] font-medium leading-snug text-foreground">
                 {jumpLabel(hoveredEntry)}
               </div>
-              <div className="mt-1.5 line-clamp-4 text-[12px] leading-relaxed text-muted-foreground">
+              <div className="mt-1.5 line-clamp-6 text-[12px] leading-relaxed text-muted-foreground">
                 {hoveredEntry.preview ||
                   (hoveredEntry.startsWithAgent
                     ? t('sessions.outline.noUserMessage', 'Started by the agent.')
