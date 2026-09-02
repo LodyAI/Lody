@@ -111,6 +111,11 @@ import {
 } from './worktree/git-process-error';
 import type { BindTurnForPromptResult, TurnRef } from '@/lib/session-transient-store';
 import {
+  PromptActivityRecorder,
+  allowsPromptReplay,
+  type PromptActivityObservation,
+} from './prompt-activity-recorder';
+import {
   AgentSessionClosedError,
   type AgentSessionCloseCause,
   getACPErrorUserMessage,
@@ -159,6 +164,24 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'upstream (a context-length or rate-limit rejection is the usual cause) and the agent ' +
   'reported it as a normal completion instead of an error. Retry your message, or start a ' +
   'new session if this conversation has grown too long.';
+
+/**
+ * Used instead of `SILENT_TURN_FAILURE_MESSAGE` when the recorder saw the turn do
+ * something — an approved permission, an `fs/write_text_file`, or a dropped
+ * update — even though nothing reached the transcript.
+ *
+ * The message above guesses at an upstream cause and tells the user to retry.
+ * Both halves are wrong here: the failure is local, and the agent may have edited
+ * files or run commands, so retrying can repeat that work. Deliberately reuses
+ * the `agent_no_output` reason code — a dedicated `agent_output_dropped` code
+ * changes `ChatFailedReasonSchema`, which is persisted and shared with every
+ * client, so it is its own high-risk change.
+ */
+const DROPPED_ACTIVITY_TURN_FAILURE_MESSAGE =
+  'The agent ended the turn without anything reaching this conversation, but it did act — ' +
+  'it requested permissions or wrote files during the turn. Its execution state for this ' +
+  'turn is therefore uncertain: check the working tree and any tool results before deciding ' +
+  'what to do, and do not simply retry, because that can repeat work the agent already did.';
 
 type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
@@ -216,6 +239,12 @@ type ApplyModeAndModelConfig = SessionTurnInputConfig & {
 
 type PromptHandoffRun = {
   turnId: string;
+  /**
+   * This run's replay-gate evidence. Lives here rather than in a map: the object
+   * is already per-prompt, fiber-held, carried along the successor chain by a
+   * steer, and dies with the turn — so boundedness is constructional.
+   */
+  activity: PromptActivityRecorder;
   promptOutcome: Promise<{ status: 'fulfilled' } | { status: 'rejected'; error: unknown }>;
   successor?: PromptHandoffRun;
   successorReady: Promise<void>;
@@ -445,8 +474,14 @@ export type SessionExecutionServiceDeps = {
    */
   bindConversationTurnForPrompt: (
     sessionId: SessionId,
-    turnRef: TurnRef
+    turnRef: TurnRef,
+    recorder?: PromptActivityRecorder
   ) => BindTurnForPromptResult;
+  /** Replay-gate evidence for a turn; `unknown` is fail-closed at every caller. */
+  observePromptActivityForTurn?: (
+    sessionId: SessionId,
+    turnId: string
+  ) => PromptActivityObservation;
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
@@ -699,6 +734,7 @@ export class SessionExecutionService {
 
   private createPromptHandoffRun(options: {
     turnId: string;
+    activity: PromptActivityRecorder;
     promptPromise: Promise<unknown>;
   }): PromptHandoffRun {
     let signalSuccessor!: () => void;
@@ -707,6 +743,7 @@ export class SessionExecutionService {
     });
     return {
       turnId: options.turnId,
+      activity: options.activity,
       promptOutcome: options.promptPromise.then(
         () => ({ status: 'fulfilled' as const }),
         (error: unknown) => ({ status: 'rejected' as const, error })
@@ -1407,9 +1444,15 @@ export class SessionExecutionService {
         // `transitionDispatchOwnership` above already moved dispatch ownership to
         // the new user turn, so falling back would render the new user message as
         // unanswered and misattribute the agent's reply.
+        // Chained to the predecessor: `steerApplicationBarrier` only guards
+        // `session/update`, so a permission request or `fs/write_text_file` the
+        // PREVIOUS turn caused can still arrive after this bind. Those are
+        // credited to the predecessor as well until this run sees its own output.
+        const nextActivity = new PromptActivityRecorder(ownedPromptRun.activity);
         const nextBindResult = this.deps.bindConversationTurnForPrompt(
           options.sessionId,
-          nextTurnRef
+          nextTurnRef,
+          nextActivity
         );
         if (nextBindResult !== 'bound') {
           this.deps.logger.error(
@@ -1431,6 +1474,7 @@ export class SessionExecutionService {
         }
         const nextPromptRun = this.createPromptHandoffRun({
           turnId: nextTurnId,
+          activity: nextActivity,
           promptPromise: steerRun.completion,
         });
         void ownedPromptRun.promptOutcome.then((outcome) => {
@@ -2904,9 +2948,15 @@ export class SessionExecutionService {
                 // that silently no-opped; it is an authoritative write now, so a
                 // refusal must stop the prompt instead of sending one whose output
                 // has nowhere to go.
+                // Created at BIND time, so the `beginTurn → bind` window is
+                // deliberately not counted: what arrives there is a resume
+                // fallback's pre-prompt startup output, which belongs to session
+                // startup rather than to this user turn.
+                const activity = new PromptActivityRecorder();
                 const bindResult = self.deps.bindConversationTurnForPrompt(
                   sessionId,
-                  runtime.turnRef
+                  runtime.turnRef,
+                  activity
                 );
                 if (bindResult !== 'bound') {
                   // Fail closed: no prompt is sent. `recordPrePromptFailure` still
@@ -2942,6 +2992,7 @@ export class SessionExecutionService {
                           async () => {
                             const initialRun = self.createPromptHandoffRun({
                               turnId: runtime.turnId,
+                              activity,
                               promptPromise: agentClient.prompt(acpSessionId, promptBlocks, {
                                 signal,
                               }),
@@ -3335,15 +3386,21 @@ export class SessionExecutionService {
     turnId: string;
     userTurnId?: string;
   }): Promise<void> {
+    const activity =
+      this.deps.observePromptActivityForTurn?.(options.sessionId, options.turnId) ?? 'unknown';
+    // Only an upstream-looking silence gets the upstream-cause guess. A turn that
+    // demonstrably acted must not be explained as a context-length or rate-limit
+    // rejection, and must not be presented as safe to retry.
+    const actedWithoutOutput = activity === 'dropped_prompt_activity';
     this.deps.logger.warn(
-      `[${options.sessionId}] Turn ${options.turnId} completed without any agent output; ` +
-        'recording it as a failed turn instead of a silent completion'
+      `[${options.sessionId}] Turn ${options.turnId} completed without any agent output ` +
+        `(activity=${activity}); recording it as a failed turn instead of a silent completion`
     );
     this.captureTurnFailed(options.sessionId, options.turnId, 'agent_no_output', false);
     await this.deps.recordChatFailure(
       options.sessionDoc,
       'agent_no_output',
-      SILENT_TURN_FAILURE_MESSAGE
+      actedWithoutOutput ? DROPPED_ACTIVITY_TURN_FAILURE_MESSAGE : SILENT_TURN_FAILURE_MESSAGE
     );
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
@@ -3969,8 +4026,19 @@ export class SessionExecutionService {
                 // the replay re-runs tools the agent already executed. (The
                 // no-output guard needs the opposite default — see
                 // `turnProducedVisibleOutput`.)
+                //
+                // The recorder is the primary signal because it also sees
+                // permission requests and `fs/write_text_file`; only a positive
+                // `none` permits a replay, so `unknown` and
+                // `dropped_prompt_activity` both refuse.
+                const activity = self.deps.observePromptActivityForTurn?.(
+                  sessionId,
+                  runtime.turnId
+                );
                 const hasPromptOutput =
-                  self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? true;
+                  activity !== undefined
+                    ? !allowsPromptReplay(activity)
+                    : (self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? true);
                 if (
                   runtime.turnId !== turnId ||
                   !shouldRecoverStaleACPConnectionPrompt({

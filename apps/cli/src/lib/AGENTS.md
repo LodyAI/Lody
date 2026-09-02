@@ -312,6 +312,13 @@ control-plane path is DEPRECATED; do not add functionality to it.
   carry the exact `Session` that produced them, and
   `SessionExecutionService.onSessionInstanceClosed` acts only when
   `runtime.session === instance`.
+  INVARIANT: `SessionTransientStore`'s two cleanup paths are HAND-WRITTEN enumerations;
+  the header comment claiming a new field is "automatically included in both" was never
+  true and now says so. Several fields survive `clearTurnState` deliberately —
+  `acpUpdateBuffer`, `lateACPUpdateTarget`, and `promptActivity` (the replay gate's
+  evidence, read precisely when a turn has ENDED). Clearing `promptActivity` per turn
+  repeats the `acpFlushCountInTurn` mistake: the gate goes blind at the only moment it
+  is consulted.
   INVARIANT: finalization commits through the store's synchronous compare-and-set
   `finalizeIfCurrent(sessionId, turnRef)`, which remembers the late-update target and
   clears turn state in one step, reading that target from LIVE state. The only thing a

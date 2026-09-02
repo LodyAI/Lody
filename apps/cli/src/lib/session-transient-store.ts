@@ -14,8 +14,20 @@
  * - `clearTurnState(id)` — after a conversation turn completes
  * - `deleteSession(id)` — when the session is evicted (idle shutdown or GC)
  *
- * It is impossible to "forget" a field because adding a new field to `SessionState`
- * automatically includes it in both cleanup paths.
+ * Both cleanup paths are HAND-WRITTEN enumerations (`clearTurnState` and
+ * `deleteSession`), not automatic. Adding a field to `SessionState` does not add
+ * it to either one — check both when you add a field.
+ *
+ * Some fields survive `clearTurnState` on purpose, and reflexively "cleaning them
+ * up" reintroduces real bugs:
+ *
+ * - `acpUpdateBuffer` / `acpFlushInFlight` — entries carry their own enqueue-time
+ *   target and must still flush after the turn clears.
+ * - `lateACPUpdateTarget` — the routing target for updates that arrive after
+ *   finalization; clearing it here is what drops post-`stopReason` output.
+ * - `promptActivity` — the replay gate's evidence. It is consulted precisely when
+ *   a turn has ended, so a turn-scoped clear would erase it exactly when it is
+ *   needed. This is the mistake `acpFlushCountInTurn` already made once.
  *
  * ## Turn State Model
  *
@@ -46,6 +58,10 @@ import {
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import type { TurnHistoryGate } from '@/session/turn-history-gate';
+import type {
+  PromptActivityObservation,
+  PromptActivityRecorder,
+} from '@/session/prompt-activity-recorder';
 
 type AssistantTurnACPUpdateTargetSource = 'active_turn' | 'finalized_turn';
 
@@ -127,6 +143,12 @@ export interface SessionState {
   turnHistoryGate: TurnHistoryGate | null;
   nextTurnEpoch: number;
   lateACPUpdateTarget: AssistantTurnACPUpdateTarget | undefined;
+  /**
+   * Replay-gate evidence for the turn that last bound for a prompt. Deliberately
+   * NOT cleared by `clearTurnState`: the gate reads it after the turn ends.
+   * Replaced by the next bind, dropped by `deleteSession`.
+   */
+  promptActivity: { ref: TurnRef; recorder: PromptActivityRecorder } | undefined;
   suppressAcpReplayUntilTurnStart: boolean;
   suppressedAcpReplayCount: number;
 
@@ -181,6 +203,7 @@ function createSessionState(): SessionState {
     turnHistoryGate: null,
     nextTurnEpoch: 1,
     lateACPUpdateTarget: undefined,
+    promptActivity: undefined,
     suppressAcpReplayUntilTurnStart: false,
     suppressedAcpReplayCount: 0,
     acpUpdateBuffer: [],
@@ -293,7 +316,11 @@ export class SessionTransientStore {
    * as a silent no-op; an authoritative write does not, so ordering is now load
    * bearing and is pinned by regression tests.
    */
-  bindTurnForPrompt(sessionId: SessionId, ref: TurnRef): BindTurnForPromptResult {
+  bindTurnForPrompt(
+    sessionId: SessionId,
+    ref: TurnRef,
+    recorder?: PromptActivityRecorder
+  ): BindTurnForPromptResult {
     const state = this.sessions.get(sessionId);
     if (!state) {
       return 'session_state_missing';
@@ -309,7 +336,30 @@ export class SessionTransientStore {
       state.turn = { ...state.turn, ownsACPUpdates: true };
     }
     state.lateACPUpdateTarget = undefined;
+    if (recorder) {
+      // Replaces the previous binding's recorder, which releases the only
+      // reference this module holds to it. The old run keeps its own.
+      state.promptActivity = { ref, recorder };
+    }
     return 'bound';
+  }
+
+  /**
+   * Evidence for "did this turn possibly act?". `unknown` whenever the turn
+   * cannot be observed — no session state, no recorder, or a recorder belonging
+   * to a different turn — and every caller must treat that as fail-closed.
+   */
+  observePromptActivityForTurn(sessionId: SessionId, turnId: string): PromptActivityObservation {
+    const activity = this.sessions.get(sessionId)?.promptActivity;
+    if (!activity || activity.ref.turnId !== turnId) {
+      return 'unknown';
+    }
+    return activity.recorder.observe();
+  }
+
+  /** The recorder currently bound for this session, for producers to write into. */
+  getBoundPromptActivityRecorder(sessionId: SessionId): PromptActivityRecorder | undefined {
+    return this.sessions.get(sessionId)?.promptActivity?.recorder;
   }
 
   /**

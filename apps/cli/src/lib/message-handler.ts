@@ -285,6 +285,7 @@ import {
   type BufferedACPUpdate,
   type TurnRef,
 } from '@/lib/session-transient-store';
+import { PromptActivityRecorder } from '@/session/prompt-activity-recorder';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
@@ -3077,8 +3078,10 @@ export class MessageHandler {
       endACPReplaySuppression: (sessionId) => this.endACPReplaySuppression(sessionId),
       beginConversationTurn: (sessionId, userTurnId, gateContext) =>
         this.beginConversationTurn(sessionId, userTurnId, gateContext),
-      bindConversationTurnForPrompt: (sessionId, turnRef) =>
-        this.bindConversationTurnForPrompt(sessionId, turnRef),
+      bindConversationTurnForPrompt: (sessionId, turnRef, recorder) =>
+        this.bindConversationTurnForPrompt(sessionId, turnRef, recorder),
+      observePromptActivityForTurn: (sessionId, turnId) =>
+        this.store.observePromptActivityForTurn(sessionId, turnId),
       clearConversationTurn: (sessionId, turnId) =>
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
@@ -3669,6 +3672,10 @@ export class MessageHandler {
     });
 
     this.sessionManager.on('onWriteTextFile', (sessionId, event) => {
+      // `fs/write_text_file` is an independent JSON-RPC request that never passes
+      // through `enqueueACPUpdate`, so the replay gate is blind to it unless the
+      // recorder is told here: the agent has already written to disk.
+      this.recordPromptSideEffect(sessionId);
       this.trackCodeCollabEvidenceWrite(
         sessionId,
         this.collectCodeCollabWriteTextFileEvidence(sessionId, event)
@@ -4713,6 +4720,15 @@ export class MessageHandler {
     }
   }
 
+  /**
+   * Note a permission request or an `fs/write_text_file` against whichever prompt
+   * run is currently bound. Both are independent JSON-RPC requests that bypass
+   * `enqueueACPUpdate`, which is exactly why the replay gate could not see them.
+   */
+  private recordPromptSideEffect(sessionId: SessionId): void {
+    this.store.getBoundPromptActivityRecorder(sessionId)?.recordSideEffect();
+  }
+
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
     // Note: ACP notifications are internal agent events, NOT user activity.
     // We intentionally do NOT call touchSession() here to avoid keeping sessions
@@ -4722,9 +4738,12 @@ export class MessageHandler {
       this.logger.debug(
         `[${sessionId}] Dropping ACP update after permanent deletion reached its commit boundary`
       );
+      this.store.getBoundPromptActivityRecorder(sessionId)?.recordDropped('session_deleted');
       return;
     }
     if (this.store.recordSuppressedAcpReplay(sessionId)) {
+      // Suppressed `loadSession` replay is previously persisted history, not this
+      // turn acting, so it is NOT recorded as prompt activity.
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
@@ -4733,6 +4752,7 @@ export class MessageHandler {
       this.logger.debug(
         `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate})`
       );
+      this.store.getBoundPromptActivityRecorder(sessionId)?.recordDropped('no_route');
       return;
     }
     if (target.source === 'finalized_turn') {
@@ -4746,6 +4766,7 @@ export class MessageHandler {
         }
       );
     }
+    this.store.getBoundPromptActivityRecorder(sessionId)?.recordRouted();
     this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
     this.scheduleFlushACPUpdates(sessionId);
   }
@@ -6052,9 +6073,10 @@ export class MessageHandler {
 
   private bindConversationTurnForPrompt(
     sessionId: SessionId,
-    turnRef: TurnRef
+    turnRef: TurnRef,
+    recorder?: PromptActivityRecorder
   ): BindTurnForPromptResult {
-    const result = this.store.bindTurnForPrompt(sessionId, turnRef);
+    const result = this.store.bindTurnForPrompt(sessionId, turnRef, recorder);
     if (result !== 'bound') {
       this.logger.error(
         `[${sessionId}] Refusing to prompt turn ${turnRef.turnId} (epoch ${turnRef.turnEpoch}): ACP routing could not be bound (${result})`
@@ -8542,6 +8564,10 @@ export class MessageHandler {
     request: RequestPermissionRequest,
     model?: ModelInfo
   ): Promise<RequestPermissionResponse> {
+    // Also an independent JSON-RPC request. Recorded on ARRIVAL rather than on
+    // approval: an agent that asked for permission has already decided to run the
+    // tool, and a replay would ask again for work that may have been approved.
+    this.recordPromptSideEffect(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
       ? parseAskUserQuestionPermissionMeta(request._meta)
@@ -9991,11 +10017,19 @@ export class MessageHandler {
       // for callers that need to tell "nothing happened" from "cannot tell".
       return true;
     }
+    // The recorder is authoritative: it sees permission requests and
+    // `fs/write_text_file` (independent JSON-RPC requests that never reach
+    // `enqueueACPUpdate`), and unlike `acpFlushCountInTurn` it is not zeroed by
+    // `clearTurnState` — which used to erase the evidence exactly when the gate
+    // was consulted. `unknown` means unobservable and refuses the replay.
+    const observation = this.store.observePromptActivityForTurn(sessionId, turnId);
+    if (observation !== 'none') {
+      return true;
+    }
+    // Recorder says this prompt did nothing. Corroborate with the buffer, which
+    // can still hold entries this turn enqueued before the recorder was bound.
     const state = this.store.get(sessionId);
-    const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-    const hasFlushedOutput =
-      state.acpFlushCountInTurn > 0 && this.store.getTurnId(sessionId) === turnId;
-    return hasBufferedOutput || hasFlushedOutput;
+    return state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
   }
 
   /**

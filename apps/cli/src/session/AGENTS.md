@@ -111,7 +111,15 @@ delegation proofs or a shared-machine gate without a new product and security de
   quiescent. Use live execution/presence for current-work signals; goal activity may
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
-  `TurnRuntimeState` is registered. `beginConversationTurn` returns the whole `TurnRef`
+  `TurnRuntimeState` is registered.
+  INVARIANT: a store turn is NOT the same thing as a registered turn runtime. The
+  auto-prompt runner calls `beginConversationTurn` for its own store turn id while
+  running INSIDE the visible turn's runtime (`runtime.autoPromptInFlight`), so
+  `SessionTransientStore` can hold a turn whose id differs from `runtime.turnId`, and it
+  can hold an owning turn while `getExecutionSnapshot().hasActiveTurn` describes a
+  different one. Never use "no active turn runtime" as a stand-in for "no turn state to
+  finalize" — that is why the no-turnId `finalizeACPState` reads `getCurrentTurnRef`
+  instead of clearing blindly. `beginConversationTurn` returns the whole `TurnRef`
   (`turnId` + `turnEpoch` + `assistantEntryId`) and the runtime carries it, because
   `bindConversationTurnForPrompt` is an authoritative write that must name the exact
   epoch it created rather than whatever turn happens to be current. A bind refusal is
@@ -200,14 +208,31 @@ delegation proofs or a shared-machine gate without a new product and security de
   `acp_internal_error`. Continue-session prompt recovery may terminate and restore
   the ACP session once before retrying the same prompt, but only when no ACP output
   has buffered/flushed for that assistant turn; after visible output, never replay
-  the user prompt automatically. That gate fails CLOSED: an absent
-  `hasPromptOutputForTurn` dep, or a session whose transient state is already gone,
-  reads as "may already have acted" and refuses the replay. Unobservable is not the
-  same as "nothing happened", and the observable signal is incomplete anyway —
-  permission requests and `fs/write_text_file` are separate JSON-RPC requests that
-  never reach `enqueueACPUpdate`, so a replay can re-run tools the agent already ran.
-  `AgentSessionClosedError` is excluded from recovery outright: that prompt was
-  accepted by a live agent whose process then died.
+  the user prompt automatically. That gate fails CLOSED and reads
+  `prompt-activity-recorder.ts`, not turn state: `persisted_output` and
+  `dropped_prompt_activity` refuse a replay, `unknown` refuses it, and only a positive
+  `none` permits one. The recorder exists because the two older signals were both
+  broken — `acpFlushCountInTurn` is zeroed by `clearTurnState`, i.e. exactly when the
+  gate runs, and neither it nor the ACP buffer can see `session/request_permission` or
+  `fs/write_text_file`, which are independent JSON-RPC requests that never reach
+  `enqueueACPUpdate`. One recorder belongs to one `PromptHandoffRun` (fiber-held,
+  carried along the steer successor chain, dies with the turn), so boundedness is
+  constructional: no keys, no eviction. It is created at BIND time, so the
+  `beginTurn → bind` window is deliberately excluded — what arrives there is a resume
+  fallback's pre-prompt startup output, not the user's turn. `AgentSessionClosedError`
+  is excluded from recovery outright: that prompt was accepted by a live agent whose
+  process then died.
+  `steerApplicationBarrier` guards ONLY `session/update` (one `await`, in
+  `agent-client.ts` `sessionUpdate`); `requestPermission` and `writeTextFile` are
+  unprotected, so a side effect the predecessor caused can arrive after the successor
+  binds. Those are credited to BOTH runs until the successor sees its own output —
+  over-refusing a replay is safe, losing the signal is not.
+  When a turn produced no visible output but the recorder says it acted, the failure
+  notice must NOT keep the `SILENT_TURN_FAILURE_MESSAGE` guess (context length / rate
+  limit) or tell the user to retry: the cause is local and a retry can repeat work.
+  Both messages reuse the `agent_no_output` reason code on purpose — a dedicated
+  `agent_output_dropped` code changes the persisted, client-shared
+  `ChatFailedReasonSchema` and is its own high-risk change.
   DeepSeek Harness persistence compression mismatches are a distinct
   `acp_session_storage_incompatible` failure, not a generic internal error; keep
   matching narrow to the backend's artifact/compression diagnostic.

@@ -24,6 +24,7 @@ import type {
 
 import type { SessionDocument } from '../src/lib/loro/doc';
 import type { BindTurnForPromptResult, TurnRef } from '../src/lib/session-transient-store';
+import { PromptActivityRecorder } from '../src/session/prompt-activity-recorder';
 import { loadEnv } from '../src/utils/const';
 
 import { createMessageHandlerHarness, destroyRepoOnRealTimers } from './message-handler-harness';
@@ -40,7 +41,11 @@ type MessageHandlerHost = {
       deferACPUpdateTarget?: boolean;
     }
   ): TurnRef;
-  bindConversationTurnForPrompt(sessionId: SessionId, turnRef: TurnRef): BindTurnForPromptResult;
+  bindConversationTurnForPrompt(
+    sessionId: SessionId,
+    turnRef: TurnRef,
+    recorder?: PromptActivityRecorder
+  ): BindTurnForPromptResult;
   beginACPReplaySuppression(sessionId: SessionId): void;
   endACPReplaySuppression(sessionId: SessionId): void;
   createAssistantEntryForTurn(
@@ -52,7 +57,13 @@ type MessageHandlerHost = {
   ): Promise<void>;
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-  store: { deleteSession(sessionId: SessionId): void };
+  hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean;
+  recordPromptSideEffect(sessionId: SessionId): void;
+  store: {
+    deleteSession(sessionId: SessionId): void;
+    clearTurnState(sessionId: SessionId): void;
+    observePromptActivityForTurn(sessionId: SessionId, turnId: string): string;
+  };
 };
 
 const createHarness = async (sessionId: SessionId) => {
@@ -118,6 +129,114 @@ describe('MessageHandler bindTurnForPrompt', () => {
 
       const assistant = (await doc.getHistory()).find((entry) => entry.id === turnRef.turnId);
       expect(readItems(assistant)).toEqual([{ type: 'text', text: 'real answer' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('refuses a replay after the turn requested a permission, with nothing in the transcript', async () => {
+    // End-to-end through the real producer: `handleAgentPermissionRequest` records
+    // a side effect, so a turn that approved and ran a tool without emitting any
+    // ACP update still refuses replay. Before the recorder this read as "produced
+    // nothing" and the prompt was replayed, re-running the tool.
+    const sessionId = 's-recorder-permission' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-1', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      const recorder = new PromptActivityRecorder();
+      expect(host.bindConversationTurnForPrompt(sessionId, turnRef, recorder)).toBe('bound');
+
+      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(false);
+
+      // The agent asks to run a tool. Nothing reaches the transcript.
+      host.recordPromptSideEffect(sessionId);
+
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe(
+        'dropped_prompt_activity'
+      );
+      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+
+      // ...and the evidence survives the turn ending, which is when the gate runs.
+      host.store.clearTurnState(sessionId);
+      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('refuses a replay for a turn with no recorder at all', async () => {
+    const sessionId = 's-recorder-missing' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-2', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      // Bound WITHOUT a recorder, as a process restart would leave things.
+      expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('bound');
+
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe('unknown');
+      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('records a routed update as persisted output', async () => {
+    const sessionId = 's-recorder-routed' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-4', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, turnRef.turnId, undefined, 'user-4');
+      expect(
+        host.bindConversationTurnForPrompt(sessionId, turnRef, new PromptActivityRecorder())
+      ).toBe('bound');
+
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'hello'));
+      await host.flushACPUpdatesNow(sessionId);
+
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe(
+        'persisted_output'
+      );
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('refuses to bind a turn that a redispatch superseded', async () => {
+    const sessionId = 's-bind-superseded' as SessionId;
+    const userTurnId = 'user-4';
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const staleRef = host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      // Same turn id (`assistant:<userTurnId>`), new epoch.
+      const liveRef = host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      expect(liveRef.turnId).toBe(staleRef.turnId);
+      expect(liveRef.turnEpoch).not.toBe(staleRef.turnEpoch);
+
+      expect(host.bindConversationTurnForPrompt(sessionId, staleRef)).toBe('turn_superseded');
+      expect(host.bindConversationTurnForPrompt(sessionId, liveRef)).toBe('bound');
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
