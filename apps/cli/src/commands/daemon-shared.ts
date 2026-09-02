@@ -175,6 +175,47 @@ export type SpawnDaemonRunnerResult =
   | { status: 'runner_exited'; runnerPid: number }
   | { status: 'timeout'; runnerPid: number };
 
+type DaemonRunnerWaitResult = {
+  outcome: SpawnDaemonRunnerResult;
+  cancelRunner: boolean;
+};
+
+/** Translate the runner report and identify outcomes whose child must be awaited. */
+export function interpretDaemonRunnerLaunchOutcome(
+  outcome: DaemonRunnerLaunchOutcome,
+  runnerPid: number
+): DaemonRunnerWaitResult {
+  switch (outcome.status) {
+    case 'ready':
+      return {
+        outcome: { status: 'ready', pid: runnerPid, instanceId: outcome.instanceId },
+        cancelRunner: false,
+      };
+    case 'occupied':
+      return {
+        outcome: {
+          status: 'occupied',
+          runnerPid,
+          ownerMode: outcome.ownerMode,
+          ownerPid: outcome.ownerPid,
+        },
+        cancelRunner: false,
+      };
+    case 'error':
+      // The report is written before the runner's fatal cleanup releases its
+      // Host lease. Await this exact child so upgrade handoff fallback cannot
+      // race the failing replacement and mistake it for a new owner.
+      return {
+        outcome: { status: 'error', runnerPid, message: outcome.message },
+        cancelRunner: true,
+      };
+    default: {
+      const unreachable: never = outcome;
+      return unreachable;
+    }
+  }
+}
+
 function isChildProcessRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
 }
@@ -295,10 +336,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
   }
 
   const readyPipe = (child.stdio[DAEMON_RUNNER_READY_FD] ?? null) as Readable | null;
-  const waitResult = await new Promise<{
-    outcome: SpawnDaemonRunnerResult;
-    cancelRunner: boolean;
-  }>((resolve) => {
+  const waitResult = await new Promise<DaemonRunnerWaitResult>((resolve) => {
     let settled = false;
     let buffer = '';
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -338,18 +376,8 @@ export async function spawnDaemonRunnerAndAwaitReady(
         finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         return;
       }
-      if (outcome.data.status === 'ready') {
-        finish({ status: 'ready', pid: runnerPid, instanceId: outcome.data.instanceId });
-      } else if (outcome.data.status === 'occupied') {
-        finish({
-          status: 'occupied',
-          runnerPid,
-          ownerMode: outcome.data.ownerMode,
-          ownerPid: outcome.data.ownerPid,
-        });
-      } else {
-        finish({ status: 'error', runnerPid, message: outcome.data.message });
-      }
+      const interpreted = interpretDaemonRunnerLaunchOutcome(outcome.data, runnerPid);
+      finish(interpreted.outcome, interpreted.cancelRunner);
     });
     // EOF without a report means the runner exited before its Worker became ready.
     readyPipe.once('end', () => finish({ status: 'runner_exited', runnerPid }, true));

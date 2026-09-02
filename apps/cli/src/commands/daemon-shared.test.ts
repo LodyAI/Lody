@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  interpretDaemonRunnerLaunchOutcome,
   readPidFileRecord,
   removePidFile,
   terminateSpawnedDaemonRunner,
@@ -73,6 +74,22 @@ describe('daemon PID ownership', () => {
 });
 
 describe('daemon runner launch cleanup', () => {
+  it('awaits a runner that reported startup failure before returning the error', () => {
+    expect(
+      interpretDaemonRunnerLaunchOutcome(
+        { status: 'error', message: 'worker bootstrap failed' },
+        999_000
+      )
+    ).toEqual({
+      outcome: {
+        status: 'error',
+        runnerPid: 999_000,
+        message: 'worker bootstrap failed',
+      },
+      cancelRunner: true,
+    });
+  });
+
   it('waits for a timed-out spawned runner to stop gracefully', async () => {
     const child = new FakeRunnerChild();
     child.onKill = (signal) => child.finish(signal);
