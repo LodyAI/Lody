@@ -152,6 +152,7 @@ const createBaseDeps = (
     beginACPReplaySuppression: vi.fn(),
     endACPReplaySuppression: vi.fn(),
     beginConversationTurn: vi.fn(() => turnRefOf('turn-1')),
+    observePromptActivityForTurn: vi.fn(() => 'none' as const),
     bindConversationTurnForPrompt: vi.fn(() => 'bound' as const),
     clearConversationTurn: vi.fn(),
     getActiveTurnId: vi.fn(() => undefined),
@@ -1136,7 +1137,7 @@ describe('SessionExecutionService', () => {
   // left the user with an unanswered message and no error anywhere.
   const runSilentPromptTurn = async (options: {
     sessionId: string;
-    hasPromptOutputForTurn: boolean;
+    visibleOutput: boolean;
     promptActivity?: PromptActivityObservation;
   }) => {
     let history: Array<Record<string, unknown>> = [
@@ -1199,7 +1200,7 @@ describe('SessionExecutionService', () => {
         ...createBaseDeps({}).turnFinalization,
         notifySessionCompleted,
       },
-      observePromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
+      observePromptOutputForTurn: vi.fn(() => options.visibleOutput),
       ...(options.promptActivity
         ? { observePromptActivityForTurn: vi.fn(() => options.promptActivity!) }
         : {}),
@@ -1233,7 +1234,7 @@ describe('SessionExecutionService', () => {
     const { deps, sessionDoc, notifySessionCompleted, upsertDocMeta, agentClient, getHistory } =
       await runSilentPromptTurn({
         sessionId: 'session-silent-turn',
-        hasPromptOutputForTurn: false,
+        visibleOutput: false,
       });
 
     expect(agentClient.prompt).toHaveBeenCalled();
@@ -1362,7 +1363,7 @@ describe('SessionExecutionService', () => {
     // is local, and retrying can repeat work the agent already did.
     const { deps, sessionDoc } = await runSilentPromptTurn({
       sessionId: 'session-silent-acted',
-      hasPromptOutputForTurn: false,
+      visibleOutput: false,
       promptActivity: 'dropped_prompt_activity',
     });
 
@@ -1381,7 +1382,7 @@ describe('SessionExecutionService', () => {
     // actionable guess rather than a blanket "state is uncertain".
     const { deps } = await runSilentPromptTurn({
       sessionId: 'session-silent-quiet',
-      hasPromptOutputForTurn: false,
+      visibleOutput: false,
       promptActivity: 'none',
     });
 
@@ -1393,7 +1394,7 @@ describe('SessionExecutionService', () => {
   it('leaves a turn that emitted agent output on the normal completion path', async () => {
     const { deps, notifySessionCompleted, getHistory } = await runSilentPromptTurn({
       sessionId: 'session-output-turn',
-      hasPromptOutputForTurn: true,
+      visibleOutput: true,
     });
 
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
@@ -2085,7 +2086,7 @@ describe('SessionExecutionService', () => {
     // Recovery is allowed only on a POSITIVE "this turn emitted nothing" answer.
     // MessageHandler always wires this dep in production; an absent one is
     // fail-closed and is covered by the next test.
-    const deps = createBaseDeps({ hasPromptOutputForTurn: vi.fn(() => false) });
+    const deps = createBaseDeps({});
     const sessionManager = deps.sessionManager as unknown as {
       getSession: ReturnType<typeof vi.fn>;
       terminateSession: ReturnType<typeof vi.fn>;
@@ -2195,7 +2196,7 @@ describe('SessionExecutionService', () => {
         history = updater(history);
       }),
     };
-    const deps = createBaseDeps({ hasPromptOutputForTurn: vi.fn(() => false) });
+    const deps = createBaseDeps({});
     let service!: SessionExecutionService;
     const instanceCloseVerdicts: boolean[] = [];
     const sessionManager = deps.sessionManager as unknown as {
@@ -2301,9 +2302,6 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
       observePromptActivityForTurn: vi.fn(() => 'dropped_prompt_activity' as const),
-      // Deliberately says "no output" so the ONLY thing that can refuse the
-      // replay is the recorder observation under test.
-      hasPromptOutputForTurn: vi.fn(() => false),
     });
     const sessionManager = deps.sessionManager as unknown as {
       getSession: ReturnType<typeof vi.fn>;
@@ -2387,9 +2385,6 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
       observePromptActivityForTurn: vi.fn(() => 'unknown' as const),
-      // Deliberately says "no output" so the ONLY thing that can refuse the
-      // replay is the recorder observation under test.
-      hasPromptOutputForTurn: vi.fn(() => false),
     });
     const sessionManager = deps.sessionManager as unknown as {
       getSession: ReturnType<typeof vi.fn>;
@@ -2473,9 +2468,6 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
       observePromptActivityForTurn: vi.fn(() => 'none' as const),
-      // Deliberately says "no output" so the ONLY thing that can refuse the
-      // replay is the recorder observation under test.
-      hasPromptOutputForTurn: vi.fn(() => false),
     });
     const sessionManager = deps.sessionManager as unknown as {
       getSession: ReturnType<typeof vi.fn>;
@@ -2504,81 +2496,6 @@ describe('SessionExecutionService', () => {
     expect(agentClient.prompt).toHaveBeenCalledTimes(1);
     expect(sessionManager.createSession).toHaveBeenCalled();
     expect(restoredAgentClient.prompt).toHaveBeenCalledTimes(1);
-  });
-
-  it('refuses the stale-ACP prompt replay when prompt output cannot be observed', async () => {
-    // The replay gate must fail CLOSED. An unwired `hasPromptOutputForTurn` used
-    // to read as "no output yet", which authorized re-sending a prompt whose
-    // tools may already have run.
-    const sessionId = 'session-stale-acp-unobservable' as SessionId;
-    const acpSessionId = 'acp-stale-unobservable' as ACPSessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const activeSession = {
-      sessionId,
-      acpSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => acpSessionId),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    // No `hasPromptOutputForTurn` dep at all.
-    const deps = createBaseDeps({});
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    const workspaceDocument = deps.workspaceDocument as unknown as {
-      getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    expect(agentClient.prompt).toHaveBeenCalledTimes(1);
-    expect(sessionManager.createSession).not.toHaveBeenCalled();
-    expect(deps.recordChatFailure).toHaveBeenCalledWith(
-      sessionDoc,
-      'agent_disconnected',
-      expect.any(String)
-    );
   });
 
   it('fails an in-flight prompt as disconnected when its own Session instance is closed', async () => {

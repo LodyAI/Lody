@@ -25,12 +25,6 @@ describe('PromptActivityRecorder', () => {
     expect(allowsPromptReplay('dropped_prompt_activity')).toBe(false);
   });
 
-  it('treats a dropped update as activity', () => {
-    const recorder = new PromptActivityRecorder();
-    recorder.recordDropped('no_route');
-    expect(recorder.observe()).toBe('dropped_prompt_activity');
-  });
-
   it('never permits a replay for an unobservable turn', () => {
     expect(allowsPromptReplay('unknown')).toBe(false);
   });
@@ -60,18 +54,6 @@ describe('PromptActivityRecorder', () => {
       // The handover is complete, so this side effect belongs to the successor.
       expect(predecessor.observe()).toBe('none');
       expect(successor.observe()).toBe('persisted_output');
-    });
-
-    it('does not let a successor drop reach the predecessor', () => {
-      // Only side effects are ambiguous across the handover. A dropped update is
-      // routed through the bound recorder, so its attribution is already exact.
-      const predecessor = new PromptActivityRecorder();
-      const successor = new PromptActivityRecorder(predecessor);
-
-      successor.recordDropped('no_route');
-
-      expect(predecessor.observe()).toBe('none');
-      expect(successor.observe()).toBe('dropped_prompt_activity');
     });
   });
 });

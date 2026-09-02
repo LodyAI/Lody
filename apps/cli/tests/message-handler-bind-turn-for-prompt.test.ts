@@ -24,7 +24,11 @@ import type {
 
 import type { SessionDocument } from '../src/lib/loro/doc';
 import type { BindTurnForPromptResult, TurnRef } from '../src/lib/session-transient-store';
-import { PromptActivityRecorder } from '../src/session/prompt-activity-recorder';
+import {
+  PromptActivityRecorder,
+  allowsPromptReplay,
+  type PromptActivityObservation,
+} from '../src/session/prompt-activity-recorder';
 import { loadEnv } from '../src/utils/const';
 
 import { createMessageHandlerHarness, destroyRepoOnRealTimers } from './message-handler-harness';
@@ -57,19 +61,24 @@ type MessageHandlerHost = {
   ): Promise<void>;
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-  hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean;
   observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined;
+  handleAgentPermissionRequest(
+    sessionId: SessionId,
+    requestId: string,
+    request: unknown,
+    model?: unknown
+  ): Promise<unknown>;
   recordPromptSideEffect(sessionId: SessionId): void;
   store: {
     deleteSession(sessionId: SessionId): void;
     clearTurnState(sessionId: SessionId): void;
-    observePromptActivityForTurn(sessionId: SessionId, turnId: string): string;
+    observePromptActivityForTurn(sessionId: SessionId, turnId: string): PromptActivityObservation;
   };
 };
 
 const createHarness = async (sessionId: SessionId) => {
-  const { repo, doc, handler } = await createMessageHandlerHarness(sessionId);
-  return { repo, doc, host: handler as unknown as MessageHandlerHost };
+  const { repo, doc, handler, sessionManager } = await createMessageHandlerHarness(sessionId);
+  return { repo, doc, sessionManager, host: handler as unknown as MessageHandlerHost };
 };
 
 const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification => ({
@@ -152,7 +161,9 @@ describe('MessageHandler bindTurnForPrompt', () => {
       const recorder = new PromptActivityRecorder();
       expect(host.bindConversationTurnForPrompt(sessionId, turnRef, recorder)).toBe('bound');
 
-      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(false);
+      expect(
+        allowsPromptReplay(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId))
+      ).toBe(true);
 
       // The agent asks to run a tool. Nothing reaches the transcript.
       host.recordPromptSideEffect(sessionId);
@@ -160,11 +171,15 @@ describe('MessageHandler bindTurnForPrompt', () => {
       expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe(
         'dropped_prompt_activity'
       );
-      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+      expect(
+        allowsPromptReplay(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId))
+      ).toBe(false);
 
       // ...and the evidence survives the turn ending, which is when the gate runs.
       host.store.clearTurnState(sessionId);
-      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+      expect(
+        allowsPromptReplay(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId))
+      ).toBe(false);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
@@ -201,7 +216,9 @@ describe('MessageHandler bindTurnForPrompt', () => {
         'dropped_prompt_activity'
       );
       // Replay gate: this turn may have acted, so refuse.
-      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+      expect(
+        allowsPromptReplay(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId))
+      ).toBe(false);
       // No-output guard: the user saw nothing, so this IS a silent failure.
       expect(host.observePromptOutputForTurn(sessionId, turnRef.turnId)).toBe(false);
     } finally {
@@ -247,6 +264,67 @@ describe('MessageHandler bindTurnForPrompt', () => {
     }
   });
 
+  it.each([
+    [
+      'a permission request',
+      async (host: MessageHandlerHost, sessionId: SessionId, _fire: (s: SessionId) => void) => {
+        // Not `recordPromptSideEffect` directly: the point is that the REAL
+        // producer reaches the recorder. Rejected by the harness (no responder),
+        // which is fine — recording happens on arrival, before any answer.
+        await host
+          .handleAgentPermissionRequest(sessionId, 'req-1', {
+            sessionId,
+            toolCall: { toolCallId: 'tool-1', title: 'rm -rf' },
+            options: [],
+          })
+          .catch(() => undefined);
+      },
+    ],
+    [
+      'an fs/write_text_file',
+      async (_host: MessageHandlerHost, sessionId: SessionId, fireWriteTextFile) => {
+        fireWriteTextFile(sessionId);
+      },
+    ],
+  ])('records %s against the bound turn', async (_label, act) => {
+    // Both are independent JSON-RPC requests that never reach
+    // `enqueueACPUpdate`, which is exactly why the replay gate could not see
+    // them. Wiring each producer to the recorder is the whole point of Step D,
+    // and neither call site had a test.
+    const sessionId = `s-producer-${_label.replace(/[^a-z]/gi, '')}` as SessionId;
+    const { repo, doc, host, sessionManager } = await createHarness(sessionId);
+    const fireWriteTextFile = (id: SessionId) => {
+      const registered = sessionManager.on.mock.calls.find(
+        (call: unknown[]) => call[0] === 'onWriteTextFile'
+      );
+      if (!registered) throw new Error('onWriteTextFile listener was never registered');
+      (registered[1] as (s: SessionId, e: unknown) => void)(id, {
+        path: '/tmp/x.ts',
+        content: 'x',
+      });
+    };
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-p', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      expect(
+        host.bindConversationTurnForPrompt(sessionId, turnRef, new PromptActivityRecorder())
+      ).toBe('bound');
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe('none');
+
+      await act(host, sessionId, fireWriteTextFile);
+
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe(
+        'dropped_prompt_activity'
+      );
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it('refuses a replay for a turn with no recorder at all', async () => {
     const sessionId = 's-recorder-missing' as SessionId;
     const { repo, doc, host } = await createHarness(sessionId);
@@ -261,7 +339,9 @@ describe('MessageHandler bindTurnForPrompt', () => {
       expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('bound');
 
       expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe('unknown');
-      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+      expect(
+        allowsPromptReplay(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId))
+      ).toBe(false);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

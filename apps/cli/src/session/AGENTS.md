@@ -211,11 +211,14 @@ delegation proofs or a shared-machine gate without a new product and security de
   the user prompt automatically. That gate fails CLOSED and reads
   `prompt-activity-recorder.ts`, not turn state: `persisted_output` and
   `dropped_prompt_activity` refuse a replay, `unknown` refuses it, and only a positive
-  `none` permits one. The recorder exists because the two older signals were both
-  broken — `acpFlushCountInTurn` is zeroed by `clearTurnState`, i.e. exactly when the
-  gate runs, and neither it nor the ACP buffer can see `session/request_permission` or
+  `none` permits one — and that observation is the ONLY input, with no fallback to a
+  blinder signal. The recorder exists because the two older signals were both broken:
+  `acpFlushCountInTurn` is zeroed by `clearTurnState`, i.e. exactly when the gate runs,
+  and neither it nor the ACP buffer can see `session/request_permission` or
   `fs/write_text_file`, which are independent JSON-RPC requests that never reach
-  `enqueueACPUpdate`. One recorder belongs to one `PromptHandoffRun` (fiber-held,
+  `enqueueACPUpdate`. Its inputs are routed updates and those two side-effect
+  requests; in-turn drops are NOT an input, because Steps A–C made them structurally
+  impossible while a recorder is bound. One recorder belongs to one `PromptHandoffRun` (fiber-held,
   carried along the steer successor chain, dies with the turn), so boundedness is
   constructional: no keys, no eviction. It is created at BIND time, so the
   `beginTurn → bind` window is deliberately excluded — what arrives there is a resume

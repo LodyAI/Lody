@@ -3086,7 +3086,6 @@ export class MessageHandler {
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
@@ -4738,7 +4737,6 @@ export class MessageHandler {
       this.logger.debug(
         `[${sessionId}] Dropping ACP update after permanent deletion reached its commit boundary`
       );
-      this.store.getBoundPromptActivityRecorder(sessionId)?.recordDropped('session_deleted');
       return;
     }
     if (this.store.recordSuppressedAcpReplay(sessionId)) {
@@ -4752,7 +4750,6 @@ export class MessageHandler {
       this.logger.debug(
         `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate})`
       );
-      this.store.getBoundPromptActivityRecorder(sessionId)?.recordDropped('no_route');
       return;
     }
     if (target.source === 'finalized_turn') {
@@ -10005,41 +10002,13 @@ export class MessageHandler {
   }
 
   /**
-   * Conservative guard for prompt replay: any buffered or already-flushed ACP
-   * update means the adapter may have acted on the user prompt, so execution
-   * recovery must stop and surface the failure instead of retrying.
-   */
-  private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
-    if (!this.store.has(sessionId)) {
-      // No transient state means we cannot observe anything about this turn, and
-      // this guard's only caller replays a user prompt. Unobservable must read as
-      // "may already have acted" — `observePromptOutputForTurn` is the accessor
-      // for callers that need to tell "nothing happened" from "cannot tell".
-      return true;
-    }
-    // The recorder is authoritative: it sees permission requests and
-    // `fs/write_text_file` (independent JSON-RPC requests that never reach
-    // `enqueueACPUpdate`), and unlike `acpFlushCountInTurn` it is not zeroed by
-    // `clearTurnState` — which used to erase the evidence exactly when the gate
-    // was consulted. `unknown` means unobservable and refuses the replay.
-    const observation = this.store.observePromptActivityForTurn(sessionId, turnId);
-    if (observation !== 'none') {
-      return true;
-    }
-    // Recorder says this prompt did nothing. Corroborate with the buffer, which
-    // can still hold entries this turn enqueued before the recorder was bound.
-    const state = this.store.get(sessionId);
-    return state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-  }
-
-  /**
    * Did this turn put anything VISIBLE in the transcript?
    *
-   * A DIFFERENT question from `hasPromptOutputForTurn`, which asks whether the
-   * turn may have ACTED. Reusing that one here was a bug: a turn that only
-   * requested a permission or wrote a file counts as "may have acted" but shows
-   * the user nothing, so the no-output guard took the success path and the user
-   * got an empty assistant entry with no explanation at all.
+   * A DIFFERENT question from the replay gate's `observePromptActivityForTurn`,
+   * which asks whether the turn may have ACTED. Answering this one with that was
+   * a bug: a turn that only requested a permission or wrote a file counts as
+   * "may have acted" but shows the user nothing, so the no-output guard took the
+   * success path and the user got an empty assistant entry with no explanation.
    *
    * `undefined` means unobservable — the transient state is gone — and keeps the
    * guard failing OPEN, because it must never accuse a turn it could not observe.

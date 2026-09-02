@@ -34,8 +34,8 @@ export type PromptActivityObservation =
   /** The agent produced output that was routed to a history entry. */
   | 'persisted_output'
   /**
-   * The agent may have acted without leaving routed output: a dropped update, an
-   * approved permission request, or an `fs/write_text_file`.
+   * The agent may have acted without leaving routed output: an approved
+   * permission request, or an `fs/write_text_file`.
    */
   | 'dropped_prompt_activity'
   /** Observed the whole prompt and it did nothing. Only this permits a replay. */
@@ -43,11 +43,8 @@ export type PromptActivityObservation =
   /** Not observable — no recorder for this turn. Always fail closed. */
   | 'unknown';
 
-export type PromptActivityDropKind = 'no_route' | 'suppressed_replay' | 'session_deleted';
-
 export class PromptActivityRecorder {
   private routed = false;
-  private dropped = false;
   private sideEffects = false;
   /**
    * Latched by this run's first routed update. Until then, side-effect signals
@@ -63,13 +60,6 @@ export class PromptActivityRecorder {
   recordRouted(): void {
     this.routed = true;
     this.tookOver = true;
-  }
-
-  recordDropped(_kind: PromptActivityDropKind): void {
-    // Steps A–C removed the in-turn drop paths structurally; this stays as
-    // diagnostic insurance so a regression surfaces as a refused replay rather
-    // than as a silently repeated tool call.
-    this.dropped = true;
   }
 
   /**
@@ -95,7 +85,7 @@ export class PromptActivityRecorder {
     if (this.routed) {
       return 'persisted_output';
     }
-    if (this.dropped || this.sideEffects) {
+    if (this.sideEffects) {
       return 'dropped_prompt_activity';
     }
     return 'none';

@@ -477,11 +477,12 @@ export type SessionExecutionServiceDeps = {
     turnRef: TurnRef,
     recorder?: PromptActivityRecorder
   ) => BindTurnForPromptResult;
-  /** Replay-gate evidence for a turn; `unknown` is fail-closed at every caller. */
-  observePromptActivityForTurn?: (
-    sessionId: SessionId,
-    turnId: string
-  ) => PromptActivityObservation;
+  /**
+   * Replay-gate evidence for a turn. Required, not optional: a missing dep would
+   * need a fallback default, and the fallback is exactly the "may have acted"
+   * question answered by a different, blinder signal.
+   */
+  observePromptActivityForTurn: (sessionId: SessionId, turnId: string) => PromptActivityObservation;
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
@@ -544,7 +545,6 @@ export type SessionExecutionServiceDeps = {
    * buffered or flushed. Prompt recovery must not replay the same user turn after
    * visible agent output, because the adapter may already have acted on it.
    */
-  hasPromptOutputForTurn?: (sessionId: SessionId, turnId: string) => boolean;
   /**
    * Same observation, but `undefined` when the session's transient state is gone
    * and the answer is unknowable. The no-output guard needs that distinction:
@@ -4021,24 +4021,15 @@ export class SessionExecutionService {
           prompt(promptBlocks).pipe(
             Effect.catchAll((error) =>
               Effect.gen(function* () {
-                // Fail CLOSED when the dependency is not wired: an unobservable
-                // turn must be treated as one that may already have acted, or
-                // the replay re-runs tools the agent already executed. (The
-                // no-output guard needs the opposite default — see
-                // `turnProducedVisibleOutput`.)
-                //
-                // The recorder is the primary signal because it also sees
-                // permission requests and `fs/write_text_file`; only a positive
-                // `none` permits a replay, so `unknown` and
-                // `dropped_prompt_activity` both refuse.
-                const activity = self.deps.observePromptActivityForTurn?.(
-                  sessionId,
-                  runtime.turnId
+                // Fails CLOSED by construction: only a positive `none` permits
+                // a replay, so an unobservable turn (`unknown`) refuses, as does
+                // one that may already have acted. The recorder is the only
+                // signal because it is the only one that sees permission
+                // requests and `fs/write_text_file`. (The no-output guard asks
+                // the opposite question — see `turnProducedVisibleOutput`.)
+                const hasPromptOutput = !allowsPromptReplay(
+                  self.deps.observePromptActivityForTurn(sessionId, runtime.turnId)
                 );
-                const hasPromptOutput =
-                  activity !== undefined
-                    ? !allowsPromptReplay(activity)
-                    : (self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? true);
                 if (
                   runtime.turnId !== turnId ||
                   !shouldRecoverStaleACPConnectionPrompt({
