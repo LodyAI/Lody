@@ -388,6 +388,15 @@ pre,
     opacity: 1;
   }
 
+  /* A touch device never hovers, so the reveal above never fires there and the
+     copy/download controls stay invisible for good. Same rule the code block
+     already carries. */
+  @media (hover: none) {
+    .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+      opacity: 1;
+    }
+  }
+
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button {
     border-radius: 0.25rem;
     padding: 0.25rem;
@@ -422,10 +431,19 @@ pre,
     overflow-y: visible !important;
     overscroll-behavior-x: contain;
     padding: 1rem;
-    cursor: default !important;
+    /* Overrides Streamdown's own grab cursor: the block does not pan in place,
+       it opens `MermaidDiagramViewer` (markdown-renderer.tsx tags it
+       `role="button"` once the diagram renders). */
+    cursor: zoom-in !important;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid']:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 0.375rem;
   }
 
   .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar {

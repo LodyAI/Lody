@@ -1,9 +1,12 @@
 import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useState,
   useCallback,
+  useEffect,
   useMemo,
   useLayoutEffect,
   useRef,
@@ -52,6 +55,7 @@ import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { useTaskImageUrl } from '@/hooks/use-task-image';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
+import { MermaidDiagramViewer, type MermaidDiagramSelection } from './mermaid-diagram-viewer';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -622,11 +626,21 @@ const STREAMDOWN_CONTROLS = {
   mermaid: {
     copy: true,
     download: true,
-    fullscreen: true,
+    // Streamdown's own full-screen overlay is off because its only exit is a
+    // 32px button at a raw `top-4 right-4`, which on a phone sits inside the
+    // status-bar inset while its content layer swallows every backdrop tap —
+    // an overlay a touch user cannot leave. `MermaidDiagramViewer` replaces it.
+    fullscreen: false,
     panZoom: false,
   },
   table: false,
 } satisfies ControlsConfig;
+
+/** Streamdown's wrapper around one rendered diagram, inside a `mermaid-block`. */
+const MERMAID_DIAGRAM_SELECTOR = '[data-streamdown="mermaid"]';
+
+/** Matches a fenced ```mermaid block, so blocks without one skip the observer. */
+const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const writeTextToClipboard = async (text: string): Promise<boolean> => {
   if (!text.trim()) return false;
@@ -854,6 +868,88 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const copyCodeLabel = t('common.copyCode', 'Copy code');
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
+  const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
+  const [diagramSelection, setDiagramSelection] = useState<MermaidDiagramSelection | null>(null);
+  const hasMermaidBlock = useMemo(() => MERMAID_FENCE_PATTERN.test(text), [text]);
+
+  const closeDiagram = useCallback(() => setDiagramSelection(null), []);
+
+  const openDiagram = useCallback((diagram: Element) => {
+    const svg = diagram.querySelector('svg');
+    if (!svg) {
+      return;
+    }
+    // The rendered size of the copy in the message is the diagram's natural
+    // size, and the viewer's opening zoom is expressed against it.
+    const rect = svg.getBoundingClientRect();
+    setDiagramSelection({
+      svg: svg.cloneNode(true) as SVGSVGElement,
+      naturalWidth: rect.width,
+      naturalHeight: rect.height,
+    });
+  }, []);
+
+  const handleMarkdownClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const diagram = event.target.closest(MERMAID_DIAGRAM_SELECTOR);
+      if (!diagram) {
+        return;
+      }
+      // Releasing a text selection over a diagram label is not a request to
+      // open it.
+      if (window.getSelection()?.toString()) {
+        return;
+      }
+      openDiagram(diagram);
+    },
+    [openDiagram]
+  );
+
+  const handleMarkdownKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const diagram = event.target.closest(MERMAID_DIAGRAM_SELECTOR);
+      if (!diagram) {
+        return;
+      }
+      event.preventDefault();
+      openDiagram(diagram);
+    },
+    [openDiagram]
+  );
+
+  // Streamdown owns the diagram markup, so the affordance that replaces its
+  // removed full-screen button is applied to that markup here. A diagram
+  // appears only after the lazily imported Mermaid runtime resolves — long
+  // after this component commits — so a one-shot pass would miss it; the
+  // observer is installed only for text that actually fences a diagram.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root || !hasMermaidBlock) {
+      return undefined;
+    }
+
+    const markDiagramsOpenable = () => {
+      root.querySelectorAll<HTMLElement>(MERMAID_DIAGRAM_SELECTOR).forEach((diagram) => {
+        diagram.setAttribute('role', 'button');
+        diagram.setAttribute('tabindex', '0');
+        diagram.setAttribute('aria-label', openDiagramLabel);
+      });
+    };
+
+    markDiagramsOpenable();
+    const observer = new MutationObserver(markDiagramsOpenable);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [hasMermaidBlock, openDiagramLabel]);
   const components = useMemo(
     () =>
       createMarkdownComponents({
@@ -1015,32 +1111,40 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   }, [copyCodeLabel, search?.isOpen, search?.query, searchBlockId, searchMatch, text]);
 
   return (
-    <div
-      ref={containerRef}
-      data-search-block-id={searchBlockId}
-      className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
-      style={markdownFontSizeStyle(normalizedSize)}
-    >
-      <Streamdown
-        // Streamdown's memo comparator does not include every rendering prop;
-        // remount when raw-HTML mode or Mermaid theme changes so sanitized
-        // rendering and diagram colors update correctly.
-        key={streamdownKey}
-        mode="streaming"
-        className="space-y-0"
-        controls={STREAMDOWN_CONTROLS}
-        isAnimating={isStreaming}
-        lineNumbers={false}
-        mermaid={mermaidOptions}
-        plugins={STREAMDOWN_PLUGINS}
-        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-        rehypePlugins={rehypePlugins}
-        components={components}
-        translations={streamdownTranslations}
-        urlTransform={markdownUrlTransform}
+    <>
+      <div
+        ref={containerRef}
+        data-search-block-id={searchBlockId}
+        className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
+        style={markdownFontSizeStyle(normalizedSize)}
+        onClick={handleMarkdownClick}
+        onKeyDown={handleMarkdownKeyDown}
       >
-        {text}
-      </Streamdown>
-    </div>
+        <Streamdown
+          // Streamdown's memo comparator does not include every rendering prop;
+          // remount when raw-HTML mode or Mermaid theme changes so sanitized
+          // rendering and diagram colors update correctly.
+          key={streamdownKey}
+          mode="streaming"
+          className="space-y-0"
+          controls={STREAMDOWN_CONTROLS}
+          isAnimating={isStreaming}
+          lineNumbers={false}
+          mermaid={mermaidOptions}
+          plugins={STREAMDOWN_PLUGINS}
+          remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+          rehypePlugins={rehypePlugins}
+          components={components}
+          translations={streamdownTranslations}
+          urlTransform={markdownUrlTransform}
+        >
+          {text}
+        </Streamdown>
+      </div>
+      {/* A sibling of the markdown, not a child: a portal's events bubble
+          through the React tree, and inside the container the viewer's own
+          clicks would reach the delegated open handler above. */}
+      <MermaidDiagramViewer selection={diagramSelection} onClose={closeDiagram} />
+    </>
   );
 });
