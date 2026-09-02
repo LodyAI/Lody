@@ -111,7 +111,17 @@ delegation proofs or a shared-machine gate without a new product and security de
   quiescent. Use live execution/presence for current-work signals; goal activity may
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
-  `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
+  `TurnRuntimeState` is registered. `beginConversationTurn` returns the whole `TurnRef`
+  (`turnId` + `turnEpoch` + `assistantEntryId`) and the runtime carries it, because
+  `bindConversationTurnForPrompt` is an authoritative write that must name the exact
+  epoch it created rather than whatever turn happens to be current. A bind refusal is
+  terminal for the turn: the initial prompt path fails closed before sending anything
+  (recorded as `turn_pre_prompt_failed`), and the steer path cancels the steered turn
+  and reports `disposition: 'error'` — it cannot withhold a prompt, because the steer
+  reuses the same physical prompt and the agent has already taken it. Output must never
+  fall back to the previous assistant entry there: `transitionDispatchOwnership` has
+  already moved dispatch ownership to the new user turn, so a fallback renders the new
+  user message as unanswered. User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
   the same history entry.
   INVARIANT: a steer (guide) the agent never accepted must not stay parked in

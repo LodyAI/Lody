@@ -121,7 +121,7 @@ describe('SessionTransientStore', () => {
       expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBeUndefined();
     });
 
-    it('keeps finalized-turn ACP routing until a deferred turn activates its ACP target', () => {
+    it('keeps finalized-turn ACP routing until a deferred turn binds for its prompt', () => {
       const store = new SessionTransientStore();
       const id = sid('s1');
 
@@ -132,18 +132,93 @@ describe('SessionTransientStore', () => {
       store.rememberFinalizedTurnForLateACPUpdates(id, finalizedTarget);
       store.clearTurnState(id);
 
-      store.beginTurn(id, { turnId: 'turn-2', ownsACPUpdates: false });
+      const deferred = store.beginTurn(id, { turnId: 'turn-2', ownsACPUpdates: false });
 
       expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
         turnId: 'turn-1',
         source: 'finalized_turn',
       });
 
-      store.activateTurnACPUpdateTarget(id, 'turn-2');
+      expect(
+        store.bindTurnForPrompt(id, {
+          turnId: 'turn-2',
+          turnEpoch: deferred,
+          assistantEntryId: 'turn-2',
+        })
+      ).toBe('bound');
       expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
         turnId: 'turn-2',
         source: 'active_turn',
       });
+    });
+
+    it('bindTurnForPrompt refuses a session whose state is gone, without recreating it', () => {
+      // Binding is an authoritative write, so it must not resurrect a deleted or
+      // GC'd session: the prompt would run against a target nothing reads.
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      const epoch = store.beginTurn(id, { turnId: 'turn-1' });
+      const ref = { turnId: 'turn-1', turnEpoch: epoch, assistantEntryId: 'turn-1' };
+      store.deleteSession(id);
+
+      expect(store.bindTurnForPrompt(id, ref)).toBe('session_state_missing');
+      expect(store.has(id)).toBe(false);
+    });
+
+    it('bindTurnForPrompt refuses when a different turn owns the session state', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      const epoch = store.beginTurn(id, { turnId: 'turn-1', ownsACPUpdates: false });
+      const staleRef = { turnId: 'turn-1', turnEpoch: epoch, assistantEntryId: 'turn-1' };
+
+      // Turn cleared, then a redispatch reuses the same turn id at a new epoch.
+      store.clearTurnState(id);
+      store.beginTurn(id, { turnId: 'turn-1', ownsACPUpdates: false });
+
+      expect(store.bindTurnForPrompt(id, staleRef)).toBe('turn_superseded');
+
+      // The live turn's routing was left untouched by the refusal.
+      expect(store.getCurrentACPUpdateTarget(id)).toBeUndefined();
+    });
+
+    it('bindTurnForPrompt refuses a turn that was already cleared', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      const epoch = store.beginTurn(id, { turnId: 'turn-1' });
+      const ref = { turnId: 'turn-1', turnEpoch: epoch, assistantEntryId: 'turn-1' };
+      store.clearTurnState(id);
+
+      expect(store.bindTurnForPrompt(id, ref)).toBe('turn_superseded');
+      expect(store.has(id)).toBe(true);
+    });
+
+    it('bindTurnForPrompt drops a stale late target so replay cannot leak into the new turn', () => {
+      // Binding is what hands routing to the new turn, and it must also drop the
+      // previous turn's late-update target — otherwise output produced between
+      // the two turns keeps landing on the old assistant entry.
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, { turnId: 'turn-1' });
+      const previous = store.getCurrentACPUpdateTarget(id);
+      if (!previous) throw new Error('expected active ACP update target');
+      store.rememberFinalizedTurnForLateACPUpdates(id, previous);
+      store.clearTurnState(id);
+
+      const epoch = store.beginTurn(id, { turnId: 'turn-2', ownsACPUpdates: false });
+      expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBe('turn-1');
+
+      expect(
+        store.bindTurnForPrompt(id, {
+          turnId: 'turn-2',
+          turnEpoch: epoch,
+          assistantEntryId: 'turn-2',
+        })
+      ).toBe('bound');
+      expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBeUndefined();
     });
 
     it('never expires finalized-turn ACP update routing by wall-clock time', () => {
@@ -204,7 +279,7 @@ describe('SessionTransientStore', () => {
       expect(store.getCurrentACPUpdateTarget(id)).toBeUndefined();
 
       // ... the prompt starts while the finalizer is awaiting ...
-      store.activateTurnACPUpdateTarget(id, 'turn-1');
+      expect(store.bindTurnForPrompt(id, ref)).toBe('bound');
 
       expect(store.finalizeIfCurrent(id, ref)).toBe(true);
       expect(store.getTurnId(id)).toBeUndefined();

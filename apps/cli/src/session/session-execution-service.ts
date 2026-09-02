@@ -109,6 +109,7 @@ import {
   GIT_EXECUTABLE_NOT_FOUND_CODE,
   isGitExecutableNotFoundError,
 } from './worktree/git-process-error';
+import type { BindTurnForPromptResult, TurnRef } from '@/lib/session-transient-store';
 import {
   AgentSessionClosedError,
   type AgentSessionCloseCause,
@@ -225,6 +226,8 @@ type TurnRuntimeState = {
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
+  /** Identity of `turnId`, so the prompt can bind routing authoritatively. */
+  turnRef: TurnRef;
   userTurnId?: string;
   requesterUserId?: string;
   session?: ISession;
@@ -434,8 +437,16 @@ export type SessionExecutionServiceDeps = {
       sessionDoc: SessionDocument;
       deferACPUpdateTarget?: boolean;
     }
-  ) => string;
-  activateConversationTurnForACPUpdates: (sessionId: SessionId, turnId: string) => void;
+  ) => TurnRef;
+  /**
+   * Authoritative write by this fiber, which holds the turn lease. `bound` is the
+   * only outcome that permits a prompt; see `bindTurnForPrompt` in
+   * `session-transient-store.ts` for why the refusals are terminal.
+   */
+  bindConversationTurnForPrompt: (
+    sessionId: SessionId,
+    turnRef: TurnRef
+  ) => BindTurnForPromptResult;
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
@@ -1371,10 +1382,11 @@ export class SessionExecutionService {
             `[${options.sessionId}] Failed to persist applied steer ownership for ${options.userTurnId}: ${formatErrorMessage(error)}`
           );
         }
-        const nextTurnId = this.deps.beginConversationTurn(options.sessionId, options.userTurnId, {
+        const nextTurnRef = this.deps.beginConversationTurn(options.sessionId, options.userTurnId, {
           dispatchSource: 'rpc',
           sessionDoc,
         });
+        const nextTurnId = nextTurnRef.turnId;
         try {
           await this.deps.createAssistantEntryForTurn(
             options.sessionId,
@@ -1388,7 +1400,35 @@ export class SessionExecutionService {
             `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
           );
         }
-        this.deps.activateConversationTurnForACPUpdates(options.sessionId, nextTurnId);
+        // The steer reuses the same physical prompt, so there is no prompt left to
+        // withhold — `steerRun.applied` already returned and the agent has taken
+        // the steer. A bind refusal therefore cancels the turn instead, and the
+        // output is NOT allowed to fall back to the previous assistant entry:
+        // `transitionDispatchOwnership` above already moved dispatch ownership to
+        // the new user turn, so falling back would render the new user message as
+        // unanswered and misattribute the agent's reply.
+        const nextBindResult = this.deps.bindConversationTurnForPrompt(
+          options.sessionId,
+          nextTurnRef
+        );
+        if (nextBindResult !== 'bound') {
+          this.deps.logger.error(
+            `[${options.sessionId}] Cancelling steered turn ${nextTurnId}: ACP update routing could not be bound (${nextBindResult})`
+          );
+          this.markTurnCancelled(options.sessionId, nextTurnId);
+          runtime.cancelRequested = true;
+          runtime.turnId = nextTurnId;
+          runtime.turnRef = nextTurnRef;
+          runtime.userTurnId = options.userTurnId;
+          this.markCurrentTurn(options.sessionId, nextTurnId);
+          this.requestTurnInterrupt(runtime);
+          // `error`, not a new disposition: the steer disposition enum is a shared
+          // persisted schema and extending it belongs to its own change.
+          return reject(
+            'error',
+            `Steer applied but ACP update routing could not be bound (${nextBindResult}); the turn was cancelled`
+          );
+        }
         const nextPromptRun = this.createPromptHandoffRun({
           turnId: nextTurnId,
           promptPromise: steerRun.completion,
@@ -1403,6 +1443,7 @@ export class SessionExecutionService {
         ownedPromptRun.successor = nextPromptRun;
         runtime.activePromptRun = nextPromptRun;
         runtime.turnId = nextTurnId;
+        runtime.turnRef = nextTurnRef;
         runtime.userTurnId = options.userTurnId;
         runtime.requesterUserId = options.userId;
         this.markCurrentTurn(options.sessionId, nextTurnId);
@@ -1609,13 +1650,14 @@ export class SessionExecutionService {
 
   private createTurnRuntime(
     sessionId: SessionId,
-    turnId: string,
+    turnRef: TurnRef,
     userTurnId?: string,
     session?: ISession
   ): TurnRuntimeState {
     return {
       sessionId,
-      turnId,
+      turnId: turnRef.turnId,
+      turnRef,
       userTurnId,
       session,
       promptStarted: false,
@@ -2668,13 +2710,14 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
-      turnId = this.deps.beginConversationTurn(sessionId, userTurnId, {
+      const turnRef = this.deps.beginConversationTurn(sessionId, userTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
         deferACPUpdateTarget: true,
       });
+      turnId = turnRef.turnId;
       this.markCurrentTurn(sessionId, turnId);
-      runtime = this.createTurnRuntime(sessionId, turnId, userTurnId, session);
+      runtime = this.createTurnRuntime(sessionId, turnRef, userTurnId, session);
       this.registerTurnRuntime(runtime);
     } finally {
       releaseConflict();
@@ -2854,7 +2897,29 @@ export class SessionExecutionService {
                   return undefined;
                 }
                 runtime.terminateSessionOnCancel = false;
-                self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
+                // Bind AFTER `acpReplaySuppression.release` and BEFORE the prompt.
+                // Both edges are load bearing: binding earlier writes `loadSession`
+                // replay into this turn's assistant entry, binding later leaves the
+                // turn's own output unroutable. This used to be a conditional claim
+                // that silently no-opped; it is an authoritative write now, so a
+                // refusal must stop the prompt instead of sending one whose output
+                // has nowhere to go.
+                const bindResult = self.deps.bindConversationTurnForPrompt(
+                  sessionId,
+                  runtime.turnRef
+                );
+                if (bindResult !== 'bound') {
+                  // Fail closed: no prompt is sent. `recordPrePromptFailure` still
+                  // sees `promptStarted === false`, so the user gets an explicit
+                  // `turn_pre_prompt_failed` instead of a turn that runs and
+                  // silently discards everything it produces.
+                  yield* Effect.fail(
+                    new Error(
+                      `Cannot start prompt for turn ${runtime.turnId}: ACP update routing could not be bound (${bindResult})`
+                    )
+                  );
+                  return undefined;
+                }
                 runtime.promptStarted = true;
 
                 yield* Effect.acquireUseRelease(

@@ -281,7 +281,9 @@ import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
   SessionTransientStore,
   type ACPUpdateTarget,
+  type BindTurnForPromptResult,
   type BufferedACPUpdate,
+  type TurnRef,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
@@ -3038,8 +3040,10 @@ export class MessageHandler {
     );
     this.autoPromptRunner = new AutoPromptRunner({
       workspaceId: this.workspaceId,
+      // Auto-prompt turns are not deferred, so they own ACP routing from
+      // `beginTurn` and never bind; the runner only needs the id.
       beginConversationTurn: (sessionId, userTurnId) =>
-        this.beginConversationTurn(sessionId, userTurnId),
+        this.beginConversationTurn(sessionId, userTurnId).turnId,
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
@@ -3073,8 +3077,8 @@ export class MessageHandler {
       endACPReplaySuppression: (sessionId) => this.endACPReplaySuppression(sessionId),
       beginConversationTurn: (sessionId, userTurnId, gateContext) =>
         this.beginConversationTurn(sessionId, userTurnId, gateContext),
-      activateConversationTurnForACPUpdates: (sessionId, turnId) =>
-        this.activateConversationTurnForACPUpdates(sessionId, turnId),
+      bindConversationTurnForPrompt: (sessionId, turnRef) =>
+        this.bindConversationTurnForPrompt(sessionId, turnRef),
       clearConversationTurn: (sessionId, turnId) =>
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
@@ -6001,20 +6005,26 @@ export class MessageHandler {
     return `assistant:${userTurnId}`;
   }
 
+  /**
+   * Returns the whole `TurnRef`, not just the id: the caller is the fiber that
+   * will bind this turn for its prompt, and `bindTurnForPrompt` is an
+   * authoritative write that needs the epoch to be sure it is writing to the turn
+   * it just created rather than to a redispatch that replaced it.
+   */
   private beginConversationTurn(
     sessionId: SessionId,
     userTurnId?: string,
     gateContext?: ConversationTurnGateContext
-  ): string {
+  ): TurnRef {
     const turnId = userTurnId ? this.getAssistantEntryIdForUserTurn(userTurnId) : uuidV4();
-    this.store.beginTurn(sessionId, {
+    const turnEpoch = this.store.beginTurn(sessionId, {
       turnId,
       assistantEntryId: turnId,
       ownsACPUpdates: !gateContext?.deferACPUpdateTarget,
       ...(userTurnId ? { userTurnId } : {}),
     });
     this.setTurnHistoryGate(sessionId, turnId, userTurnId, gateContext);
-    return turnId;
+    return { turnId, turnEpoch, assistantEntryId: turnId };
   }
 
   private async recordOwnerAccessAllowedSnapshot(): Promise<void> {
@@ -6040,8 +6050,17 @@ export class MessageHandler {
     );
   }
 
-  private activateConversationTurnForACPUpdates(sessionId: SessionId, turnId: string): void {
-    this.store.activateTurnACPUpdateTarget(sessionId, turnId);
+  private bindConversationTurnForPrompt(
+    sessionId: SessionId,
+    turnRef: TurnRef
+  ): BindTurnForPromptResult {
+    const result = this.store.bindTurnForPrompt(sessionId, turnRef);
+    if (result !== 'bound') {
+      this.logger.error(
+        `[${sessionId}] Refusing to prompt turn ${turnRef.turnId} (epoch ${turnRef.turnEpoch}): ACP routing could not be bound (${result})`
+      );
+    }
+    return result;
   }
 
   /**

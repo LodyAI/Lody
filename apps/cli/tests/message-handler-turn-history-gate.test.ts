@@ -36,7 +36,7 @@ type MessageHandlerHost = {
     sessionId: SessionId,
     userTurnId?: string,
     gateContext?: { dispatchSource?: SessionDispatchSource; sessionDoc: SessionDocument }
-  ): string;
+  ): { turnId: string; turnEpoch: number; assistantEntryId: string };
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
   createAssistantEntryForTurn(
     sessionId: SessionId,
@@ -149,7 +149,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     const { repo, doc, handler } = await createHandlerHarness(sessionId);
 
     try {
-      const turnId = handler.beginConversationTurn(sessionId, userTurnId, {
+      const { turnId } = handler.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'rpc',
         sessionDoc: doc,
       });
@@ -189,7 +189,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     const { repo, doc, handler } = await createHandlerHarness(sessionId);
 
     try {
-      const turnId = handler.beginConversationTurn(sessionId, userTurnId, {
+      const { turnId } = handler.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'rpc',
         sessionDoc: doc,
       });
@@ -213,7 +213,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
 
     try {
       await doc.updateHistory((history) => [...history, userEntry(userTurnId)]);
-      const turnId = handler.beginConversationTurn(sessionId, userTurnId, {
+      const { turnId } = handler.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'crdt',
         sessionDoc: doc,
       });

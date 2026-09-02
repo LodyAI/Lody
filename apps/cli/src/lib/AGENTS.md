@@ -282,7 +282,22 @@ control-plane path is DEPRECATED; do not add functionality to it.
   (`session-transient-store.ts`): agent sessions stay alive and emit events long after
   `stopReason` (cron, `ScheduleWakeup`, deferred work), and those must still reach the
   Loro doc. The target is cleared only when a new turn owns ACP updates (normally
-  `beginTurn()`, but visible dispatch defers until prompt start) or replay suppression.
+  `beginTurn()`, but visible dispatch defers until prompt start via
+  `bindTurnForPrompt`) or replay suppression.
+  INVARIANT: `bindTurnForPrompt(sessionId, turnRef)` is an AUTHORITATIVE synchronous
+  write by the fiber holding the turn lease — it just came out of `beginConversationTurn`
+  and holds the whole `TurnRef` — not a conditional claim. It must run AFTER
+  `acpReplaySuppression.release` and BEFORE the prompt: earlier and `loadSession` replay
+  lands in the new turn's assistant entry; later and the turn's own output is unroutable.
+  The predecessor returned void and silently no-opped on a cleared turn, which both hid
+  the 505-second failure AND enforced this ordering by accident; the accident is gone, so
+  the ordering is pinned by `tests/message-handler-bind-turn-for-prompt.test.ts` plus an
+  execution-service call-order test. Both refusals (`session_state_missing`,
+  `turn_superseded`) must stop the prompt — the initial path fails closed before sending
+  anything, the steer path cancels the turn, and neither may fall back to the previous
+  assistant entry because dispatch ownership has already moved. `session_state_missing`
+  deliberately does not go through `store.get()`: recreating state there revives a
+  deleted or GC'd session.
   INVARIANT: a SessionManager lifecycle event (`error`/`exit`/`terminated`) must NEVER
   end a turn the `SessionExecutionService` still owns
   (`executionService.getExecutionSnapshot(id).hasActiveTurn`). While a turn is owned, a

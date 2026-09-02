@@ -71,6 +71,13 @@ export type TurnRef = {
   assistantEntryId: string;
 };
 
+/**
+ * `bound` is the only outcome that permits a prompt. Both refusals are terminal
+ * for the turn: there is no correct way to send a prompt whose output cannot be
+ * routed anywhere.
+ */
+export type BindTurnForPromptResult = 'bound' | 'session_state_missing' | 'turn_superseded';
+
 export type BufferedACPUpdate = {
   notification: AcpSessionNotification;
   target: ACPUpdateTarget;
@@ -259,15 +266,50 @@ export class SessionTransientStore {
     return turnEpoch;
   }
 
-  activateTurnACPUpdateTarget(sessionId: SessionId, turnId: string): void {
+  /**
+   * Bind ACP update routing to the turn that is about to prompt.
+   *
+   * This is an AUTHORITATIVE write by the fiber holding the turn lease, not a
+   * conditional claim. The caller just came out of `beginTurn` and holds the
+   * whole `TurnRef`, so there is nothing to negotiate — which is the point. The
+   * predecessor (`activateTurnACPUpdateTarget`) returned void and silently
+   * no-opped whenever the turn had been cleared underneath it, and that silence
+   * is how a resume fallback prompted for 505 seconds into a routing target that
+   * did not exist.
+   *
+   * Two outcomes are refusals, and BOTH must stop the prompt:
+   *
+   * - `session_state_missing` — the session was deleted or GC'd. Deliberately
+   *   does not go through `get()`: recreating state here revives a dead session
+   *   and hands a live prompt to a target nothing will ever read.
+   * - `turn_superseded` — state exists but a different turn owns it. The
+   *   per-session execution mutex should make this unreachable, so it means the
+   *   lease was violated; overwriting would clobber the live turn's routing.
+   *
+   * INVARIANT: bind must happen AFTER `acpReplaySuppression.release` and BEFORE
+   * the prompt is sent. Earlier than the release and `loadSession` replay lands
+   * in the new turn's assistant entry; later than the prompt and the turn's own
+   * output has nowhere to go. The old conditional claim absorbed an early bind
+   * as a silent no-op; an authoritative write does not, so ordering is now load
+   * bearing and is pinned by regression tests.
+   */
+  bindTurnForPrompt(sessionId: SessionId, ref: TurnRef): BindTurnForPromptResult {
     const state = this.sessions.get(sessionId);
-    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
-      return;
+    if (!state) {
+      return 'session_state_missing';
+    }
+    if (
+      state.turn.phase === 'idle' ||
+      state.turn.turnId !== ref.turnId ||
+      state.turn.turnEpoch !== ref.turnEpoch
+    ) {
+      return 'turn_superseded';
     }
     if (!state.turn.ownsACPUpdates) {
       state.turn = { ...state.turn, ownsACPUpdates: true };
     }
     state.lateACPUpdateTarget = undefined;
+    return 'bound';
   }
 
   /**

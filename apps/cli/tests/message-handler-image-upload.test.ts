@@ -270,9 +270,13 @@ describe('MessageHandler image upload flow', () => {
     handlers.push(harness.handler);
 
     const sessionId = 'session-1' as SessionId;
-    const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
-      sessionId
-    );
+    const { turnId } = (
+      harness.host.beginConversationTurn as (sessionId: SessionId) => {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      }
+    )(sessionId);
     await (
       harness.host.createAssistantEntryForTurn as (
         sessionId: SessionId,
@@ -336,9 +340,13 @@ describe('MessageHandler image upload flow', () => {
     handlers.push(harness.handler);
 
     const sessionId = 'session-inline-image' as SessionId;
-    const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
-      sessionId
-    );
+    const { turnId } = (
+      harness.host.beginConversationTurn as (sessionId: SessionId) => {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      }
+    )(sessionId);
     await (
       harness.host.createAssistantEntryForTurn as (
         sessionId: SessionId,
@@ -403,9 +411,13 @@ describe('MessageHandler image upload flow', () => {
     handlers.push(harness.handler);
 
     const sessionId = 'session-1' as SessionId;
-    const turnId = (harness.host.beginConversationTurn as (sessionId: SessionId) => string)(
-      sessionId
-    );
+    const { turnId } = (
+      harness.host.beginConversationTurn as (sessionId: SessionId) => {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      }
+    )(sessionId);
     await (
       harness.host.createAssistantEntryForTurn as (
         sessionId: SessionId,

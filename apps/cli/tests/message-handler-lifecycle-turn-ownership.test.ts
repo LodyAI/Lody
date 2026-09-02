@@ -9,8 +9,9 @@
  * (`ownsACPUpdates === false`, because visible dispatch does not claim ACP
  * routing until its prompt starts). The old handler answered that event with a
  * no-turnId `finalizeACPState`, which cleared the turn; the fallback's routing
- * claim then found an idle turn, and every one of the 505 seconds of agent
- * output was dropped, after which the turn was recorded as `agent_no_output`.
+ * bind then found an idle turn and could not bind, and every one of the 505
+ * seconds of agent output was dropped, after which the turn was recorded as
+ * `agent_no_output`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,8 +44,13 @@ type MessageHandlerHost = {
       sessionDoc: SessionDocument;
       deferACPUpdateTarget?: boolean;
     }
-  ): string;
-  activateConversationTurnForACPUpdates(sessionId: SessionId, turnId: string): void;
+  ): { turnId: string; turnEpoch: number; assistantEntryId: string };
+  bindConversationTurnForPrompt(
+    sessionId: SessionId,
+    turnRef: { turnId: string; turnEpoch: number; assistantEntryId: string }
+  ): 'bound' | 'session_state_missing' | 'turn_superseded';
+  beginACPReplaySuppression(sessionId: SessionId): void;
+  endACPReplaySuppression(sessionId: SessionId): void;
   createAssistantEntryForTurn(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
@@ -53,6 +59,7 @@ type MessageHandlerHost = {
     userTurnId?: string
   ): Promise<void>;
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined;
   executionService: SessionExecutionService;
   codeCollabV2Service: CodeCollabV2Service;
   sessionActivePresence: SessionActivePresenceController;
@@ -128,11 +135,12 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     try {
       setActiveTurn(true, `assistant:${userTurnId}`);
 
-      const turnId = host.beginConversationTurn(sessionId, userTurnId, {
+      const turnRef = host.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'crdt',
         sessionDoc: doc,
         deferACPUpdateTarget: true,
       });
+      const turnId = turnRef.turnId;
       await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
 
       // The failed restore terminates its own Session instance.
@@ -140,7 +148,7 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
       await vi.advanceTimersByTimeAsync(50);
 
       // The fallback's new ACP session starts prompting and claims routing.
-      host.activateConversationTurnForACPUpdates(sessionId, turnId);
+      expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('bound');
       host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'hello'));
       host.enqueueACPUpdate(sessionId, agentChunk(sessionId, ' world'));
       await vi.advanceTimersByTimeAsync(50);
@@ -155,6 +163,45 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
       expect(releaseWatch).not.toHaveBeenCalled();
       expect(clearPresence).not.toHaveBeenCalled();
       expect(setStatus).not.toHaveBeenCalled();
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('reports produced output for a resume-fallback turn instead of `agent_no_output`', async () => {
+    const sessionId = 's-lifecycle-2' as SessionId;
+    const userTurnId = 'user-turn-2';
+    const { repo, doc, host, listeners, setActiveTurn } = await createHarness(sessionId);
+
+    try {
+      setActiveTurn(true, `assistant:${userTurnId}`);
+
+      const turnRef = host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      const turnId = turnRef.turnId;
+      await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
+
+      // Restore path: suppress ACP replay, `loadSession` throws
+      // `[ACP_RESUME_FAILED]`, SessionManager terminates the failed instance.
+      host.beginACPReplaySuppression(sessionId);
+      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Fallback succeeds on a fresh ACP session and the prompt starts.
+      host.endACPReplaySuppression(sessionId);
+      expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('bound');
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'real answer'));
+      await vi.advanceTimersByTimeAsync(50);
+
+      // This is exactly what the no-output guard reads right after the prompt
+      // returns; `false` here is what produced the false `agent_no_output`.
+      expect(host.observePromptOutputForTurn(sessionId, turnId)).toBe(true);
+
+      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
+      expect(readItems(assistant)).toEqual([{ type: 'text', text: 'real answer' }]);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
@@ -214,7 +261,7 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     }
   });
 
-  it('still finalizes and idles a session with no turn running', async () => {
+  it('still finalizes and idles a session whose `exit` arrives with no turn running', async () => {
     const sessionId = 's-lifecycle-3' as SessionId;
     const { repo, doc, host, listeners, setActiveTurn, clearPresence, setStatus } =
       await createHarness(sessionId);
@@ -222,7 +269,7 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     try {
       setActiveTurn(false);
 
-      const turnId = host.beginConversationTurn(sessionId, 'user-turn-3', {
+      const { turnId } = host.beginConversationTurn(sessionId, 'user-turn-3', {
         dispatchSource: 'crdt',
         sessionDoc: doc,
       });
@@ -243,16 +290,23 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     }
   });
 
-  it('releases the workspace watch after termination with no running turn', async () => {
+  it('releases the workspace watch on `terminated` only once no turn is running', async () => {
     const sessionId = 's-lifecycle-4' as SessionId;
-    const { repo, listeners, setActiveTurn, releaseWatch } = await createHarness(sessionId);
+    const { repo, host, listeners, setActiveTurn, releaseWatch } = await createHarness(sessionId);
+
     try {
+      setActiveTurn(true, 'assistant:user-turn-4');
+      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
+      expect(releaseWatch).not.toHaveBeenCalled();
+
       setActiveTurn(false);
       listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
       expect(releaseWatch).toHaveBeenCalledWith(sessionId);
+
+      await vi.advanceTimersByTimeAsync(50);
+      void host;
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
   });
-
 });
