@@ -251,8 +251,19 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     useLocalWorktreeSource,
   ]);
 
+  // A local list is a `git ls-files` on the machine, not a billed network call,
+  // and the working tree moves under the user between two `@`s — they drop a
+  // folder into the project and reach for it immediately. So the local source is
+  // the one source that REVALIDATES on activation instead of only ensuring it is
+  // loaded; `null` until the first activation keeps a composer mount (one per
+  // open tab and side chat) on the cached read.
+  const [localRefreshNonce, setLocalRefreshNonce] = React.useState<number | null>(null);
+  const refreshLocalFiles = React.useCallback(() => {
+    setLocalRefreshNonce((nonce) => (nonce ?? 0) + 1);
+  }, []);
+
   const githubFileData = useRepoFilePaths(repoFullName);
-  const localFileData = useLocalProjectFilePaths(localSource);
+  const localFileData = useLocalProjectFilePaths(localSource, { refreshToken: localRefreshNonce });
   const [providerFileData, setProviderFileData] = React.useState<MentionFileDataState>({
     entry: null,
     status: 'idle',
@@ -488,6 +499,12 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     initializeLazyDirectory,
     getKnownFileTokens,
     readLocalProjectFile,
+    /**
+     * Undefined unless the files come from a local transport. A GitHub tree is a
+     * billed request against a rate limit and the Code Collab provider already
+     * pushes its own updates, so neither may be refetched per menu open.
+     */
+    refreshFiles: localSource ? refreshLocalFiles : undefined,
   };
 }
 

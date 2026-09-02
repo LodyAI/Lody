@@ -89,6 +89,17 @@ Product-level mention sources built on `src/ui/mention`.
   like the file source's `fetchedAt`, so it survives the IndexedDB round trip —
   beside it, every reload would look unfetched and refetch on the first `@`. An
   unasked source reports `loading`, not `ready` with zero rows.
+  The LOCAL file source is the one exception and it DOES revalidate, because the
+  reason for the rule does not hold: it is a `git ls-files` on the machine, not a
+  billed request, and the working tree moves between two `@`s — the user drops a
+  folder into the project and reaches for it immediately, so a cached list is
+  read as a bug. `useMentionProjectFiles` hands out `refreshFiles` only for a
+  local transport (never GitHub, never the Code Collab provider, which pushes its
+  own updates) and the composer passes it as the file source's `onActivate`, so
+  the menu's own once-per-open latch is what bounds it to one refresh per `@`.
+  It stays stale-while-revalidate — the cached list paints immediately and is
+  replaced when the machine answers — and the nonce starts `null` so a composer
+  MOUNT still reads the cache: one mounts per open tab and side chat.
 - `enableAtMentions` is the one list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`. Every source with its own `enabled`
   rule (sessions: having any) belongs there too, or the composer falls back to a
@@ -208,6 +219,24 @@ Product-level mention sources built on `src/ui/mention`.
   such as a skill scope.
 - Locale files are flat dotted-key maps: i18next runs `keySeparator: false`, so
   a nested block never resolves and silently falls back to the inline default.
+- **A same-machine session's `@` files come from the local IPC RPC, not the Code
+  Collab file index.** `resolveSessionMentionProjectSource`
+  (`lib/session-mention-file-source.ts`) is the one rule: when
+  `resolveSessionLocalFileSource` answers — Electron renderer, `session.machineId`
+  == the local daemon's — the composer builds a `local` (or `github` +
+  `localWorktree`) source and never a `provider` one, and
+  `session-chat-input-area.tsx` also stops ENABLING
+  `useCodeCollabSessionFileProvider`, because joining that room is the detour, not
+  just reading from it. The index is a watcher-maintained snapshot synced through
+  a Flock doc; `local-project/list-files` / `worktree/list-files` are a live
+  `git ls-files` on the machine, so only the second one can answer "does this file
+  exist right now". `file-tree-view.tsx` already prefers local this way
+  (`shouldPreferLocalBeforeAutoProvider`), and the tree and the `@` menu must not
+  disagree about what exists. A remote-machine session still resolves to the
+  provider. Chat Landing has no provider branch at all: a local project reaches
+  its machine through the same `useLocalProjectFilePaths` transport pair (Electron
+  IPC for this machine, `requestLocalProjectControl` Machine RPC for another one),
+  and only a `github` source goes to the GitHub trees API.
 - `@` directory candidates must carry both `navigateText` (`@dir/`, descend) and
   `insertText` (`@dir`, commit without the trailing slash). The primitive no
   longer infers drill-down from a trailing `/`, so dropping either prop silently
