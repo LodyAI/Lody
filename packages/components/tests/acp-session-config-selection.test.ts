@@ -293,6 +293,63 @@ describe('ACP session config derivation', () => {
     expect(resolved.configOptionValues.reasoning_effort).toBe('medium');
   });
 
+  it('returns the resolved-model selectors so dispatch filtering keeps resolved-valid values', () => {
+    /* The resolver keeps `xhigh` for the resolved 4.6, but the caller's
+       candidate-4.5 selector would drop it at dispatch. The resolved selectors
+       must travel with the values so filtering follows the model the turn
+       will actually run on. */
+    const staleGrokReasoningSelector = {
+      configId: 'reasoning_effort',
+      label: 'Reasoning effort',
+      type: 'select' as const,
+      currentValue: 'high',
+      options: [
+        { value: 'high', label: 'High' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'low', label: 'Low' },
+      ],
+    };
+    const resolved = resolveAcpSessionConfigSelection(
+      {
+        edits: emptyEdits,
+        preferences: {
+          modelId: 'grok-4.5',
+          configOptionValues: { reasoning_effort: 'xhigh' },
+        },
+      },
+      {
+        capabilityAuthority: 'authoritative',
+        modeOptions: [],
+        modelOptions: [{ value: 'grok-4.6', label: '4.6' }],
+        defaultModeId: null,
+        defaultModelId: 'grok-4.6',
+        configOptionSelectors: [staleGrokReasoningSelector],
+        modelReasoningEfforts: {
+          'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+        },
+      },
+      { cliType: 'builtin', agentType: 'grok' }
+    );
+    expect(resolved.selectedModelId).toBe('grok-4.6');
+    expect(resolved.configOptionValues.reasoning_effort).toBe('xhigh');
+    expect(
+      resolved.configOptionSelectors
+        ?.find((selector) => selector.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['xhigh', 'high', 'medium', 'low']);
+    expect(
+      filterAcpSessionConfigOptionValues(
+        resolved.configOptionValues,
+        resolved.configOptionSelectors ?? []
+      ).reasoning_effort
+    ).toBe('xhigh');
+    expect(
+      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [
+        staleGrokReasoningSelector,
+      ]).reasoning_effort
+    ).toBeUndefined();
+  });
+
   it('builds unvalidated candidates from the same chain', () => {
     expect(
       buildAcpSessionConfigCandidates({
@@ -332,6 +389,36 @@ describe('ACP session config derivation', () => {
         selectors
       )
     ).toEqual({});
+  });
+
+  it('lets a pinned effort through when the same pick moves the model', () => {
+    const selectors = [
+      {
+        configId: 'reasoning_effort',
+        label: 'Reasoning',
+        category: 'thought_level' as const,
+        type: 'select' as const,
+        currentValue: 'high',
+        options: [
+          { value: 'high', label: 'High' },
+          { value: 'low', label: 'Low' },
+        ],
+      },
+      {
+        configId: 'collaboration_mode',
+        label: 'Collaboration mode',
+        type: 'select' as const,
+        currentValue: 'default',
+        options: [{ value: 'default', label: 'Default' }],
+      },
+    ];
+    const pinned = { reasoning_effort: 'xhigh', collaboration_mode: 'invalid' };
+    // These selectors belong to the model being left behind; only the effort is
+    // model-dependent, so everything else is still validated against them.
+    expect(filterAcpSessionConfigOptionValues(pinned, selectors, { switchesModel: true })).toEqual({
+      reasoning_effort: 'xhigh',
+    });
+    expect(filterAcpSessionConfigOptionValues(pinned, selectors)).toEqual({});
   });
 });
 
