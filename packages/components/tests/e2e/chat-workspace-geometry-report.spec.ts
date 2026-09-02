@@ -30,7 +30,7 @@ const outputDirectory = process.env.GEOMETRY_REPORT_OUTPUT_DIR;
 const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:6006';
 
 type ReportDetail = Readonly<{
-  kind: 'violation' | 'candidate' | 'jitter' | 'insufficient';
+  kind: 'violation' | 'candidate' | 'overview' | 'jitter' | 'insufficient';
   requiresReview: boolean;
   id: string;
   title: string;
@@ -68,9 +68,10 @@ type ReportDetail = Readonly<{
 function reportDetailPriority(detail: ReportDetail): number {
   if (detail.kind === 'violation') return 0;
   if (detail.kind === 'candidate' && detail.requiresReview) return 1;
-  if (detail.kind === 'insufficient') return 2;
-  if (detail.kind === 'jitter') return 3;
-  return 4;
+  if (detail.kind === 'overview') return 2;
+  if (detail.kind === 'insufficient') return 3;
+  if (detail.kind === 'jitter') return 4;
+  return 5;
 }
 
 function clampClip(rect: GeometryRect, viewport: Readonly<{ width: number; height: number }>) {
@@ -874,6 +875,82 @@ function createDiscoveryDetails({
   });
 }
 
+function createDiscoveryOverviewDetail({
+  surface,
+  idPrefix,
+  viewport,
+  railDiscovery,
+  clip = { x: 0, y: 0, width: viewport.width, height: viewport.height },
+}: Readonly<{
+  surface: string;
+  idPrefix: string;
+  viewport: Readonly<{ width: number; height: number }>;
+  railDiscovery: readonly BrowserAlignmentRailDiscoveryScope[];
+  clip?: GeometryRect;
+}>): ReportDetail {
+  const railsByPosition = new Map<
+    string,
+    {
+      line: number;
+      members: Array<{
+        coordinate: number;
+        yStart: number;
+        yEnd: number;
+        outlier: boolean;
+      }>;
+    }
+  >();
+  const outlierElements = new Set<string>();
+  for (const scope of railDiscovery) {
+    for (const rail of scope.rails) {
+      const key = `${rail.anchor}:${rail.space ?? 'ink'}:${rail.line.toFixed(1)}`;
+      const existing = railsByPosition.get(key) ?? { line: rail.line, members: [] };
+      const memberKeys = new Set(
+        existing.members.map(
+          (member) =>
+            `${member.coordinate.toFixed(2)}:${member.yStart.toFixed(2)}:${member.yEnd.toFixed(2)}`
+        )
+      );
+      for (const member of rail.members) {
+        const memberKey = `${member.coordinate.toFixed(2)}:${member.yStart.toFixed(2)}:${member.yEnd.toFixed(2)}`;
+        if (!memberKeys.has(memberKey)) {
+          existing.members.push({
+            coordinate: member.coordinate,
+            yStart: member.yStart,
+            yEnd: member.yEnd,
+            outlier: member.outlier,
+          });
+          memberKeys.add(memberKey);
+        }
+        if (member.outlier) outlierElements.add(`${member.rowId}:${member.elementId}`);
+      }
+      railsByPosition.set(key, existing);
+    }
+  }
+  const discoveredRails = Array.from(railsByPosition.values());
+  const id = `overview-${idPrefix}`;
+  return {
+    kind: 'overview',
+    requiresReview: false,
+    id,
+    title: `${discoverySurfaceLabel(surface)} · 整体视图`,
+    description: '完整页面构图；局部卡片继续说明具体候选轨与偏移元素',
+    finding:
+      discoveredRails.length > 0
+        ? `整体 · ${discoveredRails.length} 条候选轨 · ${outlierElements.size} 个待确认元素`
+        : '整体 · 当前状态没有足够重复证据形成候选轨',
+    clip: clampClip(clip, viewport),
+    images: reportImages(id),
+    overlay: {
+      alignmentGroups: [],
+      baselineGroups: [],
+      hoverActions: false,
+      semanticAnnotations: [],
+      discoveredRails,
+    },
+  };
+}
+
 async function waitForSessionConversationStory(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="session-conversation-story"]')).toBeVisible({
     timeout: 30_000,
@@ -1039,7 +1116,17 @@ test('captures the visual geometry report', async ({ browser }) => {
   );
   expect(sidebarDiscovery?.description).toContain('待确认元素');
   expect(sidebarDiscovery?.overlay.semanticAnnotations.length).toBeGreaterThan(0);
-  const workspaceDetails: ReportDetail[] = [...semanticDetails, ...workspaceDiscoveryDetails];
+  const workspaceOverview = createDiscoveryOverviewDetail({
+    surface: 'Workspace / Chat Landing',
+    idPrefix: 'workspace-wide-expanded',
+    viewport,
+    railDiscovery,
+  });
+  const workspaceDetails: ReportDetail[] = [
+    workspaceOverview,
+    ...semanticDetails,
+    ...workspaceDiscoveryDetails,
+  ];
 
   const assetsDirectory = path.join(outputDirectory, 'assets');
   await mkdir(assetsDirectory, { recursive: true });
@@ -1113,7 +1200,7 @@ test('captures the visual geometry report', async ({ browser }) => {
   const discoverySurfaces: Array<
     Readonly<{
       captureId: string;
-      contractDomain: 'workspace' | 'session';
+      contractDomain: 'workspace' | 'session' | 'right-sidebar';
       surface: string;
       viewport: Readonly<{ width: number; height: number }>;
       railDiscovery: readonly BrowserAlignmentRailDiscoveryScope[];
@@ -1176,6 +1263,28 @@ test('captures the visual geometry report', async ({ browser }) => {
     const matrixDiscovery = await discoverChatWorkspaceAlignmentRails(matrixPage, {
       aggregateScopes: ['sidebar.shell'],
     });
+    const matrixOverview = createDiscoveryOverviewDetail({
+      surface: `Workspace / ${verificationCase.name}`,
+      idPrefix: `workspace-${verificationCase.name}`,
+      viewport: verificationCase.viewport,
+      railDiscovery: matrixDiscovery,
+    });
+    await matrixPage.screenshot({
+      path: path.join(outputDirectory, matrixOverview.images.clean),
+      clip: matrixOverview.clip,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'device',
+    });
+    await showOnlyDetailSemanticGuides(matrixPage, matrixOverview);
+    await matrixPage.screenshot({
+      path: path.join(outputDirectory, matrixOverview.images.annotated),
+      clip: matrixOverview.clip,
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'device',
+    });
+    workspaceDetails.push(matrixOverview);
     discoverySurfaces.push({
       captureId: `workspace:${verificationCase.name}`,
       contractDomain: 'workspace',
@@ -1211,12 +1320,19 @@ test('captures the visual geometry report', async ({ browser }) => {
       (scope) => scope.scope === 'main.chat-landing' || scope.rect.x >= stateMainPane.x - 1
     );
     expect(mainDiscovery.some((scope) => scope.scope === 'main.chat-landing')).toBe(true);
-    const stateDetails = createDiscoveryDetails({
+    const discoveredStateDetails = createDiscoveryDetails({
       surface: story.surface,
       idPrefix: story.id,
       viewport,
       railDiscovery: mainDiscovery,
     });
+    const stateOverview = createDiscoveryOverviewDetail({
+      surface: story.surface,
+      idPrefix: story.id,
+      viewport,
+      railDiscovery: stateRailDiscovery,
+    });
+    const stateDetails = [stateOverview, ...discoveredStateDetails];
     expect(stateDetails.length).toBeGreaterThan(0);
     for (const detail of stateDetails) {
       await page.screenshot({
@@ -1284,9 +1400,16 @@ test('captures the visual geometry report', async ({ browser }) => {
       viewport,
       railDiscovery: sessionRailDiscovery,
     });
+    const sessionOverview = createDiscoveryOverviewDetail({
+      surface: story.surface,
+      idPrefix: story.id,
+      viewport,
+      railDiscovery: sessionRailDiscovery,
+    });
+    const sessionReportDetails = [sessionOverview, ...storyDetails];
     expect(storyDetails.length).toBeGreaterThan(0);
 
-    for (const detail of storyDetails) {
+    for (const detail of sessionReportDetails) {
       await page.screenshot({
         path: path.join(outputDirectory, detail.images.clean),
         clip: detail.clip,
@@ -1295,7 +1418,7 @@ test('captures the visual geometry report', async ({ browser }) => {
         scale: 'device',
       });
     }
-    for (const detail of storyDetails) {
+    for (const detail of sessionReportDetails) {
       await showOnlyDetailSemanticGuides(page, detail);
       await page.screenshot({
         path: path.join(outputDirectory, detail.images.annotated),
@@ -1306,7 +1429,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
 
-    sessionDetails.push(...storyDetails);
+    sessionDetails.push(...sessionReportDetails);
     discoverySurfaces.push({
       captureId: `${story.id}:1440x900`,
       contractDomain: 'session',
@@ -1335,12 +1458,29 @@ test('captures the visual geometry report', async ({ browser }) => {
     expect(rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')).toBe(
       true
     );
-    const rightSidebarDetails = createDiscoveryDetails({
+    const discoveredRightSidebarDetails = createDiscoveryDetails({
       surface: story.surface,
       idPrefix: story.id,
       viewport,
       railDiscovery: rightSidebarRailDiscovery,
     });
+    const sidePanelScope = rightSidebarRailDiscovery.find(
+      (scope) => scope.scope === 'session.side-panel'
+    );
+    if (!sidePanelScope) throw new Error(`${story.storyId} did not expose session.side-panel`);
+    const rightSidebarOverview = createDiscoveryOverviewDetail({
+      surface: story.surface,
+      idPrefix: story.id,
+      viewport,
+      railDiscovery: rightSidebarRailDiscovery,
+      clip: {
+        x: sidePanelScope.rect.x - 8,
+        y: sidePanelScope.rect.y - 8,
+        width: sidePanelScope.rect.width + 16,
+        height: sidePanelScope.rect.height + 16,
+      },
+    });
+    const rightSidebarDetails = [rightSidebarOverview, ...discoveredRightSidebarDetails];
     expect(rightSidebarDetails.length).toBeGreaterThan(0);
     for (const detail of rightSidebarDetails) {
       await page.screenshot({
@@ -1365,7 +1505,7 @@ test('captures the visual geometry report', async ({ browser }) => {
     const captureId = `${story.id}:1440x900`;
     discoverySurfaces.push({
       captureId,
-      contractDomain: 'session',
+      contractDomain: 'right-sidebar',
       surface: story.surface,
       viewport,
       railDiscovery: rightSidebarRailDiscovery,
@@ -1388,6 +1528,9 @@ test('captures the visual geometry report', async ({ browser }) => {
     )
     .map(({ detail }) => detail);
   expect(details.length).toBeGreaterThan(0);
+  expect(details.filter((detail) => detail.kind === 'overview')).toHaveLength(
+    coverageCaptures.length
+  );
   const reviewCandidateIndexes = details.flatMap((detail, index) =>
     detail.kind === 'candidate' && detail.requiresReview ? [index] : []
   );
@@ -1399,44 +1542,46 @@ test('captures the visual geometry report', async ({ browser }) => {
     expect(Math.max(...reviewCandidateIndexes)).toBeLessThan(Math.min(...stableCandidateIndexes));
   }
   const scopeKey = (
-    contractDomain: 'workspace' | 'session',
+    contractDomain: 'workspace' | 'session' | 'right-sidebar',
     scope: BrowserAlignmentRailDiscoveryScope
   ) =>
     `${contractDomain}:${
       scope.topology ? `auto:${scope.topology.signature}` : `hint:${scope.scope}`
     }`;
-  const contractCaptures = (['workspace', 'session'] as const).flatMap((contractDomain) => {
-    const captures = discoverySurfaces.filter(
-      (capture) => capture.contractDomain === contractDomain
-    );
-    const keys = new Set(
-      captures.flatMap((capture) =>
-        capture.railDiscovery.map((scope) => scopeKey(contractDomain, scope))
-      )
-    );
-    return captures.flatMap((capture) =>
-      Array.from(keys).map((key) => {
-        const matchingScope = capture.railDiscovery
-          .filter((scope) => scopeKey(contractDomain, scope) === key)
-          .sort(
-            (left, right) =>
-              right.rails.length - left.rails.length || right.candidateCount - left.candidateCount
-          )[0];
-        return {
-          captureId: capture.captureId,
-          scopeKey: key,
-          scopeRect: matchingScope?.rect ?? {
-            x: 0,
-            y: 0,
-            width: capture.viewport.width,
-            height: capture.viewport.height,
-          },
-          rails: matchingScope?.rails ?? [],
-          railFamilies: matchingScope?.railFamilies ?? [],
-        };
-      })
-    );
-  });
+  const contractCaptures = (['workspace', 'session', 'right-sidebar'] as const).flatMap(
+    (contractDomain) => {
+      const captures = discoverySurfaces.filter(
+        (capture) => capture.contractDomain === contractDomain
+      );
+      const keys = new Set(
+        captures.flatMap((capture) =>
+          capture.railDiscovery.map((scope) => scopeKey(contractDomain, scope))
+        )
+      );
+      return captures.flatMap((capture) =>
+        Array.from(keys).map((key) => {
+          const matchingScope = capture.railDiscovery
+            .filter((scope) => scopeKey(contractDomain, scope) === key)
+            .sort(
+              (left, right) =>
+                right.rails.length - left.rails.length || right.candidateCount - left.candidateCount
+            )[0];
+          return {
+            captureId: capture.captureId,
+            scopeKey: key,
+            scopeRect: matchingScope?.rect ?? {
+              x: 0,
+              y: 0,
+              width: capture.viewport.width,
+              height: capture.viewport.height,
+            },
+            rails: matchingScope?.rails ?? [],
+            railFamilies: matchingScope?.railFamilies ?? [],
+          };
+        })
+      );
+    }
+  );
   const contractProposals = inferAlignmentRailContractProposals(contractCaptures, {
     minConfidence: 0.35,
   });

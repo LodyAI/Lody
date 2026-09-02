@@ -286,6 +286,11 @@
         background: var(--hover);
       }
 
+      .detail-review[data-kind='overview'] .detail-finding {
+        color: var(--text-muted);
+        background: var(--hover);
+      }
+
       .chevron {
         align-self: center;
         width: 14px;
@@ -522,6 +527,7 @@
       const candidates = report.details.filter((d) => d.kind === 'candidate');
       const reviewCandidates = candidates.filter((d) => d.requiresReview);
       const stableCandidates = candidates.filter((d) => !d.requiresReview);
+      const overviews = report.details.filter((d) => d.kind === 'overview');
       const jitters = report.details.filter((d) => d.kind === 'jitter');
       const insufficient = report.details.filter((d) => d.kind === 'insufficient');
 
@@ -570,6 +576,7 @@
         ['all', '全部', report.details.length, null],
         ['violation', '违规', violations.length, 'dot--fail'],
         ['review', '待确认', reviewCandidates.length, 'dot--candidate'],
+        ['overview', '整体视图', overviews.length, null],
         ['jitter', '亚像素抖动', jitters.length, 'dot--candidate'],
         ['insufficient', '证据不足', insufficient.length, 'dot--insufficient'],
         ['stable', '稳定候选轨', stableCandidates.length, 'dot--candidate'],
@@ -638,7 +645,10 @@
         review.className = 'detail-review';
         review.dataset.kind = detail.kind;
         review.dataset.requiresReview = String(Boolean(detail.requiresReview));
-        const open = detail.kind === 'violation' || Boolean(detail.requiresReview);
+        const open =
+          detail.kind === 'violation' ||
+          Boolean(detail.requiresReview) ||
+          (detail.kind === 'overview' && detail === overviews[0]);
         review.dataset.open = String(open);
 
         const toggle = document.createElement('button');
