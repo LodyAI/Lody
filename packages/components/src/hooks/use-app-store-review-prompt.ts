@@ -2,13 +2,17 @@ import { useEffect, useMemo, useRef } from 'react';
 import { resolveSessionHistoryStatus, type SessionHistory, type SessionId } from '@lody/shared';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import {
+  countRecentActiveDays,
   createAppStoreReviewPromptState,
-  hasAppStoreReviewEligibility,
   markAppStoreReviewRequestAttempt,
   recordAppStoreReviewTurnOutcomes,
+  resolveAppStoreReviewBlockReason,
+  type AppStoreReviewBlockReason,
   type AppStoreReviewPromptState,
   type AppStoreReviewTurnOutcome,
 } from '@/lib/app-store-review-policy';
+import { deferredPostHog } from '@/lib/deferred-posthog';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 
 export type { AppStoreReviewTurnOutcome } from '@/lib/app-store-review-policy';
 
@@ -19,6 +23,61 @@ export type LodyAppStoreReviewBridge = {
 const REVIEW_PROMPT_IDLE_MS = 2_500;
 const STORAGE_KEY_PREFIX = 'lody:app-store-review:v1:';
 const memoryStates = new Map<string, AppStoreReviewPromptState>();
+
+/**
+ * Gates outside the eligibility policy that can also stop a candidate turn.
+ * Reported through the same `block_reason` so one funnel covers the whole path
+ * from finalized turn to StoreKit call.
+ */
+type AppStoreReviewRuntimeBlockReason =
+  | 'bridge_unavailable'
+  | 'text_entry_in_progress'
+  | 'user_interaction'
+  | 'app_not_visible';
+
+type ReviewPromptBlockReason = AppStoreReviewBlockReason | AppStoreReviewRuntimeBlockReason;
+
+// StoreKit reports nothing back and every gate is device-local, so analytics is
+// the only way to tell "nobody is eligible" apart from "the bridge is broken".
+// Deduplicated per user AND per reason for the life of the app process: a
+// candidate turn arrives on every completed turn, so an undeduplicated event
+// would be one of the noisiest in the product, while deduplicating on the user
+// alone would let whichever gate happens to trip first mask the rest.
+const reportedBlockReasons = new Set<string>();
+
+function buildPromptStateProperties(
+  state: AppStoreReviewPromptState,
+  nowMs: number
+): Record<string, unknown> {
+  return {
+    platform: 'mobile',
+    native_platform: 'ios',
+    effective_turn_count: state.effectiveTurnCount,
+    recent_active_day_count: countRecentActiveDays(state, nowMs),
+    stored_active_day_count: state.activeDayKeys.length,
+    hours_since_hard_failure:
+      state.lastHardFailureAtMs == null
+        ? null
+        : Math.round(((nowMs - state.lastHardFailureAtMs) / 3_600_000) * 10) / 10,
+    days_since_last_attempt:
+      state.lastRequestAttemptAtMs == null
+        ? null
+        : Math.round(((nowMs - state.lastRequestAttemptAtMs) / 86_400_000) * 10) / 10,
+    has_requested_before: state.lastRequestAttemptAtMs != null,
+  };
+}
+
+function captureReviewPromptBlocked(userId: string, blockReason: ReviewPromptBlockReason): void {
+  const dedupeKey = `${userId}:${blockReason}`;
+  if (reportedBlockReasons.has(dedupeKey)) return;
+  reportedBlockReasons.add(dedupeKey);
+  const nowMs = Date.now();
+  capturePostHogEvent(deferredPostHog, 'mobile/app_store_review_prompt_blocked', {
+    ...buildPromptStateProperties(readPromptState(userId), nowMs),
+    block_reason: blockReason,
+    app_version: getCurrentAppVersion(),
+  });
+}
 
 function getAppStoreReviewBridge(): LodyAppStoreReviewBridge | null {
   if (typeof window === 'undefined') return null;
@@ -264,13 +323,19 @@ export function useAppStoreReviewPrompt({
       !completedCandidateTurnId ||
       !currentUserId ||
       currentUserId !== sessionOwnerId ||
-      !sessionKey ||
-      isTextEntryInProgress()
+      !sessionKey
     ) {
       return undefined;
     }
+    if (isTextEntryInProgress()) {
+      captureReviewPromptBlocked(currentUserId, 'text_entry_in_progress');
+      return undefined;
+    }
     const bridge = getAppStoreReviewBridge();
-    if (!bridge) return undefined;
+    if (!bridge) {
+      captureReviewPromptBlocked(currentUserId, 'bridge_unavailable');
+      return undefined;
+    }
     if (consumedTurnIdsRef.current.has(completedCandidateTurnId)) {
       return undefined;
     }
@@ -287,11 +352,24 @@ export function useAppStoreReviewPrompt({
       window.addEventListener(event, cancel, { capture: true, passive: true });
     }
     const timer = window.setTimeout(() => {
-      if (cancelled || isTextEntryInProgress() || document.visibilityState !== 'visible') return;
+      if (cancelled || isTextEntryInProgress()) {
+        captureReviewPromptBlocked(currentUserId, 'user_interaction');
+        return;
+      }
+      if (document.visibilityState !== 'visible') {
+        captureReviewPromptBlocked(currentUserId, 'app_not_visible');
+        return;
+      }
       const appVersion = getCurrentAppVersion();
       const nowMs = Date.now();
       const promptState = readPromptState(currentUserId);
-      if (!appVersion || !hasAppStoreReviewEligibility({ state: promptState, appVersion, nowMs })) {
+      const blockReason = resolveAppStoreReviewBlockReason({
+        state: promptState,
+        appVersion,
+        nowMs,
+      });
+      if (blockReason || !appVersion) {
+        captureReviewPromptBlocked(currentUserId, blockReason ?? 'missing_app_version');
         return;
       }
 
@@ -301,6 +379,12 @@ export function useAppStoreReviewPrompt({
         currentUserId,
         markAppStoreReviewRequestAttempt(promptState, { appVersion, attemptedAtMs: nowMs })
       );
+      // The furthest point we can observe: the request left the WebView. StoreKit
+      // never reports whether the sheet rendered or what rating was given.
+      capturePostHogEvent(deferredPostHog, 'mobile/app_store_review_prompt_requested', {
+        ...buildPromptStateProperties(promptState, nowMs),
+        app_version: appVersion,
+      });
       void Promise.resolve(bridge.requestReview()).catch(() => undefined);
     }, REVIEW_PROMPT_IDLE_MS);
 

@@ -7,6 +7,11 @@ import type { SessionHistory, SessionId } from '@lody/shared';
 
 import { useAppStoreReviewPrompt } from '../src/hooks/use-app-store-review-prompt';
 
+const capture = vi.hoisted(() => vi.fn());
+vi.mock('../src/lib/deferred-posthog', () => ({
+  deferredPostHog: { capture },
+}));
+
 type PromptInput = Parameters<typeof useAppStoreReviewPrompt>[0];
 
 const nowMs = Date.parse('2026-05-10T12:00:00.000Z');
@@ -64,6 +69,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     vi.useFakeTimers();
     vi.setSystemTime(nowMs);
     localStorage.clear();
+    capture.mockClear();
     requestReview = vi.fn(async () => undefined);
     window.__LODY_NATIVE__ = true;
     window.__LODY_APP_INFO__ = { app_version: '1.5.0' };
@@ -271,5 +277,98 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
 
     expect(setItemSpy).not.toHaveBeenCalled();
     expect(requestReview).not.toHaveBeenCalled();
+  });
+
+  it('reports the request to analytics with the eligibility counters that allowed it', async () => {
+    const historical = eligibleHistoricalTurns();
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'analytics-user',
+      currentUserId: 'analytics-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({ ...baseInput, history: historical, lastCompletedAssistantMessageId: null });
+    await render({
+      ...baseInput,
+      history: [
+        ...historical,
+        userTurn('analytics-user-turn', 'handled'),
+        assistantTurn('analytics-assistant-turn', nowMs, 'analytics-user-turn'),
+      ],
+      lastCompletedAssistantMessageId: 'analytics-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(requestReview).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith(
+      'mobile/app_store_review_prompt_requested',
+      expect.objectContaining({
+        app_version: '1.5.0',
+        effective_turn_count: 51,
+        recent_active_day_count: 2,
+        has_requested_before: false,
+        native_platform: 'ios',
+      })
+    );
+  });
+
+  it('reports the first blocking gate once per user instead of on every completed turn', async () => {
+    // One completed turn: far below the effective-turn threshold.
+    const completedHistory = [
+      userTurn('blocked-user-turn', 'handled'),
+      assistantTurn('blocked-assistant-turn', nowMs, 'blocked-user-turn'),
+    ];
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'blocked-user',
+      currentUserId: 'blocked-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({ ...baseInput, history: [], lastCompletedAssistantMessageId: null });
+    await render({
+      ...baseInput,
+      history: completedHistory,
+      lastCompletedAssistantMessageId: 'blocked-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(requestReview).not.toHaveBeenCalled();
+    const blockedCalls = capture.mock.calls.filter(
+      ([eventName]) => eventName === 'mobile/app_store_review_prompt_blocked'
+    );
+    expect(blockedCalls).toHaveLength(1);
+    expect(blockedCalls[0]?.[1]).toMatchObject({
+      block_reason: 'insufficient_turns',
+      effective_turn_count: 1,
+    });
+
+    // A second completed turn for the same user must not emit a second event.
+    const moreHistory = [
+      ...completedHistory,
+      userTurn('blocked-user-turn-2', 'handled'),
+      assistantTurn('blocked-assistant-turn-2', nowMs, 'blocked-user-turn-2'),
+    ];
+    await render({
+      ...baseInput,
+      history: moreHistory,
+      lastCompletedAssistantMessageId: 'blocked-assistant-turn-2',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(
+      capture.mock.calls.filter(
+        ([eventName]) => eventName === 'mobile/app_store_review_prompt_blocked'
+      )
+    ).toHaveLength(1);
   });
 });

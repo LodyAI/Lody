@@ -77,6 +77,16 @@ this file; edit `AGENTS.md` only.
   updates with no new outcome must not synchronously rewrite local storage. Its
   idle timer depends on the stable candidate turn id, not the derived outcomes
   array, so an identity-only history update cannot consume and cancel the prompt.
+  StoreKit reports nothing back and every gate is device-local, so
+  `mobile/app_store_review_prompt_requested` / `_blocked` are the only evidence
+  that the path works at all: `requested` fires once per actual bridge call, and
+  `blocked` names the FIRST gate a candidate turn died on — policy gates from
+  `resolveAppStoreReviewBlockReason` plus the runtime ones (missing bridge, text
+  entry, interaction cancel, hidden app). `blocked` is deduplicated per user AND
+  per reason for the app process's lifetime: a candidate turn arrives on every
+  completed turn, so an undeduplicated event would be among the noisiest in the
+  product, while deduplicating on the user alone lets the first gate mask the
+  rest. Keep both bounds when adding a gate.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then
   coalesces history-only mirror bursts to the latest snapshot once per animation
   frame through `lib/latest-frame-subscription.ts`. Session history snapshots are

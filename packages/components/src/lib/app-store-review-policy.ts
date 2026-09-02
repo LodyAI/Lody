@@ -108,7 +108,30 @@ export function recordAppStoreReviewTurnOutcomes(
   };
 }
 
-export function hasAppStoreReviewEligibility({
+/**
+ * Why a candidate turn did not reach the system review sheet. Reported as the
+ * `block_reason` of `mobile/app_store_review_prompt_blocked` so the funnel can
+ * show which gate the prompt actually dies on. Ordered by evaluation order:
+ * only the first failing gate is reported.
+ */
+export type AppStoreReviewBlockReason =
+  | 'missing_app_version'
+  | 'invalid_clock'
+  | 'insufficient_turns'
+  | 'insufficient_active_days'
+  | 'recent_hard_failure'
+  | 'already_requested_this_version'
+  | 'attempt_cooldown';
+
+/** Number of stored active days that fall inside the trailing eligibility window. */
+export function countRecentActiveDays(state: AppStoreReviewPromptState, nowMs: number): number {
+  if (!Number.isFinite(nowMs) || nowMs <= 0) return 0;
+  const recentDayKeys = getRecentLocalCalendarDayKeys(nowMs);
+  return new Set(state.activeDayKeys.filter((dayKey) => recentDayKeys.has(dayKey))).size;
+}
+
+/** `null` when the prompt may be requested; otherwise the first failing gate. */
+export function resolveAppStoreReviewBlockReason({
   state,
   appVersion,
   nowMs,
@@ -116,29 +139,38 @@ export function hasAppStoreReviewEligibility({
   state: AppStoreReviewPromptState;
   appVersion: string | null | undefined;
   nowMs: number;
-}): boolean {
+}): AppStoreReviewBlockReason | null {
   const normalizedVersion = appVersion?.trim();
-  if (!normalizedVersion || !Number.isFinite(nowMs) || nowMs <= 0) return false;
-  if (state.effectiveTurnCount < APP_STORE_REVIEW_MIN_EFFECTIVE_TURNS) return false;
-
-  const recentDayKeys = getRecentLocalCalendarDayKeys(nowMs);
-  const activeDays = state.activeDayKeys.filter((dayKey) => recentDayKeys.has(dayKey));
-  if (new Set(activeDays).size < APP_STORE_REVIEW_MIN_ACTIVE_DAYS) return false;
-
+  if (!normalizedVersion) return 'missing_app_version';
+  if (!Number.isFinite(nowMs) || nowMs <= 0) return 'invalid_clock';
+  if (state.effectiveTurnCount < APP_STORE_REVIEW_MIN_EFFECTIVE_TURNS) {
+    return 'insufficient_turns';
+  }
+  if (countRecentActiveDays(state, nowMs) < APP_STORE_REVIEW_MIN_ACTIVE_DAYS) {
+    return 'insufficient_active_days';
+  }
   if (
     state.lastHardFailureAtMs != null &&
     nowMs - state.lastHardFailureAtMs < APP_STORE_REVIEW_NEGATIVE_CONTEXT_MS
   ) {
-    return false;
+    return 'recent_hard_failure';
   }
-  if (state.lastRequestedVersion === normalizedVersion) return false;
+  if (state.lastRequestedVersion === normalizedVersion) return 'already_requested_this_version';
   if (
     state.lastRequestAttemptAtMs != null &&
     nowMs - state.lastRequestAttemptAtMs < APP_STORE_REVIEW_ATTEMPT_COOLDOWN_MS
   ) {
-    return false;
+    return 'attempt_cooldown';
   }
-  return true;
+  return null;
+}
+
+export function hasAppStoreReviewEligibility(input: {
+  state: AppStoreReviewPromptState;
+  appVersion: string | null | undefined;
+  nowMs: number;
+}): boolean {
+  return resolveAppStoreReviewBlockReason(input) === null;
 }
 
 export function markAppStoreReviewRequestAttempt(
