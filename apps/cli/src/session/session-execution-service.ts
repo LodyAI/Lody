@@ -2256,20 +2256,21 @@ export class SessionExecutionService {
   }
 
   /**
-   * `turnId` is required by every caller that has one. A no-turnId finalize
-   * stamps `finished=true` on whichever assistant entry is last and clears turn
-   * state unconditionally, so an error path that omits it can close a turn it
-   * does not own.
+   * `turnId` is REQUIRED, with no fallback to `currentTurnBySession`. A no-turnId
+   * finalize stamps `finished=true` on whichever assistant entry is last and
+   * clears turn state unconditionally, so an error path that omits it can close a
+   * turn it does not own — and a fallback that reads a mutable map re-creates
+   * exactly the "whatever turn is current" coupling this change removes. Every
+   * caller has its turn id; making the parameter required is what keeps that true.
    */
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown,
-    turnId?: string
+    error: unknown,
+    turnId: string
   ): Promise<void> {
-    const finalizedTurnId = turnId ?? this.currentTurnBySession.get(sessionId);
-    await this.deps.turnFinalization.finalizeACPState(sessionId, finalizedTurnId);
-    await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, finalizedTurnId);
+    await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
+    await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, turnId);
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
