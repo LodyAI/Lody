@@ -167,7 +167,7 @@ export function MobileNewChatSheetContent({
             type="button"
             aria-label={closeAriaLabel}
             className={cn(
-              'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
+              'absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full',
               'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
               '[-webkit-app-region:no-drag]'
             )}
