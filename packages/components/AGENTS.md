@@ -22,7 +22,7 @@ mobile surfaces.
   component props or wrapper DOM. The Storybook fixture and Playwright gate
   consume the same spec. In development, `?geometry=1` adds the reference overlay
   for both the Sidebar-local and Main Pane grids, semantic alignment lines,
-  spacing-rhythm diagnostics, and Mesurer; none mounts in production or tests.
+  spacing-rhythm diagnostics; none mounts in production or tests.
   Semantic alignment compares explicit control boxes: repeated slots may share
   an X-axis line across rows, while icon/text controls within one row may share a
   Y-axis instance. Cross-font rows use visual ink centers: text comes from the

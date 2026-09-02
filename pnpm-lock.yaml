@@ -1104,9 +1104,6 @@ importers:
       mermaid:
         specifier: 11.15.0
         version: 11.15.0
-      mesurer:
-        specifier: 0.1.0
-        version: 0.1.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       monaco-editor:
         specifier: ^0.55.1
         version: 0.55.1
@@ -9406,12 +9403,6 @@ packages:
 
   meshoptimizer@1.1.1:
     resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
-
-  mesurer@0.1.0:
-    resolution: {integrity: sha512-T1wlBvn40tlvpa3crpyzmeUgZZermWMNp2BCc/U/P/OUuBeQOTvjCBi+VWoTYu9YWN5X5uD6N0LGlfVbt4bMvA==}
-    peerDependencies:
-      react: '>=18.0.0'
-      react-dom: '>=18.0.0'
 
   methods@1.1.2:
     resolution: {integrity: sha512-iclAHeNqNm68zFtnZ0e+1L2yUIdvzNoauKU4WBA3VvH/vPFieF7qfRlwUZU+DA9P9bPXIS90ulxoUoCH23sV2w==}
@@ -21787,11 +21778,6 @@ snapshots:
       uuid: 13.0.0
 
   meshoptimizer@1.1.1: {}
-
-  mesurer@0.1.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0):
-    dependencies:
-      react: 19.2.0
-      react-dom: 19.2.0(react@19.2.0)
 
   methods@1.1.2: {}
 

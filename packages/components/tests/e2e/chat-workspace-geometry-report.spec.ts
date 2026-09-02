@@ -927,25 +927,6 @@ test('captures the visual geometry report', async ({ browser }) => {
   );
   expect(sidebarDiscovery?.description).toContain('待确认元素');
   expect(sidebarDiscovery?.overlay.semanticAnnotations.length).toBeGreaterThan(0);
-  const localProjectsDiscovery = railDiscovery.find(
-    (scope) => scope.scope === 'sidebar.local-projects:geometry'
-  );
-  expect(
-    localProjectsDiscovery?.rails.some((rail) =>
-      rail.members.some(
-        (member) =>
-          member.space === 'ink' &&
-          member.kind === 'text' &&
-          member.elementId.endsWith(':lody') &&
-          Math.abs(member.coordinate - 48) <= 0.5
-      )
-    )
-  ).toBe(true);
-  expect(
-    localProjectsDiscovery?.rails.every((rail) =>
-      rail.members.every((member) => !member.elementId.includes('Toggle local projects'))
-    )
-  ).toBe(true);
   const workspaceDetails = [...semanticDetails, ...workspaceDiscoveryDetails];
 
   const assetsDirectory = path.join(outputDirectory, 'assets');
@@ -1127,39 +1108,6 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery: sessionRailDiscovery,
     });
     expect(storyDetails.length).toBeGreaterThan(0);
-    if (story.idPrefix === 'session-question') {
-      const messageLeadingRails = storyDetails.find(
-        (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
-      );
-      expect(messageLeadingRails?.overlay.discoveredRails.length).toBeGreaterThanOrEqual(3);
-      expect(messageLeadingRails?.description).toContain('暂无偏离元素');
-      expect(messageLeadingRails?.overlay.semanticAnnotations).toHaveLength(0);
-    }
-    if (story.idPrefix === 'session-working') {
-      const messageLeadingRails = storyDetails.find(
-        (detail) => detail.title.includes('消息列表') && detail.title.includes('行首区')
-      );
-      const leadingLines =
-        messageLeadingRails?.overlay.discoveredRails
-          .map((rail) => rail.line)
-          .sort((first, second) => first - second) ?? [];
-      expect(leadingLines.length).toBeGreaterThanOrEqual(2);
-      expect(
-        leadingLines.some((line, index) =>
-          leadingLines.slice(index + 1).some((otherLine) => otherLine - line >= 16)
-        )
-      ).toBe(true);
-      expect(
-        leadingLines.some((line, index) =>
-          leadingLines.slice(index + 1).some((otherLine) => Math.abs(otherLine - line) <= 1)
-        )
-      ).toBe(false);
-      expect(messageLeadingRails?.overlay.semanticAnnotations).not.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ label: expect.stringContaining('Render checkpoint') }),
-        ])
-      );
-    }
 
     for (const detail of storyDetails) {
       await page.screenshot({

@@ -1,4 +1,3 @@
-import { Mesurer } from 'mesurer';
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 import {
@@ -824,14 +823,6 @@ export default function WorkspaceGeometryDevtools({
       <SpacingAuditOverlay />
       <SemanticAlignmentOverlay />
       <SemanticBaselineOverlay />
-      <Mesurer
-        guideColor="oklch(0.63 0.26 29.23)"
-        highlightColor="oklch(0.62 0.18 255)"
-        hoverHighlightEnabled={false}
-        multiMeasureEnabled
-        persistKey="lody-chat-workspace-geometry"
-        persistOnReload
-      />
     </>
   );
 }
