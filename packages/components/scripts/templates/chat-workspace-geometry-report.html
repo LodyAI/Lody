@@ -322,7 +322,7 @@
 
       .detail-pair {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 16px;
         padding: 4px 4px 26px 52px;
       }
@@ -352,6 +352,20 @@
 
       .figure-frame:hover img {
         opacity: 0.85;
+      }
+
+      .figure-placeholder {
+        min-height: 180px;
+        border: 1px dashed var(--border-strong);
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--surface);
+        color: var(--text-faint);
+        font-size: 12px;
+        line-height: 1.6;
+        text-align: center;
       }
 
       figcaption {
@@ -515,8 +529,11 @@
       </figure>
     </dialog>
 
+    <script id="geometry-report-data" type="application/json">
+      __GEOMETRY_REPORT_DATA__
+    </script>
     <script>
-      const report = __GEOMETRY_REPORT_DATA__;
+      const report = JSON.parse(document.getElementById('geometry-report-data').textContent);
 
       const chevronSvg =
         '<svg class="chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
@@ -538,6 +555,9 @@
           `${report.coverage.captures.length} 个页面捕获`,
           `${report.details.length} 组检查`,
           `${report.contractProposals.length} 个 Contract 候选`,
+          report.afterCapturedAt
+            ? `修复后捕获 ${new Date(report.afterCapturedAt).toLocaleString()}`
+            : '等待修复后捕获',
         ].map((text) => {
           const span = document.createElement('span');
           span.className = 'mono';
@@ -695,38 +715,52 @@
         const annotatedLabel =
           detail.kind === 'candidate'
             ? '候选轨与偏移'
-            : detail.kind === 'jitter'
-              ? '亚像素抖动'
-              : detail.kind === 'insufficient'
-                ? '证据不足'
-                : '失败语义线';
+            : detail.kind === 'overview'
+              ? '候选轨总览'
+              : detail.kind === 'jitter'
+                ? '亚像素抖动'
+                : detail.kind === 'insufficient'
+                  ? '证据不足'
+                  : '失败语义线';
         for (const [label, source, alt] of [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
           [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
+          ['修复后', detail.images.after, `${detail.title} 修复后局部截图`],
         ]) {
           const figure = document.createElement('figure');
-          const frame = document.createElement('button');
-          frame.type = 'button';
-          frame.className = 'figure-frame';
-          frame.setAttribute('aria-label', `放大查看：${label}`);
-          const image = document.createElement('img');
-          image.loading = 'lazy';
-          image.src = source;
-          image.alt = alt;
-          frame.append(image);
-          frame.addEventListener('click', () =>
-            openLightbox(source, `${detail.title} · ${label}`, alt)
-          );
+          if (source) {
+            const frame = document.createElement('button');
+            frame.type = 'button';
+            frame.className = 'figure-frame';
+            frame.setAttribute('aria-label', `放大查看：${label}`);
+            const image = document.createElement('img');
+            image.loading = 'lazy';
+            image.src = source;
+            image.alt = alt;
+            frame.append(image);
+            frame.addEventListener('click', () =>
+              openLightbox(source, `${detail.title} · ${label}`, alt)
+            );
+            figure.append(frame);
+          } else {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'figure-placeholder';
+            placeholder.textContent = 'Agent 修复后运行 pnpm geometry:report --after';
+            figure.append(placeholder);
+          }
           const caption = document.createElement('figcaption');
           const captionLabel = document.createElement('span');
           captionLabel.textContent = label;
-          const link = document.createElement('a');
-          link.href = source;
-          link.target = '_blank';
-          link.rel = 'noreferrer';
-          link.textContent = '打开 2× PNG ↗';
-          caption.append(captionLabel, link);
-          figure.append(frame, caption);
+          caption.append(captionLabel);
+          if (source) {
+            const link = document.createElement('a');
+            link.href = source;
+            link.target = '_blank';
+            link.rel = 'noreferrer';
+            link.textContent = '打开 2× PNG ↗';
+            caption.append(link);
+          }
+          figure.append(caption);
           pair.append(figure);
         }
 

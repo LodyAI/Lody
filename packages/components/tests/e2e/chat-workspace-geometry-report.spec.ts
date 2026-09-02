@@ -1,7 +1,7 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import {
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
@@ -28,6 +28,7 @@ import {
 
 const outputDirectory = process.env.GEOMETRY_REPORT_OUTPUT_DIR;
 const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:6006';
+const reportPhase = process.env.GEOMETRY_REPORT_PHASE ?? 'before';
 
 type ReportDetail = Readonly<{
   kind: 'violation' | 'candidate' | 'overview' | 'jitter' | 'insufficient';
@@ -64,6 +65,24 @@ type ReportDetail = Readonly<{
     }>[];
   }>;
 }>;
+
+type PersistedReportData = {
+  afterCapturedAt?: string;
+  coverage: {
+    captures: Array<{
+      captureId: string;
+      storyId: string;
+      viewport: Readonly<{ width: number; height: number }>;
+      deviceScaleFactor: number;
+    }>;
+  };
+  details: Array<{
+    id: string;
+    captureId: string;
+    clip: GeometryRect;
+    images: { clean: string; annotated: string; after?: string };
+  }>;
+};
 
 function reportDetailPriority(detail: ReportDetail): number {
   if (detail.kind === 'violation') return 0;
@@ -1034,11 +1053,90 @@ async function enableReportCaptureMode(page: Page): Promise<void> {
   }
 }
 
+async function captureAfterReport(browser: Browser, reportOutputDirectory: string): Promise<void> {
+  const dataPath = path.join(reportOutputDirectory, 'report-data.json');
+  const reportData = JSON.parse(await readFile(dataPath, 'utf8')) as PersistedReportData;
+  const capturesById = new Map(
+    reportData.coverage.captures.map((capture) => [capture.captureId, capture])
+  );
+  const detailsByCapture = new Map<string, PersistedReportData['details']>();
+  for (const detail of reportData.details) {
+    if (!detail.captureId) {
+      throw new Error(`Geometry detail ${detail.id} has no replayable captureId`);
+    }
+    const captureDetails = detailsByCapture.get(detail.captureId) ?? [];
+    captureDetails.push(detail);
+    detailsByCapture.set(detail.captureId, captureDetails);
+  }
+  expect(detailsByCapture.size).toBeGreaterThan(0);
+
+  const unexpectedNetworkRequests: string[] = [];
+  for (const [captureId, details] of detailsByCapture) {
+    const capture = capturesById.get(captureId);
+    if (!capture) throw new Error(`Geometry capture ${captureId} is missing from coverage`);
+    const context = await browser.newContext({
+      viewport: capture.viewport,
+      deviceScaleFactor: capture.deviceScaleFactor,
+      reducedMotion: 'reduce',
+      colorScheme: 'light',
+    });
+    await context.route(/https?:\/\//, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === storybookOrigin) {
+        await route.continue();
+        return;
+      }
+      unexpectedNetworkRequests.push(url.href);
+      await route.abort('blockedbyclient');
+    });
+    const page = await context.newPage();
+    const response = await page.goto(
+      `${storybookOrigin}/iframe.html?id=${capture.storyId}&viewMode=story`
+    );
+    expect(response?.ok(), capture.storyId).toBeTruthy();
+    if (capture.storyId.includes('sessionconversationpage')) {
+      await waitForSessionConversationStory(page);
+    }
+    await enableReportCaptureMode(page);
+    if (capture.storyId.startsWith('geometry-chatworkspace--')) {
+      await measureSettledChatWorkspace(page);
+    } else {
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+      });
+    }
+    for (const detail of details) {
+      const after = `assets/detail-${detail.id}-after.png`;
+      await page.screenshot({
+        path: path.join(reportOutputDirectory, after),
+        clip: detail.clip,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'device',
+      });
+      detail.images.after = after;
+    }
+    await context.close();
+  }
+
+  expect(reportData.details.every((detail) => detail.images.after)).toBe(true);
+  reportData.afterCapturedAt = new Date().toISOString();
+  await writeFile(dataPath, `${JSON.stringify(reportData, null, 2)}\n`, 'utf8');
+  expect(unexpectedNetworkRequests).toEqual([]);
+}
+
 test.skip(!outputDirectory, 'Run through the geometry:report script');
 
 test('captures the visual geometry report', async ({ browser }) => {
   test.setTimeout(300_000);
   if (!outputDirectory) throw new Error('GEOMETRY_REPORT_OUTPUT_DIR is required');
+  if (reportPhase === 'after') {
+    await captureAfterReport(browser, outputDirectory);
+    return;
+  }
 
   const viewport = { width: 1440, height: 900 };
   const context = await browser.newContext({
@@ -1127,6 +1225,19 @@ test('captures the visual geometry report', async ({ browser }) => {
     ...semanticDetails,
     ...workspaceDiscoveryDetails,
   ];
+  const detailCaptureIds = new Map<string, string>();
+  const assignDetailsToCapture = (details: readonly ReportDetail[], captureId: string) => {
+    for (const detail of details) {
+      const existingCaptureId = detailCaptureIds.get(detail.id);
+      if (existingCaptureId && existingCaptureId !== captureId) {
+        throw new Error(
+          `Geometry detail ${detail.id} belongs to both ${existingCaptureId} and ${captureId}`
+        );
+      }
+      detailCaptureIds.set(detail.id, captureId);
+    }
+  };
+  assignDetailsToCapture(workspaceDetails, 'workspace:wide-expanded');
 
   const assetsDirectory = path.join(outputDirectory, 'assets');
   await mkdir(assetsDirectory, { recursive: true });
@@ -1221,6 +1332,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: string;
       storyId: string;
       viewport: Readonly<{ width: number; height: number }>;
+      deviceScaleFactor: number;
     }>
   > = [
     {
@@ -1229,6 +1341,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: 'Workspace / Chat Landing',
       storyId: 'geometry-chatworkspace--expanded-sidebar',
       viewport,
+      deviceScaleFactor: 2,
     },
   ];
 
@@ -1269,6 +1382,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       viewport: verificationCase.viewport,
       railDiscovery: matrixDiscovery,
     });
+    assignDetailsToCapture([matrixOverview], `workspace:${verificationCase.name}`);
     await matrixPage.screenshot({
       path: path.join(outputDirectory, matrixOverview.images.clean),
       clip: matrixOverview.clip,
@@ -1298,6 +1412,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: `Workspace / ${verificationCase.name}`,
       storyId,
       viewport: verificationCase.viewport,
+      deviceScaleFactor: 1,
     });
     await matrixContext.close();
   }
@@ -1333,6 +1448,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery: stateRailDiscovery,
     });
     const stateDetails = [stateOverview, ...discoveredStateDetails];
+    const captureId = `workspace:${story.id}:1440x900`;
+    assignDetailsToCapture(stateDetails, captureId);
     expect(stateDetails.length).toBeGreaterThan(0);
     for (const detail of stateDetails) {
       await page.screenshot({
@@ -1354,7 +1471,6 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     workspaceDetails.push(...stateDetails);
-    const captureId = `workspace:${story.id}:1440x900`;
     discoverySurfaces.push({
       captureId,
       contractDomain: 'workspace',
@@ -1368,6 +1484,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: story.surface,
       storyId: story.storyId,
       viewport,
+      deviceScaleFactor: 2,
     });
   }
 
@@ -1407,6 +1524,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery: sessionRailDiscovery,
     });
     const sessionReportDetails = [sessionOverview, ...storyDetails];
+    const captureId = `${story.id}:1440x900`;
+    assignDetailsToCapture(sessionReportDetails, captureId);
     expect(storyDetails.length).toBeGreaterThan(0);
 
     for (const detail of sessionReportDetails) {
@@ -1431,18 +1550,19 @@ test('captures the visual geometry report', async ({ browser }) => {
 
     sessionDetails.push(...sessionReportDetails);
     discoverySurfaces.push({
-      captureId: `${story.id}:1440x900`,
+      captureId,
       contractDomain: 'session',
       surface: story.surface,
       viewport,
       railDiscovery: sessionRailDiscovery,
     });
     coverageCaptures.push({
-      captureId: `${story.id}:1440x900`,
+      captureId,
       area: 'session',
       surface: story.surface,
       storyId: story.storyId,
       viewport,
+      deviceScaleFactor: 2,
     });
   }
 
@@ -1481,6 +1601,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       },
     });
     const rightSidebarDetails = [rightSidebarOverview, ...discoveredRightSidebarDetails];
+    const captureId = `${story.id}:1440x900`;
+    assignDetailsToCapture(rightSidebarDetails, captureId);
     expect(rightSidebarDetails.length).toBeGreaterThan(0);
     for (const detail of rightSidebarDetails) {
       await page.screenshot({
@@ -1502,7 +1624,6 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     sessionDetails.push(...rightSidebarDetails);
-    const captureId = `${story.id}:1440x900`;
     discoverySurfaces.push({
       captureId,
       contractDomain: 'right-sidebar',
@@ -1516,6 +1637,7 @@ test('captures the visual geometry report', async ({ browser }) => {
       surface: story.surface,
       storyId: story.storyId,
       viewport,
+      deviceScaleFactor: 2,
     });
   }
 
@@ -1623,16 +1745,21 @@ test('captures the visual geometry report', async ({ browser }) => {
     contractProposals,
     geometryViolations,
     details: details.map(
-      ({ kind, requiresReview, id, title, description, finding, clip, images }) => ({
-        kind,
-        requiresReview,
-        id,
-        title,
-        description,
-        finding,
-        clip,
-        images,
-      })
+      ({ kind, requiresReview, id, title, description, finding, clip, images }) => {
+        const captureId = detailCaptureIds.get(id);
+        if (!captureId) throw new Error(`Geometry detail ${id} has no replayable capture`);
+        return {
+          kind,
+          requiresReview,
+          id,
+          captureId,
+          title,
+          description,
+          finding,
+          clip,
+          images,
+        };
+      }
     ),
   };
 

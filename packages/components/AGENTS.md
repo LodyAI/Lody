@@ -75,7 +75,12 @@ mobile surfaces.
   semantic members and review promotes it into a named rule. Geometry-report capture covers
   the workspace Sidebar, the production-composed session right sidebar, and session states that
   materially change visible geometry; it does not duplicate an isomorphic conversation layout
-  solely for a transient interaction such as mention drop.
+  solely for a transient interaction such as mention drop. Each report detail persists the
+  capture id whose coverage entry owns its Story, viewport, and device scale. `--after` must
+  replay that original capture and clip, then append only the repair image; never rediscover
+  findings or replace the before/guide evidence, because a successful fix may remove the original
+  candidate. The fixed HTML renderer parses one embedded `application/json` payload, while every
+  screenshot remains a referenced file rather than Base64 data.
   Violation images label every deviating member in place with its human-readable role, physical
   direction, measured offset, actual anchor, and a leader to the rendered element; a bare
   internal member id or an unlabelled shared line is not an actionable design finding.

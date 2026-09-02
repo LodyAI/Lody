@@ -11,6 +11,7 @@ const templatePath = path.join(
 );
 const argumentsList = process.argv.slice(2);
 const shouldOpen = argumentsList.includes('--open');
+const shouldCaptureAfter = argumentsList.includes('--after');
 const requestedOutput = argumentsList.find((argument) => !argument.startsWith('--'));
 const outputDirectory = path.resolve(packageRoot, requestedOutput ?? 'geometry-report');
 const reportPath = path.join(outputDirectory, 'index.html');
@@ -74,6 +75,7 @@ const reportPort = await resolveReportPort();
 const reportEnvironment = {
   ...process.env,
   GEOMETRY_REPORT_OUTPUT_DIR: outputDirectory,
+  GEOMETRY_REPORT_PHASE: shouldCaptureAfter ? 'after' : 'before',
   PLAYWRIGHT_PORT: String(reportPort),
   PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${reportPort}`,
   VITE_PREVIEW_PUBLIC_BASE_DOMAIN: process.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN ?? 'local.invalid',
@@ -82,7 +84,15 @@ const reportEnvironment = {
     : {}),
 };
 
-await rm(path.join(outputDirectory, 'assets'), { recursive: true, force: true });
+if (shouldCaptureAfter) {
+  try {
+    await stat(dataPath);
+  } catch {
+    throw new Error(`Cannot capture after images before the baseline report exists: ${dataPath}`);
+  }
+} else {
+  await rm(path.join(outputDirectory, 'assets'), { recursive: true, force: true });
+}
 await run(
   pnpmCommand,
   [
@@ -114,7 +124,9 @@ if (/data:image\//i.test(reportHtml)) {
 await writeFile(reportPath, reportHtml, 'utf8');
 
 const imagePaths = [
-  ...reportData.details.flatMap((detail) => [detail.images.clean, detail.images.annotated]),
+  ...reportData.details.flatMap((detail) =>
+    [detail.images.clean, detail.images.annotated, detail.images.after].filter(Boolean)
+  ),
 ];
 const imageStats = await Promise.all(
   imagePaths.map(async (imagePath) => ({
@@ -125,7 +137,7 @@ const imageStats = await Promise.all(
 const detailImageBytes = imageStats.reduce((total, { file }) => total + file.size, 0);
 console.log(`Geometry report: ${reportPath}`);
 console.log(
-  `${reportData.coverage.captures.length} captures, ${reportData.details.length} detail pairs: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
+  `${reportData.coverage.captures.length} captures, ${reportData.details.length} details, ${imagePaths.length} images: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
 );
 
 if (shouldOpen) await openReport();
