@@ -34,6 +34,11 @@ describe('classifyPermissionModeFace', () => {
       tone: 'warning',
       render: 'icon',
     });
+    expect(classifyPermissionModeFace('bypassPermissions')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
   });
 
   it('renders model-reviewed approval modes as a short text label, neutral tone', () => {
