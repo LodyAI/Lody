@@ -378,6 +378,7 @@
   "chat.mobileHome.localProjectSearchPlaceholder": "Search projects",
   "chat.mobileHome.machineSelector": "Machines",
   "chat.mobileHome.newChatAriaLabel": "New chat",
+  "chat.mobileHome.newChatInProjectAriaLabel": "New chat in {{projectLabel}}",
   "chat.mobileHome.onboarding.description": "Download the desktop app to get started.",
   "chat.mobileHome.onboarding.downloadButton": "Download Lody",
   "chat.mobileHome.onboarding.title": "Lody runs on your computer",

@@ -5372,6 +5372,26 @@ function WorkspaceChatLanding({
     },
     [navigate, workspaceSlug]
   );
+  const handleMobileNewChatInProject = useCallback(
+    (project: { kind: 'local' | 'github'; projectKey: string }) => {
+      if (project.kind === 'github') {
+        setSelectedRepo(project.projectKey);
+        setContextType('github');
+        setMobileNewChatOpen(true);
+        return;
+      }
+
+      const entry = visibleLocalProjectMap.get(project.projectKey);
+      if (!entry) return;
+      handleSelectedLocalProjectChange({
+        machineId: entry.machineId,
+        localProjectId: entry.project.id,
+      });
+      setContextType('local');
+      setMobileNewChatOpen(true);
+    },
+    [handleSelectedLocalProjectChange, visibleLocalProjectMap]
+  );
   /* Pull-to-refresh on the mobile home list. Drives a manual catch-up
      via `runtime.repo.sync()` — the same path the SSE reconnect loop
      uses, just user-initiated. Swallow errors here so a flaky network
@@ -6327,6 +6347,10 @@ function WorkspaceChatLanding({
             archiveToggleLabel: t('chat.mobileHome.archiveToggleLabel', '归档'),
             filterBarToggleLabel: t('chat.mobileHome.filterBarToggleLabel', '过滤器'),
             newChatAriaLabel: t('chat.mobileHome.newChatAriaLabel', '新建对话'),
+            newChatInProjectAriaLabel: (projectLabel) =>
+              t('chat.mobileHome.newChatInProjectAriaLabel', '在 {{projectLabel}} 中新建对话', {
+                projectLabel,
+              }),
             searchAriaLabel: t('common.search', '搜索'),
             clearSearchAriaLabel: t('common.clear', '清空'),
             /* The home screen otherwise falls back to hard-coded
@@ -6408,6 +6432,7 @@ function WorkspaceChatLanding({
           onChatTogglePin={handleMobileChatTogglePin}
           onChatArchive={handleMobileChatArchive}
           onChatRestore={handleMobileChatRestore}
+          onNewChatInProject={handleMobileNewChatInProject}
           onChatPermanentDelete={handleMobileChatPermanentDelete}
           onSettingsOpen={() => {
             void navigate({

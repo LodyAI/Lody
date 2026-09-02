@@ -378,6 +378,7 @@
   "chat.mobileHome.localProjectSearchPlaceholder": "搜索项目",
   "chat.mobileHome.machineSelector": "机器",
   "chat.mobileHome.newChatAriaLabel": "新建对话",
+  "chat.mobileHome.newChatInProjectAriaLabel": "在 {{projectLabel}} 中新建对话",
   "chat.mobileHome.onboarding.description": "下载桌面客户端并启动后即可开始。",
   "chat.mobileHome.onboarding.downloadButton": "下载 Lody",
   "chat.mobileHome.onboarding.title": "Lody 运行在你的电脑上",

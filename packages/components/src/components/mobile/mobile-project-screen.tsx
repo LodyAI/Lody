@@ -776,6 +776,16 @@ export function MobileProjectScreen({
             onBack={onBack}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
+            filterToggle={
+              hasFilterPills ? (
+                <ProjectListFilterToggle
+                  open={filtersOpen}
+                  hasActiveFilters={hasActiveProjectFilters}
+                  ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
+                  onToggle={() => setFiltersOpen((open) => !open)}
+                />
+              ) : undefined
+            }
             showArchived={showArchived}
             onShowArchivedToggle={onShowArchivedToggle}
           />
@@ -795,8 +805,8 @@ export function MobileProjectScreen({
           />
         )}
 
-        {/* Filter pill bar — toggled from the first group heading's
-           trailing chip (mirrors home Chat). Unmounted on Files /
+        {/* Filter pill bar — toggled from the search field's trailing
+           control (mirrors home Chat). Unmounted on Files /
            Settings so those tabs stay free of conversation chrome. */}
         <AnimatePresence initial={false}>
           {selectedProjectTab === 'chat' && filtersOpen && hasFilterPills && filterPills ? (
@@ -825,19 +835,7 @@ export function MobileProjectScreen({
         >
           {selectedProjectTab === 'chat' ? (
             visibleConversations.length === 0 ? (
-              <>
-                {hasFilterPills ? (
-                  <div className="flex w-full items-center justify-end px-4 pb-1.5 pt-2">
-                    <ProjectListFilterToggle
-                      open={filtersOpen}
-                      hasActiveFilters={hasActiveProjectFilters}
-                      ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
-                      onToggle={() => setFiltersOpen((open) => !open)}
-                    />
-                  </div>
-                ) : null}
-                <ProjectEmptyState label={labels.emptyConversations ?? '没有匹配的对话'} />
-              </>
+              <ProjectEmptyState label={labels.emptyConversations ?? '没有匹配的对话'} />
             ) : (
               <MobileChatList
                 chats={visibleConversations}
@@ -856,16 +854,6 @@ export function MobileProjectScreen({
                   showArchived
                     ? (labels.archivedConversationsHeading ?? '归档对话')
                     : undefined
-                }
-                firstGroupTrailing={
-                  hasFilterPills ? (
-                    <ProjectListFilterToggle
-                      open={filtersOpen}
-                      hasActiveFilters={hasActiveProjectFilters}
-                      ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
-                      onToggle={() => setFiltersOpen((open) => !open)}
-                    />
-                  ) : undefined
                 }
                 selectedConversationId={selectedConversationId}
                 onSelect={onConversationSelect}
@@ -978,8 +966,7 @@ function ProjectTabPlaceholder({
 /* Chat-tab project header — one chrome row matching home:
    back | compact project mark | search (fills the blank) | archive.
    The full display name is no longer a centered title; the mark +
-   search placeholder keep context. Filter lives on the first group
-   heading (not here). */
+   search placeholder keep context. Filter lives inside search. */
 function ProjectChatTopBar({
   project,
   displayName,
@@ -987,6 +974,7 @@ function ProjectChatTopBar({
   onBack,
   searchQuery,
   onSearchChange,
+  filterToggle,
   showArchived,
   onShowArchivedToggle,
 }: {
@@ -996,6 +984,7 @@ function ProjectChatTopBar({
   onBack: () => void;
   searchQuery: string;
   onSearchChange: (next: string) => void;
+  filterToggle?: ReactNode;
   showArchived: boolean;
   onShowArchivedToggle?: () => void;
 }) {
@@ -1012,7 +1001,12 @@ function ProjectChatTopBar({
       <span className="sr-only">{displayName}</span>
       <ProjectAvatar project={project} />
       <div className="min-w-0 flex-1">
-        <ProjectSearchInput value={searchQuery} onChange={onSearchChange} labels={labels} />
+        <ProjectSearchInput
+          value={searchQuery}
+          onChange={onSearchChange}
+          labels={labels}
+          trailing={filterToggle}
+        />
       </div>
       {onShowArchivedToggle ? (
         <HeaderChip
@@ -1112,8 +1106,7 @@ function HeaderChip({
   );
 }
 
-/* Filter chip on the first group heading — same look as the home Chat
-   list filter toggle. */
+/* Filter control embedded in the project search field. */
 function ProjectListFilterToggle({
   open,
   hasActiveFilters,
@@ -1132,13 +1125,11 @@ function ProjectListFilterToggle({
       aria-label={ariaLabel}
       aria-pressed={open}
       className={cn(
-        'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-        'border-border/50 bg-muted text-muted-foreground',
-        'dark:border-white/12 dark:bg-white/10',
+        'relative -mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground',
         'transition-colors active:scale-[0.97]',
-        'hover:bg-muted/80 hover:text-foreground dark:hover:bg-white/14',
+        'hover:bg-background/60 hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30',
-        open && 'border-primary/40 bg-primary/15 text-primary'
+        open && 'bg-primary/15 text-primary'
       )}
     >
       <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
@@ -1189,13 +1180,15 @@ function ProjectSearchInput({
   value,
   onChange,
   labels,
+  trailing,
 }: {
   value: string;
   onChange: (next: string) => void;
   labels: MobileProjectScreenLabels;
+  trailing?: ReactNode;
 }) {
   return (
-    <label
+    <div
       className={cn(
         'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-full border border-border/50 bg-muted px-3 text-foreground',
         'dark:border-white/12 dark:bg-white/10',
@@ -1226,7 +1219,8 @@ function ProjectSearchInput({
           <X className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
         </button>
       ) : null}
-    </label>
+      {trailing}
+    </div>
   );
 }
 

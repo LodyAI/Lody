@@ -272,6 +272,7 @@ function MobileHomeScreenStory({
             chatTab: 'Chat',
             settingsTab: '设置',
             newChatAriaLabel: '新建对话',
+            newChatInProjectAriaLabel: (projectLabel) => `在 ${projectLabel} 中新建对话`,
             recentProjectsHeading: '最近常用',
             allLocalProjectsHeading: '全部项目',
             allGitHubReposHeading: '全部仓库',
@@ -291,6 +292,7 @@ function MobileHomeScreenStory({
           onLocalProjectSelect={fn()}
           onGitHubRepositorySelect={fn()}
           onChatSelect={fn()}
+          onNewChatInProject={fn()}
           onSettingsOpen={fn()}
           onNewChat={fn()}
           onDownloadClient={fn()}
