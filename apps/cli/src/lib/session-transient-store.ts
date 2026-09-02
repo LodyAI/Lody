@@ -316,6 +316,28 @@ export class SessionTransientStore {
   }
 
   /**
+   * Identity of whatever turn is current, for a finalizer that has no turn id of
+   * its own (teardown paths: archive, delete, child cleanup, shutdown drain).
+   *
+   * Those paths must still commit through the CAS rather than clearing blindly,
+   * or the turn's routing target is lost and its late updates are dropped. Note
+   * that a store turn can exist with no registered execution runtime — an
+   * auto-prompt turn runs inside the visible turn's runtime under its own store
+   * turn id — so "no active turn runtime" is not "no turn to finalize".
+   */
+  getCurrentTurnRef(sessionId: SessionId): TurnRef | undefined {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle') {
+      return undefined;
+    }
+    return {
+      turnId: state.turn.turnId,
+      turnEpoch: state.turn.turnEpoch,
+      assistantEntryId: state.turn.assistantEntryId,
+    };
+  }
+
+  /**
    * True unless a DIFFERENT turn currently owns this assistant entry.
    *
    * A redispatch reuses `assistant:<userTurnId>`, so a late finalizer for turn

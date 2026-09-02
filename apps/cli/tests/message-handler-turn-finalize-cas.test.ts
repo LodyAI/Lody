@@ -54,6 +54,7 @@ type MessageHandlerHost = {
     userTurnId?: string
   ): Promise<void>;
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+  flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
   finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
   store: { getTurnId(sessionId: SessionId): string | undefined };
 };
@@ -172,6 +173,40 @@ describe('MessageHandler turn finalization compare-and-set', () => {
 
       // ...and the CAS refused to clear the new turn's state.
       expect(host.store.getTurnId(sessionId)).toBe(turnId);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('keeps late-update routing when a teardown finalizes without a turn id', async () => {
+    // Archive/delete/child-cleanup/shutdown paths pass no turn id. They must still
+    // commit through the CAS: clearing turn state without remembering the routing
+    // target drops every update that arrives after the clear. The lifecycle
+    // listeners reach this branch whenever no execution runtime is registered,
+    // and a store turn can exist without one (an auto-prompt turn runs inside the
+    // visible turn's runtime under its own store turn id).
+    const sessionId = 's-finalize-no-turnid' as SessionId;
+    const userTurnId = 'user-3';
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnId = host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'before teardown'));
+
+      await host.finalizeACPState(sessionId);
+
+      expect(host.store.getTurnId(sessionId)).toBeUndefined();
+
+      // A late update still routes to the finalized turn's entry.
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, ' and after'));
+      await host.flushACPUpdatesNow(sessionId);
+
+      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
+      expect(readItems(assistant)).toEqual([{ type: 'text', text: 'before teardown and after' }]);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

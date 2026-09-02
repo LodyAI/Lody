@@ -5861,7 +5861,13 @@ export class MessageHandler {
     // these awaits was finalized against the `undefined` read before them.
     const endedAt = Date.now();
     const state = this.store.get(sessionId);
-    const turnRef = turnId ? this.store.getTurnRef(sessionId, turnId) : undefined;
+    // With a turnId this is a CAS token for that exact turn; without one (archive,
+    // delete, child cleanup, shutdown drain) it names whatever turn is current, so
+    // the teardown paths commit through the same CAS instead of clearing blindly
+    // and losing the turn's late-update routing target.
+    const turnRef = turnId
+      ? this.store.getTurnRef(sessionId, turnId)
+      : this.store.getCurrentTurnRef(sessionId);
     const permissionWaitMs = state.permissionWaitMs || undefined;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
@@ -5879,27 +5885,34 @@ export class MessageHandler {
       // `assistant:<userTurnId>`, so a late finalizer must not close an entry a
       // NEWER turn is streaming into. Checked here rather than before the awaits,
       // because the takeover can happen during them.
-      if (turnRef && !this.store.isAssistantEntryFinalizable(sessionId, turnRef)) {
-        this.logger.debug(
-          `[${sessionId}] Skipping finished stamp for ${turnRef.assistantEntryId}: a newer turn owns it (epoch ${turnRef.turnEpoch} superseded)`
-        );
-      } else {
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await sessionDoc.updateHistory((history) => {
-          for (let i = history.length - 1; i >= 0; i--) {
-            const entry = history[i];
-            if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-              entry.finished = true;
-              entry.endedAt = endedAt;
-              if (permissionWaitMs !== undefined) {
-                entry.permissionWaitMs = permissionWaitMs;
-              }
-              break;
-            }
-          }
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      let stamped = true;
+      await sessionDoc.updateHistory((history) => {
+        // Checked INSIDE the synchronous mutation callback on purpose: a takeover
+        // that lands between an earlier check and this write would slip through.
+        if (turnRef && !this.store.isAssistantEntryFinalizable(sessionId, turnRef)) {
+          stamped = false;
           return history;
-        });
+        }
+        for (let i = history.length - 1; i >= 0; i--) {
+          const entry = history[i];
+          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+            entry.finished = true;
+            entry.endedAt = endedAt;
+            if (permissionWaitMs !== undefined) {
+              entry.permissionWaitMs = permissionWaitMs;
+            }
+            break;
+          }
+        }
+        return history;
+      });
+      if (stamped) {
         await sessionDoc.waitUntilSynced();
+      } else {
+        this.logger.debug(
+          `[${sessionId}] Skipped finished stamp for ${turnRef?.assistantEntryId}: a newer turn owns it (epoch ${turnRef?.turnEpoch} superseded)`
+        );
       }
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);

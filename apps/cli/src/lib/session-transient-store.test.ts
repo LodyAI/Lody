@@ -217,6 +217,50 @@ describe('SessionTransientStore', () => {
       });
     });
 
+    it('getCurrentTurnRef lets a no-turnId finalize keep the late routing target', () => {
+      // Teardown paths (archive, delete, child cleanup, shutdown drain) have no
+      // turn id. Clearing blindly loses the routing target, so late updates that
+      // arrive after the clear have nowhere to go. They must commit through the
+      // same CAS. A store turn can exist with no execution runtime registered —
+      // an auto-prompt turn runs inside the visible turn's runtime under its own
+      // store turn id — so "no active turn runtime" cannot stand in for this.
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, {
+        turnId: 'turn-1',
+        assistantEntryId: 'assistant-user-1',
+        userTurnId: 'user-1',
+      });
+      const ref = store.getCurrentTurnRef(id);
+      expect(ref).toEqual({
+        turnId: 'turn-1',
+        turnEpoch: 1,
+        assistantEntryId: 'assistant-user-1',
+      });
+      if (!ref) throw new Error('expected a current turn ref');
+
+      expect(store.finalizeIfCurrent(id, ref)).toBe(true);
+      expect(store.getTurnId(id)).toBeUndefined();
+      expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
+        assistantEntryId: 'assistant-user-1',
+        turnId: 'turn-1',
+        userTurnId: 'user-1',
+        source: 'finalized_turn',
+      });
+    });
+
+    it('getCurrentTurnRef reports nothing for an idle or unknown session', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+      expect(store.getCurrentTurnRef(id)).toBeUndefined();
+      // Must not create state for a session the store has never seen.
+      expect(store.has(id)).toBe(false);
+      store.beginTurn(id, { turnId: 'turn-1' });
+      store.clearTurnState(id);
+      expect(store.getCurrentTurnRef(id)).toBeUndefined();
+    });
+
     it('finalizeIfCurrent refuses to clear a turn that has been replaced', () => {
       const store = new SessionTransientStore();
       const id = sid('s1');
