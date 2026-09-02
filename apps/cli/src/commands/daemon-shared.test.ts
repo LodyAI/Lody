@@ -1,8 +1,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { readPidFileRecord, removePidFile, writePidFile } from './daemon-shared';
+import { EventEmitter } from 'node:events';
+import type { ChildProcess } from 'node:child_process';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  readPidFileRecord,
+  removePidFile,
+  terminateSpawnedDaemonRunner,
+  writePidFile,
+} from './daemon-shared';
 
 const tempDirs: string[] = [];
 
@@ -13,8 +20,28 @@ function createPidPath(): string {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+class FakeRunnerChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly signals: NodeJS.Signals[] = [];
+  onKill: (signal: NodeJS.Signals) => void = () => {};
+
+  kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    this.signals.push(signal);
+    this.onKill(signal);
+    return true;
+  }
+
+  finish(signal: NodeJS.Signals): void {
+    this.signalCode = signal;
+    this.emit('exit', null, signal);
+    this.emit('close', null, signal);
+  }
+}
 
 describe('daemon PID ownership', () => {
   it('atomically replaces stale diagnostics after Host ownership is acquired', () => {
@@ -42,5 +69,34 @@ describe('daemon PID ownership', () => {
 
     fs.writeFileSync(filePath, JSON.stringify({ version: 1, pid: 303 }), 'utf8');
     expect(readPidFileRecord(filePath)).toBeNull();
+  });
+});
+
+describe('daemon runner launch cleanup', () => {
+  it('waits for a timed-out spawned runner to stop gracefully', async () => {
+    const child = new FakeRunnerChild();
+    child.onKill = (signal) => child.finish(signal);
+
+    await expect(
+      terminateSpawnedDaemonRunner(child as unknown as ChildProcess, 999_001)
+    ).resolves.toBe(true);
+    expect(child.signals).toEqual(['SIGTERM']);
+  });
+
+  it('force-kills the spawned runner when graceful shutdown does not finish', async () => {
+    vi.useFakeTimers();
+    const child = new FakeRunnerChild();
+    child.onKill = (signal) => {
+      if (signal === 'SIGKILL') child.finish(signal);
+    };
+
+    const stopped = terminateSpawnedDaemonRunner(child as unknown as ChildProcess, 999_002, {
+      shutdownGraceMs: 10,
+      forceKillWaitMs: 10,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(stopped).resolves.toBe(true);
+    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL']);
   });
 });

@@ -81,9 +81,15 @@ Two things the dev build does deliberately, both load-bearing:
   before changing local ports/sockets, daemon PID state, Electron/daemon startup,
   Supervisor retries, or Worker shutdown. Health probes are observation only and
   must never authorize PID killing.
-- `lody daemon status` reads the runtime probe's explicit `backend` authorization/
-  connection state and `connectedWorkspaces`; aggregate `connectivity` is local runtime
-  health and must not be presented as proof that the cached CLI token was accepted.
+- Cloud-mode `lody daemon status` reads the runtime probe's explicit `backend` authorization/
+  connection state and `connectedWorkspaces`; local mode omits that cloud-only block. Aggregate
+  `connectivity` is local runtime health and must not be presented as proof that the cached CLI
+  token was accepted.
+  Connection-age fields preserve one continuous non-connected interval across
+  connecting/disconnected transitions and clear only on connected. They travel in the
+  top-level `connectionAges` v1 extension because older consumers reject unknown keys inside
+  the strict backend/workspace objects but accept unknown top-level state. Status colors
+  these states and reports a red connection error once that interval reaches 60 seconds.
 
 - `lody daemon start` resolves cloud authentication in the FOREGROUND process before
   spawning the detached runner (`commands/daemon-auth-preflight.ts`): validate the cached
@@ -93,6 +99,11 @@ Two things the dev build does deliberately, both load-bearing:
   re-authenticating — a network outage must not replace a working credential — and a
   non-TTY run aborts instead of blocking on a browser link until the device code expires.
   `--skip-auth-check` is the explicit opt-out; `--auth` keeps its non-interactive path.
+  The runner's fd 3 launch handshake reports success only after its supervised Worker reaches
+  `startupStage=ready`; an initial Worker exit returns its bounded output to the foreground and
+  terminates the runner instead of claiming that daemon startup succeeded. Explicitly retryable
+  startup exits keep that handshake pending, and a handshake timeout terminates and awaits the
+  exact spawned runner before the foreground reports failure.
 - New one-shot commands should use `src/lib/command-runtime.ts` (`runOneShotCommand`)
   so exit codes, telemetry flush, and stream flushing are handled consistently.
 - Process entrypoints, command-owned boundaries, global process-error handlers, and

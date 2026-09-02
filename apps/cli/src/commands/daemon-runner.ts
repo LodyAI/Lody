@@ -46,6 +46,11 @@ import {
   LODY_DAEMON_SUPERVISED_ENV,
   runDaemonUpgradeFromIntent,
 } from '@/lib/machine-lifecycle';
+import {
+  describeDaemonWorkerStartupFailure,
+  isDaemonWorkerReady,
+  isRetryableDaemonWorkerStartupExit,
+} from './daemon-runner-startup';
 
 function launchLodyStart(
   passthroughArgs: string[],
@@ -144,6 +149,14 @@ export const daemonRunnerCommand = new Command('daemon-runner')
       instanceId: randomUUID(),
       token: `${randomUUID()}${randomUUID()}`,
     };
+    let launchOutcomePending = process.env[DAEMON_RUNNER_READY_FD_ENV] !== undefined;
+    const reportLaunchOutcome = (
+      outcome: Parameters<typeof reportDaemonRunnerLaunchOutcome>[0]
+    ): void => {
+      if (!launchOutcomePending) return;
+      launchOutcomePending = false;
+      reportDaemonRunnerLaunchOutcome(outcome);
+    };
     let hostShutdownRequested = false;
     let hostShutdownHandler: (() => void) | null = null;
     const requestHostShutdown = () => {
@@ -167,7 +180,7 @@ export const daemonRunnerCommand = new Command('daemon-runner')
         ? `${initialLease.record.mode} process ${initialLease.record.pid}`
         : 'another local CLI host';
       logger.error(`Cannot start daemon: ${owner} already owns the local agent runtime.`);
-      reportDaemonRunnerLaunchOutcome({
+      reportLaunchOutcome({
         status: 'occupied',
         ...(initialLease.record
           ? { ownerMode: initialLease.record.mode, ownerPid: initialLease.record.pid }
@@ -189,15 +202,10 @@ export const daemonRunnerCommand = new Command('daemon-runner')
       hostLease = null;
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to claim daemon ownership: ${message}`);
-      reportDaemonRunnerLaunchOutcome({ status: 'error', message });
+      reportLaunchOutcome({ status: 'error', message });
       await flushTelemetry();
       process.exit(1);
     }
-    reportDaemonRunnerLaunchOutcome({
-      status: 'ready',
-      pid: process.pid,
-      instanceId: supervisorIdentity.instanceId,
-    });
     logger.info(`Daemon watchdog started (PID ${process.pid})`);
 
     await normalizeCurrentProcessResourceProfile(logger);
@@ -355,6 +363,17 @@ export const daemonRunnerCommand = new Command('daemon-runner')
         },
       },
       decideExit: async (result, signal) => {
+        // A retryable startup exit is not the launch outcome yet. Keep the
+        // foreground handshake open while the supervisor retries; only a
+        // non-retryable initial exit is reported as the startup failure.
+        if (launchOutcomePending && !isRetryableDaemonWorkerStartupExit(result)) {
+          const message = describeDaemonWorkerStartupFailure(result);
+          reportLaunchOutcome({ status: 'error', message });
+          return {
+            action: 'fatal',
+            message: `Initial daemon worker startup failed: ${message}`,
+          };
+        }
         if (result.code === 0) {
           return { action: 'stop', message: 'Worker exited cleanly' };
         }
@@ -411,6 +430,13 @@ export const daemonRunnerCommand = new Command('daemon-runner')
       },
       onStateChange: (state) => {
         reportSupervisorAnalytics(state);
+        if (launchOutcomePending && isDaemonWorkerReady(state)) {
+          reportLaunchOutcome({
+            status: 'ready',
+            pid: process.pid,
+            instanceId: supervisorIdentity.instanceId,
+          });
+        }
         if (state.phase === 'fatal') {
           logger.error(`Fatal: ${state.message ?? 'unknown'}`);
         } else if (state.message) {
