@@ -77,6 +77,37 @@ this file; edit `AGENTS.md` only.
   updates with no new outcome must not synchronously rewrite local storage. Its
   idle timer depends on the stable candidate turn id, not the derived outcomes
   array, so an identity-only history update cannot consume and cancel the prompt.
+  The negative-context gate reaches the timer through a ref for that same reason.
+  Persisted state (`lody:app-store-review:v2:<userId>`, device-local, not synced
+  and deliberately NOT in `clear-local-cache.ts` — it is user state, not cache)
+  is just the newest 50 completed-turn timestamps plus the last attempt time.
+  That list answers the whole threshold — if the oldest of the newest N is
+  already outside the window then fewer than N are inside it — and its last
+  element doubles as the watermark that makes a repeated history scan
+  idempotent, replacing v1's list of up to 512 `sessionId:turnId` strings that
+  were re-serialized on every completed turn. It is also why the recording
+  effect can pass the whole outcomes array instead of diffing against a
+  per-mount observed set. Because that watermark is a stored timestamp, NO
+  stored time may ever be in the future: turn times come from the agent
+  machine's clock and `nowMs` from the phone's, so a stored future value
+  swallows every genuinely newer turn until real time catches up to it. Future
+  input is rejected (deferred, not lost — the next history update re-scans the
+  session) and stored future times are dropped, so a phone clock corrected
+  backwards heals on the next turn. It under-counts by design: a session opened OLDER than the
+  watermark does not backfill, which can never manufacture eligibility. Keep the product gates at engagement + cooldown + a narrow
+  negative-context check — StoreKit already caps the sheet at three per device
+  per 365 days, so a second rate limiter here only makes the prompt unreachable,
+  which is exactly what v1's active-day and 72h-any-failure gates did.
+  StoreKit reports nothing back and every gate is device-local, so
+  `mobile/app_store_review_prompt_requested` / `_blocked` are the only evidence
+  that the path works at all: `requested` fires once per actual bridge call, and
+  `blocked` names the FIRST gate a candidate turn died on — policy gates from
+  `resolveAppStoreReviewBlockReason` plus the runtime ones (missing bridge, text
+  entry, interaction cancel, hidden app). `blocked` is deduplicated per user AND
+  per reason for the app process's lifetime: a candidate turn arrives on every
+  completed turn, so an undeduplicated event would be among the noisiest in the
+  product, while deduplicating on the user alone lets the first gate mask the
+  rest. Keep both bounds when adding a gate.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then
   coalesces history-only mirror bursts to the latest snapshot once per animation
   frame through `lib/latest-frame-subscription.ts`. Session history snapshots are
