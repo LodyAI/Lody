@@ -363,6 +363,37 @@ export class SessionTransientStore {
   }
 
   /**
+   * Did VISIBLE output arrive for this turn — anything the user can actually see
+   * in the transcript?
+   *
+   * Deliberately NOT the same question as `observePromptActivityForTurn`, which
+   * asks whether the turn may have ACTED. A turn that only requested a permission
+   * or wrote a file acted without producing anything visible, so conflating the
+   * two makes the no-output guard treat an empty assistant entry as a success and
+   * skip the failure notice entirely — leaving the user with a blank reply and no
+   * explanation.
+   *
+   * `acpFlushCountInTurn` is still consulted for turns that never bound a recorder
+   * (an auto-prompt turn owns routing from `beginTurn` and never binds); it is
+   * valid here because the no-output guard runs before `finalizeTurn` clears it.
+   */
+  hasVisiblePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state) {
+      return false;
+    }
+    if (state.promptActivity?.ref.turnId === turnId) {
+      if (state.promptActivity.recorder.observe() === 'persisted_output') {
+        return true;
+      }
+    }
+    if (state.acpUpdateBuffer.some((item) => item.target.turnId === turnId)) {
+      return true;
+    }
+    return state.acpFlushCountInTurn > 0 && this.getTurnId(sessionId) === turnId;
+  }
+
+  /**
    * Mark the prompt as returned. Transitions turn from 'prompting' → 'finalizing'.
    * After this, the turn is no longer cancellable but still needs finalization.
    */

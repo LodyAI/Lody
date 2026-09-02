@@ -10033,17 +10033,22 @@ export class MessageHandler {
   }
 
   /**
-   * Same observation as `hasPromptOutputForTurn`, but it distinguishes "this turn
-   * emitted nothing" from "we cannot tell". The two callers need opposite
-   * conservative answers on a missing session: prompt replay must refuse to
-   * retry, while the no-output guard must not accuse a turn it could not observe.
-   * `undefined` means unobservable — the transient state is gone.
+   * Did this turn put anything VISIBLE in the transcript?
+   *
+   * A DIFFERENT question from `hasPromptOutputForTurn`, which asks whether the
+   * turn may have ACTED. Reusing that one here was a bug: a turn that only
+   * requested a permission or wrote a file counts as "may have acted" but shows
+   * the user nothing, so the no-output guard took the success path and the user
+   * got an empty assistant entry with no explanation at all.
+   *
+   * `undefined` means unobservable — the transient state is gone — and keeps the
+   * guard failing OPEN, because it must never accuse a turn it could not observe.
    */
   observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
     if (!this.store.has(sessionId)) {
       return undefined;
     }
-    return this.hasPromptOutputForTurn(sessionId, turnId);
+    return this.store.hasVisiblePromptOutputForTurn(sessionId, turnId);
   }
 
   /**

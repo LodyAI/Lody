@@ -58,6 +58,7 @@ type MessageHandlerHost = {
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
   hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean;
+  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined;
   recordPromptSideEffect(sessionId: SessionId): void;
   store: {
     deleteSession(sessionId: SessionId): void;
@@ -164,6 +165,83 @@ describe('MessageHandler bindTurnForPrompt', () => {
       // ...and the evidence survives the turn ending, which is when the gate runs.
       host.store.clearTurnState(sessionId);
       expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('separates "may have acted" from "produced visible output"', async () => {
+    // These are different questions and the two guards need different answers.
+    // Conflating them means a turn that only requested a permission reads as
+    // having produced output, so the no-output guard takes the SUCCESS path: no
+    // `agent_no_output`, no notice, and the user is left looking at an empty
+    // assistant entry with no explanation — worse than the original bug.
+    //
+    // Asserted at the MessageHandler seam with no mocked deps, because that is
+    // exactly where the two accessors diverge.
+    const sessionId = 's-recorder-visible-vs-acted' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-5', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, turnRef.turnId, undefined, 'user-5');
+      expect(
+        host.bindConversationTurnForPrompt(sessionId, turnRef, new PromptActivityRecorder())
+      ).toBe('bound');
+
+      // The agent asks to run a tool and nothing else happens: no ACP update, so
+      // nothing reaches the transcript.
+      host.recordPromptSideEffect(sessionId);
+
+      expect(host.store.observePromptActivityForTurn(sessionId, turnRef.turnId)).toBe(
+        'dropped_prompt_activity'
+      );
+      // Replay gate: this turn may have acted, so refuse.
+      expect(host.hasPromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+      // No-output guard: the user saw nothing, so this IS a silent failure.
+      expect(host.observePromptOutputForTurn(sessionId, turnRef.turnId)).toBe(false);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('reports visible output once an update is actually routed', async () => {
+    const sessionId = 's-recorder-visible-routed' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const turnRef = host.beginConversationTurn(sessionId, 'user-6', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+        deferACPUpdateTarget: true,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, turnRef.turnId, undefined, 'user-6');
+      expect(
+        host.bindConversationTurnForPrompt(sessionId, turnRef, new PromptActivityRecorder())
+      ).toBe('bound');
+
+      expect(host.observePromptOutputForTurn(sessionId, turnRef.turnId)).toBe(false);
+
+      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'hello'));
+      await host.flushACPUpdatesNow(sessionId);
+
+      expect(host.observePromptOutputForTurn(sessionId, turnRef.turnId)).toBe(true);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('leaves the no-output guard failing open for an unobservable turn', async () => {
+    const sessionId = 's-recorder-unobservable' as SessionId;
+    const { repo, host } = await createHarness(sessionId);
+
+    try {
+      // Never seen by the store at all.
+      expect(host.observePromptOutputForTurn(sessionId, 'assistant:user-7')).toBeUndefined();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

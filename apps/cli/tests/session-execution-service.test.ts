@@ -31,7 +31,11 @@ import {
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
-import type { PromptActivityObservation } from '../src/session/prompt-activity-recorder';
+import {
+  PromptActivityRecorder,
+  type PromptActivityObservation,
+} from '../src/session/prompt-activity-recorder';
+import { SessionTransientStore } from '../src/lib/session-transient-store';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
 
@@ -1250,6 +1254,105 @@ describe('SessionExecutionService', () => {
         processingUserMsgId: undefined,
       })
     );
+  });
+
+  it('surfaces the uncertain-state notice for a turn whose only activity was a permission request', async () => {
+    // End to end over a REAL `SessionTransientStore` and a REAL recorder, with the
+    // two accessors wired exactly as MessageHandler wires them. The earlier
+    // version of this test mocked `observePromptActivityForTurn` directly and so
+    // could not see that `observePromptOutputForTurn` was answering the wrong
+    // question — it reported "produced output" for a turn that only requested a
+    // permission, which sent the guard down the success path and showed the user
+    // an empty assistant entry with no notice at all.
+    const sessionId = 'session-permission-only' as SessionId;
+    const turnId = 'assistant-permission-only';
+    const store = new SessionTransientStore();
+    const recorder = new PromptActivityRecorder();
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        // The agent asks to run a tool, then ends the turn with no ACP update.
+        store.getBoundPromptActivityRecorder(sessionId)?.recordSideEffect();
+        return { stopReason: 'end_turn' };
+      }),
+      currentModel: undefined,
+    };
+    const session = {
+      sessionId,
+      acpSessionId: 'acp-permission-only' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-permission-only'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const deps = createBaseDeps({
+      beginConversationTurn: vi.fn(() => {
+        const turnEpoch = store.beginTurn(sessionId, {
+          turnId,
+          assistantEntryId: turnId,
+          ownsACPUpdates: false,
+        });
+        return { turnId, turnEpoch, assistantEntryId: turnId };
+      }),
+      // Same wiring as MessageHandler.
+      bindConversationTurnForPrompt: vi.fn((sid: SessionId, ref, activityRecorder) =>
+        store.bindTurnForPrompt(sid, ref, activityRecorder ?? recorder)
+      ),
+      observePromptActivityForTurn: vi.fn((sid: SessionId, tid: string) =>
+        store.observePromptActivityForTurn(sid, tid)
+      ),
+      observePromptOutputForTurn: vi.fn((sid: SessionId, tid: string) =>
+        store.has(sid) ? store.hasVisiblePromptOutputForTurn(sid, tid) : undefined
+      ),
+    });
+    (deps.sessionManager as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession = vi.fn(
+      () => session
+    );
+    (
+      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
+    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-user-1',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    // The turn is recorded as a failure at all — conflating the two questions
+    // skipped this entirely — and with the uncertain-state wording.
+    const [, reason, message] = vi.mocked(deps.recordChatFailure).mock.calls[0] ?? [];
+    expect(reason).toBe('agent_no_output');
+    expect(message).toContain('uncertain');
+    expect(message).toContain('do not simply retry');
+    expect(message).not.toContain('context-length');
+    expect(history[0]?.status).toBe('failed');
   });
 
   it('does not blame context length or suggest a retry when the turn actually acted', async () => {

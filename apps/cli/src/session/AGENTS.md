@@ -248,10 +248,15 @@ delegation proofs or a shared-machine gate without a new product and security de
   (diff stats, PR detection, auto-commit) and still ADVANCES the dispatch pointer:
   the prompt was delivered, so re-dispatching would spin the same silent failure.
   A missing dep fails OPEN here and only here: `observePromptOutputForTurn` returns
-  `undefined` for an unobservable turn and the guard declines to accuse it. Do not
-  confuse this with the replay gate above, which needs the opposite default — the two
-  read the same observation and take opposite conservative answers, which is why they
-  are separate accessors.
+  `undefined` for an unobservable turn and the guard declines to accuse it.
+  INVARIANT: the two accessors answer DIFFERENT questions and must not be collapsed.
+  The replay gate asks "may this turn have ACTED?" (`observation !== 'none'`); the
+  no-output guard asks "did visible output ARRIVE?"
+  (`store.hasVisiblePromptOutputForTurn`: `persisted_output`, or a buffered/flushed
+  entry for the turn). Answering the second with the first makes a turn that only
+  requested a permission look like it produced output, so the guard takes the success
+  path and the user gets an empty assistant entry with no notice at all — worse than
+  the misleading notice it replaced.
   Code Collab v1 turn markers and history fileDiff capture were removed. v2 may
   persist exact per-turn path/add/del caches derived from the CLI-local ACP evidence
   store after ACP finalization; diff content still comes only from the CLI store.
