@@ -639,7 +639,12 @@ describe('buildAcpSelectorOptions', () => {
       machine: machineWithCapabilities({}),
     });
 
-    expect(selectors.map((selector) => selector.configId)).toEqual(['mode', 'model', 'effort']);
+    expect(selectors.map((selector) => selector.configId)).toEqual([
+      'mode',
+      'model',
+      'effort',
+      'fast',
+    ]);
   });
 
   it('hides max and ultra for other Codex models and falls back to medium', () => {
