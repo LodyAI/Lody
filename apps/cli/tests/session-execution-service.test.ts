@@ -72,6 +72,9 @@ const ensureSessionDocDefaults = <T>(doc: T): T => {
     if (!('waitUntilSynced' in doc)) {
       Object.assign(doc, { waitUntilSynced: vi.fn(async () => {}) });
     }
+    if (!('waitForRemoteSync' in doc)) {
+      Object.assign(doc, { waitForRemoteSync: vi.fn(async () => {}) });
+    }
   }
   return doc;
 };
@@ -988,22 +991,34 @@ describe('SessionExecutionService', () => {
   });
 
   it('marks a delivery-ambiguous steer failed without changing predecessor ownership', async () => {
-    let history: SessionHistoryInput[] = [
-      {
-        id: 'user-2',
-        role: 'user',
-        status: 'pending_apply',
-        read: false,
-        inputConfig: { prompt: 'do it differently' },
-      } as SessionHistoryInput,
-    ];
+    let history: SessionHistoryInput[] = [];
+    const remoteSync = createDeferred<void>();
+    const remoteSyncStarted = createDeferred<void>();
+    const deferredMarkerApplied = createDeferred<void>();
+    const deferredMarkerDisposed = createDeferred<void>();
+    let historyListener: (() => void) | undefined;
+    const unsubscribeHistory = vi.fn(() => deferredMarkerDisposed.resolve());
+    const waitForRemoteSync = vi.fn(() => {
+      remoteSyncStarted.resolve();
+      return remoteSync.promise;
+    });
     const sessionDoc = {
-      waitUntilSynced: vi.fn(async () => true),
+      waitForRemoteSync,
+      getHistory: vi.fn(async () => history),
       updateHistory: vi.fn(
         async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = update(history);
+          if (history[0]?.sendStatus === 'delivery_unknown') {
+            deferredMarkerApplied.resolve();
+          }
         }
       ),
+      mirror: {
+        subscribe: vi.fn((listener: () => void) => {
+          historyListener = listener;
+          return unsubscribeHistory;
+        }),
+      },
     };
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
@@ -1045,23 +1060,46 @@ describe('SessionExecutionService', () => {
       }
     ).turnRuntimeBySession.set(sessionId, runtime);
 
-    await expect(
-      service.steerSession({
-        sessionId,
-        expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-2',
-        userId: 'user-1',
-        timestamp: '2026-07-19T00:00:00.000Z',
+    const steerResult = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-07-19T00:00:00.000Z',
+      inputConfig: { prompt: 'do it differently' },
+    });
+    await remoteSyncStarted.promise;
+    expect(sessionDoc.updateHistory).not.toHaveBeenCalled();
+
+    // The first inbound boundary may settle before the renderer-authored row.
+    // The RPC returns an error, but leaves a deferred marker on the live mirror.
+    remoteSync.resolve();
+    await expect(steerResult).resolves.toMatchObject({ applied: false, disposition: 'error' });
+    expect(waitForRemoteSync).toHaveBeenCalledOnce();
+    expect(sessionDoc.updateHistory).not.toHaveBeenCalled();
+    expect(sessionDoc.mirror.subscribe).toHaveBeenCalledOnce();
+
+    // The exact row then arrives over the history CRDT. The subscription
+    // applies the classification and disposes itself without another RPC.
+    history = [
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
         inputConfig: { prompt: 'do it differently' },
-      })
-    ).resolves.toMatchObject({ applied: false, disposition: 'error' });
-    expect(sessionDoc.waitUntilSynced).toHaveBeenCalledOnce();
+      } as SessionHistoryInput,
+    ];
+    historyListener?.();
+    await deferredMarkerApplied.promise;
+    await deferredMarkerDisposed.promise;
     expect(history[0]).toMatchObject({
       id: 'user-2',
       status: 'failed',
       read: true,
       sendStatus: 'delivery_unknown',
     });
+    expect(unsubscribeHistory).toHaveBeenCalledOnce();
     expect(deps.recordChatFailure).toHaveBeenCalledWith(
       sessionDoc,
       'steer_delivery_unknown',

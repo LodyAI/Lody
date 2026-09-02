@@ -1528,32 +1528,22 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument;
     userTurnId: string;
   }): Promise<void> {
-    let matched = false;
+    let shouldDefer = false;
     try {
-      await options.sessionDoc.waitUntilSynced();
-      await options.sessionDoc.updateHistory((history) =>
-        history.map((entry) => {
-          if (entry.id !== options.userTurnId || entry.role !== 'user') {
-            return entry;
-          }
-          matched = true;
-          return {
-            ...entry,
-            status: 'failed' as const,
-            read: true,
-            sendStatus: 'delivery_unknown' as const,
-          };
-        })
-      );
-      if (!matched) {
-        this.deps.logger.warn(
-          `[${options.sessionId}] Could not mark uncertain steer ${options.userTurnId}: its history entry has not synced`
-        );
-      }
+      // The renderer owns the guide history row. SessionDocument.init() joins
+      // its remote room in the background, while waitUntilSynced() only waits
+      // for this replica's outgoing writes and can resolve before that row is
+      // imported. Wait for the initial inbound boundary before mapping it.
+      await options.sessionDoc.waitForRemoteSync();
+      shouldDefer = !(await this.markUncertainSteerHistoryEntry(options));
     } catch (error) {
       this.deps.logger.error(
         `[${options.sessionId}] Failed to mark uncertain steer ${options.userTurnId}: ${formatErrorMessage(error)}`
       );
+      shouldDefer = true;
+    }
+    if (shouldDefer) {
+      this.deferUncertainSteerHistoryMarker(options);
     }
 
     try {
@@ -1567,6 +1557,91 @@ export class SessionExecutionService {
         `[${options.sessionId}] Failed to record uncertain steer notice for ${options.userTurnId}: ${formatErrorMessage(error)}`
       );
     }
+  }
+
+  /** Mark an already-visible guide without emitting a no-op history mutation. */
+  private async markUncertainSteerHistoryEntry(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId: string;
+  }): Promise<boolean> {
+    const history = await options.sessionDoc.getHistory();
+    if (!history.some((entry) => entry.id === options.userTurnId && entry.role === 'user')) {
+      return false;
+    }
+
+    let matched = false;
+    await options.sessionDoc.updateHistory((entries) =>
+      entries.map((entry) => {
+        if (entry.id !== options.userTurnId || entry.role !== 'user') {
+          return entry;
+        }
+        matched = true;
+        return {
+          ...entry,
+          status: 'failed' as const,
+          read: true,
+          sendStatus: 'delivery_unknown' as const,
+        };
+      })
+    );
+    return matched;
+  }
+
+  /**
+   * The initial remote boundary can time out or precede the renderer's write.
+   * Retain the classification until that exact row appears in the live mirror;
+   * the mirror owns the callback lifetime and disposal with the session doc.
+   */
+  private deferUncertainSteerHistoryMarker(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId: string;
+  }): void {
+    const mirror = options.sessionDoc.mirror;
+    if (!mirror) {
+      this.deps.logger.error(
+        `[${options.sessionId}] Cannot defer uncertain steer ${options.userTurnId}: session mirror is unavailable`
+      );
+      return;
+    }
+
+    let unsubscribe: (() => void) | undefined;
+    let checkRunning = false;
+    let checkRequested = false;
+    let applied = false;
+    const requestCheck = () => {
+      if (applied) return;
+      checkRequested = true;
+      if (checkRunning) return;
+      checkRunning = true;
+      void (async () => {
+        try {
+          while (checkRequested && !applied) {
+            checkRequested = false;
+            if (await this.markUncertainSteerHistoryEntry(options)) {
+              applied = true;
+              unsubscribe?.();
+              this.deps.logger.debug(
+                `[${options.sessionId}] Applied deferred uncertain steer marker to ${options.userTurnId}`
+              );
+            }
+          }
+        } catch (error) {
+          this.deps.logger.error(
+            `[${options.sessionId}] Deferred uncertain steer marker failed for ${options.userTurnId}: ${formatErrorMessage(error)}`
+          );
+        } finally {
+          checkRunning = false;
+          if (checkRequested && !applied) requestCheck();
+        }
+      })();
+    };
+
+    unsubscribe = mirror.subscribe(requestCheck);
+    // Close the check-to-subscribe race if the row arrived immediately before
+    // the subscription was installed.
+    requestCheck();
   }
 
   /**
