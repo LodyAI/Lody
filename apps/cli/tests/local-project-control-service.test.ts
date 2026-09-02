@@ -132,3 +132,77 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
     expect(secondPage.entries[0]?.name).toBe('ignored-dir');
   });
 });
+
+describe('LocalProjectControlService.listProjectFiles without a git repository', () => {
+  let rootPath: string;
+  let service: LocalProjectControlService;
+
+  beforeEach(async () => {
+    // An empty `.git` directory is not a repository, so `git ls-files` fails and
+    // the service falls back to its own walk — the path under test here.
+    rootPath = await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-walk-'));
+    service = new LocalProjectControlService(noopLogger);
+    await mkdir(path.join(rootPath, '.git'));
+  });
+
+  afterEach(async () => {
+    await rm(rootPath, { recursive: true, force: true });
+  });
+
+  const listPaths = async (): Promise<string[]> => (await service.listProjectFiles(rootPath)).paths;
+
+  it('applies a nested .gitignore to its own subtree only', async () => {
+    await mkdir(path.join(rootPath, 'app', 'build'), { recursive: true });
+    await mkdir(path.join(rootPath, 'lib', 'build'), { recursive: true });
+    await writeFile(path.join(rootPath, 'app', '.gitignore'), 'build/\n');
+    await writeFile(path.join(rootPath, 'app', 'main.ts'), 'export {};\n');
+    await writeFile(path.join(rootPath, 'app', 'build', 'out.js'), '\n');
+    await writeFile(path.join(rootPath, 'lib', 'build', 'out.js'), '\n');
+
+    expect(await listPaths()).toEqual([
+      'app/.gitignore',
+      'app/main.ts',
+      'lib/build/out.js',
+    ]);
+  });
+
+  it('keeps root rules while a nested file adds its own', async () => {
+    await mkdir(path.join(rootPath, 'pkg'));
+    await writeFile(path.join(rootPath, '.gitignore'), '*.log\n');
+    await writeFile(path.join(rootPath, 'pkg', '.gitignore'), 'secret.txt\n');
+    await writeFile(path.join(rootPath, 'keep.ts'), '\n');
+    await writeFile(path.join(rootPath, 'root.log'), '\n');
+    await writeFile(path.join(rootPath, 'pkg', 'nested.log'), '\n');
+    await writeFile(path.join(rootPath, 'pkg', 'secret.txt'), '\n');
+    await writeFile(path.join(rootPath, 'pkg', 'keep.ts'), '\n');
+
+    expect(await listPaths()).toEqual([
+      '.gitignore',
+      'keep.ts',
+      'pkg/.gitignore',
+      'pkg/keep.ts',
+    ]);
+  });
+
+  it('lets a nested negation re-include what the root ignored', async () => {
+    await mkdir(path.join(rootPath, 'docs'));
+    await writeFile(path.join(rootPath, '.gitignore'), '*.md\n');
+    await writeFile(path.join(rootPath, 'docs', '.gitignore'), '!README.md\n');
+    await writeFile(path.join(rootPath, 'top.md'), '\n');
+    await writeFile(path.join(rootPath, 'docs', 'README.md'), '\n');
+    await writeFile(path.join(rootPath, 'docs', 'notes.md'), '\n');
+
+    expect(await listPaths()).toEqual([
+      '.gitignore',
+      'docs/.gitignore',
+      'docs/README.md',
+    ]);
+  });
+
+  it('never lists .git internals', async () => {
+    await writeFile(path.join(rootPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(path.join(rootPath, 'a.ts'), '\n');
+
+    expect(await listPaths()).toEqual(['a.ts']);
+  });
+});

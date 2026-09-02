@@ -379,22 +379,26 @@ async function listLocalProjectFilesFromGit(
   rootPath: string,
   maxFiles: number
 ): Promise<LocalProjectFileListResult | null> {
-  const tracked = await runGitCommand(rootPath, ['ls-files', '-z']);
-  if (tracked.status !== 0) return null;
-
-  const untracked = await runGitCommand(rootPath, [
+  // ONE invocation, not two: `--cached` and `--others` compose, and each spawn
+  // costs a process plus a full index read — on a large repo that also doubles
+  // the chance of tripping LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS and falling back
+  // to the much slower walk. `--exclude-standard` is what applies .gitignore at
+  // EVERY level plus `.git/info/exclude` and the user's global excludes, and git
+  // prunes an ignored directory instead of descending into it, so a gitignored
+  // `node_modules` is never walked.
+  const listed = await runGitCommand(rootPath, [
     'ls-files',
+    '-z',
+    '--cached',
     '--others',
     '--exclude-standard',
-    '-z',
   ]);
-  if (untracked.status !== 0) return null;
+  if (listed.status !== 0) return null;
 
-  const merged = `${tracked.stdout}${untracked.stdout}`;
   const deduped = new Set<string>();
   let truncated = false;
 
-  for (const entry of merged.split('\0')) {
+  for (const entry of listed.stdout.split('\0')) {
     const normalized = normalizeProjectRelativePath(entry);
     if (!normalized) continue;
     if (deduped.has(normalized)) continue;
@@ -462,15 +466,20 @@ function globToRegexSource(pattern: string): string {
   return source;
 }
 
-function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boolean) | null {
-  let content = '';
-  try {
-    content = fs.readFileSync(path.join(rootPath, '.gitignore'), 'utf8');
-  } catch {
-    return null;
-  }
+type GitignoreRule = { negated: boolean; regex: RegExp };
 
-  const rules: Array<{ negated: boolean; regex: RegExp }> = [];
+/**
+ * Parse one `.gitignore` into rules matching ROOT-relative paths.
+ *
+ * `baseRelativePath` is the directory the file lives in, so a nested
+ * `.gitignore` constrains itself to its own subtree the way git does. An empty
+ * base is the project root.
+ */
+function parseGitignoreRules(content: string, baseRelativePath: string): GitignoreRule[] {
+  const base = normalizeProjectRelativePath(baseRelativePath);
+  const basePrefix = base ? `${escapeForRegex(base)}/` : '';
+
+  const rules: GitignoreRule[] = [];
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -498,11 +507,19 @@ function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boo
 
     const hasSlash = normalizedPattern.includes('/');
     const patternSource = globToRegexSource(normalizedPattern);
-    const prefix = anchored || hasSlash ? '^' : '(^|.*/)';
+    const prefix = anchored || hasSlash ? `^${basePrefix}` : `^${basePrefix}(.*/)?`;
     const suffix = directoryOnly ? '($|/.*)' : '$';
     rules.push({ negated, regex: new RegExp(`${prefix}${patternSource}${suffix}`) });
   }
 
+  return rules;
+}
+
+/** Later rules win, which is both git's last-match-wins rule and why a nested
+ * `.gitignore` must be appended AFTER its ancestors'. */
+function createGitignoreMatcher(
+  rules: readonly GitignoreRule[]
+): ((relativePath: string) => boolean) | null {
   if (rules.length === 0) {
     return null;
   }
@@ -518,15 +535,46 @@ function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boo
   };
 }
 
+async function readGitignoreRules(
+  directoryAbsolutePath: string,
+  directoryRelativePath: string
+): Promise<GitignoreRule[]> {
+  try {
+    const content = await fs.promises.readFile(
+      path.join(directoryAbsolutePath, '.gitignore'),
+      'utf8'
+    );
+    return parseGitignoreRules(content, directoryRelativePath);
+  } catch {
+    return [];
+  }
+}
+
+function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boolean) | null {
+  let content = '';
+  try {
+    content = fs.readFileSync(path.join(rootPath, '.gitignore'), 'utf8');
+  } catch {
+    return null;
+  }
+  return createGitignoreMatcher(parseGitignoreRules(content, ''));
+}
+
 async function listLocalProjectFilesByWalk(
   rootPath: string,
   maxFiles: number
 ): Promise<LocalProjectFileListResult> {
   const paths: string[] = [];
-  const stack: Array<{ absolutePath: string; relativePath: string }> = [
-    { absolutePath: rootPath, relativePath: '' },
-  ];
-  const shouldIgnorePath = buildGitignoreMatcher(rootPath);
+  // This fallback only runs when the root is not a git repository (or git is
+  // unavailable/timed out), so nothing applies .gitignore for us. Carry the
+  // accumulated rules down the tree instead of reading only the root file: a
+  // nested `.gitignore` is what keeps a subtree's build output out of the `@`
+  // menu, and an ignored directory is pruned here rather than descended into.
+  const stack: Array<{
+    absolutePath: string;
+    relativePath: string;
+    rules: readonly GitignoreRule[];
+  }> = [{ absolutePath: rootPath, relativePath: '', rules: [] }];
   let truncated = false;
   let entriesSinceYield = 0;
 
@@ -540,6 +588,16 @@ async function listLocalProjectFilesByWalk(
     } catch {
       continue;
     }
+
+    // Read the directory's own `.gitignore` only when the listing we already
+    // have says there is one, so the common directory costs no extra syscall.
+    const rules = entries.some((entry) => entry.name === '.gitignore' && !entry.isDirectory())
+      ? [
+          ...current.rules,
+          ...(await readGitignoreRules(current.absolutePath, current.relativePath)),
+        ]
+      : current.rules;
+    const shouldIgnorePath = createGitignoreMatcher(rules);
 
     for (const entry of entries) {
       entriesSinceYield += 1;
@@ -566,6 +624,7 @@ async function listLocalProjectFilesByWalk(
         stack.push({
           absolutePath: path.join(current.absolutePath, name),
           relativePath: normalizedRelativePath,
+          rules,
         });
         continue;
       }

@@ -154,6 +154,25 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `loro/machine-flock-sync-coordinator.ts` owns the live room, dirty state, and
   exponential retry; request-scoped `syncOnce()` failures must not make local project
   add/update flows fail after the local write is durable.
+- `local-project/list-files` and `worktree/list-files` answer an `@` menu that
+  revalidates on every open, so they must stay a LIVE listing and stay cheap.
+  `listLocalProjectFilesFromGit` is ONE `git ls-files -z --cached --others
+  --exclude-standard`: `--cached` and `--others` compose, each spawn costs a
+  process plus a full index read, and two of them double the exposure to
+  `LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS` — whose only fallback is the far slower
+  walk. `--exclude-standard` is also the whole .gitignore story on this path
+  (every level, `.git/info/exclude`, the user's global excludes), and git prunes
+  an ignored directory rather than descending, so an ignored `node_modules` is
+  never walked. Do not reintroduce a cached/watcher-maintained index here: a file
+  the user just moved in must be mentionable on the next keystroke.
+- `listLocalProjectFilesByWalk` is the fallback for a root that is NOT a git
+  repository, so nothing applies .gitignore for it. It carries accumulated
+  `GitignoreRule`s down the stack — a nested `.gitignore` constrains its own
+  subtree, appended AFTER its ancestors' because last match wins — and reads a
+  directory's file only when the `readdir` result it already has says one exists.
+  Known gap: patterns are translated approximately (`globToRegexSource` has no
+  character classes) and there is no default exclude set, so a non-git root with
+  an unignored `node_modules` is walked until `maxFiles`.
 - Builtin Codex local-project history import is read-only: require
   `_meta.lody.sessionHistory` v1 and call the Core-defined history method; never fall back to
   `loadSession`, which resumes the thread and can contend with its active writer. Publish a new
