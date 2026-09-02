@@ -14,6 +14,7 @@ import {
 
 import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { MessageRowView } from '../src/components/ai-gui/view';
+import type { UserTurnResendReason } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
 
@@ -47,6 +48,19 @@ const undeliveredMessage = {
   inputConfig: {
     prompt: 'resend me from the dialog',
     inputBlocks: [{ type: 'text', text: 'resend me from the dialog' }],
+  },
+} as unknown as SessionHistoryParsed;
+
+const uncertainMessage = {
+  ...undeliveredMessage,
+  id: 'user-turn-delivery-unknown',
+  status: 'failed',
+  read: true,
+  sendStatus: 'delivery_unknown',
+  items: [{ type: 'text', text: 'this steer may already have run' }],
+  inputConfig: {
+    prompt: 'this steer may already have run',
+    inputBlocks: [{ type: 'text', text: 'this steer may already have run' }],
   },
 } as unknown as SessionHistoryParsed;
 
@@ -89,7 +103,12 @@ describe('UserMessageRowView undelivered resend dialog', () => {
   });
 
   const renderRow = async (
-    onResendUndelivered: (userTurnId: string, inputBlocks: unknown) => Promise<boolean>
+    onResendUndelivered: (
+      userTurnId: string,
+      inputBlocks: unknown,
+      reason: UserTurnResendReason
+    ) => Promise<boolean>,
+    message: SessionHistoryParsed = undeliveredMessage
   ) => {
     const store = createStore();
     store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
@@ -99,7 +118,7 @@ describe('UserMessageRowView undelivered resend dialog', () => {
           JotaiProvider,
           { store },
           createElement(MessageRowView, {
-            message: undeliveredMessage,
+            message,
             sessionId,
             onResendUndelivered,
           })
@@ -120,7 +139,8 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     expect(onResendUndelivered).toHaveBeenCalledTimes(1);
     expect(onResendUndelivered).toHaveBeenCalledWith(
       missingTurnId,
-      buildResendInputBlocks(undeliveredMessage)
+      buildResendInputBlocks(undeliveredMessage),
+      'not-delivered'
     );
     // The dialog closed after the action.
     expect(document.body.textContent).not.toContain('did not run');
@@ -136,6 +156,22 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     await click(queryBodyButton('Cancel'));
     expect(onResendUndelivered).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain('did not run');
+  });
+
+  it('warns before manually resending a delivery-ambiguous steer', async () => {
+    const onResendUndelivered = vi.fn(async () => true);
+    await renderRow(onResendUndelivered, uncertainMessage);
+
+    await click(queryBodyButton('Delivery uncertain'));
+    expect(document.body.textContent).toContain('may already have received');
+    expect(document.body.textContent).toContain('may repeat work');
+
+    await click(queryBodyButton('Resend message'));
+    expect(onResendUndelivered).toHaveBeenCalledWith(
+      uncertainMessage.id,
+      buildResendInputBlocks(uncertainMessage),
+      'delivery-unknown'
+    );
   });
 
   it('keeps the label non-interactive without a resend handler', async () => {

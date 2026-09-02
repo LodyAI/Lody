@@ -171,6 +171,11 @@ const DROPPED_ACTIVITY_TURN_FAILURE_MESSAGE =
   'turn is therefore uncertain: check the working tree and any tool results before deciding ' +
   'what to do, and do not simply retry, because that can repeat work the agent already did.';
 
+const STEER_DELIVERY_UNKNOWN_MESSAGE =
+  "The steering message's delivery status is uncertain: the agent may have applied it even " +
+  'though Lody did not receive a conclusive acknowledgement. Check the conversation, working ' +
+  'tree, and tool effects before deciding whether to resend it; resending can repeat work.';
+
 type TurnFinalizationEffects = {
   finalizeACPState: (
     sessionId: SessionId,
@@ -1333,8 +1338,10 @@ export class SessionExecutionService {
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
     let submittedToAgent = false;
+    let applicationConfirmed = false;
+    let sessionDoc: SessionDocument | undefined;
     try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
+      sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
         options.inputConfig.inputBlocks,
         options.inputConfig.prompt ?? ''
@@ -1373,6 +1380,7 @@ export class SessionExecutionService {
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       submittedToAgent = true;
       const application = await steerRun.applied;
+      applicationConfirmed = true;
       // Link activity as soon as application is known. Permission/file requests
       // can arrive while history ownership is being handed over below.
       const nextActivity = new PromptActivityRecorder(ownedPromptRun.activity);
@@ -1489,6 +1497,13 @@ export class SessionExecutionService {
     } catch (error) {
       const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
       if (!notDelivered) {
+        if (!applicationConfirmed && sessionDoc) {
+          await this.recordUncertainSteerDelivery({
+            sessionId: options.sessionId,
+            sessionDoc,
+            userTurnId: options.userTurnId,
+          });
+        }
         return reject('error', formatErrorMessage(error));
       }
       // `no-active-turn` for the agent's own refusal: it is the disposition
@@ -1497,6 +1512,59 @@ export class SessionExecutionService {
       return await rejectUndelivered(
         error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
         formatErrorMessage(error)
+      );
+    }
+  }
+
+  /**
+   * Fail closed after an ambiguous provider submission. This is intentionally
+   * NOT ordinary turn failure bookkeeping: the predecessor still owns the live
+   * prompt, so changing `lastHandledUserMsgId` or `processingUserMsgId` here
+   * would corrupt its dispatch ownership. The target steer alone becomes a
+   * terminal, human-retryable history entry.
+   */
+  private async recordUncertainSteerDelivery(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId: string;
+  }): Promise<void> {
+    let matched = false;
+    try {
+      await options.sessionDoc.waitUntilSynced();
+      await options.sessionDoc.updateHistory((history) =>
+        history.map((entry) => {
+          if (entry.id !== options.userTurnId || entry.role !== 'user') {
+            return entry;
+          }
+          matched = true;
+          return {
+            ...entry,
+            status: 'failed' as const,
+            read: true,
+            sendStatus: 'delivery_unknown' as const,
+          };
+        })
+      );
+      if (!matched) {
+        this.deps.logger.warn(
+          `[${options.sessionId}] Could not mark uncertain steer ${options.userTurnId}: its history entry has not synced`
+        );
+      }
+    } catch (error) {
+      this.deps.logger.error(
+        `[${options.sessionId}] Failed to mark uncertain steer ${options.userTurnId}: ${formatErrorMessage(error)}`
+      );
+    }
+
+    try {
+      await this.deps.recordChatFailure(
+        options.sessionDoc,
+        'steer_delivery_unknown',
+        STEER_DELIVERY_UNKNOWN_MESSAGE
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        `[${options.sessionId}] Failed to record uncertain steer notice for ${options.userTurnId}: ${formatErrorMessage(error)}`
       );
     }
   }

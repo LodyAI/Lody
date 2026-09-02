@@ -455,6 +455,16 @@ describe('AgentClient plan mode permission restoration', () => {
       );
     });
 
+    it('maps the Core failed outcome to a conclusive not-delivered error', async () => {
+      const { client } = createSteerClient(async () => ({ outcome: 'failed' }));
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+    });
+
     it('keeps a steer whose request died in transport ambiguous', async () => {
       // The frame may already have reached the agent, so re-sending this user
       // turn could deliver the same message twice. Only the agent's own
@@ -501,6 +511,30 @@ describe('AgentClient plan mode permission restoration', () => {
       refuse(
         Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
       );
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+    });
+
+    it('lets a Core failed outcome win when the steered turn completes first', async () => {
+      let answer!: (value: unknown) => void;
+      let completeTurn!: () => void;
+      const completion = new Promise<never>((resolve) => {
+        completeTurn = () => resolve(undefined as never);
+      });
+      const { client } = createSteerClient(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+        completion
+      );
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+      completeTurn();
+      await Promise.resolve();
+      answer({ outcome: 'failed' });
 
       await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
     });

@@ -3071,6 +3071,7 @@ export const ChatFailedReasonSchema = z.enum([
   'agent_no_output',
   'turn_pre_prompt_failed',
   'message_delivery_failed',
+  'steer_delivery_unknown',
   'machine_access_denied',
   'acp_auth_required',
   'acp_internal_error',

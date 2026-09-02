@@ -2338,11 +2338,10 @@ export class AgentClient implements acp.Client {
       : undefined;
     try {
       const response = await withAbort(request, abort).catch((error: unknown) => {
-        // Only the agent's own `invalid request` answer proves it declined the
-        // prompt (Codex answers `No active Codex turn to steer`). A closed
-        // connection, a dead agent process, or an internal error may have left
-        // the prompt inside the live turn, so those stay ambiguous — re-sending
-        // one of those would deliver the user's message twice.
+        // Compatibility with adapters predating Core's explicit `failed`
+        // outcome: their own `invalid request` answer was the only conclusive
+        // refusal. A closed connection, dead process, or internal error may
+        // have left the prompt inside the live turn, so those stay ambiguous.
         throw isAcpInvalidRequestError(error)
           ? new AgentSteerNotDeliveredError(
               `Agent refused the acknowledged steer request ${method}: ${formatErrorMessage(error)}`,
@@ -2350,9 +2349,14 @@ export class AgentClient implements acp.Client {
             )
           : error;
       });
-      const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
+      const parsed = z.object({ outcome: z.enum(['injected', 'failed']) }).safeParse(response);
       if (!parsed.success) {
         throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
+      }
+      if (parsed.data.outcome === 'failed') {
+        throw new AgentSteerNotDeliveredError(
+          `Agent conclusively declined the acknowledged steer request ${method}`
+        );
       }
     } finally {
       if (signal && abortListener) {

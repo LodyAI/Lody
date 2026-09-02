@@ -1118,6 +1118,7 @@ export type ChatFailedReason =
   | 'agent_no_output'
   | 'turn_pre_prompt_failed'
   | 'message_delivery_failed'
+  | 'steer_delivery_unknown'
   | 'machine_access_denied' // requester is not authorized to use this machine (definitive backend deny)
   // ACP RPC errors (from @agentclientprotocol/sdk)
   | 'acp_auth_required' // -32000: Authentication required

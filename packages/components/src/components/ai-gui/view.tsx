@@ -1806,6 +1806,8 @@ export const SessionChatStreamView = forwardRef<
 
 SessionChatStreamView.displayName = 'SessionChatStreamView';
 
+export type UserTurnResendReason = 'not-delivered' | 'delivery-unknown';
+
 export const MessageRowView = memo(function MessageRowView({
   message,
   sessionId,
@@ -1820,7 +1822,11 @@ export const MessageRowView = memo(function MessageRowView({
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
-  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  onResendUndelivered?: (
+    userTurnId: string,
+    inputBlocks: SessionInputBlock[],
+    reason: UserTurnResendReason
+  ) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
   conversationFontSize?: ConversationFontSize;
@@ -2297,6 +2303,11 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.messageDeliveryFailed',
           'Message delivery failed - please resend after sync recovers'
         );
+      case 'steer_delivery_unknown':
+        return t(
+          'sessions.systemNotices.chatFailed.steerDeliveryUnknown',
+          'Steering message delivery is uncertain — check for effects before deciding whether to resend'
+        );
       case 'machine_access_denied':
         return t('sessions.systemNotices.chatFailed.machineAccessDenied', 'Machine access denied');
       case 'memory_pressure':
@@ -2687,7 +2698,11 @@ const UserMessageRowView = ({
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
-  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  onResendUndelivered?: (
+    userTurnId: string,
+    inputBlocks: SessionInputBlock[],
+    reason: UserTurnResendReason
+  ) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -2709,6 +2724,9 @@ const UserMessageRowView = ({
     sessionMeta?.lastMissingHistoryUserMsgId,
     message
   );
+  const isDeliveryUnknown =
+    message.status === 'failed' && message.sendStatus === 'delivery_unknown';
+  const isFailed = message.status === 'failed';
   const pinCtx = useSessionPin();
   const showSendingSpinner =
     useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
@@ -2755,7 +2773,11 @@ const UserMessageRowView = ({
     }
     setIsResending(true);
     try {
-      const accepted = await onResendUndelivered(message.id, inputBlocks);
+      const accepted = await onResendUndelivered(
+        message.id,
+        inputBlocks,
+        isDeliveryUnknown ? 'delivery-unknown' : 'not-delivered'
+      );
       if (!accepted) {
         toast.error(t('sessions.resendUndelivered.failed', 'Failed to resend the message'));
       }
@@ -2770,7 +2792,7 @@ const UserMessageRowView = ({
       setIsResending(false);
       setResendDialogOpen(false);
     }
-  }, [isResending, message, onResendUndelivered, sessionId, t]);
+  }, [isDeliveryUnknown, isResending, message, onResendUndelivered, sessionId, t]);
 
   const handleSaveEdit = useCallback(async () => {
     if (!onEdit || isSavingEdit || !editText.trim()) return;
@@ -2797,7 +2819,7 @@ const UserMessageRowView = ({
       >
         <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered ? (
+          {isUndelivered || isDeliveryUnknown ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -2806,18 +2828,31 @@ const UserMessageRowView = ({
                 onClick={() => setResendDialogOpen(true)}
               >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile
+                  ? isDeliveryUnknown
+                    ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
+                    : t('sessions.messageStatus.notDelivered', 'Not delivered')
+                  : null}
               </button>
             ) : (
               <span className="inline-flex items-center gap-1 text-destructive">
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile
+                  ? isDeliveryUnknown
+                    ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
+                    : t('sessions.messageStatus.notDelivered', 'Not delivered')
+                  : null}
               </span>
             )
           ) : isPendingApply ? (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <Clock3 className="h-3.5 w-3.5" strokeWidth={2} />
               {!isMobile ? t('sessions.messageStatus.pendingApply', 'Steering') : null}
+            </span>
+          ) : isFailed ? (
+            <span className="inline-flex items-center gap-1 text-destructive">
+              <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+              {!isMobile ? t('sessions.messageStatus.failed', 'Failed') : null}
             </span>
           ) : (
             <span title={isDelivered ? 'Delivered' : 'Sending'}>
@@ -2981,6 +3016,7 @@ const UserMessageRowView = ({
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
+          deliveryUnknown={isDeliveryUnknown}
           onConfirm={() => {
             void handleConfirmResend();
           }}
@@ -2991,19 +3027,21 @@ const UserMessageRowView = ({
 };
 
 /**
- * Confirmation dialog behind the "Not delivered" label: resends the
- * undelivered turn's exact content as a NEW message (the old turn is never
- * revived). The row's label is the only entry point.
+ * Confirmation dialog behind a delivery-failure label. Definite
+ * non-delivery and uncertain delivery deliberately use different copy: only
+ * the former can promise that the agent did not act.
  */
 const ResendUndeliveredDialog = ({
   open,
   onOpenChange,
   isResending,
+  deliveryUnknown,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
+  deliveryUnknown: boolean;
   onConfirm: () => void;
 }) => {
   const { t } = useTranslation();
@@ -3012,13 +3050,20 @@ const ResendUndeliveredDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t('sessions.resendUndelivered.title', 'Message not delivered')}
+            {deliveryUnknown
+              ? t('sessions.resendDeliveryUnknown.title', 'Delivery uncertain')
+              : t('sessions.resendUndelivered.title', 'Message not delivered')}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {t(
-              'sessions.resendUndelivered.description',
-              'This message never reached the agent, so it did not run. Resend the same content as a new message?'
-            )}
+            {deliveryUnknown
+              ? t(
+                  'sessions.resendDeliveryUnknown.description',
+                  'The agent may already have received this message. Check the conversation, working tree, and tool effects before resending; resending may repeat work. Resend it as a new message?'
+                )
+              : t(
+                  'sessions.resendUndelivered.description',
+                  'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+                )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

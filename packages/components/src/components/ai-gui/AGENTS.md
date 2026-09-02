@@ -126,5 +126,10 @@ work) and a hover preview.
   dialog resends the same content as a new ordinary message, then marks the old
   entry `canceled`; the producer clears the marker. Never automatically dispatch
   or revive the old turn.
+- An acknowledged steer whose post-submission result is ambiguous renders from
+  `status: failed` plus `sendStatus: delivery_unknown` as "Delivery uncertain".
+  Its confirmation must warn that the agent may already have acted before it
+  sends a new ordinary turn. A successful resend clears only `sendStatus`; the
+  original remains failed, because neither applied nor not-applied was proven.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).

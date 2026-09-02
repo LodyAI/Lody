@@ -570,7 +570,11 @@ describe('SessionExecutionService', () => {
     applicationD.reject(new Error('steer application failed'));
     await expect(steerD).resolves.toMatchObject({ applied: false, disposition: 'error' });
     expect(history).toContainEqual(
-      expect.objectContaining({ id: 'user-d', status: 'pending_apply' })
+      expect.objectContaining({
+        id: 'user-d',
+        status: 'failed',
+        sendStatus: 'delivery_unknown',
+      })
     );
     expect(service.getExecutionSnapshot(sessionId).activeTurnId).toBe('assistant:user-c');
 
@@ -983,12 +987,29 @@ describe('SessionExecutionService', () => {
     expect(getDocMeta).not.toHaveBeenCalled();
   });
 
-  it('keeps a steer that failed after submission out of the dispatch queue', async () => {
+  it('marks a delivery-ambiguous steer failed without changing predecessor ownership', async () => {
+    let history: SessionHistoryInput[] = [
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: { prompt: 'do it differently' },
+      } as SessionHistoryInput,
+    ];
+    const sessionDoc = {
+      waitUntilSynced: vi.fn(async () => true),
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    };
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
       workspaceDocument: {
         repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
@@ -1034,6 +1055,20 @@ describe('SessionExecutionService', () => {
         inputConfig: { prompt: 'do it differently' },
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'error' });
+    expect(sessionDoc.waitUntilSynced).toHaveBeenCalledOnce();
+    expect(history[0]).toMatchObject({
+      id: 'user-2',
+      status: 'failed',
+      read: true,
+      sendStatus: 'delivery_unknown',
+    });
+    expect(deps.recordChatFailure).toHaveBeenCalledWith(
+      sessionDoc,
+      'steer_delivery_unknown',
+      expect.stringContaining('may have applied it')
+    );
+    // The still-running user-1 turn retains all three dispatch pointers. In
+    // particular, unknown is not an automatic redispatch signal for user-2.
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
