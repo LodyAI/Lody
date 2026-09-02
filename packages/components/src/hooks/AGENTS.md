@@ -109,3 +109,19 @@ this file; edit `AGENTS.md` only.
   during an owed frame it only advances the target. A switch renders
   synchronously for longer than the key repeat, so a held shortcut otherwise
   queues renders nobody sees. Not a time-based debounce.
+- `use-lody-live-activity.ts` throttles the summary INPUT, not the bridge call.
+  A debounce on the bridge alone starved: `atoms/doc-meta` republishes the
+  session array once per flushed batch, so a cold start reset the 250ms timer
+  before it ever fired while every batch still paid for a full rebuild. The
+  session list plus the presence-derived status map pass through one
+  leading-edge throttle whose trailing deadline is anchored to the last EMIT,
+  so a burst of any rate still delivers and its final value always lands. The
+  payload memo therefore must not depend on a per-render identity — resolve
+  every `t(...)` label to a string first — or the debounce starves again.
+  A pending permission request is the exception and is scanned from the
+  UNTHROTTLED list: it flushes the window so the alert ships with a summary
+  that actually contains it, and `shownPermissionAlertKeysRef` still shows one
+  alert per candidate key. Compute nothing when the feature is off — the
+  activity id is derived separately from `iosLiveActivitiesEnabledAtom` so the
+  disable and unmount paths can still end an activity the payload no longer
+  describes.
