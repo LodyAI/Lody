@@ -95,8 +95,11 @@ export function ThemeProvider({
       forcedTheme={previewedTheme}
       storageKey={storageKey}
       themes={['light', 'dark']}
-      // Electron's CSP intentionally rejects inline scripts. Its native-theme
-      // bridge supplies the initial resolved theme immediately after mount.
+      // Electron's CSP intentionally rejects inline scripts, so next-themes'
+      // blocking pre-paint script is neutered here. Its job is done earlier
+      // instead: preload puts the resolved class on `<html>` from the theme
+      // main persisted (`initial-window-theme-argument.ts`), and the
+      // native-theme bridge supplies OS appearance changes after mount.
       scriptProps={isElectron ? { type: 'application/json' } : undefined}
     >
       <LodyThemeProvider
@@ -150,10 +153,21 @@ function LodyThemeProvider({
   }, [resolvedTheme, theme]);
 
   // On Electron, keep the OS-drawn window chrome (notably the Windows title bar)
-  // matching the in-app theme. Preserve `system` as the native source.
+  // matching the in-app theme. Preserve `system` as the native source. This
+  // follows the preview too, so hovering a theme in Settings retints the frame.
   useEffect(() => {
     void getIpcServices()?.app.setNativeTheme(theme);
   }, [theme]);
+
+  // Mirror the COMMITTED choice into the main process. It is the only record
+  // main has of the user's theme — the renderer keeps it in `localStorage`,
+  // which main cannot read — and the next launch needs it before any renderer
+  // code runs, to pick the window background color and to hand preload the
+  // class to put on `<html>` ahead of the first frame. A preview is excluded on
+  // purpose: it says nothing about how the app should open.
+  useEffect(() => {
+    void getIpcServices()?.app.setStartupThemeSource(storedTheme);
+  }, [storedTheme]);
 
   useIsomorphicLayoutEffect(() => {
     const root = window.document.documentElement;

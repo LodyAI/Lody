@@ -17,11 +17,14 @@ import {
 import {
   getInitialMainWindowThemeSource,
   getMainWindowBackgroundColor,
-  getMainWindowTitleBarOverlay
+  getMainWindowTitleBarOverlay,
+  resolveNativeWindowTheme
 } from './window-theme'
+import { readStartupThemeSource } from './theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
+import { serializeInitialWindowThemeArgument } from '../initial-window-theme-argument'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -329,8 +332,11 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
 
 export function createMainWindow(options: CreateMainWindowOptions): BrowserWindow {
   const shouldMaximizeOnLaunch = shouldMaximizeMainWindowOnLaunch()
-  nativeTheme.themeSource = getInitialMainWindowThemeSource(options.initialPath)
-  const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  nativeTheme.themeSource = getInitialMainWindowThemeSource(
+    options.initialPath,
+    readStartupThemeSource()
+  )
+  const resolvedTheme = resolveNativeWindowTheme(nativeTheme.shouldUseDarkColors)
   const window = new BrowserWindow({
     ...getMainWindowConstructorOptions(),
     show: false,
@@ -355,7 +361,13 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       // Carry Electron's OS-level preference into preload so first-run product
       // language detection does not mistake the available .pak for user intent.
       additionalArguments: [
-        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages()),
+        // Preload applies this as the `.dark`/`.light` class on `<html>`. The
+        // window's `backgroundColor` above only covers what the document does
+        // not paint, and `tailwind/index.css` paints `body` from the theme
+        // class — so without this the first frame is the LIGHT canvas even in
+        // a dark window, until React mounts and corrects it.
+        serializeInitialWindowThemeArgument(resolvedTheme)
       ],
       sandbox: false,
       nodeIntegration: false,

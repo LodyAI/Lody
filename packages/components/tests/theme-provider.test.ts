@@ -395,6 +395,66 @@ describe('ThemeProvider', () => {
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
   });
 
+  it('mirrors the committed theme into the Electron main process, but never a preview', () => {
+    installMatchMediaMock(false);
+    const invokeCalls: Array<{ channel: string; args: unknown[] }> = [];
+    Object.defineProperty(window, 'ipc', {
+      configurable: true,
+      value: {
+        invoke: async (channel: string, ...args: unknown[]) => {
+          invokeCalls.push({ channel, args });
+          return undefined;
+        },
+        on: () => () => {},
+        send: () => {},
+      },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(
+          ThemeProvider,
+          {
+            defaultTheme: 'light',
+            storageKey: 'theme-provider-test-theme',
+          },
+          React.createElement(ThemeProbe)
+        )
+      );
+    });
+
+    const startupCalls = () =>
+      invokeCalls
+        .filter((call) => call.channel === 'app.setStartupThemeSource')
+        .map((call) => call.args[0]);
+
+    // The window background and the pre-paint class for the NEXT launch come
+    // from this value, so the first mount has to publish it too.
+    expect(startupCalls()).toEqual(['light']);
+
+    invokeCalls.length = 0;
+    flushSync(() => {
+      container?.querySelector<HTMLButtonElement>('#preview-dark-theme')?.click();
+    });
+
+    // A preview retints the live native chrome but says nothing about how the
+    // app should open, so it must not reach the persisted startup theme.
+    expect(
+      invokeCalls.filter((call) => call.channel === 'app.setNativeTheme').map((call) => call.args[0])
+    ).toEqual(['dark']);
+    expect(startupCalls()).toEqual([]);
+
+    flushSync(() => {
+      container?.querySelector<HTMLButtonElement>('#set-dark-theme')?.click();
+    });
+
+    expect(startupCalls()).toEqual(['dark']);
+  });
+
   it('follows Electron native theme updates while theme mode is system', () => {
     installMatchMediaMock(false);
     const nativeThemeHandlers = new Set<(resolved: 'light' | 'dark') => void>();
