@@ -125,7 +125,7 @@ function MockContextTypeNode({
       onValueChange={(v) => onChange(v as 'local' | 'github' | 'chat')}
       className="w-full"
     >
-      <TabsList className="flex h-10 w-full rounded-md bg-muted p-1">
+      <TabsList className="flex h-9 w-full rounded-md bg-muted p-1">
         <TabsTrigger value="local" className={triggerClassName}>
           <Folder className="h-3.5 w-3.5" />
           <span>Local</span>
@@ -148,7 +148,7 @@ function MockWorkdirModeNode({ contextType }: { contextType: 'local' | 'github' 
   const triggerClassName =
     'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all';
   return (
-    <div className="flex h-10 w-full rounded-md bg-muted p-1">
+    <div className="flex h-9 w-full rounded-md bg-muted p-1">
       <button type="button" className={cn(triggerClassName, 'text-muted-foreground')}>
         <Folder className="h-3.5 w-3.5" />
         <span>本地文件</span>
@@ -241,7 +241,6 @@ function StoryHarness({
   initialContextType = 'github' as 'local' | 'github' | 'chat',
   initialModel = 'claude-3.5-sonnet',
   modelPickerOptions = modelOptions,
-  projectScoped = false,
 }) {
   const [open, setOpen] = useState(initialOpen);
   const [contextType, setContextType] = useState<'local' | 'github' | 'chat'>(initialContextType);
@@ -272,28 +271,22 @@ function StoryHarness({
         onOpenChange={setOpen}
         coordinator={MobileInlinePickerCoordinator}
         machineNode={
-          projectScoped ? null : (
-            <MobileNativeSelect
-              value={machine}
-              onChange={setMachine}
-              options={machineOptions}
-              ariaLabel="Machine"
-              triggerContent={
-                <>
-                  <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="truncate">{machine}</span>
-                </>
-              }
-            />
-          )
+          <MobileNativeSelect
+            value={machine}
+            onChange={setMachine}
+            options={machineOptions}
+            ariaLabel="Machine"
+            triggerContent={
+              <>
+                <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                <span className="truncate">{machine}</span>
+              </>
+            }
+          />
         }
-        contextTypeNode={
-          projectScoped ? null : (
-            <MockContextTypeNode value={contextType} onChange={setContextType} />
-          )
-        }
+        contextTypeNode={<MockContextTypeNode value={contextType} onChange={setContextType} />}
         perTypeNode={
-          contextType === 'chat' || projectScoped ? null : contextType === 'github' ? (
+          contextType === 'chat' ? null : contextType === 'github' ? (
             <MobileNativeSelect
               value={repo}
               onChange={setRepo}
@@ -416,17 +409,6 @@ export const LocalContext: Story = {
     composer: null,
   },
   render: () => <StoryHarness initialContextType="local" />,
-};
-
-export const ProjectScopedLocalContext: Story = {
-  args: {
-    open: true,
-    onOpenChange: () => {},
-    machineNode: null,
-    contextTypeNode: null,
-    composer: null,
-  },
-  render: () => <StoryHarness initialContextType="local" projectScoped />,
 };
 
 export const ChatContext: Story = {

@@ -42,7 +42,7 @@ export function MobileNativeSelect<T extends string = string>({
   return (
     <div
       className={cn(
-        'relative flex w-full select-none items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium',
+        'relative flex h-9 w-full select-none items-center gap-2 rounded-md px-3 py-1 text-left text-sm font-medium',
         'text-foreground/85 transition-colors hover:text-foreground',
         (disabled || loading) && 'opacity-60',
         className

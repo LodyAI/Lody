@@ -32,9 +32,9 @@ export type MobileNewChatSheetProps = {
 
 export type MobileNewChatSheetContentProps = {
   labels?: MobileNewChatSheetLabels;
-  /** Row 1: machine pill / selector. Pass `null` when the entry point fixes it. */
+  /** Row 1: machine pill / selector. */
   machineNode: ReactNode;
-  /** Row 2: project type (3-icon) pill switcher. Pass `null` when fixed. */
+  /** Row 2: project type (3-icon) pill switcher. */
   contextTypeNode: ReactNode;
   /** Row 3: the project (local) or repo (github) picker on its own
      row — branch moved to its own row below so neither chip gets
@@ -73,9 +73,9 @@ export type MobileNewChatSheetContentProps = {
 /**
  * Bottom sheet that hosts the "new chat" composer flow on mobile home.
  *
- * Layout stacks top-to-bottom per the design comp: optional machine →
- * optional project type → per-type selectors (optionally split into
- * project+branch + worktree on local) → composer (footer holds the same
+ * Layout stacks top-to-bottom per the design comp: machine → project
+ * type → per-type selectors (optionally split into project+branch +
+ * worktree on local) → composer (footer holds the same
  * `MobileSessionRunConfig` face as the in-session chat). Each row
  * carries a short label (机器 / 类型 / 项目 / 模式) so the surface reads
  * like a form rather than a tag cloud.
@@ -224,17 +224,13 @@ export function MobileNewChatSheetContent({
              `AnimatePresence` + height-animated wrappers slide the
              rows in / out so the surrounding stack ripples smoothly
              rather than snapping. */}
-          <div className="flex flex-col pb-3 pt-1">
-            {machineNode ? (
-              <AnimatedSheetRow alwaysOn>
-                <Row label={machineLabel}>{machineNode}</Row>
-              </AnimatedSheetRow>
-            ) : null}
-            {contextTypeNode ? (
-              <AnimatedSheetRow alwaysOn>
-                <Row label={contextTypeLabel}>{contextTypeNode}</Row>
-              </AnimatedSheetRow>
-            ) : null}
+          <div className="flex flex-col pb-2 pt-1">
+            <AnimatedSheetRow alwaysOn>
+              <Row label={machineLabel}>{machineNode}</Row>
+            </AnimatedSheetRow>
+            <AnimatedSheetRow alwaysOn>
+              <Row label={contextTypeLabel}>{contextTypeNode}</Row>
+            </AnimatedSheetRow>
             <AnimatePresence initial={false}>
               {perTypeNode ? (
                 <AnimatedSheetRow key="per-type">
@@ -254,7 +250,7 @@ export function MobileNewChatSheetContent({
             </AnimatePresence>
           </div>
 
-          <div className="pt-1">{composer}</div>
+          <div className="pt-0.5">{composer}</div>
 
           {belowComposerNode ? (
             /* Vertical-rhythm wrapper only; the slot owns horizontal
@@ -270,10 +266,10 @@ export function MobileNewChatSheetContent({
 /* Wrapper that animates a row's mount / unmount via height accordion.
    `alwaysOn` skips the AnimatePresence-driven mount transition (for
    rows that are always rendered like machine + type) but keeps the
-   `pt-1.5` rhythm so the spacing stays consistent with the rows that
+   `pt-1` rhythm so the spacing stays consistent with the rows that
    do animate in.
 
-   We bake `pt-1.5` into the wrapper instead of using parent `gap-1.5`
+   We bake `pt-1` into the wrapper instead of using parent `gap-1`
    because gap doesn't animate with height — when a row mounts from
    height 0, the gap above it pops in instantly while the row's body
    grows, which looks jumpy. Putting the spacing inside the animated
@@ -286,7 +282,7 @@ function AnimatedSheetRow({
   alwaysOn?: boolean;
 }) {
   if (alwaysOn) {
-    return <div className="pt-1.5 first:pt-0">{children}</div>;
+    return <div className="pt-1 first:pt-0">{children}</div>;
   }
   return (
     <motion.div
@@ -296,7 +292,7 @@ function AnimatedSheetRow({
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
       className="overflow-hidden"
     >
-      <div className="pt-1.5">{children}</div>
+      <div className="pt-1">{children}</div>
     </motion.div>
   );
 }
@@ -313,15 +309,15 @@ function AnimatedSheetRow({
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <MobileInlinePickerRowSlot>
-      <div className="flex min-w-0 items-stretch gap-3 rounded-xl px-3 py-1.5">
+      <div className="flex min-w-0 items-stretch gap-3 rounded-xl px-3 py-1">
         {/* Fixed-width label column so every row's value column starts
            at the same x regardless of the label's intrinsic width.
            Without this, "Machine" / "Type" / "Project" / "Branch" /
            "Mode" each push the value chip to a different x in
            English (Chinese labels are uniform 2 chars so it accidentally
            lined up before). `w-16` (64px) fits the longest English
-           label at 0.72rem without wrapping. */}
-        <span className="w-16 shrink-0 self-center text-[0.72rem] font-semibold tracking-wide text-muted-foreground">
+           label at 0.875rem without wrapping. */}
+        <span className="w-16 shrink-0 self-center text-sm font-semibold leading-5 text-muted-foreground">
           {label}
         </span>
         <div className="min-w-0 flex-1">{children}</div>
