@@ -2363,6 +2363,7 @@
   "settings.agent.dialog.deepseek.apiKeyHelp": "随此 provider 配置保存，并在启动 DSH 时注入为 DEEPSEEK_API_KEY。",
   "settings.agent.dialog.deepseek.apiKeyLabel": "DeepSeek API Key",
   "settings.agent.dialog.deepseek.apiKeyPlaceholder": "sk-XXXXXXXXXXXX",
+  "settings.agent.dialog.deepseek.customApiKeyLabel": "API Key",
   "settings.agent.dialog.deepseek.customTab": "自定义 Endpoint",
   "settings.agent.dialog.deepseek.endpointHelp": "必填 HTTP 或 HTTPS 地址。原样保存为 DEEPSEEK_BASE_URL，不会自动增删 /v1。",
   "settings.agent.dialog.deepseek.endpointLabel": "API Endpoint",

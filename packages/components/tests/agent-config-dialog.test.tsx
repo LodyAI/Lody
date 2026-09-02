@@ -358,6 +358,9 @@ describe('AgentConfigDialog', () => {
     expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
     expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('false');
     expect(getVisibleDeepSeekEndpointInput()).toBeNull();
+    expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
+      'DeepSeek API Key'
+    );
     const apiKeyInput = document.body.querySelector<HTMLInputElement>('#deepseek-api-key');
     expect(apiKeyInput?.type).toBe('password');
     const createButton = getPrimaryAction('Create');
@@ -397,6 +400,9 @@ describe('AgentConfigDialog', () => {
 
     await selectTab('Custom Endpoint');
     expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
+    expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
+      'API Key'
+    );
 
     const apiKeyInput = document.body.querySelector<HTMLInputElement>('#deepseek-api-key');
     await act(async () => {

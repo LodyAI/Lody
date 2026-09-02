@@ -2363,6 +2363,7 @@
   "settings.agent.dialog.deepseek.apiKeyHelp": "Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.",
   "settings.agent.dialog.deepseek.apiKeyLabel": "DeepSeek API Key",
   "settings.agent.dialog.deepseek.apiKeyPlaceholder": "sk-XXXXXXXXXXXX",
+  "settings.agent.dialog.deepseek.customApiKeyLabel": "API Key",
   "settings.agent.dialog.deepseek.customTab": "Custom Endpoint",
   "settings.agent.dialog.deepseek.endpointHelp": "Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.",
   "settings.agent.dialog.deepseek.endpointLabel": "API Endpoint",

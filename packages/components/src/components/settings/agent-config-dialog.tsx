@@ -2768,15 +2768,17 @@ function ProbeStatus({
 function DeepSeekApiKeyField({
   value,
   onChange,
+  label,
 }: {
   value: string;
   onChange: (value: string) => void;
+  label?: string;
 }) {
   const { t } = useTranslation();
   return (
     <Field
       htmlFor="deepseek-api-key"
-      label={t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
+      label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
       hint={t(
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
@@ -2857,7 +2859,11 @@ function DeepSeekHarnessPanel({
               className="h-9 font-mono"
             />
           </Field>
-          <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
+          <DeepSeekApiKeyField
+            value={apiKey}
+            onChange={onApiKeyChange}
+            label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
+          />
         </TabsContent>
       </Tabs>
     </div>
