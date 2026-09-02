@@ -6093,7 +6093,7 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             promptDisabled={submitting}
             promptRows={4}
-            mobileSessionPromptRows={mobileNewChatProjectScoped ? 3 : undefined}
+            mobileSessionPromptRows={3}
             promptEnterKeyHint={promptEnterKeyHint}
             promptAutoFocus
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
