@@ -100,6 +100,7 @@ import {
   resolveSessionRepoFullName,
 } from '@/lib/session-local-file-source';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
+import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from 'sonner';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
@@ -475,6 +476,8 @@ export type SessionChatInputAreaHandle = {
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   handleImageDrop: (files: File[]) => void;
+  /** Folders dropped from the OS; each becomes a `@<absolute path>` mention. */
+  handleDirectoryDrop: (directories: File[]) => void;
   /**
    * Mention another conversation in this draft. Returns false when nothing was
    * written (archived draft, unknown/own session, already mentioned), so the
@@ -1664,6 +1667,19 @@ export const SessionChatInputArea = memo(
       },
       [disableImageUpload, enqueueFileAttachments, handleAddFiles, isArchived]
     );
+    const handleDirectoryDrop = useCallback(
+      (directories: File[]) => {
+        if (isArchived) {
+          return;
+        }
+        for (const directory of directories) {
+          const localPath = getDroppedFileLocalPath(directory);
+          if (!localPath) continue;
+          mentionActionsRef.current?.insertPathMention(toPathMentionInsertion(localPath, 'dir'));
+        }
+      },
+      [isArchived]
+    );
 
     const insertSessionMention = useCallback(
       (sessionId: string) => {
@@ -1687,6 +1703,7 @@ export const SessionChatInputArea = memo(
         addVisualAnnotationReference,
         toggleVisualAnnotationReference,
         handleImageDrop,
+        handleDirectoryDrop,
         insertSessionMention,
         getAgentRoleSelection: (runConfigOverrides) =>
           resolveTurnAgentRoleForRunConfig({
@@ -1703,6 +1720,7 @@ export const SessionChatInputArea = memo(
         addVisualAnnotationReference,
         toggleVisualAnnotationReference,
         handleImageDrop,
+        handleDirectoryDrop,
         insertSessionMention,
       ]
     );
@@ -2498,6 +2516,7 @@ export const SessionChatInputArea = memo(
         onPromptKeyDown={handleKeyDown}
         onPromptPaste={handlePaste}
         onImageDrop={!submissionPending && attachmentAddEnabled ? handleImageDrop : undefined}
+        onDirectoryDrop={handleDirectoryDrop}
         // The dropzone accepts files AND images, so it must NOT inherit the
         // image-only disable (which trips at 8 pending images). Per-type count
         // limits are enforced inside handleImageDrop's handlers. Drops are only

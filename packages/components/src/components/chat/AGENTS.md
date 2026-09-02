@@ -69,7 +69,8 @@
   to `chat-landing.tsx` would buy nothing. `ConversationDropOverlay` paints the
   page-level mask as soon as the sidebar drag starts, not only after `dragenter`.
   Desktop only — touch has no HTML5 drag, so the mobile branch passes the handle
-  but installs no drop target.
+  but installs no drop target. A dropped folder goes through the same handle as
+  a `@<absolute path>` mention.
 - `comment-reference-*` and `visual-annotation-reference-*` own attachment chip
   state and rendering for references attached to outgoing messages.
 - Landing attachment uploads use two sibling hooks in `hooks/`:

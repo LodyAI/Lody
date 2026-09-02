@@ -18,6 +18,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import { ArrowUp, Bug, Download, ExternalLink, Loader2, Settings } from 'lucide-react';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
+import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
@@ -245,6 +246,18 @@ export function ChatLandingView({
   const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
   );
+  // A folder is not an attachment — it becomes a `@path` mention, through the
+  // same handle the session drop uses, so it lands in this composer's draft.
+  const handleDirectoryDrop = useCallback(
+    (directories: File[]) => {
+      for (const directory of directories) {
+        const localPath = getDroppedFileLocalPath(directory);
+        if (!localPath) continue;
+        mentionActionsRef.current?.insertPathMention(toPathMentionInsertion(localPath, 'dir'));
+      }
+    },
+    [mentionActionsRef]
+  );
 
   const {
     somethingWentWrong = 'Something went wrong',
@@ -431,6 +444,7 @@ export function ChatLandingView({
         onPromptKeyDown={onPromptKeyDown}
         onPromptPaste={onPromptPaste}
         onImageDrop={submissionPending ? undefined : onImageDrop}
+        onDirectoryDrop={submissionPending ? undefined : handleDirectoryDrop}
         imageDropDisabled={submissionPending}
         promptPlaceholder={promptPlaceholder}
         promptDisabled={submissionPending}

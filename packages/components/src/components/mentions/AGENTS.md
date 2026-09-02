@@ -118,6 +118,13 @@ Product-level mention sources built on `src/ui/mention`.
   `ConversationDropOverlay` via `SessionMentionDropLayer`. Do not put that mask
   inside each keep-alive tab page: hidden panes and draft tabs make a per-page
   overlay vanish or stack on the wrong surface.
+- A FOLDER dropped from the OS takes the same route (`insertPathMention`) and
+  becomes a `@dir` mention, never an attachment: a directory `File` cannot be
+  read, so uploading it only ever produced a failed chip. `lib/file-drop.ts`
+  splits a drop by `webkitGetAsEntry().isDirectory`; `lib/dropped-local-path.ts`
+  names the path through Electron's `webUtils.getPathForFile` and keeps it
+  ABSOLUTE: the agent resolves it from any cwd, and the user reads exactly what
+  was dropped. Without the bridge (web, mobile) a directory drop inserts nothing.
 - An Agent Role mention is the session mention's shape — a plain `@<token>` whose
   committed RANGE carries the stable Role id — with a different payload. The
   rewrite asks the agent to CREATE a Session and carries the Role id only. The

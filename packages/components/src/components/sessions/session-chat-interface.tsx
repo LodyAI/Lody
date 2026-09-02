@@ -48,7 +48,7 @@ import { getIpcServices } from '@/lib/electron-ipc-client';
 import { isMac } from '@/lib/commands/platform';
 import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
 import { isSessionContextCompacting } from '@/lib/session-context-compaction';
-import { hasFileTransfer, getFilesFromDataTransfer } from '@/lib/file-drop';
+import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
@@ -3176,9 +3176,12 @@ export const SessionChatInterface = memo(
       enabled: canHandlePageDrop,
       accepts: hasFileTransfer,
       onDrop: useCallback((dataTransfer: DataTransfer) => {
-        const files = getFilesFromDataTransfer(dataTransfer);
+        const { files, directories } = readDroppedTransfer(dataTransfer);
         if (files.length > 0) {
           inputAreaRef.current?.handleImageDrop(files);
+        }
+        if (directories.length > 0) {
+          inputAreaRef.current?.handleDirectoryDrop(directories);
         }
       }, []),
     });

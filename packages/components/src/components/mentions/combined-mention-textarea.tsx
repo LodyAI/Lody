@@ -36,6 +36,7 @@ import {
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { applyAgentRoleEmojiChip } from '@/components/mentions/mention-chips';
+import type { PathMentionInsertion } from '@/lib/dropped-local-path';
 import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
 import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import {
@@ -45,6 +46,7 @@ import {
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
   buildMentionFileIndex,
+  MENTION_TRIGGER,
   useMentionCategories,
   type MentionCategorySources,
 } from '@/components/mentions/mention-registry';
@@ -544,6 +546,13 @@ export type CombinedMentionTextareaHandle = {
    * unknown/archived/own session, or one the draft already mentions.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /**
+   * Append a `@path` mention for a path that did not come from the menu — a
+   * folder dropped from the OS. Same artefact a menu commit writes: the text
+   * and a committed range, so the chip and the before-send rewrite both see it.
+   * Returns false when the path is empty.
+   */
+  insertPathMention: (insertion: PathMentionInsertion) => boolean;
 };
 
 /**
@@ -572,6 +581,20 @@ function MentionActionsBridge({
         const insertion = buildSessionMentionInsertion(mentions, item);
         if (!insertion) return false;
         onMentionInsert(insertion);
+        return true;
+      },
+      insertPathMention: ({ path, kind }) => {
+        const token = path.replace(/\/+$/, '');
+        if (!token) return false;
+        // Mirrors `toFileCandidate`: a directory commits as `@src/components`
+        // while its payload keeps the trailing slash the file index uses.
+        onMentionInsert({
+          text: `${MENTION_TRIGGER}${token}`,
+          value: kind === 'dir' ? `${token}/` : token,
+          kind,
+          separate: true,
+          suffix: ' ',
+        });
         return true;
       },
     }),
