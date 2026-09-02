@@ -277,7 +277,11 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+// 7: entries probed before the legacy `model[effort]` derivation became
+// Codex-only carry a bogus ladder for every agent that spells other variants
+// with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
+// per-model effort picker would rebuild that model's ladder from it.
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
