@@ -51,8 +51,9 @@ export function describeUnsupportedRuntime(runtime: {
   }
   if (!isNodeApiVersionSupported(runtime.napi)) {
     return (
-      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION}, which means Node.js v22.14.0 or ` +
-      `newer (you are on ${process.version}, Node-API ${runtime.napi ?? 'unknown'}).\n` +
+      `Lody needs Node-API ${REQUIRED_NODE_API_VERSION}, which means Node.js v22.14.0+, ` +
+      `v23.6.0+, or a later release (you are on ${process.version}, ` +
+      `Node-API ${runtime.napi ?? 'unknown'}).\n` +
       `Its SQLite binding would crash the process instead of failing cleanly here.\n` +
       `Upgrade Node, then re-run: npx lody@latest`
     );
@@ -65,7 +66,7 @@ export function assertSqliteRuntimeSupported(): void {
     napi: process.versions.napi,
     arch: process.arch,
   });
-  if (!problem) {
+  if (problem === undefined) {
     return;
   }
   process.stderr.write(`${problem}\n`);

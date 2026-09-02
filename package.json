@@ -4,7 +4,7 @@
   "description": "Local-first workspace for coding agents",
   "private": true,
   "scripts": {
-    "preinstall": "node scripts/guard-nested-workspace-install.mjs",
+    "preinstall": "node scripts/check-node-runtime.mjs && node scripts/guard-nested-workspace-install.mjs",
     "build": "corepack pnpm --dir apps/electron build",
     "dev:cli": "corepack pnpm --filter lody dev",
     "dev:site-docs": "corepack pnpm --filter @lody/site-docs dev",
@@ -49,12 +49,13 @@
   ],
   "author": "LodyAI",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.14.0 <23 || >=23.6.0",
+    "pnpm": "10.20.0"
   },
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": ">=22.0.0",
+      "version": ">=22.14.0 <23 || >=23.6.0",
       "onFail": "error"
     }
   },

@@ -70,7 +70,8 @@ Two things the dev build does deliberately, both load-bearing:
 - Embedded CLI packaging invariants (native deps, ABI, child runtime env) live in
   [apps/electron/AGENTS.md](../electron/AGENTS.md). Read them before changing runtime
   deps/bundle externals or spawning `process.execPath` with a filtered environment.
-- `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
+- `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
+  `NAPI_VERSION=10`, and
   `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts`. Older Node
   segfaults on the SQLite binding instead of throwing. Rationale + the three places that
   must move together: [apps/electron/AGENTS.md](../electron/AGENTS.md) (native deps).

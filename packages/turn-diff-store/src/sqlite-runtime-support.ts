@@ -21,7 +21,7 @@ export function describeUnsupportedTurnDiffSqliteRuntime(
   if (!Number.isFinite(napi) || napi < REQUIRED_NODE_API_VERSION) {
     return (
       `@lody/turn-diff-store needs Node-API ${REQUIRED_NODE_API_VERSION} ` +
-      `(Node.js 22.14.0 or newer); received ${runtime.nodeVersion} with ` +
+      `(Node.js 22.14.0+, 23.6.0+, or a later release); received ${runtime.nodeVersion} with ` +
       `Node-API ${runtime.napi ?? 'unknown'}.`
     );
   }
@@ -34,7 +34,7 @@ export function assertTurnDiffSqliteRuntimeSupported(): void {
     arch: process.arch,
     nodeVersion: process.version,
   });
-  if (problem) throw new Error(problem);
+  if (problem !== undefined) throw new Error(problem);
 }
 
 // This side-effect import must evaluate before better-sqlite3. Older Node-API
