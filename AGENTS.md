@@ -5,19 +5,16 @@
 ## Context maintenance
 
 Read every `AGENTS.md` from the repository root to the file being changed.
-Before starting work intended for a pull request, or creating or editing a
-pull request or issue, read `.github/AGENTS.md`.
-Record public contributor invariants in the narrowest relevant `AGENTS.md`.
-Internal context, plans, specifications, and task records stay in the private
-repository. Keep each `AGENTS.md` under 8 KiB and add a matching `CLAUDE.md`
-symlink for new scoped files.
+Before PR or Issue work, read `.github/AGENTS.md`. Record public contributor
+invariants in the narrowest relevant `AGENTS.md` (under 8 KiB; add a `CLAUDE.md`
+symlink for new scoped files). Internal context, plans, specifications, and
+task records stay in the private repository.
 
 ## Repository boundary
 
-This is the standalone public source tree. It includes `apps/{cli,electron}`
-and the packages they consume. It intentionally excludes hosted backend
-implementations, deployment/operator configuration, billing operations,
-private service secrets, and the Web and mobile app sources.
+Standalone public source tree: `apps/{cli,electron}` and the packages they
+consume. Excludes hosted backends, operator/billing config, private secrets,
+and Web/mobile app sources.
 
 - Never add a dependency on `@lody/convex`, a private workspace package, or a
   generated backend API declaration.
@@ -90,49 +87,44 @@ after changing package scope or cloud/local composition.
 
 ## Project map
 
-- `apps/cli`: agent execution, local persistence, Machine RPC, Code Collab
-- `apps/electron`: desktop shell and bundled CLI lifecycle
-- `packages/components`: shared React product/workspace UI
-- `packages/platform`: provider and capability contracts plus local defaults
-- `packages/cloud-api`: public optional-cloud client contract
-- `packages/shared`: schemas, protocols, and cross-runtime utilities
-- `packages/loro-streams-rpc`: public Streams RPC protocol/client
-- `packages/acp-extension-core`: shared public ACP extension contracts
-- `packages/acp-extension-kimi`: independently built Kimi runtime source and Lody ACP extensions
-- `site-docs`: public documentation site
+`apps/cli` (agent, persistence, Machine RPC), `apps/electron` (desktop +
+bundled CLI), `packages/components` (shared UI), `packages/platform` (ports),
+`packages/cloud-api` (optional-cloud DTOs), `packages/shared` (schemas),
+`packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`, `site-docs`.
 
 ## Checks and commits
 
-Use Node.js 22+ and the pnpm version pinned in `package.json`.
-
-- Install dependencies with `pnpm install`.
-- When this checkout is embedded in a parent pnpm workspace, that parent owns
-  dependency installation. The public preinstall guard rejects a second nested
-  install because it would mix virtual-store identities. Use a separate clone
-  for standalone public development.
-- The canonical desktop command is `pnpm start:local`; it rebuilds both the
-  bundled CLI and local OSS renderer before launch. Root `pnpm build` builds
-  the same local desktop composition.
-- Before committing, normally run `pnpm check` and `pnpm format`.
-- If a user explicitly asks to skip tests, do not run test commands; report the
-  narrower type/build/static validation that was performed.
-- Commit subjects use Conventional Commit prefixes such as `feat:`, `fix:`,
-  `docs:`, `chore:`, and `test:`.
-- AI commits end with `Model: <runtime-model-id>`.
-- CI installs with `pnpm install --frozen-lockfile`, so a manifest change must
-  land with its `pnpm-lock.yaml` update.
+Use Node.js 22+ and the pnpm version pinned in `package.json`. Install with
+`pnpm install`. A parent pnpm workspace owns nested checkouts; the public
+preinstall guard rejects a second install. Use a separate clone for standalone
+public development. `pnpm start:local` is the canonical desktop command; root
+`pnpm build` is the same local composition. Before committing, normally run
+`pnpm check` and `pnpm format`. If asked to skip tests, report the narrower
+type/build/static validation instead. Conventional Commits (`feat:`, `fix:`,
+`docs:`, `chore:`, `test:`); AI commits end with `Model: <runtime-model-id>`.
+CI uses `pnpm install --frozen-lockfile`, so manifest changes update
+`pnpm-lock.yaml`.
 
 ## Test quality
 
-Tests must not depend on real sleeps, wall-clock races, network access, machine
-load, or scheduler luck. Use explicit signals, injected clocks, fake timers,
-and deterministic fixtures. Assert observable behavior at the lowest realistic
-boundary, not implementation details or mock call counts.
+No real sleeps, wall-clock races, network, machine load, or scheduler luck.
+Use explicit signals, injected clocks, fake timers, and deterministic fixtures.
+Assert observable behavior, not mock call counts.
 
 ## Editing discipline
 
 Keep changes traceable to the request. Preserve unrelated user work. Prefer a
-small explicit contract over hidden fallback behavior, and remove only code
-made unused by the current change. Update the nearest public `AGENTS.md`
-whenever an invariant or repository boundary changes. Do not copy internal
-design records into this repository.
+small explicit contract over hidden fallbacks, and remove only code the change
+makes unused. Update the nearest public `AGENTS.md` when an invariant or
+repository boundary changes. Do not copy internal design records here.
+
+## Code Review Rules
+
+Report only P0/P1. Security first. If the PR solves the linked Issue and no
+P0/P1 remains, react 👍. See `.github/codex-review.md`.
+
+- P0: exploitable security, secret leak, auth/capability bypass, data loss, or
+  a broken public/cloud/local boundary.
+- P1: likely shipped breakage or a durable catalog/session contract violation.
+- Skip style, nits, P2+, extreme edge cases, extra tests, and duplication
+  under 100 lines of near-identical code in this diff. Leave lint to CI.
