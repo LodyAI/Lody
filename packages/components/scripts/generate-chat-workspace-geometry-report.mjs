@@ -125,7 +125,7 @@ const imageStats = await Promise.all(
 const detailImageBytes = imageStats.reduce((total, { file }) => total + file.size, 0);
 console.log(`Geometry report: ${reportPath}`);
 console.log(
-  `${reportData.details.length} detail pairs: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
+  `${reportData.coverage.captures.length} captures, ${reportData.details.length} detail pairs: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
 );
 
 if (shouldOpen) await openReport();

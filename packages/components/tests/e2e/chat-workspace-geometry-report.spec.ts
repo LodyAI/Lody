@@ -151,10 +151,122 @@ const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
   'Chat Session / Agent Question': 'Chat Session / Agent 提问态',
   'Chat Session / Idle': 'Chat Session / 空闲态',
   'Chat Session / Permission': 'Chat Session / 权限确认态',
-  'Chat Session / Right Sidebar': 'Chat Session / 右侧栏',
+  'Chat Session / Right Sidebar / Changes': 'Chat Session / 右侧栏变更列表',
+  'Chat Session / Right Sidebar / Empty': 'Chat Session / 右侧栏空态',
+  'Chat Session / Right Sidebar / Tabs': 'Chat Session / 右侧栏多标签态',
   'Chat Session / Working': 'Chat Session / 工作态（冻结帧）',
   'Workspace / Chat Landing': 'Workspace / Chat Landing',
+  'Workspace / Chat Landing / Long Model': 'Workspace / Chat Landing 长配置名',
+  'Workspace / Chat Landing / No Agent': 'Workspace / Chat Landing 无 Agent 配置',
+  'Workspace / Chat Landing / No Machine Download': 'Workspace / Chat Landing 未连接客户端',
+  'Workspace / Chat Landing / No Machine Starting': 'Workspace / Chat Landing Daemon 启动态',
+  'Workspace / Chat Landing / Pasted Text': 'Workspace / Chat Landing 长粘贴文本',
+  'Workspace / Chat Landing / Submitting': 'Workspace / Chat Landing 提交中',
 };
+
+const WORKSPACE_STATE_CAPTURES = [
+  {
+    id: 'landing-submitting',
+    surface: 'Workspace / Chat Landing / Submitting',
+    storyId: 'geometry-chatworkspace--submission-pending',
+  },
+  {
+    id: 'landing-no-machine-download',
+    surface: 'Workspace / Chat Landing / No Machine Download',
+    storyId: 'geometry-chatworkspace--no-machine-download',
+  },
+  {
+    id: 'landing-no-machine-starting',
+    surface: 'Workspace / Chat Landing / No Machine Starting',
+    storyId: 'geometry-chatworkspace--no-machine-starting',
+  },
+  {
+    id: 'landing-no-agent',
+    surface: 'Workspace / Chat Landing / No Agent',
+    storyId: 'geometry-chatworkspace--no-agent-config',
+  },
+  {
+    id: 'landing-long-model',
+    surface: 'Workspace / Chat Landing / Long Model',
+    storyId: 'geometry-chatworkspace--long-model',
+  },
+  {
+    id: 'landing-pasted-text',
+    surface: 'Workspace / Chat Landing / Pasted Text',
+    storyId: 'geometry-chatworkspace--pasted-text',
+  },
+] as const;
+
+const SESSION_STATE_CAPTURES = [
+  {
+    id: 'session-idle',
+    surface: 'Chat Session / Idle',
+    storyId: 'sessions-sessionconversationpage--desktop-idle',
+  },
+  {
+    id: 'session-working',
+    surface: 'Chat Session / Working',
+    storyId: 'sessions-sessionconversationpage--desktop-working-settled',
+  },
+  {
+    id: 'session-permission',
+    surface: 'Chat Session / Permission',
+    storyId: 'sessions-sessionconversationpage--desktop-permission-approval',
+  },
+  {
+    id: 'session-question',
+    surface: 'Chat Session / Agent Question',
+    storyId: 'sessions-sessionconversationpage--desktop-agent-question',
+  },
+] as const;
+
+const RIGHT_SIDEBAR_STATE_CAPTURES = [
+  {
+    id: 'session-right-sidebar-changes',
+    surface: 'Chat Session / Right Sidebar / Changes',
+    storyId: 'sessions-sessionsidepaneltabbar--geometry-report',
+  },
+  {
+    id: 'session-right-sidebar-tabs',
+    surface: 'Chat Session / Right Sidebar / Tabs',
+    storyId: 'sessions-sessionsidepaneltabbar--unified-tabs',
+  },
+  {
+    id: 'session-right-sidebar-empty',
+    surface: 'Chat Session / Right Sidebar / Empty',
+    storyId: 'sessions-sessionsidepaneltabbar--empty-state',
+  },
+] as const;
+
+const GEOMETRY_COVERAGE_EXCLUSIONS = [
+  {
+    surface: 'Chat Session / Mention Drop',
+    storyId: 'sessions-sessionconversationpage--desktop-session-mention-drop',
+    reason: 'Transient interaction is geometrically isomorphic to the captured idle session.',
+  },
+  {
+    surface: 'Chat Session / Live Streaming',
+    storyId: 'sessions-sessionconversationpage--desktop-streaming-working',
+    reason:
+      'Live timing is nondeterministic; the settled working frame captures its stable geometry.',
+  },
+  {
+    surface: 'Chat Landing / Theme Variants',
+    storyId: 'chat-chatlandingview--desktop-dark',
+    reason:
+      'Theme changes paint, not layout geometry; the production workspace composition is captured.',
+  },
+  {
+    surface: 'Chat Landing / Keyboard Navigation',
+    storyId: 'chat-chatlandingview--desktop-keyboard-nav',
+    reason: 'Keyboard ownership does not change the static rendered geometry.',
+  },
+  {
+    surface: 'Chat Workspace / Mobile',
+    storyId: 'sessions-sessionconversationpage--mobile-idle',
+    reason: 'Outside the authenticated desktop Web workspace scope with persistent left Sidebar.',
+  },
+] as const;
 
 const DISCOVERY_ELEMENT_LABELS: Readonly<Record<string, string>> = {
   'Import local project folder': '分区尾部按钮',
@@ -927,7 +1039,7 @@ test('captures the visual geometry report', async ({ browser }) => {
   );
   expect(sidebarDiscovery?.description).toContain('待确认元素');
   expect(sidebarDiscovery?.overlay.semanticAnnotations.length).toBeGreaterThan(0);
-  const workspaceDetails = [...semanticDetails, ...workspaceDiscoveryDetails];
+  const workspaceDetails: ReportDetail[] = [...semanticDetails, ...workspaceDiscoveryDetails];
 
   const assetsDirectory = path.join(outputDirectory, 'assets');
   await mkdir(assetsDirectory, { recursive: true });
@@ -1015,6 +1127,23 @@ test('captures the visual geometry report', async ({ browser }) => {
       railDiscovery,
     },
   ];
+  const coverageCaptures: Array<
+    Readonly<{
+      captureId: string;
+      area: 'workspace' | 'session' | 'right-sidebar';
+      surface: string;
+      storyId: string;
+      viewport: Readonly<{ width: number; height: number }>;
+    }>
+  > = [
+    {
+      captureId: 'workspace:wide-expanded',
+      area: 'workspace',
+      surface: 'Workspace / Chat Landing',
+      storyId: 'geometry-chatworkspace--expanded-sidebar',
+      viewport,
+    },
+  ];
 
   for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
     if (verificationCase.name === 'wide-expanded') continue;
@@ -1054,43 +1183,91 @@ test('captures the visual geometry report', async ({ browser }) => {
       viewport: verificationCase.viewport,
       railDiscovery: matrixDiscovery,
     });
+    coverageCaptures.push({
+      captureId: `workspace:${verificationCase.name}`,
+      area: 'workspace',
+      surface: `Workspace / ${verificationCase.name}`,
+      storyId,
+      viewport: verificationCase.viewport,
+    });
     await matrixContext.close();
   }
-  const sessionDetails: ReportDetail[] = [];
-  const sessionStories = [
-    {
-      surface: 'Chat Session / Idle',
-      idPrefix: 'session-idle',
-      storyId: 'sessions-sessionconversationpage--desktop-idle',
-    },
-    {
-      surface: 'Chat Session / Working',
-      idPrefix: 'session-working',
-      storyId: 'sessions-sessionconversationpage--desktop-working-settled',
-    },
-    {
-      surface: 'Chat Session / Permission',
-      idPrefix: 'session-permission',
-      storyId: 'sessions-sessionconversationpage--desktop-permission-approval',
-    },
-    {
-      surface: 'Chat Session / Agent Question',
-      idPrefix: 'session-question',
-      storyId: 'sessions-sessionconversationpage--desktop-agent-question',
-    },
-  ] as const;
 
-  for (const story of sessionStories) {
+  for (const story of WORKSPACE_STATE_CAPTURES) {
+    const response = await page.goto(
+      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
+    );
+    expect(response?.ok()).toBeTruthy();
+    await enableReportCaptureMode(page);
+    const stateMeasurement = await measureSettledChatWorkspace(page);
+    const stateRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
+      aggregateScopes: ['sidebar.shell'],
+    });
+    const stateMainPane = requireGeometryRect(
+      stateMeasurement.snapshot,
+      CHAT_WORKSPACE_GEOMETRY_ANCHORS.mainPane
+    );
+    const mainDiscovery = stateRailDiscovery.filter(
+      (scope) => scope.scope === 'main.chat-landing' || scope.rect.x >= stateMainPane.x - 1
+    );
+    expect(mainDiscovery.some((scope) => scope.scope === 'main.chat-landing')).toBe(true);
+    const stateDetails = createDiscoveryDetails({
+      surface: story.surface,
+      idPrefix: story.id,
+      viewport,
+      railDiscovery: mainDiscovery,
+    });
+    expect(stateDetails.length).toBeGreaterThan(0);
+    for (const detail of stateDetails) {
+      await page.screenshot({
+        path: path.join(outputDirectory, detail.images.clean),
+        clip: detail.clip,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'device',
+      });
+    }
+    for (const detail of stateDetails) {
+      await showOnlyDetailSemanticGuides(page, detail);
+      await page.screenshot({
+        path: path.join(outputDirectory, detail.images.annotated),
+        clip: detail.clip,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'device',
+      });
+    }
+    workspaceDetails.push(...stateDetails);
+    const captureId = `workspace:${story.id}:1440x900`;
+    discoverySurfaces.push({
+      captureId,
+      contractDomain: 'workspace',
+      surface: story.surface,
+      viewport,
+      railDiscovery: stateRailDiscovery,
+    });
+    coverageCaptures.push({
+      captureId,
+      area: 'workspace',
+      surface: story.surface,
+      storyId: story.storyId,
+      viewport,
+    });
+  }
+
+  const sessionDetails: ReportDetail[] = [];
+
+  for (const story of SESSION_STATE_CAPTURES) {
     const response = await page.goto(
       `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
     );
     expect(response?.ok()).toBeTruthy();
     await waitForSessionConversationStory(page);
     await enableReportCaptureMode(page);
-    if (story.idPrefix === 'session-working') {
+    if (story.id === 'session-working') {
       await expect(page.locator('[data-stream-phase="indicator-only"]')).toBeAttached();
     }
-    if (story.idPrefix === 'session-permission') {
+    if (story.id === 'session-permission') {
       const responseActionBar = page.locator(
         '[data-geometry-capture-reveal="true"]:has(.lucide-info)'
       );
@@ -1103,7 +1280,7 @@ test('captures the visual geometry report', async ({ browser }) => {
     expect(sessionRailDiscovery.some((scope) => scope.scope.startsWith('session.'))).toBe(true);
     const storyDetails = createDiscoveryDetails({
       surface: story.surface,
-      idPrefix: story.idPrefix,
+      idPrefix: story.id,
       viewport,
       railDiscovery: sessionRailDiscovery,
     });
@@ -1131,59 +1308,76 @@ test('captures the visual geometry report', async ({ browser }) => {
 
     sessionDetails.push(...storyDetails);
     discoverySurfaces.push({
-      captureId: `${story.idPrefix}:1440x900`,
+      captureId: `${story.id}:1440x900`,
       contractDomain: 'session',
       surface: story.surface,
       viewport,
       railDiscovery: sessionRailDiscovery,
     });
+    coverageCaptures.push({
+      captureId: `${story.id}:1440x900`,
+      area: 'session',
+      surface: story.surface,
+      storyId: story.storyId,
+      viewport,
+    });
   }
 
-  const rightSidebarResponse = await page.goto(
-    `${storybookOrigin}/iframe.html?id=sessions-sessionsidepaneltabbar--geometry-report&viewMode=story`
-  );
-  expect(rightSidebarResponse?.ok()).toBeTruthy();
-  await enableReportCaptureMode(page);
-  const rightSidebarRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
-    aggregateScopes: ['session.side-panel'],
-  });
-  expect(rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')).toBe(
-    true
-  );
-  const rightSidebarDetails = createDiscoveryDetails({
-    surface: 'Chat Session / Right Sidebar',
-    idPrefix: 'session-right-sidebar',
-    viewport,
-    railDiscovery: rightSidebarRailDiscovery,
-  });
-  expect(rightSidebarDetails.length).toBeGreaterThan(0);
-  for (const detail of rightSidebarDetails) {
-    await page.screenshot({
-      path: path.join(outputDirectory, detail.images.clean),
-      clip: detail.clip,
-      animations: 'disabled',
-      caret: 'hide',
-      scale: 'device',
+  for (const story of RIGHT_SIDEBAR_STATE_CAPTURES) {
+    const response = await page.goto(
+      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
+    );
+    expect(response?.ok()).toBeTruthy();
+    await enableReportCaptureMode(page);
+    const rightSidebarRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
+      aggregateScopes: ['session.side-panel'],
+    });
+    expect(rightSidebarRailDiscovery.some((scope) => scope.scope === 'session.side-panel')).toBe(
+      true
+    );
+    const rightSidebarDetails = createDiscoveryDetails({
+      surface: story.surface,
+      idPrefix: story.id,
+      viewport,
+      railDiscovery: rightSidebarRailDiscovery,
+    });
+    expect(rightSidebarDetails.length).toBeGreaterThan(0);
+    for (const detail of rightSidebarDetails) {
+      await page.screenshot({
+        path: path.join(outputDirectory, detail.images.clean),
+        clip: detail.clip,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'device',
+      });
+    }
+    for (const detail of rightSidebarDetails) {
+      await showOnlyDetailSemanticGuides(page, detail);
+      await page.screenshot({
+        path: path.join(outputDirectory, detail.images.annotated),
+        clip: detail.clip,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'device',
+      });
+    }
+    sessionDetails.push(...rightSidebarDetails);
+    const captureId = `${story.id}:1440x900`;
+    discoverySurfaces.push({
+      captureId,
+      contractDomain: 'session',
+      surface: story.surface,
+      viewport,
+      railDiscovery: rightSidebarRailDiscovery,
+    });
+    coverageCaptures.push({
+      captureId,
+      area: 'right-sidebar',
+      surface: story.surface,
+      storyId: story.storyId,
+      viewport,
     });
   }
-  for (const detail of rightSidebarDetails) {
-    await showOnlyDetailSemanticGuides(page, detail);
-    await page.screenshot({
-      path: path.join(outputDirectory, detail.images.annotated),
-      clip: detail.clip,
-      animations: 'disabled',
-      caret: 'hide',
-      scale: 'device',
-    });
-  }
-  sessionDetails.push(...rightSidebarDetails);
-  discoverySurfaces.push({
-    captureId: 'session-right-sidebar:1440x900',
-    contractDomain: 'session',
-    surface: 'Chat Session / Right Sidebar',
-    viewport,
-    railDiscovery: rightSidebarRailDiscovery,
-  });
 
   const details = [...workspaceDetails, ...sessionDetails]
     .map((detail, sourceIndex) => ({ detail, sourceIndex }))
@@ -1274,6 +1468,12 @@ test('captures the visual geometry report', async ({ browser }) => {
     spacingAudit,
     semanticAlignments,
     semanticBaselines,
+    coverage: {
+      scope: 'authenticated-desktop-web-chat-workspace',
+      status: 'complete-for-scope',
+      captures: coverageCaptures,
+      exclusions: GEOMETRY_COVERAGE_EXCLUSIONS,
+    },
     discoverySurfaces,
     contractProposals,
     geometryViolations,

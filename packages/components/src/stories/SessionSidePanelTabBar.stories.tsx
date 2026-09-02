@@ -62,8 +62,14 @@ function SidePanelTabBarStory() {
   );
 
   return (
-    <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+    <div
+      data-geometry-fixture-ready="true"
+      className="min-h-screen bg-background p-8 text-foreground"
+    >
+      <div
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.side-panel' }}
+        className="flex h-[520px] w-[620px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+      >
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -195,8 +201,14 @@ export const UnifiedTabs: Story = {
 
 export const EmptyState: Story = {
   render: () => (
-    <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-background shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+    <div
+      data-geometry-fixture-ready="true"
+      className="min-h-screen bg-background p-8 text-foreground"
+    >
+      <div
+        {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.side-panel' }}
+        className="flex h-[520px] w-[420px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-background shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+      >
         <SessionSidePanelTabBar
           tabs={[]}
           activeTabId={null}

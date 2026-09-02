@@ -43,6 +43,7 @@ import {
   CHAT_WORKSPACE_GEOMETRY_SPEC,
   CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
 } from '@/lib/chat-workspace-geometry';
+import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 
 const GEOMETRY_MACHINE_ID = 'machine-geometry' as MachineId;
 const GEOMETRY_PROJECT_ID = 'project-geometry' as LocalProjectId;
@@ -85,6 +86,35 @@ const modelOptions: AcpSessionSelectOption[] = [
   { value: 'gpt-5.5', label: 'gpt-5.5', description: 'Frontier agentic coding model.' },
   { value: 'gpt-5.4', label: 'gpt-5.4', description: 'General-purpose coding model.' },
 ];
+
+const longModelOptions: AcpSessionSelectOption[] = [
+  {
+    value: 'claude-sonnet-4-6-20250514-thinking-extended',
+    label: 'claude-sonnet-4-6-20250514-thinking-extended',
+    description: 'A deliberately long production-shaped model label.',
+  },
+  ...modelOptions,
+];
+
+type LandingScenario =
+  | 'default'
+  | 'submission-pending'
+  | 'no-machine-download'
+  | 'no-machine-starting'
+  | 'no-agent-config'
+  | 'long-model'
+  | 'pasted-text';
+
+const pastedTextDisplay = '[Pasted 1,320 characters]';
+const pastedTextPromptPrefix = 'Inspect ';
+const pastedTextPrompt = `${pastedTextPromptPrefix}${pastedTextDisplay} and identify the layout regression.`;
+const pastedTextDraft: PastedTextDraft = {
+  id: 'geometry-pasted-text',
+  text: 'Synthetic geometry audit log. '.repeat(48),
+  displayText: pastedTextDisplay,
+  start: pastedTextPromptPrefix.length,
+  end: pastedTextPromptPrefix.length + pastedTextDisplay.length,
+};
 
 const permissionModeOptions: AcpSessionSelectOption[] = [
   { value: 'default', label: 'Default', description: 'Ask before sensitive operations.' },
@@ -243,15 +273,26 @@ function GeometrySidebarTopContent() {
   );
 }
 
-function DeterministicChatLanding() {
-  const [prompt, setPrompt] = useState('');
+function DeterministicChatLanding({ scenario }: { scenario: LandingScenario }) {
+  const initialPrompt =
+    scenario === 'pasted-text'
+      ? pastedTextPrompt
+      : scenario === 'submission-pending'
+        ? 'This draft remains stable while the session is being created.'
+        : '';
+  const selectedModel =
+    scenario === 'long-model' ? 'claude-sonnet-4-6-20250514-thinking-extended' : 'gpt-5.5';
+  const [prompt, setPrompt] = useState(initialPrompt);
+  const [pastedTextDrafts, setPastedTextDrafts] = useState<PastedTextDraft[]>(
+    scenario === 'pasted-text' ? [pastedTextDraft] : []
+  );
   const [project, setProject] = useState<UnifiedProjectSelection>({
     kind: 'local',
     machineId: GEOMETRY_MACHINE_ID,
     localProjectId: GEOMETRY_PROJECT_ID,
   });
   const [branch, setBranch] = useState('feat/web-grid-system');
-  const [model, setModel] = useState<string | null>('gpt-5.5');
+  const [model, setModel] = useState<string | null>(selectedModel);
   const [permissionMode, setPermissionMode] = useState<string | null>('default');
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>({
     reasoning_effort: 'medium',
@@ -303,7 +344,7 @@ function DeterministicChatLanding() {
         availableAgentConfigs={geometryAgentConfigs}
         fallbackAgent={{ cliType: 'builtin', agentType: 'codex' }}
         onAgentConfigChange={() => {}}
-        modelOptions={modelOptions}
+        modelOptions={scenario === 'long-model' ? longModelOptions : modelOptions}
         selectedModelId={model}
         onModelChange={setModel}
         modeOptions={permissionModeOptions}
@@ -329,9 +370,23 @@ function DeterministicChatLanding() {
       promptValue={prompt}
       onPromptChange={setPrompt}
       promptPlaceholder="Press '/' for commands, '@' for mentions."
+      pastedTextDrafts={pastedTextDrafts}
+      onPastedTextDraftsChange={setPastedTextDrafts}
       topSelector={topSelector}
       footerSelector={footerSelector}
-      submitDisabled={prompt.trim().length === 0}
+      submissionPending={scenario === 'submission-pending'}
+      submitDisabled={scenario === 'submission-pending' || prompt.trim().length === 0}
+      hintType={
+        scenario === 'no-agent-config'
+          ? 'no-agent-config'
+          : scenario === 'no-machine-download' || scenario === 'no-machine-starting'
+            ? 'no-machine'
+            : null
+      }
+      noMachineVariant={scenario === 'no-machine-starting' ? 'daemon-starting' : 'download-client'}
+      onDownloadClient={() => {}}
+      onReportBug={() => {}}
+      onGoToAgentSettings={() => {}}
       onSubmit={() => {}}
     />
   );
@@ -344,8 +399,10 @@ function DeterministicChatLanding() {
  */
 function ChatWorkspaceGeometryFixture({
   sidebar = 'expanded',
+  landingScenario = 'default',
 }: {
   sidebar?: 'expanded' | 'collapsed';
+  landingScenario?: LandingScenario;
 }) {
   const store = useMemo(() => {
     const nextStore = createStore();
@@ -391,7 +448,7 @@ function ChatWorkspaceGeometryFixture({
             sidebarSlideWidth={sidebarSlideWidth}
             shouldReduceMotion
           >
-            <DeterministicChatLanding />
+            <DeterministicChatLanding scenario={landingScenario} />
           </WebWorkspaceFrame>
         </div>
       </Provider>
@@ -415,6 +472,30 @@ export const ExpandedSidebar: Story = {};
 
 export const CollapsedSidebar: Story = {
   args: { sidebar: 'collapsed' },
+};
+
+export const SubmissionPending: Story = {
+  args: { landingScenario: 'submission-pending' },
+};
+
+export const NoMachineDownload: Story = {
+  args: { landingScenario: 'no-machine-download' },
+};
+
+export const NoMachineStarting: Story = {
+  args: { landingScenario: 'no-machine-starting' },
+};
+
+export const NoAgentConfig: Story = {
+  args: { landingScenario: 'no-agent-config' },
+};
+
+export const LongModel: Story = {
+  args: { landingScenario: 'long-model' },
+};
+
+export const PastedText: Story = {
+  args: { landingScenario: 'pasted-text' },
 };
 
 export const GeometryAudit: Story = {

@@ -84,6 +84,46 @@
         font-size: 12px;
       }
 
+      .coverage {
+        margin-top: 28px;
+        border-block: 1px solid var(--border);
+        padding-block: 14px;
+      }
+
+      .coverage summary {
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 550;
+      }
+
+      .coverage-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 24px;
+        padding-top: 16px;
+      }
+
+      .coverage-grid h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 650;
+        color: var(--text);
+      }
+
+      .coverage-grid ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--text-muted);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      .coverage-grid code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--text);
+      }
+
       /* ---------- summary / filter ---------- */
 
       .toolbar {
@@ -398,6 +438,10 @@
           padding: 36px 20px 64px;
         }
 
+        .coverage-grid {
+          grid-template-columns: 1fr;
+        }
+
         .detail-toggle {
           grid-template-columns: 10px minmax(0, 1fr) 20px;
         }
@@ -437,6 +481,20 @@
         <p class="meta" id="meta"></p>
       </header>
 
+      <details class="coverage" id="coverage">
+        <summary id="coverage-summary"></summary>
+        <div class="coverage-grid">
+          <section>
+            <h2>已捕获</h2>
+            <ul id="coverage-captures"></ul>
+          </section>
+          <section>
+            <h2>明确排除</h2>
+            <ul id="coverage-exclusions"></ul>
+          </section>
+        </div>
+      </details>
+
       <div class="toolbar" id="toolbar" role="group" aria-label="按类型筛选"></div>
 
       <div class="detail-reviews" id="detail-reviews"></div>
@@ -471,6 +529,7 @@
         ...[
           new Date(report.generatedAt).toLocaleString(),
           `${report.viewport.width} × ${report.viewport.height}`,
+          `${report.coverage.captures.length} 个页面捕获`,
           `${report.details.length} 组检查`,
           `${report.contractProposals.length} 个 Contract 候选`,
         ].map((text) => {
@@ -480,6 +539,28 @@
           return span;
         })
       );
+
+      const coverageSummary = document.getElementById('coverage-summary');
+      coverageSummary.textContent = `扫描范围 · ${report.coverage.scope} · ${report.coverage.captures.length} 个捕获 · ${report.coverage.exclusions.length} 个明确排除`;
+      const coverageCaptures = document.getElementById('coverage-captures');
+      for (const capture of report.coverage.captures) {
+        const item = document.createElement('li');
+        const id = document.createElement('code');
+        id.textContent = capture.captureId;
+        item.append(
+          id,
+          ` · ${capture.viewport.width}×${capture.viewport.height} · ${capture.surface}`
+        );
+        coverageCaptures.append(item);
+      }
+      const coverageExclusions = document.getElementById('coverage-exclusions');
+      for (const exclusion of report.coverage.exclusions) {
+        const item = document.createElement('li');
+        const id = document.createElement('code');
+        id.textContent = exclusion.storyId;
+        item.append(id, ` · ${exclusion.reason}`);
+        coverageExclusions.append(item);
+      }
 
       // ---------- filter ----------
 
