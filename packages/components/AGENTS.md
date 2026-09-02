@@ -271,7 +271,11 @@ mobile surfaces.
   raw HTML off. The website is only the no-notes fallback, through `getChangelogUrl`
   and `openExternalUrl`, never a hardcoded link.
 - Agent configuration: `settings/agent-config-dialog.tsx` and
-  `settings/env-vars-textarea.tsx`.
+  `settings/env-vars-textarea.tsx`. DeepSeek Harness official vs custom
+  endpoint is dialog form state only: persist `DEEPSEEK_API_KEY` /
+  `DEEPSEEK_BASE_URL` (official always writes `https://api.deepseek.com`)
+  and never a new AgentConfigMeta field. Additional env cannot override
+  those keys.
 - Codex reset forecast: `components/codex-reset/` + `lib/codex-reset-forecast*.ts`.
   A public unauthenticated GET to the third-party `codex-resets.com`, cached in ONE
   module-level store (`lib/codex-reset-forecast-store.ts`) that every surface shares.

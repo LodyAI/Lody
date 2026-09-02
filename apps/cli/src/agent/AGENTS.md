@@ -97,8 +97,8 @@ arrive: context/message-flow.md "Upstream".
   atomic-config, and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It
   publishes Lody's versioned ACP composition beside (without replacing) user Harness config and
   launches the pinned explicit package closure through `dsh-acp-demo`; do not replace it with the
-  all-in-one `@deepseek-ai/dsh` package while that package's unpublished telemetry dependency makes
-  fresh installs fail. CLI production and dev builds copy the extension's pinned official presets
+  all-in-one `@deepseek-ai/dsh` product CLI, because this ACP host deliberately excludes product UI
+  and telemetry packages. CLI production and dev builds copy the extension's pinned official presets
   beside `deepseek-acp.js`; the generated roster also discovers `$DSH_HOME/.agent-presets`. The
   adapter must
   apply model and reasoning selection through the Agent-scoped request waterfall, permissions

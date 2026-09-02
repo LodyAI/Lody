@@ -44,9 +44,12 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 ### DeepSeek Harness
 
-Lody includes **DeepSeek Harness** as a built-in ACP provider. Create an Agent Config, choose
-DeepSeek Harness, and paste a DeepSeek API token. Lody stores it as `DEEPSEEK_API_KEY`; you do not
-need to install the standalone `dsh` command.
+Lody includes **DeepSeek Harness** as a built-in ACP provider. Create an Agent Config and choose
+DeepSeek Harness. The **DeepSeek Official** tab only needs a DeepSeek API token. The **Custom
+Endpoint** tab accepts an HTTP(S) API endpoint and its API key for a Harness-compatible service.
+Lody stores these values as `DEEPSEEK_BASE_URL` and `DEEPSEEK_API_KEY`; you do not need to install
+the standalone `dsh` command. Saving the official tab explicitly uses `https://api.deepseek.com`,
+so an ambient endpoint variable from the host machine cannot redirect the config.
 
 > **Known delegation limitation:** When a session uses a model other than DeepSeek-V4-Pro,
 > delegated subagents may still use the session's creation-time DeepSeek-V4-Pro seed instead of the
