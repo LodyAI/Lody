@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { GithubMark } from './github-mark';
 import {
   DOWNLOAD_BASE,
   detectPlatform,
@@ -14,6 +15,10 @@ import {
 } from './landing-platform-download';
 
 export type LandingHeroDownloadCopy = {
+  /**
+   * Ghost secondary. It is the source-repository link by contract, so the
+   * button always carries the GitHub mark.
+   */
   secondary: string;
   secondaryHref: string;
   /** Set when `secondaryHref` leaves the site (source repository). */
@@ -63,6 +68,7 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
           href={copy.secondaryHref}
           {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
         >
+          <GithubMark className="underwater-btn__icon" />
           {copy.secondary}
         </a>
       </div>

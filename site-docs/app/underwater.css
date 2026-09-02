@@ -322,6 +322,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   height: 2.9rem;
   padding: 0 1.5rem;
   border-radius: 10px;
@@ -336,6 +337,14 @@
     background 0.18s ease,
     border-color 0.18s ease,
     color 0.18s ease;
+}
+
+/* Brand mark inside a button (GitHub on the hero ghost secondary). Sized to the
+   cap height of the label so the lockup reads as one word, not icon + text. */
+.underwater-btn__icon {
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 /* Primary: a flat, solid, inverted-ink button (dark-on-light in light mode,

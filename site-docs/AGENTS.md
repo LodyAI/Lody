@@ -37,7 +37,11 @@
   Pricing content lives in
   `components/pricing-page.tsx` + `app/pricing.css` (Vue-ported table + plans +
   FAQ). **Public Plus yearly is fixed early-bird**: `$5`/seat/mo (`$60`/yr) with
-  regular `$8` strike-through; monthly `$10`. No `Date.now()` / env gate.
+  regular `$8` strike-through; monthly `$10`. No `Date.now()` / env gate. The
+  offer's end date is **one line of static copy** — folded into `promoDiscount`
+  in both locales, deliberately not repeated in the yearly note or an FAQ (the
+  note already says the price locks forever). When it passes, edit that string;
+  do not reintroduce a clock, which once caused an `$8`→`$5` flash on paint.
   Billing toggle animates via `@number-flow/react` (digit odometer) plus CSS
   height/opacity for promo banner, strike-through reference, and note swap.
 - Framework boundary files live under `src/`: `src/router.tsx`,
