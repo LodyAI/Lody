@@ -1401,18 +1401,6 @@ function WorkspaceChatLanding({
     [numberFormatter, prompt, setSessionState, t]
   );
 
-  // Auto-focus textarea on mount (desktop only)
-  const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      if (!isMobileRef.current) {
-        promptTextareaRef.current?.focus();
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
-
   // ── Apply pre-selection from search params ──
   const preSelectionKey = buildChatLandingPreSelectionKey({
     context: preSelectedContext,
@@ -6107,6 +6095,7 @@ function WorkspaceChatLanding({
             promptRows={4}
             mobileSessionPromptRows={mobileNewChatProjectScoped ? 3 : undefined}
             promptEnterKeyHint={promptEnterKeyHint}
+            promptAutoFocus
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
             onMentionRangesChange={handleMentionRangesChange}

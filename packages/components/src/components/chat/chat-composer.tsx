@@ -121,6 +121,8 @@ export interface ChatComposerProps {
   /** Override the compact one-row minimum used by mobile session composers. */
   mobileSessionPromptRows?: number;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
+  /** Focus the prompt as soon as this composer is mounted. */
+  promptAutoFocus?: boolean;
   promptRef?: Ref<HTMLTextAreaElement>;
   pastedTextDrafts?: PastedTextDraft[];
   onPastedTextDraftsChange?: (drafts: PastedTextDraft[]) => void;
@@ -247,6 +249,7 @@ export function ChatComposer({
   promptRows = 3,
   mobileSessionPromptRows,
   promptEnterKeyHint,
+  promptAutoFocus = false,
   promptRef,
   pastedTextDrafts = [],
   onPastedTextDraftsChange,
@@ -900,6 +903,7 @@ export function ChatComposer({
                 disabled={promptDisabled}
                 rows={effectivePromptRows}
                 enterKeyHint={promptEnterKeyHint}
+                autoFocus={promptAutoFocus}
                 placeholder={resolvedPromptPlaceholder}
                 // While the ⌘L focus hint is shown the box is empty, so the (long)
                 // placeholder would otherwise run under the top-right ⌘L chip. Reserve

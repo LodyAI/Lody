@@ -1738,6 +1738,23 @@ const SessionDetail = ({
     },
     []
   );
+  const activeSessionReadyForInputFocus = activeSession !== null;
+
+  // Desktop conversation navigation is an intent to continue typing: focus the
+  // active composer after entering a Session or switching its conversation tab.
+  // Mobile deliberately does not do this for existing Sessions, where focus
+  // would raise the software keyboard merely from navigation. A pending child
+  // waits until its real chat surface arrives before taking focus.
+  useEffect(() => {
+    if (isMobile || !activeSessionReadyForInputFocus || activeTabIsPendingChild) {
+      return undefined;
+    }
+
+    const frameId = requestAnimationFrame(() => {
+      chatRefsMap.current.get(activeTabSessionId)?.focusInput();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [activeSessionReadyForInputFocus, activeTabIsPendingChild, activeTabSessionId, isMobile]);
 
   const handleInsertDroppedSessionMention = useCallback(
     (droppedSessionId: string) => {

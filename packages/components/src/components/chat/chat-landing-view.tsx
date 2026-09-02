@@ -436,6 +436,7 @@ export function ChatLandingView({
         promptDisabled={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
+        promptAutoFocus
         pastedTextDrafts={submissionPending ? [] : pastedTextDrafts}
         onPastedTextDraftsChange={submissionPending ? undefined : onPastedTextDraftsChange}
         onMentionRangesChange={onMentionRangesChange}
