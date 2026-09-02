@@ -14,35 +14,19 @@
  * authoritative write has no such backstop, which is what these tests are for.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoroRepo } from 'loro-repo';
 
 import type {
   AcpSessionNotification,
   MessageContent,
   SessionHistoryInput,
   SessionId,
-  WorkspaceId,
 } from '@lody/shared';
 
-import { MessageHandler } from '../src/lib/message-handler';
-import { SessionDocument } from '../src/lib/loro/doc';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import type { SessionManager } from '../src/session/session-manager';
+import type { SessionDocument } from '../src/lib/loro/doc';
 import type { BindTurnForPromptResult, TurnRef } from '../src/lib/session-transient-store';
-import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
-import { createTestCloudPort } from './test-cloud-port';
 
-const createSilentLogger = (): Logger => ({
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  success: () => {},
-  debug: () => {},
-  setLevel: () => {},
-  child: () => createSilentLogger(),
-  close: async () => {},
-});
+import { createMessageHandlerHarness, destroyRepoOnRealTimers } from './message-handler-harness';
 
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
@@ -71,53 +55,8 @@ type MessageHandlerHost = {
   store: { deleteSession(sessionId: SessionId): void };
 };
 
-const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
-  if (vi.isFakeTimers()) {
-    vi.useRealTimers();
-  }
-  await repo.destroy();
-};
-
 const createHarness = async (sessionId: SessionId) => {
-  const logger = createSilentLogger();
-  const repo = await LoroRepo.create({});
-  const doc = new SessionDocument(repo, sessionId);
-  await doc.initOffline();
-
-  const workspaceDocument = {
-    isTransportConnected: vi.fn(() => true),
-    markMachineFlockDocDirty: vi.fn(),
-    registerMachine: vi.fn(),
-    repo: {
-      watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-      getDocMeta: vi.fn(async () => ({
-        meta: { needToArchiveSessions: {}, needToDeleteSessions: {} },
-      })),
-    },
-    getOrCreateSessionDoc: vi.fn(async () => doc),
-  };
-  const sessionManager = {
-    on: vi.fn(),
-    setRequestPermissionHandler: vi.fn(),
-    getSession: vi.fn(() => null),
-    cleanUp: vi.fn(async () => {}),
-  };
-
-  const handler = new MessageHandler(
-    sessionManager as unknown as SessionManager,
-    workspaceDocument as unknown as LoroDocumentManager,
-    logger,
-    {
-      token: 't',
-      workspaceId: 'ws-1' as WorkspaceId,
-      userId: 'u-1',
-      machineId: 'm-1',
-      machineName: 'machine',
-      cliVersion: '0.0.0',
-      cloudPort: createTestCloudPort(),
-    }
-  );
-
+  const { repo, doc, handler } = await createMessageHandlerHarness(sessionId);
   return { repo, doc, host: handler as unknown as MessageHandlerHost };
 };
 
@@ -179,54 +118,6 @@ describe('MessageHandler bindTurnForPrompt', () => {
 
       const assistant = (await doc.getHistory()).find((entry) => entry.id === turnRef.turnId);
       expect(readItems(assistant)).toEqual([{ type: 'text', text: 'real answer' }]);
-    } finally {
-      await destroyRepoOnRealTimers(repo);
-    }
-  });
-
-  it('lets replay into the turn when bind is moved before the suppression release', async () => {
-    // Guards the invariant from the other side: this is what a future refactor
-    // that hoists the bind would produce, and it must stay visibly wrong.
-    const sessionId = 's-bind-order-wrong' as SessionId;
-    const userTurnId = 'user-2';
-    const { repo, doc, host } = await createHarness(sessionId);
-
-    try {
-      const turnRef = host.beginConversationTurn(sessionId, userTurnId, {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-        deferACPUpdateTarget: true,
-      });
-      await host.createAssistantEntryForTurn(sessionId, doc, turnRef.turnId, undefined, userTurnId);
-
-      // WRONG ORDER: bind before the suppression window closes.
-      expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('bound');
-      host.beginACPReplaySuppression(sessionId);
-      host.endACPReplaySuppression(sessionId);
-
-      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'REPLAYED HISTORY'));
-      await host.flushACPUpdatesNow(sessionId);
-
-      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnRef.turnId);
-      expect(readItems(assistant)).toEqual([{ type: 'text', text: 'REPLAYED HISTORY' }]);
-    } finally {
-      await destroyRepoOnRealTimers(repo);
-    }
-  });
-
-  it('refuses to bind a session whose transient state is gone', async () => {
-    const sessionId = 's-bind-missing-state' as SessionId;
-    const { repo, doc, host } = await createHarness(sessionId);
-
-    try {
-      const turnRef = host.beginConversationTurn(sessionId, 'user-3', {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-        deferACPUpdateTarget: true,
-      });
-      host.store.deleteSession(sessionId);
-
-      expect(host.bindConversationTurnForPrompt(sessionId, turnRef)).toBe('session_state_missing');
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

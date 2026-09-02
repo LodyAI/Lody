@@ -240,7 +240,7 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
 
     try {
       setActiveTurn(true, `assistant:${userTurnId}`);
-      const turnId = host.beginConversationTurn(sessionId, userTurnId, {
+      const { turnId } = host.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'crdt',
         sessionDoc: doc,
       });

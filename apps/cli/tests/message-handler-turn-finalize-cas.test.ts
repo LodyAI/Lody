@@ -9,34 +9,18 @@
  * a live turn is streaming into and clears that turn's routing state.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoroRepo } from 'loro-repo';
 
 import type {
   AcpSessionNotification,
   MessageContent,
   SessionHistoryInput,
   SessionId,
-  WorkspaceId,
 } from '@lody/shared';
 
-import { MessageHandler } from '../src/lib/message-handler';
-import { SessionDocument } from '../src/lib/loro/doc';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import type { SessionManager } from '../src/session/session-manager';
-import type { Logger } from '../src/utils/logger';
+import type { SessionDocument } from '../src/lib/loro/doc';
 import { loadEnv } from '../src/utils/const';
-import { createTestCloudPort } from './test-cloud-port';
 
-const createSilentLogger = (): Logger => ({
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  success: () => {},
-  debug: () => {},
-  setLevel: () => {},
-  child: () => createSilentLogger(),
-  close: async () => {},
-});
+import { createMessageHandlerHarness, destroyRepoOnRealTimers } from './message-handler-harness';
 
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
@@ -59,53 +43,8 @@ type MessageHandlerHost = {
   store: { getTurnId(sessionId: SessionId): string | undefined };
 };
 
-const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
-  if (vi.isFakeTimers()) {
-    vi.useRealTimers();
-  }
-  await repo.destroy();
-};
-
 const createHarness = async (sessionId: SessionId) => {
-  const logger = createSilentLogger();
-  const repo = await LoroRepo.create({});
-  const doc = new SessionDocument(repo, sessionId);
-  await doc.initOffline();
-
-  const workspaceDocument = {
-    isTransportConnected: vi.fn(() => true),
-    markMachineFlockDocDirty: vi.fn(),
-    registerMachine: vi.fn(),
-    repo: {
-      watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-      getDocMeta: vi.fn(async () => ({
-        meta: { needToArchiveSessions: {}, needToDeleteSessions: {} },
-      })),
-    },
-    getOrCreateSessionDoc: vi.fn(async () => doc),
-  };
-  const sessionManager = {
-    on: vi.fn(),
-    setRequestPermissionHandler: vi.fn(),
-    getSession: vi.fn(() => null),
-    cleanUp: vi.fn(async () => {}),
-  };
-
-  const handler = new MessageHandler(
-    sessionManager as unknown as SessionManager,
-    workspaceDocument as unknown as LoroDocumentManager,
-    logger,
-    {
-      token: 't',
-      workspaceId: 'ws-1' as WorkspaceId,
-      userId: 'u-1',
-      machineId: 'm-1',
-      machineName: 'machine',
-      cliVersion: '0.0.0',
-      cloudPort: createTestCloudPort(),
-    }
-  );
-
+  const { repo, doc, handler } = await createMessageHandlerHarness(sessionId);
   return { repo, doc, host: handler as unknown as MessageHandlerHost };
 };
 
