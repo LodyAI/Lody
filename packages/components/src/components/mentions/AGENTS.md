@@ -248,6 +248,13 @@ Product-level mention sources built on `src/ui/mention`.
   chip surfaces. The composer's resolver decides only slot geometry and the
   transcript's chip only its layout, so `@src/a.ts` cannot look like two
   different objects before and after it is sent.
+- `message-text-chips.tsx` paints the transcript's chip as INLINE text, never an
+  `inline-flex` box: an atomic inline cannot break, so a long path was pinned to
+  one line and lost its file name to `truncate`. The glyph is bound to the first
+  few label characters with `white-space: nowrap` — every engine offers a break
+  beside an atomic inline and a WORD JOINER does not stop it, so without that
+  group the glyph strands at the end of the previous line. Only the pasted-text
+  chip stays boxed; it is a `<button>` with a short, fixed label.
 - `mention-fuse.ts` owns the shared, module-cached `fuse.js` import. Keep it
   module-cached and keyed by menu activation, and reuse provider file entries
   when paths/lazy dirs are unchanged — the menu must not rebuild either from

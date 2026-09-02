@@ -76,12 +76,15 @@ function Bubble({
   text,
   spans,
   collapsed = false,
+  className,
 }: {
   title: string;
   text: string;
   spans?: MessageTextSpan[];
   /** Runs the production collapse: its real slice helper and its real height. */
   collapsed?: boolean;
+  /** Narrows the column, the way a phone or a split pane does. */
+  className?: string;
 }) {
   // `getUserTextRenderSlice` is what production truncates with, so the story
   // sees what production sees. Re-implementing the cut here is how the pasted
@@ -89,7 +92,7 @@ function Bubble({
   // never exercised the character budget that dropped the span.
   const slice = collapsed ? getUserTextRenderSlice(text, spans) : undefined;
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className={cn('flex flex-col items-end gap-1.5', className)}>
       <div className="font-medium text-muted-foreground text-xs">{title}</div>
       <div className="min-w-0 max-w-full rounded-2xl border border-foreground/[0.08] bg-foreground/[0.05] px-4 py-2.5">
         <div
@@ -128,6 +131,28 @@ const LONG = applyTextRewrites(
   ]
 );
 
+/**
+ * One path longer than any bubble it can be shown in.
+ *
+ * A chip that cannot break would pin this to a single line: the bubble grows to
+ * its width cap for the sake of one token, and in a narrow column the label
+ * loses its tail — the file NAME — to the clip. So this fixture is rendered in a
+ * column too narrow to hold it, where wrapping is the only correct outcome.
+ */
+const LONG_PATH_SOURCE =
+  'Look at @packages/components/scripts/generate-chat-workspace-geometry-report.mjs and the design around it';
+const LONG_PATH = applyTextRewrites(LONG_PATH_SOURCE, [
+  {
+    start: LONG_PATH_SOURCE.indexOf('@packages/'),
+    end: LONG_PATH_SOURCE.indexOf('.mjs') + '.mjs'.length,
+    span: {
+      kind: 'file',
+      label: '@packages/components/scripts/generate-chat-workspace-geometry-report.mjs',
+      target: 'packages/components/scripts/generate-chat-workspace-geometry-report.mjs',
+    },
+  },
+]);
+
 function Board({ withSpans }: { withSpans: boolean }) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8 bg-background p-8">
@@ -141,6 +166,12 @@ function Board({ withSpans }: { withSpans: boolean }) {
         text={LONG.text}
         spans={withSpans ? LONG.spans : undefined}
         collapsed
+      />
+      <Bubble
+        title="A path wider than the column"
+        text={LONG_PATH.text}
+        spans={withSpans ? LONG_PATH.spans : undefined}
+        className="max-w-[20rem] self-end"
       />
     </div>
   );
