@@ -475,6 +475,56 @@ describe('session command helpers', () => {
     ).toThrow(/Allowed values/);
   });
 
+  it('accepts a stored per-model config option dispatched with another model', () => {
+    // Codex publishes `fast-mode` only while the current model has a fast speed
+    // tier, so a probe under a model without one produces this snapshot. An
+    // Agent Role (or a frozen Operation replay) then dispatches the concrete id
+    // with no semantic selection to resolve.
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'Model A' },
+            { value: 'model-b', name: 'Model B' },
+          ],
+        },
+      ],
+      models: [],
+    };
+    const roleRunConfig = { modelId: 'model-b', configOptionValues: { 'fast-mode': true } };
+
+    const requested = applyAgentRunConfigSelection(roleRunConfig, capability);
+
+    expect(requested.unverifiedSelections).toEqual(['fast-mode=true']);
+    expect(() =>
+      validateTurnConfigOptionValues(
+        requested.config.configOptionValues,
+        capability,
+        requested.validatedConfigIds
+      )
+    ).not.toThrow();
+
+    // Running the probed model keeps the snapshot authoritative: there the
+    // missing option really is the model's own answer.
+    expect(() => {
+      const probedModel = applyAgentRunConfigSelection(
+        { modelId: 'model-a', configOptionValues: { 'fast-mode': true } },
+        capability
+      );
+      validateTurnConfigOptionValues(
+        probedModel.config.configOptionValues,
+        capability,
+        probedModel.validatedConfigIds
+      );
+    }).toThrow(/Unknown ACP config option/);
+  });
+
   it('drops inherited ACP config options that are no longer compatible', () => {
     expect(
       filterCompatibleTurnConfigOptionValues(

@@ -335,6 +335,7 @@ export const resolveAgentRunConfigSelection = (
       // Agents drop the fast toggle entirely for models that lack fast support,
       // and no agent publishes which models those are.
       unverifiedSelections.push(`fastMode=${selection.fastMode}`);
+      validatedConfigIds.push(option.id);
     }
   }
 
@@ -358,4 +359,86 @@ export const resolveAgentRunConfigSelection = (
     ...(validatedConfigIds.length > 0 ? { validatedConfigIds } : {}),
     ...(unverifiedSelections.length > 0 ? { unverifiedSelections } : {}),
   };
+};
+
+/**
+ * Whether a bare config id names an option the agent rebuilds per MODEL.
+ *
+ * The snapshot is consulted for the option's CATEGORY, because an agent may
+ * publish effort under its own id, but an id the snapshot omits still matches:
+ * omission is exactly what a per-model option does for a model that lacks the
+ * control (Codex publishes `fast-mode` only while the current model has a fast
+ * speed tier), so it cannot be the reason to reject one.
+ */
+const isPerModelConfigOptionId = (
+  configId: string,
+  capability: RunConfigCapabilitySource | undefined
+): boolean => {
+  if (isAcpFastModeConfigId(configId)) {
+    return true;
+  }
+  const option = findConfigOption(capability, (candidate) => candidate.id === configId);
+  return isAcpThoughtLevelConfigOption(option ?? { id: configId });
+};
+
+export type PerModelConfigOptionResolution = {
+  /**
+   * Ids the caller must exclude from its probed-snapshot check, because this
+   * module either validated them against the target model or established that
+   * the snapshot cannot judge them.
+   */
+  validatedConfigIds: string[];
+  /** Requested values that could not be verified offline. */
+  unverifiedSelections: string[];
+};
+
+/**
+ * The same per-model rule `resolveAgentRunConfigSelection` applies, for
+ * CONCRETE config option values that never passed through a semantic
+ * selection: an Agent Role's stored `runConfig`, an explicit `--config-option`,
+ * or a frozen Operation replayed after recovery.
+ *
+ * Only a turn that runs a model OTHER than the probed one is affected — when
+ * the turn runs the probed model the snapshot describes it exactly and stays
+ * authoritative. Effort is still validated strictly wherever the agent
+ * published its per-model breakdown; what is left is dispatched as requested
+ * and reported in `unverifiedSelections`, because a snapshot of a different
+ * model cannot prove the agent will reject it.
+ */
+export const resolvePerModelConfigOptionSelection = (args: {
+  configOptionValues: Record<string, AcpConfigOptionValue> | undefined;
+  modelId: string | undefined;
+  capability: RunConfigCapabilitySource | undefined;
+}): PerModelConfigOptionResolution => {
+  const entries = Object.entries(args.configOptionValues ?? {});
+  const probedModelId = findCurrentModelId(args.capability);
+  const targetModelId = args.modelId ?? probedModelId;
+  if (entries.length === 0 || targetModelId === undefined || targetModelId === probedModelId) {
+    return { validatedConfigIds: [], unverifiedSelections: [] };
+  }
+
+  const validatedConfigIds: string[] = [];
+  const unverifiedSelections: string[] = [];
+  for (const [configId, value] of entries) {
+    if (!isPerModelConfigOptionId(configId, args.capability)) {
+      continue;
+    }
+    const targetModelEfforts = isAcpFastModeConfigId(configId)
+      ? undefined
+      : args.capability?.modelReasoningEfforts?.[targetModelId];
+    if (targetModelEfforts) {
+      if (typeof value !== 'string' || !targetModelEfforts.includes(value)) {
+        throw new Error(
+          `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${targetModelEfforts.join(
+            ', '
+          )}.`
+        );
+      }
+      validatedConfigIds.push(configId);
+      continue;
+    }
+    validatedConfigIds.push(configId);
+    unverifiedSelections.push(`${configId}=${String(value)}`);
+  }
+  return { validatedConfigIds, unverifiedSelections };
 };

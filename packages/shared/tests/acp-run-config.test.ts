@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   resolveAgentRunConfigSelection,
+  resolvePerModelConfigOptionSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
@@ -146,8 +147,9 @@ describe('agent run config selection', () => {
         collaboration_mode: 'plan',
       },
       // This agent published no per-model breakdown, and the selection switches
-      // away from the probed model, so effort/fast cannot be checked offline.
-      validatedConfigIds: ['reasoning_effort'],
+      // away from the probed model, so effort/fast cannot be checked offline:
+      // both are dispatched as requested and excluded from the snapshot check.
+      validatedConfigIds: ['reasoning_effort', 'fast-mode'],
       unverifiedSelections: ['reasoningEffort=high', 'fastMode=true'],
     });
   });
@@ -351,5 +353,89 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+});
+
+describe('per-model config options carried as concrete ids', () => {
+  /** Codex probed under a model without a fast speed tier: no `fast-mode` at all. */
+  const withoutFastMode = (): AcpCapabilityCacheEntry => {
+    const capability = codexCapability();
+    return {
+      ...capability,
+      configOptions: (capability.configOptions ?? []).filter((option) => option.id !== 'fast-mode'),
+    };
+  };
+
+  it('keeps a stored fast toggle dispatchable when the turn runs another model', () => {
+    // An Agent Role's stored run config: concrete ids, no semantic selection.
+    expect(
+      resolvePerModelConfigOptionSelection({
+        configOptionValues: { 'fast-mode': true, mode: 'agent' },
+        modelId: 'gpt-5.4-mini',
+        capability: codexCapability(),
+      })
+    ).toEqual({ validatedConfigIds: ['fast-mode'], unverifiedSelections: ['fast-mode=true'] });
+
+    // The probe never saw the option because its model had no fast tier. That
+    // says nothing about the model this turn selects.
+    expect(
+      resolvePerModelConfigOptionSelection({
+        configOptionValues: { 'fast-mode': true },
+        modelId: 'gpt-5.4-mini',
+        capability: withoutFastMode(),
+      })
+    ).toEqual({ validatedConfigIds: ['fast-mode'], unverifiedSelections: ['fast-mode=true'] });
+  });
+
+  it('leaves the snapshot authoritative for the model it was probed under', () => {
+    for (const modelId of ['gpt-5.6-sol', undefined]) {
+      expect(
+        resolvePerModelConfigOptionSelection({
+          configOptionValues: { 'fast-mode': true },
+          modelId,
+          capability: withoutFastMode(),
+        })
+      ).toEqual({ validatedConfigIds: [], unverifiedSelections: [] });
+    }
+  });
+
+  it('still validates a stored effort against the target model breakdown', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...codexCapability(),
+      modelReasoningEfforts: {
+        'gpt-5.6-sol': ['low', 'medium', 'high'],
+        'gpt-5.4-mini': ['low', 'medium'],
+      },
+    };
+
+    expect(
+      resolvePerModelConfigOptionSelection({
+        configOptionValues: { reasoning_effort: 'medium' },
+        modelId: 'gpt-5.4-mini',
+        capability,
+      })
+    ).toEqual({ validatedConfigIds: ['reasoning_effort'], unverifiedSelections: [] });
+
+    expect(() =>
+      resolvePerModelConfigOptionSelection({
+        configOptionValues: { reasoning_effort: 'high' },
+        modelId: 'gpt-5.4-mini',
+        capability,
+      })
+    ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini.*Allowed values: low, medium/s);
+  });
+
+  it('recognizes an agent that publishes effort under its own id', () => {
+    // Claude: `effort` by category, `fast` as the toggle id.
+    expect(
+      resolvePerModelConfigOptionSelection({
+        configOptionValues: { effort: 'high', fast: 'on', mode: 'auto' },
+        modelId: 'opus',
+        capability: claudeCapability(),
+      })
+    ).toEqual({
+      validatedConfigIds: ['effort', 'fast'],
+      unverifiedSelections: ['effort=high', 'fast=on'],
+    });
   });
 });

@@ -268,7 +268,13 @@ Two things the dev build does deliberately, both load-bearing:
   TARGET model and the ids so validated come back as `validatedConfigIds`, which
   `validateTurnConfigOptionValues(..., skipIds)` must skip (the probed model's list
   would wrongly reject them). What cannot be checked offline is dispatched as
-  requested. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
+  requested. The rule follows the VALUES, not the caller: concrete ids that never
+  passed through a semantic selection — an Agent Role's stored `runConfig`, an
+  explicit `--config-option`, a frozen Operation replayed after recovery — go
+  through `resolvePerModelConfigOptionSelection` for the same exemption, because a
+  per-model option's ABSENCE from the snapshot is exactly what the probed model's
+  lack of the control looks like and can never be the reason to reject another
+  model's turn. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
   for model, reasoning effort, Fast, or Plan are not promoted to visible
   `agent_warning` notices, while other rejected selections still are. Compatibility exception: Claude
   Fable models omit the Fast mode option, so an explicit `fast=false` is skipped as

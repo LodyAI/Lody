@@ -51,6 +51,7 @@ import {
   hasAgentRunConfigSelection,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
+  resolvePerModelConfigOptionSelection,
   resolveProjectGitHubRepo,
   type AgentRunConfigSelection,
   type AcpCapabilityCacheEntry,
@@ -1359,23 +1360,39 @@ export function applyAgentRunConfigSelection(
   unverifiedSelections: readonly string[];
 } {
   const { runConfig, ...rest } = config;
-  if (!hasAgentRunConfigSelection(runConfig)) {
-    return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
-  }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const resolved = hasAgentRunConfigSelection(runConfig)
+    ? resolveAgentRunConfigSelection(runConfig, capability)
+    : {};
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
   };
+  const modeId = resolved.modeId ?? rest.modeId;
+  const modelId = resolved.modelId ?? rest.modelId;
+  // Concrete values that never passed through the semantic resolver — an Agent
+  // Role's stored run config, `--config-option`, a frozen Operation replay —
+  // still carry per-model options, so the same rule is applied to the merged
+  // table here.
+  const perModel = resolvePerModelConfigOptionSelection({
+    configOptionValues,
+    modelId,
+    capability,
+  });
   return {
     config: {
       ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
-      ...((resolved.modeId ?? rest.modeId) ? { modeId: resolved.modeId ?? rest.modeId } : {}),
-      ...((resolved.modelId ?? rest.modelId) ? { modelId: resolved.modelId ?? rest.modelId } : {}),
+      ...(modeId ? { modeId } : {}),
+      ...(modelId ? { modelId } : {}),
       ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
     },
-    validatedConfigIds: new Set(resolved.validatedConfigIds ?? []),
-    unverifiedSelections: resolved.unverifiedSelections ?? [],
+    validatedConfigIds: new Set([
+      ...(resolved.validatedConfigIds ?? []),
+      ...perModel.validatedConfigIds,
+    ]),
+    unverifiedSelections: [
+      ...(resolved.unverifiedSelections ?? []),
+      ...perModel.unverifiedSelections,
+    ],
   };
 }
 
@@ -3153,7 +3170,19 @@ export async function sendSessionChatResult(
       agentConfigId: session.agentConfigId,
     });
     validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
+    // A follow-up turn carries concrete ids only, so the per-model rule is
+    // applied directly: `configOptions` describes the probed model, and this
+    // turn may be running another one.
+    const perModel = resolvePerModelConfigOptionSelection({
+      configOptionValues: dispatchConfig.configOptionValues,
+      modelId: dispatchConfig.modelId,
+      capability,
+    });
+    validateTurnConfigOptionValues(
+      dispatchConfig.configOptionValues,
+      capability,
+      new Set(perModel.validatedConfigIds)
+    );
   }
   const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
 
