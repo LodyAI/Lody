@@ -225,7 +225,13 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   exports the legacy `MobileModelPickerLabel` helpers for any remaining chip
   faces; `mobile-fast-plan-toggles.tsx` is no longer mounted on new-chat
   (Plan/Fast live inside the run-config sheet).
-- `mobile-inline-picker.tsx` dropdown is keyboard-operable (↑/↓/Enter/Esc, desktop
+- New-chat target rows (machine, project/repository, and branch) use the backgroundless
+  `mobile-native-select.tsx` face with `ChevronsUpDown`; its transparent real `<select>`
+  owns the whole hit target so touch opens the platform option picker. Do not route these
+  rows back through the app-owned inline picker. When no enabled alternative to the
+  current value exists, hide the chevrons and disable the select; the face has no focus
+  ring. Rich run-config rows still use
+  `mobile-inline-picker.tsx`, whose dropdown is keyboard-operable (↑/↓/Enter/Esc, desktop
   search autofocus on `pointer: fine`) and **virtualizes lists >40 options** via
   `@tanstack/react-virtual` (scroll-by-index keeps the active row mounted). Its
   search filters FUZZILY and re-ranks through `lib/fuzzy-option-filter.ts`,

@@ -19,6 +19,10 @@ import {
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
 import {
+  MobileNativeSelect,
+  type MobileNativeSelectOption,
+} from '@/components/mobile/mobile-native-select';
+import {
   MobileModelPickerLabel,
   mobileModelPickerTriggerClassName,
 } from '@/components/mobile/mobile-session-composer-footer';
@@ -37,48 +41,39 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/* The story wires real `MobileInlinePicker`s for the row chips so the
-   drawer-from-behind animation, single-open coordination, and trigger
-   styling are screenshot-verifiable. Composer-internal chips (model /
-   thinking) still need a real `ChatComposer` to test fully; the mock
-   composer here renders just the picker triggers so we can see them
-   inline in the footer row. */
+/* The story wires native selects for the new-chat target rows and keeps
+   `MobileInlinePicker` for rich composer configuration rows. Composer-internal
+   chips still need a real `ChatComposer` to test fully; the mock composer here
+   renders just their picker triggers so we can see them in the footer row. */
 
-const machineOptions: MobileInlinePickerOption[] = [
-  { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor className="h-3.5 w-3.5" /> },
-  { value: 'lab-m2', label: 'lab-m2', icon: <Monitor className="h-3.5 w-3.5" /> },
+const machineOptions: MobileNativeSelectOption[] = [
+  { value: 'zx-macbook', label: 'zx-macbook' },
+  { value: 'lab-m2', label: 'lab-m2' },
 ];
 
-const githubRepoOptions: MobileInlinePickerOption[] = [
+const githubRepoOptions: MobileNativeSelectOption[] = [
   {
     value: 'loro-dev/lody',
     label: 'loro-dev/lody',
-    description: 'AI-native local-first coding companion',
-    icon: <Github className="h-3.5 w-3.5" />,
   },
   {
     value: 'loro-dev/loro',
     label: 'loro-dev/loro',
-    description: 'High-performance CRDT framework',
-    icon: <Github className="h-3.5 w-3.5" />,
   },
 ];
 
-const localProjectOptions: MobileInlinePickerOption[] = [
+const localProjectOptions: MobileNativeSelectOption[] = [
   {
     value: 'zx-macbook:lody',
     label: 'lody',
-    description: '~/code/lody',
-    icon: <Folder className="h-3.5 w-3.5" />,
   },
 ];
 
-const branchOptions: MobileInlinePickerOption[] = [
-  { value: 'main', label: 'main', icon: <GitBranch className="h-3.5 w-3.5" /> },
+const branchOptions: MobileNativeSelectOption[] = [
+  { value: 'main', label: 'main' },
   {
     value: 'feat/audit-mobile-coupling',
     label: 'feat/audit-mobile-coupling',
-    icon: <GitBranch className="h-3.5 w-3.5" />,
   },
 ];
 
@@ -278,8 +273,7 @@ function StoryHarness({
         coordinator={MobileInlinePickerCoordinator}
         machineNode={
           projectScoped ? null : (
-            <MobileInlinePicker
-              id="story-machine"
+            <MobileNativeSelect
               value={machine}
               onChange={setMachine}
               options={machineOptions}
@@ -299,55 +293,48 @@ function StoryHarness({
           )
         }
         perTypeNode={
-          contextType === 'chat' || projectScoped ? null : (
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0 flex-1">
-                {contextType === 'github' ? (
-                  <MobileInlinePicker
-                    id="story-repo"
-                    value={repo}
-                    onChange={setRepo}
-                    options={githubRepoOptions}
-                    ariaLabel="Repository"
-                    triggerContent={
-                      <>
-                        <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{repo}</span>
-                      </>
-                    }
-                  />
-                ) : (
-                  <MobileInlinePicker
-                    id="story-local-project"
-                    value={localProject}
-                    onChange={setLocalProject}
-                    options={localProjectOptions}
-                    ariaLabel="Project"
-                    triggerContent={
-                      <>
-                        <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{localProject.split(':')[1] ?? 'lody'}</span>
-                      </>
-                    }
-                  />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <MobileInlinePicker
-                  id="story-branch"
-                  value={branch}
-                  onChange={setBranch}
-                  options={branchOptions}
-                  ariaLabel="Branch"
-                  triggerContent={
-                    <>
-                      <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">{branch}</span>
-                    </>
-                  }
-                />
-              </div>
-            </div>
+          contextType === 'chat' || projectScoped ? null : contextType === 'github' ? (
+            <MobileNativeSelect
+              value={repo}
+              onChange={setRepo}
+              options={githubRepoOptions}
+              ariaLabel="Repository"
+              triggerContent={
+                <>
+                  <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="truncate">{repo}</span>
+                </>
+              }
+            />
+          ) : (
+            <MobileNativeSelect
+              value={localProject}
+              onChange={setLocalProject}
+              options={localProjectOptions}
+              ariaLabel="Project"
+              triggerContent={
+                <>
+                  <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="truncate">{localProject.split(':')[1] ?? 'lody'}</span>
+                </>
+              }
+            />
+          )
+        }
+        branchNode={
+          contextType === 'chat' ? null : (
+            <MobileNativeSelect
+              value={branch}
+              onChange={setBranch}
+              options={branchOptions}
+              ariaLabel="Branch"
+              triggerContent={
+                <>
+                  <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="truncate">{branch}</span>
+                </>
+              }
+            />
           )
         }
         secondaryPerTypeNode={

@@ -309,11 +309,13 @@ import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Folder as FolderIcon, GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
 import {
-  MobileInlinePicker,
   MobileInlinePickerCoordinator,
   MobileInlinePickerRowSlot,
-  type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
+import {
+  MobileNativeSelect,
+  type MobileNativeSelectOption,
+} from '@/components/mobile/mobile-native-select';
 import {
   buildChildSessionsByParent,
   buildSidebarOpenerRowResolver,
@@ -3801,23 +3803,17 @@ function WorkspaceChatLanding({
   const bottomBarNode = null;
 
   /* ── Mobile-sheet (new-chat bottom sheet) selector nodes ──
-     The sheet drives every selector through the unified
-     `MobileInlinePicker` — a chip-style trigger that expands a drawer
-     of options inline below it. We bypass the desktop selector
-     desktop selector components
-     and feed the picker raw option arrays here so the interaction +
-     animation are identical across machine / project / branch / model /
-     thinking / agent / permission. The pill switchers (类型, 模式) stay
-     as Tabs since they're already inline. */
+     Machine / project / branch use real HTML selects so touch platforms
+     present their native option picker. Complex composer run-config rows
+     retain MobileInlinePicker for search and rich option content. The pill
+     switchers (类型, 模式) stay as Tabs since they're already inline. */
 
   /* ── Machine ── */
   const mobileSheetOnlineMachines = useOnlineMachines();
-  const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
+  const mobileSheetMachineOptions = useMemo<MobileNativeSelectOption<MachineId>[]>(() => {
     return mobileSheetOnlineMachines.map((m) => ({
       value: m.id as MachineId,
       label: m.name,
-      searchText: m.name,
-      icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
     }));
   }, [mobileSheetOnlineMachines]);
   const mobileSheetSelectedMachineLabel = useMemo(() => {
@@ -3825,17 +3821,13 @@ function WorkspaceChatLanding({
     return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
   }, [mobileSheetMachineOptions, selectedMachineId]);
   const mobileSheetMachineNode = (
-    <MobileInlinePicker<MachineId>
-      id="mobile-sheet-machine"
+    <MobileNativeSelect<MachineId>
       value={selectedMachineId}
       onChange={(id) => handleMachineChange(id)}
       options={mobileSheetMachineOptions}
       disabled={hasNoMachine}
       loading={isInitialDataLoading}
       ariaLabel={t('chat.machineSelector.placeholder', 'Machine')}
-      emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
-      searchable={mobileSheetMachineOptions.length > 5}
-      searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
       triggerContent={
         <>
           <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
@@ -3851,7 +3843,7 @@ function WorkspaceChatLanding({
   );
 
   /* ── Project (per context) ── */
-  const mobileSheetGitHubRepoOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
+  const mobileSheetGitHubRepoOptions = useMemo<MobileNativeSelectOption<string>[]>(() => {
     if (contextType !== 'github') return [];
     const repos = [...(repositories ?? [])].sort((a, b) =>
       compareChatLandingRepositoryByRecency(a, b, mobileSheetRecency.byRepo)
@@ -3859,12 +3851,9 @@ function WorkspaceChatLanding({
     return repos.map((repo) => ({
       value: repo.fullName,
       label: repo.fullName,
-      searchText: repo.fullName,
-      description: repo.description ?? undefined,
-      icon: <GithubIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
     }));
   }, [contextType, repositories, mobileSheetRecency]);
-  const mobileSheetLocalProjectOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
+  const mobileSheetLocalProjectOptions = useMemo<MobileNativeSelectOption<string>[]>(() => {
     if (contextType !== 'local') return [];
     const entries = [...visibleLocalProjectMap.values()]
       .filter(
@@ -3877,9 +3866,6 @@ function WorkspaceChatLanding({
     return entries.map((entry) => ({
       value: buildLocalProjectKey(entry.machineId, entry.project.id),
       label: entry.project.name,
-      searchText: `${entry.project.name} ${entry.project.rootPath}`,
-      description: entry.project.rootPath,
-      icon: <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
     }));
   }, [contextType, localProjectSelectorMachineId, visibleLocalProjectMap, mobileSheetRecency]);
   const mobileSheetSelectedLocalProjectKey = selectedLocalProject
@@ -3895,8 +3881,7 @@ function WorkspaceChatLanding({
   }, [mobileSheetLocalProjectOptions, mobileSheetSelectedLocalProjectKey]);
   const mobileSheetProjectNode =
     contextType === 'github' ? (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-repo"
+      <MobileNativeSelect<string>
         value={selectedRepo ?? null}
         onChange={(repo) => {
           setSelectedRepo(repo);
@@ -3904,12 +3889,6 @@ function WorkspaceChatLanding({
         }}
         options={mobileSheetGitHubRepoOptions}
         ariaLabel={t('chat.repoPlaceholder', 'Repository')}
-        emptyText={t(
-          'chat.mobileHome.emptyGitHubProjects',
-          '当前 workspace 没有已授权的 GitHub 仓库'
-        )}
-        searchable={mobileSheetGitHubRepoOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.repoSearchPlaceholder', 'Search repositories')}
         triggerContent={
           <>
             <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
@@ -3920,8 +3899,7 @@ function WorkspaceChatLanding({
         }
       />
     ) : (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-local-project"
+      <MobileNativeSelect<string>
         value={mobileSheetSelectedLocalProjectKey}
         onChange={(key) => {
           const opt = visibleLocalProjectMap.get(key);
@@ -3934,9 +3912,6 @@ function WorkspaceChatLanding({
         }}
         options={mobileSheetLocalProjectOptions}
         ariaLabel={t('chat.validation.missingProject', 'Select a project')}
-        emptyText={localProjectSelectorEmptyText}
-        searchable={mobileSheetLocalProjectOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.localProjectSearchPlaceholder', 'Search projects')}
         triggerContent={
           <>
             <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
@@ -3950,20 +3925,16 @@ function WorkspaceChatLanding({
     );
 
   /* ── Branch ── */
-  const mobileSheetBranchOptions = useMemo<MobileInlinePickerOption<string>[]>(
+  const mobileSheetBranchOptions = useMemo<MobileNativeSelectOption<string>[]>(
     () =>
       branchOptions.map((opt) => ({
         value: opt.value,
         label: opt.label,
-        searchText: opt.label,
-        description: opt.description,
-        icon: <GitBranchIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
       })),
     [branchOptions]
   );
   const mobileSheetBranchNode = showBranchSelector ? (
-    <MobileInlinePicker<string>
-      id="mobile-sheet-branch"
+    <MobileNativeSelect<string>
       key={branchSelectorKey}
       value={currentBranch}
       onChange={(value) => setCurrentBranch(value)}
@@ -3972,9 +3943,6 @@ function WorkspaceChatLanding({
       loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : false}
       loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
       ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-      emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
-      searchable={mobileSheetBranchOptions.length > 5}
-      searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
       triggerContent={
         <>
           <GitBranchIcon

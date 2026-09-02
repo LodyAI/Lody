@@ -306,14 +306,14 @@ function AnimatedSheetRow({
    so chips render in the remaining width. The whole row is wrapped in a
    `MobileInlinePickerRowSlot` so any picker dropped inside the value
    column portals its expansion drawer into the slot rendered just
-   below the row card — full row width, escaping the chip's own column.
+   below the row — full row width, escaping the chip's own column.
    That gives the "list under the entire row" behavior the design comp
    asks for even when the row holds two side-by-side chips (e.g.
    project + branch). */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <MobileInlinePickerRowSlot>
-      <div className="flex min-w-0 items-stretch gap-3 rounded-xl bg-card px-3 py-1.5 ring-1 ring-border/60">
+      <div className="flex min-w-0 items-stretch gap-3 rounded-xl px-3 py-1.5">
         {/* Fixed-width label column so every row's value column starts
            at the same x regardless of the label's intrinsic width.
            Without this, "Machine" / "Type" / "Project" / "Branch" /
