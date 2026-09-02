@@ -32,9 +32,9 @@ export type MobileNewChatSheetProps = {
 
 export type MobileNewChatSheetContentProps = {
   labels?: MobileNewChatSheetLabels;
-  /** Row 1: machine pill / selector. */
+  /** Row 1: machine pill / selector. Pass `null` when the entry point fixes it. */
   machineNode: ReactNode;
-  /** Row 2: project type (3-icon) pill switcher. */
+  /** Row 2: project type (3-icon) pill switcher. Pass `null` when fixed. */
   contextTypeNode: ReactNode;
   /** Row 3: the project (local) or repo (github) picker on its own
      row — branch moved to its own row below so neither chip gets
@@ -73,9 +73,9 @@ export type MobileNewChatSheetContentProps = {
 /**
  * Bottom sheet that hosts the "new chat" composer flow on mobile home.
  *
- * Layout stacks top-to-bottom per the design comp: machine → project
- * type → per-type selectors (optionally split into project+branch +
- * worktree on local) → composer (footer holds the same
+ * Layout stacks top-to-bottom per the design comp: optional machine →
+ * optional project type → per-type selectors (optionally split into
+ * project+branch + worktree on local) → composer (footer holds the same
  * `MobileSessionRunConfig` face as the in-session chat). Each row
  * carries a short label (机器 / 类型 / 项目 / 模式) so the surface reads
  * like a form rather than a tag cloud.
@@ -90,9 +90,8 @@ export function MobileNewChatSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      {/* Adaptive height: only cap the maximum so short contexts (chat-only
-         with no per-type row) collapse to their natural height instead of
-         leaving a half-screen of empty white space below the composer. */}
+      {/* Adaptive height: only cap the maximum so every context follows its
+         actual rows and composer height without leaving blank sheet space. */}
       {/* Shift the whole drawer up by the soft-keyboard height on iOS
          Capacitor so the textarea + footer stay above the keyboard. The
          `--native-keyboard-height` CSS var is `0px` on web and Android;
@@ -226,12 +225,16 @@ export function MobileNewChatSheetContent({
              rows in / out so the surrounding stack ripples smoothly
              rather than snapping. */}
           <div className="flex flex-col pb-3 pt-1">
-            <AnimatedSheetRow alwaysOn>
-              <Row label={machineLabel}>{machineNode}</Row>
-            </AnimatedSheetRow>
-            <AnimatedSheetRow alwaysOn>
-              <Row label={contextTypeLabel}>{contextTypeNode}</Row>
-            </AnimatedSheetRow>
+            {machineNode ? (
+              <AnimatedSheetRow alwaysOn>
+                <Row label={machineLabel}>{machineNode}</Row>
+              </AnimatedSheetRow>
+            ) : null}
+            {contextTypeNode ? (
+              <AnimatedSheetRow alwaysOn>
+                <Row label={contextTypeLabel}>{contextTypeNode}</Row>
+              </AnimatedSheetRow>
+            ) : null}
             <AnimatePresence initial={false}>
               {perTypeNode ? (
                 <AnimatedSheetRow key="per-type">

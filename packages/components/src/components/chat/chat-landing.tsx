@@ -1052,6 +1052,10 @@ function WorkspaceChatLanding({
      selectors as the desktop landing — opening it doesn't navigate,
      so the home tab list stays visible underneath. */
   const [mobileNewChatOpen, setMobileNewChatOpen] = useState(false);
+  /* A project-row or project-detail entry point already fixes the context.
+     Keep that intent separate from the selected project state: the same state
+     also powers the generic new-chat sheet, where those selectors stay open. */
+  const [mobileNewChatProjectScoped, setMobileNewChatProjectScoped] = useState(false);
 
   /* Mobile-only: controls the bottom-sheet workspace switcher launched
      from the home screen's workspace pill. Replaces the inline dropdown
@@ -5377,6 +5381,7 @@ function WorkspaceChatLanding({
       if (project.kind === 'github') {
         setSelectedRepo(project.projectKey);
         setContextType('github');
+        setMobileNewChatProjectScoped(true);
         setMobileNewChatOpen(true);
         return;
       }
@@ -5388,6 +5393,7 @@ function WorkspaceChatLanding({
         localProjectId: entry.project.id,
       });
       setContextType('local');
+      setMobileNewChatProjectScoped(true);
       setMobileNewChatOpen(true);
     },
     [handleSelectedLocalProjectChange, visibleLocalProjectMap]
@@ -6056,12 +6062,22 @@ function WorkspaceChatLanding({
       secondaryPerTypeLabel: t('chat.mobileNewChat.workdirModeLabel', '模式'),
     },
     coordinator: MobileInlinePickerCoordinator,
-    machineNode: mobileSheetMachineNode,
-    contextTypeNode: mobileSheetContextSwitchNode,
+    /* A local project owns its machine. GitHub repositories do not, so retain
+       the machine choice when it is ambiguous (or when none are online and the
+       unavailable state needs to remain visible). */
+    machineNode:
+      mobileNewChatProjectScoped &&
+      (contextType === 'local' ||
+        (mobileSheetMachineOptions.length === 1 &&
+          mobileSheetMachineOptions[0]?.value === selectedMachineId))
+        ? null
+        : mobileSheetMachineNode,
+    contextTypeNode: mobileNewChatProjectScoped ? null : mobileSheetContextSwitchNode,
     /* Project / repo on its own row; branch on its own row below
          (split per the user's design ask — chips no longer share a row
          and so don't truncate on narrow phones). */
-    perTypeNode: contextType === 'chat' ? null : mobileSheetProjectNode,
+    perTypeNode:
+      contextType === 'chat' || mobileNewChatProjectScoped ? null : mobileSheetProjectNode,
     branchNode: contextType === 'chat' ? null : mobileSheetBranchNode,
     secondaryPerTypeNode: mobileSheetWorkdirModeNode,
     composer: (
@@ -6089,6 +6105,7 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             promptDisabled={submitting}
             promptRows={4}
+            mobileSessionPromptRows={mobileNewChatProjectScoped ? 3 : undefined}
             promptEnterKeyHint={promptEnterKeyHint}
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
@@ -6131,7 +6148,7 @@ function WorkspaceChatLanding({
               </Button>
             }
             autoResize
-            maxRows={6}
+            maxRows={mobileNewChatProjectScoped ? 8 : 6}
           />
         </MobileInlinePickerRowSlot>
       </ErrorBoundary>
@@ -6208,11 +6225,12 @@ function WorkspaceChatLanding({
           onConversationArchive={handleMobileChatArchive}
           onConversationRestore={handleMobileChatRestore}
           onConversationPermanentDelete={handleMobileChatPermanentDelete}
-          /* New-chat chip uses the same sheet the home page opens. The
-             sheet reads the current project context from chat-landing
-             state, so it lands preselected without needing extra
-             props. */
-          onNewChat={() => setMobileNewChatOpen(true)}
+          /* This project page fixes the new chat's context, so the sheet can
+             omit the redundant type/project scope rows. */
+          onNewChat={() => {
+            setMobileNewChatProjectScoped(true);
+            setMobileNewChatOpen(true);
+          }}
           showArchived={mobileProjectShowArchived}
           onShowArchivedToggle={() => setMobileProjectShowArchived((prev) => !prev)}
           /* The Files tab shares the project header: it renders the
@@ -6447,6 +6465,7 @@ function WorkspaceChatLanding({
             if (selectedMobileHomeTab === 'chat') {
               setContextType('chat');
             }
+            setMobileNewChatProjectScoped(false);
             setMobileNewChatOpen(true);
           }}
           showArchived={mobileHomeShowArchived}

@@ -118,6 +118,8 @@ export interface ChatComposerProps {
   promptPlaceholder?: string;
   promptDisabled?: boolean;
   promptRows?: number;
+  /** Override the compact one-row minimum used by mobile session composers. */
+  mobileSessionPromptRows?: number;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
   promptRef?: Ref<HTMLTextAreaElement>;
   pastedTextDrafts?: PastedTextDraft[];
@@ -243,6 +245,7 @@ export function ChatComposer({
   promptPlaceholder,
   promptDisabled = false,
   promptRows = 3,
+  mobileSessionPromptRows,
   promptEnterKeyHint,
   promptRef,
   pastedTextDrafts = [],
@@ -293,7 +296,7 @@ export function ChatComposer({
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
-  const effectivePromptRows = singleLineMobile ? 1 : promptRows;
+  const effectivePromptRows = singleLineMobile ? (mobileSessionPromptRows ?? 1) : promptRows;
   // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
   // AND non-mobile layout so phone frames / narrow viewports never show a
   // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.

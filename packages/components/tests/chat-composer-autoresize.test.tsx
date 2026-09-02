@@ -17,6 +17,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
 }));
 
 import { ChatComposer } from '../src/components/chat/chat-composer';
+import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
 
 (
@@ -94,5 +95,37 @@ describe('ChatComposer auto resize', () => {
       Number.parseFloat(computed.paddingBottom || '0');
     expect(textarea?.style.height).toBe(`${elevenRowsHeight}px`);
     expect(textarea?.style.overflowY).toBe('auto');
+  });
+
+  it('allows a mobile session composer to start taller than the compact default', async () => {
+    const promptRef = createRef<HTMLTextAreaElement>();
+
+    await act(async () =>
+      root.render(
+        <ForceMobileLayoutProvider force>
+          <ChatComposer
+            variant="session"
+            promptRef={promptRef}
+            promptValue=""
+            onPromptChange={() => undefined}
+            mobileSessionPromptRows={3}
+            primaryAction={null}
+            autoResize
+            maxRows={8}
+          />
+        </ForceMobileLayoutProvider>
+      )
+    );
+
+    const textarea = promptRef.current;
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    expect(textarea?.getAttribute('rows')).toBe('3');
+
+    const computed = getComputedStyle(textarea!);
+    const threeRowsHeight =
+      24 * 3 +
+      Number.parseFloat(computed.paddingTop || '0') +
+      Number.parseFloat(computed.paddingBottom || '0');
+    expect(textarea?.style.height).toBe(`${threeRowsHeight}px`);
   });
 });

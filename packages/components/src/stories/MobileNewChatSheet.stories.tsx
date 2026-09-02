@@ -246,6 +246,7 @@ function StoryHarness({
   initialContextType = 'github' as 'local' | 'github' | 'chat',
   initialModel = 'claude-3.5-sonnet',
   modelPickerOptions = modelOptions,
+  projectScoped = false,
 }) {
   const [open, setOpen] = useState(initialOpen);
   const [contextType, setContextType] = useState<'local' | 'github' | 'chat'>(initialContextType);
@@ -276,23 +277,29 @@ function StoryHarness({
         onOpenChange={setOpen}
         coordinator={MobileInlinePickerCoordinator}
         machineNode={
-          <MobileInlinePicker
-            id="story-machine"
-            value={machine}
-            onChange={setMachine}
-            options={machineOptions}
-            ariaLabel="Machine"
-            triggerContent={
-              <>
-                <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                <span className="truncate">{machine}</span>
-              </>
-            }
-          />
+          projectScoped ? null : (
+            <MobileInlinePicker
+              id="story-machine"
+              value={machine}
+              onChange={setMachine}
+              options={machineOptions}
+              ariaLabel="Machine"
+              triggerContent={
+                <>
+                  <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="truncate">{machine}</span>
+                </>
+              }
+            />
+          )
         }
-        contextTypeNode={<MockContextTypeNode value={contextType} onChange={setContextType} />}
+        contextTypeNode={
+          projectScoped ? null : (
+            <MockContextTypeNode value={contextType} onChange={setContextType} />
+          )
+        }
         perTypeNode={
-          contextType === 'chat' ? null : (
+          contextType === 'chat' || projectScoped ? null : (
             <div className="flex w-full items-start gap-2">
               <div className="min-w-0 flex-1">
                 {contextType === 'github' ? (
@@ -422,6 +429,17 @@ export const LocalContext: Story = {
     composer: null,
   },
   render: () => <StoryHarness initialContextType="local" />,
+};
+
+export const ProjectScopedLocalContext: Story = {
+  args: {
+    open: true,
+    onOpenChange: () => {},
+    machineNode: null,
+    contextTypeNode: null,
+    composer: null,
+  },
+  render: () => <StoryHarness initialContextType="local" projectScoped />,
 };
 
 export const ChatContext: Story = {
