@@ -1817,6 +1817,120 @@ describe('SessionExecutionService', () => {
     expect(history[0]?.status).toBe('handled');
   });
 
+  it('lets the stale-ACP retry proceed when terminating the old instance emits `terminated`', async () => {
+    // The stale-ACP recovery terminates its own Session instance, and in
+    // production that emits a real `terminated` lifecycle event naming the
+    // instance the turn is still bound to. `onSessionInstanceClosed` must NOT
+    // treat that as a disconnect: the terminate runs AFTER `prompt()` already
+    // rejected, so `promptInFlight` is back to false and the close guard is
+    // uninstalled. The sibling test above mocks `terminateSession` into a no-op,
+    // so it never fires the event and cannot catch a regression here.
+    const sessionId = 'session-stale-acp-lifecycle' as SessionId;
+    const acpSessionId = 'acp-stale-lifecycle' as ACPSessionId;
+    const restoredAcpSessionId = 'acp-restored-lifecycle' as ACPSessionId;
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        throw new Error('ACP connection closed');
+      }),
+      currentModel: undefined,
+    };
+    const restoredAgentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => ({})),
+      currentModel: undefined,
+    };
+    const exec = vi.fn(async (command: string, args: string[]) => {
+      const key = `${command} ${args.join(' ')}`;
+      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
+      if (key === 'git rev-parse HEAD') return 'abc123\n';
+      return '';
+    });
+    const activeSession = {
+      sessionId,
+      acpSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec,
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => acpSessionId),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const restoredSession = {
+      ...activeSession,
+      acpSessionId: restoredAcpSessionId,
+      agentClient: restoredAgentClient,
+      createAgent: vi.fn(async () => restoredAcpSessionId),
+    };
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const deps = createBaseDeps({ hasPromptOutputForTurn: vi.fn(() => false) });
+    let service!: SessionExecutionService;
+    const instanceCloseVerdicts: boolean[] = [];
+    const sessionManager = deps.sessionManager as unknown as {
+      getSession: ReturnType<typeof vi.fn>;
+      terminateSession: ReturnType<typeof vi.fn>;
+      createSession: ReturnType<typeof vi.fn>;
+    };
+    sessionManager.getSession.mockReturnValue(activeSession);
+    sessionManager.createSession.mockResolvedValue(restoredSession);
+    // Stand in for SessionManager's own listener: terminating the instance the
+    // turn is bound to reports the close, exactly as production does.
+    sessionManager.terminateSession.mockImplementation(async () => {
+      instanceCloseVerdicts.push(
+        service.onSessionInstanceClosed(
+          sessionId,
+          activeSession as unknown as ISession,
+          'terminated'
+        )
+      );
+    });
+    (
+      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
+    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+
+    service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-user-1',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    // The lifecycle report was seen and declined — the prompt was no longer in
+    // flight, so the turn owner keeps its own recovery.
+    expect(instanceCloseVerdicts).toEqual([false]);
+    expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
+      restoredAcpSessionId,
+      [{ type: 'text', text: 'hello' }],
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(history[0]?.status).toBe('handled');
+  });
+
   it('refuses the stale-ACP prompt replay when prompt output cannot be observed', async () => {
     // The replay gate must fail CLOSED. An unwired `hasPromptOutputForTurn` used
     // to read as "no output yet", which authorized re-sending a prompt whose
