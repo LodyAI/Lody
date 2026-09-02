@@ -296,7 +296,18 @@ control-plane path is DEPRECATED; do not add functionality to it.
   replacement. Ownership is INSTANCE identity, never the session id: lifecycle events
   carry the exact `Session` that produced them, and
   `SessionExecutionService.onSessionInstanceClosed` acts only when
-  `runtime.session === instance`. Regression coverage:
+  `runtime.session === instance`.
+  INVARIANT: finalization commits through the store's synchronous compare-and-set
+  `finalizeIfCurrent(sessionId, turnRef)`, which remembers the late-update target and
+  clears turn state in one step, reading that target from LIVE state. The only thing a
+  finalizer may carry across its awaits is a `TurnRef` — an identity token used as the
+  expected value. Do not reintroduce a routing-target snapshot taken before those
+  awaits: a turn that claimed ACP routing during them was then finalized against the
+  `undefined` read before them, which is the whole bug. For the same reason the
+  `finished=true` stamp is bound to `assistantEntryId + turnEpoch` and is SKIPPED when a
+  newer turn owns that entry (a redispatch reuses `assistant:<userTurnId>`); do not rely
+  on `writeAssistantEntryForTurn`'s reopen branch to repair a wrong stamp, since it only
+  runs at genuine turn (re)start. Regression coverage:
   `tests/message-handler-lifecycle-turn-ownership.test.ts`.
   This is what lets the web derive the "session will continue" panel from the Cron/ScheduleWakeup
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in

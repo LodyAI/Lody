@@ -180,6 +180,112 @@ describe('SessionTransientStore', () => {
       }
     });
 
+    it('finalizeIfCurrent reads the routing target at commit time, not from a caller snapshot', () => {
+      // The turn starts deferred, so a target read before the finalizer's awaits
+      // is `undefined`. Claiming routing mid-finalization must still produce a
+      // late-update target — reading it up front and committing that stale value
+      // is what dropped a whole turn of agent output.
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, {
+        turnId: 'turn-1',
+        assistantEntryId: 'assistant-user-1',
+        userTurnId: 'user-1',
+        ownsACPUpdates: false,
+      });
+      const ref = store.getTurnRef(id, 'turn-1');
+      expect(ref).toEqual({
+        turnId: 'turn-1',
+        turnEpoch: 1,
+        assistantEntryId: 'assistant-user-1',
+      });
+      if (!ref) throw new Error('expected a turn ref');
+      expect(store.getCurrentACPUpdateTarget(id)).toBeUndefined();
+
+      // ... the prompt starts while the finalizer is awaiting ...
+      store.activateTurnACPUpdateTarget(id, 'turn-1');
+
+      expect(store.finalizeIfCurrent(id, ref)).toBe(true);
+      expect(store.getTurnId(id)).toBeUndefined();
+      expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
+        assistantEntryId: 'assistant-user-1',
+        turnId: 'turn-1',
+        userTurnId: 'user-1',
+        turnEpoch: 1,
+        source: 'finalized_turn',
+      });
+    });
+
+    it('finalizeIfCurrent refuses to clear a turn that has been replaced', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, { turnId: 'turn-1' });
+      const ref = store.getTurnRef(id, 'turn-1');
+      if (!ref) throw new Error('expected a turn ref');
+
+      // A newer turn takes over while the old finalizer is still awaiting.
+      store.clearTurnState(id);
+      store.beginTurn(id, { turnId: 'turn-2' });
+
+      expect(store.finalizeIfCurrent(id, ref)).toBe(false);
+      expect(store.getTurnId(id)).toBe('turn-2');
+      expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
+        turnId: 'turn-2',
+        source: 'active_turn',
+      });
+    });
+
+    it('finalizeIfCurrent matches on epoch, not just turn id', () => {
+      // A redispatch reuses `assistant:<userTurnId>` as the turn id, so the id
+      // alone cannot tell two runs of the same user turn apart.
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, { turnId: 'assistant:user-1', userTurnId: 'user-1' });
+      const staleRef = store.getTurnRef(id, 'assistant:user-1');
+      if (!staleRef) throw new Error('expected a turn ref');
+      store.clearTurnState(id);
+      store.beginTurn(id, { turnId: 'assistant:user-1', userTurnId: 'user-1' });
+
+      expect(staleRef.turnEpoch).toBe(1);
+      expect(store.getTurnRef(id, 'assistant:user-1')?.turnEpoch).toBe(2);
+      expect(store.finalizeIfCurrent(id, staleRef)).toBe(false);
+      expect(store.getTurnId(id)).toBe('assistant:user-1');
+    });
+
+    it('isAssistantEntryFinalizable rejects an entry a newer turn owns', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+
+      store.beginTurn(id, { turnId: 'assistant:user-1', assistantEntryId: 'assistant:user-1' });
+      const staleRef = store.getTurnRef(id, 'assistant:user-1');
+      if (!staleRef) throw new Error('expected a turn ref');
+
+      // Nobody owns it: the ordinary path where the turn already released.
+      store.clearTurnState(id);
+      expect(store.isAssistantEntryFinalizable(id, staleRef)).toBe(true);
+
+      // A newer epoch re-adopted the same entry and is streaming into it.
+      store.beginTurn(id, { turnId: 'assistant:user-1', assistantEntryId: 'assistant:user-1' });
+      expect(store.isAssistantEntryFinalizable(id, staleRef)).toBe(false);
+
+      // A different entry is unaffected.
+      const otherRef = { ...staleRef, assistantEntryId: 'assistant:user-2' };
+      expect(store.isAssistantEntryFinalizable(id, otherRef)).toBe(true);
+    });
+
+    it('getTurnRef returns nothing for a turn that is not current', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+      expect(store.getTurnRef(id, 'turn-1')).toBeUndefined();
+      store.beginTurn(id, { turnId: 'turn-1' });
+      expect(store.getTurnRef(id, 'turn-other')).toBeUndefined();
+      store.clearTurnState(id);
+      expect(store.getTurnRef(id, 'turn-1')).toBeUndefined();
+    });
+
     it('clears late ACP update routing when ACP replay suppression begins', () => {
       const store = new SessionTransientStore();
       const id = sid('s1');

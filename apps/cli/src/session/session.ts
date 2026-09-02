@@ -107,6 +107,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly logger: Logger;
   private fixedWorkdir?: string;
   private status: SessionStatus['status'] = 'created';
+  /** Memoizes `terminate()` so one instance emits `terminated` exactly once. */
+  private terminationPromise: Promise<void> | null = null;
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
@@ -237,7 +239,33 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
+  /**
+   * Idempotent. Termination is reached from several directions at once — a
+   * resource-limit failure terminates while cancel is terminating, cleanup runs
+   * over every session, an error path terminates after the turn already did — and
+   * running the body twice emits a second `terminated` event for one instance.
+   * Concurrent and later callers await the first run instead.
+   *
+   * A FAILED teardown releases the memo so a later attempt can retry; a
+   * successful one keeps it, because `terminated` is a terminal state.
+   */
   async terminate(force: boolean = false): Promise<void> {
+    const inFlight = this.terminationPromise;
+    if (inFlight) {
+      this.logger.debug(`[${this.sessionId}] Terminate already in progress; awaiting it`);
+      return await inFlight;
+    }
+    const run = this.terminateOnce(force);
+    this.terminationPromise = run;
+    try {
+      await run;
+    } catch (error) {
+      this.terminationPromise = null;
+      throw error;
+    }
+  }
+
+  private async terminateOnce(force: boolean): Promise<void> {
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
 

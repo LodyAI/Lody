@@ -157,11 +157,21 @@ delegation proofs or a shared-machine gate without a new product and security de
   history mutation, leaving B pending and permanently unwatched.
   INVARIANT: the no-turnId `finalizeACPState` overload stamps `finished=true` on
   whichever assistant entry is last and then unconditionally clears turn state, so only
-  the turn's OWNER may call it. Process lifecycle listeners must not — see the
-  lifecycle invariant in `../lib/AGENTS.md`; they drain buffers and report the closed
-  Session INSTANCE through `onSessionInstanceClosed`, which acts only when
-  `runtime.session === instance` so a resume fallback terminating the failed instance
-  cannot end the live turn running on its replacement.
+  the turn's OWNER may call it, and only when it genuinely has no turn to name
+  (archive, delete, child cleanup, shutdown drain). Every turn-scoped caller passes its
+  turnId — `handleTurnError` and the auto-prompt runner included. Process lifecycle
+  listeners must not call it at all — see the lifecycle invariant in `../lib/AGENTS.md`;
+  they drain buffers and report the closed Session INSTANCE through
+  `onSessionInstanceClosed`, which acts only when `runtime.session === instance` so a
+  resume fallback terminating the failed instance cannot end the live turn running on
+  its replacement. Releasing the Code Collab workspace watch is the turn owner's job for
+  the same reason: `releaseTurnRuntime` releases it when the turn ends and no instance is
+  registered under that id, which is false for a live replacement.
+  INVARIANT: `Session.terminate` is idempotent and `SessionManager`'s exit/terminated
+  listeners delete from `sessions` only when `get(id) === session`. A session id is
+  served by several instances, and termination is reached from several directions at
+  once; without both, a superseded instance's event evicts its live replacement and
+  `getSession` reports no session for a session that is running.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s

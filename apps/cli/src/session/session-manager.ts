@@ -2265,15 +2265,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.emit('error', { ...event, session });
     });
 
-    session.on('exit', (event: SessionExitEvent) => {
-      this.sessions.delete(event.sessionId);
+    // Only the instance currently registered under this id may remove itself.
+    // A restore fallback, a stale-ACP retry, or any resume replaces the map entry
+    // while the OLD instance is still being torn down; deleting on the id alone
+    // evicts the live replacement, after which `getSession` reports no session
+    // for a session that is running.
+    const forgetIfCurrent = (sessionId: SessionId): boolean => {
+      if (this.sessions.get(sessionId) !== session) {
+        return false;
+      }
+      this.sessions.delete(sessionId);
       void this.rebalanceSessionSandboxes();
+      return true;
+    };
+
+    session.on('exit', (event: SessionExitEvent) => {
+      forgetIfCurrent(event.sessionId);
       this.emit('exit', { ...event, session });
     });
 
     session.on('terminated', (event: SessionExitEvent) => {
-      this.sessions.delete(event.sessionId);
-      void this.rebalanceSessionSandboxes();
+      forgetIfCurrent(event.sessionId);
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,

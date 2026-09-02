@@ -4841,6 +4841,280 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  it('releases the Code Collab workspace watch when a turn ends with no live instance', async () => {
+    // Lifecycle listeners no longer release the watch while a turn is running,
+    // because a resume fallback terminates the failed instance while the turn
+    // keeps editing through its replacement. The turn owner therefore releases
+    // it at teardown — but only when nothing is registered under the id any
+    // more, so a live replacement keeps its watch.
+    const sessionId = 'session-watch-release' as SessionId;
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const promptStarted = createDeferred();
+    const session = {
+      sessionId,
+      acpSessionId: 'acp-watch-release' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(() => {
+          promptStarted.resolve();
+          return new Promise<never>(() => {});
+        }),
+        currentModel: undefined,
+      },
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-watch-release'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const releaseWorkspaceWatch = vi.fn();
+    // The instance is gone once it closes, exactly as SessionManager's map does.
+    let liveSession: typeof session | null = session;
+    const deps = createBaseDeps({});
+    (deps.sessionManager as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession = vi.fn(
+      () => liveSession
+    );
+    (
+      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
+    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+    deps.turnFinalization.releaseWorkspaceWatch = releaseWorkspaceWatch;
+
+    const service = new SessionExecutionService(deps);
+    const turn = service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-user-1',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    await promptStarted.promise;
+    expect(releaseWorkspaceWatch).not.toHaveBeenCalled();
+
+    liveSession = null;
+    expect(
+      service.onSessionInstanceClosed(sessionId, session as unknown as ISession, 'terminated')
+    ).toBe(true);
+    await turn;
+
+    expect(releaseWorkspaceWatch).toHaveBeenCalledWith(sessionId);
+  });
+
+  it('keeps the workspace watch when a closed instance was already replaced', async () => {
+    const sessionId = 'session-watch-keep' as SessionId;
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const session = {
+      sessionId,
+      acpSessionId: 'acp-watch-keep' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          throw new Error('boom');
+        }),
+        currentModel: undefined,
+      },
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-watch-keep'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const releaseWorkspaceWatch = vi.fn();
+    const deps = createBaseDeps({});
+    // A replacement instance stays registered under the same id.
+    (deps.sessionManager as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession = vi.fn(
+      () => session
+    );
+    (
+      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
+    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+    deps.turnFinalization.releaseWorkspaceWatch = releaseWorkspaceWatch;
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-user-1',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    expect(releaseWorkspaceWatch).not.toHaveBeenCalled();
+  });
+
+  it('keeps cancel write ordering when `terminated` lands during cancellation', async () => {
+    // Cancel must persist "user turn canceled" BEFORE the assistant entry is
+    // finalized: Operation reconciliation reads a terminal assistant as success
+    // unless the user turn already carries the stronger cancelled outcome.
+    // A lifecycle close arriving mid-cancel must not jump that order, and must
+    // not re-report the turn as a disconnect — cancel owns this outcome.
+    const sessionId = 'session-cancel-terminated' as SessionId;
+    const turnId = 'assistant-cancel-terminated';
+    let meta: Record<string, unknown> = {};
+    let history: Array<Record<string, unknown>> = [
+      {
+        id: 'turn-cancel-terminated',
+        role: 'user',
+        items: [{ type: 'text', text: 'hello' }],
+        status: 'pending',
+        read: false,
+      },
+    ];
+    const writeOrder: string[] = [];
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
+      meta = { ...meta, ...patch };
+    });
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+        if (history[0]?.status === 'canceled') {
+          writeOrder.push('user-canceled');
+        }
+      }),
+    };
+    let activeTurnId: string | undefined;
+    let service!: SessionExecutionService;
+    const instanceCloseVerdicts: boolean[] = [];
+    const session = {
+      sessionId,
+      acpSessionId: 'acp-cancel-terminated' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        // Fires while cancellation is running, exactly where SessionManager's
+        // listener would report the closed instance.
+        cancel: vi.fn(async () => {
+          instanceCloseVerdicts.push(
+            service.onSessionInstanceClosed(sessionId, session as unknown as ISession, 'terminated')
+          );
+        }),
+        prompt: vi.fn(async () => {
+          const result = await service.cancelSession({
+            type: 'session/cancel',
+            sessionId,
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            turnId,
+          });
+          expect(result).toEqual({ success: true });
+          throw new Error('agent cancelled prompt');
+        }),
+        currentModel: undefined,
+      },
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-cancel-terminated'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => session),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      beginConversationTurn: vi.fn(() => {
+        activeTurnId = turnId;
+        return turnId;
+      }),
+      getActiveTurnId: vi.fn(() => activeTurnId),
+      clearActiveTurnId: vi.fn((_sessionId, id) => {
+        if (activeTurnId === id) {
+          activeTurnId = undefined;
+        }
+      }),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({ meta })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+    vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(async () => {
+      writeOrder.push('assistant-finalized');
+      expect(history[0]).toMatchObject({ status: 'canceled' });
+    });
+
+    service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-cancel-terminated',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    // The close was reported and declined: cancel already owns this turn.
+    expect(instanceCloseVerdicts).toEqual([false]);
+    expect(writeOrder).toEqual(['user-canceled', 'assistant-finalized']);
+    expect(history[0]).toMatchObject({ status: 'canceled' });
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    // Step B: the cancel path names its turn instead of finalizing whatever is last.
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(sessionId, turnId);
+  });
+
   it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {
     let meta: Record<string, unknown> = {};
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {

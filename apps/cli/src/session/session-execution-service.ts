@@ -195,6 +195,13 @@ type TurnFinalizationEffects = {
     onAutoPromptEnd?: () => void | Promise<void>;
   }) => Promise<void>;
   refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
+  /**
+   * Drop the Code Collab workspace watch for this session. Lifecycle listeners
+   * deliberately do NOT release it while a turn is running (a resume fallback
+   * terminates the failed instance while the turn continues on its replacement),
+   * so the turn owner releases it when its turn ends with no live instance left.
+   */
+  releaseWorkspaceWatch?: (sessionId: SessionId) => void;
   notifySessionCompleted: (
     sessionId: SessionId,
     userId: string,
@@ -1647,6 +1654,21 @@ export class SessionExecutionService {
     const releasedOwner = runtime?.turnId === turnId;
     if (releasedOwner) {
       this.turnRuntimeBySession.delete(sessionId);
+      // The turn is over. If nothing is registered under this session id any
+      // more, its agent process is gone (closed instance, cancel-with-terminate,
+      // terminate after an ACP error) and the workspace watch has no owner —
+      // release it here, since the lifecycle listener was not allowed to while
+      // this turn was running. A live REPLACEMENT instance (restore fallback,
+      // stale-ACP retry) is still registered, so this correctly does nothing.
+      if (!this.deps.sessionManager.getSession(sessionId)) {
+        try {
+          this.deps.turnFinalization.releaseWorkspaceWatch?.(sessionId);
+        } catch (error) {
+          this.deps.logger.debug(
+            `[${sessionId}] Failed to release workspace watch after turn ${turnId}: ${formatErrorMessage(error)}`
+          );
+        }
+      }
     }
     // Safety net: drop per-turn analytics state if the turn ended without a
     // completed/failed capture (e.g. cancellation), so the map cannot leak.
@@ -1885,7 +1907,12 @@ export class SessionExecutionService {
           options.sessionId,
           'Failed to finalize ACP state for cancelled turn',
           self.tryPromise(() =>
-            self.handleTurnError(options.sessionId, options.sessionDoc, new Error('cancelled'))
+            self.handleTurnError(
+              options.sessionId,
+              options.sessionDoc,
+              new Error('cancelled'),
+              options.turnId
+            )
           )
         );
       } else {
@@ -2123,7 +2150,12 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    await this.handleTurnError(
+      options.sessionId,
+      options.sessionDoc,
+      options.error,
+      options.runtime.turnId
+    );
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2134,7 +2166,7 @@ export class SessionExecutionService {
     reason: ChatFailedReason;
   }): Promise<void> {
     try {
-      await this.handleTurnError(options.sessionId, options.sessionDoc);
+      await this.handleTurnError(options.sessionId, options.sessionDoc, undefined, options.turnId);
     } catch (error) {
       this.deps.logger.warn(
         `[${options.sessionId}] Failed to finalize halted turn ${options.turnId} (${options.reason}): ${formatErrorMessage(error)}`
@@ -2223,16 +2255,21 @@ export class SessionExecutionService {
     );
   }
 
+  /**
+   * `turnId` is required by every caller that has one. A no-turnId finalize
+   * stamps `finished=true` on whichever assistant entry is last and clears turn
+   * state unconditionally, so an error path that omits it can close a turn it
+   * does not own.
+   */
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown
+    error?: unknown,
+    turnId?: string
   ): Promise<void> {
-    await this.deps.turnFinalization.finalizeACPState(sessionId);
-    await this.persistCodeCollabTurnDiffsAfterACPFinalization(
-      sessionId,
-      this.currentTurnBySession.get(sessionId)
-    );
+    const finalizedTurnId = turnId ?? this.currentTurnBySession.get(sessionId);
+    await this.deps.turnFinalization.finalizeACPState(sessionId, finalizedTurnId);
+    await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, finalizedTurnId);
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {

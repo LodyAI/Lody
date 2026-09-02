@@ -61,6 +61,16 @@ export type AssistantTurnACPUpdateTarget = {
 
 export type ACPUpdateTarget = AssistantTurnACPUpdateTarget;
 
+/**
+ * Identity of one turn. Carried by finalizers as a compare-and-set token so a
+ * commit can be refused when the turn it names is no longer the current one.
+ */
+export type TurnRef = {
+  turnId: string;
+  turnEpoch: number;
+  assistantEntryId: string;
+};
+
 export type BufferedACPUpdate = {
   notification: AcpSessionNotification;
   target: ACPUpdateTarget;
@@ -282,6 +292,90 @@ export class SessionTransientStore {
 
   getTurnPhase(sessionId: SessionId): TurnPhase['phase'] {
     return this.sessions.get(sessionId)?.turn.phase ?? 'idle';
+  }
+
+  /**
+   * Identity of the turn currently in flight, for use as a compare-and-set token.
+   * Returns undefined unless `turnId` names the current turn.
+   *
+   * This is the ONLY thing a finalizer may carry across its awaits. It is an
+   * EXPECTED value handed back to `finalizeIfCurrent`, never a routing decision:
+   * the target that actually gets remembered is read at commit time, inside the
+   * CAS, from live state.
+   */
+  getTurnRef(sessionId: SessionId, turnId: string): TurnRef | undefined {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
+      return undefined;
+    }
+    return {
+      turnId: state.turn.turnId,
+      turnEpoch: state.turn.turnEpoch,
+      assistantEntryId: state.turn.assistantEntryId,
+    };
+  }
+
+  /**
+   * True unless a DIFFERENT turn currently owns this assistant entry.
+   *
+   * A redispatch reuses `assistant:<userTurnId>`, so a late finalizer for turn
+   * epoch N can otherwise stamp `finished=true` on the entry that epoch N+1 is
+   * still streaming into — the web renderer then folds a live turn into a
+   * "Worked for …" summary. An entry owned by nobody is finalizable: that is the
+   * ordinary path where the turn already released its state.
+   *
+   * Do not rely on `writeAssistantEntryForTurn`'s reopen branch to undo a wrong
+   * stamp. It only runs at genuine turn (re)start via `openAssistantEntry`, so
+   * it covers the restore fallback and nothing else.
+   */
+  isAssistantEntryFinalizable(sessionId: SessionId, ref: TurnRef): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle') {
+      return true;
+    }
+    if (state.turn.assistantEntryId !== ref.assistantEntryId) {
+      return true;
+    }
+    return state.turn.turnEpoch === ref.turnEpoch;
+  }
+
+  /**
+   * Compare-and-set finalization: if `ref` still names the current turn, remember
+   * its routing target for late updates and clear turn state, atomically.
+   *
+   * Lookup and commit are one synchronous operation on purpose. The previous
+   * shape read the routing target before a long await chain and committed that
+   * stale value in a `finally`, so a turn that claimed ACP routing during the
+   * await was finalized against `undefined` and every subsequent update was
+   * dropped for having no target. There is no way to express that bug through
+   * this API: callers hold an identity token, not a target.
+   *
+   * Returns whether the CAS matched.
+   */
+  finalizeIfCurrent(sessionId: SessionId, ref: TurnRef): boolean {
+    const state = this.sessions.get(sessionId);
+    if (
+      !state ||
+      state.turn.phase === 'idle' ||
+      state.turn.turnId !== ref.turnId ||
+      state.turn.turnEpoch !== ref.turnEpoch
+    ) {
+      return false;
+    }
+    if (state.turn.ownsACPUpdates) {
+      // Read at commit time, from live state — never from a caller's snapshot.
+      state.lateACPUpdateTarget = {
+        kind: 'assistant_entry',
+        assistantEntryId: state.turn.assistantEntryId,
+        turnId: state.turn.turnId,
+        turnEpoch: state.turn.turnEpoch,
+        source: 'finalized_turn',
+        finalizedAtMs: getServerNow(),
+        ...(state.turn.userTurnId ? { userTurnId: state.turn.userTurnId } : {}),
+      };
+    }
+    this.clearTurnState(sessionId);
+    return true;
   }
 
   /**

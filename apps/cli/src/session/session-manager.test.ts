@@ -19,7 +19,7 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
@@ -1214,5 +1214,95 @@ describe('SessionManager preparation resource accounting', () => {
 
     expect(durableApplyLimits).toHaveBeenCalledTimes(1);
     expect(preparationApplyLimits).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionManager lifecycle events are instance-scoped', () => {
+  const buildManager = () =>
+    new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+  const buildSession = (sessionId: SessionId) =>
+    new Session(
+      createSessionConfig({ sessionId }),
+      createLogger(),
+      mkdtempSync(path.join(os.tmpdir(), 'lody-session-instance-')),
+      createNoopSessionSandbox()
+    );
+
+  it('does not let a superseded instance evict its live replacement', () => {
+    // A resume fallback terminates the FAILED instance after its replacement is
+    // already registered. Deleting on the session id alone drops the live one,
+    // and `getSession` then reports no session for a session that is running.
+    const sessionId = 'session-instance-identity' as SessionId;
+    const manager = buildManager();
+    const internals = manager as unknown as {
+      registerSessionEvents(session: Session): void;
+      sessions: Map<SessionId, Session>;
+    };
+
+    const oldInstance = buildSession(sessionId);
+    const newInstance = buildSession(sessionId);
+    internals.registerSessionEvents(oldInstance);
+    internals.registerSessionEvents(newInstance);
+    internals.sessions.set(sessionId, newInstance);
+
+    const terminated: Array<Session | undefined> = [];
+    manager.on('terminated', (event) => terminated.push(event.session as Session));
+
+    oldInstance.emit('terminated', { sessionId, exitCode: 0 });
+
+    expect(manager.getSession(sessionId)).toBe(newInstance);
+    // The event still fires, naming the instance that actually closed, so
+    // consumers can compare identity themselves.
+    expect(terminated).toEqual([oldInstance]);
+
+    // The live instance closing does remove it.
+    newInstance.emit('terminated', { sessionId, exitCode: 0 });
+    expect(manager.getSession(sessionId)).toBeNull();
+  });
+
+  it('does not let a superseded instance evict its replacement on exit either', () => {
+    const sessionId = 'session-instance-identity-exit' as SessionId;
+    const manager = buildManager();
+    const internals = manager as unknown as {
+      registerSessionEvents(session: Session): void;
+      sessions: Map<SessionId, Session>;
+    };
+
+    const oldInstance = buildSession(sessionId);
+    const newInstance = buildSession(sessionId);
+    internals.registerSessionEvents(oldInstance);
+    internals.registerSessionEvents(newInstance);
+    internals.sessions.set(sessionId, newInstance);
+
+    oldInstance.emit('exit', { sessionId, exitCode: 1 });
+
+    expect(manager.getSession(sessionId)).toBe(newInstance);
+  });
+
+  it('terminates once even when several paths request it', async () => {
+    // Resource-limit failure terminates while cancel is terminating, cleanup
+    // runs over every session, an error path terminates after the turn already
+    // did. Two runs of the body emit `terminated` twice for one instance, and
+    // the second emit used to delete a live map entry.
+    const sessionId = 'session-terminate-idempotent' as SessionId;
+    const session = buildSession(sessionId);
+    const emitted: number[] = [];
+    session.on('terminated', () => emitted.push(1));
+
+    await Promise.all([session.terminate(true), session.terminate(true)]);
+    await session.terminate(true);
+
+    expect(emitted).toHaveLength(1);
   });
 });

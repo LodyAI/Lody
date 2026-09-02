@@ -3044,7 +3044,7 @@ export class MessageHandler {
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
         await this.createAssistantEntryForTurn(sessionId, sessionDoc, turnId, modelInfo),
-      finalizeACPState: async (sessionId) => await this.finalizeACPState(sessionId),
+      finalizeACPState: async (sessionId, turnId) => await this.finalizeACPState(sessionId, turnId),
       flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
     });
     this.turnPostProcessingService = new TurnPostProcessingService({
@@ -3113,6 +3113,8 @@ export class MessageHandler {
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId) =>
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
+        releaseWorkspaceWatch: (sessionId) =>
+          this.codeCollabV2Service.releaseWorkspaceWatchForOwner(sessionId),
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
         autoCommitAndPushForPR: async (ctx) =>
@@ -5852,11 +5854,14 @@ export class MessageHandler {
     if (!turnId || this.store.getTurnId(sessionId) === turnId) {
       await this.awaitTurnHistoryGate(sessionId);
     }
-    // Capture timing data and turnId before clearing state
+    // Carry only the turn's IDENTITY across the awaits below. It is the expected
+    // value for the closing compare-and-set, not a routing decision: reading the
+    // ACP target here and committing it in the `finally` is exactly the bug that
+    // dropped a turn's whole output, because a turn that claimed routing during
+    // these awaits was finalized against the `undefined` read before them.
     const endedAt = Date.now();
     const state = this.store.get(sessionId);
-    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
-    const finalizedTarget = !turnId || currentTarget?.turnId === turnId ? currentTarget : undefined;
+    const turnRef = turnId ? this.store.getTurnRef(sessionId, turnId) : undefined;
     const permissionWaitMs = state.permissionWaitMs || undefined;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
@@ -5869,32 +5874,43 @@ export class MessageHandler {
         await sessionDoc.setLastMessageAt();
       }
 
-      // Mark the owning assistant entry as finished and record timing.
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
+      // Mark the owning assistant entry as finished and record timing. The stamp
+      // is bound to `assistantEntryId + turnEpoch`: a redispatch reuses
+      // `assistant:<userTurnId>`, so a late finalizer must not close an entry a
+      // NEWER turn is streaming into. Checked here rather than before the awaits,
+      // because the takeover can happen during them.
+      if (turnRef && !this.store.isAssistantEntryFinalizable(sessionId, turnRef)) {
+        this.logger.debug(
+          `[${sessionId}] Skipping finished stamp for ${turnRef.assistantEntryId}: a newer turn owns it (epoch ${turnRef.turnEpoch} superseded)`
+        );
+      } else {
+        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+        await sessionDoc.updateHistory((history) => {
+          for (let i = history.length - 1; i >= 0; i--) {
+            const entry = history[i];
+            if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+              entry.finished = true;
+              entry.endedAt = endedAt;
+              if (permissionWaitMs !== undefined) {
+                entry.permissionWaitMs = permissionWaitMs;
+              }
+              break;
             }
-            break;
           }
-        }
-        return history;
-      });
-      await sessionDoc.waitUntilSynced();
+          return history;
+        });
+        await sessionDoc.waitUntilSynced();
+      }
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
     } finally {
-      if (finalizedTarget) {
-        this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
-      }
-      if (turnId) {
-        this.clearConversationTurnIfMatches(sessionId, turnId);
-      } else {
+      if (turnRef) {
+        // One synchronous compare-and-set: remember the late-update target and
+        // clear the turn, or do neither because this turn is no longer current.
+        this.store.finalizeIfCurrent(sessionId, turnRef);
+      } else if (!turnId) {
+        // Owner-driven teardown with no turn to name (archive, delete, child
+        // cleanup, shutdown drain): clearing unconditionally is the intent.
         this.clearACPState(sessionId);
       }
       // Updates buffered during the finalization tail survive the turn clear
