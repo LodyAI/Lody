@@ -5460,11 +5460,7 @@ const PlanPanel = ({
       <div className="relative">
         <div
           ref={bodyRef}
-          className={cn(
-            CONVERSATION_PANEL_BODY_CLASS,
-            !isOpen && 'max-h-56 overflow-hidden',
-            isOpen && 'scrollbar-pro max-h-[32rem] overflow-y-auto'
-          )}
+          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
         >
           <MarkdownRenderer
             text={plan.markdown}
