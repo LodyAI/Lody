@@ -292,8 +292,8 @@ function ReviewerMachineRow({
                 {configured
                   ? t('settings.review.configured', 'Configured')
                   : reviewerConfig
-                  ? t('settings.review.agentRemoved', 'Reviewer unavailable')
-                  : t('settings.review.notConfigured', 'Not configured')}
+                    ? t('settings.review.agentRemoved', 'Reviewer unavailable')
+                    : t('settings.review.notConfigured', 'Not configured')}
               </span>
 
               {reviewerConfig ? (
@@ -481,12 +481,17 @@ export function ReviewPolicySection() {
 
   // Each policy write is a Flock row put plus a sync, so persisting per
   // keystroke in the requirements textarea would put one on the wire per char.
-  const pendingWrite = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWrite = useRef<{
+    timeout: ReturnType<typeof setTimeout>;
+    flush: () => void;
+  } | null>(null);
   useEffect(
     () => () => {
-      if (pendingWrite.current) {
-        clearTimeout(pendingWrite.current);
-      }
+      const pending = pendingWrite.current;
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      pendingWrite.current = null;
+      pending.flush();
     },
     []
   );
@@ -499,12 +504,17 @@ export function ReviewPolicySection() {
         return;
       }
       if (pendingWrite.current) {
-        clearTimeout(pendingWrite.current);
+        clearTimeout(pendingWrite.current.timeout);
       }
-      pendingWrite.current = setTimeout(() => {
-        pendingWrite.current = null;
+      const flush = () => {
         void writeReviewPolicyToFlock(runtime, workspacePolicy);
+      };
+      const timeout = setTimeout(() => {
+        if (pendingWrite.current?.timeout !== timeout) return;
+        pendingWrite.current = null;
+        flush();
       }, POLICY_WRITE_DEBOUNCE_MS);
+      pendingWrite.current = { timeout, flush };
     },
     [runtime]
   );

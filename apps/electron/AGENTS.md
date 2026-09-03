@@ -149,17 +149,23 @@ Root `AGENTS.md` also applies.
   never `electron-builder` directly. It injects the released version via
   `extraMetadata` so `package.json` is a fallback rather than the release source of
   truth, and it forces `--publish never` unless a caller opts in.
-- The `publish` block in `electron-builder.yml` is what gives the public build an
-  update feed: `electron.vite.config.ts` strips every `VITE_*` value, so
-  `AppUpdaterService` finds no `VITE_ELECTRON_UPDATE_URL` and falls back to the
-  packaged `app-update.yml`. That block is also what makes electron-builder emit
-  `latest*.yml` at all. Its tag contract is `v${version}`.
-- Artifact names must stay space-free. GitHub Releases rewrites spaces in uploaded
-  asset names to periods, which would desynchronize them from the names recorded in
-  `latest*.yml`. Do not reintroduce `${productName}` into an `artifactName`.
-- macOS releases must be signed and notarized. Squirrel.Mac will not install an update
-  it cannot validate against the running app's signature, so an unsigned macOS build
-  silently has no working auto-update. Windows and Linux do not have this constraint.
+- Windows/Linux electron-updater still uses the `publish` block: Vite strips every
+  `VITE_*` value, so `AppUpdaterService` falls back to packaged `app-update.yml` and
+  `latest*.yml`. Tag contract is `v${version}`.
+- macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
+  Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
+  `SPARKLE_ED_PUBLIC_KEY` before signing. The release workflow then runs
+  `Innei/electron-sparkle-updater/action@v1` against this release's zips only
+  (`publish: false`); the Action fetches the two previous `v*` zip releases as
+  delta bases. Previous zips stay out of the published asset list. Sparkle load
+  failure falls back to electron-updater. Sparkle UI stays silent; progress and
+  ready-to-install go through `ElectronUpdaterState` for the renderer banner.
+- Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
+  which desynchronizes `latest*.yml` and Sparkle enclosures. Do not use
+  `${productName}` in `artifactName`.
+- macOS releases must be signed and notarized. `generate_appcast` refuses archives
+  that fail `codesign --verify --deep --strict`, and Gatekeeper needs a notarized
+  first-install DMG. Windows and Linux do not have this constraint.
 - CI packages Linux as `AppImage deb` only; `snap` stays in the target list for local
   builds because it needs snapcraft on the machine.
 

@@ -1,7 +1,9 @@
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { loadSparkleBridge, type SparkleBridge } from 'electron-sparkle-updater'
 import type {
   CheckForElectronUpdateResult,
   ElectronUpdaterState,
@@ -11,6 +13,15 @@ import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
 import { setAppQuitting } from '../window-state'
 import { readUpdaterReleaseMetadata } from './app-updater-metadata'
+import { sparkleEventToStatePatch } from './app-updater-sparkle-events'
+import {
+  resolveSparkleAddonPath,
+  resolveSparkleAppcastUrl,
+  shouldUseSparkleUpdater,
+  sparklePackageJsonPathFromModuleEntry
+} from './app-updater-sparkle-policy'
+
+const SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER = 'SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER'
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 const LODY_UPDATER_STATE_EVENT = IPC_PUSH_CHANNELS.updaterState
@@ -72,6 +83,7 @@ export class AppUpdaterService {
   private listenersAttached = false
   private checkInFlight = false
   private intervalRef: NodeJS.Timeout | null = null
+  private sparkleBridge: SparkleBridge | null = null
 
   constructor(private readonly options: { enabled?: boolean } = {}) {}
 
@@ -88,6 +100,14 @@ export class AppUpdaterService {
         phase: 'disabled',
         disabledReason: 'updater_disabled_in_dev'
       })
+      return
+    }
+
+    const sparkleBridge = this.tryLoadSparkleBridge()
+    if (sparkleBridge) {
+      this.sparkleBridge = sparkleBridge
+      this.attachSparkleEventHandler(sparkleBridge)
+      sparkleBridge.setAutomaticChecks(true)
       return
     }
 
@@ -132,6 +152,32 @@ export class AppUpdaterService {
         error: 'updater_disabled'
       }
     }
+    if (this.sparkleBridge) {
+      try {
+        this.setState({
+          phase: 'checking',
+          error: undefined,
+          checkedAtMs: Date.now(),
+          percent: undefined,
+          bytesPerSecond: undefined,
+          transferred: undefined,
+          total: undefined
+        })
+        this.sparkleBridge.checkForUpdates()
+        return { started: true }
+      } catch (error) {
+        const message = formatUnknownError(error)
+        this.setState({
+          phase: 'error',
+          error: message,
+          checkedAtMs: Date.now()
+        })
+        return {
+          started: false,
+          error: message
+        }
+      }
+    }
     if (this.checkInFlight) {
       return {
         started: false,
@@ -165,6 +211,25 @@ export class AppUpdaterService {
   }
 
   quitAndInstall(): QuitAndInstallElectronUpdateResult {
+    if (this.sparkleBridge) {
+      try {
+        setAppQuitting(true)
+        this.sparkleBridge.installUpdateNow()
+        return { ok: true }
+      } catch (error) {
+        setAppQuitting(false)
+        const message = formatUnknownError(error)
+        this.setState({
+          phase: 'error',
+          error: message
+        })
+        return {
+          ok: false,
+          error: message
+        }
+      }
+    }
+
     if (this.state.phase !== 'downloaded') {
       return {
         ok: false,
@@ -201,6 +266,78 @@ export class AppUpdaterService {
         error: message
       }
     }
+  }
+
+  private tryLoadSparkleBridge(): SparkleBridge | null {
+    if (
+      !shouldUseSparkleUpdater({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        sparkleAvailable: true
+      })
+    ) {
+      return null
+    }
+
+    const log = (message: string): void => {
+      console.log(`[sparkle] ${message}`)
+    }
+
+    let resolvedPackageJsonPath: string | undefined
+    try {
+      resolvedPackageJsonPath = sparklePackageJsonPathFromModuleEntry(
+        createRequire(import.meta.url).resolve('electron-sparkle-updater')
+      )
+    } catch {
+      resolvedPackageJsonPath = undefined
+    }
+
+    const addonPath = resolveSparkleAddonPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      resolvedPackageJsonPath,
+      exists: existsSync
+    })
+    if (!addonPath) {
+      log('native addon not found')
+      return null
+    }
+
+    const bridge = loadSparkleBridge({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      addonPath,
+      log
+    })
+    if (!bridge) return null
+
+    const initialized = bridge.init({
+      appcastUrl: resolveSparkleAppcastUrl({
+        configuredAppcastUrl: readNonEmptyString(process.env.SPARKLE_APPCAST_URL)
+      }),
+      publicEdKey:
+        readNonEmptyString(process.env.SPARKLE_ED_PUBLIC_KEY) ?? SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER
+    })
+    if (!initialized) {
+      log('init failed')
+      return null
+    }
+    return bridge
+  }
+
+  private attachSparkleEventHandler(bridge: SparkleBridge): void {
+    if (typeof bridge.setEventHandler !== 'function') {
+      console.log('[sparkle] native bridge has no event handler; renderer progress will not update')
+      return
+    }
+    bridge.setEventHandler((event) => {
+      try {
+        const patch = sparkleEventToStatePatch(event, Date.now())
+        if (patch) this.setState(patch)
+      } catch (error) {
+        console.log(`[sparkle] event handler failed: ${formatUnknownError(error)}`)
+      }
+    })
   }
 
   private isUpdaterEnabled(): boolean {

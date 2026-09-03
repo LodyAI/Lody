@@ -1,8 +1,13 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  isMacPackaging,
+  resolvePackagedSparkleFeedUrl,
+  resolveSparkleRebuildArch
+} from './sparkle-packaging.mjs'
 
 // electron-builder derives the packaged version from apps/electron/package.json,
 // which tracks the private cloud release line only when someone remembers to bump
@@ -112,11 +117,27 @@ assertPublishPolicyIsExplicit(electronBuilderArguments)
 
 const generatedConfigDirectory = mkdtempSync(path.join(tmpdir(), 'lody-oss-electron-builder-'))
 const generatedConfigPath = path.join(generatedConfigDirectory, 'electron-builder.json')
-writeFileSync(
-  generatedConfigPath,
-  `${JSON.stringify({ extends: baseConfigPath, extraMetadata: { version } }, null, 2)}\n`,
-  'utf8'
-)
+const configuredSparkleFeedUrl = process.env.SPARKLE_APPCAST_URL
+const sparkleFeedUrl = resolvePackagedSparkleFeedUrl({
+  configuredAppcastUrl: configuredSparkleFeedUrl
+})
+const localSparkleFeed = Boolean(configuredSparkleFeedUrl?.trim())
+const generatedConfig = {
+  extends: baseConfigPath,
+  extraMetadata: { version },
+  mac: {
+    extendInfo: {
+      SUFeedURL: sparkleFeedUrl,
+      ...(localSparkleFeed
+        ? {
+            SUScheduledCheckInterval: 1,
+            NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
+          }
+        : {})
+    }
+  }
+}
+writeFileSync(generatedConfigPath, `${JSON.stringify(generatedConfig, null, 2)}\n`, 'utf8')
 
 let cleanedUp = false
 function cleanupGeneratedConfig() {
@@ -128,6 +149,25 @@ function cleanupGeneratedConfig() {
 console.log(`[package-electron] packaging Lody OSS ${version}`)
 
 const runner = resolveRunner()
+
+if (isMacPackaging(electronBuilderArguments, process.platform)) {
+  const sparkleArch = resolveSparkleRebuildArch(electronBuilderArguments, process.arch)
+  console.log(`[package-electron] rebuilding Sparkle native addon (${sparkleArch})`)
+  const sparkleRebuild = spawnSync(
+    runner.command,
+    [...runner.args, 'exec', 'electron-sparkle-updater', 'rebuild', '--arch', sparkleArch],
+    {
+      cwd: electronDir,
+      env: process.env,
+      stdio: 'inherit'
+    }
+  )
+  if (sparkleRebuild.status !== 0) {
+    cleanupGeneratedConfig()
+    process.exit(sparkleRebuild.status ?? 1)
+  }
+}
+
 const child = spawn(
   runner.command,
   [

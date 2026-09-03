@@ -79,6 +79,51 @@ type MdastNode = {
   children?: MdastNode[];
   url?: string;
   title?: string | null;
+  position?: {
+    start?: { offset?: number };
+    end?: { offset?: number };
+  };
+};
+
+type MdastChildReplacement = {
+  nodes: MdastNode[];
+  consumedSiblings?: number;
+};
+
+type MdastChildTransformer = (
+  child: MdastNode,
+  nextChild: MdastNode | undefined
+) => MdastChildReplacement | undefined;
+
+const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer) => {
+  if (typeof tree !== 'object' || tree === null) return;
+  const root = tree as MdastNode;
+  if (typeof root.type !== 'string') return;
+
+  const walk = (node: MdastNode) => {
+    if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
+
+    const children = node.children;
+    if (!Array.isArray(children) || children.length === 0) return;
+
+    const nextChildren: MdastNode[] = [];
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      const replacement = transform(child, children[index + 1]);
+      if (replacement) {
+        nextChildren.push(...replacement.nodes);
+        index += replacement.consumedSiblings ?? 0;
+        continue;
+      }
+
+      walk(child);
+      nextChildren.push(child);
+    }
+
+    node.children = nextChildren;
+  };
+
+  walk(root);
 };
 
 // `!` prefixes are load-bearing: Streamdown wraps its output in a div with
@@ -230,6 +275,13 @@ const splitAutolinkTrailing = (value: string) => {
   return { url, trailing };
 };
 
+const createTextLinkNode = (url: string, text: string, title: string | null = null): MdastNode => ({
+  type: 'link',
+  url,
+  title,
+  children: [{ type: 'text', value: text }],
+});
+
 const linkifyTextValue = (value: string): MdastNode[] => {
   const result: MdastNode[] = [];
   AUTOLINK_PATTERN.lastIndex = 0;
@@ -254,12 +306,7 @@ const linkifyTextValue = (value: string): MdastNode[] => {
       result.push({ type: 'text', value: rawUrl });
     } else {
       const href = url.startsWith('www.') ? `https://${url}` : url;
-      result.push({
-        type: 'link',
-        url: href,
-        title: null,
-        children: [{ type: 'text', value: url }],
-      });
+      result.push(createTextLinkNode(href, url));
 
       if (trailing.length > 0) {
         result.push({ type: 'text', value: trailing });
@@ -277,20 +324,195 @@ const linkifyTextValue = (value: string): MdastNode[] => {
   return result;
 };
 
+type MarkdownParser = {
+  parse: (value: string) => MdastNode;
+};
+
+type MarkdownFile = {
+  toString: () => string;
+};
+
+const isExactDoubleAsterisk = (value: string, offset: number) =>
+  offset >= 0 &&
+  value.slice(offset, offset + 2) === '**' &&
+  value[offset - 1] !== '*' &&
+  value[offset + 2] !== '*';
+
+const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
+  if (!isExactDoubleAsterisk(source, offset)) return false;
+
+  let precedingBackslashes = 0;
+  for (let index = offset - 1; index >= 0 && source[index] === '\\'; index -= 1) {
+    precedingBackslashes += 1;
+  }
+  return precedingBackslashes % 2 === 0;
+};
+
+const isMarkdownPunctuation = (value: string) =>
+  /[!-/:-@[-`{-~]/u.test(value) || /\p{P}/u.test(value);
+
+const isValidStrongCloser = (value: string, offset: number) => {
+  if (!isExactDoubleAsterisk(value, offset)) return false;
+
+  const precedingCharacter = value[offset - 1];
+  const followingCodePoint = value.codePointAt(offset + 2);
+  const followingCharacter =
+    followingCodePoint === undefined ? undefined : String.fromCodePoint(followingCodePoint);
+  if (!precedingCharacter || /\s/u.test(precedingCharacter)) return false;
+
+  return (
+    followingCharacter === undefined ||
+    /\s/u.test(followingCharacter) ||
+    isMarkdownPunctuation(followingCharacter)
+  );
+};
+
+const findValidStrongCloser = (value: string, start = 0, end = value.length) => {
+  for (let offset = start; offset + 1 < end; offset += 1) {
+    if (isValidStrongCloser(value, offset)) return offset;
+  }
+  return -1;
+};
+
+const hasUnescapedValidCloser = (source: string, start: number, end: number) => {
+  for (let offset = start; offset + 1 < end; offset += 1) {
+    if (isUnescapedDoubleAsterisk(source, offset) && isValidStrongCloser(source, offset)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const isLiteralGfmAutolink = (source: string, link: MdastNode, linkText: MdastNode) => {
+  const linkStartOffset = link.position?.start?.offset;
+  const linkTextStartOffset = linkText.position?.start?.offset;
+  return (
+    typeof linkStartOffset === 'number' &&
+    typeof linkTextStartOffset === 'number' &&
+    linkStartOffset === linkTextStartOffset &&
+    source[linkStartOffset] !== '['
+  );
+};
+
+// GFM can consume a closing strong delimiter and the following inline markup
+// into an autolink. Repair that AST shape after GFM by truncating the already
+// normalized destination, while keeping ordinary URL and email autolinks.
+const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
+  const parse = this.parse.bind(this);
+
+  const parseInlineSuffix = (value: string): MdastNode[] => {
+    if (!value) return [];
+
+    const parsed = parse(value);
+    const [first] = parsed.children ?? [];
+    if (parsed.children?.length === 1 && first?.type === 'paragraph' && first.children) {
+      return first.children;
+    }
+
+    return [{ type: 'text', value }];
+  };
+
+  const splitMalformedAutolink = (link: MdastNode, source: string) => {
+    if (link.type !== 'link' || typeof link.url !== 'string') return undefined;
+
+    const linkText = link.children?.[0];
+    if (linkText?.type !== 'text' || typeof linkText.value !== 'string') return undefined;
+    if (!isLiteralGfmAutolink(source, link, linkText)) return undefined;
+
+    const textCloser = findValidStrongCloser(linkText.value);
+    const urlCloser = findValidStrongCloser(link.url);
+    if (textCloser <= 0 || urlCloser <= 0) return undefined;
+
+    const linkStart = link.position?.start?.offset;
+    const linkEnd = link.position?.end?.offset;
+    if (
+      typeof linkStart !== 'number' ||
+      typeof linkEnd !== 'number' ||
+      !hasUnescapedValidCloser(source, linkStart, linkEnd)
+    ) {
+      return undefined;
+    }
+
+    const url = linkText.value.slice(0, textCloser);
+    if (!/^(?:https?:\/\/|www\.)/iu.test(url)) return undefined;
+
+    const suffix = linkText.value.slice(textCloser + 2);
+    const suffixNodes = suffix ? parseInlineSuffix(suffix) : [];
+    if (!suffixNodes.some((suffixNode) => suffixNode.type !== 'text')) return undefined;
+
+    return {
+      href: link.url.slice(0, urlCloser),
+      url,
+      suffixNodes,
+    };
+  };
+
+  const wrapRepairedAutolink = (
+    link: MdastNode,
+    split: { href: string; url: string }
+  ): MdastNode => ({
+    type: 'strong' as const,
+    children: [createTextLinkNode(split.href, split.url, link.title ?? null)],
+  });
+
+  const tryRepairMalformedBoldAutolink = (
+    child: MdastNode,
+    nextChild: MdastNode | undefined,
+    source: string
+  ): MdastChildReplacement | undefined => {
+    if (child.type === 'strong' && child.children?.length === 1) {
+      const strongStart = child.position?.start?.offset;
+      if (!isUnescapedDoubleAsterisk(source, typeof strongStart === 'number' ? strongStart : -1)) {
+        return undefined;
+      }
+
+      const split = splitMalformedAutolink(child.children[0], source);
+      if (!split) return undefined;
+      return {
+        nodes: [wrapRepairedAutolink(child.children[0], split), ...split.suffixNodes],
+      };
+    }
+
+    if (child.type !== 'text' || typeof child.value !== 'string' || !child.value.endsWith('**')) {
+      return undefined;
+    }
+    if (!nextChild) return undefined;
+
+    const precedingEndOffset = child.position?.end?.offset;
+    if (
+      !isUnescapedDoubleAsterisk(
+        source,
+        typeof precedingEndOffset === 'number' ? precedingEndOffset - 2 : -1
+      )
+    ) {
+      return undefined;
+    }
+
+    const split = splitMalformedAutolink(nextChild, source);
+    if (!split) return undefined;
+
+    const repaired: MdastNode[] = [];
+    const textBeforeStrong = child.value.slice(0, -2);
+    if (textBeforeStrong) {
+      repaired.push({ ...child, value: textBeforeStrong });
+    }
+    repaired.push(wrapRepairedAutolink(nextChild, split), ...split.suffixNodes);
+    return { nodes: repaired, consumedSiblings: 1 };
+  };
+
+  return (tree: unknown, file: MarkdownFile) => {
+    const source = file.toString();
+    transformMdastChildren(tree, (child, nextChild) =>
+      tryRepairMalformedBoldAutolink(child, nextChild, source)
+    );
+  };
+};
+
 const remarkLinkifyPlainUrls = () => {
-  const walk = (node: MdastNode) => {
-    if (node.type === 'link' || node.type === 'linkReference') return;
-    if (node.type === 'code') return;
-
-    const children = node.children;
-    if (!Array.isArray(children) || children.length === 0) return;
-
-    const nextChildren: MdastNode[] = [];
-    for (const child of children) {
+  return (tree: unknown) => {
+    transformMdastChildren(tree, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
-        const linkified = linkifyTextValue(child.value);
-        nextChildren.push(...linkified);
-        continue;
+        return { nodes: linkifyTextValue(child.value) };
       }
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
@@ -307,25 +529,12 @@ const remarkLinkifyPlainUrls = () => {
             }
             return { type: 'inlineCode', value: n.value };
           });
-          nextChildren.push(...wrappedChildren);
-        } else {
-          nextChildren.push(child);
+          return { nodes: wrappedChildren };
         }
-        continue;
       }
 
-      nextChildren.push(child);
-      walk(child);
-    }
-
-    node.children = nextChildren;
-  };
-
-  return (tree: unknown) => {
-    if (typeof tree !== 'object' || tree === null) return;
-    const root = tree as MdastNode;
-    if (typeof root.type !== 'string') return;
-    walk(root);
+      return undefined;
+    });
   };
 };
 
@@ -333,62 +542,35 @@ const remarkLinkifyPlainUrls = () => {
 // `link` nodes that explicit markdown file links use, so they flow through the
 // `a` -> AgentFileLink renderer. Runs AFTER URL linkify so URLs are already
 // `link` nodes (which this walk skips) and can't be re-grabbed as paths.
-const buildFilePathLinkNode = (path: string): MdastNode => ({
-  type: 'link',
-  url: path,
-  title: null,
-  children: [{ type: 'text', value: path }],
-});
-
 const remarkLinkifyFilePaths = () => {
-  const walk = (node: MdastNode) => {
-    if (node.type === 'link' || node.type === 'linkReference') return;
-    if (node.type === 'code') return;
-
-    const children = node.children;
-    if (!Array.isArray(children) || children.length === 0) return;
-
-    const nextChildren: MdastNode[] = [];
-    for (const child of children) {
+  return (tree: unknown) => {
+    transformMdastChildren(tree, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
         const segments = splitTextIntoFilePathSegments(child.value);
-        if (segments.length === 1 && segments[0]?.type === 'text') {
-          nextChildren.push(child);
-          continue;
-        }
-        for (const segment of segments) {
-          nextChildren.push(
+        if (segments.length === 1 && segments[0]?.type === 'text') return undefined;
+
+        return {
+          nodes: segments.map((segment) =>
             segment.type === 'path'
-              ? buildFilePathLinkNode(segment.value)
+              ? createTextLinkNode(segment.value, segment.value)
               : { type: 'text', value: segment.value }
-          );
-        }
-        continue;
+          ),
+        };
       }
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
         const path = matchWholeFilePath(child.value);
-        nextChildren.push(path ? buildFilePathLinkNode(path) : child);
-        continue;
+        return path ? { nodes: [createTextLinkNode(path, path)] } : undefined;
       }
 
-      nextChildren.push(child);
-      walk(child);
-    }
-
-    node.children = nextChildren;
-  };
-
-  return (tree: unknown) => {
-    if (typeof tree !== 'object' || tree === null) return;
-    const root = tree as MdastNode;
-    if (typeof root.type !== 'string') return;
-    walk(root);
+      return undefined;
+    });
   };
 };
 
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
   remarkSingleDollarTextMath,

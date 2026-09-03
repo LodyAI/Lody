@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canPauseGoalThroughPromptBridge,
   getPromptBridgeGoalCommands,
+  GOAL_PROMPT_DISPATCH_OPTIONS,
   isSessionPromptBusy,
 } from '../src/components/sessions/session-goal-control';
 
@@ -46,5 +47,9 @@ describe('session goal prompt bridge', () => {
         isGoalActive: false,
       })
     ).toBe(true);
+  });
+
+  it('forces direct dispatch for slash goal commands so steer cannot reject them', () => {
+    expect(GOAL_PROMPT_DISPATCH_OPTIONS).toEqual({ forceDirect: true });
   });
 });

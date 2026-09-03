@@ -9,6 +9,7 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 import { ProviderRow } from '@/components/settings/provider-row';
+import { cn } from '@/lib/utils';
 
 const machineId = 'machine-1' as MachineId;
 const resetIn = (seconds: number) => Math.floor(getServerNow() / 1000) + seconds;
@@ -37,11 +38,17 @@ type StoryProps = {
   config: AgentConfigMeta;
   machine: MachineViewMeta;
   showActions?: boolean;
+  narrow?: boolean;
 };
 
-function StoryWrapper({ config, machine, showActions }: StoryProps) {
+function StoryWrapper({ config, machine, showActions, narrow }: StoryProps) {
   return (
-    <div className="w-[520px] rounded-lg border border-border/60 bg-card/50">
+    <div
+      className={cn(
+        'rounded-lg border border-border/60 bg-card/50',
+        narrow ? 'w-[340px]' : 'w-[520px]'
+      )}
+    >
       <ProviderRow
         config={config}
         machine={machine}
@@ -168,6 +175,14 @@ export const CodexWeeklyOnly: Story = {
         },
       },
     }),
+  },
+};
+
+export const CodexWeeklyOnlyNarrow: Story = {
+  args: {
+    ...CodexWeeklyOnly.args,
+    narrow: true,
+    showActions: true,
   },
 };
 
