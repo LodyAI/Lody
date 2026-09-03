@@ -23,7 +23,10 @@ import {
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { getLodyOperationStorePath } from '@/orchestration/operation-store';
+import {
+  getLodyOperationStorePath,
+  LodyOperationStoreError,
+} from '@/orchestration/operation-store';
 
 import {
   __lodyMcpServerInternals,
@@ -53,10 +56,14 @@ const {
   SessionCancelToolInputSchema,
   SessionHistoryToolInputSchema,
   SessionListToolInputSchema,
+  SessionRenameToolInputSchema,
+  SessionRenameManyToolInputSchema,
   SessionStatusManyToolInputSchema,
   mcpErrorResult,
   assertDifferentMcpSession,
   assertBatchSize,
+  resolveSessionRenameItems,
+  applySessionRenameItems,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -172,6 +179,9 @@ describe('Lody Task MCP tool gate', () => {
   it('omits every Task tool while leaving the rest of Lody MCP available when disabled', async () => {
     const names = await listPublishedToolNames(false);
     expect(names).toContain('lody_feedback');
+    expect(names).toEqual(
+      expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
+    );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
 
@@ -820,6 +830,90 @@ describe('session MCP input schemas', () => {
         timeoutSeconds: 3_601,
       }).success
     ).toBe(false);
+  });
+
+  it('validates single and batch session renames', () => {
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'Current title' }).success).toBe(true);
+    expect(
+      SessionRenameToolInputSchema.safeParse({ sessionId: 'session-1', title: 'New title' }).success
+    ).toBe(true);
+    expect(SessionRenameToolInputSchema.safeParse({ title: '   ' }).success).toBe(false);
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'x'.repeat(201) }).success).toBe(false);
+
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-2', title: 'Two' },
+        ],
+      }).success
+    ).toBe(true);
+    expect(SessionRenameManyToolInputSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-1', title: 'Two' },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: Array.from({ length: 21 }, (_, index) => ({
+          sessionId: `session-${index}`,
+          title: `Title ${index}`,
+        })),
+      }).success
+    ).toBe(false);
+  });
+
+  it('resolves current session renames and preserves ordered independent results', async () => {
+    expect(
+      resolveSessionRenameItems(
+        [{ sessionId: 'current', title: 'Current title' }],
+        createMcpContext()
+      )
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    expect(() =>
+      resolveSessionRenameItems(
+        [
+          { sessionId: 'current', title: 'First' },
+          { sessionId: 'current-session-id', title: 'Second' },
+        ],
+        createMcpContext()
+      )
+    ).toThrow(/appear only once/);
+
+    const results = await applySessionRenameItems(
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      async ({ sessionId }) => {
+        if (sessionId === 'missing') {
+          throw new LodyOperationStoreError(
+            'SESSION_NOT_FOUND',
+            'Session not found: missing',
+            false
+          );
+        }
+      }
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
   });
 
   it('cancels only the assistant turn created by the Operation item', () => {
