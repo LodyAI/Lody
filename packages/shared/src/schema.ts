@@ -31,7 +31,7 @@ import {
   WorktreeSetupScriptConfig,
 } from '.';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
-import type { ModelInfo } from './ai';
+import type { ModelInfo, TurnSummary } from './ai';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
@@ -197,6 +197,12 @@ const isWorktreeScriptHistoryStep = (value: unknown): boolean =>
   (value.status === 'in_progress' || value.status === 'completed' || value.status === 'failed') &&
   typeof value.output === 'string';
 
+const isToolCallRef = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.machineId === 'string' &&
+  typeof value.turnId === 'string' &&
+  typeof value.index === 'number';
+
 const historyMessageItemSchema = schema
   .LoroMap(
     {
@@ -271,7 +277,14 @@ const historyMessageItemSchema = schema
               ? true
               : 'Missing goal metadata';
           case 'tool_call':
-            return typeof v.toolCallId === 'string' && typeof v.status === 'string'
+            // Sealed turns may store a skeleton (`kind`/`status`/`title`/
+            // `locations`/`ref`) with the execution payload kept on the origin
+            // machine. A skeleton has no `content` array and may omit
+            // `toolCallId`, so `ref` is accepted as the payload pointer.
+            if (typeof v.status !== 'string') {
+              return 'Missing toolCallId/status';
+            }
+            return typeof v.toolCallId === 'string' || isToolCallRef(v.ref)
               ? true
               : 'Missing toolCallId/status';
           case 'subagent_task':
@@ -489,6 +502,12 @@ export const sessionPreviewDocSchema = schema.LoroMap(
 export const sessionExternalHistoryCursorDocSchema = schema.LoroMap(
   {
     importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+    /**
+     * Canonical-hash version the stored `importedTurnHashes` were computed
+     * with (see `HASH_VERSION` in `@lody/history-import`). Absent = v1, the
+     * legacy verbatim `{ role, items, plan }` hash.
+     */
+    hashVersion: schema.Number({ required: false }),
   },
   { required: false }
 );
@@ -571,6 +590,23 @@ export const sessionHistorySchema = schema.LoroMap({
   // Send status for user messages - only set when message delivery failed (e.g., timeout)
   // Cleared when message is successfully retried
   sendStatus: schema.String<SessionHistorySendStatus>({ required: false }),
+  /**
+   * Derived summary of a sealed turn (`TurnSummary`). Declared as `Any` so the
+   * exact derived shape can evolve without a schema migration; readers treat
+   * it as optional and opaque.
+   */
+  summary: schema.Any({ required: false }),
+  /**
+   * Live streaming container for the in-progress text/thought of an open turn.
+   * Sealed turns omit it; the final text/thought items carry the content.
+   */
+  live: schema.LoroMap(
+    {
+      kind: schema.String<'text' | 'thought'>(),
+      text: schema.LoroText(),
+    },
+    { required: false }
+  ),
 });
 
 export type PrStatus = 'open' | 'closed' | 'merged' | 'draft';
@@ -693,6 +729,12 @@ export type ExternalAcpHistorySyncMeta = {
   importedTurnCount: number;
   /** @deprecated Legacy bulky cursor. New writes do not store per-turn hashes in meta. */
   importedTurnHashes?: string[];
+  /**
+   * Canonical-hash version `replayDigest`/`importedTurnHashes` were computed
+   * with. Absent = v1 (legacy verbatim hash); v2 hashes a canonical item form
+   * so full and skeleton tool_call shapes compare equal.
+   */
+  hashVersion?: number;
   lastSyncAt: number;
   status?: 'synced' | 'sync_conflict' | 'metadata_only';
   conflictReason?: string;
@@ -716,6 +758,8 @@ export type SessionPreviewLegacyMetaFields = {
 
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
+  /** Canonical-hash version of the stored hashes. Absent = v1 (legacy). */
+  hashVersion?: number;
 };
 
 /**
@@ -1189,6 +1233,8 @@ export type SessionHistoryInput = Omit<
   | 'items'
   | 'read'
   | 'userId'
+  | 'summary'
+  | 'live'
 > & {
   items?: Array<MessageContent & { text?: string | undefined }>;
   read?: boolean;
@@ -1209,6 +1255,13 @@ export type SessionHistoryInput = Omit<
   plan?: SessionPlanEntry[];
   finished?: boolean;
   sendStatus?: SessionHistorySendStatus;
+  /** Derived summary written when the turn is sealed. Readers tolerate absence. */
+  summary?: TurnSummary;
+  /**
+   * Live streaming container of an open turn. Declared for readers only;
+   * current writers do not set it.
+   */
+  live?: { kind: 'text' | 'thought'; text: string };
 };
 export type SessionHistory = Omit<SessionHistoryInput, '$cid'> & {
   $cid?: string;

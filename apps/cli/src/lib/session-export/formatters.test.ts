@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionHistoryInput, SessionMeta } from '@lody/shared';
+import type { MessageContent, SessionHistoryInput, SessionMeta } from '@lody/shared';
 import { buildSessionArtifacts, toExportSessionSummary, toUserFacingAgentType } from './formatters';
 import { buildTranscriptMarkdown } from './markdown';
 
@@ -186,6 +186,74 @@ describe('session export formatters', () => {
     ]);
   });
 
+  it('tolerates sealed tool_call skeletons without execution payload', () => {
+    // Sealed turns persist only kind/status/title/locations/ref — no
+    // toolCallId, content, rawInput, or rawOutput (see ToolCallRef).
+    const skeleton = {
+      type: 'tool_call',
+      kind: 'execute',
+      status: 'completed',
+      title: 'Shell: ls',
+      locations: [{ path: '/tmp/work' }],
+      ref: { machineId: 'machine-1', turnId: 'turn-2', index: 0 },
+    } as unknown as MessageContent;
+
+    const artifacts = buildSessionArtifacts([
+      createHistoryEntry({
+        id: 'turn-2',
+        role: 'assistant',
+        items: [skeleton],
+      }),
+    ]);
+
+    expect(artifacts.toolCalls).toEqual([
+      {
+        turnId: 'turn-2',
+        timestamp: '2026-03-23T10:01:00.000Z',
+        role: 'assistant',
+        toolCallId: null,
+        title: 'Shell: ls',
+        kind: 'execute',
+        status: 'completed',
+        locations: [{ path: '/tmp/work' }],
+        permissionRequest: undefined,
+        content: [],
+        rawInput: undefined,
+        rawOutput: undefined,
+        ref: { machineId: 'machine-1', turnId: 'turn-2', index: 0 },
+      },
+    ]);
+    // The transcript copy keeps the skeleton and serializes cleanly.
+    expect(artifacts.transcript[0]?.items).toEqual([{ ...skeleton, content: [] }]);
+    expect(() => JSON.stringify(artifacts)).not.toThrow();
+  });
+
+  it('keeps old-shape tool call records byte-identical in serialized output', () => {
+    const artifacts = buildSessionArtifacts([
+      createHistoryEntry({
+        id: 'turn-2',
+        role: 'assistant',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'tool-1',
+            status: 'completed',
+            kind: 'read',
+            title: 'Read session schema',
+            rawInput: { path: 'schema.ts' },
+            rawOutput: { ok: true },
+          },
+        ],
+      }),
+    ]);
+
+    expect(JSON.stringify(artifacts.toolCalls[0])).toBe(
+      '{"turnId":"turn-2","timestamp":"2026-03-23T10:01:00.000Z","role":"assistant",' +
+        '"toolCallId":"tool-1","title":"Read session schema","kind":"read","status":"completed",' +
+        '"content":[],"rawInput":{"path":"schema.ts"},"rawOutput":{"ok":true}}'
+    );
+  });
+
   it('renders transcript markdown with thought blocks and attachment links', () => {
     const markdown = buildTranscriptMarkdown({
       session: toExportSessionSummary(createSessionMeta({ title: 'Exporter' }), 'workspace-1'),
@@ -231,5 +299,83 @@ describe('session export formatters', () => {
     expect(markdown).toContain('#### Thought');
     expect(markdown).toContain('Need to keep this independent.');
     expect(markdown).toContain('![diagram.png](artifacts/attachments/files/img-1.png)');
+  });
+
+  it('renders old-shape tool calls unchanged in transcript markdown', () => {
+    const markdown = buildTranscriptMarkdown({
+      session: toExportSessionSummary(createSessionMeta({ title: 'Exporter' }), 'workspace-1'),
+      turns: [
+        {
+          turnId: 'turn-1',
+          role: 'assistant',
+          timestamp: '2026-03-23T10:01:00.000Z',
+          finished: true,
+          sendStatus: undefined,
+          startedAt: null,
+          endedAt: null,
+          modelInfo: undefined,
+          items: [
+            {
+              type: 'tool_call',
+              toolCallId: 'tool-1',
+              status: 'completed',
+              kind: 'read',
+              title: 'Read `schema.ts`',
+            },
+          ],
+        },
+      ],
+      attachments: [],
+    });
+
+    expect(markdown).toContain(
+      '#### Tool Call\n- id: `tool-1`\n- title: Read `schema.ts`\n- status: `completed`\n- kind: `read`'
+    );
+    expect(markdown).not.toContain('origin machine');
+  });
+
+  it('renders sealed tool_call skeletons in transcript markdown without an id', () => {
+    const skeleton = {
+      type: 'tool_call',
+      kind: 'execute',
+      status: 'completed',
+      title: 'Shell: ls',
+      ref: { machineId: 'machine-1', turnId: 'turn-1', index: 0 },
+    } as unknown as MessageContent;
+    const titleless = {
+      type: 'tool_call',
+      kind: 'read',
+      status: 'completed',
+      ref: { machineId: 'machine-1', turnId: 'turn-1', index: 1 },
+    } as unknown as MessageContent;
+
+    const markdown = buildTranscriptMarkdown({
+      session: toExportSessionSummary(createSessionMeta({ title: 'Exporter' }), 'workspace-1'),
+      turns: [
+        {
+          turnId: 'turn-1',
+          role: 'assistant',
+          timestamp: '2026-03-23T10:01:00.000Z',
+          finished: true,
+          sendStatus: undefined,
+          startedAt: null,
+          endedAt: null,
+          modelInfo: undefined,
+          items: [skeleton, titleless],
+        },
+      ],
+      attachments: [],
+    });
+
+    expect(markdown).toContain(
+      '#### Tool Call\n- title: Shell: ls\n- status: `completed`\n- kind: `execute`\n' +
+        '- note: execution details stored on the origin machine'
+    );
+    // Without a title the kind line still identifies the tool.
+    expect(markdown).toContain(
+      '#### Tool Call\n- status: `completed`\n- kind: `read`\n' +
+        '- note: execution details stored on the origin machine'
+    );
+    expect(markdown).not.toContain('- id:');
   });
 });

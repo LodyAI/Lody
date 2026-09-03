@@ -1,5 +1,7 @@
 import { SESSION_IMAGE_MAX_COUNT, type MessageContent } from '@lody/shared';
 
+import { isToolCallRef } from './tool-call-skeleton';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -137,7 +139,14 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
         (value.updatedAt === undefined || typeof value.updatedAt === 'number')
       );
     case 'tool_call':
-      return typeof value.toolCallId === 'string' && typeof value.status === 'string';
+      // Sealed turns may store a skeleton with no `toolCallId` and no
+      // `content`; its payload pointer `ref` identifies it instead (see
+      // `tool-call-skeleton.ts` and `packages/shared/src/schema.ts`).
+      return (
+        typeof value.status === 'string' &&
+        (typeof value.toolCallId === 'string' || isToolCallRef(value.ref)) &&
+        (value.content === undefined || Array.isArray(value.content))
+      );
     case 'subagent_task':
       return typeof value.taskId === 'string' && typeof value.status === 'string';
     case 'available_commands':

@@ -6,7 +6,7 @@ import {
   type SessionHistoryInput,
 } from '@lody/shared';
 
-import { hashHistoryEntry, hashText } from './hashing';
+import { HASH_VERSION, hashHistoryEntryV2, hashText } from './hashing';
 import { buildHistoryReplayImport } from './replay-import';
 
 export type MaterializedReplay = {
@@ -14,6 +14,8 @@ export type MaterializedReplay = {
   turnHashes: string[];
   replayDigest: string;
   droppedNotifications: number;
+  /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
+  hashVersion: number;
 };
 
 export type MaterializeReplayArgs = {
@@ -45,7 +47,7 @@ export function materializeReplay(args: MaterializeReplayArgs): MaterializedRepl
     createId: () => `${providerKey}:${args.acpSessionId}:tmp:${tempId++}`,
     mode: 'imported_snapshot',
   });
-  const turnHashes = replay.history.map(hashHistoryEntry);
+  const turnHashes = replay.history.map(hashHistoryEntryV2);
   const history = replay.history.map((entry, index) => ({
     ...entry,
     id: `${providerKey}:${args.acpSessionId}:turn:${index}:${turnHashes[index]!.slice(0, 16)}`,
@@ -56,5 +58,6 @@ export function materializeReplay(args: MaterializeReplayArgs): MaterializedRepl
     turnHashes,
     replayDigest: hashText(turnHashes.join('\n')),
     droppedNotifications: replay.droppedNotifications,
+    hashVersion: HASH_VERSION,
   };
 }

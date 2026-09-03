@@ -38,7 +38,8 @@ export type ExportToolCallRecord = {
   turnId: string;
   timestamp: string;
   role: SessionHistoryInput['role'];
-  toolCallId: string;
+  /** Absent on sealed skeletons, whose payload stays on the origin machine. */
+  toolCallId: string | null;
   title: string | null;
   kind: string | null;
   status: string;
@@ -50,6 +51,8 @@ export type ExportToolCallRecord = {
   >[];
   rawInput: Extract<MessageContent, { type: 'tool_call' }>['rawInput'];
   rawOutput: Extract<MessageContent, { type: 'tool_call' }>['rawOutput'];
+  /** Payload pointer present only on sealed skeletons. */
+  ref?: Extract<MessageContent, { type: 'tool_call' }>['ref'];
 };
 
 export type ExportSystemNoticeRecord = {

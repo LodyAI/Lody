@@ -881,3 +881,217 @@ describe('acp history apply', () => {
     }
   );
 });
+
+describe('sealed skeleton tool_call items', () => {
+  type HistoryInput = Parameters<typeof applyNotificationOnHistory>[0];
+
+  // A sealed turn's skeleton: no `toolCallId`, no `content`, no rawInput/rawOutput —
+  // only the ref pointer to the origin machine's payload store.
+  const skeletonItem = {
+    type: 'tool_call',
+    kind: 'execute',
+    status: 'completed',
+    title: 'Shell',
+    ref: { machineId: 'machine-1', turnId: 'sealed-turn', index: 1 },
+  };
+
+  const makeSealedHistory = (items: unknown[]): HistoryInput =>
+    [
+      {
+        id: 'sealed-turn',
+        role: 'assistant',
+        finished: true,
+        timestamp: '2026-05-13T00:00:00.000Z',
+        items,
+      },
+    ] as unknown as HistoryInput;
+
+  const readItems = (entry: unknown): MessageContent[] => {
+    const items = (entry as { items?: unknown }).items;
+    return Array.isArray(items) ? (items as unknown as MessageContent[]) : [];
+  };
+
+  const findToolCall = (entry: unknown) =>
+    readItems(entry).find((item) => item.type === 'tool_call') as
+      | Extract<MessageContent, { type: 'tool_call' }>
+      | undefined;
+
+  it('still merges tool_call_update into a live item when earlier sealed entries hold skeletons', () => {
+    const history = applyNotificationOnHistory(
+      makeSealedHistory([{ type: 'text', text: 'done' }, skeletonItem]),
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'live-1',
+          title: 'Shell',
+          status: 'in_progress',
+          rawInput: { command: 'echo hi' },
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'live-1',
+          status: 'completed',
+          rawOutput: { stdout: 'hi\n', exit_code: 0 },
+        }),
+      ],
+      undefined,
+      { createId: () => 'live-entry', now: () => '2026-05-14T00:00:00.000Z' }
+    );
+
+    expect(history).toHaveLength(2);
+    // The sealed entry (including its skeleton) is untouched.
+    expect(readItems(history[0])).toEqual([{ type: 'text', text: 'done' }, skeletonItem]);
+
+    const toolCall = findToolCall(history[1]);
+    expect(toolCall).toMatchObject({ toolCallId: 'live-1', status: 'completed' });
+    const output = toolCall?.content?.find((block) => block.type === 'terminal_output');
+    expect(output).toMatchObject({ output: 'hi\n' });
+  });
+
+  it('merges an update into the live entry holding the id when a sealed skeleton entry precedes it', () => {
+    const history = [
+      {
+        id: 'sealed-turn',
+        role: 'assistant',
+        finished: true,
+        timestamp: '2026-05-13T00:00:00.000Z',
+        items: [skeletonItem],
+      },
+      {
+        id: 'live-turn',
+        role: 'assistant',
+        timestamp: '2026-05-14T00:00:00.000Z',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'live-9',
+            title: 'Shell',
+            status: 'in_progress',
+            content: [{ type: 'terminal_command', command: 'echo hi' }],
+          },
+        ],
+      },
+    ] as unknown as HistoryInput;
+
+    const next = applyNotificationOnHistory(history, [
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'live-9',
+        status: 'completed',
+        rawOutput: { stdout: 'hi\n', exit_code: 0 },
+      }),
+    ]);
+
+    expect(next).toHaveLength(2);
+    expect(readItems(next[0])).toEqual([skeletonItem]);
+    const merged = findToolCall(next[1]);
+    expect(merged).toMatchObject({ toolCallId: 'live-9', status: 'completed' });
+    expect(merged?.content?.some((block) => block.type === 'terminal_output')).toBe(true);
+  });
+
+  it('appends a tool_call_update whose id matches no live item (unknown-id semantics unchanged)', () => {
+    const history = applyNotificationOnHistory(
+      makeSealedHistory([skeletonItem]),
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'missing-id',
+          status: 'completed',
+          rawOutput: { stdout: 'orphan\n', exit_code: 0 },
+        }),
+      ],
+      undefined,
+      { createId: () => 'live-entry', now: () => '2026-05-14T00:00:00.000Z' }
+    );
+
+    expect(history).toHaveLength(2);
+    expect(readItems(history[0])).toEqual([skeletonItem]);
+    expect(findToolCall(history[1])).toMatchObject({
+      toolCallId: 'missing-id',
+      status: 'completed',
+    });
+  });
+
+  it('hydrates a skeleton that carries a toolCallId instead of crashing on its missing content', () => {
+    const skeletonWithId = {
+      type: 'tool_call',
+      toolCallId: 'sealed-1',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'Shell',
+      ref: { machineId: 'machine-1', turnId: 'sealed-turn', index: 0 },
+    };
+
+    const next = applyNotificationOnHistory(makeSealedHistory([skeletonWithId]), [
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'sealed-1',
+        status: 'completed',
+        rawOutput: { stdout: 'late\n', exit_code: 0 },
+      }),
+    ]);
+
+    // Merged in place inside the sealed entry; the ref pointer survives.
+    expect(next).toHaveLength(1);
+    const merged = findToolCall(next[0]);
+    expect(merged).toMatchObject({
+      toolCallId: 'sealed-1',
+      status: 'completed',
+      ref: skeletonWithId.ref,
+    });
+    expect(merged?.content?.some((block) => block.type === 'terminal_output')).toBe(true);
+  });
+
+  it('applyMessageContentsBatch ignores skeletons when indexing and never merges into them', () => {
+    const history = [
+      {
+        id: 'live-turn',
+        role: 'assistant',
+        timestamp: '2026-05-14T00:00:00.000Z',
+        items: [
+          // Sealed skeleton sitting inside an unfinished entry.
+          skeletonItem,
+          {
+            type: 'tool_call',
+            toolCallId: 'live-9',
+            title: 'Shell',
+            status: 'in_progress',
+            content: [{ type: 'terminal_command', command: 'echo hi' }],
+          },
+        ],
+      },
+    ] as unknown as Parameters<typeof applyMessageContentsBatch>[0];
+
+    const replayedSkeleton = {
+      type: 'tool_call',
+      kind: 'read',
+      status: 'completed',
+      title: 'ReadFile',
+      ref: { machineId: 'machine-1', turnId: 'other-turn', index: 0 },
+    };
+
+    const next = applyMessageContentsBatch(
+      history,
+      [
+        {
+          type: 'tool_call',
+          toolCallId: 'live-9',
+          status: 'completed',
+          content: [{ type: 'terminal_output', output: 'hi\n', stream: 'combined' }],
+        },
+        replayedSkeleton,
+      ] as unknown as MessageContent[],
+      { createId: () => 'entry-x', now: () => '2026-05-14T01:00:00.000Z' }
+    );
+
+    expect(next).toHaveLength(1);
+    const toolCalls = readItems(next[0]).filter((item) => item.type === 'tool_call');
+    expect(toolCalls).toHaveLength(3);
+    // The original skeleton is untouched and was not a merge target.
+    expect(toolCalls[0]).toEqual(skeletonItem);
+    // The live item merged in place by id.
+    expect(toolCalls[1]).toMatchObject({ toolCallId: 'live-9', status: 'completed' });
+    // The id-less replayed skeleton appended as its own item (unknown-id semantics).
+    expect(toolCalls[2]).toEqual(replayedSkeleton);
+  });
+});

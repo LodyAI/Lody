@@ -22,6 +22,7 @@ import {
   isActiveSessionStatus,
   SessionStatusFactory,
   type ProjectRef,
+  type SessionHistoryInput,
   type SessionId,
 } from '@lody/shared';
 
@@ -35,9 +36,10 @@ import {
   getHistoryImportKey,
   getProviderLabel,
   hasPendingDispatchHistory,
-  hashHistoryEntry,
+  hashHistoryEntryForVersion,
   materializeReplay,
   resolveImportedTurnHashes,
+  resolveStoredHashVersion,
   resolveSessionTitle,
   resolveSourceUpdatedAtMs,
   selectLatestCatalogItems,
@@ -118,15 +120,34 @@ async function readSessionImportedTurnHashes(
 
 async function writeSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
-  turnHashes: readonly string[]
+  turnHashes: readonly string[],
+  hashVersion: number
 ): Promise<void> {
   const current = await sessionDoc.getExternalHistoryCursor();
-  if (areStringArraysEqual(current?.importedTurnHashes ?? [], turnHashes)) {
+  if (
+    current?.hashVersion === hashVersion &&
+    areStringArraysEqual(current?.importedTurnHashes ?? [], turnHashes)
+  ) {
     return;
   }
   await sessionDoc.setExternalHistoryCursor({
     importedTurnHashes: [...turnHashes],
+    hashVersion,
   });
+}
+
+/**
+ * Hash locally stored turns in the version of the stored sync cursor. The
+ * decisions compare these against stored-version replay hashes, so hashing
+ * with the wrong canonical form (e.g. v2 against a v1 cursor) would
+ * manufacture a conflict on upgrade.
+ */
+function hashHistoryForStoredVersion(
+  history: readonly SessionHistoryInput[],
+  externalHistory: ExternalAcpHistorySyncMeta
+): string[] {
+  const hashVersion = resolveStoredHashVersion(externalHistory);
+  return history.map((entry) => hashHistoryEntryForVersion(entry, hashVersion));
 }
 
 async function listWorkspaceSessionMetas(
@@ -418,7 +439,10 @@ export class LocalProjectHistorySyncService {
         existingExternalHistory
       );
       if (
-        areStringArraysEqual(currentHistoryBeforeReplay.map(hashHistoryEntry), importedTurnHashes)
+        areStringArraysEqual(
+          hashHistoryForStoredVersion(currentHistoryBeforeReplay, existingExternalHistory),
+          importedTurnHashes
+        )
       ) {
         return finishResolved(meta);
       }
@@ -470,7 +494,7 @@ export class LocalProjectHistorySyncService {
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
       materialized,
-      currentHistoryHashes: latestHistory.map(hashHistoryEntry),
+      currentHistoryHashes: hashHistoryForStoredVersion(latestHistory, latestExternalHistory),
       currentHistoryHasPendingDispatch: hasPendingDispatchHistory(latestHistory),
     });
     if (decision.status === 'blocked') {
@@ -494,7 +518,7 @@ export class LocalProjectHistorySyncService {
         externalHistory: latestExternalHistory,
         importedTurnHashes: latestImportedTurnHashes,
         materialized,
-        currentHistoryHashes: history.map(hashHistoryEntry),
+        currentHistoryHashes: hashHistoryForStoredVersion(history, latestExternalHistory),
         currentHistoryHasPendingDispatch: hasPendingDispatchHistory(history),
       });
       if (writeTimeDecision.status !== 'replace') {
@@ -506,7 +530,11 @@ export class LocalProjectHistorySyncService {
       }
       return materialized.history;
     });
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
+    await writeSessionImportedTurnHashes(
+      sessionDoc,
+      materialized.turnHashes,
+      materialized.hashVersion
+    );
     await this.manager.repo.upsertDocMeta(roomId, {
       origin: 'external-acp',
       lastMessageAt,
@@ -692,7 +720,11 @@ export class LocalProjectHistorySyncService {
     try {
       const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
       await sessionDoc.updateHistory(() => args.materialized.history);
-      await writeSessionImportedTurnHashes(sessionDoc, args.materialized.turnHashes);
+      await writeSessionImportedTurnHashes(
+        sessionDoc,
+        args.materialized.turnHashes,
+        args.materialized.hashVersion
+      );
       await this.manager.repo.upsertDocMeta(roomId, meta);
       const synced = await sessionDoc.waitUntilSynced();
       if (!synced) {
@@ -767,10 +799,15 @@ export class LocalProjectHistorySyncService {
       importedTurnHashes,
       replayDigest: materialized.replayDigest,
       turnHashes: materialized.turnHashes,
+      materialized,
     });
 
     if (replayDecision.reason === 'digest_match') {
-      await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
+      await writeSessionImportedTurnHashes(
+        sessionDoc,
+        materialized.turnHashes,
+        materialized.hashVersion
+      );
       await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
         origin: 'external-acp',
         externalHistory: buildExternalHistoryMeta({
@@ -800,7 +837,8 @@ export class LocalProjectHistorySyncService {
       importedTurnHashes,
       replayDigest: materialized.replayDigest,
       turnHashes: materialized.turnHashes,
-      currentHistoryHashes: currentHistory.map(hashHistoryEntry),
+      materialized,
+      currentHistoryHashes: hashHistoryForStoredVersion(currentHistory, externalHistory),
     });
     if (appendDecision.status === 'conflicted') {
       await this.markConflict(
@@ -827,7 +865,11 @@ export class LocalProjectHistorySyncService {
 
     const suffix = materialized.history.slice(appendDecision.appendFromIndex);
     await sessionDoc.updateHistory((history) => [...history, ...suffix]);
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
+    await writeSessionImportedTurnHashes(
+      sessionDoc,
+      materialized.turnHashes,
+      materialized.hashVersion
+    );
     await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
       origin: 'external-acp',
       lastMessageAt: resolveSourceUpdatedAtMs(args.info, getServerNow()),
