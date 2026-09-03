@@ -109,60 +109,121 @@ describe('applyAcpSessionRunConfig', () => {
     expect(vi.mocked(logger.debug).mock.calls.flat().join('\n')).not.toContain('private-value');
   });
 
-  it.each(['codex', 'claude'])(
-    'suppresses known %s run-config mismatch warnings while retaining rejection diagnostics',
-    async (agentType) => {
-      const reject = vi.fn(async () => {
-        throw new Error('rejected');
-      });
-      const agentClient = {
-        isCreated: () => true,
-        getConfigOptions: () => [
-          { id: 'effort', category: 'thought_level' },
-          { id: 'fast', category: 'fast-mode' },
-          { id: 'collaboration_mode', category: 'collaboration_mode' },
-          { id: 'custom-option', category: 'custom' },
-        ],
-        setSessionMode: reject,
-        unstable_setSessionModel: reject,
-        setSessionConfigOption: reject,
-      } as unknown as AgentClient;
+  it('reports a selection the agent accepted but dropped from its own state', async () => {
+    // The codex shape: `fast-mode` is accepted without error on a model with no
+    // fast speed tier, and simply does not come back in the published state, so
+    // the turn runs at normal speed with nothing thrown.
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [
+        { id: 'model', category: 'model', type: 'select', currentValue: 'gpt-5.2' },
+        {
+          id: 'reasoning_effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+        },
+      ],
+      unstable_setSessionModel: vi.fn(async () => undefined),
+      setSessionConfigOption: vi.fn(async () => undefined),
+    } as unknown as AgentClient;
 
-      await expect(
-        applyAcpSessionRunConfig({
-          session: {
-            sessionId: 'session-3' as SessionId,
-            acpSessionId: 'acp-3' as ACPSessionId,
-            agentClient,
-          },
-          config: {
-            cliType: 'builtin',
-            agentType,
-            modeId: 'plan',
-            modelId: 'model-a',
-            configOptionValues: {
-              effort: 'high',
-              fast: false,
-              collaboration_mode: 'plan',
-              'custom-option': 'enabled',
-            },
-          },
-          logger: createLogger(),
-        })
-      ).resolves.toEqual({
-        rejectedSelections: [
-          'mode="plan"',
-          'model="model-a"',
-          'effort="high"',
-          'fast=false',
-          'collaboration_mode="plan"',
-          'custom-option="enabled"',
-        ],
-        warningSelections: ['custom-option="enabled"'],
-        runtimeConfigPatch: { acpSessionId: 'acp-3', configOptionValues: {} },
-      });
-    }
-  );
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-3' as SessionId,
+          acpSessionId: 'acp-3' as ACPSessionId,
+          agentClient,
+        },
+        config: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          modelId: 'gpt-5.2',
+          configOptionValues: { reasoning_effort: 'high', 'fast-mode': true },
+        },
+        logger: createLogger(),
+      })
+    ).resolves.toEqual({
+      // Nothing was rejected, so diagnostics stay empty: the published state is
+      // the only evidence Fast is not running.
+      rejectedSelections: [],
+      warningSelections: ['fast-mode=true'],
+      runtimeConfigPatch: {
+        acpSessionId: 'acp-3',
+        modelId: 'gpt-5.2',
+        configOptionValues: { model: 'gpt-5.2', reasoning_effort: 'high' },
+      },
+    });
+  });
+
+  it('stays quiet when a rejected selection was already effective', async () => {
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [
+        { id: 'fast', category: 'model_config', type: 'boolean', currentValue: false },
+        {
+          id: 'effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+        },
+      ],
+      setSessionConfigOption: vi.fn(async () => {
+        throw new Error('rejected');
+      }),
+    } as unknown as AgentClient;
+
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-6' as SessionId,
+          acpSessionId: 'acp-6' as ACPSessionId,
+          agentClient,
+        },
+        config: {
+          cliType: 'builtin',
+          agentType: 'claude',
+          configOptionValues: { fast: false, effort: 'low' },
+        },
+        logger: createLogger(),
+      })
+    ).resolves.toEqual({
+      rejectedSelections: ['fast=false', 'effort="low"'],
+      // `fast` already held the requested value, so the rejection changed
+      // nothing; `effort` did not, so it is worth saying.
+      warningSelections: ['effort="low"'],
+      runtimeConfigPatch: {
+        acpSessionId: 'acp-6',
+        configOptionValues: { fast: false, effort: 'high' },
+      },
+    });
+  });
+
+  it('treats an on/off select and a boolean toggle as the same choice', async () => {
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [
+        { id: 'fast', category: 'model_config', type: 'select', currentValue: 'on' },
+      ],
+      setSessionConfigOption: vi.fn(async () => undefined),
+    } as unknown as AgentClient;
+
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-7' as SessionId,
+          acpSessionId: 'acp-7' as ACPSessionId,
+          agentClient,
+        },
+        config: { cliType: 'builtin', agentType: 'claude', configOptionValues: { fast: true } },
+        logger: createLogger(),
+      })
+    ).resolves.toEqual({
+      rejectedSelections: [],
+      warningSelections: [],
+      runtimeConfigPatch: { acpSessionId: 'acp-7', configOptionValues: { fast: 'on' } },
+    });
+  });
 
   it('keeps known run-config rejection warnings for other agents', async () => {
     const agentClient = {

@@ -274,12 +274,19 @@ Two things the dev build does deliberately, both load-bearing:
   through `resolvePerModelConfigOptionSelection` for the same exemption, because a
   per-model option's ABSENCE from the snapshot is exactly what the probed model's
   lack of the control looks like and can never be the reason to reject another
-  model's turn. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
-  for model, reasoning effort, Fast, or Plan are not promoted to visible
-  `agent_warning` notices, while other rejected selections still are. Compatibility exception: Claude
-  Fable models omit the Fast mode option, so an explicit `fast=false` is skipped as
-  an already-effective no-op; `fast=true` must still be dispatched and retained in debug
-  diagnostics if rejected.
+  model's turn. Runtime rejections remain in debug diagnostics; what becomes a visible
+  `agent_warning` is DIVERGENCE — the state the agent publishes after applying the
+  turn's config contradicts what was requested. A rejection is not that signal in
+  either direction: Codex accepts `fast-mode` on a model with no fast speed tier and
+  then omits the option from its published state, so the state is the only evidence
+  Fast is off, while a rejected value that was already effective changed nothing and
+  must stay silent. Only where the agent published no config options at all (or for a
+  sensitive id, which the runtime state deliberately omits) does the failed call
+  remain the sole signal. Do not restore a per-agent suppression list: it silenced
+  exactly the per-model controls users most need told about. Compatibility exception:
+  Claude Fable models omit the Fast mode option, so an explicit `fast=false` is
+  skipped as an already-effective no-op and is judged for neither; `fast=true` must
+  still be dispatched and retained in debug diagnostics if rejected.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

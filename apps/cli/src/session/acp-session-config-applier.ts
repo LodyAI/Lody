@@ -1,9 +1,7 @@
 import {
-  ACP_PLAN_PERMISSION_MODE_ID,
-  ACP_REASONING_EFFORT_CONFIG_ID,
+  ACP_CONFIG_OPTION_OFF_VALUE,
+  ACP_CONFIG_OPTION_ON_VALUE,
   isAcpFastModeConfigId,
-  isAcpPlanModeConfigOption,
-  isAcpThoughtLevelConfigOption,
   isSensitiveAcpConfigOptionId,
   type ACPSessionId,
   type AcpConfigOptionValue,
@@ -67,25 +65,54 @@ type AcpSessionRunConfigApplyResult = {
   runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
 };
 
-function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
-  return config.agentType === 'codex' || config.agentType === 'claude';
-}
-
-function isKnownRunConfigOption(
-  configId: string,
-  agentConfigOptions: ReadonlyArray<{ id: string; category?: string | null }>
+/** A boolean toggle and an `on`/`off` select express the same choice. */
+function configValuesMatch(
+  requested: AcpConfigOptionValue,
+  effective: AcpConfigOptionValue | undefined
 ): boolean {
-  if (
-    configId === ACP_REASONING_EFFORT_CONFIG_ID ||
-    isAcpFastModeConfigId(configId) ||
-    isAcpPlanModeConfigOption({ id: configId })
-  ) {
+  if (requested === effective) {
     return true;
   }
-  const option = agentConfigOptions.find((candidate) => candidate.id === configId);
-  return option
-    ? isAcpThoughtLevelConfigOption({ id: option.id, category: option.category ?? undefined })
-    : false;
+  const toggle = (value: boolean): string =>
+    value ? ACP_CONFIG_OPTION_ON_VALUE : ACP_CONFIG_OPTION_OFF_VALUE;
+  if (typeof requested === 'boolean' && typeof effective === 'string') {
+    return effective === toggle(requested);
+  }
+  if (typeof requested === 'string' && typeof effective === 'boolean') {
+    return requested === toggle(effective);
+  }
+  return false;
+}
+
+/** One requested selection, judged against the agent's own answer for it. */
+type AppliedSelection = {
+  /** Diagnostic label, already redacted for sensitive ids. */
+  label: string;
+  requested: AcpConfigOptionValue;
+  /** How to read the agent's state for this selection once everything is applied. */
+  source: { kind: 'mode' } | { kind: 'model' } | { kind: 'configOption'; configId: string };
+  /** The agent threw while applying it. */
+  rejected: boolean;
+};
+
+/**
+ * Whether the agent's post-apply state contradicts what the turn asked for.
+ *
+ * A rejection alone does not answer this, in either direction. Codex ACCEPTS
+ * `fast-mode` on a model without a fast speed tier and then simply omits the
+ * option from the state it publishes — the turn runs at normal speed and
+ * nothing threw — so the published state is the only evidence Fast is not on.
+ * Conversely a rejected selection that is already effective changed nothing and
+ * is not worth a notice. Only where the agent published nothing to compare
+ * against does the failed call remain the sole signal.
+ */
+function divergesFromAgentState(args: {
+  requested: AcpConfigOptionValue;
+  effective: AcpConfigOptionValue | undefined;
+  known: boolean;
+  rejected: boolean;
+}): boolean {
+  return args.known ? !configValuesMatch(args.requested, args.effective) : args.rejected;
 }
 
 export async function applyAcpSessionRunConfig(args: {
@@ -116,17 +143,10 @@ export async function applyAcpSessionRunConfig(args: {
   }
 
   const rejectedSelections: string[] = [];
-  const warningSelections: string[] = [];
+  const appliedSelections: AppliedSelection[] = [];
   let confirmedLegacyModeId: string | undefined;
   let confirmedLegacyModelId: string | undefined;
   const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
-  const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
-  const recordRejection = (selection: string, suppressWarning: boolean): void => {
-    rejectedSelections.push(selection);
-    if (!suppressWarning) {
-      warningSelections.push(selection);
-    }
-  };
   const modeConfigId =
     agentConfigOptions.find((option) => option.category === 'mode')?.id ?? 'mode';
   const modelConfigId =
@@ -136,38 +156,57 @@ export async function applyAcpSessionRunConfig(args: {
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
   if (config.modeId) {
+    const label = `mode=${JSON.stringify(config.modeId)}`;
+    let rejected = false;
     try {
       await agentClient.setSessionMode?.(acpSessionId, config.modeId);
       confirmedLegacyModeId = config.modeId;
     } catch (error) {
-      recordRejection(
-        `mode=${JSON.stringify(config.modeId)}`,
-        suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
-      );
+      rejected = true;
+      rejectedSelections.push(label);
       logger.debug(
         `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
       );
     }
+    appliedSelections.push({
+      label,
+      requested: config.modeId,
+      source: { kind: 'mode' },
+      rejected,
+    });
   }
   if (config.modelId) {
+    const label = `model=${JSON.stringify(config.modelId)}`;
+    let rejected = false;
     try {
       await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
       confirmedLegacyModelId = config.modelId;
     } catch (error) {
-      recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
+      rejected = true;
+      rejectedSelections.push(label);
       logger.debug(
         `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
       );
     }
+    appliedSelections.push({
+      label,
+      requested: config.modelId,
+      source: { kind: 'model' },
+      rejected,
+    });
   }
 
   for (const [configId, value] of configOptionEntries) {
     if (configId === modeConfigId) {
+      // An explicit `config.modeId` outranks this duplicate, and is judged in
+      // its place: losing a precedence contest is not the agent disagreeing.
       if (!config.modeId && typeof value === 'string') {
+        let rejected = false;
         try {
           await agentClient.setSessionMode?.(acpSessionId, value);
           confirmedLegacyModeId = value;
         } catch (error) {
+          rejected = true;
           logger.debug(
             `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -175,15 +214,23 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        appliedSelections.push({
+          label: `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
+          requested: value,
+          source: { kind: 'mode' },
+          rejected,
+        });
       }
       continue;
     }
     if (configId === modelConfigId) {
       if (!config.modelId && typeof value === 'string') {
+        let rejected = false;
         try {
           await agentClient.unstable_setSessionModel?.(acpSessionId, value);
           confirmedLegacyModelId = value;
         } catch (error) {
+          rejected = true;
           logger.debug(
             `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -191,21 +238,33 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        appliedSelections.push({
+          label: `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
+          requested: value,
+          source: { kind: 'model' },
+          rejected,
+        });
       }
       continue;
     }
     if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
       continue;
     }
+    const label = `${configId}=${formatAcpConfigValueForLog(configId, value)}`;
+    let rejected = false;
     try {
       await agentClient.setSessionConfigOption(acpSessionId, configId, value);
     } catch (error) {
-      recordRejection(
-        `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
-        suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
-      );
+      rejected = true;
+      rejectedSelections.push(label);
       logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
     }
+    appliedSelections.push({
+      label,
+      requested: value,
+      source: { kind: 'configOption', configId },
+      rejected,
+    });
   }
 
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
@@ -228,6 +287,33 @@ export async function applyAcpSessionRunConfig(args: {
   if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
     runtimeConfigPatch.modelId = confirmedLegacyModelId;
   }
+
+  // An agent that publishes no config options at all answered nothing here, and
+  // the effective table deliberately omits sensitive ids, so neither can be read
+  // as "the agent dropped it".
+  const publishesConfigOptions = agentConfigOptions.length > 0;
+  const effectiveConfigOptionValues = runtimeConfigPatch.configOptionValues ?? {};
+  const warningSelections = appliedSelections
+    .filter((selection) => {
+      const effective =
+        selection.source.kind === 'mode'
+          ? runtimeConfigPatch.modeId
+          : selection.source.kind === 'model'
+            ? runtimeConfigPatch.modelId
+            : effectiveConfigOptionValues[selection.source.configId];
+      const known =
+        selection.source.kind === 'configOption'
+          ? publishesConfigOptions && !isSensitiveAcpConfigOptionId(selection.source.configId)
+          : effective !== undefined;
+      return divergesFromAgentState({
+        requested: selection.requested,
+        effective,
+        known,
+        rejected: selection.rejected,
+      });
+    })
+    .map((selection) => selection.label);
+
   return {
     rejectedSelections,
     warningSelections,

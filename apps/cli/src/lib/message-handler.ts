@@ -1744,9 +1744,9 @@ export class MessageHandler {
       // Not awaited: this is reporting, and the prompt hot path must not block
       // on a history write.
       void this.recordAgentWarning(session.sessionId, {
-        message: `The agent rejected part of the requested run configuration (${warningSelections.join(
+        message: `The agent did not apply part of the requested run configuration (${warningSelections.join(
           ', '
-        )}) and is using its own values instead. Reasoning effort and fast mode depend on the selected model.`,
+        )}) and is running with its own values instead. Reasoning effort and fast mode depend on the selected model.`,
         source: 'configWarning',
       });
     }
