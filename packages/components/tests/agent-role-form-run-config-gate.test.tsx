@@ -68,7 +68,7 @@ describe('Agent Role run-config gate', () => {
       (button) => button.getAttribute('type') === 'submit'
     );
 
-  it('refuses to save a Role that pins nothing because capabilities are unreported', () => {
+  it('refuses to create a Role while capabilities are unreported', () => {
     // The agent has not reported; the form shows no run-config controls, so the
     // user has chosen nothing. Saving would create a "complete configuration"
     // that pins no permission at all.
@@ -119,12 +119,30 @@ describe('Agent Role run-config gate', () => {
     expect(submitButton()?.disabled).toBe(false);
   });
 
+  it('refuses a composer-seeded create too, non-empty though it is', () => {
+    // Chat landing and the input area create a Role from what they currently
+    // show, and under `provisional` capabilities those values are the static
+    // tables' own defaults — nobody chose them. Emptiness cannot tell that from
+    // a real selection, so creation itself is what is refused.
+    expect(
+      validateAgentRoleForm(
+        namedValue({
+          modeId: 'plan',
+          modelId: 'model-a',
+          configOptionValues: { 'fast-mode': true },
+        }),
+        { accessibleRoles: [], capabilityAuthority: 'provisional' }
+      )
+    ).toEqual(['run_config_unavailable']);
+  });
+
   it('keeps an existing Role editable while its agent is unreachable', () => {
     // It already carries what it pins, so nothing is being invented here.
     expect(
       validateAgentRoleForm(namedValue({ modeId: 'plan', modelId: 'model-a' }), {
         accessibleRoles: [],
         capabilityAuthority: 'unavailable',
+        isEditingExistingRole: true,
       })
     ).toEqual([]);
   });

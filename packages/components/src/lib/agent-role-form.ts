@@ -118,6 +118,13 @@ export const validateAgentRoleForm = (
     editingRoleId?: AgentRoleId | null;
     /** How the selected agent's capabilities were obtained, when known. */
     capabilityAuthority?: AcpCapabilityAuthority;
+    /**
+     * True only while editing a Role that already exists. It cannot be inferred
+     * from the value: the composer creates a Role pre-filled from whatever it
+     * currently shows, and under `provisional` capabilities those are the static
+     * tables' own defaults — a non-empty run config that nobody chose.
+     */
+    isEditingExistingRole?: boolean;
   }
 ): AgentRoleFormError[] => {
   const errors: AgentRoleFormError[] = [];
@@ -138,20 +145,19 @@ export const validateAgentRoleForm = (
   if (!value.agentConfigId) errors.push('agent_config_required');
 
   /* A Role IS its run config — it pins the permission mode, and the surfaces
-     that hide the permission control rely on that. Non-authoritative
-     capabilities are the built-in static tables, which must not be seeded into
-     a Role, so the form has nothing real to offer and the user has chosen
-     nothing: saving here would create a "complete configuration" that pins no
-     permission at all. An existing Role that already carries values keeps its
-     own and stays editable offline. */
-  const hasPinnedRunConfig =
-    Boolean(value.modeId) ||
-    Boolean(value.modelId) ||
-    Object.keys(value.configOptionValues).length > 0;
+     that hide the permission control rely on that. Under non-authoritative
+     capabilities the only values available are the built-in static tables', so
+     a NEW Role created now would persist a guess as a durable promise: either
+     seeded here, or carried in from a composer that resolved those same static
+     defaults (chat landing and the input area both create a Role from what they
+     currently show). Emptiness cannot tell those apart, so the rule is the
+     creation itself, not the value. Editing an existing Role stays open — it
+     already carries what it pins, and its owner must be able to rename it while
+     the machine is offline. */
   if (
     options.capabilityAuthority !== undefined &&
     options.capabilityAuthority !== 'authoritative' &&
-    !hasPinnedRunConfig
+    !options.isEditingExistingRole
   ) {
     errors.push('run_config_unavailable');
   }

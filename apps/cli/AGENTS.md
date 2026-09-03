@@ -284,8 +284,12 @@ Two things the dev build does deliberately, both load-bearing:
   `provisional` means the built-in static tables, and seeding from those persists a
   guess as a durable promise. Nor may it be SAVED without one: a Role is its run
   config and pins the permission mode, so `validateAgentRoleForm` refuses a new
-  Role that pins nothing while capabilities are unreported (`run_config_unavailable`).
-  An existing Role that already carries values stays editable offline. The composer keeps stored keys its selector catalog
+  Role while capabilities are unreported (`run_config_unavailable`), keyed on
+  CREATION rather than on the value being empty: the chat landing and the input
+  area both create a Role from what the composer currently shows, and under
+  `provisional` capabilities those are the static tables' own defaults — a
+  non-empty run config nobody chose. Editing an existing Role stays open, so its
+  owner can rename it while the machine is offline. The composer keeps stored keys its selector catalog
   does not cover; only a present runtime table (the agent's live state) owns the
   whole key set. Runtime rejections remain in debug diagnostics; what becomes a visible
   `agent_warning` is DIVERGENCE — the state the agent publishes after applying the
@@ -341,7 +345,12 @@ Two things the dev build does deliberately, both load-bearing:
   (including an explicit empty selection), `taskToolsEnabled` and
   `issuePRMentions` all come from its frozen `inputConfig`, never from the
   composer — pairing an old prompt with tool reach the user has since changed
-  would hand it permissions that turn never had.
+  would hand it permissions that turn never had. Those fields travel as ONE
+  required `TurnScopedOverrides` carrier through every send route (direct,
+  queue, guide), because each route rebuilds the turn config from composer
+  state: a route that forwarded three of four silently produced a turn with no
+  acceptance, which the daemon stopped again. Required, not optional, so a new
+  route fails to compile rather than dropping it.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

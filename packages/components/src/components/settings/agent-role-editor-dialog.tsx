@@ -155,6 +155,7 @@ export function AgentRoleEditorDialog({
             ...(selectedAgentConfig && selectorOptions
               ? { capabilityAuthority: selectorOptions.capabilityAuthority }
               : {}),
+            isEditingExistingRole: editor?.mode === 'edit',
           })
         : [],
     [accessibleRoles, editor, editorValue, selectedAgentConfig, selectorOptions]
