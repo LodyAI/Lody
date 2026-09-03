@@ -20,6 +20,7 @@ import {
   type LiveActivityConversationItem,
   type LiveActivityPermissionAlert,
   type LiveActivityStatusCounts,
+  type AgentConfigMeta,
   type LodySessionPresenceState,
   type SessionMeta,
   type SessionStatus,
@@ -59,6 +60,20 @@ type LodyLiveActivityWindow = Window & {
 };
 
 const LIVE_ACTIVITY_RECHECK_INTERVAL_MS = 60_000;
+
+/**
+ * Coalesces the multi-render sequence one logical change produces into a single
+ * bridge call. A flush lands in the commit *after* the change that requested it,
+ * so a new permission request first renders with the previous summary and only
+ * then with the flushed one. Without this the bridge would receive both, and the
+ * stale one would win: it marks the alert key as shown, so the fresh payload
+ * would hit the "already alerted" early return and never be delivered.
+ *
+ * This is not a second throttle. It bounds nothing about how often the payload
+ * is rebuilt — `LIVE_ACTIVITY_SUMMARY_THROTTLE_MS` does that — and on its own it
+ * cannot, because a payload identity that changes faster than the window resets
+ * it forever.
+ */
 const LIVE_ACTIVITY_SYNC_DEBOUNCE_MS = 250;
 
 /**
@@ -66,12 +81,15 @@ const LIVE_ACTIVITY_SYNC_DEBOUNCE_MS = 250;
  * session list.
  *
  * `atoms/doc-meta` flushes metadata in batches per macrotask, so a cold start or
- * a reconnect catch-up republishes `allActiveSessionsAtom` many times per
- * second. Rebuilding the summary is three passes over every session plus item
- * sorting and relative-time formatting, and debouncing only the bridge call did
- * not help: the payload identity changed on every batch, so the debounce timer
- * was reset before it ever fired while the CPU still paid for every rebuild.
- * Throttling the *input* bounds that work instead.
+ * a reconnect catch-up republishes `allActiveSessionsAtom` and
+ * `getAllAgentConfigAtom` many times per second. Rebuilding the summary is three
+ * passes over every session plus item sorting and relative-time formatting, and
+ * debouncing only the bridge call did not help: the payload identity changed on
+ * every batch, so that timer was reset before it ever fired while the CPU still
+ * paid for every rebuild. Throttling the *input* bounds that work instead.
+ *
+ * Every input the summary reads must go through here — a single one left outside
+ * (agent configs were, at first) restores the starvation on its own.
  *
  * Pending permission requests are deliberately excluded — they are scanned from
  * the unthrottled session list and flush this window (see `flushSignal` below),
@@ -137,6 +155,9 @@ function useThrottledSnapshot<T>(value: T, intervalMs: number, flushSignal: stri
   const lastEmittedFlushSignalRef = useRef<string>(flushSignal);
 
   useEffect(() => {
+    // Also what makes this effect a no-op in the steady state: it re-runs on the
+    // commit that lands an emit, and without this it would schedule a timer to
+    // re-emit a value the snapshot already holds.
     const flushRequested = flushSignal !== lastEmittedFlushSignalRef.current;
     if (!flushRequested && Object.is(value, snapshot)) return undefined;
 
@@ -163,6 +184,7 @@ function useThrottledSnapshot<T>(value: T, intervalMs: number, flushSignal: stri
 
 type LiveActivitySummaryInput = {
   sessions: readonly SessionMeta[];
+  agentConfigs: readonly AgentConfigMeta[];
   liveSessionStatuses: ReadonlyMap<string, SessionStatus>;
 };
 
@@ -170,6 +192,7 @@ const EMPTY_LIVE_SESSION_STATUSES: ReadonlyMap<string, SessionStatus> = new Map(
 
 const EMPTY_SUMMARY_INPUT: LiveActivitySummaryInput = {
   sessions: [],
+  agentConfigs: [],
   liveSessionStatuses: EMPTY_LIVE_SESSION_STATUSES,
 };
 
@@ -186,25 +209,28 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const userId = user?.id ?? null;
   const liveActivitiesEnabled = useAtomValue(iosLiveActivitiesEnabledAtom);
   const shownPermissionAlertKeysRef = useRef<Set<string>>(new Set());
-  // The host shell cannot change for the lifetime of the document; the sync and
-  // teardown effects below already rely on that.
-  const nativeIOSAppShell = useMemo(() => isNativeIOSAppShell(), []);
+  const nativeIOSAppShell = isNativeIOSAppShell();
 
-  // Kept separate from the payload so the teardown paths below still know which
-  // activity to end after the payload itself has been gated off.
-  const activityId = useMemo(() => {
-    if (!notificationsAvailable) return null;
-    if (!currentWorkspaceId || !userId) return null;
-    return buildLodyConversationsLiveActivityId({
+  // The id and the two fields it is built from travel together, and the teardown
+  // paths below still need them after the payload itself has been gated off.
+  const activityTarget = useMemo(() => {
+    if (!notificationsAvailable || !currentWorkspaceId || !userId) return null;
+    return {
+      activityId: buildLodyConversationsLiveActivityId({
+        workspaceId: currentWorkspaceId,
+        userId,
+        schemaVersion: LODY_CONVERSATIONS_LIVE_ACTIVITY_SCHEMA_VERSION,
+      }),
       workspaceId: currentWorkspaceId,
       userId,
-      schemaVersion: LODY_CONVERSATIONS_LIVE_ACTIVITY_SCHEMA_VERSION,
-    });
+    };
   }, [currentWorkspaceId, notificationsAvailable, userId]);
 
-  // A disabled Live Activity used to pay for the whole summary build and throw
-  // it away in the sync effect. Gate the computation itself instead.
-  const enabled = activityId !== null && nativeIOSAppShell && liveActivitiesEnabled;
+  // A disabled Live Activity used to pay for the whole summary build and throw it
+  // away in the sync effect. Gate the computation itself instead. The two
+  // conditions are not equivalent: the atom defaults to `true`, so without the
+  // shell check every desktop build rebuilds the summary it can never show.
+  const enabled = activityTarget !== null && nativeIOSAppShell && liveActivitiesEnabled;
 
   /**
    * One pass over the presence snapshot instead of one `findFreshSessionPresenceState`
@@ -229,17 +255,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     return statuses;
   }, [enabled, presenceNowMs, presenceStates]);
 
-  // Resolve every label to a string up front and memoize on those strings rather
-  // than on `t`: the payload identity drives the bridge debounce, so a `t` whose
-  // identity changed per render would reset that timer forever — exactly the
-  // starvation this change exists to remove.
   const defaultTitle = t('sessions.newSession.title', 'New Task');
-  const permissionStatusLabel = t('sessions.status.requestPermission', 'Request Permission');
-  const questionStatusLabel = t('sessions.status.askUserQuestion', 'Question');
-  const runningStatusLabel = t('sessions.status.running', 'Running');
-  const unreadStatusLabel = t('sessions.status.completed', 'Completed');
-  const permissionAlertTitle = t('sessions.permissionRequired', 'Permission Required');
-  const language = i18n.language;
 
   /**
    * Deliberately reads the *unthrottled* session list. A permission request the
@@ -250,21 +266,29 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     if (!enabled) return null;
     return findLiveActivityPermissionAlertCandidate({
       sessions,
-      currentUserId: userId,
+      currentUserId: activityTarget?.userId ?? null,
       defaultTitle,
       liveSessionStatuses,
     });
-  }, [defaultTitle, enabled, liveSessionStatuses, sessions, userId]);
+  }, [activityTarget?.userId, defaultTitle, enabled, liveSessionStatuses, sessions]);
+
+  // Depend on the candidate's VALUE, not its identity. The scan above reruns on
+  // every metadata batch and builds a fresh object each time, so leaking that
+  // identity into the payload memo restored the debounce starvation for exactly
+  // the case that matters most: a pending permission request during a sync burst.
+  const permissionAlertKey = permissionAlertCandidate?.key ?? null;
+  const permissionAlertBody = permissionAlertCandidate?.sessionTitle ?? null;
 
   const summaryInput = useMemo<LiveActivitySummaryInput>(
-    () => (enabled ? { sessions, liveSessionStatuses } : EMPTY_SUMMARY_INPUT),
-    [enabled, liveSessionStatuses, sessions]
+    () => (enabled ? { sessions, agentConfigs, liveSessionStatuses } : EMPTY_SUMMARY_INPUT),
+    [agentConfigs, enabled, liveSessionStatuses, sessions]
   );
 
-  // A new permission candidate, a workspace switch, and re-enabling the feature
-  // each bypass the throttle: those are the moments where a stale summary would
-  // be visible rather than merely late.
-  const flushSignal = `${enabled ? '1' : '0'}|${activityId ?? ''}|${permissionAlertCandidate?.key ?? ''}`;
+  // A new permission candidate and a workspace switch each bypass the throttle:
+  // those are the moments where a stale summary would be wrong on screen rather
+  // than merely late — the previous workspace's rows, or an alert next to a list
+  // that does not contain the session asking for permission.
+  const flushSignal = `${activityTarget?.activityId ?? ''}|${permissionAlertKey ?? ''}`;
   const throttledInput = useThrottledSnapshot(
     summaryInput,
     LIVE_ACTIVITY_SUMMARY_THROTTLE_MS,
@@ -274,65 +298,64 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const payload = useMemo<
     (LodyLiveActivitySyncPayload & { permissionAlertCandidateKey?: string }) | null
   >(() => {
-    if (!enabled || !activityId || !currentWorkspaceId || !userId) return null;
+    if (!enabled || !activityTarget) return null;
+    const { activityId, workspaceId, userId: currentUserId } = activityTarget;
     const nowMs = now.getTime();
-    const { sessions: throttledSessions, liveSessionStatuses: throttledStatuses } = throttledInput;
+    const {
+      sessions: throttledSessions,
+      agentConfigs: throttledAgentConfigs,
+      liveSessionStatuses: throttledStatuses,
+    } = throttledInput;
     const items = buildLiveActivityConversationItems({
       sessions: throttledSessions,
-      agentConfigs,
-      currentUserId: userId,
+      agentConfigs: throttledAgentConfigs,
+      currentUserId,
       defaultTitle,
       statusLabels: {
-        permission: permissionStatusLabel,
-        question: questionStatusLabel,
-        running: runningStatusLabel,
-        unread: unreadStatusLabel,
+        permission: t('sessions.status.requestPermission', 'Request Permission'),
+        question: t('sessions.status.askUserQuestion', 'Question'),
+        running: t('sessions.status.running', 'Running'),
+        unread: t('sessions.status.completed', 'Completed'),
       },
-      formatUpdatedAt: (updatedAt) => formatCompactUpdatedAt(updatedAt, nowMs, language),
+      formatUpdatedAt: (updatedAt) => formatCompactUpdatedAt(updatedAt, nowMs, i18n.language),
       liveSessionStatuses: throttledStatuses,
     });
     const totalCount = countLiveActivityConversationCandidates({
       sessions: throttledSessions,
-      currentUserId: userId,
+      currentUserId,
       liveSessionStatuses: throttledStatuses,
     });
     const statusCounts = countLiveActivityConversationStatuses({
       sessions: throttledSessions,
-      currentUserId: userId,
+      currentUserId,
       liveSessionStatuses: throttledStatuses,
     });
     const nextPayload: LodyLiveActivitySyncPayload & { permissionAlertCandidateKey?: string } = {
       activityId,
-      workspaceId: currentWorkspaceId,
+      workspaceId,
       workspaceName,
       totalCount,
       statusCounts,
       items,
     };
-    if (permissionAlertCandidate) {
+    if (permissionAlertKey !== null && permissionAlertBody !== null) {
       nextPayload.permissionAlert = {
-        title: permissionAlertTitle,
-        body: permissionAlertCandidate.sessionTitle,
+        title: t('sessions.permissionRequired', 'Permission Required'),
+        body: permissionAlertBody,
       };
-      nextPayload.permissionAlertCandidateKey = permissionAlertCandidate.key;
+      nextPayload.permissionAlertCandidateKey = permissionAlertKey;
     }
     return nextPayload;
   }, [
-    activityId,
-    agentConfigs,
-    currentWorkspaceId,
+    activityTarget,
     defaultTitle,
     enabled,
-    language,
+    i18n.language,
     now,
-    permissionAlertCandidate,
-    permissionAlertTitle,
-    permissionStatusLabel,
-    questionStatusLabel,
-    runningStatusLabel,
+    permissionAlertBody,
+    permissionAlertKey,
+    t,
     throttledInput,
-    unreadStatusLabel,
-    userId,
     workspaceName,
   ]);
 
@@ -373,6 +396,8 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
       window.clearTimeout(handle);
     };
   }, [payload]);
+
+  const activityId = activityTarget?.activityId;
 
   useEffect(() => {
     if (!nativeIOSAppShell || liveActivitiesEnabled || !activityId) return undefined;

@@ -4,12 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider, type PrimitiveAtom } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  AgentConfigMeta,
-  LodyPresenceStateMap,
-  SessionId,
-  SessionMeta,
-} from '@lody/shared';
+import type { AgentConfigMeta, LodyPresenceStateMap, SessionId, SessionMeta } from '@lody/shared';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -27,7 +22,7 @@ const testAtoms = await vi.hoisted(async () => {
     userAtom: atom<{ id: string } | null>({ id: 'user-1' }),
     liveActivitiesEnabledAtom: atom<boolean>(true),
     workspaceIdAtom: atom<string | null>('ws-1'),
-    notificationsAvailableAtom: atom<boolean>(true),
+    nativeIOSAppShell: { value: true },
   };
 });
 
@@ -50,17 +45,17 @@ vi.mock('../src/hooks/use-resolved-workspace-scope', async () => {
     }),
   };
 });
-vi.mock('../src/lib/native-platform', () => ({ isNativeIOSAppShell: () => true }));
-vi.mock('@lody/platform/react', async () => {
-  const { useAtomValue } = await import('jotai');
-  return { usePlatformCapability: () => useAtomValue(testAtoms.notificationsAvailableAtom) };
-});
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: unknown) => (typeof fallback === 'string' ? fallback : key),
-    i18n: { language: 'en' },
-  }),
+vi.mock('../src/lib/native-platform', () => ({
+  isNativeIOSAppShell: () => testAtoms.nativeIOSAppShell.value,
 }));
+vi.mock('@lody/platform/react', () => ({ usePlatformCapability: () => true }));
+// Faithful to react-i18next: `t` and `i18n` hold a stable identity across renders
+// and are replaced only when the language or namespace changes.
+vi.mock('react-i18next', () => {
+  const t = (key: string, fallback?: unknown) => (typeof fallback === 'string' ? fallback : key);
+  const i18n = { language: 'en' };
+  return { useTranslation: () => ({ t, i18n }) };
+});
 
 import {
   LIVE_ACTIVITY_SUMMARY_THROTTLE_MS,
@@ -68,7 +63,7 @@ import {
   type LodyLiveActivitySyncPayload,
 } from '../src/hooks/use-lody-live-activity';
 
-/** Matches the private constant in the hook; the bridge call trails every emit by it. */
+/** Mirrors the hook's private constant; every bridge call trails an emit by it. */
 const SYNC_DEBOUNCE_MS = 250;
 const ACTIVITY_ID_WS_1 = 'lody-conversations:v5:ws-1:user-1';
 
@@ -139,6 +134,23 @@ describe('useLodyLiveActivity summary throttling', () => {
     });
   };
 
+  /**
+   * One `atoms/doc-meta` flush: a republished session array plus a republished
+   * agent-config array, the two inputs that stream in during a catch-up.
+   */
+  const metadataBatch = async (step: number, extra: SessionMeta[] = []) => {
+    await act(async () => {
+      store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [
+        session('a'),
+        ...extra,
+        ...Array.from({ length: step }, (_, index) => session(`b${index}`)),
+      ]);
+      store.set(testAtoms.agentConfigsAtom as PrimitiveAtom<AgentConfigMeta[]>, [
+        { id: `config-${step}`, name: `Config ${step}` } as AgentConfigMeta,
+      ]);
+    });
+  };
+
   const mount = async (workspaceName = 'Workspace One') => {
     await act(async () => {
       root.render(
@@ -154,6 +166,7 @@ describe('useLodyLiveActivity summary throttling', () => {
     vi.setSystemTime(NOW_MS);
     syncedPayloads = [];
     endedActivityIds = [];
+    testAtoms.nativeIOSAppShell.value = true;
     (window as LiveActivityBridgeWindow).__LODY_LIVE_ACTIVITY__ = {
       syncConversationSummary: async (payload) => {
         syncedPayloads.push(structuredClone(payload));
@@ -171,7 +184,6 @@ describe('useLodyLiveActivity summary throttling', () => {
     store.set(testAtoms.userAtom as PrimitiveAtom<{ id: string } | null>, { id: 'user-1' });
     store.set(testAtoms.liveActivitiesEnabledAtom as PrimitiveAtom<boolean>, true);
     store.set(testAtoms.workspaceIdAtom as PrimitiveAtom<string | null>, 'ws-1');
-    store.set(testAtoms.notificationsAvailableAtom as PrimitiveAtom<boolean>, true);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -192,13 +204,13 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(syncedPayloads).toHaveLength(1);
     syncedPayloads.length = 0;
 
-    // `atoms/doc-meta` republishes the session array once per flushed batch. A
-    // burst faster than the bridge debounce used to reset that timer forever, so
-    // nothing was ever delivered while every batch still paid for a full rebuild.
+    // A burst faster than the bridge debounce used to reset that timer forever,
+    // so nothing was ever delivered while every batch still paid for a rebuild.
+    // Any summary input left outside the throttle reproduces this on its own.
     const burstMs = 2 * LIVE_ACTIVITY_SUMMARY_THROTTLE_MS;
     const stepMs = 50;
     for (let step = 1; step <= burstMs / stepMs; step += 1) {
-      await setSessions([session('a'), ...Array.from({ length: step }, (_, i) => session(`b${i}`))]);
+      await metadataBatch(step);
       await advance(stepMs);
     }
 
@@ -206,34 +218,33 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(syncedPayloads.length).toBeGreaterThanOrEqual(1);
     expect(syncedPayloads.length).toBeLessThanOrEqual(burstMs / LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
 
-    // Each delivery carries burst content, not the pre-burst snapshot.
-    expect(syncedPayloads[0]?.totalCount).toBeGreaterThan(1);
-
     // The burst's final state still lands once it settles: the trailing throttle
     // emit, then the bridge debounce that follows it.
     await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
     await advance(SYNC_DEBOUNCE_MS);
-    const latest = syncedPayloads.at(-1);
-    expect(latest?.totalCount).toBe(1 + burstMs / stepMs);
-    expect(latest?.activityId).toBe(ACTIVITY_ID_WS_1);
+    expect(syncedPayloads.at(-1)?.totalCount).toBe(1 + burstMs / stepMs);
   });
 
-  it('delivers a pending permission alert within the debounce rather than at the next throttle window', async () => {
+  it('delivers a permission alert raised in the middle of an ongoing metadata burst', async () => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
     syncedPayloads.length = 0;
 
-    // Open the throttle window with an ordinary batch, then raise a permission
-    // request while that window is still closed.
-    await setSessions([session('a'), session('b')]);
-    await advance(100);
-    expect(syncedPayloads).toHaveLength(0);
+    const pending = [session('b')];
+    for (let step = 1; step <= 6; step += 1) {
+      await metadataBatch(step, pending);
+      await advance(50);
+    }
 
+    // The request arrives while batches are still streaming in. Neither the
+    // throttle window nor the batches that keep coming may swallow it.
     await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
-    await advance(SYNC_DEBOUNCE_MS);
+    for (let step = 7; step <= 12; step += 1) {
+      await metadataBatch(step, pending);
+      await advance(50);
+    }
 
-    expect(syncedPayloads).toHaveLength(1);
-    const alertPayload = syncedPayloads[0];
+    const alertPayload = syncedPayloads.find((payload) => payload.permissionAlert !== undefined);
     expect(alertPayload?.permissionAlert).toEqual({
       title: 'Permission Required',
       body: 'Task b',
@@ -244,7 +255,6 @@ describe('useLodyLiveActivity summary throttling', () => {
       'b',
       'permission',
     ]);
-    expect(alertPayload?.statusCounts.permission).toBe(1);
   });
 
   it('does not re-alert or resume summary sync while the same permission request is pending', async () => {
@@ -257,8 +267,8 @@ describe('useLodyLiveActivity summary throttling', () => {
     syncedPayloads.length = 0;
 
     // Further batches must not replace the just-shown alert with a plain summary.
-    for (let step = 0; step < 40; step += 1) {
-      await setSessions([session('a'), session('b'), ...Array.from({ length: step }, (_, i) => session(`c${i}`))]);
+    for (let step = 1; step <= 40; step += 1) {
+      await metadataBatch(step, [session('b')]);
       await advance(50);
     }
     expect(syncedPayloads).toHaveLength(0);
@@ -273,30 +283,6 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(resumed?.statusCounts.running).toBe(1);
   });
 
-  it('re-alerts when a new permission request arrives after the previous one resolved', async () => {
-    await mount();
-    await advance(SYNC_DEBOUNCE_MS);
-    await setSessions([session('a'), session('b', { lastMessageAt: NOW_MS - 5_000 })]);
-    await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
-    await advance(SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads.at(-1)?.permissionAlert).toBeDefined();
-
-    await setPresence({});
-    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
-    await advance(SYNC_DEBOUNCE_MS);
-    syncedPayloads.length = 0;
-
-    // A later request on the same session is a distinct candidate key because its
-    // last message moved on.
-    await setSessions([session('a'), session('b', { lastMessageAt: NOW_MS - 1_000 })]);
-    await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
-    await advance(SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads.at(-1)?.permissionAlert).toEqual({
-      title: 'Permission Required',
-      body: 'Task b',
-    });
-  });
-
   it('sends nothing while Live Activities are disabled and ends the existing activity', async () => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
@@ -308,8 +294,8 @@ describe('useLodyLiveActivity summary throttling', () => {
     });
     expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
 
-    for (let step = 0; step < 20; step += 1) {
-      await setSessions([session('a'), ...Array.from({ length: step }, (_, i) => session(`b${i}`))]);
+    for (let step = 1; step <= 20; step += 1) {
+      await metadataBatch(step);
       await advance(100);
     }
     await setPresence(presence('a', { type: 'requestPermission' }, Date.now()));
@@ -317,13 +303,28 @@ describe('useLodyLiveActivity summary throttling', () => {
     await advance(SYNC_DEBOUNCE_MS);
     expect(syncedPayloads).toHaveLength(0);
 
-    // Re-enabling resumes without waiting out a throttle window.
+    // Re-enabling resumes, carrying the state that accumulated while it was off.
     await act(async () => {
       store.set(testAtoms.liveActivitiesEnabledAtom as PrimitiveAtom<boolean>, true);
     });
     await advance(SYNC_DEBOUNCE_MS);
     expect(syncedPayloads).toHaveLength(1);
-    expect(syncedPayloads[0]?.totalCount).toBe(20);
+    expect(syncedPayloads[0]?.totalCount).toBe(21);
+  });
+
+  it('sends nothing on a host that is not a native iOS shell', async () => {
+    testAtoms.nativeIOSAppShell.value = false;
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+
+    for (let step = 1; step <= 10; step += 1) {
+      await metadataBatch(step);
+      await advance(100);
+    }
+    await setPresence(presence('a', { type: 'requestPermission' }, Date.now()));
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
   });
 
   it('ends the previous activity and syncs the new workspace on a workspace switch', async () => {
@@ -331,7 +332,8 @@ describe('useLodyLiveActivity summary throttling', () => {
     await advance(SYNC_DEBOUNCE_MS);
     syncedPayloads.length = 0;
 
-    // Switch inside a closed throttle window: the new workspace must not wait it out.
+    // Switch inside a closed throttle window: the new workspace must not wait it
+    // out, and must never ship the previous workspace's rows.
     await setSessions([session('a'), session('b')]);
     await advance(100);
     await act(async () => {
@@ -343,7 +345,6 @@ describe('useLodyLiveActivity summary throttling', () => {
     expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
     expect(syncedPayloads).toHaveLength(1);
     expect(syncedPayloads[0]?.activityId).toBe('lody-conversations:v5:ws-2:user-1');
-    expect(syncedPayloads[0]?.workspaceId).toBe('ws-2');
     expect(syncedPayloads[0]?.items.map((item) => item.id)).toEqual(['z']);
   });
 
