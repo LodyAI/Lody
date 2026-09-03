@@ -49,10 +49,7 @@ export const isAcpToggleSelectValues = (values: readonly string[]): boolean =>
 export const isAcpToggleSelectEnabledValue = (value: unknown): boolean =>
   value === ACP_CONFIG_OPTION_ON_VALUE || value === ACP_CONFIG_OPTION_TRUE_VALUE;
 
-export const toggleAcpSelectOptionValue = (
-  values: readonly string[],
-  enabled: boolean
-): string =>
+export const toggleAcpSelectOptionValue = (values: readonly string[], enabled: boolean): string =>
   isAcpTrueFalseSelectValues(values)
     ? enabled
       ? ACP_CONFIG_OPTION_TRUE_VALUE
@@ -94,7 +91,8 @@ export type AgentRunConfigSelection = {
 export type AgentRunConfigCapabilities = {
   /**
    * `reasoningEffortValues` is per model when the agent publishes that
-   * breakdown; otherwise it is absent and only the snapshot below applies.
+   * breakdown or a per-model option catalog; otherwise it is absent and only
+   * the snapshot below applies.
    */
   models: Array<{ id: string; name: string; reasoningEffortValues?: string[] }>;
   /**
@@ -130,7 +128,7 @@ export type AgentRunConfigResolution = {
 
 type RunConfigCapabilitySource = Pick<
   AcpCapabilityCacheEntry,
-  'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts'
+  'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts' | 'configOptionsByModel'
 >;
 
 /**
@@ -192,20 +190,52 @@ const toggleValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfi
     ? enabled
     : toggleAcpSelectOptionValue(selectOptionValues(option), enabled);
 
-const findFastModeOption = (
-  capability: RunConfigCapabilitySource | undefined
+const isMultiLevelReasoningEffortSelect = (option: AcpConfigOptionSummary): boolean =>
+  option.type === 'select' &&
+  isAcpThoughtLevelConfigOption(option) &&
+  !isAcpToggleSelectValues(selectOptionValues(option));
+
+const isThoughtLevelSelect = (option: AcpConfigOptionSummary): boolean =>
+  option.type === 'select' && isAcpThoughtLevelConfigOption(option);
+
+/**
+ * A model that publishes both a thinking toggle and an effort ladder (Cursor)
+ * maps `reasoningEffort` onto the ladder; a model whose only thought control is
+ * the toggle (Kimi without effort levels) keeps mapping onto it.
+ */
+const findReasoningEffortOptionIn = (
+  configOptions: readonly AcpConfigOptionSummary[] | undefined
 ): AcpConfigOptionSummary | undefined =>
-  findConfigOption(
-    capability,
-    (option) => isAcpFastModeConfigId(option.id) && isToggleOption(option)
+  configOptions?.find(isMultiLevelReasoningEffortSelect) ??
+  configOptions?.find(isThoughtLevelSelect);
+
+const findFastModeOptionIn = (
+  configOptions: readonly AcpConfigOptionSummary[] | undefined
+): AcpConfigOptionSummary | undefined =>
+  configOptions?.find((option) => isAcpFastModeConfigId(option.id) && isToggleOption(option));
+
+const hasPerModelCatalogEntry = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined
+): boolean => {
+  const catalog = capability?.configOptionsByModel;
+  return catalog !== undefined && typeof modelId === 'string' && catalog[modelId] !== undefined;
+};
+
+const findFastModeOption = (
+  capability: RunConfigCapabilitySource | undefined,
+  targetModelId?: string
+): AcpConfigOptionSummary | undefined =>
+  findFastModeOptionIn(
+    capability ? resolveAcpConfigOptionsForModel(capability, targetModelId) : undefined
   );
 
 const findReasoningEffortOption = (
-  capability: RunConfigCapabilitySource | undefined
+  capability: RunConfigCapabilitySource | undefined,
+  targetModelId?: string
 ): AcpConfigOptionSummary | undefined =>
-  findConfigOption(
-    capability,
-    (option) => option.type === 'select' && isAcpThoughtLevelConfigOption(option)
+  findReasoningEffortOptionIn(
+    capability ? resolveAcpConfigOptionsForModel(capability, targetModelId) : undefined
   );
 
 const findPlanModeOption = (
@@ -275,8 +305,20 @@ export const summarizeAgentRunConfigCapabilities = (
   const measuredForModelId = findCurrentModelId(capability);
   return {
     models: listModels(capability).map((model) => {
-      const efforts = perModelEfforts?.[model.id];
-      return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };
+      const legacyEfforts = perModelEfforts?.[model.id];
+      if (legacyEfforts) {
+        return { ...model, reasoningEffortValues: legacyEfforts };
+      }
+      if (!capability || !hasPerModelCatalogEntry(capability, model.id)) {
+        return model;
+      }
+      const catalogEfforts = findReasoningEffortOptionIn(
+        resolveAcpConfigOptionsForModel(capability, model.id)
+      )?.options.map((value) => value.value);
+      return {
+        ...model,
+        ...(catalogEfforts ? { reasoningEffortValues: catalogEfforts } : {}),
+      };
     }),
     reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(
       (value) => value.value
@@ -327,7 +369,7 @@ export const resolveAgentRunConfigSelection = (
   let modeId: string | undefined;
 
   if (selection.reasoningEffort !== undefined) {
-    const option = findReasoningEffortOption(capability);
+    const option = findReasoningEffortOption(capability, targetModelId);
     const targetModelEfforts = targetModelId
       ? capability.modelReasoningEfforts?.[targetModelId]
       : undefined;
@@ -344,6 +386,14 @@ export const resolveAgentRunConfigSelection = (
       // Validated against the target model; the caller's snapshot check knows
       // only the probed model's list and could reject a legitimate value.
       validatedConfigIds.push(configId);
+    } else if (option && hasPerModelCatalogEntry(capability, targetModelId)) {
+      const allowed = option.options.map((value) => value.value);
+      if (!allowed.includes(selection.reasoningEffort)) {
+        throw new Error(
+          `Invalid reasoning effort for model ${targetModelId}: ${selection.reasoningEffort}. Allowed values: ${allowed.join(', ')}.`
+        );
+      }
+      validatedConfigIds.push(configId);
     } else if (switchesModel) {
       unverifiedSelections.push(`reasoningEffort=${selection.reasoningEffort}`);
       validatedConfigIds.push(configId);
@@ -352,14 +402,12 @@ export const resolveAgentRunConfigSelection = (
   }
 
   if (selection.fastMode !== undefined) {
-    const option = findFastModeOption(capability);
+    const option = findFastModeOption(capability, targetModelId);
     if (!option) {
       throw new Error('The selected agent does not offer a fast mode option.');
     }
     configOptionValues[option.id] = toggleValue(option, selection.fastMode);
-    if (switchesModel) {
-      // Agents drop the fast toggle entirely for models that lack fast support,
-      // and no agent publishes which models those are.
+    if (switchesModel && !hasPerModelCatalogEntry(capability, targetModelId)) {
       unverifiedSelections.push(`fastMode=${selection.fastMode}`);
     }
   }
