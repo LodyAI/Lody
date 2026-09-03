@@ -2913,6 +2913,31 @@ const applySessionRenameItems = async (
     }
   });
 
+const persistSessionRenameItems = async (
+  manager: LoroDocumentManager,
+  items: readonly ResolvedSessionRenameItem[],
+  syncReason: string
+): Promise<Awaited<ReturnType<typeof applySessionRenameItems>>> => {
+  const results = await applySessionRenameItems(items, async (item) => {
+    const session = await readCurrentSessionMeta(manager, item.sessionId);
+    if (!session) {
+      throw new LodyOperationStoreError(
+        'SESSION_NOT_FOUND',
+        `Session not found: ${item.sessionId}`,
+        false
+      );
+    }
+    await manager.repo.upsertDocMeta(getSessionRoomId(item.sessionId), {
+      title: item.title,
+      titleSource: 'user',
+    } satisfies Partial<SessionMeta>);
+  });
+  if (results.some((item) => item.ok)) {
+    await ensureWorkspaceMetaSynced(manager, syncReason);
+  }
+  return results;
+};
+
 const renameSessionItems = async (
   input: SessionRenameManyToolInput
 ): Promise<Awaited<ReturnType<typeof applySessionRenameItems>>> => {
@@ -2921,25 +2946,9 @@ const renameSessionItems = async (
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_rename_many:${ctx.sessionId}`);
-    const items = await applySessionRenameItems(resolved, async (item) => {
-      const session = await readCurrentSessionMeta(manager, item.sessionId);
-      if (!session) {
-        throw new LodyOperationStoreError(
-          'SESSION_NOT_FOUND',
-          `Session not found: ${item.sessionId}`,
-          false
-        );
-      }
-      await manager.repo.upsertDocMeta(getSessionRoomId(item.sessionId), {
-        title: item.title,
-        titleSource: 'user',
-      } satisfies Partial<SessionMeta>);
-    });
-    if (items.some((item) => item.ok)) {
-      await ensureWorkspaceMetaSynced(manager, `mcp.session_rename_many:${ctx.sessionId}`);
-    }
-    return items;
+    const reason = `mcp.session_rename_many:${ctx.sessionId}`;
+    await syncWorkspaceMetaForRead(manager, reason);
+    return await persistSessionRenameItems(manager, resolved, reason);
   });
 };
 
@@ -3901,6 +3910,7 @@ export const __lodyMcpServerInternals = {
   assertBatchSize,
   resolveSessionRenameItems,
   applySessionRenameItems,
+  persistSessionRenameItems,
   resolveInvokingHistoryInput,
   buildOperationTargetCancelArgs,
   summarizeProjectRefForMcp,

@@ -7,6 +7,7 @@ import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
   TASK_LABEL_MAX_COUNT,
+  getSessionRoomId,
   workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
@@ -64,6 +65,7 @@ const {
   assertBatchSize,
   resolveSessionRenameItems,
   applySessionRenameItems,
+  persistSessionRenameItems,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -914,6 +916,85 @@ describe('session MCP input schemas', () => {
       },
       { sessionId: 'session-3', ok: true, title: 'Three' },
     ]);
+  });
+
+  it('persists only existing sessions as user titles and confirms successful writes', async () => {
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) =>
+          roomId === getSessionRoomId('missing' as SessionId)
+            ? undefined
+            : { meta: { id: roomId }, exists: true }
+        ),
+        upsertDocMeta,
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    const results = await persistSessionRenameItems(
+      manager,
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      'mcp.session_rename_many:current-session-id'
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
+    expect(upsertDocMeta.mock.calls).toEqual([
+      [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
+      [getSessionRoomId('session-3' as SessionId), { title: 'Three', titleSource: 'user' }],
+    ]);
+    expect(waitUntilMetaSynced).toHaveBeenCalledOnce();
+    expect(waitUntilMetaSynced).toHaveBeenCalledWith({
+      reason: 'mcp.session_rename_many:current-session-id',
+    });
+  });
+
+  it('does not request write confirmation when every session is missing', async () => {
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta: vi.fn(async () => undefined),
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    await expect(
+      persistSessionRenameItems(
+        manager,
+        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        'mcp.session_rename_many:current-session-id'
+      )
+    ).resolves.toEqual([
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+    ]);
+    expect(manager.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(waitUntilMetaSynced).not.toHaveBeenCalled();
   });
 
   it('cancels only the assistant turn created by the Operation item', () => {
