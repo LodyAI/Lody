@@ -46,7 +46,12 @@ export const resolveGitBranch = async (
     return { kind: 'branch', branch: current };
   }
 
-  const abbrevRef = await tryExecTrimmed(exec, 'git', ['rev-parse', '--abbrev-ref', 'HEAD'], workdir);
+  const abbrevRef = await tryExecTrimmed(
+    exec,
+    'git',
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    workdir
+  );
   if (!abbrevRef) {
     return { kind: 'unresolved' };
   }

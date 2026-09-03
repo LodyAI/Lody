@@ -20,7 +20,12 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import type { Logger } from '@/utils/logger';
-import { advanceReviewRun, readReviewRun, writeReviewPolicy, readReviewPolicy } from './review-automation-store';
+import {
+  advanceReviewRun,
+  readReviewRun,
+  writeReviewPolicy,
+  readReviewPolicy,
+} from './review-automation-store';
 import { nextStateForAction, planReviewStep, type ReviewAction } from './review-automation-plan';
 
 /**
@@ -518,7 +523,11 @@ export class ReviewAutomationEngine {
         await advanceReviewRun(this.deps.repo, this.deps.workspaceId, run, {
           state: nextState,
           detail: `Asked the author to fix CI (attempt ${run.ciFixUsed + 1}).`,
-          patch: { ...basePatch, ciFixUsed: run.ciFixUsed + 1, lastEngineTurnId: dispatched.userTurnId },
+          patch: {
+            ...basePatch,
+            ciFixUsed: run.ciFixUsed + 1,
+            lastEngineTurnId: dispatched.userTurnId,
+          },
         });
         return;
       }
@@ -531,7 +540,11 @@ export class ReviewAutomationEngine {
         await advanceReviewRun(this.deps.repo, this.deps.workspaceId, run, {
           state: nextState,
           detail: `Asked the author to resolve conflicts (attempt ${run.conflictUsed + 1}).`,
-          patch: { ...basePatch, conflictUsed: run.conflictUsed + 1, lastEngineTurnId: dispatched.userTurnId },
+          patch: {
+            ...basePatch,
+            conflictUsed: run.conflictUsed + 1,
+            lastEngineTurnId: dispatched.userTurnId,
+          },
         });
         return;
       }

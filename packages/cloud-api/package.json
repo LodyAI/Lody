@@ -13,8 +13,8 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts"
+    "format": "oxfmt 'src/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts'"
   },
   "dependencies": {
     "@lody/shared": "workspace:*",

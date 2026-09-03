@@ -58,8 +58,9 @@ Repository map and entry points: [README.md](README.md#repository).
 - Node.js 22+; use the pnpm in `package.json`. `pnpm install` (nested checkouts
   skip it); standalone work uses a separate clone. `pnpm start:local` starts the
   desktop; root `pnpm build` uses the same local composition.
-- Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
-  type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
+- Before commit: `pnpm check` and `pnpm format`. Root packages share
+  `.oxfmtrc.json`; ACP submodules stay independently formatted. If tests are
+  skipped, report type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits
   end with `Model: <runtime-model-id>`.
 - Tests use explicit signals, injected clocks, fake timers, and deterministic
