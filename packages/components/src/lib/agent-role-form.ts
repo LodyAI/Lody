@@ -196,12 +196,20 @@ export const buildAgentRoleFromForm = (
  * Only unset fields are filled: a saved Role keeps its stored selection even
  * when it differs from the agent's current default, which is what makes an
  * incompatible value visible instead of silently replaced.
+ *
+ * A Role is a durable promise about how a Session will run, so it may only be
+ * seeded from capabilities the agent itself reported. `provisional` ones are
+ * the built-in static tables — a hand-maintained copy of a catalog the agent
+ * fetches per account — and writing those in would persist a GUESS as the
+ * Role's commitment. That is how a Role came to promise Fast mode for an agent
+ * whose probe never published the option. Unseeded fields stay unset and the
+ * user chooses them.
  */
 export const applyAgentRoleRunConfigDefaults = (
   value: AgentRoleFormValue,
   selectorOptions: AcpSelectorOptions | null
 ): AgentRoleFormValue => {
-  if (!selectorOptions || selectorOptions.capabilityAuthority === 'unavailable') return value;
+  if (!selectorOptions || selectorOptions.capabilityAuthority !== 'authoritative') return value;
 
   const modelId =
     value.modelId ??

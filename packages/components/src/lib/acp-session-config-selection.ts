@@ -302,16 +302,47 @@ export const resolveAcpSessionConfigSelection = (
         ? preferredValue
         : selector.currentValue;
     }
+
+    /* A stored value the catalog does not cover is KEPT while no runtime table
+       exists. The catalog describes the model the capability probe happened to
+       run, so a value it omits may belong to the model this turn selects — an
+       Agent Role pinning Fast on a fast-capable model is exactly that. Dropping
+       it made the Role's own value invisible in the composer that is supposed to
+       show what the Role will do. A present runtime table still owns the whole
+       key set: that one is the agent's live state, not a snapshot of another
+       model, so an omission there is an answer. */
+    if (!runtimeTable) {
+      const cataloged = new Set(selectors.map((selector) => selector.configId));
+      for (const [configId, value] of Object.entries({
+        ...preferences.configOptionValues,
+        ...edits.configOptions,
+      })) {
+        if (!cataloged.has(configId)) {
+          configOptionValues[configId] = value;
+        }
+      }
+    }
   }
 
   return { selectedModeId, selectedModelId, configOptionValues };
 };
 
+/**
+ * Drops values a KNOWN selector rejects. A value with no selector at all is
+ * kept: the selector catalog comes from a capability snapshot of one model, so
+ * its silence is not a verdict, and the runtime reports any divergence.
+ */
 export const filterAcpSessionConfigOptionValues = (
   values: Record<string, AcpConfigOptionValue> | undefined,
   selectors: readonly AcpConfigOptionSelector[]
 ): Record<string, AcpConfigOptionValue> => {
   const filtered: Record<string, AcpConfigOptionValue> = {};
+  const cataloged = new Set(selectors.map((selector) => selector.configId));
+  for (const [configId, value] of Object.entries(values ?? {})) {
+    if (!cataloged.has(configId)) {
+      filtered[configId] = value;
+    }
+  }
   for (const selector of selectors) {
     const value = values?.[selector.configId];
     if (isConfigOptionValueValid(selector, value)) {

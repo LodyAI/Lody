@@ -82,7 +82,7 @@ describe('ACP session config derivation', () => {
     ).toBe('gpt-5.6-sol');
   });
 
-  it('keeps unknown config keys provisionally and removes them authoritatively', () => {
+  it('keeps a stored key the catalog does not cover, whatever the authority', () => {
     const selectors = [
       {
         configId: 'fast-mode',
@@ -107,13 +107,17 @@ describe('ACP session config derivation', () => {
         configOptionSelectors: selectors,
       }).configOptionValues
     ).toEqual({ future_option: 'enabled', 'fast-mode': 'future-value' });
+    // Authoritative only means the catalog is the agent's own — of ONE model.
+    // A value it rejects for a selector it HAS falls back ('future-value' is
+    // not a `fast-mode` value); a key it never mentions is kept, because the
+    // model this turn selects may well have it.
     expect(
       resolveAcpSessionConfigSelection(inputs, {
         ...baseOptions,
         capabilityAuthority: 'authoritative',
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ 'fast-mode': 'off' });
+    ).toEqual({ 'fast-mode': 'off', future_option: 'enabled' });
   });
 
   it('applies the runtime baseline over non-user fields', () => {
@@ -320,18 +324,20 @@ describe('ACP session config derivation', () => {
         ],
       },
     ];
+    // Uncataloged keys survive; a cataloged one with a value the selector
+    // rejects does not.
     expect(
       filterAcpSessionConfigOptionValues(
         { 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' },
         selectors
       )
-    ).toEqual({ collaboration_mode: 'plan' });
+    ).toEqual({ 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' });
     expect(
       filterAcpSessionConfigOptionValues(
         { 'plan-mode': 'on', collaboration_mode: 'invalid' },
         selectors
       )
-    ).toEqual({});
+    ).toEqual({ 'plan-mode': 'on' });
   });
 });
 
