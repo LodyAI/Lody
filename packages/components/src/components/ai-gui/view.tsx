@@ -2505,7 +2505,7 @@ const ChatFailedNoticeView = ({
         : t(
             'sessions.systemNotices.chatFailed.permissionRunOnce',
             'Run once with "{{effective}}"',
-            { effective: permissionRetry.effectiveModeId }
+            { effective: permissionRetry.disclosed.effectiveModeId }
           )}
     </button>
   ) : null;

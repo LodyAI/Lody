@@ -3,6 +3,7 @@ import {
   ACP_CONFIG_OPTION_ON_VALUE,
   isAcpFastModeConfigId,
   isAcpPermissionWiderThanRequested,
+  type AcceptedWiderPermission,
   isAcpPlanModeConfigOption,
   isSensitiveAcpConfigOptionId,
   type ACPSessionId,
@@ -56,8 +57,8 @@ export type AcpSessionRunConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
-  /** One-time informed acceptance carried by this turn. */
-  acceptWiderPermission?: boolean;
+  /** One-time informed acceptance carried by this turn, for one exact difference. */
+  acceptWiderPermission?: AcceptedWiderPermission;
 };
 
 type AcpSessionRunConfigApplyResult = {
@@ -73,7 +74,7 @@ type AcpSessionRunConfigApplyResult = {
    * from a snapshot, never when either mode is unranked, never when the agent
    * reported nothing to compare.
    */
-  permissionEscalation?: { requestedModeId: string; effectiveModeId: string };
+  permissionEscalation?: AcceptedWiderPermission;
 };
 
 /** A boolean toggle and an `on`/`off` select express the same choice. */
@@ -343,12 +344,8 @@ export async function applyAcpSessionRunConfig(args: {
      which case the two are equal and nothing fires), and the config table comes
      straight from what the agent published. So this cannot be triggered by a
      snapshot, by a stale cache, or by an unconfirmed request. */
-  const findPermissionEscalation = ():
-    | { requestedModeId: string; effectiveModeId: string }
-    | undefined => {
-    if (config.acceptWiderPermission) {
-      return undefined;
-    }
+  const accepted = config.acceptWiderPermission;
+  const findPermissionEscalation = (): AcceptedWiderPermission | undefined => {
     for (const selection of appliedSelections) {
       if (
         selection.source.kind === 'model' ||
@@ -357,24 +354,40 @@ export async function applyAcpSessionRunConfig(args: {
       ) {
         continue;
       }
+      const controlId = selection.source.kind === 'mode' ? modeConfigId : selection.source.configId;
       const effective =
         selection.source.kind === 'mode'
           ? runtimeConfigPatch.modeId
-          : effectiveConfigOptionValues[selection.source.configId];
+          : effectiveConfigOptionValues[controlId];
       if (
-        typeof selection.requested === 'string' &&
-        typeof effective === 'string' &&
-        isAcpPermissionWiderThanRequested(selection.requested, effective)
+        typeof selection.requested !== 'string' ||
+        typeof effective !== 'string' ||
+        !isAcpPermissionWiderThanRequested(selection.requested, effective)
       ) {
-        return { requestedModeId: selection.requested, effectiveModeId: effective };
+        continue;
       }
+      /* Only the exact difference the user was shown is skipped, and the scan
+         CONTINUES. A bare "accepted" would also wave through a difference they
+         never saw: the agent may have moved further still by the time the turn
+         re-runs (`plan → auto` accepted, `plan → always-approve` live), and a
+         second permission control may have widened alongside the one in the
+         notice. Either way this is a new, undisclosed escalation, and it gets
+         its own accurate stop. */
+      if (
+        accepted?.controlId === controlId &&
+        accepted.requestedModeId === selection.requested &&
+        accepted.effectiveModeId === effective
+      ) {
+        continue;
+      }
+      return { controlId, requestedModeId: selection.requested, effectiveModeId: effective };
     }
     return undefined;
   };
   const permissionEscalation = findPermissionEscalation();
   if (permissionEscalation) {
     logger.debug(
-      `[${sessionId}] Permission not applied: requested ${permissionEscalation.requestedModeId}, effective ${permissionEscalation.effectiveModeId}`
+      `[${sessionId}] Permission not applied for ${permissionEscalation.controlId}: requested ${permissionEscalation.requestedModeId}, effective ${permissionEscalation.effectiveModeId}`
     );
   }
 
@@ -394,6 +407,7 @@ export async function applyAcpSessionRunConfig(args: {
  */
 export class AcpPermissionNotAppliedError extends Error {
   constructor(
+    readonly controlId: string,
     readonly requestedModeId: string,
     readonly effectiveModeId: string
   ) {

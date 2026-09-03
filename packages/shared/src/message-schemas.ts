@@ -354,6 +354,15 @@ export const SessionInputBlocksSchema = z
     }
   });
 
+/** The one permission difference a user was shown and chose to run with. */
+export const AcceptedWiderPermissionSchema = z
+  .object({
+    controlId: z.string().trim().min(1),
+    requestedModeId: z.string().trim().min(1),
+    effectiveModeId: z.string().trim().min(1),
+  })
+  .strict();
+
 export const ACPSessionConfigSchema = z
   .object({
     prompt: z.string(),
@@ -367,7 +376,7 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: z.boolean().optional(),
+    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -389,7 +398,7 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: z.boolean().optional(),
+    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -496,8 +505,12 @@ export const normalizeSessionTurnInputConfig = (
      through here (direct RPC, the dispatch-turn and steer entries, the Loro
      history readback, queue promotion), so a field this rebuild does not copy
      never reaches the daemon at all. */
-  if (maybeParseField(z.boolean(), record.acceptWiderPermission) === true) {
-    normalized.acceptWiderPermission = true;
+  const acceptWiderPermission = maybeParseField(
+    AcceptedWiderPermissionSchema,
+    record.acceptWiderPermission
+  );
+  if (acceptWiderPermission) {
+    normalized.acceptWiderPermission = acceptWiderPermission;
   }
 
   if (record.agentRoleId === null) {
@@ -959,7 +972,7 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: z.boolean().optional(),
+    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
   })
   .strict();
 

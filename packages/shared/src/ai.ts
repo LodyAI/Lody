@@ -1151,7 +1151,7 @@ export type ChatFailedMeta = {
    * the agent reported. Structured so the notice can name both instead of the
    * client parsing them back out of `message`.
    */
-  permission?: { requestedModeId: string; effectiveModeId: string };
+  permission?: AcceptedWiderPermission;
 };
 
 /**
@@ -1577,6 +1577,14 @@ export type ToolCallContent =
 
 export type ACPSessionId = string & { __brand: 'ACPSessionId' };
 
+/** The one permission difference a user was shown and chose to run with. */
+export type AcceptedWiderPermission = {
+  /** The control it was disclosed for: a config option id, or the mode selector. */
+  controlId: string;
+  requestedModeId: string;
+  effectiveModeId: string;
+};
+
 export type IssuePRMention = {
   type: 'issue' | 'pr';
   title: string;
@@ -1602,11 +1610,16 @@ export type ACPSessionConfig = {
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
   /**
-   * One-time informed acceptance: the user was told the agent would run with a
-   * wider permission than requested and chose to run anyway. Scoped to the turn
-   * that carries it — never inherited, never a default.
+   * One-time informed acceptance, scoped to the turn that carries it — never
+   * inherited, never a default.
+   *
+   * It names the exact difference the user was shown, because a bare "yes"
+   * would also accept differences they never saw: the agent may have moved
+   * further by the time the turn re-runs, and a second permission control may
+   * have widened alongside the one in the notice. Anything that does not match
+   * this triple stops the turn again with its own accurate notice.
    */
-  acceptWiderPermission?: boolean;
+  acceptWiderPermission?: AcceptedWiderPermission;
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

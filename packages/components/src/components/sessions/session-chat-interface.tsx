@@ -3758,7 +3758,9 @@ export const SessionChatInterface = memo(
             // keep the stopped turn's tool reach and its acceptance.
             mcpServerIds: [...(inputConfig.mcpServerIds ?? mcpSelection.selectedIds)],
             taskToolsEnabled: inputConfig.taskToolsEnabled,
-            ...(inputConfig.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
+            ...(inputConfig.acceptWiderPermission
+              ? { acceptWiderPermission: inputConfig.acceptWiderPermission }
+              : {}),
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
@@ -4097,8 +4099,7 @@ export const SessionChatInterface = memo(
         permissionRetryTarget
           ? {
               noticeId: permissionRetryTarget.noticeId,
-              requestedModeId: permissionRetryTarget.requestedModeId,
-              effectiveModeId: permissionRetryTarget.effectiveModeId,
+              disclosed: permissionRetryTarget.disclosed,
               pending: permissionRetryPending,
               canRetry:
                 sessionDocReady &&

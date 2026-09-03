@@ -951,11 +951,17 @@ describe('one-time acceptance of a wider permission', () => {
     agentType: 'claude',
     modeId: 'plan',
   };
+  const accepted = {
+    controlId: 'permission-mode',
+    requestedModeId: 'plan',
+    effectiveModeId: 'auto',
+  };
 
   it('writes the flag only into the turn that carries it', () => {
     expect(
-      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true }).acceptWiderPermission
-    ).toBe(true);
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: accepted })
+        .acceptWiderPermission
+    ).toEqual(accepted);
   });
 
   it('leaves an ordinary send — including a plain resend — without it', () => {
@@ -963,7 +969,8 @@ describe('one-time acceptance of a wider permission', () => {
     // undefined flag must never become an acceptance the next turn inherits.
     expect(buildSessionTurnInputConfig(base).acceptWiderPermission).toBeUndefined();
     expect(
-      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: false }).acceptWiderPermission
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: undefined })
+        .acceptWiderPermission
     ).toBeUndefined();
   });
 
@@ -971,10 +978,13 @@ describe('one-time acceptance of a wider permission', () => {
     // Edit-and-resend mints a new userTurnId and a new prompt. The acceptance
     // was given for the ORIGINAL prompt, so carrying it would let the edited
     // one past the stop without ever asking — a bypass built out of a spread.
-    const accepted = buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true });
-    expect(accepted.acceptWiderPermission).toBe(true);
+    const acceptedTurn = buildSessionTurnInputConfig({
+      ...base,
+      acceptWiderPermission: accepted,
+    });
+    expect(acceptedTurn.acceptWiderPermission).toEqual(accepted);
 
-    const edited = deriveTurnInputConfigForNewTurn(accepted, {
+    const edited = deriveTurnInputConfigForNewTurn(acceptedTurn, {
       prompt: 'ship something else',
       inputBlocks: [{ type: 'text', text: 'ship something else' }],
     });
@@ -986,9 +996,9 @@ describe('one-time acceptance of a wider permission', () => {
     // The same-turn path is untouched: a status rewrite or a transport retry is
     // still the turn the user accepted.
     expect(
-      normalizeSessionTurnInputConfig({ ...accepted, _lodyDeliveryKind: 'steer' })
+      normalizeSessionTurnInputConfig({ ...acceptedTurn, _lodyDeliveryKind: 'steer' })
         ?.acceptWiderPermission
-    ).toBe(true);
+    ).toEqual(accepted);
   });
 
   it('survives the normalizer every transport runs it through', () => {
@@ -998,22 +1008,26 @@ describe('one-time acceptance of a wider permission', () => {
     // client set it.
     expect(
       normalizeSessionTurnInputConfig(
-        buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true })
+        buildSessionTurnInputConfig({ ...base, acceptWiderPermission: accepted })
       )?.acceptWiderPermission
-    ).toBe(true);
+    ).toEqual(accepted);
 
     // One-time semantics survive the round trip too: only an explicit `true` is
     // carried, so nothing can read an acceptance out of a turn that made none.
     expect(
       normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermission
     ).toBeUndefined();
+    // A malformed or partial acceptance reads as no acceptance: one that cannot
+    // name the control and both values would be a blanket one.
     expect(
-      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: false })
+      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: true })
         ?.acceptWiderPermission
     ).toBeUndefined();
     expect(
-      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: 'yes' })
-        ?.acceptWiderPermission
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermission: { requestedModeId: 'plan', effectiveModeId: 'auto' },
+      })?.acceptWiderPermission
     ).toBeUndefined();
   });
 });

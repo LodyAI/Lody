@@ -340,7 +340,18 @@ Two things the dev build does deliberately, both load-bearing:
   means adding its values there, or its escalations go unseen. The way out is explicit and
   per-turn: `SessionTurnInputConfig.acceptWiderPermission` is informed
   acceptance carried by one resend, never inherited and never a default, and it
-  suppresses the stop while still reporting the mismatch. That resend replays the
+  suppresses the stop while still reporting the mismatch. It NAMES the exact
+  difference that was disclosed — `{ controlId, requestedModeId,
+  effectiveModeId }`, written from the failure notice's own meta — because a
+  bare boolean also accepts differences the user never saw: the agent may have
+  moved further by the time the turn re-runs (`plan → auto` accepted, `plan →
+  always-approve` live), and a second permission control may have widened
+  alongside the one in the notice (Grok carries both a mode selector and an
+  explicit `_permission` one). The applier skips ONLY an exact triple match and
+  keeps scanning the remaining permission selections, so anything undisclosed
+  stops the turn again with its own accurate notice. Do not match on the values
+  alone, and do not treat a rank ceiling as equivalent across different
+  permission controls. That resend replays the
   STOPPED turn: prompt, mode, model, config values, Role, `mcpServerIds`
   (including an explicit empty selection), `taskToolsEnabled` and
   `issuePRMentions` all come from its frozen `inputConfig`, never from the

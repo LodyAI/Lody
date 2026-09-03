@@ -1,5 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AcpConfigOptionValue, AgentRoleId, SessionInputBlock } from '@lody/shared';
+import type {
+  AcceptedWiderPermission,
+  AcpConfigOptionValue,
+  AgentRoleId,
+  SessionInputBlock,
+} from '@lody/shared';
 
 /**
  * Recovering a turn the daemon stopped because the agent reported a permission
@@ -14,10 +19,8 @@ import type { AcpConfigOptionValue, AgentRoleId, SessionInputBlock } from '@lody
 export type PermissionNotAppliedRetryTarget = {
   /** History entry id of the failure notice, for matching the render site. */
   noticeId: string;
-  /** The permission the stopped turn asked for. */
-  requestedModeId: string;
-  /** The wider one the agent reported. */
-  effectiveModeId: string;
+  /** The exact difference that was disclosed, as the notice reported it. */
+  disclosed: AcceptedWiderPermission;
   userTurnId: string;
   inputBlocks: SessionInputBlock[];
   modeId?: string;
@@ -45,22 +48,26 @@ type RetryHistoryEntry = {
   inputConfig?: unknown;
 };
 
-const readPermissionMeta = (
-  item: RetryHistoryItem
-): { requestedModeId: string; effectiveModeId: string } | null => {
+const readPermissionMeta = (item: RetryHistoryItem): AcceptedWiderPermission | null => {
   if (item?.type !== 'system_notice' || item.name !== 'chat_failed') {
     return null;
   }
   const meta = item.meta as
-    | { reason?: unknown; permission?: { requestedModeId?: unknown; effectiveModeId?: unknown } }
+    | {
+        reason?: unknown;
+        permission?: { controlId?: unknown; requestedModeId?: unknown; effectiveModeId?: unknown };
+      }
     | undefined;
   if (meta?.reason !== 'permission_not_applied') {
     return null;
   }
-  const requestedModeId = meta.permission?.requestedModeId;
-  const effectiveModeId = meta.permission?.effectiveModeId;
-  return typeof requestedModeId === 'string' && typeof effectiveModeId === 'string'
-    ? { requestedModeId, effectiveModeId }
+  const { controlId, requestedModeId, effectiveModeId } = meta.permission ?? {};
+  // All three or nothing: an acceptance that cannot name the control it is for
+  // would be a blanket one.
+  return typeof controlId === 'string' &&
+    typeof requestedModeId === 'string' &&
+    typeof effectiveModeId === 'string'
+    ? { controlId, requestedModeId, effectiveModeId }
     : null;
 };
 
@@ -81,7 +88,7 @@ export const findPermissionNotAppliedRetryTarget = (
     return null;
   }
   let noticeIndex = -1;
-  let permission: { requestedModeId: string; effectiveModeId: string } | null = null;
+  let permission: AcceptedWiderPermission | null = null;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (!entry) continue;
@@ -114,7 +121,7 @@ export const findPermissionNotAppliedRetryTarget = (
     }
     return {
       noticeId: history[noticeIndex]?.id ?? '',
-      ...permission,
+      disclosed: permission,
       userTurnId: entry.id,
       inputBlocks,
       ...(typeof inputConfig?.modeId === 'string' ? { modeId: inputConfig.modeId } : {}),
@@ -150,8 +157,7 @@ export const findPermissionNotAppliedRetryTarget = (
 /** What the failure notice needs to render its one-time acceptance action. */
 export type PermissionRetryControl = {
   noticeId: string;
-  requestedModeId: string;
-  effectiveModeId: string;
+  disclosed: AcceptedWiderPermission;
   pending: boolean;
   canRetry: boolean;
   retry: () => void;

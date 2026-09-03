@@ -1753,6 +1753,7 @@ export class MessageHandler {
        an explicit one-time acceptance if they want it anyway. */
     if (permissionEscalation) {
       throw new AcpPermissionNotAppliedError(
+        permissionEscalation.controlId,
         permissionEscalation.requestedModeId,
         permissionEscalation.effectiveModeId
       );

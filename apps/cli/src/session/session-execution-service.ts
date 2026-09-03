@@ -1881,6 +1881,7 @@ export class SessionExecutionService {
       // name the two permissions and offer to run this exact turn once with the
       // one the agent actually has, instead of a generic pre-prompt error.
       await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message, undefined, {
+        controlId: error.controlId,
         requestedModeId: error.requestedModeId,
         effectiveModeId: error.effectiveModeId,
       });

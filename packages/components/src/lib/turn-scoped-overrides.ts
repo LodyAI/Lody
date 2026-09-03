@@ -1,4 +1,9 @@
-import type { AcpConfigOptionValue, IssuePRMention, McpServerId } from '@lody/shared';
+import type {
+  AcceptedWiderPermission,
+  AcpConfigOptionValue,
+  IssuePRMention,
+  McpServerId,
+} from '@lody/shared';
 import type { PermissionNotAppliedRetryTarget } from '@/lib/permission-not-applied-retry';
 
 /**
@@ -16,8 +21,8 @@ import type { PermissionNotAppliedRetryTarget } from '@/lib/permission-not-appli
  * an empty `mcpServerIds` array, which is an explicit "no servers" selection.
  */
 export type TurnScopedOverrides = {
-  /** One-time informed acceptance of a wider permission, for this turn only. */
-  acceptWiderPermission?: boolean;
+  /** One-time informed acceptance of ONE disclosed difference, this turn only. */
+  acceptWiderPermission?: AcceptedWiderPermission;
   mcpServerIdsOverride?: readonly McpServerId[];
   taskToolsEnabledOverride?: boolean;
   issuePRMentionsOverride?: IssuePRMention[];
@@ -29,7 +34,9 @@ export const EMPTY_TURN_SCOPED_OVERRIDES: TurnScopedOverrides = {};
 export const pickTurnScopedOverrides = (
   options: TurnScopedOverrides | undefined
 ): TurnScopedOverrides => ({
-  ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
+  ...(options?.acceptWiderPermission
+    ? { acceptWiderPermission: options.acceptWiderPermission }
+    : {}),
   ...(options?.mcpServerIdsOverride !== undefined
     ? { mcpServerIdsOverride: options.mcpServerIdsOverride }
     : {}),
@@ -45,10 +52,12 @@ export const pickTurnScopedOverrides = (
 export const buildPermissionRetryOverrides = (
   target: Pick<
     PermissionNotAppliedRetryTarget,
-    'mcpServerIds' | 'taskToolsEnabled' | 'issuePRMentions'
+    'disclosed' | 'mcpServerIds' | 'taskToolsEnabled' | 'issuePRMentions'
   >
 ): TurnScopedOverrides => ({
-  acceptWiderPermission: true,
+  // The acceptance names what the notice showed, so the daemon can tell it from
+  // a difference that appeared afterwards.
+  acceptWiderPermission: target.disclosed,
   ...(target.mcpServerIds !== undefined
     ? { mcpServerIdsOverride: target.mcpServerIds as McpServerId[] }
     : {}),
@@ -75,7 +84,7 @@ type TurnInputConfigFields = {
 export const applyTurnScopedOverrides = <T extends TurnInputConfigFields>(
   args: T,
   overrides: TurnScopedOverrides
-): T & { acceptWiderPermission?: boolean } => ({
+): T & { acceptWiderPermission?: AcceptedWiderPermission } => ({
   ...args,
   ...(overrides.mcpServerIdsOverride !== undefined
     ? { mcpServerIds: overrides.mcpServerIdsOverride }
@@ -86,5 +95,7 @@ export const applyTurnScopedOverrides = <T extends TurnInputConfigFields>(
   ...(overrides.issuePRMentionsOverride !== undefined
     ? { issuePRMentions: overrides.issuePRMentionsOverride }
     : {}),
-  ...(overrides.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
+  ...(overrides.acceptWiderPermission
+    ? { acceptWiderPermission: overrides.acceptWiderPermission }
+    : {}),
 });

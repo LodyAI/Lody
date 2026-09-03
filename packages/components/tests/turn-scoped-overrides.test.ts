@@ -43,7 +43,11 @@ describe('turn-scoped overrides reach the wire', () => {
           name: 'chat_failed',
           meta: {
             reason: 'permission_not_applied',
-            permission: { requestedModeId: 'plan', effectiveModeId: 'auto' },
+            permission: {
+              controlId: 'permission-mode',
+              requestedModeId: 'plan',
+              effectiveModeId: 'auto',
+            },
           },
         },
       ],
@@ -60,7 +64,11 @@ describe('turn-scoped overrides reach the wire', () => {
     const afterHops = pickTurnScopedOverrides(pickTurnScopedOverrides(dispatchOptions));
     const config = buildSessionTurnInputConfig(applyTurnScopedOverrides(composerArgs, afterHops));
 
-    expect(config.acceptWiderPermission).toBe(true);
+    expect(config.acceptWiderPermission).toEqual({
+      controlId: 'permission-mode',
+      requestedModeId: 'plan',
+      effectiveModeId: 'auto',
+    });
     // The composer's own values lost to the stopped turn's, including the
     // explicit empty MCP selection and `taskToolsEnabled: false`.
     expect(config.mcpServerIds).toEqual([]);
@@ -80,12 +88,22 @@ describe('turn-scoped overrides reach the wire', () => {
 
   it('keeps a stopped turn that pinned nothing extra from inventing values', () => {
     // No MCP/task/mention fields on the frozen config: the composer's stay.
-    const overrides = buildPermissionRetryOverrides({});
+    const overrides = buildPermissionRetryOverrides({
+      disclosed: {
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      },
+    });
     const config = buildSessionTurnInputConfig(
       applyTurnScopedOverrides(composerArgs, pickTurnScopedOverrides(overrides))
     );
 
-    expect(config.acceptWiderPermission).toBe(true);
+    expect(config.acceptWiderPermission).toEqual({
+      controlId: 'permission-mode',
+      requestedModeId: 'plan',
+      effectiveModeId: 'auto',
+    });
     expect(config.mcpServerIds).toEqual(['server-the-user-picked-later']);
     expect(config.taskToolsEnabled).toBe(true);
   });

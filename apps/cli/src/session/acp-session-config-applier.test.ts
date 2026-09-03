@@ -211,6 +211,7 @@ describe('applyAcpSessionRunConfig', () => {
       );
 
       expect(result.permissionEscalation).toEqual({
+        controlId: 'permission-mode',
         requestedModeId: 'plan',
         effectiveModeId: 'auto',
       });
@@ -294,6 +295,7 @@ describe('applyAcpSessionRunConfig', () => {
       );
 
       expect(result.permissionEscalation).toEqual({
+        controlId: 'permission_mode',
         requestedModeId: 'ask',
         effectiveModeId: 'always-approve',
       });
@@ -321,7 +323,7 @@ describe('applyAcpSessionRunConfig', () => {
             permissionAgent('auto')
           )
         ).permissionEscalation
-      ).toEqual({ requestedModeId: 'ask', effectiveModeId: 'auto' });
+      ).toEqual({ controlId: 'permission_mode', requestedModeId: 'ask', effectiveModeId: 'auto' });
 
       // DeepSeek Harness `read-only` → `workspace-write`.
       expect(
@@ -335,7 +337,11 @@ describe('applyAcpSessionRunConfig', () => {
             permissionAgent('workspace-write')
           )
         ).permissionEscalation
-      ).toEqual({ requestedModeId: 'read-only', effectiveModeId: 'workspace-write' });
+      ).toEqual({
+        controlId: 'permission_mode',
+        requestedModeId: 'read-only',
+        effectiveModeId: 'workspace-write',
+      });
 
       // The other direction is a functional mismatch, not an escalation.
       expect(
@@ -414,13 +420,173 @@ describe('applyAcpSessionRunConfig', () => {
           cliType: 'builtin',
           agentType: 'grok',
           configOptionValues: { permission_mode: 'ask' },
-          acceptWiderPermission: true,
+          acceptWiderPermission: {
+            controlId: 'permission_mode',
+            requestedModeId: 'ask',
+            effectiveModeId: 'always-approve',
+          },
         },
         agentClient
       );
 
       expect(result.permissionEscalation).toBeUndefined();
       expect(result.warningSelections).toEqual(['permission_mode="ask"']);
+    });
+
+    it('still stops when the agent moved further than what was accepted', async () => {
+      // Accepted `plan → auto` after the first stop; by the time the turn
+      // re-runs the agent reports `always-approve`. That is a difference the
+      // user was never shown, so the acceptance does not cover it.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          {
+            id: 'permission-mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'always-approve',
+          },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'claude',
+          modeId: 'plan',
+          acceptWiderPermission: {
+            controlId: 'permission-mode',
+            requestedModeId: 'plan',
+            effectiveModeId: 'auto',
+          },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'always-approve',
+      });
+    });
+
+    it('still stops on a second permission control the user never saw', async () => {
+      // Grok carries both a mode selector and an explicit `_permission` one.
+      // Accepting the disclosed one must not wave the other one through.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'interaction_mode', category: 'mode', type: 'select', currentValue: 'auto' },
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'always-approve',
+          },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          modeId: 'plan',
+          configOptionValues: { permission_mode: 'ask' },
+          acceptWiderPermission: {
+            controlId: 'interaction_mode',
+            requestedModeId: 'plan',
+            effectiveModeId: 'auto',
+          },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        controlId: 'permission_mode',
+        requestedModeId: 'ask',
+        effectiveModeId: 'always-approve',
+      });
+    });
+
+    it('keeps scanning past the accepted item to the one still undisclosed', async () => {
+      // The accepted control is reached FIRST in the apply order, so a skip that
+      // ended the scan would let the later mode escalation through.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'interaction_mode', category: 'mode', type: 'select', currentValue: 'auto' },
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'always-approve',
+          },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          modeId: 'plan',
+          configOptionValues: { permission_mode: 'ask' },
+          acceptWiderPermission: {
+            controlId: 'permission_mode',
+            requestedModeId: 'ask',
+            effectiveModeId: 'always-approve',
+          },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        controlId: 'interaction_mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      });
+    });
+
+    it('does not let an acceptance for one control cover the same values on another', async () => {
+      // Same `plan → auto` values, different control. Matching on the values
+      // alone would silently transfer consent between permission dimensions.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'auto',
+          },
+        ],
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          configOptionValues: { permission_mode: 'plan' },
+          acceptWiderPermission: {
+            controlId: 'interaction_mode',
+            requestedModeId: 'plan',
+            effectiveModeId: 'auto',
+          },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        controlId: 'permission_mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      });
     });
 
     it('stands down for a turn that carries the informed acceptance', async () => {
@@ -433,7 +599,16 @@ describe('applyAcpSessionRunConfig', () => {
       } as unknown as AgentClient;
 
       const result = await apply(
-        { cliType: 'builtin', agentType: 'claude', modeId: 'plan', acceptWiderPermission: true },
+        {
+          cliType: 'builtin',
+          agentType: 'claude',
+          modeId: 'plan',
+          acceptWiderPermission: {
+            controlId: 'permission-mode',
+            requestedModeId: 'plan',
+            effectiveModeId: 'auto',
+          },
+        },
         agentClient
       );
 

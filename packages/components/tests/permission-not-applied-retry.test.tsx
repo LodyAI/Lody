@@ -22,7 +22,11 @@ const stoppedTurn = (overrides?: Record<string, unknown>) => ({
   },
 });
 
-const failureNotice = (permission?: { requestedModeId: string; effectiveModeId: string }) => ({
+const failureNotice = (permission?: {
+  controlId: string;
+  requestedModeId: string;
+  effectiveModeId: string;
+}) => ({
   id: 'notice-1',
   role: 'system',
   items: [
@@ -47,13 +51,20 @@ describe('findPermissionNotAppliedRetryTarget', () => {
       },
       { id: 'assistant-0', role: 'assistant' },
       stoppedTurn(),
-      failureNotice({ requestedModeId: 'plan', effectiveModeId: 'auto' }),
+      failureNotice({
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      }),
     ]);
 
     expect(target).toEqual({
       noticeId: 'notice-1',
-      requestedModeId: 'plan',
-      effectiveModeId: 'auto',
+      disclosed: {
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      },
       userTurnId: 'user-1',
       inputBlocks: [{ type: 'text', text: 'ship it' }],
       modeId: 'plan',
@@ -69,7 +80,11 @@ describe('findPermissionNotAppliedRetryTarget', () => {
     // would pair the old prompt with tool permissions that turn never had.
     const target = findPermissionNotAppliedRetryTarget([
       stoppedTurn({ mcpServerIds: [], taskToolsEnabled: false, issuePRMentions: [{ number: 7 }] }),
-      failureNotice({ requestedModeId: 'plan', effectiveModeId: 'auto' }),
+      failureNotice({
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      }),
     ]);
 
     expect(target?.mcpServerIds).toEqual([]);
@@ -82,7 +97,11 @@ describe('findPermissionNotAppliedRetryTarget', () => {
     expect(
       findPermissionNotAppliedRetryTarget([
         stoppedTurn(),
-        failureNotice({ requestedModeId: 'plan', effectiveModeId: 'auto' }),
+        failureNotice({
+          controlId: 'permission-mode',
+          requestedModeId: 'plan',
+          effectiveModeId: 'auto',
+        }),
         {
           id: 'user-2',
           role: 'user',
@@ -115,7 +134,11 @@ describe('findPermissionNotAppliedRetryTarget', () => {
     expect(
       findPermissionNotAppliedRetryTarget([
         { id: 'user-1', role: 'user', inputConfig: { modeId: 'plan' } },
-        failureNotice({ requestedModeId: 'plan', effectiveModeId: 'auto' }),
+        failureNotice({
+          controlId: 'permission-mode',
+          requestedModeId: 'plan',
+          effectiveModeId: 'auto',
+        }),
       ])
     ).toBeNull();
   });
