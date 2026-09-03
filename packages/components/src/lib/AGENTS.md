@@ -95,8 +95,14 @@ Production layout stays ordinary Flex/Grid with stable geometry data markers onl
 columns are never props or wrapper DOM. Fixture and gate share one spec. `?geometry=1` adds
 the overlay, alignment lines and spacing diagnostics; dev only.
 
-- Explicit control boxes: repeated slots share an X line across rows, icon/text controls
-  in one row a Y instance.
+- Explicit control boxes: repeated slots share an X line across rows.
+- A Y rail's row is GEOMETRIC: `assignGeometricRows` puts an extent on the line whose MEDIAN
+  band it overlaps by half — to that band, never neighbour to neighbour, or a ladder of
+  half-overlaps chains two lines of different heights into one, as chaining intermediate
+  coordinates would merge two indentation levels. The DOM row is a PRIOR setting the EVIDENCE
+  BAR, never eligibility, which as a gate hid every cross-structural line by construction.
+  An atom no row accepted is measured on Y under its own row id, or the DOM would still gate
+  a layer earlier; alone in that row, it can only reach the cross-family bar.
 - Cross-font rows compare ink centres — a cap-height band from a fixed reference glyph,
   transformed SVG path bounds, a painted CSS shape's box; baselines compare text only
   ([tests/e2e/support](../../tests/e2e/support/AGENTS.md)). The overlay and the capture take
