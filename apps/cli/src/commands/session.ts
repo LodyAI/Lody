@@ -49,6 +49,7 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  isAcpPerModelConfigId,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -1513,11 +1514,28 @@ export function findUnverifiedTurnSelectors(
 }
 
 /**
- * Drops only what cannot be dispatched. An id the snapshot does not carry is
- * kept: the snapshot describes one model, and an inherited value may well
- * belong to another one.
+ * What a NEW Session may inherit from an older turn's config.
+ *
+ * Inheritance is not a request. Nobody asked for these values on this turn —
+ * they are carried forward as a convenience — so an id the capability catalog
+ * does not know gets no benefit of the doubt here, unlike an explicit
+ * `--config-option` or a frozen Operation request, which are dispatched as
+ * asked and reconciled at runtime. Without that distinction a removed or
+ * renamed option rides the Session lineage forever: every new Session inherits
+ * it, the agent rejects or warns about it, and the resulting config becomes the
+ * next inheritance source, with no surface anywhere to clear it.
+ *
+ * The one exception is an id Lody knows names a PER-MODEL control: those are
+ * absent from a snapshot whenever the captured model lacked them, which says
+ * nothing about the model a new Session will run. This mirrors what the
+ * composer keeps client-side.
+ *
+ * With no capability at all nothing can be cataloged, so the same rule applies
+ * and only per-model ids survive. Inheritance is a convenience and an explicit
+ * request is always available; carrying every historical key forward on a
+ * missing snapshot is how the accumulation starts.
  */
-export function filterCompatibleTurnConfigOptionValues(
+export function filterInheritedTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
   capability: AcpCapabilityCacheEntry | undefined
 ): Record<string, string | boolean> | undefined {
@@ -1530,7 +1548,9 @@ export function filterCompatibleTurnConfigOptionValues(
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
-      return option === undefined || validateConfigOptionShape(option, value) === undefined;
+      return option === undefined
+        ? isAcpPerModelConfigId(id)
+        : validateConfigOptionShape(option, value) === undefined;
     })
   );
   return Object.keys(compatible).length > 0 ? compatible : undefined;
@@ -1565,7 +1585,7 @@ export function filterCompatibleInheritedTurnConfig(
   if (!config) {
     return undefined;
   }
-  const configOptionValues = filterCompatibleTurnConfigOptionValues(
+  const configOptionValues = filterInheritedTurnConfigOptionValues(
     config.configOptionValues,
     capability
   );

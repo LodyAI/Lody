@@ -272,6 +272,17 @@ Two things the dev build does deliberately, both load-bearing:
   confirmed; neither blocks. Do not reintroduce a `validatedConfigIds`-style
   exemption set: it only made sense while the snapshot could reject, and with
   rejection gone there is nothing to exempt.
+  INHERITANCE is the one place that still drops:
+  `filterInheritedTurnConfigOptionValues` keeps an uncataloged key only when
+  `isAcpPerModelConfigId` recognises it. A value carried forward from an older
+  turn is not a request — nobody asked for it on this turn — so a removed or
+  renamed option would otherwise ride the Session lineage forever: every new
+  Session inherits it, the agent rejects it, and that config becomes the next
+  inheritance source, with no surface anywhere to clear it. The same rule applies
+  when there is no capability at all; an explicit request is always available, so
+  a missing snapshot must not become a licence to carry every historical key.
+  Explicit `--config-option` and frozen Operation requests keep going out
+  unchanged — that split is the whole point.
   The one thing that still fails loudly is a missing wire BINDING — no snapshot
   option and no agent convention for how to spell a control, so there is no
   request to send and an invented id would be a silent no-op. That is a different

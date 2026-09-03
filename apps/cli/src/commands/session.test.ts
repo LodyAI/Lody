@@ -31,7 +31,7 @@ import {
   filterAuthorizedMachineMetas,
   filterAuthorizedLocalProjectCandidates,
   filterCompatibleInheritedTurnConfig,
-  filterCompatibleTurnConfigOptionValues,
+  filterInheritedTurnConfigOptionValues,
   filterSessionMetas,
   hasNonPositionalPromptSource,
   listChildSessionIds,
@@ -518,16 +518,52 @@ describe('session command helpers', () => {
     ).not.toThrow();
   });
 
-  it('drops inherited ACP config options only when the type cannot carry them', () => {
+  it('inherits only what the catalog knows, plus the per-model controls it cannot', () => {
     expect(
-      filterCompatibleTurnConfigOptionValues(
-        { approval_policy: 'never', web_search: 'true', removed: false },
+      filterInheritedTurnConfigOptionValues(
+        {
+          approval_policy: 'never',
+          web_search: 'true',
+          removed_option: false,
+          'fast-mode': true,
+          reasoning_effort: 'high',
+          thinking: 'on',
+        },
         createAcpCapability()
       )
-      // `web_search` is a boolean option handed a string: undispatchable.
-      // `removed` is simply absent from this snapshot, which the model this
-      // turn runs may well still have.
-    ).toEqual({ approval_policy: 'never', removed: false });
+    ).toEqual({
+      approval_policy: 'never',
+      // Absent from the snapshot because the captured model lacked them, which
+      // says nothing about the model a new Session runs.
+      'fast-mode': true,
+      reasoning_effort: 'high',
+      thinking: 'on',
+    });
+    // `web_search` is a boolean option handed a string: undispatchable under any
+    // model. `removed_option` is an id nobody asked for on this turn and the
+    // catalog has never heard of — inheriting it forever is how a deleted
+    // option keeps being resent down the Session lineage.
+
+    // With no capability at all the same rule applies: inheritance is a
+    // convenience, and an explicit request is always available.
+    expect(
+      filterInheritedTurnConfigOptionValues({ removed_option: false, 'fast-mode': true }, undefined)
+    ).toEqual({ 'fast-mode': true });
+  });
+
+  it('still dispatches an explicitly requested option the catalog does not know', () => {
+    // The other half of the rule: an explicit `--config-option` or a frozen
+    // Operation request is a request, and a snapshot of one model does not get
+    // to refuse it.
+    const requested = applyAgentRunConfigSelection(
+      { configOptionValues: { removed_option: false } },
+      createAcpCapability()
+    );
+
+    expect(requested.config.configOptionValues).toEqual({ removed_option: false });
+    expect(() =>
+      validateTurnConfigOptionValues(requested.config.configOptionValues, createAcpCapability())
+    ).not.toThrow();
   });
 
   it('reports mode and model selectors the snapshot cannot confirm, without rejecting them', () => {
