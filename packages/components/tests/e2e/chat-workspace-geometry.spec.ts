@@ -457,6 +457,106 @@ test('vertical row alignment is discovered without geometry marker attributes', 
   expect(changedRows.map(([rowId]) => rowId)).toEqual([target?.rowId]);
 });
 
+test('a cross-family geometric row reports its outlier and no DOM row', async ({ page }) => {
+  test.setTimeout(120_000);
+  const response = await page.goto(
+    '/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story'
+  );
+  expect(response?.ok()).toBeTruthy();
+  await expect(page.locator('[data-geometry-fixture-ready="true"]')).toBeAttached({
+    timeout: 30_000,
+  });
+
+  // The discovery-scope attribute stays: it is a declared hint, and it is half
+  // of what sets a rail's evidence bar. The alignment markers go, so nothing a
+  // designer wrote can be what put these controls on one line.
+  const semanticAttributes = Object.values(CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES);
+  await page.locator('*').evaluateAll((elements, attributes) => {
+    for (const element of elements) {
+      for (const attribute of attributes) element.removeAttribute(attribute);
+    }
+  }, semanticAttributes);
+
+  type Identified = Readonly<{ primitiveId?: string }>;
+  const primitiveIdOf = (member: Identified) => member.primitiveId ?? '';
+  const outlierIds = (rail: DiscoveredBlockRail) =>
+    rail.outliers
+      .map((member) => primitiveIdOf(member as typeof member & Identified))
+      .sort()
+      .join(',');
+  const memberIds = (rail: DiscoveredBlockRail) =>
+    rail.members
+      .map((member) => primitiveIdOf(member as typeof member & Identified))
+      .sort()
+      .join(',');
+  const outliersByRail = (rails: readonly DiscoveredBlockRail[]) =>
+    new Map(
+      rails.map((rail) => [`${rail.evidence} ${memberIds(rail)} ${rail.anchor}`, outlierIds(rail)])
+    );
+  const crossFamily = (rails: readonly DiscoveredBlockRail[]) =>
+    rails.filter((rail) => rail.evidence === 'cross-family');
+  const rowInstance = (rails: readonly DiscoveredBlockRail[]) =>
+    rails.filter((rail) => rail.evidence === 'row-instance');
+
+  const before = await discoverChatWorkspaceBlockRails(page);
+  expect(crossFamily(before).length, 'no cross-family geometric row to probe').toBeGreaterThan(0);
+
+  // Any singleton control on any cross-family row will do; naming a header icon
+  // would make the gate about one product surface rather than about the rule.
+  // An odd, tight rail: the median is then one member's coordinate, so the shift
+  // moves the probe and not the line it is measured against.
+  const probeOf = (rail: DiscoveredBlockRail) =>
+    rail.members.find((member) => !member.outlier && member.kind === 'svg');
+  const target = crossFamily(before).find(
+    (rail) => rail.sampleSize % 2 === 1 && rail.spread <= 1 && probeOf(rail) !== undefined
+  );
+  expect(target, 'no tight cross-family row with an aligned icon to probe').toBeDefined();
+  if (!target) return;
+  const probe = probeOf(target);
+  const probeId = probe ? primitiveIdOf(probe as typeof probe & Identified) : '';
+  expect(probeId).not.toBe('');
+
+  const probeShift = 2;
+  await page.evaluate(
+    ({ primitiveId, shift }) => {
+      const index = Number(primitiveId.replace('dom-', '')) - 1;
+      const element = [document.body, ...document.body.querySelectorAll('*')][index];
+      if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+        throw new Error(`Geometry probe element ${primitiveId} is missing`);
+      }
+      element.style.transform = `translateY(${shift}px)`;
+    },
+    { primitiveId: probeId, shift: probeShift }
+  );
+
+  const after = await discoverChatWorkspaceBlockRails(page);
+  const probed = crossFamily(after).find((rail) => memberIds(rail) === memberIds(target));
+  const probedMember = probed?.members.find(
+    (member) => primitiveIdOf(member as typeof member & Identified) === probeId
+  );
+  expect(probedMember?.outlier).toBe(true);
+  const probedOffset = (probedMember?.coordinate ?? 0) - (probed?.line ?? 0);
+  expect(probedOffset).toBeGreaterThan(probeShift - 1);
+  expect(probedOffset).toBeLessThan(probeShift + 1);
+
+  // Only the injected element left its rail, and it is the only element added to
+  // that rail's outliers. Comparing the two runs, rather than asserting which
+  // product rows are aligned, keeps the gate from failing when a real offset
+  // elsewhere is fixed.
+  const changed = [...outliersByRail(after).entries()].filter(
+    ([key, outliers]) => outliersByRail(before).get(key) !== outliers
+  );
+  expect(changed.map(([key]) => key)).toEqual([
+    `cross-family ${memberIds(target)} ${target.anchor}`,
+  ]);
+  expect(probed ? outlierIds(probed) : '').toBe(
+    [...new Set([...outlierIds(target).split(',').filter(Boolean), probeId])].sort().join(',')
+  );
+  // No product DOM row was touched: the DOM prior decides the evidence bar, and
+  // a cross-family probe must not reach a row-instance rail at all.
+  expect(rowInstance(after).length).toBe(rowInstance(before).length);
+});
+
 if (process.env.GEOMETRY_DIAGNOSTIC_AUDIT === '1') {
   test('geometry audit exposes every guide and diagnostic without hover', async ({ page }) => {
     test.setTimeout(60_000);
