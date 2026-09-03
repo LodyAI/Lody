@@ -31,6 +31,35 @@ export const ACP_THOUGHT_LEVEL_CATEGORY = 'thought_level';
 
 export const ACP_CONFIG_OPTION_ON_VALUE = 'on';
 export const ACP_CONFIG_OPTION_OFF_VALUE = 'off';
+const ACP_CONFIG_OPTION_TRUE_VALUE = 'true';
+const ACP_CONFIG_OPTION_FALSE_VALUE = 'false';
+
+export const isAcpOnOffSelectValues = (values: readonly string[]): boolean =>
+  values.includes(ACP_CONFIG_OPTION_ON_VALUE) && values.includes(ACP_CONFIG_OPTION_OFF_VALUE);
+
+/** cursor-agent emits boolean parameters as a two-row select with these exact values. */
+export const isAcpTrueFalseSelectValues = (values: readonly string[]): boolean =>
+  values.length === 2 &&
+  values.includes(ACP_CONFIG_OPTION_TRUE_VALUE) &&
+  values.includes(ACP_CONFIG_OPTION_FALSE_VALUE);
+
+export const isAcpToggleSelectValues = (values: readonly string[]): boolean =>
+  isAcpOnOffSelectValues(values) || isAcpTrueFalseSelectValues(values);
+
+export const isAcpToggleSelectEnabledValue = (value: unknown): boolean =>
+  value === ACP_CONFIG_OPTION_ON_VALUE || value === ACP_CONFIG_OPTION_TRUE_VALUE;
+
+export const toggleAcpSelectOptionValue = (
+  values: readonly string[],
+  enabled: boolean
+): string =>
+  isAcpTrueFalseSelectValues(values)
+    ? enabled
+      ? ACP_CONFIG_OPTION_TRUE_VALUE
+      : ACP_CONFIG_OPTION_FALSE_VALUE
+    : enabled
+      ? ACP_CONFIG_OPTION_ON_VALUE
+      : ACP_CONFIG_OPTION_OFF_VALUE;
 
 /** Permission mode id that means "plan without editing" across builtin agents. */
 export const ACP_PLAN_PERMISSION_MODE_ID = 'plan';
@@ -146,13 +175,12 @@ const findConfigOption = (
   predicate: (option: AcpConfigOptionSummary) => boolean
 ): AcpConfigOptionSummary | undefined => capability?.configOptions?.find(predicate);
 
-const isOnOffSelect = (option: AcpConfigOptionSummary): boolean =>
-  option.type === 'select' &&
-  option.options.some((value) => value.value === ACP_CONFIG_OPTION_ON_VALUE) &&
-  option.options.some((value) => value.value === ACP_CONFIG_OPTION_OFF_VALUE);
+const selectOptionValues = (option: AcpConfigOptionSummary): readonly string[] =>
+  option.options.map((value) => value.value);
 
 const isToggleOption = (option: AcpConfigOptionSummary): boolean =>
-  option.type === 'boolean' || isOnOffSelect(option);
+  option.type === 'boolean' ||
+  (option.type === 'select' && isAcpToggleSelectValues(selectOptionValues(option)));
 
 const isCollaborationModeSelect = (option: AcpConfigOptionSummary): boolean =>
   option.type === 'select' &&
@@ -162,9 +190,7 @@ const isCollaborationModeSelect = (option: AcpConfigOptionSummary): boolean =>
 const toggleValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfigOptionValue =>
   option.type === 'boolean'
     ? enabled
-    : enabled
-      ? ACP_CONFIG_OPTION_ON_VALUE
-      : ACP_CONFIG_OPTION_OFF_VALUE;
+    : toggleAcpSelectOptionValue(selectOptionValues(option), enabled);
 
 const findFastModeOption = (
   capability: RunConfigCapabilitySource | undefined
@@ -358,4 +384,65 @@ export const resolveAgentRunConfigSelection = (
     ...(validatedConfigIds.length > 0 ? { validatedConfigIds } : {}),
     ...(unverifiedSelections.length > 0 ? { unverifiedSelections } : {}),
   };
+};
+
+const isModelOrModeCategory = (option: AcpConfigOptionSummary): boolean =>
+  option.category === 'model' || option.category === 'mode';
+
+/**
+ * Compose the option list a model should see from the probe snapshot and the
+ * per-model catalog.
+ *
+ * An option owned by ANY model's catalog entry is per-model and is dropped from
+ * the shared snapshot, so a probe-time `fast` does not leak into a model whose
+ * entry lacks it. `model`/`mode`-category options are always taken from the
+ * snapshot and never from a catalog entry, so a catalog cannot shrink the model
+ * picker or replace the permission mode list.
+ */
+export const resolveAcpConfigOptionsForModel = (
+  entry: Pick<AcpCapabilityCacheEntry, 'configOptions' | 'configOptionsByModel'>,
+  modelId: string | null | undefined
+): AcpConfigOptionSummary[] | undefined => {
+  const catalog = entry.configOptionsByModel;
+  if (catalog === undefined || typeof modelId !== 'string') {
+    return entry.configOptions;
+  }
+  const catalogEntry = catalog[modelId];
+  if (catalogEntry === undefined) {
+    return entry.configOptions;
+  }
+
+  const perModelIds = new Set<string>();
+  for (const options of Object.values(catalog)) {
+    for (const option of options) {
+      if (!isModelOrModeCategory(option)) {
+        perModelIds.add(option.id);
+      }
+    }
+  }
+
+  const shared = (entry.configOptions ?? []).filter((option) => !perModelIds.has(option.id));
+  const perModel = catalogEntry.filter((option) => !isModelOrModeCategory(option));
+  return [...shared, ...perModel];
+};
+
+export const resolveAcpTargetModelId = (args: {
+  modelId?: string | null;
+  configOptionValues?: Record<string, string | boolean>;
+  configOptions?: AcpConfigOptionSummary[];
+}): string | undefined => {
+  if (typeof args.modelId === 'string' && args.modelId !== '') {
+    return args.modelId;
+  }
+  const modelOption = args.configOptions?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  if (modelOption === undefined) {
+    return undefined;
+  }
+  const selected = args.configOptionValues?.[modelOption.id];
+  if (typeof selected === 'string' && selected !== '') {
+    return selected;
+  }
+  return typeof modelOption.currentValue === 'string' ? modelOption.currentValue : undefined;
 };

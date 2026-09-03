@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isAcpOnOffSelectValues,
+  isAcpToggleSelectEnabledValue,
+  isAcpTrueFalseSelectValues,
+  resolveAcpConfigOptionsForModel,
+  resolveAcpTargetModelId,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
+  toggleAcpSelectOptionValue,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
 } from '../src';
 
 /** Codex-shaped agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
@@ -351,5 +358,286 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+
+  it('recognises a true/false fast select and writes those advertised values', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'cursor',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'fast',
+          name: 'Fast',
+          type: 'select',
+          currentValue: 'false',
+          options: [
+            { value: 'true', name: 'On' },
+            { value: 'false', name: 'Off' },
+          ],
+        },
+      ],
+      fetchedAt: 1,
+    };
+
+    expect(summarizeAgentRunConfigCapabilities(capability).fastMode).toBe(true);
+    expect(resolveAgentRunConfigSelection({ fastMode: true }, capability)).toEqual({
+      configOptionValues: { fast: 'true' },
+    });
+    expect(resolveAgentRunConfigSelection({ fastMode: false }, capability)).toEqual({
+      configOptionValues: { fast: 'false' },
+    });
+  });
+});
+
+const modelSelect = (currentValue = 'a'): AcpConfigOptionSummary => ({
+  id: 'model',
+  name: 'Model',
+  category: 'model',
+  type: 'select',
+  currentValue,
+  options: [
+    { value: 'a', name: 'A' },
+    { value: 'b', name: 'B' },
+    { value: 'c', name: 'C' },
+  ],
+});
+
+const modeSelect = (): AcpConfigOptionSummary => ({
+  id: 'mode',
+  name: 'Mode',
+  category: 'mode',
+  type: 'select',
+  currentValue: 'agent',
+  options: [{ value: 'agent', name: 'Agent' }],
+});
+
+const thinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+});
+
+const effortSelect = (): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'high', name: 'High' },
+  ],
+});
+
+const fastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+});
+
+const reasoningSelect = (): AcpConfigOptionSummary => ({
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'minimal',
+  options: [
+    { value: 'minimal', name: 'Minimal' },
+    { value: 'full', name: 'Full' },
+  ],
+});
+
+const contextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const catalogCompositionEntry = (): Pick<
+  AcpCapabilityCacheEntry,
+  'configOptions' | 'configOptionsByModel'
+> => ({
+  configOptions: [modelSelect(), modeSelect(), thinkingSelect(), effortSelect(), fastSelect()],
+  configOptionsByModel: {
+    a: [thinkingSelect(), effortSelect(), fastSelect()],
+    b: [reasoningSelect(), contextSelect()],
+    c: [],
+  },
+});
+
+describe('resolveAcpConfigOptionsForModel', () => {
+  it('composes shared snapshot options with model a catalog entries', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'a')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'thinking',
+      'effort',
+      'fast',
+    ]);
+  });
+
+  it('does not leak probe-time per-model options into model b', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'b')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'reasoning',
+      'context',
+    ]);
+  });
+
+  it('keeps only shared snapshot options for a known model with an empty catalog entry', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'c')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+    ]);
+  });
+
+  it('returns the snapshot unchanged for a model the catalog does not know', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'z')).toBe(entry.configOptions);
+  });
+
+  it('returns the snapshot when the catalog is absent or the model id is not a string', () => {
+    const entry = catalogCompositionEntry();
+    const snapshot = entry.configOptions;
+    expect(resolveAcpConfigOptionsForModel({ configOptions: snapshot }, 'a')).toBe(snapshot);
+    expect(resolveAcpConfigOptionsForModel(entry, undefined)).toBe(snapshot);
+    expect(resolveAcpConfigOptionsForModel(entry, null)).toBe(snapshot);
+  });
+
+  it('ignores model and mode options that a catalog entry tries to replace', () => {
+    const snapshotModel = modelSelect();
+    const snapshotMode = modeSelect();
+    const entry = {
+      configOptions: [snapshotModel, snapshotMode, thinkingSelect(), effortSelect(), fastSelect()],
+      configOptionsByModel: {
+        a: [
+          {
+            ...modelSelect('a'),
+            options: [{ value: 'a', name: 'A' }],
+          },
+          {
+            ...modeSelect(),
+            currentValue: 'catalog-mode',
+            options: [{ value: 'catalog-mode', name: 'Catalog mode' }],
+          },
+          thinkingSelect(),
+          effortSelect(),
+          fastSelect(),
+        ],
+        b: [reasoningSelect(), contextSelect()],
+        c: [],
+      },
+    };
+
+    const resolved = resolveAcpConfigOptionsForModel(entry, 'a');
+    expect(resolved?.[0]).toBe(snapshotModel);
+    expect(resolved?.[1]).toBe(snapshotMode);
+    expect(resolved?.[0]?.options.map((option) => option.value)).toEqual(['a', 'b', 'c']);
+    expect(resolved?.[1]?.currentValue).toBe('agent');
+    expect(resolved?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'thinking',
+      'effort',
+      'fast',
+    ]);
+  });
+});
+
+describe('resolveAcpTargetModelId', () => {
+  it('prefers an explicit model id over config values and the current value', () => {
+    expect(
+      resolveAcpTargetModelId({
+        modelId: 'explicit',
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('explicit');
+  });
+
+  it('reads the model-category select from config option values before currentValue', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-values');
+    expect(resolveAcpTargetModelId({ configOptions: [modelSelect('from-current')] })).toBe(
+      'from-current'
+    );
+  });
+
+  it('treats an empty-string modelId as not explicit', () => {
+    expect(
+      resolveAcpTargetModelId({
+        modelId: '',
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-values');
+  });
+
+  it('ignores a non-string model option value', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: true },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-current');
+  });
+
+  it('treats an empty-string model option value as not selected', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: '' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-current');
+  });
+});
+
+describe('ACP toggle select predicates', () => {
+  it('recognises on/off selects that include extra values', () => {
+    expect(isAcpOnOffSelectValues(['off', 'on', 'auto'])).toBe(true);
+  });
+
+  it('recognises exactly the true/false select set', () => {
+    expect(isAcpTrueFalseSelectValues(['true', 'false'])).toBe(true);
+    expect(isAcpTrueFalseSelectValues(['false', 'true'])).toBe(true);
+    expect(isAcpTrueFalseSelectValues(['true', 'false', 'auto'])).toBe(false);
+    expect(isAcpTrueFalseSelectValues(['true', 'true'])).toBe(false);
+    expect(isAcpTrueFalseSelectValues(['True', 'False'])).toBe(false);
+  });
+
+  it('writes the advertised toggle representation', () => {
+    expect(toggleAcpSelectOptionValue(['true', 'false'], true)).toBe('true');
+    expect(toggleAcpSelectOptionValue(['on', 'off'], false)).toBe('off');
+  });
+
+  it('treats only the advertised enabled strings as on', () => {
+    expect(isAcpToggleSelectEnabledValue('true')).toBe(true);
+    expect(isAcpToggleSelectEnabledValue('on')).toBe(true);
+    expect(isAcpToggleSelectEnabledValue('false')).toBe(false);
+    expect(isAcpToggleSelectEnabledValue(true)).toBe(false);
   });
 });
