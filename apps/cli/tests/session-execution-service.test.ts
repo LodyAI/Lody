@@ -72,9 +72,6 @@ const ensureSessionDocDefaults = <T>(doc: T): T => {
     if (!('waitUntilSynced' in doc)) {
       Object.assign(doc, { waitUntilSynced: vi.fn(async () => {}) });
     }
-    if (!('waitForRemoteSync' in doc)) {
-      Object.assign(doc, { waitForRemoteSync: vi.fn(async () => {}) });
-    }
   }
   return doc;
 };
@@ -990,20 +987,13 @@ describe('SessionExecutionService', () => {
     expect(getDocMeta).not.toHaveBeenCalled();
   });
 
-  it('marks a delivery-ambiguous steer failed without changing predecessor ownership', async () => {
+  it('defers a delivery-ambiguous failure until its renderer-authored history row arrives', async () => {
     let history: SessionHistoryInput[] = [];
-    const remoteSync = createDeferred<void>();
-    const remoteSyncStarted = createDeferred<void>();
     const deferredMarkerApplied = createDeferred<void>();
     const deferredMarkerDisposed = createDeferred<void>();
     let historyListener: (() => void) | undefined;
     const unsubscribeHistory = vi.fn(() => deferredMarkerDisposed.resolve());
-    const waitForRemoteSync = vi.fn(() => {
-      remoteSyncStarted.resolve();
-      return remoteSync.promise;
-    });
     const sessionDoc = {
-      waitForRemoteSync,
       getHistory: vi.fn(async () => history),
       updateHistory: vi.fn(
         async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
@@ -1068,18 +1058,11 @@ describe('SessionExecutionService', () => {
       timestamp: '2026-07-19T00:00:00.000Z',
       inputConfig: { prompt: 'do it differently' },
     });
-    await remoteSyncStarted.promise;
-    expect(sessionDoc.updateHistory).not.toHaveBeenCalled();
-
-    // The first inbound boundary may settle before the renderer-authored row.
-    // The RPC returns an error, but leaves a deferred marker on the live mirror.
-    remoteSync.resolve();
     await expect(steerResult).resolves.toMatchObject({ applied: false, disposition: 'error' });
-    expect(waitForRemoteSync).toHaveBeenCalledOnce();
     expect(sessionDoc.updateHistory).not.toHaveBeenCalled();
     expect(sessionDoc.mirror.subscribe).toHaveBeenCalledOnce();
 
-    // The exact row then arrives over the history CRDT. The subscription
+    // The exact row arrives later over the history CRDT. The subscription
     // applies the classification and disposes itself without another RPC.
     history = [
       {
@@ -1108,6 +1091,73 @@ describe('SessionExecutionService', () => {
     // The still-running user-1 turn retains all three dispatch pointers. In
     // particular, unknown is not an automatic redispatch signal for user-2.
     expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('closes the deferred marker subscription race without duplicate history writes', async () => {
+    let history: SessionHistoryInput[] = [];
+    const historyWriteStarted = createDeferred<void>();
+    const releaseHistoryWrite = createDeferred<void>();
+    const markerDisposed = createDeferred<void>();
+    let historyListener: (() => void) | undefined;
+    const unsubscribeHistory = vi.fn(() => markerDisposed.resolve());
+    const updateHistory = vi.fn(
+      async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        historyWriteStarted.resolve();
+        await releaseHistoryWrite.promise;
+        history = update(history);
+      }
+    );
+    const sessionDoc = {
+      getHistory: vi.fn(async () => history),
+      updateHistory,
+      mirror: {
+        subscribe: vi.fn((listener: () => void) => {
+          historyListener = listener;
+          history = [
+            {
+              id: 'user-raced',
+              role: 'user',
+              status: 'pending_apply',
+              read: false,
+              inputConfig: { prompt: 'arrived during subscribe' },
+            } as SessionHistoryInput,
+          ];
+          return unsubscribeHistory;
+        }),
+      },
+    };
+    const service = new SessionExecutionService(createBaseDeps());
+    const deferMarker = (
+      service as unknown as {
+        deferUncertainSteerHistoryMarker: (options: {
+          sessionId: SessionId;
+          sessionDoc: unknown;
+          userTurnId: string;
+        }) => void;
+      }
+    ).deferUncertainSteerHistoryMarker.bind(service);
+
+    deferMarker({
+      sessionId: 'session-steer-race' as SessionId,
+      sessionDoc,
+      userTurnId: 'user-raced',
+    });
+    await historyWriteStarted.promise;
+
+    // Multiple mirror events while the first mutation is in flight must
+    // coalesce behind it instead of writing the same terminal marker again.
+    historyListener?.();
+    historyListener?.();
+    releaseHistoryWrite.resolve();
+    await markerDisposed.promise;
+
+    expect(updateHistory).toHaveBeenCalledOnce();
+    expect(unsubscribeHistory).toHaveBeenCalledOnce();
+    expect(history[0]).toMatchObject({
+      id: 'user-raced',
+      status: 'failed',
+      sendStatus: 'delivery_unknown',
+    });
   });
 
   it('notifies when a prompt completes while a persistent goal remains active', async () => {

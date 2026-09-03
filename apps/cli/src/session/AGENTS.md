@@ -137,13 +137,13 @@ delegation proofs or a shared-machine gate without a new product and security de
   `processingUserMsgId`, or `latestUserMsgId`: the predecessor still owns the
   physical prompt, and automatic replay could duplicate work. The user may
   inspect the transcript/worktree and explicitly resend the content as a new turn.
-  Machine RPC can reach the CLI before the renderer-authored guide row, so this
-  mutation waits for `SessionDocument.waitForRemoteSync()`'s initial inbound
-  boundary. `waitUntilSynced()` is not a substitute: it only confirms this
-  replica's pending outgoing writes and may resolve before history arrives. If
-  the initial boundary times out or still lacks the exact row, retain a mirror
-  subscription that applies the marker when the row arrives; never silently
-  discard the classification after an empty history map.
+  Machine RPC can reach the CLI before the renderer-authored guide row, so an
+  initial empty history check retains a mirror subscription that applies the
+  marker when the exact row arrives. Install the subscription before the second
+  check to close the check-to-subscribe race. Neither `waitUntilSynced()` (which
+  only confirms outgoing writes) nor one initial remote-sync boundary proves
+  that the row has arrived; never silently discard the classification after an
+  empty history map.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
   sends, edit-and-resend, refused-steer requeue, accepted steer ownership
   transfer, and message-queue promotion) may publish it, and every one of them

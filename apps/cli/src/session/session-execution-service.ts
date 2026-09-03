@@ -1528,21 +1528,14 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument;
     userTurnId: string;
   }): Promise<void> {
-    let shouldDefer = false;
     try {
-      // The renderer owns the guide history row. SessionDocument.init() joins
-      // its remote room in the background, while waitUntilSynced() only waits
-      // for this replica's outgoing writes and can resolve before that row is
-      // imported. Wait for the initial inbound boundary before mapping it.
-      await options.sessionDoc.waitForRemoteSync();
-      shouldDefer = !(await this.markUncertainSteerHistoryEntry(options));
+      if (!(await this.markUncertainSteerHistoryEntry(options))) {
+        this.deferUncertainSteerHistoryMarker(options);
+      }
     } catch (error) {
       this.deps.logger.error(
         `[${options.sessionId}] Failed to mark uncertain steer ${options.userTurnId}: ${formatErrorMessage(error)}`
       );
-      shouldDefer = true;
-    }
-    if (shouldDefer) {
       this.deferUncertainSteerHistoryMarker(options);
     }
 
@@ -1589,8 +1582,8 @@ export class SessionExecutionService {
   }
 
   /**
-   * The initial remote boundary can time out or precede the renderer's write.
-   * Retain the classification until that exact row appears in the live mirror;
+   * Retain the classification until the exact renderer-authored row appears.
+   * The subscription-first immediate check closes the check-to-subscribe race;
    * the mirror owns the callback lifetime and disposal with the session doc.
    */
   private deferUncertainSteerHistoryMarker(options: {
@@ -1606,41 +1599,30 @@ export class SessionExecutionService {
       return;
     }
 
+    let done = false;
     let unsubscribe: (() => void) | undefined;
-    let checkRunning = false;
-    let checkRequested = false;
-    let applied = false;
+    let checks = Promise.resolve();
     const requestCheck = () => {
-      if (applied) return;
-      checkRequested = true;
-      if (checkRunning) return;
-      checkRunning = true;
-      void (async () => {
+      if (done) return;
+      checks = checks.then(async () => {
+        if (done) return;
         try {
-          while (checkRequested && !applied) {
-            checkRequested = false;
-            if (await this.markUncertainSteerHistoryEntry(options)) {
-              applied = true;
-              unsubscribe?.();
-              this.deps.logger.debug(
-                `[${options.sessionId}] Applied deferred uncertain steer marker to ${options.userTurnId}`
-              );
-            }
+          if (await this.markUncertainSteerHistoryEntry(options)) {
+            done = true;
+            unsubscribe?.();
+            this.deps.logger.debug(
+              `[${options.sessionId}] Applied deferred uncertain steer marker to ${options.userTurnId}`
+            );
           }
         } catch (error) {
           this.deps.logger.error(
             `[${options.sessionId}] Deferred uncertain steer marker failed for ${options.userTurnId}: ${formatErrorMessage(error)}`
           );
-        } finally {
-          checkRunning = false;
-          if (checkRequested && !applied) requestCheck();
         }
-      })();
+      });
     };
 
     unsubscribe = mirror.subscribe(requestCheck);
-    // Close the check-to-subscribe race if the row arrived immediately before
-    // the subscription was installed.
     requestCheck();
   }
 
