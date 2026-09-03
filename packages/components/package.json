@@ -64,6 +64,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:geometry": "playwright test tests/e2e/chat-workspace-geometry.spec.ts --workers=1 --retries=0",
     "geometry:report": "node scripts/generate-chat-workspace-geometry-report.mjs",
+    "geometry:verify-fix": "node scripts/verify-geometry-fix.mjs",
     "geometry:report:open": "node scripts/generate-chat-workspace-geometry-report.mjs --open",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"

@@ -17,6 +17,7 @@ import {
   checkGeometryLedgerRatchet,
   formatGeometryRatchetViolations,
   geometryFindingDevicePixel,
+  verifyGeometryFixes,
   geometryFindingLabel,
   geometryIdentityLocator,
   geometryRowFamilyKey,
@@ -378,7 +379,7 @@ describe('geometry constraint artifacts', () => {
           },
         },
         'geometry/workspace/resolved': {
-          status: 'accepted-debt',
+          status: 'debt',
           baseline: { offset: 2 },
         },
       },
@@ -425,7 +426,7 @@ describe('geometry constraint artifacts', () => {
     );
 
     expect(second.findings[finding.key]).toEqual({
-      status: 'accepted-debt',
+      status: 'debt',
       baseline: { offset: 4 },
       identity: {
         label: 'Shifted',
@@ -1558,7 +1559,7 @@ describe('re-keying a reviewed finding', () => {
     version: 1,
     findings: {
       'geometry/workspace/old-machine': {
-        status: 'accepted-debt',
+        status: 'debt',
         reason: 'Reviewed: optical centring of the machine icon.',
         baseline: { offset: -4 },
         identity: {
@@ -1569,7 +1570,7 @@ describe('re-keying a reviewed finding', () => {
         },
       },
       'geometry/workspace/old-zh-machine': {
-        status: 'accepted-debt',
+        status: 'debt',
         baseline: { offset: -4 },
         identity: {
           label: '机器',
@@ -1579,7 +1580,7 @@ describe('re-keying a reviewed finding', () => {
         },
       },
       'geometry/workspace/old-unreviewed': {
-        status: 'accepted-debt',
+        status: 'debt',
         baseline: { offset: 9 },
       },
     },
@@ -1657,7 +1658,7 @@ describe('re-keying a reviewed finding', () => {
 
     expect(migrated.findings['geometry/workspace/old-machine']).toBeUndefined();
     expect(migrated.findings['geometry/workspace/new-machine']).toEqual({
-      status: 'accepted-debt',
+      status: 'debt',
       reason: 'Reviewed: optical centring of the machine icon.',
       // The baseline travels: a structural re-key must not silently accept the
       // current offset as the reviewed one.
@@ -1803,7 +1804,7 @@ describe('geometry ledger ratchet', () => {
   it('allows a device pixel of drift above the reviewed baseline and no more', () => {
     const ledger: GeometryLedger = {
       version: 1,
-      findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: -2 } } },
+      findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: -2 } } },
     };
 
     // 2.5 is exactly baseline + one device pixel at 2x; 2.51 is past it.
@@ -1824,7 +1825,7 @@ describe('geometry ledger ratchet', () => {
         kind: 'offset-regression',
         key: 'geometry/workspace/a',
         label: 'label for geometry/workspace/a',
-        status: 'accepted-debt',
+        status: 'debt',
         baseline: -2,
         current: 2.51,
         tolerance: 0.5,
@@ -1885,10 +1886,10 @@ describe('geometry ledger ratchet', () => {
     ).toEqual([]);
   });
 
-  it('holds an entry baselined at zero to zero', () => {
+  it('holds a fixed finding to its near-zero baseline', () => {
     const ledger: GeometryLedger = {
       version: 1,
-      findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: 0 } } },
+      findings: { 'geometry/workspace/a': { status: 'fixed', baseline: { offset: 0 } } },
     };
 
     expect(
@@ -1897,7 +1898,9 @@ describe('geometry ledger ratchet', () => {
         ledger,
         retina
       )
-    ).toEqual([expect.objectContaining({ kind: 'offset-regression', baseline: 0 })]);
+    ).toEqual([
+      expect.objectContaining({ kind: 'offset-regression', status: 'fixed', baseline: 0 }),
+    ]);
   });
 
   it('takes its tolerance from the coarsest capture the finding was measured on', () => {
@@ -1915,10 +1918,121 @@ describe('geometry ledger ratchet', () => {
     expect(
       checkGeometryLedgerRatchet(
         { version: 1, findings: [finding] },
-        { version: 1, findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: 0 } } } },
+        { version: 1, findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: 0 } } } },
         mixed
       )
     ).toEqual([]);
   });
 
+  it('marks a finding fixed only when it is inside one device pixel', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/a': { status: 'debt', baseline: { offset: -3 } },
+        'geometry/workspace/b': { status: 'debt', baseline: { offset: 5 } },
+      },
+    };
+
+    const still = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 1.5)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+    expect(still.verifications[0]).toMatchObject({ passed: false });
+    expect(still.verifications[0]?.reason).toContain('exceeds one device pixel');
+    expect(still.ledger).toBe(ledger);
+
+    const fixed = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0.25)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+    expect(fixed.verifications[0]).toMatchObject({ passed: true, offset: 0.25 });
+    expect(fixed.ledger.findings['geometry/workspace/a']).toEqual({
+      status: 'fixed',
+      baseline: { offset: 0.25 },
+    });
+    // Untouched entries keep their review.
+    expect(fixed.ledger.findings['geometry/workspace/b']).toEqual(
+      ledger.findings['geometry/workspace/b']
+    );
+  });
+
+  it('treats a finding no rail reports any more as fixed at zero', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: -3 } } },
+    };
+
+    const result = verifyGeometryFixes({ version: 1, findings: [] }, ledger, retina, [
+      'geometry/workspace/a',
+    ]);
+
+    expect(result.verifications[0]).toMatchObject({ passed: true, resolved: true });
+    expect(result.ledger.findings['geometry/workspace/a']).toEqual({
+      status: 'fixed',
+      baseline: { offset: 0 },
+    });
+  });
+
+  it('refuses to unpromote a finding its contract already gates', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/a': {
+          status: 'promoted',
+          baseline: { offset: 0 },
+          contract: {
+            name: 'workspace.rail',
+            story: 'geometry--landing',
+            members: [locator('First'), locator('Second')],
+            axis: 'x',
+            anchor: 'inline-end',
+            space: 'ink',
+            tolerance: 0.5,
+          },
+        },
+      },
+    };
+
+    // Marking it `fixed` would stop compiling the contract and quietly drop the
+    // tightest rule in the file.
+    const result = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+
+    expect(result.verifications[0]).toMatchObject({ passed: false });
+    expect(result.verifications[0]?.reason).toContain('retire the contract');
+    expect(result.ledger).toBe(ledger);
+  });
+
+  it('refuses to verify a finding no ledger entry reviews', () => {
+    const result = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0)] },
+      { version: 1, findings: {} },
+      retina,
+      ['geometry/workspace/a']
+    );
+
+    expect(result.verifications[0]).toMatchObject({ passed: false });
+    expect(result.verifications[0]?.reason).toContain('no ledger entry');
+  });
+
+  it('compiles no contract from a fixed, debt or wont-fix entry', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/fixed': { status: 'fixed', baseline: { offset: 0 } },
+        'geometry/workspace/debt': { status: 'debt', baseline: { offset: 2 } },
+        'geometry/workspace/wont-fix': { status: 'wont-fix', baseline: { offset: 2 } },
+      },
+    };
+
+    expect(compileGeometryContracts(ledger)).toEqual({ version: 1, contracts: [] });
+  });
 });

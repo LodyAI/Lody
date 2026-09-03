@@ -657,12 +657,23 @@
       const STATUS_LABELS = {
         new: '新增',
         changed: '偏移变化',
-        'accepted-debt': '已接受债务',
+        debt: '待修复债务',
+        'wont-fix': '不修复',
+        fixed: '已修复',
         promoted: '已提升为 Contract',
         ignored: '已忽略',
         unreviewed: '未纳入 ledger',
       };
-      const STATUS_ORDER = ['new', 'changed', 'accepted-debt', 'promoted', 'ignored', 'unreviewed'];
+      const STATUS_ORDER = [
+        'new',
+        'changed',
+        'debt',
+        'wont-fix',
+        'fixed',
+        'promoted',
+        'ignored',
+        'unreviewed',
+      ];
       const CLASSIFICATION_ORDER = ['css-defect', 'structural', 'optical-residual', ''];
       const CLASSIFICATION_LABELS = {
         'css-defect': 'CSS 缺陷',
@@ -674,11 +685,15 @@
       // The default view is the work queue: what is new, what moved, what the
       // box model says is a repairable CSS defect, and what is already promoted
       // to a contract — a promoted rule is the one a regression would break.
+      // A `wont-fix` finding is a decision, and a `fixed` one is already done:
+      // neither is work, so neither belongs in the queue however it classifies.
       const isDefaultDetail = (detail) =>
-        detailStatus(detail) === 'new' ||
-        detailStatus(detail) === 'changed' ||
-        detailStatus(detail) === 'promoted' ||
-        detail.classification === 'css-defect';
+        detailStatus(detail) !== 'wont-fix' &&
+        detailStatus(detail) !== 'fixed' &&
+        (detailStatus(detail) === 'new' ||
+          detailStatus(detail) === 'changed' ||
+          detailStatus(detail) === 'promoted' ||
+          detail.classification === 'css-defect');
 
       const statusCounts = new Map();
       for (const detail of report.details) {
@@ -698,7 +713,9 @@
           `status:${status}`,
           STATUS_LABELS[status],
           statusCounts.get(status) ?? 0,
-          status === 'new' || status === 'changed' ? 'dot--candidate' : 'dot--insufficient',
+          status === 'new' || status === 'changed' || status === 'debt'
+            ? 'dot--candidate'
+            : 'dot--insufficient',
         ]),
         ['css-defect', 'CSS 缺陷', cssDefects.length, 'dot--fail'],
         ['structural', '结构性', structural.length, 'dot--candidate'],

@@ -83,8 +83,8 @@ new. Pairing is one-to-one; an entry without a recorded identity stays resolved.
 `css-defect` / `optical-residual` / `structural` and `dimensionSensitivity` are arithmetic
 over the evidence explanations and never alter a verdict; thresholds, terms and axes sit
 beside the code ([src/lib](../../src/lib/AGENTS.md)). Review lives in checked-in
-`geometry-ledger.json`; `geometry-contracts.json` compiles only `promoted` entries, each
-declaring `ink` or `layout-box`.
+`geometry-ledger.json`; `geometry-contracts.json` compiles ONLY `promoted` entries, each
+declaring `ink` or `layout-box` — `new`, `debt`, `wont-fix`, `fixed`, `ignored` compile none.
 
 - A baseline is EXECUTED, not printed: the gate reruns the pipeline over the whole capture
   plan with no screenshots, and fails when a finding's |offset| passes |baseline| plus one
@@ -92,6 +92,10 @@ declaring `ink` or `layout-box`.
   (`geometry:triage`, like a lockfile). `ignored` opts out; `promoted` belongs to the
   contract check. Offsets are means over the WHOLE plan, so a baseline belongs to the
   platform that recorded it: re-baseline where CI runs, never trim the plan for speed.
+- `debt` and `wont-fix` are two decisions, not one word; `triage` records `debt` rather
+  than guess. `geometry:verify-fix <dir> <key…>` reruns that gate and only
+  then moves a finding back inside one device pixel to `fixed` at its new baseline, the
+  strictest entry there is.
 - Two contract members never cover one element twice; member resolution, the ink witness
   and named tokens (the ledger records only the `--spacing-*` property): see
   [support](support/AGENTS.md). Relations are a small deterministic algebra there; widen
@@ -109,8 +113,9 @@ Discovery or proposal presence is never a report assertion; coverage:
   findings or replacing evidence. Replay: [support](support/AGENTS.md).
 - Steady state, not delta: every finding gets a card grouped by ledger status and
   classification, with baseline vs current offset, capture count, dimension sensitivity and
-  repair text. Chips filter both, default new + changed + css-defect + promoted; the meta
-  line totals new/changed/resolved. One JSON payload, one renderer, images as files.
+  repair text. Chips filter both, default new + changed + css-defect + promoted minus
+  wont-fix and fixed; the meta line totals new/changed/resolved. One JSON payload, one
+  renderer, images as files.
 - Violation images label each deviating member in place with role, physical direction,
   measured offset, actual anchor and a leader to it. A Y card comes from the FINISHED
   findings, never a second pipeline printing another number: each annotation IS that

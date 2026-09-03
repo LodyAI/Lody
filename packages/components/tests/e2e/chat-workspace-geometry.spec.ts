@@ -16,6 +16,7 @@ import {
   checkGeometryLedgerRatchet,
   compileGeometryContracts,
   formatGeometryRatchetViolations,
+  verifyGeometryFixes,
   type GeometryContractArtifact,
   type GeometryLedger,
   type GeometryObservationCache,
@@ -40,10 +41,19 @@ import {
 
 /**
  * Set to write `capture.json` / `observation.json` / `findings.json` beside the
- * ratchet run. CI does not need them and does not set it, so the gate stays a
- * measurement with no artifacts.
+ * ratchet run. `pnpm geometry:verify-fix` reads them; CI does not need them and
+ * does not set this, so the gate stays a measurement with no artifacts.
  */
 const pipelineOutputDirectory = process.env.GEOMETRY_PIPELINE_OUTPUT_DIR;
+/**
+ * `pnpm geometry:verify-fix` sets this. The DECISION — is this finding fixed,
+ * and what does the ledger become — is made here in TypeScript, beside the
+ * ratchet it must not regress; the script only applies the file it writes.
+ */
+const verifyFixKeys = (process.env.GEOMETRY_VERIFY_FIX_KEYS ?? '')
+  .split(',')
+  .map((key) => key.trim())
+  .filter(Boolean);
 
 const STORY_IDS = {
   expanded: 'geometry-chatworkspace--expanded-sidebar',
@@ -124,6 +134,23 @@ test('every measured geometry finding stays inside its reviewed ledger baseline'
     `Geometry ledger ratchet failed:\n\n${formatGeometryRatchetViolations(violations)}`
   ).toEqual([]);
 
+  if (!pipelineOutputDirectory || verifyFixKeys.length === 0) return;
+  const keys = [...new Set(verifyFixKeys)];
+  const verification = verifyGeometryFixes(findings, ledger, capture, keys);
+  await writeFile(
+    path.join(pipelineOutputDirectory, 'fix-verification.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        passed: verification.verifications.every((item) => item.passed),
+        verifications: verification.verifications,
+        ledger: verification.ledger,
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
 });
 
 for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {

@@ -7,9 +7,12 @@ const argumentsList = process.argv.slice(2);
 const requestedReport = argumentsList.find((argument) => !argument.startsWith('--'));
 const statusArgument = argumentsList.find((argument) => argument.startsWith('--status='));
 const ledgerArgument = argumentsList.find((argument) => argument.startsWith('--ledger='));
-const status = statusArgument?.slice('--status='.length) ?? 'accepted-debt';
-if (status !== 'new' && status !== 'accepted-debt') {
-  throw new Error('--status must be new or accepted-debt');
+// New entries land on `debt`, never `wont-fix`. Telling "we will fix this" from
+// "this is not a defect" IS the review; a tool that guessed would be recording
+// a decision nobody made.
+const status = statusArgument?.slice('--status='.length) ?? 'debt';
+if (status !== 'new' && status !== 'debt') {
+  throw new Error('--status must be new or debt');
 }
 
 const reportDirectory = path.resolve(packageRoot, requestedReport ?? 'geometry-report');

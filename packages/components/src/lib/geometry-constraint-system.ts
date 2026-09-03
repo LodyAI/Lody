@@ -378,16 +378,34 @@ export type GeometryFindingArtifact = Readonly<{
   findings: readonly GeometryFinding[];
 }>;
 
-export type GeometryLedgerStatus = 'new' | 'accepted-debt' | 'ignored' | 'promoted';
-
 /**
- * Statuses the ratchet holds to their reviewed baseline. `ignored` opts out —
- * that is what ignoring one means — and `promoted` is left to the contract
- * check that already gates it exactly, rather than gated twice and loosely.
+ * How a human reviewed one finding.
+ *
+ * `accepted-debt` used to carry two different decisions under one word — "this
+ * is wrong and we will fix it later" and "this is not a defect" — so a queue
+ * built from it mixed work with non-work. They are `debt` and `wont-fix` now.
+ * `fixed` is the other end of the same flywheel: a finding measured back to
+ * zero, re-baselined there, and therefore held to the STRICTEST ratchet of
+ * all — reopening it is a regression, not a new review.
+ *
+ * Only `promoted` compiles into a contract. `new`, `debt`, `wont-fix`, `fixed`
+ * and `ignored` compile into nothing; what separates them is the ratchet,
+ * which skips `ignored` and holds every other status to its baseline.
  */
+export type GeometryLedgerStatus =
+  | 'new'
+  | 'debt'
+  | 'wont-fix'
+  | 'fixed'
+  | 'ignored'
+  | 'promoted';
+
+/** Statuses the ratchet holds to their reviewed baseline. */
 export const GEOMETRY_RATCHETED_LEDGER_STATUSES: readonly GeometryLedgerStatus[] = [
   'new',
-  'accepted-debt',
+  'debt',
+  'wont-fix',
+  'fixed',
 ];
 
 /**
@@ -2513,11 +2531,15 @@ export function diffGeometryFindings(
   };
 }
 
-/** Record previously unseen findings without moving an existing baseline. */
+/**
+ * Record previously unseen findings without moving an existing baseline. New
+ * entries land on `debt`, never `wont-fix`: telling those two apart is the
+ * review, and a tool that guessed it would be recording a decision nobody made.
+ */
 export function triageGeometryFindings(
   artifact: GeometryFindingArtifact,
   ledger: GeometryLedger,
-  status: Extract<GeometryLedgerStatus, 'new' | 'accepted-debt'> = 'accepted-debt'
+  status: Extract<GeometryLedgerStatus, 'new' | 'debt'> = 'debt'
 ): GeometryLedger {
   const findings: Record<string, GeometryLedgerEntry> = { ...ledger.findings };
   const reviewedIdentity = (finding: GeometryFinding): GeometryReviewedIdentity => ({
@@ -2914,6 +2936,94 @@ export function checkGeometryLedgerRatchet(
   });
 }
 
+export type GeometryFixVerification = Readonly<{
+  key: string;
+  label: string;
+  /** Absent from findings: the rail no longer reports this element at all. */
+  resolved: boolean;
+  offset: number;
+  tolerance: number;
+  passed: boolean;
+  reason?: string;
+}>;
+
+/**
+ * Close the flywheel: a finding whose offset is now within one device pixel of
+ * its line is `fixed`, and its baseline moves to what was just measured — which
+ * makes it the STRICTEST entry in the ledger from then on. Everything else is
+ * reported and changes nothing: a verification that re-baselined a failure
+ * would be a ratchet that only ever loosens.
+ */
+export function verifyGeometryFixes(
+  artifact: GeometryFindingArtifact,
+  ledger: GeometryLedger,
+  captures: GeometryCaptureArtifact,
+  keys: readonly string[]
+): Readonly<{
+  verifications: readonly GeometryFixVerification[];
+  ledger: GeometryLedger;
+}> {
+  const byKey = new Map(artifact.findings.map((finding) => [finding.key, finding]));
+  const findings: Record<string, GeometryLedgerEntry> = { ...ledger.findings };
+  const verifications = keys.map((key): GeometryFixVerification => {
+    const entry = ledger.findings[key];
+    const finding = byKey.get(key);
+    const label = finding?.label ?? entry?.identity?.label ?? key;
+    const refuse = (reason: string): GeometryFixVerification => ({
+      key,
+      label,
+      resolved: !finding,
+      offset: finding?.offset ?? 0,
+      tolerance: 0,
+      passed: false,
+      reason,
+    });
+    if (!entry) return refuse('no ledger entry reviews this finding');
+    // A promoted finding is gated EXACTLY by its contract. Moving it to `fixed`
+    // would leave that contract uncompiled and silently drop the tightest rule
+    // in the file, so retiring the contract has to be the deliberate step.
+    if (entry.status === 'promoted') {
+      return refuse('a promoted finding is gated by its contract; retire the contract first');
+    }
+    if (!finding) {
+      // The element is no longer measured off any line: nothing left to allow.
+      findings[key] = { ...entry, status: 'fixed', baseline: { offset: 0 } };
+      return { key, label, resolved: true, offset: 0, tolerance: 0, passed: true };
+    }
+    const tolerance = geometryFindingDevicePixel(finding, captures);
+    const passed = Math.abs(finding.offset) <= tolerance;
+    if (passed) {
+      findings[key] = { ...entry, status: 'fixed', baseline: { offset: finding.offset } };
+    }
+    return {
+      key,
+      label,
+      resolved: false,
+      offset: finding.offset,
+      tolerance,
+      passed,
+      ...(passed
+        ? {}
+        : {
+            reason: `|offset| ${Math.abs(finding.offset).toFixed(3)}px exceeds one device pixel (${tolerance.toFixed(3)}px)`,
+          }),
+    };
+  });
+  if (verifications.some((verification) => !verification.passed)) {
+    return { verifications, ledger };
+  }
+  return {
+    verifications,
+    ledger: {
+      version: 1,
+      ...(ledger.tokens ? { tokens: ledger.tokens } : {}),
+      findings: Object.fromEntries(
+        Object.entries(findings).sort(([left], [right]) => left.localeCompare(right))
+      ),
+    },
+  };
+}
+
 export function formatGeometryRatchetViolations(
   violations: readonly GeometryRatchetViolation[]
 ): string {
@@ -2936,6 +3046,13 @@ export function formatGeometryRatchetViolations(
     .join('\n\n');
 }
 
+/**
+ * Only `promoted` compiles. `new`, `debt`, `wont-fix`, `fixed` and `ignored`
+ * produce no contract at all — a status is a REVIEW, and a review that started
+ * gating the product without a human writing the contract would be a rule
+ * nobody wrote. A `fixed` finding is held to its own near-zero baseline by the
+ * ratchet; promoting it to a contract is a separate, deliberate step.
+ */
 export function compileGeometryContracts(ledger: GeometryLedger): GeometryContractArtifact {
   const contracts = Object.entries(ledger.findings).flatMap(([findingKey, entry]) => {
     if (entry.status !== 'promoted') return [];
