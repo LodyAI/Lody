@@ -3304,6 +3304,7 @@
   "agents.acpBinary.installError": "下载失败",
   "commands.workspace.openSettings": "打开设置",
   "commands.workspace.openAboutSettings": "关于 Lody",
+  "commands.layout.toggleZenMode": "切换 Zen 布局",
   "commands.session.new": "新建对话",
   "commands.project.importLocal": "导入本地项目",
   "sessions.currentBranchUnavailable": "没有可复制的当前分支",

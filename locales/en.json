@@ -3304,6 +3304,7 @@
   "agents.acpBinary.installError": "Download failed",
   "commands.workspace.openSettings": "Open Settings",
   "commands.workspace.openAboutSettings": "About Lody",
+  "commands.layout.toggleZenMode": "Toggle Zen Layout",
   "commands.session.new": "New Chat",
   "commands.project.importLocal": "Import Local Project",
   "sessions.currentBranchUnavailable": "No current branch to copy",

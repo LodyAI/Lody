@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
-import { useAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Archive, ChevronDown, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
+import { navigationSidebarHiddenAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { useWindowDragRegionClass, useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -49,7 +49,8 @@ export function WebArchiveScreen({
   children,
 }: WebArchiveScreenProps) {
   const { t } = useTranslation();
-  const [isLeftSidebarCollapsed, setLeftSidebarCollapsed] = useAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDragClass = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
@@ -66,17 +67,17 @@ export function WebArchiveScreen({
         <header
           className={cn(
             'flex h-[calc(2.75rem+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]',
-            isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]',
+            isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
             windowDragClass,
             windowsCaptionPadClass
           )}
         >
-          {isLeftSidebarCollapsed ? (
+          {isLeftSidebarHidden ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setLeftSidebarCollapsed(false)}
+              onClick={() => showNavigationSidebar()}
               aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
               className="-ml-1 h-7 w-7 shrink-0 text-muted-foreground"
             >

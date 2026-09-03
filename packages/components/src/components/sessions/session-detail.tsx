@@ -88,7 +88,12 @@ import {
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
-import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
+import {
+  getZenAwarePanelToggleState,
+  navigationSidebarHiddenAtom,
+  showNavigationSidebarAtom,
+  zenLayoutModeAtom,
+} from '@/atoms/layout-state';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
@@ -686,6 +691,8 @@ const SessionDetail = ({
   const router = useRouter();
   const postHog = usePostHog();
   const isMobile = useIsMobile();
+  const isZenLayoutMode = useAtomValue(zenLayoutModeAtom);
+  const setZenLayoutMode = useSetAtom(zenLayoutModeAtom);
   const hidesBillingUi = isMobile || isNativeAppShell();
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
@@ -708,6 +715,11 @@ const SessionDetail = ({
     oneActiveSurface: isMobile,
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
+  const isSidebarVisible = isSidebarOpen && !isZenLayoutMode;
+  const revealRightSidebar = useCallback(() => {
+    setZenLayoutMode(false);
+    setIsSidebarOpen(true);
+  }, [setZenLayoutMode]);
   /* Bumped whenever `isSidebarOpen` changes because side-panel state was
      RESTORED (session switch, `?pr=` deep link) rather than toggled by the
      user, so the desktop layout snaps the panel to its target width instead of
@@ -795,8 +807,8 @@ const SessionDetail = ({
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
-  const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -851,7 +863,7 @@ const SessionDetail = ({
     [viewerTabs]
   );
   const isFileProviderSidebarActive =
-    isSidebarOpen && (activeSidebarTab === 'files' || activeSidebarTab === 'changes');
+    isSidebarVisible && (activeSidebarTab === 'files' || activeSidebarTab === 'changes');
   const isSessionStateCurrent = localStateSessionId === sessionId;
   const activeSessionFileProviderRequested = Boolean(
     activeSession &&
@@ -2702,10 +2714,10 @@ const SessionDetail = ({
         setActiveViewerTabId((prevActiveId) => (prevActiveId === tab.id ? prevActiveId : tab.id));
       } else {
         selectSidePanelTab(tab.id);
-        setIsSidebarOpen(true);
+        revealRightSidebar();
       }
     },
-    [isMobile, selectSidePanelTab]
+    [isMobile, revealRightSidebar, selectSidePanelTab]
   );
 
   const nextFocusRequestSeq = useCallback(() => {
@@ -2958,7 +2970,7 @@ const SessionDetail = ({
         surface: 'mobile_sheet',
       });
     } else {
-      setIsSidebarOpen(true);
+      revealRightSidebar();
       activateSidebarTab('changes');
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
@@ -2972,6 +2984,7 @@ const SessionDetail = ({
     changeFilePaths,
     isMobile,
     nextFocusRequestSeq,
+    revealRightSidebar,
   ]);
 
   const handleOpenPrTab = useCallback(
@@ -2991,7 +3004,7 @@ const SessionDetail = ({
             minWidthPx: PR_SIDEBAR_MIN_WIDTH_PX,
           }));
         }
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         activateSidebarTab('pr');
       }
       captureSessionDetailEvent('session/pr_tab_opened', {
@@ -3008,6 +3021,7 @@ const SessionDetail = ({
       isMobile,
       isSidebarOpen,
       replaceSessionUrlPr,
+      revealRightSidebar,
     ]
   );
 
@@ -3068,7 +3082,7 @@ const SessionDetail = ({
       if (isMobile) {
         replaceSessionUrlBrowser(true, { push: true });
       } else {
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         activateSidebarTab('browser');
       }
       captureSessionDetailEvent('session/browser_tab_opened', {
@@ -3082,6 +3096,7 @@ const SessionDetail = ({
       captureSessionDetailEvent,
       isMobile,
       navigateToSessionTab,
+      revealRightSidebar,
       replaceSessionUrlBrowser,
     ]
   );
@@ -3310,7 +3325,7 @@ const SessionDetail = ({
       if (!taken) return;
       if (taken.placement === 'side-panel') {
         selectSidePanelTab(getSideSessionPanelTabId(targetSessionId));
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         return;
       }
       if (taken.placement === 'worktree') {
@@ -3324,7 +3339,14 @@ const SessionDetail = ({
       }
       handleSessionTabSelect(targetSessionId);
     },
-    [handleSessionTabSelect, router, selectSidePanelTab, takePendingFork, workspaceSlug]
+    [
+      handleSessionTabSelect,
+      revealRightSidebar,
+      router,
+      selectSidePanelTab,
+      takePendingFork,
+      workspaceSlug,
+    ]
   );
   const handleForkedConversationPrepareError = useCallback(
     (sourceSessionId: string, targetSessionId: SessionId) => {
@@ -3360,14 +3382,14 @@ const SessionDetail = ({
         setActiveViewerTabId(tabId);
       } else {
         selectSidePanelTab(tabId);
-        setIsSidebarOpen(true);
+        revealRightSidebar();
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
         viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
       });
     },
-    [captureSessionDetailEvent, isMobile, selectSidePanelTab]
+    [captureSessionDetailEvent, isMobile, revealRightSidebar, selectSidePanelTab]
   );
 
   const handleSidebarTabSelect = useCallback(
@@ -3591,13 +3613,27 @@ const SessionDetail = ({
   );
 
   const handleToggleSidebar = useCallback(() => {
-    const nextOpen = !isSidebarOpen;
-    captureSessionDetailEvent(nextOpen ? 'session/sidebar_opened' : 'session/sidebar_closed', {
-      default_tab: activeSidebarTab,
-      change_file_count: changeEntries.length,
+    const next = getZenAwarePanelToggleState({
+      zenMode: isZenLayoutMode,
+      panelOpen: isSidebarOpen,
     });
-    setIsSidebarOpen((prev) => !prev);
-  }, [activeSidebarTab, captureSessionDetailEvent, changeEntries.length, isSidebarOpen]);
+    captureSessionDetailEvent(
+      next.panelOpen ? 'session/sidebar_opened' : 'session/sidebar_closed',
+      {
+        default_tab: activeSidebarTab,
+        change_file_count: changeEntries.length,
+      }
+    );
+    setZenLayoutMode(next.zenMode);
+    setIsSidebarOpen(next.panelOpen);
+  }, [
+    activeSidebarTab,
+    captureSessionDetailEvent,
+    changeEntries.length,
+    isSidebarOpen,
+    isZenLayoutMode,
+    setZenLayoutMode,
+  ]);
 
   const handleCloseViewerTab = useCallback(
     (tabId: string) => {
@@ -4066,7 +4102,7 @@ const SessionDetail = ({
     () =>
       getSessionTabCloseTarget({
         focusRegion: desktopTabFocusRegionRef.current,
-        sidePanelOpen: isSidebarOpen,
+        sidePanelOpen: isSidebarVisible,
         activeSidePanelTabId,
         activeConversationTabId: activeTabSessionId,
         parentConversationTabId: sessionId,
@@ -4075,7 +4111,7 @@ const SessionDetail = ({
     [
       activeSidePanelTabId,
       activeTabSessionId,
-      isSidebarOpen,
+      isSidebarVisible,
       orderedSessionTabIds.length,
       sessionId,
     ]
@@ -5451,7 +5487,7 @@ const SessionDetail = ({
         className="bg-background"
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.
-        visible={isSidebarOpen}
+        visible={isSidebarVisible}
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
@@ -5479,7 +5515,7 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
-            active={activeSidebarTab === 'browser' && isSidebarOpen}
+            active={activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
                 ? browserCandidateNavigationRequest.id
@@ -5520,22 +5556,22 @@ const SessionDetail = ({
       size="icon"
       onClick={handleToggleSidebar}
       aria-label={
-        isSidebarOpen
+        isSidebarVisible
           ? t('sessions.sidebar.hide', 'Hide sidebar')
           : t('sessions.sidebar.show', 'Show sidebar')
       }
-      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !isSidebarOpen && 'mr-[9px]')}
+      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !isSidebarVisible && 'mr-[9px]')}
     >
       <PanelRight className="h-4 w-4" />
     </Button>
   );
 
-  const leftSidebarExpandButton = isLeftSidebarCollapsed ? (
+  const leftSidebarExpandButton = isLeftSidebarHidden ? (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      onClick={() => setLeftSidebarCollapsed(false)}
+      onClick={() => showNavigationSidebar()}
       aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
       className="h-7 w-7 shrink-0 text-muted-foreground"
     >
@@ -5556,7 +5592,7 @@ const SessionDetail = ({
       headerEndSlot={
         <>
           <TerminalDockToggleButton />
-          {!isSidebarOpen ? sidebarToggleButton : null}
+          {!isSidebarVisible ? sidebarToggleButton : null}
         </>
       }
       titleSyncing={activeSessionDocIsSyncing}
@@ -5632,8 +5668,8 @@ const SessionDetail = ({
         // 6px higher for them to land on that same line: 2 + (44 - 32) / 2 = 8.
         // Re-derive this if the row or the pill height changes.
         'mt-0.5 h-11',
-        isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]',
-        !isSidebarOpen && windowsCaptionPadClass
+        isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
+        !isSidebarVisible && windowsCaptionPadClass
       )}
     />
   );
@@ -5751,9 +5787,9 @@ const SessionDetail = ({
       <div
         key={tab.id}
         className={isActive ? 'h-full' : 'hidden h-full'}
-        aria-hidden={!isActive || !isSidebarOpen}
+        aria-hidden={!isActive || !isSidebarVisible}
       >
-        {renderViewerTabContent(tab, 'h-full', isActive && isSidebarOpen)}
+        {renderViewerTabContent(tab, 'h-full', isActive && isSidebarVisible)}
       </div>
     );
   });
@@ -5775,7 +5811,7 @@ const SessionDetail = ({
           aria-hidden={!isActive}
         >
           <SessionChatInterface
-            {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarOpen)}
+            {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarVisible)}
             isChildTab
           />
         </div>
@@ -5854,7 +5890,7 @@ const SessionDetail = ({
         chatSurfaces={desktopChatSurfaces}
         terminalDock={<TerminalDockHost />}
         secondaryPanel={desktopSecondaryPanel}
-        sidebarOpen={isSidebarOpen}
+        sidebarOpen={isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
         sidebarMinWidthRequest={prSidebarWidthRequest}
