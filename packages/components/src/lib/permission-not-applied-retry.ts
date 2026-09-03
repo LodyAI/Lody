@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type {
   AcceptedWiderPermission,
+  PermissionNotAppliedNotice,
   AcpConfigOptionValue,
   AgentRoleId,
   SessionInputBlock,
@@ -58,26 +59,36 @@ type RetryHistoryEntry = {
   inputConfig?: unknown;
 };
 
-const readPermissionMeta = (item: RetryHistoryItem): AcceptedWiderPermission | null => {
+const readPermissionMeta = (item: RetryHistoryItem): PermissionNotAppliedNotice | null => {
   if (item?.type !== 'system_notice' || item.name !== 'chat_failed') {
     return null;
   }
   const meta = item.meta as
     | {
         reason?: unknown;
-        permission?: { controlId?: unknown; requestedModeId?: unknown; effectiveModeId?: unknown };
+        permission?: {
+          controlId?: unknown;
+          requestedModeId?: unknown;
+          effectiveModeId?: unknown;
+          userTurnId?: unknown;
+        };
       }
     | undefined;
   if (meta?.reason !== 'permission_not_applied') {
     return null;
   }
-  const { controlId, requestedModeId, effectiveModeId } = meta.permission ?? {};
+  const { controlId, requestedModeId, effectiveModeId, userTurnId } = meta.permission ?? {};
   // All three or nothing: an acceptance that cannot name the control it is for
   // would be a blanket one.
   return typeof controlId === 'string' &&
     typeof requestedModeId === 'string' &&
     typeof effectiveModeId === 'string'
-    ? { controlId, requestedModeId, effectiveModeId }
+    ? {
+        controlId,
+        requestedModeId,
+        effectiveModeId,
+        ...(typeof userTurnId === 'string' && userTurnId ? { userTurnId } : {}),
+      }
     : null;
 };
 
@@ -114,7 +125,7 @@ export const findPermissionNotAppliedRetryTarget = (
     return null;
   }
   let noticeIndex = -1;
-  let permission: AcceptedWiderPermission | null = null;
+  let permission: PermissionNotAppliedNotice | null = null;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (!entry) continue;
@@ -132,9 +143,14 @@ export const findPermissionNotAppliedRetryTarget = (
     return null;
   }
 
+  /* The notice names its own turn, so it is found by id. Adjacency is the
+     fallback for notices written before that field existed: it attaches to
+     whatever user entry sits above, which is the right guess only when nothing
+     rewrote history between the failure and the notice landing. */
   for (let index = noticeIndex - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (!entry || entry.role !== 'user') continue;
+    if (permission.userTurnId !== undefined && entry.id !== permission.userTurnId) continue;
     const inputConfig = isRecord(entry.inputConfig) ? entry.inputConfig : undefined;
     const inputBlocks = Array.isArray(inputConfig?.inputBlocks)
       ? (inputConfig.inputBlocks as SessionInputBlock[])

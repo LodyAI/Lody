@@ -401,11 +401,24 @@ Two things the dev build does deliberately, both load-bearing:
   must not become inheritable there.
   The mirror image is just as load-bearing: making the field survive rebuilds
   also made it copyable. Any derivation that mints a new `userTurnId` or changes
-  the prompt/input blocks — edit-and-resend, history replay import — must go
-  through `deriveTurnInputConfigForNewTurn`, which drops it. The acceptance was
+  the prompt/input blocks — edit-and-resend, queue-item editing, the Operation
+  completion turn, history replay import — must drop it, through
+  `deriveTurnInputConfigForNewTurn` wherever the type allows. The acceptance was
   given for ONE prompt; carrying it onto another is a permission bypass built
-  out of a spread. Same-turn rewrites (status, `_lodyDeliveryKind`, transport
-  retry) are not copies and keep it.
+  out of a spread, and `{...original, ...replacement}` is that spread: a
+  replacement that merely LACKS the field does not overwrite a present one. The
+  DAEMON enforces this, not the client — edit-and-resend rebuilds server-side,
+  so a correct client is not what makes it safe. Same-turn rewrites (status,
+  `_lodyDeliveryKind`, transport retry) are not copies and keep it. The
+  `overrides` parameter cannot re-add the field, and speculative preparation
+  configs do not carry it at all.
+  The notice names the turn it stopped (`permission.userTurnId`) and the client
+  matches by that id. Reading "the nearest user entry above the notice" instead
+  attaches the acceptance to whatever landed last — another client's turn, or an
+  edit-and-resend that rewrote history between the failure and the notice — and
+  if that prompt makes the same permission selection it runs with an acceptance
+  nobody gave it. Adjacency remains only as the fallback for notices written
+  before the field existed.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

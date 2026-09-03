@@ -587,7 +587,10 @@ export const normalizeSessionTurnInputConfig = (
  */
 export const deriveTurnInputConfigForNewTurn = (
   original: unknown,
-  overrides: Partial<SessionTurnInputConfig> = {}
+  // The one field a derived turn may not carry is also the one field the
+  // overrides may not put back: a caller that could pass it would have a
+  // one-line way around the whole rule.
+  overrides: Omit<Partial<SessionTurnInputConfig>, 'acceptWiderPermissions'> = {}
 ): SessionTurnInputConfig => {
   const { acceptWiderPermissions: _dropped, ...carried } =
     normalizeSessionTurnInputConfig(original) ?? {};
@@ -987,7 +990,8 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
+    // No acceptance here on purpose: a speculative preparation is not a
+    // dispatched turn, so there is no disclosed difference for it to accept.
   })
   .strict();
 
@@ -3177,7 +3181,11 @@ export const ChatFailedMetaSchema = z.object({
    * acceptance — which is the safe direction, since an acceptance that cannot
    * name its control would be a blanket one.
    */
-  permission: AcceptedWiderPermissionSchema.optional().catch(undefined),
+  permission: AcceptedWiderPermissionSchema.extend({
+    userTurnId: z.string().trim().min(1).optional(),
+  })
+    .optional()
+    .catch(undefined),
 });
 
 // Non-system notice MessageContent discriminated union

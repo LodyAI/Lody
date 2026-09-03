@@ -1880,10 +1880,14 @@ export class SessionExecutionService {
       // Keep the specific reason AND both mode ids: they are what let the client
       // name the two permissions and offer to run this exact turn once with the
       // one the agent actually has, instead of a generic pre-prompt error.
+      // The turn id travels with the notice: the client must not have to guess
+      // which prompt this stop belongs to by looking at whatever user entry
+      // happens to sit above it.
       await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message, undefined, {
         controlId: error.controlId,
         requestedModeId: error.requestedModeId,
         effectiveModeId: error.effectiveModeId,
+        ...(runtime.userTurnId ? { userTurnId: runtime.userTurnId } : {}),
       });
     } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(

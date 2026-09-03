@@ -9,7 +9,7 @@ import {
 } from '../src/lib/permission-not-applied-retry';
 
 const stoppedTurn = (overrides?: Record<string, unknown>) => ({
-  id: 'user-1',
+  id: typeof overrides?.id === 'string' ? overrides.id : 'user-1',
   role: 'user',
   inputConfig: {
     inputBlocks: [{ type: 'text', text: 'ship it' }],
@@ -26,6 +26,7 @@ const failureNotice = (permission?: {
   controlId: string;
   requestedModeId: string;
   effectiveModeId: string;
+  userTurnId?: string;
 }) => ({
   id: 'notice-1',
   role: 'system',
@@ -91,6 +92,41 @@ describe('findPermissionNotAppliedRetryTarget', () => {
     expect(target?.mcpServerIds).toEqual([]);
     expect(target?.taskToolsEnabled).toBe(false);
     expect(target?.issuePRMentions).toEqual([{ number: 7 }]);
+  });
+
+  it('binds the notice to the turn that produced it, not the nearest one above', () => {
+    // Another client's turn (or an edit-and-resend rewriting history between the
+    // failure and the notice landing) can leave a DIFFERENT user entry directly
+    // above the notice. Accepting there would run a prompt nobody accepted for.
+    const target = findPermissionNotAppliedRetryTarget([
+      stoppedTurn({
+        id: 'user-stopped',
+        inputBlocks: [{ type: 'text', text: 'the stopped prompt' }],
+      }),
+      stoppedTurn({ id: 'user-other', inputBlocks: [{ type: 'text', text: 'someone else' }] }),
+      failureNotice({
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+        userTurnId: 'user-stopped',
+      }),
+    ]);
+
+    expect(target?.userTurnId).toBe('user-stopped');
+    expect(target?.inputBlocks).toEqual([{ type: 'text', text: 'the stopped prompt' }]);
+  });
+
+  it('falls back to adjacency for a notice written before the turn id existed', () => {
+    const target = findPermissionNotAppliedRetryTarget([
+      stoppedTurn({ id: 'user-1' }),
+      failureNotice({
+        controlId: 'permission-mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      }),
+    ]);
+
+    expect(target?.userTurnId).toBe('user-1');
   });
 
   it('stands down once the user has sent something newer', () => {

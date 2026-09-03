@@ -1892,13 +1892,18 @@ function buildEditedMessageQueueItem(
     };
   }
 
+  // Editing the text makes this a different prompt, so the one-time permission
+  // acceptance the queued turn carried does not follow it — the same rule
+  // `deriveTurnInputConfigForNewTurn` applies, written out here because the
+  // queued config is its own nominal type.
+  const { acceptWiderPermissions: _notCarried, ...carriedConfig } = item.acpSessionConfig;
   return {
     ...item,
     task: nextTask || imageOnlyLabel,
     isEditing: false,
     editingStartedAt: undefined,
     acpSessionConfig: {
-      ...item.acpSessionConfig,
+      ...carriedConfig,
       prompt: nextTask,
       inputBlocks: nextInputBlocks.length > 0 ? nextInputBlocks : undefined,
     },

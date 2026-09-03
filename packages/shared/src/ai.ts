@@ -1151,7 +1151,7 @@ export type ChatFailedMeta = {
    * the agent reported. Structured so the notice can name both instead of the
    * client parsing them back out of `message`.
    */
-  permission?: AcceptedWiderPermission;
+  permission?: PermissionNotAppliedNotice;
 };
 
 /**
@@ -1576,6 +1576,21 @@ export type ToolCallContent =
   | DiffBlock;
 
 export type ACPSessionId = string & { __brand: 'ACPSessionId' };
+
+/**
+ * The stopped turn's identity alongside the difference that stopped it.
+ *
+ * The client builds its acceptance from this notice, so the notice has to say
+ * WHICH turn it belongs to. Reading "the nearest user entry above" instead
+ * attaches the acceptance to whatever landed last — another client's turn, or
+ * an edit-and-resend that rewrote history between the failure and the notice —
+ * and if that prompt happens to make the same permission selection it runs with
+ * an acceptance nobody gave it.
+ */
+export type PermissionNotAppliedNotice = AcceptedWiderPermission & {
+  /** The turn this stop belongs to. Absent on notices written before this field. */
+  userTurnId?: string;
+};
 
 /** The one permission difference a user was shown and chose to run with. */
 export type AcceptedWiderPermission = {
