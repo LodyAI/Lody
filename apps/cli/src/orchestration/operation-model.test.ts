@@ -24,9 +24,10 @@ describe('Operation delivery executable model', () => {
     );
     expect(afterDelivery).toMatchObject({
       activeTurn: 'delivery',
-      delivery: 'consumed',
+      delivery: 'attempting',
       completionTurnWrites: 1,
     });
+    expect(stepOrchestrationModel(afterDelivery, 'complete_turn').delivery).toBe('consumed');
   });
 
   it('keeps archived delivery pending until restore', () => {
@@ -36,7 +37,7 @@ describe('Operation delivery executable model', () => {
       stepOrchestrationModel(archived, 'restore'),
       'schedule'
     );
-    expect(restored.delivery).toBe('consumed');
+    expect(restored.delivery).toBe('attempting');
   });
 
   it('writes the result once without starting an assistant when configuration is gone', () => {
@@ -53,6 +54,24 @@ describe('Operation delivery executable model', () => {
     expect(trace('accept', 'deadline')).toMatchObject({
       operation: 'finished',
       delivery: 'pending',
+    });
+  });
+
+  it('permits one interrupted recovery and consumes without a third attempt', () => {
+    const firstAttempt = trace('accept', 'materialize_success', 'finish', 'schedule');
+    const secondAttempt = stepOrchestrationModel(
+      stepOrchestrationModel(firstAttempt, 'interrupt_turn'),
+      'schedule'
+    );
+    expect(secondAttempt).toMatchObject({ delivery: 'attempting', deliveryAttempts: 2 });
+    const exhausted = stepOrchestrationModel(
+      stepOrchestrationModel(secondAttempt, 'interrupt_turn'),
+      'schedule'
+    );
+    expect(exhausted).toMatchObject({
+      delivery: 'consumed',
+      deliveryAttempts: 2,
+      activeTurn: 'none',
     });
   });
 
@@ -97,5 +116,11 @@ describe('Operation delivery executable model', () => {
         chainDepth: 6,
       })
     ).toThrow(/exceeded the fixed depth cap/);
+    expect(() =>
+      assertOrchestrationModelSafety({
+        ...initialOrchestrationModelState(),
+        deliveryAttempts: 3,
+      })
+    ).toThrow(/bounded attempt count/);
   });
 });

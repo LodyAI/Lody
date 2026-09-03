@@ -72,6 +72,42 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('migrates legacy Delivery rows to the durable attempt and acknowledgement contract', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-migration-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const legacy = new Database(dbPath);
+    try {
+      legacy.exec(`
+        CREATE TABLE deliveries (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id TEXT NOT NULL,
+          requester_session_id TEXT NOT NULL,
+          operation_id TEXT NOT NULL,
+          delivery_id TEXT NOT NULL UNIQUE,
+          system_turn_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
+          initiator_chain_depth INTEGER NOT NULL,
+          completion_json TEXT NOT NULL,
+          consumed_at TEXT
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new LodyOperationStore(dbPath);
+    try {
+      migrated.accept(baseInput());
+      migrated.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(migrated.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
+        expect.objectContaining({ attemptCount: 0, state: 'pending' }),
+      ]);
+    } finally {
+      migrated.close();
+    }
+  });
+
   it('accepts once and returns the same Operation for canonical-equivalent retries', async () => {
     const store = await makeStore();
     try {
@@ -182,6 +218,81 @@ describe('LodyOperationStore', () => {
           state: 'pending',
         }),
       ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('acknowledges only the active Delivery attempt and consumes it atomically', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-1',
+          ownerId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        store.acknowledgeDelivery('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'stale-attempt',
+          assistantTurnId: 'assistant:operation-completion:requester-1:review-round-1',
+          outcome: 'completed',
+        })
+      ).toMatchObject({ acknowledged: false, delivery: { state: 'pending' } });
+
+      expect(
+        store.acknowledgeDelivery('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-1',
+          assistantTurnId: 'assistant:operation-completion:requester-1:review-round-1',
+          outcome: 'completed',
+        })
+      ).toMatchObject({
+        acknowledged: true,
+        delivery: {
+          state: 'consumed',
+          continuationTurnId: 'assistant:operation-completion:requester-1:review-round-1',
+          continuationOutcome: 'completed',
+        },
+      });
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('permits one interrupted Delivery recovery and then exhausts attempts', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-1',
+          ownerId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        store.interruptDeliveryAttempt('requester-1' as SessionId, 'review-round-1', 'attempt-1')
+      ).toBe(true);
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-2',
+          ownerId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
+      expect(
+        store.interruptDeliveryAttempt('requester-1' as SessionId, 'review-round-1', 'attempt-2')
+      ).toBe(true);
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-3',
+          ownerId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'exhausted', delivery: { attemptCount: 2, state: 'pending' } });
     } finally {
       store.close();
     }
