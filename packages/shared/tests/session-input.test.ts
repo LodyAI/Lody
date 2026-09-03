@@ -951,26 +951,24 @@ describe('one-time acceptance of a wider permission', () => {
     agentType: 'claude',
     modeId: 'plan',
   };
-  const accepted = {
-    controlId: 'permission-mode',
-    requestedModeId: 'plan',
-    effectiveModeId: 'auto',
-  };
+  const accepted = [
+    { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+  ];
 
   it('writes the flag only into the turn that carries it', () => {
     expect(
-      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: accepted })
-        .acceptWiderPermission
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: accepted })
+        .acceptWiderPermissions
     ).toEqual(accepted);
   });
 
   it('leaves an ordinary send — including a plain resend — without it', () => {
     // Nothing outside the one dispatch may set it: an omitted, false, or
     // undefined flag must never become an acceptance the next turn inherits.
-    expect(buildSessionTurnInputConfig(base).acceptWiderPermission).toBeUndefined();
+    expect(buildSessionTurnInputConfig(base).acceptWiderPermissions).toBeUndefined();
     expect(
-      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: undefined })
-        .acceptWiderPermission
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: undefined })
+        .acceptWiderPermissions
     ).toBeUndefined();
   });
 
@@ -980,15 +978,15 @@ describe('one-time acceptance of a wider permission', () => {
     // one past the stop without ever asking — a bypass built out of a spread.
     const acceptedTurn = buildSessionTurnInputConfig({
       ...base,
-      acceptWiderPermission: accepted,
+      acceptWiderPermissions: accepted,
     });
-    expect(acceptedTurn.acceptWiderPermission).toEqual(accepted);
+    expect(acceptedTurn.acceptWiderPermissions).toEqual(accepted);
 
     const edited = deriveTurnInputConfigForNewTurn(acceptedTurn, {
       prompt: 'ship something else',
       inputBlocks: [{ type: 'text', text: 'ship something else' }],
     });
-    expect(edited.acceptWiderPermission).toBeUndefined();
+    expect(edited.acceptWiderPermissions).toBeUndefined();
     // Everything else the original turn ran with is still carried.
     expect(edited.modeId).toBe('plan');
     expect(edited.prompt).toBe('ship something else');
@@ -997,7 +995,7 @@ describe('one-time acceptance of a wider permission', () => {
     // still the turn the user accepted.
     expect(
       normalizeSessionTurnInputConfig({ ...acceptedTurn, _lodyDeliveryKind: 'steer' })
-        ?.acceptWiderPermission
+        ?.acceptWiderPermissions
     ).toEqual(accepted);
   });
 
@@ -1008,26 +1006,26 @@ describe('one-time acceptance of a wider permission', () => {
     // client set it.
     expect(
       normalizeSessionTurnInputConfig(
-        buildSessionTurnInputConfig({ ...base, acceptWiderPermission: accepted })
-      )?.acceptWiderPermission
+        buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: accepted })
+      )?.acceptWiderPermissions
     ).toEqual(accepted);
 
     // One-time semantics survive the round trip too: only an explicit `true` is
     // carried, so nothing can read an acceptance out of a turn that made none.
     expect(
-      normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermission
+      normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermissions
     ).toBeUndefined();
     // A malformed or partial acceptance reads as no acceptance: one that cannot
     // name the control and both values would be a blanket one.
     expect(
-      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: true })
-        ?.acceptWiderPermission
+      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermissions: true })
+        ?.acceptWiderPermissions
     ).toBeUndefined();
     expect(
       normalizeSessionTurnInputConfig({
         ...base,
-        acceptWiderPermission: { requestedModeId: 'plan', effectiveModeId: 'auto' },
-      })?.acceptWiderPermission
+        acceptWiderPermissions: [{ requestedModeId: 'plan', effectiveModeId: 'auto' }],
+      })?.acceptWiderPermissions
     ).toBeUndefined();
   });
 });

@@ -19,8 +19,18 @@ import type {
 export type PermissionNotAppliedRetryTarget = {
   /** History entry id of the failure notice, for matching the render site. */
   noticeId: string;
-  /** The exact difference that was disclosed, as the notice reported it. */
+  /** The exact difference this notice disclosed. */
   disclosed: AcceptedWiderPermission;
+  /**
+   * Differences already disclosed and accepted on the turn that was stopped.
+   *
+   * Two controls widening at once are disclosed one stop at a time, so a replay
+   * carrying only the newest acceptance would drop the previous one and land
+   * back on the first stop — the user would alternate between two notices with
+   * no way through. Read from the stopped turn's own frozen config and
+   * re-validated, so nothing but a previously accepted exact triple accumulates.
+   */
+  previouslyAccepted: AcceptedWiderPermission[];
   userTurnId: string;
   inputBlocks: SessionInputBlock[];
   modeId?: string;
@@ -74,6 +84,22 @@ const readPermissionMeta = (item: RetryHistoryItem): AcceptedWiderPermission | n
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** Re-validates what a stopped turn claims it already accepted. */
+const readAcceptedWiderPermissions = (value: unknown): AcceptedWiderPermission[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const { controlId, requestedModeId, effectiveModeId } = entry;
+    return typeof controlId === 'string' &&
+      typeof requestedModeId === 'string' &&
+      typeof effectiveModeId === 'string'
+      ? [{ controlId, requestedModeId, effectiveModeId }]
+      : [];
+  });
+};
+
 /**
  * The newest stopped turn still awaiting a decision, or null.
  *
@@ -122,6 +148,7 @@ export const findPermissionNotAppliedRetryTarget = (
     return {
       noticeId: history[noticeIndex]?.id ?? '',
       disclosed: permission,
+      previouslyAccepted: readAcceptedWiderPermissions(inputConfig?.acceptWiderPermissions),
       userTurnId: entry.id,
       inputBlocks,
       ...(typeof inputConfig?.modeId === 'string' ? { modeId: inputConfig.modeId } : {}),

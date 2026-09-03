@@ -1613,13 +1613,19 @@ export type ACPSessionConfig = {
    * One-time informed acceptance, scoped to the turn that carries it — never
    * inherited, never a default.
    *
-   * It names the exact difference the user was shown, because a bare "yes"
-   * would also accept differences they never saw: the agent may have moved
-   * further by the time the turn re-runs, and a second permission control may
-   * have widened alongside the one in the notice. Anything that does not match
-   * this triple stops the turn again with its own accurate notice.
+   * Each entry names one exact difference the user was shown, because a bare
+   * "yes" would also accept differences they never saw: the agent may have
+   * moved further by the time the turn re-runs, and a second permission control
+   * may have widened alongside the one in the notice.
+   *
+   * It is a LIST because those differences are disclosed one at a time. Two
+   * controls widening at once produce two stops, and a replay that carried only
+   * the newest acceptance would drop the previous one and land back on the
+   * first stop — the user would alternate between two notices forever with no
+   * way through. Each entry is still matched exactly, so accumulating them
+   * grants nothing beyond what was individually shown and accepted.
    */
-  acceptWiderPermission?: AcceptedWiderPermission;
+  acceptWiderPermissions?: AcceptedWiderPermission[];
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

@@ -57,8 +57,8 @@ export type AcpSessionRunConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
-  /** One-time informed acceptance carried by this turn, for one exact difference. */
-  acceptWiderPermission?: AcceptedWiderPermission;
+  /** Differences disclosed and accepted for this turn, each matched exactly. */
+  acceptWiderPermissions?: AcceptedWiderPermission[];
 };
 
 type AcpSessionRunConfigApplyResult = {
@@ -344,7 +344,7 @@ export async function applyAcpSessionRunConfig(args: {
      which case the two are equal and nothing fires), and the config table comes
      straight from what the agent published. So this cannot be triggered by a
      snapshot, by a stale cache, or by an unconfirmed request. */
-  const accepted = config.acceptWiderPermission;
+  const accepted = config.acceptWiderPermissions ?? [];
   const findPermissionEscalation = (): AcceptedWiderPermission | undefined => {
     for (const selection of appliedSelections) {
       if (
@@ -366,17 +366,20 @@ export async function applyAcpSessionRunConfig(args: {
       ) {
         continue;
       }
-      /* Only the exact difference the user was shown is skipped, and the scan
-         CONTINUES. A bare "accepted" would also wave through a difference they
+      /* Only differences the user was actually shown are skipped, each matched
+         exactly, and the scan CONTINUES. A bare "accepted" would also wave through a difference they
          never saw: the agent may have moved further still by the time the turn
          re-runs (`plan → auto` accepted, `plan → always-approve` live), and a
          second permission control may have widened alongside the one in the
          notice. Either way this is a new, undisclosed escalation, and it gets
          its own accurate stop. */
       if (
-        accepted?.controlId === controlId &&
-        accepted.requestedModeId === selection.requested &&
-        accepted.effectiveModeId === effective
+        accepted.some(
+          (entry) =>
+            entry.controlId === controlId &&
+            entry.requestedModeId === selection.requested &&
+            entry.effectiveModeId === effective
+        )
       ) {
         continue;
       }

@@ -354,7 +354,7 @@ export const SessionInputBlocksSchema = z
     }
   });
 
-/** The one permission difference a user was shown and chose to run with. */
+/** One permission difference a user was shown and chose to run with. */
 export const AcceptedWiderPermissionSchema = z
   .object({
     controlId: z.string().trim().min(1),
@@ -362,6 +362,28 @@ export const AcceptedWiderPermissionSchema = z
     effectiveModeId: z.string().trim().min(1),
   })
   .strict();
+
+/**
+ * Every difference disclosed and accepted for ONE turn, deduplicated.
+ *
+ * Bounded because it grows only by one control per stop and an agent publishes
+ * a handful; a longer list is not a real disclosure history. Malformed input —
+ * including the boolean this field used to be, or a single bare object — is a
+ * whole-list rejection, so it reads as no acceptance rather than a partial one.
+ */
+export const AcceptedWiderPermissionsSchema = z
+  .array(AcceptedWiderPermissionSchema)
+  .min(1)
+  .max(8)
+  .transform((entries) => {
+    const seen = new Set<string>();
+    return entries.filter((entry) => {
+      const key = `${entry.controlId}\u0000${entry.requestedModeId}\u0000${entry.effectiveModeId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
 
 export const ACPSessionConfigSchema = z
   .object({
@@ -376,7 +398,7 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
+    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -398,7 +420,7 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
+    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -505,12 +527,12 @@ export const normalizeSessionTurnInputConfig = (
      through here (direct RPC, the dispatch-turn and steer entries, the Loro
      history readback, queue promotion), so a field this rebuild does not copy
      never reaches the daemon at all. */
-  const acceptWiderPermission = maybeParseField(
-    AcceptedWiderPermissionSchema,
-    record.acceptWiderPermission
+  const acceptWiderPermissions = maybeParseField(
+    AcceptedWiderPermissionsSchema,
+    record.acceptWiderPermissions
   );
-  if (acceptWiderPermission) {
-    normalized.acceptWiderPermission = acceptWiderPermission;
+  if (acceptWiderPermissions?.length) {
+    normalized.acceptWiderPermissions = acceptWiderPermissions;
   }
 
   if (record.agentRoleId === null) {
@@ -574,7 +596,7 @@ export const deriveTurnInputConfigForNewTurn = (
   original: unknown,
   overrides: Partial<SessionTurnInputConfig> = {}
 ): SessionTurnInputConfig => {
-  const { acceptWiderPermission: _dropped, ...carried } =
+  const { acceptWiderPermissions: _dropped, ...carried } =
     normalizeSessionTurnInputConfig(original) ?? {};
   return { ...carried, ...overrides };
 };
@@ -972,7 +994,7 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
-    acceptWiderPermission: AcceptedWiderPermissionSchema.optional(),
+    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
   })
   .strict();
 

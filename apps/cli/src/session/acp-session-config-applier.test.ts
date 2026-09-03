@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ACPSessionId, SessionId } from '@lody/shared';
+import type { AcceptedWiderPermission } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
 import type { Logger } from '@/utils/logger';
 import { applyAcpSessionRunConfig } from './acp-session-config-applier';
@@ -420,11 +421,13 @@ describe('applyAcpSessionRunConfig', () => {
           cliType: 'builtin',
           agentType: 'grok',
           configOptionValues: { permission_mode: 'ask' },
-          acceptWiderPermission: {
-            controlId: 'permission_mode',
-            requestedModeId: 'ask',
-            effectiveModeId: 'always-approve',
-          },
+          acceptWiderPermissions: [
+            {
+              controlId: 'permission_mode',
+              requestedModeId: 'ask',
+              effectiveModeId: 'always-approve',
+            },
+          ],
         },
         agentClient
       );
@@ -456,11 +459,9 @@ describe('applyAcpSessionRunConfig', () => {
           cliType: 'builtin',
           agentType: 'claude',
           modeId: 'plan',
-          acceptWiderPermission: {
-            controlId: 'permission-mode',
-            requestedModeId: 'plan',
-            effectiveModeId: 'auto',
-          },
+          acceptWiderPermissions: [
+            { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+          ],
         },
         agentClient
       );
@@ -496,11 +497,9 @@ describe('applyAcpSessionRunConfig', () => {
           agentType: 'grok',
           modeId: 'plan',
           configOptionValues: { permission_mode: 'ask' },
-          acceptWiderPermission: {
-            controlId: 'interaction_mode',
-            requestedModeId: 'plan',
-            effectiveModeId: 'auto',
-          },
+          acceptWiderPermissions: [
+            { controlId: 'interaction_mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+          ],
         },
         agentClient
       );
@@ -536,11 +535,13 @@ describe('applyAcpSessionRunConfig', () => {
           agentType: 'grok',
           modeId: 'plan',
           configOptionValues: { permission_mode: 'ask' },
-          acceptWiderPermission: {
-            controlId: 'permission_mode',
-            requestedModeId: 'ask',
-            effectiveModeId: 'always-approve',
-          },
+          acceptWiderPermissions: [
+            {
+              controlId: 'permission_mode',
+              requestedModeId: 'ask',
+              effectiveModeId: 'always-approve',
+            },
+          ],
         },
         agentClient
       );
@@ -573,11 +574,9 @@ describe('applyAcpSessionRunConfig', () => {
           cliType: 'builtin',
           agentType: 'grok',
           configOptionValues: { permission_mode: 'plan' },
-          acceptWiderPermission: {
-            controlId: 'interaction_mode',
-            requestedModeId: 'plan',
-            effectiveModeId: 'auto',
-          },
+          acceptWiderPermissions: [
+            { controlId: 'interaction_mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+          ],
         },
         agentClient
       );
@@ -587,6 +586,58 @@ describe('applyAcpSessionRunConfig', () => {
         requestedModeId: 'plan',
         effectiveModeId: 'auto',
       });
+    });
+
+    it('reaches a runnable turn after both disclosures are accepted', async () => {
+      // The whole loop for two controls widening at once: stop on one, accept
+      // it, stop on the other, accept both, run. Without accumulation the
+      // second acceptance would replace the first and the user would alternate
+      // between the two notices with no way through.
+      const grokAgent = () =>
+        ({
+          isCreated: () => true,
+          getConfigOptions: () => [
+            { id: 'interaction_mode', category: 'mode', type: 'select', currentValue: 'auto' },
+            {
+              id: 'permission_mode',
+              category: '_permission',
+              type: 'select',
+              currentValue: 'always-approve',
+            },
+          ],
+          setSessionMode: vi.fn(async () => undefined),
+          setSessionConfigOption: vi.fn(async () => undefined),
+        }) as unknown as AgentClient;
+      const turn = (acceptWiderPermissions: AcceptedWiderPermission[]) => ({
+        cliType: 'builtin' as const,
+        agentType: 'grok',
+        modeId: 'plan',
+        configOptionValues: { permission_mode: 'ask' },
+        ...(acceptWiderPermissions.length > 0 ? { acceptWiderPermissions } : {}),
+      });
+
+      const first = await apply(turn([]), grokAgent());
+      const firstEscalation = first.permissionEscalation;
+      expect(firstEscalation).toEqual({
+        controlId: 'permission_mode',
+        requestedModeId: 'ask',
+        effectiveModeId: 'always-approve',
+      });
+
+      // Accepting only the first still stops, on the one never disclosed.
+      const second = await apply(turn([firstEscalation!]), grokAgent());
+      const secondEscalation = second.permissionEscalation;
+      expect(secondEscalation).toEqual({
+        controlId: 'interaction_mode',
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      });
+
+      // Carrying BOTH — what the retry builder produces from the stopped turn —
+      // finally runs, and both mismatches are still reported.
+      const third = await apply(turn([firstEscalation!, secondEscalation!]), grokAgent());
+      expect(third.permissionEscalation).toBeUndefined();
+      expect(third.warningSelections).toEqual(['permission_mode="ask"', 'mode="plan"']);
     });
 
     it('stands down for a turn that carries the informed acceptance', async () => {
@@ -603,11 +654,9 @@ describe('applyAcpSessionRunConfig', () => {
           cliType: 'builtin',
           agentType: 'claude',
           modeId: 'plan',
-          acceptWiderPermission: {
-            controlId: 'permission-mode',
-            requestedModeId: 'plan',
-            effectiveModeId: 'auto',
-          },
+          acceptWiderPermissions: [
+            { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+          ],
         },
         agentClient
       );

@@ -65,6 +65,7 @@ describe('findPermissionNotAppliedRetryTarget', () => {
         requestedModeId: 'plan',
         effectiveModeId: 'auto',
       },
+      previouslyAccepted: [],
       userTurnId: 'user-1',
       inputBlocks: [{ type: 'text', text: 'ship it' }],
       modeId: 'plan',

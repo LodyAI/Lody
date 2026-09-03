@@ -21,8 +21,8 @@ import type { PermissionNotAppliedRetryTarget } from '@/lib/permission-not-appli
  * an empty `mcpServerIds` array, which is an explicit "no servers" selection.
  */
 export type TurnScopedOverrides = {
-  /** One-time informed acceptance of ONE disclosed difference, this turn only. */
-  acceptWiderPermission?: AcceptedWiderPermission;
+  /** Differences disclosed and accepted for this turn only. */
+  acceptWiderPermissions?: AcceptedWiderPermission[];
   mcpServerIdsOverride?: readonly McpServerId[];
   taskToolsEnabledOverride?: boolean;
   issuePRMentionsOverride?: IssuePRMention[];
@@ -30,12 +30,24 @@ export type TurnScopedOverrides = {
 
 export const EMPTY_TURN_SCOPED_OVERRIDES: TurnScopedOverrides = {};
 
+const dedupeAcceptedWiderPermissions = (
+  entries: readonly AcceptedWiderPermission[]
+): AcceptedWiderPermission[] => {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const key = `${entry.controlId}\u0000${entry.requestedModeId}\u0000${entry.effectiveModeId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 /** Narrows a wider options object to exactly the turn-scoped set. */
 export const pickTurnScopedOverrides = (
   options: TurnScopedOverrides | undefined
 ): TurnScopedOverrides => ({
-  ...(options?.acceptWiderPermission
-    ? { acceptWiderPermission: options.acceptWiderPermission }
+  ...(options?.acceptWiderPermissions?.length
+    ? { acceptWiderPermissions: options.acceptWiderPermissions }
     : {}),
   ...(options?.mcpServerIdsOverride !== undefined
     ? { mcpServerIdsOverride: options.mcpServerIdsOverride }
@@ -52,12 +64,16 @@ export const pickTurnScopedOverrides = (
 export const buildPermissionRetryOverrides = (
   target: Pick<
     PermissionNotAppliedRetryTarget,
-    'disclosed' | 'mcpServerIds' | 'taskToolsEnabled' | 'issuePRMentions'
+    'disclosed' | 'previouslyAccepted' | 'mcpServerIds' | 'taskToolsEnabled' | 'issuePRMentions'
   >
 ): TurnScopedOverrides => ({
-  // The acceptance names what the notice showed, so the daemon can tell it from
-  // a difference that appeared afterwards.
-  acceptWiderPermission: target.disclosed,
+  // What this notice showed, ON TOP of what the stopped turn had already been
+  // accepted for. Each entry is still matched exactly by the daemon, so the set
+  // grants nothing beyond the differences shown one stop at a time.
+  acceptWiderPermissions: dedupeAcceptedWiderPermissions([
+    ...target.previouslyAccepted,
+    target.disclosed,
+  ]),
   ...(target.mcpServerIds !== undefined
     ? { mcpServerIdsOverride: target.mcpServerIds as McpServerId[] }
     : {}),
@@ -84,7 +100,7 @@ type TurnInputConfigFields = {
 export const applyTurnScopedOverrides = <T extends TurnInputConfigFields>(
   args: T,
   overrides: TurnScopedOverrides
-): T & { acceptWiderPermission?: AcceptedWiderPermission } => ({
+): T & { acceptWiderPermissions?: AcceptedWiderPermission[] } => ({
   ...args,
   ...(overrides.mcpServerIdsOverride !== undefined
     ? { mcpServerIds: overrides.mcpServerIdsOverride }
@@ -95,7 +111,7 @@ export const applyTurnScopedOverrides = <T extends TurnInputConfigFields>(
   ...(overrides.issuePRMentionsOverride !== undefined
     ? { issuePRMentions: overrides.issuePRMentionsOverride }
     : {}),
-  ...(overrides.acceptWiderPermission
-    ? { acceptWiderPermission: overrides.acceptWiderPermission }
+  ...(overrides.acceptWiderPermissions?.length
+    ? { acceptWiderPermissions: overrides.acceptWiderPermissions }
     : {}),
 });

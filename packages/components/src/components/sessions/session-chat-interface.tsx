@@ -3707,7 +3707,7 @@ export const SessionChatInterface = memo(
           | 'modelIdOverride'
           | 'configOptionValuesOverride'
           | 'agentRole'
-          | 'acceptWiderPermission'
+          | 'acceptWiderPermissions'
           | 'mcpServerIdsOverride'
           | 'taskToolsEnabledOverride'
           | 'issuePRMentionsOverride'
@@ -3758,8 +3758,8 @@ export const SessionChatInterface = memo(
             // keep the stopped turn's tool reach and its acceptance.
             mcpServerIds: [...(inputConfig.mcpServerIds ?? mcpSelection.selectedIds)],
             taskToolsEnabled: inputConfig.taskToolsEnabled,
-            ...(inputConfig.acceptWiderPermission
-              ? { acceptWiderPermission: inputConfig.acceptWiderPermission }
+            ...(inputConfig.acceptWiderPermissions?.length
+              ? { acceptWiderPermissions: inputConfig.acceptWiderPermissions }
               : {}),
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
@@ -3822,7 +3822,7 @@ export const SessionChatInterface = memo(
           | 'modelIdOverride'
           | 'configOptionValuesOverride'
           | 'agentRole'
-          | 'acceptWiderPermission'
+          | 'acceptWiderPermissions'
           | 'mcpServerIdsOverride'
           | 'taskToolsEnabledOverride'
           | 'issuePRMentionsOverride'

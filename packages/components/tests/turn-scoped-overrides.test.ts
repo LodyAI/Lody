@@ -64,11 +64,9 @@ describe('turn-scoped overrides reach the wire', () => {
     const afterHops = pickTurnScopedOverrides(pickTurnScopedOverrides(dispatchOptions));
     const config = buildSessionTurnInputConfig(applyTurnScopedOverrides(composerArgs, afterHops));
 
-    expect(config.acceptWiderPermission).toEqual({
-      controlId: 'permission-mode',
-      requestedModeId: 'plan',
-      effectiveModeId: 'auto',
-    });
+    expect(config.acceptWiderPermissions).toEqual([
+      { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+    ]);
     // The composer's own values lost to the stopped turn's, including the
     // explicit empty MCP selection and `taskToolsEnabled: false`.
     expect(config.mcpServerIds).toEqual([]);
@@ -81,7 +79,7 @@ describe('turn-scoped overrides reach the wire', () => {
       applyTurnScopedOverrides(composerArgs, pickTurnScopedOverrides(undefined))
     );
 
-    expect(config.acceptWiderPermission).toBeUndefined();
+    expect(config.acceptWiderPermissions).toBeUndefined();
     expect(config.mcpServerIds).toEqual(['server-the-user-picked-later']);
     expect(config.taskToolsEnabled).toBe(true);
   });
@@ -94,17 +92,48 @@ describe('turn-scoped overrides reach the wire', () => {
         requestedModeId: 'plan',
         effectiveModeId: 'auto',
       },
+      previouslyAccepted: [],
     });
     const config = buildSessionTurnInputConfig(
       applyTurnScopedOverrides(composerArgs, pickTurnScopedOverrides(overrides))
     );
 
-    expect(config.acceptWiderPermission).toEqual({
-      controlId: 'permission-mode',
-      requestedModeId: 'plan',
-      effectiveModeId: 'auto',
-    });
+    expect(config.acceptWiderPermissions).toEqual([
+      { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+    ]);
     expect(config.mcpServerIds).toEqual(['server-the-user-picked-later']);
     expect(config.taskToolsEnabled).toBe(true);
+  });
+
+  it('accumulates the disclosures already accepted on the stopped turn', () => {
+    // Two controls widened at once, so they are disclosed one stop at a time.
+    // A replay carrying only the newest acceptance drops the previous one and
+    // lands back on the first stop — the user would alternate forever.
+    const first = { controlId: 'permission_mode', requestedModeId: 'ask', effectiveModeId: 'auto' };
+    const second = {
+      controlId: 'interaction_mode',
+      requestedModeId: 'plan',
+      effectiveModeId: 'auto',
+    };
+
+    const config = buildSessionTurnInputConfig(
+      applyTurnScopedOverrides(
+        composerArgs,
+        pickTurnScopedOverrides(
+          buildPermissionRetryOverrides({ disclosed: second, previouslyAccepted: [first] })
+        )
+      )
+    );
+
+    expect(config.acceptWiderPermissions).toEqual([first, second]);
+  });
+
+  it('does not duplicate a disclosure the stopped turn already accepted', () => {
+    const only = { controlId: 'permission_mode', requestedModeId: 'ask', effectiveModeId: 'auto' };
+
+    expect(
+      buildPermissionRetryOverrides({ disclosed: only, previouslyAccepted: [only] })
+        .acceptWiderPermissions
+    ).toEqual([only]);
   });
 });

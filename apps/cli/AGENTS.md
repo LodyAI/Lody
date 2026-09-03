@@ -347,9 +347,18 @@ Two things the dev build does deliberately, both load-bearing:
   moved further by the time the turn re-runs (`plan → auto` accepted, `plan →
   always-approve` live), and a second permission control may have widened
   alongside the one in the notice (Grok carries both a mode selector and an
-  explicit `_permission` one). The applier skips ONLY an exact triple match and
+  explicit `_permission` one). The applier skips ONLY exact triple matches and
   keeps scanning the remaining permission selections, so anything undisclosed
-  stops the turn again with its own accurate notice. Do not match on the values
+  stops the turn again with its own accurate notice.
+  It is a LIST (`acceptWiderPermissions`) because those differences are
+  disclosed one stop at a time: two controls widening at once produce two
+  notices, and a replay carrying only the newest acceptance would drop the
+  previous one and land back on the first — the user alternates between two
+  notices with no way through. A retry therefore inherits the acceptances
+  already on the turn it is replaying, re-validated, and appends the current
+  notice's triple. Accumulating grants nothing extra, because every entry is
+  still matched exactly. An ordinary send, edit-and-resend and any prompt-derived
+  turn clear the whole set; a same-turn transport retry keeps it. Do not match on the values
   alone, and do not treat a rank ceiling as equivalent across different
   permission controls. The notice meta and the acceptance share ONE schema
   (`AcceptedWiderPermissionSchema`): the client reads the meta and writes it
