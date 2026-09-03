@@ -2292,6 +2292,11 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.turnPrePromptFailed',
           'Failed before the agent could start'
         );
+      case 'permission_not_applied':
+        return t(
+          'sessions.systemNotices.chatFailed.permissionNotApplied',
+          'The agent did not apply the requested permission mode, so the turn was stopped before it ran — resend to run with the permission the agent has'
+        );
       case 'message_delivery_failed':
         return t(
           'sessions.systemNotices.chatFailed.messageDeliveryFailed',

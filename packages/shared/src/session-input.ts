@@ -628,6 +628,8 @@ export const buildSessionTurnInputConfig = (args: {
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
   taskToolsEnabled?: boolean;
+  /** One-time informed acceptance of a wider permission, for THIS turn only. */
+  acceptWiderPermission?: boolean;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
@@ -648,6 +650,7 @@ export const buildSessionTurnInputConfig = (args: {
         ? args.configOptionValues
         : undefined,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
+    ...(args.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
     ...(args.taskToolsEnabled !== undefined
       ? { taskToolsEnabled: args.taskToolsEnabled === true }
       : {}),

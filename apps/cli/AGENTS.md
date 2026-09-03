@@ -312,6 +312,19 @@ Two things the dev build does deliberately, both load-bearing:
   differing only in warning wording and follow-up marking. A Role that would run
   diverged is surfaced, not refused — an upgrade must never turn a Role that used
   to run into one that fails.
+  EXCEPTION, and the only one: when the agent's own reported final state says the
+  turn would run with MORE permission than it asked for, the turn fails before
+  `prompt` (`AcpPermissionNotAppliedError` → `permission_not_applied`). By the
+  time a warning about that is readable the agent may already have edited files,
+  so this is the one divergence a notice cannot cover. It fires only on a live
+  contradiction: `isAcpPermissionWiderThanRequested` requires BOTH modes to be
+  ranked among the builtin ones and the effective one to be strictly wider, and
+  the effective mode is read from the agent's published state — a snapshot, a
+  stale cache, an unranked third-party mode, an unconfirmed request, or a
+  NARROWER outcome must never stop a turn. The way out is explicit and
+  per-turn: `SessionTurnInputConfig.acceptWiderPermission` is informed
+  acceptance carried by one resend, never inherited and never a default, and it
+  suppresses the stop while still reporting the mismatch.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

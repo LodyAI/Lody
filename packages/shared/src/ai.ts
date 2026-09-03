@@ -1117,6 +1117,7 @@ export type ChatFailedReason =
   // HTTP 400), which would otherwise be recorded as an ordinary completion.
   | 'agent_no_output'
   | 'turn_pre_prompt_failed'
+  | 'permission_not_applied'
   | 'message_delivery_failed'
   | 'machine_access_denied' // requester is not authorized to use this machine (definitive backend deny)
   // ACP RPC errors (from @agentclientprotocol/sdk)
@@ -1594,6 +1595,12 @@ export type ACPSessionConfig = {
   mcpServerIds?: McpServerId[];
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
+  /**
+   * One-time informed acceptance: the user was told the agent would run with a
+   * wider permission than requested and chose to run anyway. Scoped to the turn
+   * that carries it — never inherited, never a default.
+   */
+  acceptWiderPermission?: boolean;
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

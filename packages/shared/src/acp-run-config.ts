@@ -53,6 +53,56 @@ export const isAcpPlanModeConfigOption = (option: ConfigOptionIdentity): boolean
   option.id === ACP_COLLABORATION_MODE_CONFIG_ID ||
   option.category === ACP_COLLABORATION_MODE_CONFIG_ID;
 
+/**
+ * How much a permission mode lets the agent do without asking a human, for the
+ * builtin modes Lody adapts. Higher is wider.
+ *
+ * Deliberately partial: an id not listed here — a third-party or newly added
+ * mode — has NO rank, and an unranked mode can never be judged wider than
+ * another. Blocking a turn on a guess about an unknown mode would be the same
+ * mistake as blocking it on a stale snapshot.
+ */
+const ACP_PERMISSION_MODE_RANKS: Record<string, number> = {
+  // Cannot modify anything.
+  'read-only': 0,
+  plan: 0,
+  // Asks a human before acting.
+  agent: 1,
+  default: 1,
+  // Routes approval to a reviewing model instead of a human.
+  'agent-auto-review': 2,
+  auto: 2,
+  // Auto-approves edits.
+  acceptEdits: 3,
+  // Skips approval entirely.
+  dontAsk: 4,
+  bypassPermissions: 4,
+  'agent-full-access': 4,
+  'danger-full-access': 4,
+  yolo: 4,
+  'always-approve': 4,
+};
+
+export const findAcpPermissionModeRank = (modeId: string | null | undefined): number | undefined =>
+  typeof modeId === 'string' ? ACP_PERMISSION_MODE_RANKS[modeId] : undefined;
+
+/**
+ * Whether the agent ended up with MORE permission than the turn asked for.
+ *
+ * Both sides must be ranked and the effective one must be strictly wider. Equal,
+ * narrower, unranked, or unknown all answer `false`: this decides whether to
+ * stop a turn before it runs, so it may only fire on a contradiction the agent's
+ * own reported state establishes.
+ */
+export const isAcpPermissionWiderThanRequested = (
+  requestedModeId: string | null | undefined,
+  effectiveModeId: string | null | undefined
+): boolean => {
+  const requested = findAcpPermissionModeRank(requestedModeId);
+  const effective = findAcpPermissionModeRank(effectiveModeId);
+  return requested !== undefined && effective !== undefined && effective > requested;
+};
+
 /** Semantic run-config selection, independent of any agent's option ids. */
 export type AgentRunConfigSelection = {
   modelId?: string;

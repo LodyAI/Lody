@@ -88,6 +88,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import { AcpPermissionNotAppliedError } from '@/session/acp-session-config-applier';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -1873,6 +1874,11 @@ export class SessionExecutionService {
     // of a generic "failed before the agent could start".
     if (error instanceof AcpAuthenticationRequiredError) {
       await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
+    } else if (error instanceof AcpPermissionNotAppliedError) {
+      // Keep the specific reason: it is what lets the client name the two modes
+      // and offer to run once with the permission the agent actually has,
+      // instead of a generic "failed before the agent could start".
+      await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message);
     } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,

@@ -2,6 +2,7 @@ import {
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
   isAcpFastModeConfigId,
+  isAcpPermissionWiderThanRequested,
   isAcpPlanModeConfigOption,
   isSensitiveAcpConfigOptionId,
   type ACPSessionId,
@@ -55,6 +56,8 @@ export type AcpSessionRunConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** One-time informed acceptance carried by this turn. */
+  acceptWiderPermission?: boolean;
 };
 
 type AcpSessionRunConfigApplyResult = {
@@ -64,6 +67,13 @@ type AcpSessionRunConfigApplyResult = {
   warningSelections: string[];
   /** Agent-confirmed state after applying the requested selections. */
   runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
+  /**
+   * The agent's own reported state says this turn would run with MORE
+   * permission than it asked for. Present only on that contradiction — never
+   * from a snapshot, never when either mode is unranked, never when the agent
+   * reported nothing to compare.
+   */
+  permissionEscalation?: { requestedModeId: string; effectiveModeId: string };
 };
 
 /** A boolean toggle and an `on`/`off` select express the same choice. */
@@ -313,9 +323,51 @@ export async function applyAcpSessionRunConfig(args: {
     })
     .map((selection) => selection.label);
 
+  /* The permission the turn asked for, against the one the agent reports after
+     everything has been applied. `runtimeConfigPatch.modeId` is the agent's own
+     state — it is only filled from a `set_mode` acknowledgement when the agent
+     reports no mode of its own, in which case the two are equal and nothing
+     fires here. So this cannot be triggered by a snapshot, by a stale cache, or
+     by an unconfirmed request. */
+  const requestedModeId =
+    config.modeId ??
+    (typeof configOptionEntryFor(modeConfigId) === 'string'
+      ? (configOptionEntryFor(modeConfigId) as string)
+      : undefined);
+  const permissionEscalation =
+    requestedModeId !== undefined &&
+    !config.acceptWiderPermission &&
+    isAcpPermissionWiderThanRequested(requestedModeId, runtimeConfigPatch.modeId)
+      ? { requestedModeId, effectiveModeId: runtimeConfigPatch.modeId as string }
+      : undefined;
+  if (permissionEscalation) {
+    logger.debug(
+      `[${sessionId}] Permission not applied: requested ${permissionEscalation.requestedModeId}, effective ${permissionEscalation.effectiveModeId}`
+    );
+  }
+
   return {
     rejectedSelections,
     warningSelections,
     runtimeConfigPatch,
+    ...(permissionEscalation ? { permissionEscalation } : {}),
   };
+}
+
+/**
+ * The agent's own state reports a wider permission than the turn requested.
+ *
+ * Thrown before `prompt`, so the turn never runs. Carries both mode ids so the
+ * failure notice can name them and offer the one-time informed downgrade.
+ */
+export class AcpPermissionNotAppliedError extends Error {
+  constructor(
+    readonly requestedModeId: string,
+    readonly effectiveModeId: string
+  ) {
+    super(
+      `The agent did not apply the requested permission mode "${requestedModeId}" and would run with "${effectiveModeId}", which allows more than was asked for.`
+    );
+    this.name = 'AcpPermissionNotAppliedError';
+  }
 }

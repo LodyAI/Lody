@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isAcpPermissionWiderThanRequested,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
@@ -400,5 +401,27 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+});
+
+describe('permission width', () => {
+  it('answers only on a ranked, strictly wider outcome', () => {
+    // Wider: the effective mode acts with less human involvement.
+    expect(isAcpPermissionWiderThanRequested('plan', 'auto')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('plan', 'default')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('default', 'bypassPermissions')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('read-only', 'agent-full-access')).toBe(true);
+
+    // Equal or narrower is a functional mismatch, not an escalation.
+    expect(isAcpPermissionWiderThanRequested('plan', 'plan')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('auto', 'plan')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('agent-full-access', 'agent')).toBe(false);
+
+    // Unranked or absent on either side answers false: a turn may not be
+    // stopped on a guess about a mode Lody does not adapt.
+    expect(isAcpPermissionWiderThanRequested('plan', 'vendor-mode')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('vendor-mode', 'agent-full-access')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('plan', undefined)).toBe(false);
+    expect(isAcpPermissionWiderThanRequested(undefined, 'agent-full-access')).toBe(false);
   });
 });

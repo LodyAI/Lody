@@ -157,6 +157,137 @@ describe('applyAcpSessionRunConfig', () => {
     expect(result.warningSelections).toEqual([]);
   });
 
+  describe('permission not applied', () => {
+    /** An agent whose model switch resets the permission mode to `auto`. */
+    const wideningAgent = () => {
+      let currentMode = 'auto';
+      let currentModel = 'model-a';
+      return {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'permission-mode', category: 'mode', type: 'select', currentValue: currentMode },
+          { id: 'engine', category: 'model', type: 'select', currentValue: currentModel },
+        ],
+        setSessionMode: vi.fn(async (_sessionId: string, mode: string) => {
+          currentMode = mode;
+        }),
+        unstable_setSessionModel: vi.fn(async (_sessionId: string, model: string) => {
+          currentModel = model;
+          currentMode = 'auto';
+        }),
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+    };
+
+    const apply = async (
+      config: Parameters<typeof applyAcpSessionRunConfig>[0]['config'],
+      agentClient: AgentClient
+    ) =>
+      await applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-9' as SessionId,
+          acpSessionId: 'acp-9' as ACPSessionId,
+          agentClient,
+        },
+        config,
+        logger: createLogger(),
+      });
+
+    it('reports the escalation when the agent ends up wider than requested', async () => {
+      // The agent refuses to stay in plan: `setSessionMode` "succeeds" but its
+      // own state says `auto`, which approves without asking a human.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'auto' },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        { cliType: 'builtin', agentType: 'claude', modeId: 'plan' },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        requestedModeId: 'plan',
+        effectiveModeId: 'auto',
+      });
+    });
+
+    it('does not report one when the agent honors the request', async () => {
+      // Same widening agent, but the ordering fix means plan is applied after
+      // the model that would have reset it.
+      const result = await apply(
+        { cliType: 'builtin', agentType: 'claude', modeId: 'plan', modelId: 'model-b' },
+        wideningAgent()
+      );
+
+      expect(result.runtimeConfigPatch?.modeId).toBe('plan');
+      expect(result.permissionEscalation).toBeUndefined();
+    });
+
+    it('does not report one on an unconfirmed, narrower, or unranked outcome', async () => {
+      // Nothing to compare against: the agent publishes no mode of its own, so
+      // the patch carries only our own acknowledgement.
+      const silent = {
+        isCreated: () => true,
+        getConfigOptions: () => [],
+        setSessionMode: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+      expect(
+        (await apply({ cliType: 'builtin', agentType: 'claude', modeId: 'plan' }, silent))
+          .permissionEscalation
+      ).toBeUndefined();
+
+      // Narrower than requested is a functional mismatch, not an escalation.
+      const narrower = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'plan' },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+      expect(
+        (await apply({ cliType: 'builtin', agentType: 'claude', modeId: 'auto' }, narrower))
+          .permissionEscalation
+      ).toBeUndefined();
+
+      // A third-party mode Lody does not rank can never be judged wider.
+      const unranked = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'vendor-mode' },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+      expect(
+        (await apply({ cliType: 'registry', agentType: 'other', modeId: 'plan' }, unranked))
+          .permissionEscalation
+      ).toBeUndefined();
+    });
+
+    it('stands down for a turn that carries the informed acceptance', async () => {
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'auto' },
+        ],
+        setSessionMode: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        { cliType: 'builtin', agentType: 'claude', modeId: 'plan', acceptWiderPermission: true },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toBeUndefined();
+      // Still reported: accepting the run does not make the mismatch invisible.
+      expect(result.warningSelections).toEqual(['mode="plan"']);
+    });
+  });
+
   it('reports a selection the agent accepted but dropped from its own state', async () => {
     // The codex shape: `fast-mode` is accepted without error on a model with no
     // fast speed tier, and simply does not come back in the published state, so

@@ -318,6 +318,7 @@ import { AutoPromptRunner } from '@/session/auto-prompt-runner';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
+  AcpPermissionNotAppliedError,
   type AcpSessionRunConfig,
 } from '@/session/acp-session-config-applier';
 import {
@@ -1721,11 +1722,12 @@ export class MessageHandler {
       basedOnUserTurnId?: string;
     }
   ): Promise<void> {
-    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
-      session,
-      config,
-      logger: this.logger,
-    });
+    const { runtimeConfigPatch, warningSelections, permissionEscalation } =
+      await applyAcpSessionRunConfig({
+        session,
+        config,
+        logger: this.logger,
+      });
 
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
@@ -1738,6 +1740,19 @@ export class MessageHandler {
           `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
         );
       });
+    }
+
+    /* The one divergence that stops a turn. Everything else — model, effort,
+       fast — runs and reports, because the worst case is a slower or costlier
+       turn. Running with MORE permission than the user asked for is not that:
+       by the time a warning is readable the agent may already have edited
+       files. The turn fails here, before `prompt`, and the user re-sends with
+       an explicit one-time acceptance if they want it anyway. */
+    if (permissionEscalation) {
+      throw new AcpPermissionNotAppliedError(
+        permissionEscalation.requestedModeId,
+        permissionEscalation.effectiveModeId
+      );
     }
 
     if (warningSelections.length > 0) {

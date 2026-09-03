@@ -2118,6 +2118,7 @@
   "sessions.systemNotices.chatFailed.sessionNotFound": "会话不存在",
   "sessions.systemNotices.chatFailed.sessionRestoreFailed": "会话恢复失败",
   "sessions.systemNotices.chatFailed.turnPrePromptFailed": "Agent 启动前失败",
+  "sessions.systemNotices.chatFailed.permissionNotApplied": "该 Agent 未应用请求的权限模式，本轮已在执行前停止——重新发送即可按该 Agent 实际拥有的权限运行",
   "sessions.systemNotices.chatFailed.messageDeliveryFailed": "消息送达失败 - 请在同步恢复后重发",
   "sessions.systemNotices.chatFailed.machineAccessDenied": "机器访问被拒绝",
   "sessions.systemNotices.chatFailed.memoryPressure": "机器内存不足 - 请释放内存后重试",
