@@ -60,6 +60,56 @@ describe('message-schemas system_notice', () => {
     expect(result.success).toBe(true);
   });
 
+  it('keeps the whole disclosed permission triple through a notice parse', () => {
+    // Zod strips undeclared keys, so a field this schema does not know about is
+    // removed on every history read. The client builds its one-time acceptance
+    // from exactly this meta, so a dropped `controlId` silently removes the
+    // "run once" action from a failure the daemon reported correctly.
+    const result = MessageContentSchema.safeParse({
+      type: 'system_notice',
+      name: 'chat_failed',
+      meta: {
+        reason: 'permission_not_applied',
+        permission: {
+          controlId: 'permission_mode',
+          requestedModeId: 'ask',
+          effectiveModeId: 'always-approve',
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.meta).toEqual({
+        reason: 'permission_not_applied',
+        permission: {
+          controlId: 'permission_mode',
+          requestedModeId: 'ask',
+          effectiveModeId: 'always-approve',
+        },
+      });
+    }
+  });
+
+  it('still renders a notice written before the triple existed', () => {
+    // Readable as a failure; it just cannot name a control, so no acceptance
+    // can be built from it and no action is offered.
+    const result = MessageContentSchema.safeParse({
+      type: 'system_notice',
+      name: 'chat_failed',
+      meta: {
+        reason: 'permission_not_applied',
+        permission: { requestedModeId: 'plan', effectiveModeId: 'auto' },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data.meta as { permission?: unknown }).permission).toBeUndefined();
+      expect((result.data.meta as { reason?: string }).reason).toBe('permission_not_applied');
+    }
+  });
+
   it('accepts chat_failed notice with reason meta', () => {
     const result = MessageContentSchema.safeParse({
       type: 'system_notice',

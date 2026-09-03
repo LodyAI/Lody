@@ -351,7 +351,13 @@ Two things the dev build does deliberately, both load-bearing:
   keeps scanning the remaining permission selections, so anything undisclosed
   stops the turn again with its own accurate notice. Do not match on the values
   alone, and do not treat a rank ceiling as equivalent across different
-  permission controls. That resend replays the
+  permission controls. The notice meta and the acceptance share ONE schema
+  (`AcceptedWiderPermissionSchema`): the client reads the meta and writes it
+  straight back, and Zod strips undeclared keys, so a second declaration drops a
+  field on every history read — the action then disappears from a failure the
+  daemon reported correctly. A malformed or pre-triple `permission` degrades to
+  absent rather than failing the parse, so the notice still renders and simply
+  offers no acceptance. That resend replays the
   STOPPED turn: prompt, mode, model, config values, Role, `mcpServerIds`
   (including an explicit empty selection), `taskToolsEnabled` and
   `issuePRMentions` all come from its frozen `inputConfig`, never from the

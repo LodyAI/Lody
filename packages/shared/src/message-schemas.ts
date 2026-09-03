@@ -3145,11 +3145,24 @@ export const ChatFailedMetaSchema = z.object({
   code: ChatFailedCodeSchema.optional(),
   message: z.string().optional(),
   /**
-   * `permission_not_applied` only: the mode the turn asked for and the wider one
-   * the agent reported. Structured so the notice can name both instead of the
-   * client parsing them back out of `message`.
+   * `permission_not_applied` only: the exact difference that was disclosed.
+   *
+   * The SAME shape the acceptance uses, deliberately — the client reads this
+   * meta and writes it straight back as `acceptWiderPermission`, so a second
+   * declaration here would let the two drift and, since Zod strips undeclared
+   * keys, silently drop a field on every history read. That is what happened:
+   * a `controlId` this schema did not know about was removed on parse, the
+   * client could no longer build an acceptance from the notice, and the "run
+   * once" action vanished from a failure the daemon had reported correctly.
+   *
+   * Absent-tolerant by DEGRADING, not by failing: a notice written before the
+   * triple existed carries only two of the three fields, and rejecting it would
+   * make the whole history item unparseable rather than merely actionless. It
+   * drops to `undefined`, so the failure still renders and simply offers no
+   * acceptance — which is the safe direction, since an acceptance that cannot
+   * name its control would be a blanket one.
    */
-  permission: z.object({ requestedModeId: z.string(), effectiveModeId: z.string() }).optional(),
+  permission: AcceptedWiderPermissionSchema.optional().catch(undefined),
 });
 
 // Non-system notice MessageContent discriminated union
