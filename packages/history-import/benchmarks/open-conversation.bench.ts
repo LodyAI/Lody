@@ -217,6 +217,7 @@ type Row = {
   'p99 ms': number;
   'ops/sec': number;
   samples: number;
+  error?: string;
 };
 
 const rowsOf = (bench: Bench): Row[] =>
@@ -225,7 +226,12 @@ const rowsOf = (bench: Bench): Row[] =>
     'mean ms': Number((task.result?.mean ?? 0).toFixed(2)),
     'p99 ms': Number((task.result?.p99 ?? 0).toFixed(2)),
     'ops/sec': Number((task.result?.hz ?? 0).toFixed(1)),
-    samples: task.result?.samples.length ?? 0,
+    samples: task.result?.samples?.length ?? 0,
+    // A task that threw (the full Mirror on a large doc can) has `result.error`
+    // and no samples; report it instead of crashing the whole run.
+    ...(task.result?.error
+      ? { error: String((task.result.error as { message?: string }).message ?? task.result.error) }
+      : {}),
   }));
 
 const meanOf = (bench: Bench, name: string): number =>
@@ -390,13 +396,20 @@ async function main(): Promise<void> {
       ...rowsOf(streamBench),
     ]);
     const mirrorMean = meanOf(openBench, 'Mirror');
+    const mirrorError = openBench.tasks.find((task) => task.name === 'Mirror')?.result?.error;
     const openMean = meanOf(viewBench, 'view.open');
     const streamP99 = p99Of(streamBench, 'view.stream');
-    process.stdout.write(
-      `  before (Mirror): ${mirrorMean.toFixed(1)} ms = ` +
+    const before = mirrorError
+      ? `  before (Mirror): FAILED (${String((mirrorError as { message?: string }).message ?? mirrorError)})\n`
+      : `  before (Mirror): ${mirrorMean.toFixed(1)} ms = ` +
         `${((mirrorMean * 1000) / Math.max(history.length, 1)).toFixed(0)} µs/turn, ` +
-        `${((mirrorMean * 1000) / Math.max(containers, 1)).toFixed(1)} µs/container\n` +
-        `  after (view.open): ${openMean.toFixed(1)} ms (${(mirrorMean / Math.max(openMean, 1e-6)).toFixed(1)}x faster)` +
+        `${((mirrorMean * 1000) / Math.max(containers, 1)).toFixed(1)} µs/container\n`;
+    const speedup = mirrorError
+      ? ''
+      : ` (${(mirrorMean / Math.max(openMean, 1e-6)).toFixed(1)}x faster)`;
+    process.stdout.write(
+      before +
+        `  after (view.open): ${openMean.toFixed(1)} ms${speedup}` +
         `  open<=${OPEN_BUDGET_MS}ms: ${openMean <= OPEN_BUDGET_MS ? 'PASS' : 'FAIL'}` +
         `  stream p99<=${STREAM_P99_BUDGET_MS}ms: ${streamP99 <= STREAM_P99_BUDGET_MS ? 'PASS' : 'FAIL'} (${streamP99.toFixed(2)} ms)\n\n`
     );
