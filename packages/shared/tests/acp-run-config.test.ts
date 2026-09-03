@@ -641,3 +641,235 @@ describe('ACP toggle select predicates', () => {
     expect(isAcpToggleSelectEnabledValue(true)).toBe(false);
   });
 });
+
+const cursorThinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorEffortSelect = (
+  values: readonly string[],
+  currentValue: string
+): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue,
+  options: values.map((value) => ({ value, name: value })),
+});
+
+const cursorFastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorContextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const cursorReasoningSelect = (): AcpConfigOptionSummary => ({
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'medium', name: 'Medium' },
+    { value: 'high', name: 'High' },
+    { value: 'extra-high', name: 'Extra high' },
+  ],
+});
+
+const cursorModelSelect = (): AcpConfigOptionSummary => ({
+  id: 'model',
+  name: 'Model',
+  category: 'model',
+  type: 'select',
+  currentValue: 'opus',
+  options: [
+    { value: 'opus', name: 'Opus' },
+    { value: 'sonnet', name: 'Sonnet' },
+    { value: 'gemini', name: 'Gemini' },
+    { value: 'gpt', name: 'GPT' },
+    { value: 'empty', name: 'Empty' },
+  ],
+});
+
+const cursorOpusSnapshotOptions = (): AcpConfigOptionSummary[] => [
+  cursorModelSelect(),
+  cursorThinkingSelect(),
+  cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+  cursorFastSelect(),
+  cursorContextSelect(),
+];
+
+const cursorCatalogCapability = (): AcpCapabilityCacheEntry => ({
+  cliType: 'custom',
+  agentType: 'cursor',
+  modes: [],
+  models: [],
+  configOptions: cursorOpusSnapshotOptions(),
+  configOptionsByModel: {
+    opus: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+      cursorFastSelect(),
+      cursorContextSelect(),
+    ],
+    sonnet: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'max'], 'medium'),
+    ],
+    gemini: [cursorEffortSelect(['minimal', 'low', 'medium', 'high'], 'medium')],
+    gpt: [cursorReasoningSelect(), cursorFastSelect()],
+    empty: [],
+  },
+  fetchedAt: 1,
+});
+
+describe('per-model config catalog run config', () => {
+  it('writes gpt extra-high onto reasoning and marks that id pre-validated', () => {
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'gpt', reasoningEffort: 'extra-high' },
+      cursorCatalogCapability()
+    );
+    expect(resolved.configOptionValues).toEqual({ reasoning: 'extra-high' });
+    expect(resolved.configOptionValues).not.toHaveProperty('thinking');
+    expect(resolved.validatedConfigIds).toEqual(['reasoning']);
+  });
+
+  it('rejects a reasoning effort the target model catalog does not allow', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gemini', reasoningEffort: 'max' },
+        cursorCatalogCapability()
+      )
+    ).toThrow('Invalid reasoning effort for model gemini');
+  });
+
+  it('rejects fast mode when the target catalog omits it and accepts gpt without unverifiedSelections', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'sonnet', fastMode: true },
+        cursorCatalogCapability()
+      )
+    ).toThrow('does not offer a fast mode option');
+
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'gpt', fastMode: true },
+      cursorCatalogCapability()
+    );
+    expect(resolved.configOptionValues).toEqual({ fast: 'true' });
+    expect(resolved.unverifiedSelections).toBeUndefined();
+  });
+
+  it('rejects reasoning effort when the target catalog entry is empty', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'empty', reasoningEffort: 'high' },
+        cursorCatalogCapability()
+      )
+    ).toThrow('does not offer a reasoning effort option');
+  });
+
+  it('keeps snapshot-based unverified selections when the agent has no catalog', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...cursorCatalogCapability(),
+      configOptionsByModel: undefined,
+    };
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'sonnet', reasoningEffort: 'high', fastMode: true },
+      capability
+    );
+    expect(resolved.configOptionValues).toEqual({ effort: 'high', fast: 'true' });
+    expect(resolved.unverifiedSelections).toEqual(['reasoningEffort=high', 'fastMode=true']);
+    expect(resolved.validatedConfigIds).toEqual(['effort']);
+  });
+
+  it('maps reasoning effort onto a lone thinking toggle when no effort ladder exists', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'kimi',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'k2',
+          options: [{ value: 'k2', name: 'K2' }],
+        },
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'off',
+          options: [
+            { value: 'off', name: 'Off' },
+            { value: 'on', name: 'On' },
+          ],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'on' }, capability).configOptionValues
+    ).toEqual({ thinking: 'on' });
+    expect(summarizeAgentRunConfigCapabilities(capability).reasoningEffortValues).toEqual([
+      'off',
+      'on',
+    ]);
+  });
+
+  it('publishes per-model catalog efforts and still prefers legacy modelReasoningEfforts', () => {
+    const summary = summarizeAgentRunConfigCapabilities(cursorCatalogCapability());
+    expect(summary.models.find((model) => model.id === 'gpt')?.reasoningEffortValues).toEqual([
+      'low',
+      'medium',
+      'high',
+      'extra-high',
+    ]);
+    expect(summary.models.find((model) => model.id === 'gemini')?.reasoningEffortValues).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+    expect(
+      summary.models.find((model) => model.id === 'empty')?.reasoningEffortValues
+    ).toBeUndefined();
+
+    const withLegacy = summarizeAgentRunConfigCapabilities({
+      ...cursorCatalogCapability(),
+      modelReasoningEfforts: { gpt: ['low', 'high'] },
+    });
+    expect(withLegacy.models.find((model) => model.id === 'gpt')?.reasoningEffortValues).toEqual([
+      'low',
+      'high',
+    ]);
+  });
+});
