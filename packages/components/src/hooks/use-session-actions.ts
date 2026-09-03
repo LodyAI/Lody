@@ -56,6 +56,8 @@ import {
   getRpcDeliveredTurnKey,
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
+import { patchHistoryEntry } from '@/lib/conversation-view';
+import { readSessionUserTurn } from '@/lib/session-store-history';
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
 import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -812,9 +814,7 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
+        readSessionUserTurn(sessionStore, userTurnId)
       );
       const inputConfig =
         options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
@@ -920,9 +920,7 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
+        readSessionUserTurn(sessionStore, userTurnId)
       );
       const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
       const userId = entry?.userId?.trim();
@@ -960,6 +958,21 @@ export function useSessionActions(): SessionActions {
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
         const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
+          const view = sessionStore.conversationView;
+          if (view) {
+            // `status` is an index field, so the precondition reads the doc's
+            // current value without hydrating the turn; the patch writes only
+            // the two scalars, leaving the turn's items untouched.
+            const index = view.indexOf(userTurnId);
+            const row = index >= 0 ? view.index(index) : undefined;
+            if (!row || row.role !== 'user' || row.status !== 'pending_apply') return false;
+            return patchHistoryEntry(
+              sessionStore.doc,
+              userTurnId,
+              { status: 'pending', read: false },
+              index
+            );
+          }
           let didPromote = false;
           sessionStore.setState((draft: SessionDocMeta) => {
             const pendingEntry = draft.history.find(

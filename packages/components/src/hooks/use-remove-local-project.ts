@@ -10,7 +10,6 @@ import {
   getServerNow,
   isActiveSessionStatus,
   machineFlockKeys,
-  resolveActiveAssistantTurnId,
   type LocalProjectId,
   type LocalProjectMeta,
   type LocalProjectWorktreeCleanupPreflightResult,
@@ -27,6 +26,7 @@ import {
 } from '@/hooks/use-machine-flock-rows';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useSessionActions } from '@/hooks/use-session-actions';
+import { readActiveAssistantTurnId } from '@/lib/session-store-history';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 
 export type RemoveLocalProjectTarget = {
@@ -150,7 +150,7 @@ export function useRemoveLocalProject() {
             const sessionId = session.id as SessionId;
             const activeAssistantTurnId = await runtime.withSessionStore(
               sessionId,
-              (sessionStore) => resolveActiveAssistantTurnId(sessionStore.getState().history)
+              (sessionStore) => readActiveAssistantTurnId(sessionStore)
             );
             if (!activeAssistantTurnId) return;
             await requestSessionCancel(sessionId, activeAssistantTurnId);

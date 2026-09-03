@@ -148,4 +148,55 @@ describe('ConversationView', () => {
     expect(changes).toEqual(expect.arrayContaining(['index', 'tail']));
     view.dispose();
   });
+
+  it('exposes plan and item counts on index rows without hydrating', () => {
+    const doc = docWithTurns(4);
+    replaceHistoryEntry(doc, 'a3', {
+      ...turn(3),
+      plan: [{ content: 'step 1', status: 'pending', priority: 'medium' }] as never,
+    });
+    const view = createConversationViewFromDoc(doc, { sessionId, tailKeep: 0 });
+    expect(view.index(3)).toMatchObject({ id: 'a3', itemCount: 3, planCount: 1 });
+    expect(view.index(1)?.planCount).toBeUndefined();
+    expect(view.isHydrated(3)).toBe(false);
+    view.dispose();
+  });
+
+  it('retain() protects a range from eviction until released', async () => {
+    const doc = docWithTurns(60);
+    const view = createConversationViewFromDoc(doc, { sessionId, tailKeep: 5, maxHydrated: 10 });
+    const release = view.retain(0, 8);
+    await view.ensureRange(0, 8);
+    await view.ensureRange(20, 40);
+    expect(view.isHydrated(0)).toBe(true);
+    expect(view.isHydrated(7)).toBe(true);
+    release();
+    await view.ensureRange(40, 50);
+    expect(view.isHydrated(0)).toBe(false);
+    view.dispose();
+  });
+
+  it('readAll() hands back the same objects for unchanged turns across changes', () => {
+    const doc = docWithTurns(30);
+    const view = createConversationViewFromDoc(doc, { sessionId, tailKeep: 3, maxHydrated: 5 });
+    const first = view.readAll();
+    expect(view.readAll()).toBe(first);
+
+    appendHistoryEntry(doc, turn(30));
+    const second = view.readAll();
+    expect(second).not.toBe(first);
+    expect(second).toHaveLength(31);
+    for (let i = 0; i < 30; i += 1) expect(second[i]).toBe(first[i]);
+
+    replaceHistoryEntry(doc, 'a11', { ...turn(11), finished: false, endedAt: undefined });
+    const third = view.readAll();
+    expect(third[11]).not.toBe(second[11]);
+    expect(third[11]).toMatchObject({ id: 'a11', finished: false });
+    expect(third[10]).toBe(second[10]);
+    expect(third[12]).toBe(second[12]);
+    expect(JSON.parse(JSON.stringify(third))).toEqual(fullHistory(doc));
+    // A full read does not pin the LRU: the window stays bounded.
+    expect(view.isHydrated(0)).toBe(false);
+    view.dispose();
+  });
 });

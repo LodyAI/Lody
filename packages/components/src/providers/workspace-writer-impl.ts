@@ -5,10 +5,17 @@ import {
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
   type SessionDocMeta,
+  type SessionHistoryInput,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
 import type { PreviewVisualCommentDocStore, SessionDocStore } from '../atoms/runtime';
+import {
+  appendHistoryEntry,
+  findPermissionRequestTurnIndex,
+  replaceHistoryEntry,
+  respondHistoryPermission,
+} from '../lib/conversation-view';
 import type { WorkspaceWriter } from './workspace-writer';
 
 // # WorkspaceWriter implementation
@@ -31,6 +38,23 @@ export type DirectWorkspaceWriterDeps = {
  * repo / session stores. This is exactly what the hooks did before the seam, so
  * there is zero behavior change in cloud mode.
  */
+/**
+ * Every history write lands here. A store carrying a `ConversationView` runs
+ * on the control-plane Mirror, whose schema ignores `history`, so its writes
+ * go straight to the doc through `lib/conversation-view/history-writer`
+ * (same container shapes the full-schema Mirror would produce). Without a
+ * view this is the untouched `setState` path.
+ */
+const appendHistory = (store: SessionDocStore, entry: Record<string, unknown>): void => {
+  if (store.conversationView) {
+    appendHistoryEntry(store.doc, entry as unknown as SessionHistoryInput);
+    return;
+  }
+  store.setState((draft: SessionDocMeta) => {
+    draft.history.push(entry as SessionDocMeta['history'][number]);
+  });
+};
+
 export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): WorkspaceWriter {
   const withSessionStore = async <T>(
     sessionId: string,
@@ -77,9 +101,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
         withSessionStore(sessionId, (store) => {
-          store.setState((draft: SessionDocMeta) => {
-            draft.history.push(entry as SessionDocMeta['history'][number]);
-          });
+          appendHistory(store, entry);
         }),
       ]);
       void dispatch;
@@ -120,9 +142,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionTurn(sessionId, entry, dispatch) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        appendHistory(store, entry);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -131,14 +151,24 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionHistory(sessionId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        appendHistory(store, entry);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
       await withSessionStore(sessionId, (store) => {
+        const view = store.conversationView;
+        if (view) {
+          // Not found stays a no-op, as on the Mirror path.
+          const index = view.indexOf(entryId);
+          replaceHistoryEntry(
+            store.doc,
+            entryId,
+            entry as unknown as SessionHistoryInput,
+            index >= 0 ? index : undefined
+          );
+          return;
+        }
         store.setState((draft: SessionDocMeta) => {
           const history = draft.history as SessionDocMeta['history'];
           const idx = history.findIndex((h) => (h as { id?: string }).id === entryId);
@@ -150,6 +180,14 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async respondSessionPermission(sessionId, requestId, outcome) {
       await withSessionStore(sessionId, (store) => {
+        const view = store.conversationView;
+        if (view) {
+          // The request almost always sits on the open tail turn; the writer
+          // scans the doc itself when the hydrated tail does not carry it.
+          const hint = findPermissionRequestTurnIndex(view, requestId);
+          respondHistoryPermission(store.doc, requestId, outcome, hint >= 0 ? hint : undefined);
+          return;
+        }
         store.setState((draft: SessionDocMeta) => {
           for (const entry of draft.history as SessionDocMeta['history']) {
             const items = (entry as { items?: unknown[] }).items;

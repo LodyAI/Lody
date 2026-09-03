@@ -2579,6 +2579,13 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.logger.debug(`[${this.sessionId}] setStatus: upsertDocMeta complete`);
   }
 
+  /**
+   * Full materialization of the transcript: every history entry, every item,
+   * through the full-schema Mirror. Reserved for consumers that genuinely
+   * need the whole list — import hashing and the dispatch/fork scans. Do not
+   * add renderer-style readers on top of it; the client reads history
+   * through the windowed `ConversationView` for exactly that reason.
+   */
   async getHistory(): Promise<SessionHistoryInput[]> {
     if (!this.mirror) {
       return [];

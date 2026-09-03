@@ -30,6 +30,8 @@ import {
 } from './view';
 import { buildChatStreamItems, type BuildChatStreamItemsCache } from './build-chat-stream-items';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useConversationViewSelector } from '@/hooks/use-conversation-view-selector';
+import type { ConversationView } from '@/lib/conversation-view';
 import { useCloudQuery } from '@lody/platform/react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type {
@@ -38,6 +40,14 @@ import type {
 } from '@/components/sessions/session-fork-destination-menu';
 
 const emptyHistory = [] as SessionDoc['history'];
+
+const findLastUserTurnId = (view: ConversationView): string | null => {
+  for (let index = view.turnCount - 1; index >= 0; index -= 1) {
+    const row = view.index(index);
+    if (row?.role === 'user') return row.id ?? null;
+  }
+  return null;
+};
 const CHAT_STREAM_ITEMS_CACHE_LIMIT = 20;
 const chatStreamItemsCacheBySessionId = new Map<SessionId, BuildChatStreamItemsCache>();
 
@@ -75,6 +85,12 @@ export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
   sessionDoc: SessionDoc;
+  /**
+   * Windowed history reader for `sessionDoc`'s session. Present on the
+   * ConversationView path; `null` (or omitted) on the full-Mirror rollback
+   * path, where `sessionDoc.history` is the only source.
+   */
+  conversationView?: ConversationView | null;
   sessionCreatedAt?: string;
   dividerLabel?: string;
   className?: string;
@@ -159,6 +175,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       sessionId,
       workspaceId,
       sessionDoc,
+      conversationView = null,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
       className,
@@ -225,12 +242,19 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const hasFilePathClick = onFilePathClick !== undefined;
     const hasNavigateSession = onNavigateSession !== undefined;
     const hasForkLastAssistant = onForkLastAssistant !== undefined;
-    const lastUserMessageId = useMemo(() => {
+    const fallbackLastUserMessageId = useMemo(() => {
+      if (conversationView) return null;
       for (let index = sessionHistory.length - 1; index >= 0; index -= 1) {
         if (sessionHistory[index]?.role === 'user') return sessionHistory[index]?.id ?? null;
       }
       return null;
-    }, [sessionHistory]);
+    }, [conversationView, sessionHistory]);
+    // Index rows carry `role` and `id`, so this never hydrates a turn.
+    const lastUserMessageId = useConversationViewSelector(
+      conversationView,
+      findLastUserTurnId,
+      fallbackLastUserMessageId
+    );
 
     const renderMessageRow = useCallback(
       ({

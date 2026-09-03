@@ -2,6 +2,7 @@ import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { readDiffInputsFromView } from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
   SessionFileChangeEntry,
@@ -401,7 +402,13 @@ export function useSessionDiffSummary(
         }
         releaseSync = store.acquireSync();
 
-        const initialHistory = store.getState().history;
+        // On the view path every turn's `fileDiff` comes from its own small
+        // container (index rows carry id/role), so the summary never hydrates
+        // message items; the rollback path reads the Mirror's history array.
+        const view = store.conversationView;
+        const readDiffInputs = (): SessionHistoryInput =>
+          view ? readDiffInputsFromView(view) : store.getState().history;
+        const initialHistory = readDiffInputs();
         historyRef.current = initialHistory;
         diffInputsFingerprintRef.current = computeSessionDiffInputsFingerprint(initialHistory);
         setDiffInputsVersion((prev) => prev + 1);
@@ -427,18 +434,19 @@ export function useSessionDiffSummary(
             // ignore
           });
 
-        unsubscribe = store.subscribe((nextState) => {
-          const nextFingerprint = computeSessionDiffInputsFingerprint(nextState.history);
+        const handleHistoryChange = () => {
+          const nextHistory = readDiffInputs();
+          const nextFingerprint = computeSessionDiffInputsFingerprint(nextHistory);
           if (nextFingerprint === diffInputsFingerprintRef.current) {
             return;
           }
           diffInputsFingerprintRef.current = nextFingerprint;
-          historyRef.current = nextState.history;
+          historyRef.current = nextHistory;
           setDiffInputsVersion((prev) => prev + 1);
           if (!shouldUpdateFallbackSummary()) {
             return;
           }
-          const nextSummary = buildSessionDiffSummary(nextState.history);
+          const nextSummary = buildSessionDiffSummary(nextHistory);
           setState((prev) => {
             if (areSessionDiffSummariesEqual(prev.summary, nextSummary)) {
               if (prev.source === 'fallback') {
@@ -456,7 +464,10 @@ export function useSessionDiffSummary(
               unavailableMessage: undefined,
             };
           });
-        });
+        };
+        unsubscribe = view
+          ? view.subscribe(handleHistoryChange)
+          : store.subscribe(handleHistoryChange);
       } catch (error) {
         console.error('Failed to load session diff summary', { sessionId, error });
       }

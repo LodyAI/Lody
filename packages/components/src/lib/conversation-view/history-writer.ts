@@ -280,22 +280,52 @@ export function replaceHistoryEntry(
   entry: SessionHistoryInput,
   indexHint?: number
 ): boolean {
-  const index =
-    indexHint !== undefined &&
-    (() => {
-      const hinted = turnMapAt(doc, indexHint);
-      return hinted !== null && fieldValue(hinted, 'id') === entryId;
-    })()
-      ? indexHint
-      : findHistoryIndex(doc, entryId);
-  if (index < 0) return false;
-  const map = turnMapAt(doc, index);
+  const map = resolveTurnMap(doc, entryId, indexHint);
   if (!map) return false;
   const next = entry as unknown as Record<string, unknown>;
   for (const key of map.keys()) {
     if (next[key] === undefined) map.delete(key);
   }
+  writeEntryFields(map, next);
+  doc.commit();
+  return true;
+}
+
+/**
+ * Set only the fields in `patch` on the entry with `entryId`; an explicit
+ * `undefined` deletes that field, and untouched fields keep their containers.
+ * The scalar-field counterpart of `replaceHistoryEntry`, for status flips
+ * that must not rewrite a turn's items.
+ */
+export function patchHistoryEntry(
+  doc: LoroDoc,
+  entryId: string,
+  patch: Partial<SessionHistoryInput>,
+  indexHint?: number
+): boolean {
+  const map = resolveTurnMap(doc, entryId, indexHint);
+  if (!map) return false;
+  const next = patch as unknown as Record<string, unknown>;
   for (const [key, value] of Object.entries(next)) {
+    if (key !== '$cid' && value === undefined) map.delete(key);
+  }
+  writeEntryFields(map, next);
+  doc.commit();
+  return true;
+}
+
+/** The entry's map: the hinted position when it still holds `entryId`, else a scan. */
+const resolveTurnMap = (doc: LoroDoc, entryId: string, indexHint?: number): LoroMap | null => {
+  if (indexHint !== undefined && indexHint >= 0) {
+    const hinted = turnMapAt(doc, indexHint);
+    if (hinted !== null && fieldValue(hinted, 'id') === entryId) return hinted;
+  }
+  const index = findHistoryIndex(doc, entryId);
+  return index < 0 ? null : turnMapAt(doc, index);
+};
+
+const writeEntryFields = (map: LoroMap, fields: Record<string, unknown>): void => {
+  for (const [key, value] of Object.entries(fields)) {
     if (key === '$cid' || value === undefined) continue;
     const fieldSchema = HISTORY_ENTRY_SCHEMA.definition?.[key] ?? HISTORY_ENTRY_SCHEMA.catchallType;
     if (!fieldSchema) {
@@ -304,9 +334,7 @@ export function replaceHistoryEntry(
     }
     setMapField(map, key, value, fieldSchema, undefined);
   }
-  doc.commit();
-  return true;
-}
+};
 
 /**
  * Record a permission outcome on the item carrying `requestId`. Mirrors the

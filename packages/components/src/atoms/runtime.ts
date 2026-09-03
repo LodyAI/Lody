@@ -67,6 +67,7 @@ import type {
 } from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
+import type { ConversationView } from '../lib/conversation-view';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
 import type { RoomSyncState } from '@/lib/room-sync-state';
@@ -92,6 +93,14 @@ export type SessionDocStore = {
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
+  /**
+   * Windowed history reader, present when the store was built with the
+   * control-plane Mirror (`isConversationViewEnabled()`); `null` on the
+   * full-Mirror rollback path. When present, `getState().history` is a lazy
+   * bridge over `conversationView.readAll()` and history writes must go
+   * through the history writer (`WorkspaceWriter` does), never `setState`.
+   */
+  readonly conversationView: ConversationView | null;
   getState: () => SessionDocState;
   setState: (updater: SessionDocUpdater) => void;
   subscribe: (listener: (state: SessionDocState) => void) => () => void;

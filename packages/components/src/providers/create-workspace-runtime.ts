@@ -35,7 +35,6 @@ import {
   SESSION_DOC_PREFIX,
   type SessionStatus,
   LORO_STREAMS_BUCKET_ID,
-  sessionDocSchema,
   ClientToServerSchema,
   ServerToClientSchema,
   type ClientToServer,
@@ -75,6 +74,7 @@ import {
 } from './workspace-target-router';
 import { mergePresenceSnapshots } from './presence-snapshot-merge';
 import { Mirror } from 'loro-mirror';
+import { createSessionDocStateSource } from './session-doc-state-source';
 import { LoroDoc, EphemeralStore } from 'loro-crdt';
 import {
   WorkspaceRuntime,
@@ -301,6 +301,21 @@ const isElectronLocalDataPlaneEnabled = (): boolean => {
   if (import.meta.env.VITE_LODY_ELECTRON_LOCAL_DATA_PLANE === '0') return false;
   try {
     return globalThis.localStorage?.getItem('lody:electronLocalDataPlane') !== '0';
+  } catch {
+    return true;
+  }
+};
+
+/**
+ * Session docs read history through `ConversationView` (control-plane Mirror,
+ * O(window) hydration) unless switched off. Off is the full-Mirror path,
+ * untouched, as the rollback: `VITE_LODY_CONVERSATION_VIEW=0` at build time or
+ * `localStorage['lody:conversationView'] = '0'` at runtime.
+ */
+const isConversationViewEnabled = (): boolean => {
+  if (import.meta.env.VITE_LODY_CONVERSATION_VIEW === '0') return false;
+  try {
+    return globalThis.localStorage?.getItem('lody:conversationView') !== '0';
   } catch {
     return true;
   }
@@ -3622,14 +3637,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
-    const mirror = new Mirror({
+    const stateSource = createSessionDocStateSource({
       doc: persistedDoc.doc as LoroDoc,
-      schema: sessionDocSchema,
-      // Tolerate root keys written by peers running a newer schema version.
-      ignoreUnknownProperties: true,
-      // Plan is now stored per-turn on history entries, not at root level
-      initialState: { session: { id: sessionId }, history: [] },
-      debug: false,
+      sessionId,
+      conversationViewEnabled: isConversationViewEnabled(),
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
@@ -3760,16 +3771,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         syncTracker.subscribeSyncState((state) => {
           listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
         }),
-      getState: () => mirror.getState(),
-      setState: (updater) => {
-        mirror.setState(updater as never);
-      },
-      subscribe: (listener) => mirror.subscribe(listener),
+      conversationView: stateSource.conversationView,
+      getState: stateSource.getState,
+      setState: stateSource.setState,
+      subscribe: stateSource.subscribe,
       dispose: () => {
         disposed = true;
         stopSyncNow();
         syncTracker.dispose();
-        mirror.dispose();
+        stateSource.dispose();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
         await transportReady.promise;
