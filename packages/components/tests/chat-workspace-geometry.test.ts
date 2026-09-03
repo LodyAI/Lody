@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import * as chatWorkspaceGeometry from '../src/lib/chat-workspace-geometry';
 import {
   CHAT_WORKSPACE_GEOMETRY_SPEC,
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
@@ -7,6 +8,8 @@ import {
   calculateGridPlacementRect,
   calculateMainPaneGrid,
   calculateSidebarGrid,
+  GEOMETRY_ROW_BAND_OVERLAP,
+  assignGeometricRows,
   discoverAlignmentRails,
   discoverBlockAlignmentRails,
   discoverRepeatedLayoutScopes,
@@ -22,6 +25,8 @@ import {
   validateChatWorkspaceGeometry,
   type AlignmentRailCandidate,
   type BlockRailCandidate,
+  type GeometryRowSlotExtent,
+  type DiscoveredBlockRail,
   type ChatWorkspaceGeometrySnapshot,
   type LayoutTopologyNode,
 } from '../src/lib/chat-workspace-geometry';
@@ -1160,6 +1165,336 @@ describe('vertical rail discovery', () => {
   });
 });
 
+describe('geometric rows', () => {
+  const extent = (id: string, yStart: number, yEnd: number) => ({ id, yStart, yEnd });
+
+  it('groups extents that overlap the row band by half', () => {
+    expect(
+      assignGeometricRows([extent('title', 32, 48), extent('time', 33, 47), extent('icon', 34, 50)])
+    ).toEqual([0, 0, 0]);
+  });
+
+  it('keeps two lines that do not meet apart', () => {
+    expect(assignGeometricRows([extent('label', 600, 617), extent('field', 623, 671)])).toEqual([
+      0, 1,
+    ]);
+  });
+
+  it('lets a small mark share the line of the control it sits in', () => {
+    // The SMALLER extent decides, so a 16px icon centred inside a 32px control
+    // is on its line \u2014 a row is about the line, not about size.
+    expect(assignGeometricRows([extent('control', 24, 56), extent('icon', 32, 48)])).toEqual([
+      0, 0,
+    ]);
+  });
+
+  it('refuses to chain one line into the next through a half-overlapping neighbour', () => {
+    // Pairwise transitivity would put all three on one row: each overlaps its
+    // neighbour by exactly half. The MEDIAN band is what stops the ladder, the
+    // same reason an X rail must not chain intermediate coordinates.
+    expect(
+      assignGeometricRows([
+        extent('first', 32, 48),
+        extent('second', 40, 56),
+        extent('third', 48, 64),
+      ])
+    ).toEqual([0, 0, 1]);
+  });
+
+  it('partitions on rendered geometry alone, whatever order candidates arrive in', () => {
+    const extents = [
+      extent('a', 32, 48),
+      extent('b', 33, 47),
+      extent('c', 100, 116),
+      extent('d', 101, 117),
+    ];
+    const partition = (values: readonly ReturnType<typeof extent>[]) => {
+      const rows = assignGeometricRows(values);
+      const grouped = new Map<number, string[]>();
+      values.forEach((value, index) => {
+        const row = rows[index] ?? -1;
+        grouped.set(row, [...(grouped.get(row) ?? []), value.id]);
+      });
+      return [...grouped.values()].map((ids) => ids.sort().join(',')).sort();
+    };
+    expect(partition(extents)).toEqual(partition([...extents].reverse()));
+  });
+
+  it('leaves an extent with no height out of every row', () => {
+    expect(assignGeometricRows([extent('empty', 40, 40), extent('title', 32, 48)])).toEqual([
+      -1, 0,
+    ]);
+  });
+});
+
+describe('cross-family rails', () => {
+  const singleton = (
+    elementId: string,
+    coordinate: number,
+    overrides: Partial<BlockRailCandidate> = {}
+  ): BlockRailCandidate => ({
+    elementId,
+    rowId: `visual-row:${elementId}`,
+    rowFamily: `div[${elementId}]>button`,
+    scope: `scope.${elementId}`,
+    kind: 'svg',
+    space: 'ink',
+    anchor: 'visual-center',
+    coordinate,
+    xStart: 24,
+    xEnd: 40,
+    yStart: coordinate - 8,
+    yEnd: coordinate + 8,
+    ...overrides,
+  });
+  const crossFamily = (rails: readonly DiscoveredBlockRail[]) =>
+    rails.filter((rail) => rail.evidence === 'cross-family');
+  const rowInstance = (rails: readonly DiscoveredBlockRail[]) =>
+    rails.filter((rail) => rail.evidence === 'row-instance');
+
+  it('compares three singletons that no DOM row put on one line', () => {
+    const [rail, ...rest] = crossFamily(
+      discoverBlockAlignmentRails([
+        singleton('sidebar', 40),
+        singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+        singleton('info', 42, { xStart: 1200, xEnd: 1216 }),
+      ])
+    );
+
+    expect(rest).toEqual([]);
+    expect(rail).toMatchObject({
+      evidence: 'cross-family',
+      anchor: 'visual-center',
+      line: 40,
+      support: 2,
+      sampleSize: 3,
+    });
+    expect(rail?.outliers.map((member) => member.elementId)).toEqual(['info']);
+    // Signed against the line, so a card can say \u2193 rather than "2px away".
+    expect((rail?.outliers[0]?.coordinate ?? 0) - (rail?.line ?? 0)).toBe(2);
+  });
+
+  it('needs three: two singletons agreeing are not a line', () => {
+    expect(
+      crossFamily(
+        discoverBlockAlignmentRails([
+          singleton('sidebar', 40),
+          singleton('tabs', 42, { xStart: 320, xEnd: 336 }),
+        ])
+      )
+    ).toEqual([]);
+  });
+
+  it('leaves one repeated row shape to the row-instance rule', () => {
+    const sameFamily = crossFamily(
+      discoverBlockAlignmentRails([
+        singleton('a', 40, { rowFamily: 'div[row]>button', scope: 'sidebar.shell' }),
+        singleton('b', 40, {
+          rowFamily: 'div[row]>button',
+          scope: 'sidebar.shell',
+          xStart: 320,
+          xEnd: 336,
+        }),
+        singleton('c', 43, {
+          rowFamily: 'div[row]>button',
+          scope: 'sidebar.shell',
+          xStart: 620,
+          xEnd: 636,
+        }),
+      ])
+    );
+    expect(sameFamily).toEqual([]);
+
+    // One member from another scope makes it a cross-structural claim.
+    const [crossed] = crossFamily(
+      discoverBlockAlignmentRails([
+        singleton('a', 40, { rowFamily: 'div[row]>button', scope: 'sidebar.shell' }),
+        singleton('b', 40, {
+          rowFamily: 'div[row]>button',
+          scope: 'sidebar.shell',
+          xStart: 320,
+          xEnd: 336,
+        }),
+        singleton('c', 43, {
+          rowFamily: 'div[row]>button',
+          scope: 'session.topbar',
+          xStart: 620,
+          xEnd: 636,
+        }),
+      ])
+    );
+    expect(crossed?.outliers.map((member) => member.elementId)).toEqual(['c']);
+  });
+
+  it('refuses singletons whose vertical extents barely meet', () => {
+    expect(
+      crossFamily(
+        discoverBlockAlignmentRails([
+          singleton('sidebar', 40),
+          singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+          singleton('below', 52, { xStart: 1200, xEnd: 1216, yStart: 46, yEnd: 62 }),
+        ])
+      )
+    ).toEqual([]);
+  });
+
+  it('gives the DOM prior priority: a row instance spends its members', () => {
+    const rowMember = (elementId: string, coordinate: number, xStart: number): BlockRailCandidate =>
+      singleton(elementId, coordinate, {
+        rowId: 'visual-row:sidebar',
+        rowFamily: 'div[row]>button',
+        scope: 'sidebar.shell',
+        xStart,
+        xEnd: xStart + 16,
+      });
+    const rails = discoverBlockAlignmentRails([
+      rowMember('row-a', 40, 24),
+      rowMember('row-b', 40, 60),
+      rowMember('row-c', 42, 96),
+      singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+      singleton('info', 40, { xStart: 1200, xEnd: 1216 }),
+    ]);
+
+    // The row explains its own three members, so the two singletons left on that
+    // geometric row are not three and there is no cross-family rail at all.
+    expect(rowInstance(rails).map((rail) => rail.rowId)).toEqual(['visual-row:sidebar']);
+    expect(rowInstance(rails)[0]?.outliers.map((member) => member.elementId)).toEqual(['row-c']);
+    expect(crossFamily(rails)).toEqual([]);
+
+    // A third singleton is enough, and it never takes a row member with it.
+    const withThird = discoverBlockAlignmentRails([
+      rowMember('row-a', 40, 24),
+      rowMember('row-b', 40, 60),
+      rowMember('row-c', 42, 96),
+      singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+      singleton('info', 40, { xStart: 1200, xEnd: 1216 }),
+      singleton('panel', 43, { xStart: 1300, xEnd: 1316 }),
+    ]);
+    expect(crossFamily(withThird)[0]?.members.map((member) => member.elementId)).toEqual([
+      'tabs',
+      'info',
+      'panel',
+    ]);
+    expect(crossFamily(withThird)[0]?.outliers.map((member) => member.elementId)).toEqual([
+      'panel',
+    ]);
+  });
+
+  it('spends the members of a two-member row as well', () => {
+    const pair = (elementId: string, coordinate: number, xStart: number): BlockRailCandidate =>
+      singleton(elementId, coordinate, {
+        rowId: 'visual-row:pair',
+        rowFamily: 'div[pair]>button',
+        scope: 'sidebar.shell',
+        xStart,
+        xEnd: xStart + 16,
+      });
+    const rails = discoverBlockAlignmentRails([
+      pair('pair-a', 40, 24),
+      pair('pair-b', 41, 60),
+      singleton('info', 40, { xStart: 1200, xEnd: 1216 }),
+    ]);
+
+    expect(rowInstance(rails)).toHaveLength(1);
+    expect(crossFamily(rails)).toEqual([]);
+  });
+
+  it('reads only the visual centre', () => {
+    expect(
+      crossFamily(
+        discoverBlockAlignmentRails([
+          singleton('sidebar', 40, { anchor: 'block-start' }),
+          singleton('tabs', 40, { anchor: 'block-start', xStart: 320, xEnd: 336 }),
+          singleton('info', 42, { anchor: 'block-start', xStart: 1200, xEnd: 1216 }),
+        ])
+      )
+    ).toEqual([]);
+  });
+
+  it('refuses a rail whose members all disagree about where the line is', () => {
+    expect(
+      crossFamily(
+        discoverBlockAlignmentRails([
+          singleton('sidebar', 36),
+          singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+          singleton('info', 44, { xStart: 1200, xEnd: 1216 }),
+        ])
+      )
+    ).toEqual([]);
+  });
+
+  it('snaps to the physical pixel grid before deciding what left the line', () => {
+    const [rail] = crossFamily(
+      discoverBlockAlignmentRails(
+        [
+          singleton('sidebar', 40.1),
+          singleton('tabs', 40.1, { xStart: 320, xEnd: 336 }),
+          singleton('info', 40.3, { xStart: 1200, xEnd: 1216 }),
+        ],
+        { deviceScaleFactor: 2 }
+      )
+    );
+
+    expect(rail?.line).toBe(40);
+    expect(rail?.outliers).toEqual([]);
+  });
+
+  it('cannot change a single row-instance rail by existing', () => {
+    // The row-instance path is the rule that has always decided a Y rail. This
+    // is the parity oracle: the same rows, discovered with and without the
+    // singletons that only a geometric row can group, are the same rails.
+    const rowsOnly: readonly BlockRailCandidate[] = [
+      singleton('title', 40, {
+        rowId: 'visual-row:1',
+        rowFamily: 'div[row]>button',
+        kind: 'text',
+        xStart: 40,
+        xEnd: 220,
+      }),
+      singleton('time', 40, {
+        rowId: 'visual-row:1',
+        rowFamily: 'div[row]>button',
+        kind: 'text',
+        xStart: 240,
+        xEnd: 262,
+      }),
+      singleton('icon', 42, { rowId: 'visual-row:1', rowFamily: 'div[row]>button' }),
+      singleton('label', 608, {
+        rowId: 'visual-row:2',
+        rowFamily: 'div[composer]',
+        kind: 'text',
+        yStart: 600,
+        yEnd: 617,
+      }),
+      singleton('field', 647, {
+        rowId: 'visual-row:2',
+        rowFamily: 'div[composer]',
+        kind: 'field',
+        yStart: 623,
+        yEnd: 671,
+      }),
+    ];
+    const singletons: readonly BlockRailCandidate[] = [
+      singleton('tabs', 40, { xStart: 320, xEnd: 336 }),
+      singleton('info', 41, { xStart: 1200, xEnd: 1216 }),
+      singleton('panel', 40, { xStart: 1300, xEnd: 1316 }),
+    ];
+
+    expect(rowInstance(discoverBlockAlignmentRails([...rowsOnly, ...singletons]))).toEqual(
+      rowInstance(discoverBlockAlignmentRails(rowsOnly))
+    );
+    expect(
+      crossFamily(discoverBlockAlignmentRails([...rowsOnly, ...singletons])).map((rail) =>
+        rail.members.map((member) => member.elementId)
+      )
+    ).toEqual([['tabs', 'info', 'panel']]);
+  });
+
+  it('rejects an evidence bar that would not be higher than a row instance', () => {
+    expect(() => discoverBlockAlignmentRails([], { crossFamilyMinMembers: 2 })).toThrow(RangeError);
+  });
+});
+
 describe('chat workspace validation', () => {
   it('accepts the expanded Sidebar + Main Pane + Chat Landing geometry', () => {
     expect(
@@ -1298,6 +1633,35 @@ describe('what belongs to a visual row', () => {
     // Neither slot reaches the other's line, so the proposal has fewer than two
     // members left and is not a row at all.
     expect(selectVisualRowSlots([badge, text], rowCenter).length).toBeLessThan(2);
+  });
+});
+
+describe('helpers capture serializes into the page', () => {
+  /**
+   * `installGeometryBrowserHelpers` ships these functions to the browser as
+   * SOURCE, where this module does not exist: a name resolved from module scope
+   * is a `ReferenceError` in the middle of a capture, and without this only a
+   * full report run would say so.
+   *
+   * Every exported name is searched for in the serialized text, which is what
+   * catches the realistic slip — reaching for a shared constant instead of
+   * repeating its literal.
+   */
+  const moduleBindings = Object.keys(chatWorkspaceGeometry);
+  const moduleReferences = (fn: unknown, ownName: string) =>
+    moduleBindings.filter(
+      (name) => name !== ownName && new RegExp(`\\b${name}\\b`).test(String(fn))
+    );
+
+  it('leaves every serialized helper closure-free', () => {
+    expect(moduleReferences(selectVisualRowSlots, 'selectVisualRowSlots')).toEqual([]);
+    expect(moduleReferences(isGeometryPaintedShape, 'isGeometryPaintedShape')).toEqual([]);
+  });
+
+  it('sees a shared constant a serialized helper would fail on', () => {
+    const closesOver = (slots: readonly GeometryRowSlotExtent[]) =>
+      slots.length > GEOMETRY_ROW_BAND_OVERLAP;
+    expect(moduleReferences(closesOver, 'closesOver')).toEqual(['GEOMETRY_ROW_BAND_OVERLAP']);
   });
 });
 

@@ -391,12 +391,14 @@ export type BlockRailCandidateAnchor =
 
 export type BlockRailCandidate = Readonly<{
   elementId: string;
-  /** The one visual row this primitive belongs to; a Y rail never leaves it. */
+  /** The DOM row this primitive renders in. A PRIOR, never eligibility. */
   rowId: string;
   /** Structural family shared by instances of the same visual row shape. */
   rowFamily?: string;
   /** Nearest visual partition inside the discovery scope. */
   sectionId?: string;
+  /** Nearest declared discovery scope; with `rowFamily`, the DOM prior. */
+  scope?: string;
   /** Geometry-derived visual role; semantic contract names never enter discovery. */
   kind?: string;
   space?: AlignmentRailCandidateSpace;
@@ -413,14 +415,28 @@ export type BlockRailDiscoveryOptions = Readonly<{
   /** Maximum distance from the row median at which a member supports the rail. */
   inlierTolerance?: number;
   minMembers?: number;
+  /** Members a rail needs when no DOM row vouches for the comparison. */
+  crossFamilyMinMembers?: number;
   /** Coordinates are snapped to this physical-pixel grid before comparison. */
   deviceScaleFactor?: number;
 }>;
+
+/**
+ * What let these primitives be compared at all.
+ *
+ * - `row-instance`: every member renders in ONE DOM row. That prior is strong
+ *   enough on its own, so two members and one capture are a rail.
+ * - `cross-family`: a geometric row put members of DIFFERENT row families or
+ *   scopes on one line, and no DOM structure says they belong together. The
+ *   claim is the same; only the evidence behind it is weaker.
+ */
+export type BlockRailEvidence = 'row-instance' | 'cross-family';
 
 export type DiscoveredBlockRail = Readonly<{
   rowId: string;
   rowFamily?: string;
   sectionId?: string;
+  evidence: BlockRailEvidence;
   anchor: BlockRailCandidateAnchor;
   line: number;
   spread: number;
@@ -430,6 +446,18 @@ export type DiscoveredBlockRail = Readonly<{
   members: readonly Readonly<BlockRailCandidate & { delta: number; outlier: boolean }>[];
   outliers: readonly Readonly<BlockRailCandidate & { delta: number; outlier: true }>[];
 }>;
+
+/**
+ * How much of the SMALLER of two vertical extents has to fall inside the other
+ * for them to be on ONE line: the same "at least half" `selectVisualRowSlots`
+ * asks of a row slot, so a row and a rail cannot mean different things by it.
+ * That function repeats the literal because capture serializes it into the
+ * page, where this binding does not exist; keep the two in step.
+ */
+export const GEOMETRY_ROW_BAND_OVERLAP = 0.5;
+
+/** One element's vertical extent: all a geometric row is made of. */
+export type GeometricRowExtent = Readonly<{ id: string; yStart: number; yEnd: number }>;
 
 export type LayoutTopologyNode = Readonly<{
   id: string;
@@ -1299,6 +1327,8 @@ export type GeometryRowSlotExtent = Readonly<{ top: number; bottom: number }>;
 export function selectVisualRowSlots(
   slots: readonly GeometryRowSlotExtent[],
   rowCenter: number,
+  // The literal, not `GEOMETRY_ROW_BAND_OVERLAP`: capture serializes this
+  // function into the page, where a module binding does not exist.
   minimumBandOverlap = 0.5
 ): readonly number[] {
   const heights = slots
@@ -1363,38 +1393,86 @@ export function isGeometryPaintedShape(paint: GeometryShapePaint): boolean {
 }
 
 /**
- * Discover vertical rails WITHOUT reading a single alignment marker. A Y rail
- * is scoped to ONE visual row instance — the same unit the marker-based
- * `instance` rules use — because two different rows share no vertical line.
- * Every anchor is discovered independently, so a row can report that its boxes
- * agree (`block-center`) while the ink a reader sees does not (`visual-center`).
- * Cross-row aggregation belongs to finding identity, not to discovery.
+ * Assign vertical extents to GEOMETRIC rows: the visual lines a reader sees,
+ * derived from rendered geometry and nothing else. Returns one row index per
+ * input, in input order; an extent with no height belongs to no row (`-1`).
+ *
+ * An extent joins the row whose MEDIAN band — the median member height centred
+ * on the median member centre — it overlaps by at least half, and the best such
+ * overlap wins. The median band is what stops a chain: neighbour-to-neighbour
+ * transitivity would let a ladder of half-overlapping extents link two lines of
+ * different heights into one row, exactly as chaining intermediate coordinates
+ * would link two indentation levels into one X rail.
  */
-export function discoverBlockAlignmentRails(
-  candidates: readonly BlockRailCandidate[],
-  options: BlockRailDiscoveryOptions = {}
-): readonly DiscoveredBlockRail[] {
-  const inlierTolerance = options.inlierTolerance ?? 0.5;
-  const minMembers = options.minMembers ?? 2;
-  const deviceScaleFactor = options.deviceScaleFactor ?? 1;
-  if (!Number.isFinite(inlierTolerance) || inlierTolerance < 0) {
-    throw new RangeError('inlierTolerance must be a finite, non-negative number');
+export function assignGeometricRows(
+  extents: readonly GeometricRowExtent[],
+  minimumBandOverlap = GEOMETRY_ROW_BAND_OVERLAP
+): readonly number[] {
+  const ordered = extents
+    .map((extent, index) => ({ extent, index }))
+    .filter(
+      ({ extent }) =>
+        Number.isFinite(extent.yStart) &&
+        Number.isFinite(extent.yEnd) &&
+        extent.yEnd > extent.yStart
+    )
+    .sort(
+      (first, second) =>
+        (first.extent.yStart + first.extent.yEnd) / 2 -
+          (second.extent.yStart + second.extent.yEnd) / 2 ||
+        first.extent.yStart - second.extent.yStart ||
+        first.extent.id.localeCompare(second.extent.id)
+    );
+  const rows: { centers: number[]; heights: number[] }[] = [];
+  const assignment = extents.map(() => -1);
+  for (const { extent, index } of ordered) {
+    const height = extent.yEnd - extent.yStart;
+    const center = (extent.yStart + extent.yEnd) / 2;
+    let chosen = -1;
+    let chosenOverlap = 0;
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      if (!row) continue;
+      const bandHeight = median(row.heights);
+      const bandCenter = median(row.centers);
+      const bandStart = bandCenter - bandHeight / 2;
+      const bandEnd = bandCenter + bandHeight / 2;
+      const shared = Math.min(extent.yEnd, bandEnd) - Math.max(extent.yStart, bandStart);
+      const smaller = Math.min(height, bandHeight);
+      const ratio = smaller > 0 ? shared / smaller : 0;
+      if (ratio >= minimumBandOverlap && ratio > chosenOverlap) {
+        chosen = rowIndex;
+        chosenOverlap = ratio;
+      }
+    }
+    if (chosen < 0) {
+      rows.push({ centers: [center], heights: [height] });
+      chosen = rows.length - 1;
+    } else {
+      const row = rows[chosen];
+      if (row) {
+        row.centers.push(center);
+        row.heights.push(height);
+      }
+    }
+    assignment[index] = chosen;
   }
-  if (!Number.isInteger(minMembers) || minMembers < 2) {
-    throw new RangeError('minMembers must be an integer greater than one');
-  }
+  return assignment;
+}
 
+/**
+ * One rail over the members of one DOM row instance at one anchor: the rule
+ * that has always decided a Y rail, unchanged. Every member is vouched for by
+ * the same rendered row, so two of them and one capture are enough.
+ */
+function discoverRowInstanceRails(
+  candidates: readonly BlockRailCandidate[],
+  options: Readonly<{ inlierTolerance: number; minMembers: number; deviceScaleFactor: number }>
+): DiscoveredBlockRail[] {
+  const { inlierTolerance, minMembers, deviceScaleFactor } = options;
   const byRowAndAnchor = new Map<string, BlockRailCandidate[]>();
   for (const candidate of candidates) {
-    if (
-      !Number.isFinite(candidate.coordinate) ||
-      !Number.isFinite(candidate.xStart) ||
-      !Number.isFinite(candidate.xEnd) ||
-      candidate.xEnd < candidate.xStart
-    ) {
-      throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
-    }
-    const key = `${candidate.rowId} ${candidate.anchor}`;
+    const key = `${candidate.rowId} ${candidate.anchor}`;
     const members = byRowAndAnchor.get(key) ?? [];
     members.push(candidate);
     byRowAndAnchor.set(key, members);
@@ -1465,6 +1543,7 @@ export function discoverBlockAlignmentRails(
       rowId: representative.rowId,
       ...(representative.rowFamily ? { rowFamily: representative.rowFamily } : {}),
       ...(representative.sectionId ? { sectionId: representative.sectionId } : {}),
+      evidence: 'row-instance',
       anchor: representative.anchor,
       line,
       spread: Math.max(...coordinates) - Math.min(...coordinates),
@@ -1479,8 +1558,177 @@ export function discoverBlockAlignmentRails(
       ),
     });
   }
+  return rails;
+}
 
-  return rails.sort(
+/**
+ * The rails a geometric row still owes an explanation for: primitives on one
+ * visual line that NO DOM row put there, so nothing but the rendering says they
+ * belong together.
+ *
+ * Same claim, weaker evidence, so the bar is higher and explicit: three members
+ * at least, drawn from two or more distinct (row family, scope) pairs — one
+ * repeated row shape is the row-instance rule's business — at `visual-center`
+ * only, the one anchor a glyph and a mark are comparable at all. The line is the
+ * member median on the same DPR grid, and two members at least have to reach it:
+ * three coordinates that all disagree have a median but not a line.
+ */
+function discoverCrossFamilyRails(
+  candidates: readonly BlockRailCandidate[],
+  rowOfElement: ReadonlyMap<string, number>,
+  options: Readonly<{ inlierTolerance: number; minMembers: number; deviceScaleFactor: number }>
+): DiscoveredBlockRail[] {
+  const { inlierTolerance, minMembers, deviceScaleFactor } = options;
+  const byRow = new Map<number, BlockRailCandidate[]>();
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (candidate.anchor !== 'visual-center') continue;
+    if (seen.has(candidate.elementId)) continue;
+    const row = rowOfElement.get(candidate.elementId);
+    if (row === undefined) continue;
+    seen.add(candidate.elementId);
+    byRow.set(row, [
+      ...(byRow.get(row) ?? []),
+      {
+        ...candidate,
+        coordinate: quantizeGeometryCoordinate(candidate.coordinate, deviceScaleFactor),
+      },
+    ]);
+  }
+
+  const rails: DiscoveredBlockRail[] = [];
+  const orderedRows = [...byRow.entries()].sort(([first], [second]) => first - second);
+  for (const [row, rowCandidates] of orderedRows) {
+    if (rowCandidates.length < minMembers) continue;
+    const groups = new Set(
+      rowCandidates.map((member) => `${member.rowFamily ?? ''}\u0000${member.scope ?? ''}`)
+    );
+    if (groups.size < 2) continue;
+    const line = median(rowCandidates.map((member) => member.coordinate));
+    const members = rowCandidates
+      .map((member) => {
+        const delta = Math.abs(member.coordinate - line);
+        return { ...member, delta, outlier: delta > inlierTolerance };
+      })
+      .sort(
+        (first, second) =>
+          first.xStart - second.xStart ||
+          first.coordinate - second.coordinate ||
+          first.elementId.localeCompare(second.elementId)
+      );
+    const support = members.filter((member) => !member.outlier).length;
+    if (support < 2) continue;
+    const coordinates = members.map((member) => member.coordinate);
+    rails.push({
+      rowId: `geometric-row:${row}`,
+      evidence: 'cross-family',
+      anchor: 'visual-center',
+      line,
+      spread: Math.max(...coordinates) - Math.min(...coordinates),
+      support,
+      sampleSize: members.length,
+      horizontalSpan:
+        Math.max(...members.map((member) => member.xEnd)) -
+        Math.min(...members.map((member) => member.xStart)),
+      members,
+      outliers: members.filter(
+        (member): member is BlockRailCandidate & { delta: number; outlier: true } => member.outlier
+      ),
+    });
+  }
+  return rails;
+}
+
+/**
+ * Discover vertical rails WITHOUT reading a single alignment marker.
+ *
+ * A Y rail's row is GEOMETRIC: the visual line a reader sees, made of every
+ * candidate whose vertical extent overlaps that line's median band by half. The
+ * DOM row is a PRIOR, never an eligibility test — before this, a control that
+ * rendered outside the DOM row of the things it lines up with could not be
+ * compared to them at all, and every cross-structural misalignment was invisible
+ * by construction rather than by measurement.
+ *
+ * What the DOM decides is how much evidence a rail needs:
+ *
+ * - Members of ONE DOM row instance keep the row-instance rule exactly: two
+ *   members, any anchor, one capture, the verdict anchor chosen from what the
+ *   row is made of.
+ * - What is left on a geometric row — elements no row-instance rail measures —
+ *   is a `cross-family` rail: three members from two or more (row family, scope)
+ *   pairs, `visual-center` only.
+ *
+ * ONE element, ONE rail, and the DOM prior WINS: an element a row-instance rail
+ * already measures never joins a cross-family one, so the rails that exist today
+ * are exactly the rails that existed before, with the same members and the same
+ * lines. Every anchor is still discovered independently, so a row can report
+ * that its boxes agree (`block-center`) while the ink a reader sees does not
+ * (`visual-center`). Cross-capture aggregation belongs to finding identity, not
+ * to discovery.
+ */
+export function discoverBlockAlignmentRails(
+  candidates: readonly BlockRailCandidate[],
+  options: BlockRailDiscoveryOptions = {}
+): readonly DiscoveredBlockRail[] {
+  const inlierTolerance = options.inlierTolerance ?? 0.5;
+  const minMembers = options.minMembers ?? 2;
+  const crossFamilyMinMembers = options.crossFamilyMinMembers ?? 3;
+  const deviceScaleFactor = options.deviceScaleFactor ?? 1;
+  if (!Number.isFinite(inlierTolerance) || inlierTolerance < 0) {
+    throw new RangeError('inlierTolerance must be a finite, non-negative number');
+  }
+  if (!Number.isInteger(minMembers) || minMembers < 2) {
+    throw new RangeError('minMembers must be an integer greater than one');
+  }
+  if (!Number.isInteger(crossFamilyMinMembers) || crossFamilyMinMembers <= minMembers) {
+    throw new RangeError('crossFamilyMinMembers must be an integer above minMembers');
+  }
+  for (const candidate of candidates) {
+    if (
+      !Number.isFinite(candidate.coordinate) ||
+      !Number.isFinite(candidate.xStart) ||
+      !Number.isFinite(candidate.xEnd) ||
+      candidate.xEnd < candidate.xStart
+    ) {
+      throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
+    }
+  }
+
+  const rowInstanceRails = discoverRowInstanceRails(candidates, {
+    inlierTolerance,
+    minMembers,
+    deviceScaleFactor,
+  });
+  // Geometric rows are formed over EVERY element, claimed or not: a row's median
+  // band is a fact about what is rendered on that line, and computing it from
+  // the leftovers alone would let the elements a row rail already explains
+  // change where the remaining ones are judged to sit.
+  const extentByElement = new Map<string, GeometricRowExtent>();
+  for (const candidate of candidates) {
+    if (extentByElement.has(candidate.elementId)) continue;
+    extentByElement.set(candidate.elementId, {
+      id: candidate.elementId,
+      yStart: candidate.yStart,
+      yEnd: candidate.yEnd,
+    });
+  }
+  const extents = [...extentByElement.values()];
+  const assignment = assignGeometricRows(extents);
+  const rowOfElement = new Map<string, number>();
+  for (const [index, extent] of extents.entries()) {
+    const row = assignment[index];
+    if (row !== undefined && row >= 0) rowOfElement.set(extent.id, row);
+  }
+  const claimed = new Set(
+    rowInstanceRails.flatMap((rail) => rail.members.map((member) => member.elementId))
+  );
+  const crossFamilyRails = discoverCrossFamilyRails(
+    candidates.filter((candidate) => !claimed.has(candidate.elementId)),
+    rowOfElement,
+    { inlierTolerance, minMembers: crossFamilyMinMembers, deviceScaleFactor }
+  );
+
+  return [...rowInstanceRails, ...crossFamilyRails].sort(
     (first, second) =>
       first.line - second.line ||
       first.rowId.localeCompare(second.rowId) ||
