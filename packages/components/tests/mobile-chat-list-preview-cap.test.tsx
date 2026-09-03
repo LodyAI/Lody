@@ -99,18 +99,33 @@ function toggleLabels(): string[] {
 }
 
 describe('mobile chat list group preview cap', () => {
-  it('renders every row when the caller does not opt in', () => {
-    // The in-project list drills into one project deliberately: there is
-    // nothing else on that page for a cap to make room for.
+  it('caps only when the caller opts in, independently of grouping', () => {
+    // Both directions matter, and neither follows from the other. The
+    // in-project list drills into one project deliberately, so it opts out and
+    // must render everything. And the cap must NOT be inferred from `groupBy`:
+    // the project page is only `none` because `chat-landing.tsx` pins it for
+    // heading reasons, so deriving the cap from grouping would silently switch
+    // it on there the day that page grows a date mode — hiding the very
+    // worktree rows the cap exists to expose.
     render(makeProjectItems(9, 'p1'), { capGroupPreviews: false });
     expect(rows()).toHaveLength(9);
     expect(toggles()).toHaveLength(0);
+
+    render(makeProjectItems(9, 'p1'), { groupBy: 'none' });
+    expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
+    expect(toggleLabels()).toEqual(['Show all (9)']);
   });
 
 
-  it('previews five top-level rows per bucket and offers the rest', () => {
-    render([...makeProjectItems(9, 'p1'), ...makeProjectItems(2, 'p2')]);
-    // p1 is capped; p2 is under the cap and gets no toggle at all.
+  it('previews five rows per overflowing bucket and leaves the rest alone', () => {
+    // Three boundary points in one list: over the cap (trimmed, toggle),
+    // exactly at it (untouched, no toggle — an off-by-one in the `>` would
+    // surface here and nowhere else), and under it (untouched, no toggle).
+    render([
+      ...makeProjectItems(9, 'p1'),
+      ...makeProjectItems(MOBILE_CHAT_PREVIEW_MAX_ROOTS, 'p2'),
+      ...makeProjectItems(2, 'p3'),
+    ]);
     expect(titles()).toEqual([
       'Session p1-0',
       'Session p1-1',
@@ -119,15 +134,13 @@ describe('mobile chat list group preview cap', () => {
       'Session p1-4',
       'Session p2-0',
       'Session p2-1',
+      'Session p2-2',
+      'Session p2-3',
+      'Session p2-4',
+      'Session p3-0',
+      'Session p3-1',
     ]);
     expect(toggleLabels()).toEqual(['Show all (9)']);
-  });
-
-  it('leaves a bucket exactly at the cap untouched', () => {
-    // A toggle whose tap would change nothing must not appear.
-    render(makeProjectItems(MOBILE_CHAT_PREVIEW_MAX_ROOTS, 'p1'));
-    expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
-    expect(toggles()).toHaveLength(0);
   });
 
   it('expands and re-collapses only the bucket that was tapped', () => {
@@ -242,26 +255,31 @@ describe('mobile chat list group preview cap', () => {
   });
 
   it('pulls the toggle back into view when a bucket collapses', () => {
-    // Collapsing removes rows ABOVE the toggle, so on a long bucket the tap
-    // target and everything around it jumps off the top of the viewport.
-    // jsdom has no layout, so the browser API is the only observable here.
-    const calls: Array<ScrollIntoViewOptions | boolean | undefined> = [];
+    // Measured in Chromium with `overflow-anchor: none` (Safari/iOS ships no
+    // scroll anchoring): collapsing a 14-row bucket drops the toggle from
+    // y=328 to y=-68, off the top of the viewport. With this correction it
+    // lands at y=0. jsdom has no layout, so what is observable here is WHICH
+    // element the list asks the browser to keep on screen.
+    let scrolled: { target: Element; options: unknown } | null = null;
     const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function scrollIntoView(arg) {
-      calls.push(arg);
+    Element.prototype.scrollIntoView = function scrollIntoView(options) {
+      scrolled = { target: this, options };
     };
     try {
       render(makeProjectItems(9, 'p1'));
       act(() => {
         toggles()[0]!.click();
       });
-      // Expanding only appends rows below the toggle: nothing to correct.
-      expect(calls).toEqual([]);
+      // Expanding only appends rows BELOW the toggle. Moving the viewport
+      // there would yank the list out from under the reader.
+      expect(scrolled).toBeNull();
 
       act(() => {
         toggles()[0]!.click();
       });
-      expect(calls).toEqual([{ block: 'nearest' }]);
+      expect(scrolled).not.toBeNull();
+      expect(scrolled!.target).toBe(toggles()[0]);
+      expect(scrolled!.options).toEqual({ block: 'nearest' });
     } finally {
       Element.prototype.scrollIntoView = original;
     }

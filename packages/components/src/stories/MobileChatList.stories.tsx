@@ -445,7 +445,7 @@ export const GroupPreviewExpanded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const [toggle] = await canvas.findAllByRole('button', { name: /Show all/i });
-    if (toggle) await userEvent.click(toggle);
+    await userEvent.click(toggle!);
   },
 };
 

@@ -518,11 +518,12 @@ export function MobileChatListCard({
          intentional single-row archive case still works because that
          path only removes one item from the same key bucket.
 
-         "Show less" is the same shape of bulk removal: collapsing a 40-row
-         project back to five would otherwise run 35 simultaneous 0.4s height
-         exits. The preview state joins the key so that transition remounts
-         instead — and `initial={false}` means expanding adds its rows with no
-         enter animation either. */}
+         "Show less" is the same shape of bulk removal. Measured with the key
+         carrying only `archived`: collapsing a 14-row bucket leaves all 14 rows
+         in the DOM a frame later, animating out together for 400ms. Adding the
+         preview state to the key makes that transition a remount instead — the
+         same frame reports the 5 rows that remain — and `initial={false}` means
+         expanding adds its rows with no enter animation either. */}
       <AnimatePresence
         initial={false}
         key={`${archived ? 'archived' : 'active'}:${capped ? 'preview' : 'full'}`}
@@ -983,7 +984,18 @@ export function MobileChatList({
      buckets compete for the screen and one busy project would otherwise push
      every other project and worktree below the fold. Off inside a single
      project's page: the user drilled in to read exactly that list, and there
-     is nothing else there for a cap to make room for. */
+     is nothing else there for a cap to make room for.
+
+     This stays an explicit flag rather than being derived from
+     `groupBy !== 'none'`, which is equivalent TODAY and shorter. The project
+     page is `none` only because `chat-landing.tsx` pins it there so a
+     single-bucket list does not render a redundant heading — a presentation
+     decision that has nothing to do with capping. Deriving from it would couple
+     the two through a shared variable and fail silently in both directions: give
+     the project page a date mode and the cap switches on and starts hiding
+     worktree rows, which is the opposite of what it is for; give home a flat
+     mode and the cap disappears. `groupBy` also defaults to `none`, so a new
+     caller would silently opt out. */
   capGroupPreviews?: boolean;
   /** Copy for the multi-select toolbar + confirmation alert-dialog.
      All keys are optional with reasonable Chinese defaults; callers
