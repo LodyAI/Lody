@@ -25,6 +25,15 @@ export type PermissionNotAppliedRetryTarget = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
+  /**
+   * Tool reach is part of what that turn was, not of what the composer holds
+   * now. An explicit empty selection is a selection — `mcpServerIds: []` means
+   * "no servers", which is why it travels as `undefined`-vs-array rather than
+   * being collapsed to falsy.
+   */
+  mcpServerIds?: string[];
+  taskToolsEnabled?: boolean;
+  issuePRMentions?: unknown[];
 };
 
 type RetryHistoryItem = { type?: string; name?: string; meta?: unknown } | null | undefined;
@@ -123,6 +132,15 @@ export const findPermissionNotAppliedRetryTarget = (
         : {}),
       ...(typeof inputConfig?.agentRoleRevision === 'number'
         ? { agentRoleRevision: inputConfig.agentRoleRevision }
+        : {}),
+      ...(Array.isArray(inputConfig?.mcpServerIds)
+        ? { mcpServerIds: inputConfig.mcpServerIds as string[] }
+        : {}),
+      ...(typeof inputConfig?.taskToolsEnabled === 'boolean'
+        ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
+        : {}),
+      ...(Array.isArray(inputConfig?.issuePRMentions)
+        ? { issuePRMentions: inputConfig.issuePRMentions as unknown[] }
         : {}),
     };
   }

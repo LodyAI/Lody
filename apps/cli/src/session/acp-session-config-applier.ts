@@ -213,6 +213,17 @@ export async function applyAcpSessionRunConfig(args: {
     });
   };
 
+  /* Every shape a permission control arrives in. Agents publish it three ways:
+     the legacy `session/set_mode` selector, a `category: 'mode'` config option,
+     and an explicit `category: '_permission'` one (Grok's `permission_mode`).
+     Matching only the first two let a requested `ask` run as `always-approve`
+     with nothing but a warning. */
+  const permissionConfigIds = new Set(
+    agentConfigOptions
+      .filter((option) => option.category === 'mode' || option.category === '_permission')
+      .map((option) => option.id)
+  );
+
   /**
    * Permission-bearing controls go LAST, and that ordering is load-bearing.
    *
@@ -225,7 +236,9 @@ export async function applyAcpSessionRunConfig(args: {
    * still taken before the agent can act on it.
    */
   const isPermissionBearing = (configId: string): boolean =>
-    configId === modeConfigId || isAcpPlanModeConfigOption({ id: configId });
+    configId === modeConfigId ||
+    permissionConfigIds.has(configId) ||
+    isAcpPlanModeConfigOption({ id: configId });
   const configOptionEntryFor = (configId: string): AcpConfigOptionValue | undefined =>
     configOptionEntries.find(([id]) => id === configId)?.[1];
 
@@ -323,23 +336,42 @@ export async function applyAcpSessionRunConfig(args: {
     })
     .map((selection) => selection.label);
 
-  /* The permission the turn asked for, against the one the agent reports after
-     everything has been applied. `runtimeConfigPatch.modeId` is the agent's own
-     state — it is only filled from a `set_mode` acknowledgement when the agent
-     reports no mode of its own, in which case the two are equal and nothing
-     fires here. So this cannot be triggered by a snapshot, by a stale cache, or
-     by an unconfirmed request. */
-  const requestedModeId =
-    config.modeId ??
-    (typeof configOptionEntryFor(modeConfigId) === 'string'
-      ? (configOptionEntryFor(modeConfigId) as string)
-      : undefined);
-  const permissionEscalation =
-    requestedModeId !== undefined &&
-    !config.acceptWiderPermission &&
-    isAcpPermissionWiderThanRequested(requestedModeId, runtimeConfigPatch.modeId)
-      ? { requestedModeId, effectiveModeId: runtimeConfigPatch.modeId as string }
-      : undefined;
+  /* Every permission-bearing selection this turn made, against the value the
+     agent reports for it after everything has been applied. The effective side
+     is the agent's own state: `runtimeConfigPatch.modeId` is only filled from a
+     `set_mode` acknowledgement when the agent reports no mode of its own (in
+     which case the two are equal and nothing fires), and the config table comes
+     straight from what the agent published. So this cannot be triggered by a
+     snapshot, by a stale cache, or by an unconfirmed request. */
+  const findPermissionEscalation = ():
+    | { requestedModeId: string; effectiveModeId: string }
+    | undefined => {
+    if (config.acceptWiderPermission) {
+      return undefined;
+    }
+    for (const selection of appliedSelections) {
+      if (
+        selection.source.kind === 'model' ||
+        (selection.source.kind === 'configOption' &&
+          !isPermissionBearing(selection.source.configId))
+      ) {
+        continue;
+      }
+      const effective =
+        selection.source.kind === 'mode'
+          ? runtimeConfigPatch.modeId
+          : effectiveConfigOptionValues[selection.source.configId];
+      if (
+        typeof selection.requested === 'string' &&
+        typeof effective === 'string' &&
+        isAcpPermissionWiderThanRequested(selection.requested, effective)
+      ) {
+        return { requestedModeId: selection.requested, effectiveModeId: effective };
+      }
+    }
+    return undefined;
+  };
+  const permissionEscalation = findPermissionEscalation();
   if (permissionEscalation) {
     logger.debug(
       `[${sessionId}] Permission not applied: requested ${permissionEscalation.requestedModeId}, effective ${permissionEscalation.effectiveModeId}`

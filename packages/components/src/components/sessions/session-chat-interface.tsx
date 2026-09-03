@@ -87,6 +87,8 @@ import {
   buildConversationMarkdown,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  type IssuePRMention,
+  type McpServerId,
   countBillableSessionTurns,
   deriveSessionPullRequestReadiness,
   evaluateBillingQuota,
@@ -1864,6 +1866,10 @@ export type DispatchInputBlocksOptions = {
    * not the Session, not a Role, not a user default.
    */
   acceptWiderPermission?: boolean;
+  /** Turn-scoped execution fields replayed verbatim from a frozen turn. */
+  mcpServerIdsOverride?: readonly McpServerId[];
+  taskToolsEnabledOverride?: boolean;
+  issuePRMentionsOverride?: IssuePRMention[];
 };
 
 function buildEditedMessageQueueItem(
@@ -3549,6 +3555,14 @@ export const SessionChatInterface = memo(
           agentRole?: SessionTurnAgentRoleSelection;
           /** One-time informed acceptance, written into this turn only. */
           acceptWiderPermission?: boolean;
+          /**
+           * Turn-scoped execution fields replayed verbatim from a frozen turn.
+           * An explicit empty `mcpServerIds` is a real selection, so these are
+           * applied when PRESENT rather than when truthy.
+           */
+          mcpServerIdsOverride?: readonly McpServerId[];
+          taskToolsEnabledOverride?: boolean;
+          issuePRMentionsOverride?: IssuePRMention[];
         }
       ): Promise<boolean> => {
         try {
@@ -3569,9 +3583,9 @@ export const SessionChatInterface = memo(
             modeId: turnModeId,
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
-            issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
+            issuePRMentions: options?.issuePRMentionsOverride ?? issuePRMentions,
+            mcpServerIds: options?.mcpServerIdsOverride ?? mcpSelection.selectedIds,
+            taskToolsEnabled: options?.taskToolsEnabledOverride ?? tasksEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3695,6 +3709,9 @@ export const SessionChatInterface = memo(
           | 'configOptionValuesOverride'
           | 'agentRole'
           | 'acceptWiderPermission'
+          | 'mcpServerIdsOverride'
+          | 'taskToolsEnabledOverride'
+          | 'issuePRMentionsOverride'
         >
       ): Promise<boolean> => {
         try {
@@ -3796,6 +3813,9 @@ export const SessionChatInterface = memo(
           | 'configOptionValuesOverride'
           | 'agentRole'
           | 'acceptWiderPermission'
+          | 'mcpServerIdsOverride'
+          | 'taskToolsEnabledOverride'
+          | 'issuePRMentionsOverride'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3807,6 +3827,15 @@ export const SessionChatInterface = memo(
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
           ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
+          ...(options?.mcpServerIdsOverride !== undefined
+            ? { mcpServerIdsOverride: options.mcpServerIdsOverride }
+            : {}),
+          ...(options?.taskToolsEnabledOverride !== undefined
+            ? { taskToolsEnabledOverride: options.taskToolsEnabledOverride }
+            : {}),
+          ...(options?.issuePRMentionsOverride !== undefined
+            ? { issuePRMentionsOverride: options.issuePRMentionsOverride }
+            : {}),
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -3894,6 +3923,15 @@ export const SessionChatInterface = memo(
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
             ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
+            ...(options?.mcpServerIdsOverride !== undefined
+              ? { mcpServerIdsOverride: options.mcpServerIdsOverride }
+              : {}),
+            ...(options?.taskToolsEnabledOverride !== undefined
+              ? { taskToolsEnabledOverride: options.taskToolsEnabledOverride }
+              : {}),
+            ...(options?.issuePRMentionsOverride !== undefined
+              ? { issuePRMentionsOverride: options.issuePRMentionsOverride }
+              : {}),
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -4033,6 +4071,18 @@ export const SessionChatInterface = memo(
                 ? null
                 : undefined,
           acceptWiderPermission: true,
+          // Tool reach belonged to that turn too: replaying it with whatever the
+          // composer holds now would pair the old prompt with new permissions,
+          // and would silently drop an explicit empty MCP selection.
+          ...(target.mcpServerIds !== undefined
+            ? { mcpServerIdsOverride: target.mcpServerIds as McpServerId[] }
+            : {}),
+          ...(target.taskToolsEnabled !== undefined
+            ? { taskToolsEnabledOverride: target.taskToolsEnabled }
+            : {}),
+          ...(target.issuePRMentions !== undefined
+            ? { issuePRMentionsOverride: target.issuePRMentions as IssuePRMention[] }
+            : {}),
         });
         if (!accepted) {
           toast.error(

@@ -230,7 +230,7 @@ export function AgentRoleForm({
             hint={t('settings.agentRoles.form.sectionRunConfigHint')}
           >
             {capabilitiesUnreported || !selectorOptions ? (
-              <FormMessage tone="warning">
+              <FormMessage tone={hasError('run_config_unavailable') ? 'error' : 'warning'}>
                 {t('settings.agentRoles.form.capabilitiesUnavailable')}
               </FormMessage>
             ) : (

@@ -268,6 +268,161 @@ describe('applyAcpSessionRunConfig', () => {
       ).toBeUndefined();
     });
 
+    it('catches a widened explicit _permission selector, not just the mode', async () => {
+      // Grok's real permission control is a `_permission` config option, not a
+      // mode: `ask` requested, `always-approve` reported.
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'always-approve',
+          },
+        ],
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          configOptionValues: { permission_mode: 'ask' },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toEqual({
+        requestedModeId: 'ask',
+        effectiveModeId: 'always-approve',
+      });
+    });
+
+    it('ranks the remaining builtin permission values', async () => {
+      const permissionAgent = (currentValue: string) =>
+        ({
+          isCreated: () => true,
+          getConfigOptions: () => [
+            { id: 'permission_mode', category: '_permission', type: 'select', currentValue },
+          ],
+          setSessionConfigOption: vi.fn(async () => undefined),
+        }) as unknown as AgentClient;
+
+      // Grok `ask` → `auto`: approval moves from a human to the model.
+      expect(
+        (
+          await apply(
+            {
+              cliType: 'builtin',
+              agentType: 'grok',
+              configOptionValues: { permission_mode: 'ask' },
+            },
+            permissionAgent('auto')
+          )
+        ).permissionEscalation
+      ).toEqual({ requestedModeId: 'ask', effectiveModeId: 'auto' });
+
+      // DeepSeek Harness `read-only` → `workspace-write`.
+      expect(
+        (
+          await apply(
+            {
+              cliType: 'builtin',
+              agentType: 'deepseek',
+              configOptionValues: { permission_mode: 'read-only' },
+            },
+            permissionAgent('workspace-write')
+          )
+        ).permissionEscalation
+      ).toEqual({ requestedModeId: 'read-only', effectiveModeId: 'workspace-write' });
+
+      // The other direction is a functional mismatch, not an escalation.
+      expect(
+        (
+          await apply(
+            {
+              cliType: 'builtin',
+              agentType: 'grok',
+              configOptionValues: { permission_mode: 'always-approve' },
+            },
+            permissionAgent('ask')
+          )
+        ).permissionEscalation
+      ).toBeUndefined();
+    });
+
+    it('applies an explicit _permission selector after the model', async () => {
+      // Same reset hazard as the mode: a model switch must not be able to
+      // overwrite the permission the turn asked for.
+      let currentPermission = 'always-approve';
+      let currentModel = 'model-a';
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: currentPermission,
+          },
+          { id: 'engine', category: 'model', type: 'select', currentValue: currentModel },
+        ],
+        unstable_setSessionModel: vi.fn(async (_sessionId: string, model: string) => {
+          currentModel = model;
+          currentPermission = 'always-approve';
+        }),
+        setSessionConfigOption: vi.fn(
+          async (_sessionId: string, configId: string, value: unknown) => {
+            if (configId === 'permission_mode' && typeof value === 'string') {
+              currentPermission = value;
+            }
+          }
+        ),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          modelId: 'model-b',
+          configOptionValues: { permission_mode: 'ask' },
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toBeUndefined();
+      expect(result.runtimeConfigPatch?.configOptionValues?.['permission_mode']).toBe('ask');
+    });
+
+    it('stands down for a _permission escalation the turn accepted', async () => {
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => [
+          {
+            id: 'permission_mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'always-approve',
+          },
+        ],
+        setSessionConfigOption: vi.fn(async () => undefined),
+      } as unknown as AgentClient;
+
+      const result = await apply(
+        {
+          cliType: 'builtin',
+          agentType: 'grok',
+          configOptionValues: { permission_mode: 'ask' },
+          acceptWiderPermission: true,
+        },
+        agentClient
+      );
+
+      expect(result.permissionEscalation).toBeUndefined();
+      expect(result.warningSelections).toEqual(['permission_mode="ask"']);
+    });
+
     it('stands down for a turn that carries the informed acceptance', async () => {
       const agentClient = {
         isCreated: () => true,

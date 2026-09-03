@@ -282,7 +282,10 @@ Two things the dev build does deliberately, both load-bearing:
   `unverifiedSelections`. It never rejects one.
   Client side: a Role may be seeded only from `authoritative` capabilities —
   `provisional` means the built-in static tables, and seeding from those persists a
-  guess as a durable promise. The composer keeps stored keys its selector catalog
+  guess as a durable promise. Nor may it be SAVED without one: a Role is its run
+  config and pins the permission mode, so `validateAgentRoleForm` refuses a new
+  Role that pins nothing while capabilities are unreported (`run_config_unavailable`).
+  An existing Role that already carries values stays editable offline. The composer keeps stored keys its selector catalog
   does not cover; only a present runtime table (the agent's live state) owns the
   whole key set. Runtime rejections remain in debug diagnostics; what becomes a visible
   `agent_warning` is DIVERGENCE — the state the agent publishes after applying the
@@ -317,14 +320,28 @@ Two things the dev build does deliberately, both load-bearing:
   `prompt` (`AcpPermissionNotAppliedError` → `permission_not_applied`). By the
   time a warning about that is readable the agent may already have edited files,
   so this is the one divergence a notice cannot cover. It fires only on a live
-  contradiction: `isAcpPermissionWiderThanRequested` requires BOTH modes to be
+  contradiction. Permission arrives in THREE shapes and all three are checked:
+  the legacy `session/set_mode` selector, a `category: 'mode'` config option, and
+  an explicit `category: '_permission'` one (Grok's `permission_mode`, values
+  `ask`/`auto`/`always-approve`). Matching only the first two let a requested
+  `ask` run as `always-approve` with nothing but a warning. Each requested
+  permission-bearing value is compared against the agent's reported value for
+  THAT control; `isAcpPermissionWiderThanRequested` requires BOTH values to be
   ranked among the builtin ones and the effective one to be strictly wider, and
-  the effective mode is read from the agent's published state — a snapshot, a
+  the effective value is read from the agent's published state — a snapshot, a
   stale cache, an unranked third-party mode, an unconfirmed request, or a
-  NARROWER outcome must never stop a turn. The way out is explicit and
+  NARROWER outcome must never stop a turn. The rank table covers only values the
+  repo adapts (Codex, Claude, Grok `ask`/`auto`/`always-approve`, DeepSeek
+  Harness `read-only`/`workspace-write`/`danger-full-access`); adding an agent
+  means adding its values there, or its escalations go unseen. The way out is explicit and
   per-turn: `SessionTurnInputConfig.acceptWiderPermission` is informed
   acceptance carried by one resend, never inherited and never a default, and it
-  suppresses the stop while still reporting the mismatch.
+  suppresses the stop while still reporting the mismatch. That resend replays the
+  STOPPED turn: prompt, mode, model, config values, Role, `mcpServerIds`
+  (including an explicit empty selection), `taskToolsEnabled` and
+  `issuePRMentions` all come from its frozen `inputConfig`, never from the
+  composer — pairing an old prompt with tool reach the user has since changed
+  would hand it permissions that turn never had.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

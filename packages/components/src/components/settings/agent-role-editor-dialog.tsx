@@ -149,9 +149,15 @@ export function AgentRoleEditorDialog({
                 ? editor.role.id
                 : editor.roleId
               : null,
+            // Only once an agent config is picked does its authority mean
+            // anything; before that the run-config section is not the thing
+            // blocking the form.
+            ...(selectedAgentConfig && selectorOptions
+              ? { capabilityAuthority: selectorOptions.capabilityAuthority }
+              : {}),
           })
         : [],
-    [accessibleRoles, editor, editorValue]
+    [accessibleRoles, editor, editorValue, selectedAgentConfig, selectorOptions]
   );
   const runConfigIssues = useMemo(
     () =>

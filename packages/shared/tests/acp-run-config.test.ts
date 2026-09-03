@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isAcpPerModelConfigId,
   isAcpPermissionWiderThanRequested,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
@@ -244,6 +245,14 @@ describe('agent run config selection', () => {
       resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, bare('claude'))
         .configOptionValues
     ).toEqual({ effort: 'high', fast: true });
+
+    // Kimi publishes thinking as `thinking`, and offers no fast toggle at all.
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, bare('kimi')).configOptionValues
+    ).toEqual({ thinking: 'high' });
+    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, bare('kimi'))).toThrow(
+      /cannot be encoded/
+    );
   });
 
   it('reports a missing wire binding as such, not as an unsupported control', () => {
@@ -404,6 +413,16 @@ describe('agent run config selection', () => {
   });
 });
 
+describe('per-model config ids', () => {
+  it('recognizes every builtin spelling, so a stored value survives a snapshot without it', () => {
+    for (const configId of ['fast-mode', 'fast', 'reasoning_effort', 'effort', 'thinking']) {
+      expect(isAcpPerModelConfigId(configId)).toBe(true);
+    }
+    // A key with no per-model excuse is not preserved on the strength of this.
+    expect(isAcpPerModelConfigId('approval_policy')).toBe(false);
+  });
+});
+
 describe('permission width', () => {
   it('answers only on a ranked, strictly wider outcome', () => {
     // Wider: the effective mode acts with less human involvement.
@@ -411,6 +430,11 @@ describe('permission width', () => {
     expect(isAcpPermissionWiderThanRequested('plan', 'default')).toBe(true);
     expect(isAcpPermissionWiderThanRequested('default', 'bypassPermissions')).toBe(true);
     expect(isAcpPermissionWiderThanRequested('read-only', 'agent-full-access')).toBe(true);
+    // Grok's `_permission` values and DeepSeek Harness's workspace tier.
+    expect(isAcpPermissionWiderThanRequested('ask', 'auto')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('ask', 'always-approve')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('read-only', 'workspace-write')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('workspace-write', 'danger-full-access')).toBe(true);
 
     // Equal or narrower is a functional mismatch, not an escalation.
     expect(isAcpPermissionWiderThanRequested('plan', 'plan')).toBe(false);

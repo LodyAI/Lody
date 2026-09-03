@@ -1,5 +1,6 @@
 import {
   AGENT_ROLE_VERSION,
+  type AcpCapabilityAuthority,
   ACP_CONFIG_OPTION_OFF_VALUE,
   getAgentRoleMentionSlug,
   isAcpThoughtLevelConfigOption,
@@ -98,7 +99,9 @@ export type AgentRoleFormError =
   | 'name_required'
   | 'name_taken'
   | 'machine_required'
-  | 'agent_config_required';
+  | 'agent_config_required'
+  /** The agent has not reported capabilities, so nothing can be pinned yet. */
+  | 'run_config_unavailable';
 
 /**
  * The name is the only authored label, so it carries both jobs: it is what the
@@ -110,7 +113,12 @@ export type AgentRoleFormError =
  */
 export const validateAgentRoleForm = (
   value: AgentRoleFormValue,
-  options: { accessibleRoles: readonly AgentRole[]; editingRoleId?: AgentRoleId | null }
+  options: {
+    accessibleRoles: readonly AgentRole[];
+    editingRoleId?: AgentRoleId | null;
+    /** How the selected agent's capabilities were obtained, when known. */
+    capabilityAuthority?: AcpCapabilityAuthority;
+  }
 ): AgentRoleFormError[] => {
   const errors: AgentRoleFormError[] = [];
   const slug = normalizeAgentRoleMentionSlug(value.name);
@@ -128,6 +136,25 @@ export const validateAgentRoleForm = (
 
   if (!value.machineId) errors.push('machine_required');
   if (!value.agentConfigId) errors.push('agent_config_required');
+
+  /* A Role IS its run config — it pins the permission mode, and the surfaces
+     that hide the permission control rely on that. Non-authoritative
+     capabilities are the built-in static tables, which must not be seeded into
+     a Role, so the form has nothing real to offer and the user has chosen
+     nothing: saving here would create a "complete configuration" that pins no
+     permission at all. An existing Role that already carries values keeps its
+     own and stays editable offline. */
+  const hasPinnedRunConfig =
+    Boolean(value.modeId) ||
+    Boolean(value.modelId) ||
+    Object.keys(value.configOptionValues).length > 0;
+  if (
+    options.capabilityAuthority !== undefined &&
+    options.capabilityAuthority !== 'authoritative' &&
+    !hasPinnedRunConfig
+  ) {
+    errors.push('run_config_unavailable');
+  }
   return errors;
 };
 

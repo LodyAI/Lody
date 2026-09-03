@@ -64,6 +64,19 @@ describe('findPermissionNotAppliedRetryTarget', () => {
     });
   });
 
+  it("keeps the stopped turn's tool reach, including an explicit empty selection", () => {
+    // The composer may hold a different MCP selection by now; replaying with it
+    // would pair the old prompt with tool permissions that turn never had.
+    const target = findPermissionNotAppliedRetryTarget([
+      stoppedTurn({ mcpServerIds: [], taskToolsEnabled: false, issuePRMentions: [{ number: 7 }] }),
+      failureNotice({ requestedModeId: 'plan', effectiveModeId: 'auto' }),
+    ]);
+
+    expect(target?.mcpServerIds).toEqual([]);
+    expect(target?.taskToolsEnabled).toBe(false);
+    expect(target?.issuePRMentions).toEqual([{ number: 7 }]);
+  });
+
   it('stands down once the user has sent something newer', () => {
     // Replaying now would inject the old turn behind whatever they just sent.
     expect(

@@ -69,11 +69,13 @@ const ACP_PERMISSION_MODE_RANKS: Record<string, number> = {
   // Asks a human before acting.
   agent: 1,
   default: 1,
+  ask: 1,
   // Routes approval to a reviewing model instead of a human.
   'agent-auto-review': 2,
   auto: 2,
-  // Auto-approves edits.
+  // Auto-approves edits inside the workspace.
   acceptEdits: 3,
+  'workspace-write': 3,
   // Skips approval entirely.
   dontAsk: 4,
   bypassPermissions: 4,
@@ -236,6 +238,7 @@ const AGENT_PER_MODEL_BINDINGS: Record<
   codex: { fastModeConfigId: 'fast-mode', reasoningEffortConfigId: ACP_REASONING_EFFORT_CONFIG_ID },
   claude: { fastModeConfigId: 'fast', reasoningEffortConfigId: 'effort' },
   grok: { reasoningEffortConfigId: ACP_REASONING_EFFORT_CONFIG_ID },
+  kimi: { reasoningEffortConfigId: 'thinking' },
 };
 
 const findAgentPerModelBinding = (capability: RunConfigCapabilitySource | undefined) =>
