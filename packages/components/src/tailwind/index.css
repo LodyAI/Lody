@@ -1891,6 +1891,27 @@ pre,
   }
 }
 
+/* An agent runtime whose wait has no denominator (the ACP handshake) gets the
+   same ring as a download, on an orbit instead of a fill. Transform-only and
+   CSS-driven, so React stays idle while it spins. */
+@keyframes agent-readiness-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agent-readiness-orbit {
+  animation: agent-readiness-orbit 1.4s linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-readiness-orbit {
+    animation: none;
+  }
+}
+
 /* Agent activity stays on compositor-friendly transform/opacity animations.
    The highlighted label is a pseudo-element so React remains idle while the
    agent is working. */

@@ -6,6 +6,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, Trash2, XCircle } 
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
@@ -51,6 +52,7 @@ import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
 import { REGISTRY_AGENT_ICON_SVGS } from '@/components/icons/registry-agent-icons';
 import {
   AgentConfigDialog,
@@ -73,10 +75,13 @@ import {
   type OnboardingProviderStatus,
 } from '../provider-status';
 import {
+  agentRuntimeReadinessFromActivity,
   createProviderTestRunRegistry,
   providerTestActivityFromProgress,
+  type AgentRuntimeReadiness,
   type ProviderTestActivity,
 } from '../provider-test-state';
+import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
@@ -183,6 +188,12 @@ export interface ProvidersScreenViewProps {
   testActivities?: Record<string, ProviderTestActivity>;
   /** Latest failed probe detail, kept available after its toast disappears. */
   failureReasons?: Record<string, string>;
+  /**
+   * Readiness of the managed built-in runtimes the background prefetch warms.
+   * Passed in rather than read from a runtime atom so this half stays
+   * presentational and story-renderable.
+   */
+  runtimeReadiness?: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
   selectedProviderId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
@@ -215,6 +226,7 @@ export function ProvidersScreenView({
   testStatuses,
   testActivities = {},
   failureReasons = {},
+  runtimeReadiness = {},
   selectedProviderId,
   noLocalMachine,
   localMachineId = null,
@@ -332,8 +344,14 @@ export function ProvidersScreenView({
                 {configs.map((config) => {
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
                   const activity = testActivities[config.id];
-                  const activityPercent = getProviderTestActivityPercent(activity);
                   const selected = config.id === resolvedSelectedProviderId;
+                  // 'needs-auth' stays ready on purpose: that agent arrived, it
+                  // is waiting on the user, and the row's panel says so.
+                  const rowReadiness: AgentRuntimeReadiness =
+                    agentRuntimeReadinessFromActivity(activity) ??
+                    (status === 'failed'
+                      ? { readiness: 'cold', percent: null }
+                      : { readiness: 'ready', percent: null });
                   return (
                     <motion.div
                       key={config.id}
@@ -368,15 +386,20 @@ export function ProvidersScreenView({
                         })}
                         onClick={() => (onSelect ? onSelect(config) : onEdit(config))}
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-                          <AgentIcon
-                            cliType={config.cliType}
-                            agentType={config.agentType}
-                            brandId={config.brandId}
-                            env={config.env}
-                            className="h-5 w-5"
-                          />
-                        </div>
+                        {/* The mark carries the work, so the row needs no second
+                            activity element. A published config reads as ready
+                            unless a request is running on it or it failed:
+                            dimming an agent the user already has, because we
+                            have not probed it, is the anxiety this replaces. */}
+                        <AgentReadinessMark
+                          cliType={config.cliType}
+                          agentType={config.agentType}
+                          brandId={config.brandId}
+                          env={config.env}
+                          readiness={rowReadiness.readiness}
+                          percent={rowReadiness.percent}
+                          size="md"
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{config.name}</div>
                           <div className="truncate text-xs text-muted-foreground">
@@ -397,14 +420,7 @@ export function ProvidersScreenView({
                           {t('common.edit', 'Edit')}
                         </Button>
                         {activity ? (
-                          <ProviderProgressButton
-                            percent={activityPercent}
-                            label={
-                              activityPercent !== null
-                                ? `${activityPercent}%`
-                                : t('onboarding.providers.workingAction', 'Working')
-                            }
-                          />
+                          <ProviderActivityAction activity={activity} />
                         ) : status !== 'needs-auth' ? (
                           <Button
                             variant={status === 'passed' ? 'ghost' : 'outline'}
@@ -476,9 +492,59 @@ export function ProvidersScreenView({
           </p>
         ) : null}
 
-        <AgentShowcase disabled={noLocalMachine} onPick={onAdd} />
+        <AgentShowcase
+          disabled={noLocalMachine}
+          onPick={onAdd}
+          runtimeReadiness={runtimeReadiness}
+        />
       </div>
     </OnboardingShell>
+  );
+}
+
+/**
+ * The glyph inside a showcase chip.
+ *
+ * Only the managed built-in runtimes the background prefetch warms get the
+ * readiness treatment, and they light up from monochrome to full brand colour
+ * as each one lands. The rest keep the wall's resting monochrome look, because
+ * nothing is being prepared for them and a dimmed mark would imply otherwise.
+ */
+function ShowcaseChipMark({
+  agent,
+  runtimeReadiness,
+}: {
+  agent: ShowcaseAgent;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
+}) {
+  const warmed =
+    agent.pick.kind === 'builtin' && isManagedBuiltinAgentType(agent.pick.agentType)
+      ? runtimeReadiness[agent.pick.agentType]
+      : undefined;
+
+  if (warmed) {
+    return (
+      <AgentReadinessMark
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        readiness={warmed.readiness}
+        percent={warmed.percent}
+        size="sm"
+        className="rounded-full bg-muted/50"
+      />
+    );
+  }
+
+  return (
+    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
+      <AgentIcon
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        className="h-3.5 w-3.5"
+      />
+    </span>
   );
 }
 
@@ -491,9 +557,11 @@ export function ProvidersScreenView({
 function AgentShowcase({
   disabled,
   onPick,
+  runtimeReadiness,
 }: {
   disabled: boolean;
   onPick: (pick: ShowcasePick) => void;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -527,14 +595,7 @@ function AgentShowcase({
               'disabled:pointer-events-none disabled:opacity-50'
             )}
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
-              <AgentIcon
-                cliType={agent.icon.cliType}
-                agentType={agent.icon.agentType}
-                brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
-                className="h-3.5 w-3.5"
-              />
-            </span>
+            <ShowcaseChipMark agent={agent} runtimeReadiness={runtimeReadiness} />
             {agent.label}
           </button>
         ))}
@@ -623,6 +684,7 @@ export function ProvidersScreen({
     [allSetups, localMachineId]
   );
   useProviderSetupRuntimeProgress(runtime, workspaceId, localSetups);
+  const runtimeReadiness = useBuiltinRuntimeReadiness(localMachineId);
 
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   const dialogOpen = dialogMode !== null;
@@ -852,7 +914,7 @@ export function ProvidersScreen({
       });
       setTestActivities((prev) => ({
         ...prev,
-        [config.id]: { phase: 'checking-runtime' },
+        [config.id]: { phase: 'checking-runtime', startedAtMs: Date.now() },
       }));
       void (async () => {
         try {
@@ -864,7 +926,14 @@ export function ProvidersScreen({
               if (!testRunsRef.current.isCurrent(config.id, run)) return;
               setTestActivities((prev) => ({
                 ...prev,
-                [config.id]: providerTestActivityFromProgress(progress),
+                [config.id]: {
+                  ...providerTestActivityFromProgress(progress),
+                  // Elapsed time belongs to the request, not to the stage it
+                  // happens to be in, so it survives every phase change.
+                  ...(prev[config.id]?.startedAtMs !== undefined
+                    ? { startedAtMs: prev[config.id]?.startedAtMs }
+                    : {}),
+                },
               }));
             },
           });
@@ -1107,6 +1176,7 @@ export function ProvidersScreen({
         testStatuses={testStatuses}
         testActivities={testActivities}
         failureReasons={failureReasons}
+        runtimeReadiness={runtimeReadiness}
         selectedProviderId={selectedProviderId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
@@ -1215,6 +1285,55 @@ export function ProvidersScreen({
   );
 }
 
+/** Seconds since `startedAtMs`, ticking only while one is supplied. */
+function useElapsedSeconds(startedAtMs: number | null): number {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (startedAtMs === null) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const tick = (): void =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [startedAtMs]);
+  return elapsedSeconds;
+}
+
+/**
+ * The in-flight action for a row.
+ *
+ * A download has a denominator, so the button fills and reads as a percentage.
+ * Every other stage — the ACP handshake above all — has none, and inventing one
+ * would be a lie; it reports elapsed time instead, which is what turns an
+ * open-ended wait into a wait the user can measure. The badge beside it names
+ * the stage, so the two together read as "Starting · 14s".
+ */
+function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }) {
+  const { t } = useTranslation();
+  const percent = getProviderTestActivityPercent(activity);
+  const runtimeFailed = activity.phase === 'runtime-failed';
+  const elapsedSeconds = useElapsedSeconds(
+    percent === null && !runtimeFailed ? (activity.startedAtMs ?? null) : null
+  );
+  const label = (() => {
+    if (percent !== null) return `${percent}%`;
+    // Never label an already-failed runtime as ongoing work while the durable
+    // reason is still in flight.
+    if (runtimeFailed) return t('onboarding.providers.failedAction', 'Failed');
+    if (elapsedSeconds > 0) {
+      return t('onboarding.providers.workingSeconds', '{{seconds}}s', {
+        seconds: elapsedSeconds,
+      });
+    }
+    return t('onboarding.providers.workingAction', 'Working');
+  })();
+
+  return <ProviderProgressButton percent={percent} label={label} />;
+}
+
 function getProviderTestActivityPercent(activity?: ProviderTestActivity): number | null {
   return activity?.phase === 'downloading-runtime' && typeof activity.percent === 'number'
     ? Math.min(100, Math.max(0, Math.round(activity.percent)))
@@ -1246,15 +1365,25 @@ function ProviderStatusBadge({
           return t('onboarding.providers.activityInstalling', 'Installing');
         case 'probing-provider':
           return t('onboarding.providers.activityStarting', 'Starting');
+        case 'runtime-failed':
+          return t('onboarding.providers.activityRuntimeFailed', 'Runtime failed');
       }
 
       const unreachablePhase: never = activity.phase;
       throw new Error(`Unknown provider test activity phase: ${String(unreachablePhase)}`);
     })();
+    // A runtime that already reported a failure must not keep wearing the
+    // in-progress tone; the final response still owns the durable reason.
+    const runtimeFailed = activity.phase === 'runtime-failed';
     return (
       <Badge
         variant="outline"
-        className="shrink-0 whitespace-nowrap border-primary/35 bg-primary/8 text-[10px] text-primary"
+        className={cn(
+          'shrink-0 whitespace-nowrap text-[10px]',
+          runtimeFailed
+            ? 'border-destructive/40 bg-destructive/8 text-destructive'
+            : 'border-primary/35 bg-primary/8 text-primary'
+        )}
       >
         {label}
       </Badge>
