@@ -5,3 +5,4 @@ test-results/
 playwright-report/
 playwright/.cache/
 geometry-report/
+geometry-report-next/

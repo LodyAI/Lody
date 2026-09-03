@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "tokens": {
+    "sidebar.trailingInset": {
+      "unit": "px",
+      "cssVariable": "--spacing-sidebar-trailing",
+      "expected": 9
+    }
+  },
+  "contracts": [
+    {
+      "name": "workspace.sidebar.primary-trailing-actions",
+      "story": "geometry-chatworkspace--expanded-sidebar",
+      "members": [
+        {
+          "role": "button",
+          "name": "New session"
+        },
+        {
+          "role": "button",
+          "name": "Remove project"
+        },
+        {
+          "role": "button",
+          "name": "Archive",
+          "rowFamily": "div[button]>div[text]",
+          "all": true
+        }
+      ],
+      "axis": "x",
+      "anchor": "inline-end",
+      "space": "layout-box",
+      "tolerance": 1,
+      "findingKey": "geometry/workspace/lvwy4w"
+    },
+    {
+      "name": "workspace.sidebar.trailing-inset",
+      "story": "geometry-chatworkspace--expanded-sidebar",
+      "members": [
+        {
+          "role": "text",
+          "selfFamily": "div[text]>div[button],div[text]"
+        },
+        {
+          "role": "text",
+          "selfFamily": "div[text]>div[button],button[button]"
+        },
+        {
+          "role": "button",
+          "rowFamily": "div[text]>div[button]",
+          "roleIndex": 0,
+          "all": true
+        }
+      ],
+      "axis": "x",
+      "anchor": "inline-end",
+      "space": "layout-box",
+      "tolerance": 0,
+      "relation": {
+        "kind": "box-model-sum-equals-token",
+        "properties": [
+          "padding-inline-end",
+          "border-inline-end-width"
+        ],
+        "token": "sidebar.trailingInset"
+      },
+      "findingKey": "geometry/workspace/sidebar-trailing-inset"
+    }
+  ]
+}

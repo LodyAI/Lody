@@ -1,0 +1,973 @@
+{
+  "version": 1,
+  "tokens": {
+    "sidebar.trailingInset": {
+      "unit": "px",
+      "cssVariable": "--spacing-sidebar-trailing",
+      "expected": 9
+    }
+  },
+  "findings": {
+    "geometry/right-sidebar/11pscs0": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2
+      },
+      "identity": {
+        "label": "geometry-validation.md + 40 − 8",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/171u7h8": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "Code 2 + 100 − 20",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/177rmie": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2
+      },
+      "identity": {
+        "label": "session-layout.md + 60 − 12",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1e5wvsl": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 4
+      },
+      "identity": {
+        "label": "Files",
+        "axis": "x",
+        "anchor": "inline-end",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1ls7j8z": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "session-layout.md + 60 − 12",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1mxwyl5": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "app.tsx",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1r5c99a": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "Code 2 + 100 − 20",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1simiqu": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "app.tsx",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/1vnwrqv": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "Add panel",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/57h0zw": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.5
+      },
+      "identity": {
+        "label": "app.tsx",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/6ijj9r": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "Docs 2 + 100 − 20",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/6q3vy3": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.5
+      },
+      "identity": {
+        "label": "app.tsx",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/8s2gxh": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2
+      },
+      "identity": {
+        "label": "session-detail.tsx + 60 − 12",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/b0m4s": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 6.5
+      },
+      "identity": {
+        "label": "Files",
+        "axis": "x",
+        "anchor": "inline-start",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/b8dyq5": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "session-detail.tsx + 60 − 12",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/d3cw9u": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "session-detail.tsx + 60 − 12",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/d4c4q": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "geometry-validation.md + 40 − 8",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/daf70p": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "Conversation Diff",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/gvz5jb": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.75
+      },
+      "identity": {
+        "label": "button #1 in row",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/hdgowf": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2
+      },
+      "identity": {
+        "label": "chat-workspace-geometry.ts + 40 − 8",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/im7aci": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "button #1 in row",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/kbsjam": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "Conversation Diff",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/l4kgf": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "chat-workspace-geometry.ts + 40 − 8",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/nerzug": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "Docs 2 + 100 − 20",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/u9ipw4": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "chat-workspace-geometry.ts + 40 − 8",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/vvedhu": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.75
+      },
+      "identity": {
+        "label": "Add panel",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/x7rij5": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "Docs 2 + 100 − 20",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/right-sidebar/xrp5i4": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 0.75
+      },
+      "identity": {
+        "label": "session-layout.md + 60 − 12",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "right-sidebar"
+      }
+    },
+    "geometry/session/1aje3gt": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.25
+      },
+      "identity": {
+        "label": "Cancel",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1euuz5v": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3
+      },
+      "identity": {
+        "label": "text “Tighten the mobile spacing after the permission” in text row",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1p4pgog": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3
+      },
+      "identity": {
+        "label": "text “Tighten the mobile spacing after the permission” in text row",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1t257v2": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.25
+      },
+      "identity": {
+        "label": "Private to you: lody is not shared with the team.",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1xffq47": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "Private to you: lody is not shared with the team.",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1y86m8m": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 25
+      },
+      "identity": {
+        "label": "Message",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/37kibv": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3
+      },
+      "identity": {
+        "label": "text “Tighten the mobile spacing after the permission” in text row",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/5875hb": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2.5
+      },
+      "identity": {
+        "label": "text “Which session page state should we iterate on fi” in row ↔ Cancel",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/88iul9": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 9.5
+      },
+      "identity": {
+        "label": "Always allow edits in this session for files under packages/components/src/components/sessions/ ↔ Always allow edits in this session for files under packages/components/src/components/sessions/",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/9slq61": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 3
+      },
+      "identity": {
+        "label": "text “Message” in text row",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/i4jvzg": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "Private to you: lody is not shared with the team.",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/le2uqr": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3
+      },
+      "identity": {
+        "label": "Message",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/nu8q04": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.25
+      },
+      "identity": {
+        "label": "Cancel",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/pothvh": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.25
+      },
+      "identity": {
+        "label": "text “Which session page state should we iterate on fi” in row",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/r7rfec": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.5
+      },
+      "identity": {
+        "label": "text “Message” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/wy7fax": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 12.5
+      },
+      "identity": {
+        "label": "Message ↔ text “Tighten the mobile spacing after the permission” in text row",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/y2yn1n": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.5
+      },
+      "identity": {
+        "label": "text “Tighten the mobile spacing after the permission” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/zhdd1c": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 9.5
+      },
+      "identity": {
+        "label": "Message",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/workspace/14n6pir": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "text “Geometry Lab” in text row",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1fccih": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.75
+      },
+      "identity": {
+        "label": "Machine",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1jrw0q7": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.75
+      },
+      "identity": {
+        "label": "More actions",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1lbwj6e": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.5
+      },
+      "identity": {
+        "label": "text “Geometry Lab” in text row",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1my7gbo": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -2.5
+      },
+      "identity": {
+        "label": "text “G” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1oezpj5": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 5.269230769230769
+      },
+      "identity": {
+        "label": "Message",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1p79krt": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -4
+      },
+      "identity": {
+        "label": "New session",
+        "axis": "x",
+        "anchor": "inline-end",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1t2nsoi": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.8181818181818182
+      },
+      "identity": {
+        "label": "More actions",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1y8h8dm": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.375
+      },
+      "identity": {
+        "label": "Toggle project",
+        "axis": "x",
+        "anchor": "inline-start",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/1ysr2o": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.75
+      },
+      "identity": {
+        "label": "更多操作",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/23ysa1": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.5
+      },
+      "identity": {
+        "label": "text “G” in text row",
+        "axis": "y",
+        "anchor": "block-start",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/3qj791": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -4.076923076923077
+      },
+      "identity": {
+        "label": "text “Message” in text row",
+        "axis": "y",
+        "anchor": "block-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/4gx82n": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2.25
+      },
+      "identity": {
+        "label": "机器",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/4ik93p": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3.375
+      },
+      "identity": {
+        "label": "Settings",
+        "axis": "x",
+        "anchor": "inline-start",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/5p59kz": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 5
+      },
+      "identity": {
+        "label": "text “G” in text row ↔ text “Geometry Lab” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/6bmnyr": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1.8125
+      },
+      "identity": {
+        "label": "text “G” in text row",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/bu6kch": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1
+      },
+      "identity": {
+        "label": "Home",
+        "axis": "x",
+        "anchor": "inline-start",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/cqs9ix": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -0.8181818181818182
+      },
+      "identity": {
+        "label": "More actions",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/fi8gpa": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -3.375
+      },
+      "identity": {
+        "label": "button “Audit Sidebar semantic baselines”",
+        "axis": "x",
+        "anchor": "inline-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/h1bkqs": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -4
+      },
+      "identity": {
+        "label": "机器",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/hg2c2f": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -4
+      },
+      "identity": {
+        "label": "Machine",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/k13zs1": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 3
+      },
+      "identity": {
+        "label": "text “Message” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/ky1uql": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 5.269230769230769
+      },
+      "identity": {
+        "label": "Message",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/lkcnsw": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 1.8125
+      },
+      "identity": {
+        "label": "text “Geometry Lab” in text row",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/lvwy4w": {
+      "status": "promoted",
+      "reason": "Reviewed product rule: primary Sidebar actions share one trailing edge. The gate compares layout boxes, which is the edge the CSS decides; the ink comparison stays a non-gating witness because glyph whitespace differs per icon.",
+      "baseline": {
+        "offset": -1
+      },
+      "contract": {
+        "name": "workspace.sidebar.primary-trailing-actions",
+        "story": "geometry-chatworkspace--expanded-sidebar",
+        "members": [
+          {
+            "role": "button",
+            "name": "New session"
+          },
+          {
+            "role": "button",
+            "name": "Remove project"
+          },
+          {
+            "role": "button",
+            "name": "Archive",
+            "rowFamily": "div[button]>div[text]",
+            "all": true
+          }
+        ],
+        "axis": "x",
+        "anchor": "inline-end",
+        "space": "layout-box",
+        "tolerance": 1
+      },
+      "identity": {
+        "label": "Remove project",
+        "axis": "x",
+        "anchor": "inline-end",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/mcouew": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "text “G” in text row",
+        "axis": "y",
+        "anchor": "block-end",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/qltk66": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -1
+      },
+      "identity": {
+        "label": "More actions",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/sidebar-trailing-inset": {
+      "status": "promoted",
+      "reason": "Reviewed product rule: the Sidebar section header, the group header wrapper, the project row and every session row put their trailing content on one shared inset token. Rows reach it as padding plus their 1px transparent border, so the relation sums both declared terms rather than loosening the tolerance or excluding the rows. The project row is covered by the row-family member, so it carries no second member of its own: two members resolving one element would count its value twice.",
+      "contract": {
+        "name": "workspace.sidebar.trailing-inset",
+        "story": "geometry-chatworkspace--expanded-sidebar",
+        "members": [
+          {
+            "role": "text",
+            "selfFamily": "div[text]>div[button],div[text]"
+          },
+          {
+            "role": "text",
+            "selfFamily": "div[text]>div[button],button[button]"
+          },
+          {
+            "role": "button",
+            "rowFamily": "div[text]>div[button]",
+            "roleIndex": 0,
+            "all": true
+          }
+        ],
+        "axis": "x",
+        "anchor": "inline-end",
+        "space": "layout-box",
+        "tolerance": 0,
+        "relation": {
+          "kind": "box-model-sum-equals-token",
+          "properties": [
+            "padding-inline-end",
+            "border-inline-end-width"
+          ],
+          "token": "sidebar.trailingInset"
+        }
+      }
+    },
+    "geometry/workspace/u25p0b": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": 2.5
+      },
+      "identity": {
+        "label": "text “Geometry Lab” in text row",
+        "axis": "y",
+        "anchor": "text-baseline",
+        "surfaceFamily": "workspace"
+      }
+    },
+    "geometry/workspace/w5fbub": {
+      "status": "accepted-debt",
+      "baseline": {
+        "offset": -4.076923076923077
+      },
+      "identity": {
+        "label": "Machine",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "workspace"
+      }
+    }
+  }
+}

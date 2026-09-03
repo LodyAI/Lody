@@ -205,6 +205,56 @@
         border-top: 1px solid var(--border);
       }
 
+      .detail-section-heading {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 22px 4px 10px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+
+      .detail-section-heading[hidden] {
+        display: none;
+      }
+
+      .detail-section-heading .count {
+        font-weight: 500;
+        color: var(--text-faint);
+      }
+
+      .status-badge {
+        display: inline-block;
+        border: 1px solid var(--border-strong);
+        border-radius: 999px;
+        padding: 1px 8px;
+        margin-right: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .detail-facts {
+        margin: 0 0 14px;
+        padding: 0 4px 0 52px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 18px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .detail-repair {
+        margin: 0 0 14px;
+        padding: 0 4px 0 52px;
+        font-size: 12.5px;
+        color: var(--text);
+        text-wrap: pretty;
+      }
+
       .detail-review {
         border-bottom: 1px solid var(--border);
       }
@@ -537,12 +587,29 @@
       const overviews = report.details.filter((d) => d.kind === 'overview');
       const jitters = report.details.filter((d) => d.kind === 'jitter');
       const insufficient = report.details.filter((d) => d.kind === 'insufficient');
+      const measurementModels = report.details.filter((d) => d.kind === 'measurement-model');
+      const cssDefects = report.details.filter((d) => d.classification === 'css-defect');
+      const opticalResiduals = report.details.filter(
+        (d) => d.classification === 'optical-residual'
+      );
+      const structural = report.details.filter((d) => d.classification === 'structural');
 
       const reportMeta = [
         new Date(report.generatedAt).toLocaleString(),
         `${report.viewport.width} × ${report.viewport.height}`,
         `${report.coverage.captures.length} 个页面捕获`,
-        `${report.details.length} 组检查`,
+        `${report.findingDiff.current.length} 条 finding（全部展示）`,
+        `${report.findingDiff.new.length} 个新 finding`,
+        `${report.findingDiff.changed.length} 个偏移变化`,
+        `${report.findingDiff.resolved.length} 个已消失`,
+        report.qualityMetrics.discoveryPrecision == null
+          ? 'Discovery precision 待标注'
+          : `Discovery precision ${(report.qualityMetrics.discoveryPrecision * 100).toFixed(1)}%（${report.qualityMetrics.labeledFindingCount} 条已标注）`,
+        report.qualityMetrics.geometryCoverage == null
+          ? 'Geometry coverage 暂无原语'
+          : `Geometry coverage ${(report.qualityMetrics.geometryCoverage * 100).toFixed(1)}%`,
+        `${cssDefects.length} 个 CSS 缺陷 / ${structural.length} 个结构性 / ${opticalResiduals.length} 个视觉余量`,
+        `${report.pixelWitnesses.length} 个像素证人（仅 confidence）`,
         `${report.contractProposals.length} 个 Contract 候选`,
       ];
       if (report.afterCapturedAt) {
@@ -564,9 +631,12 @@
         const item = document.createElement('li');
         const id = document.createElement('code');
         id.textContent = capture.captureId;
+        const dimensions = capture.dimensions
+          ? ` · ${capture.dimensions.theme}/${capture.dimensions.locale}/${capture.dimensions.density}`
+          : '';
         item.append(
           id,
-          ` · ${capture.viewport.width}×${capture.viewport.height} · ${capture.surface}`
+          ` · ${capture.viewport.width}×${capture.viewport.height} · ${capture.surface}${dimensions}`
         );
         coverageCaptures.append(item);
       }
@@ -579,35 +649,109 @@
         coverageExclusions.append(item);
       }
 
-      // ---------- filter ----------
+      // ---------- grouping + filter ----------
 
       const reviewsEl = document.getElementById('detail-reviews');
       const toolbar = document.getElementById('toolbar');
+
+      const STATUS_LABELS = {
+        new: '新增',
+        changed: '偏移变化',
+        'accepted-debt': '已接受债务',
+        promoted: '已提升为 Contract',
+        ignored: '已忽略',
+        unreviewed: '未纳入 ledger',
+      };
+      const STATUS_ORDER = ['new', 'changed', 'accepted-debt', 'promoted', 'ignored', 'unreviewed'];
+      const CLASSIFICATION_ORDER = ['css-defect', 'structural', 'optical-residual', ''];
+      const CLASSIFICATION_LABELS = {
+        'css-defect': 'CSS 缺陷',
+        structural: '结构性',
+        'optical-residual': '视觉余量',
+      };
+      const detailStatus = (detail) => detail.ledgerStatus ?? 'unreviewed';
+      const DEFAULT_FILTER = 'default';
+      // The default view is the work queue: what is new, what moved, what the
+      // box model says is a repairable CSS defect, and what is already promoted
+      // to a contract — a promoted rule is the one a regression would break.
+      const isDefaultDetail = (detail) =>
+        detailStatus(detail) === 'new' ||
+        detailStatus(detail) === 'changed' ||
+        detailStatus(detail) === 'promoted' ||
+        detail.classification === 'css-defect';
+
+      const statusCounts = new Map();
+      for (const detail of report.details) {
+        const status = detailStatus(detail);
+        statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+      }
+
       const filters = [
+        [
+          DEFAULT_FILTER,
+          '默认（新增 + 变化 + CSS 缺陷 + 已提升）',
+          report.details.filter(isDefaultDetail).length,
+          null,
+        ],
         ['all', '全部', report.details.length, null],
+        ...STATUS_ORDER.map((status) => [
+          `status:${status}`,
+          STATUS_LABELS[status],
+          statusCounts.get(status) ?? 0,
+          status === 'new' || status === 'changed' ? 'dot--candidate' : 'dot--insufficient',
+        ]),
+        ['css-defect', 'CSS 缺陷', cssDefects.length, 'dot--fail'],
+        ['structural', '结构性', structural.length, 'dot--candidate'],
+        ['optical-residual', '视觉余量', opticalResiduals.length, 'dot--insufficient'],
         ['violation', '违规', violations.length, 'dot--fail'],
         ['review', '待确认', reviewCandidates.length, 'dot--candidate'],
         ['overview', '整体视图', overviews.length, null],
         ['jitter', '亚像素抖动', jitters.length, 'dot--candidate'],
+        ['measurement-model', '测量模型分歧', measurementModels.length, 'dot--candidate'],
         ['insufficient', '证据不足', insufficient.length, 'dot--insufficient'],
         ['stable', '稳定候选轨', stableCandidates.length, 'dot--candidate'],
       ];
+
+      function matchesFilter(review, kind) {
+        if (kind === 'all') return true;
+        if (kind === DEFAULT_FILTER) return review.dataset.default === 'true';
+        if (kind.startsWith('status:')) return review.dataset.ledgerStatus === kind.slice(7);
+        return (
+          review.dataset.kind === kind ||
+          review.dataset.classification === kind ||
+          (kind === 'review' && review.dataset.requiresReview === 'true') ||
+          (kind === 'stable' &&
+            review.dataset.kind === 'candidate' &&
+            review.dataset.requiresReview === 'false')
+        );
+      }
 
       function applyFilter(kind) {
         for (const chip of toolbar.querySelectorAll('.chip')) {
           chip.setAttribute('aria-pressed', String(chip.dataset.filter === kind));
         }
-        for (const review of reviewsEl.children) {
-          const matches =
-            kind === 'all' ||
-            review.dataset.kind === kind ||
-            (kind === 'review' && review.dataset.requiresReview === 'true') ||
-            (kind === 'stable' &&
-              review.dataset.kind === 'candidate' &&
-              review.dataset.requiresReview === 'false');
-          review.hidden = !matches;
+        for (const section of reviewsEl.querySelectorAll('.detail-section')) {
+          let visible = 0;
+          for (const review of section.querySelectorAll('.detail-review')) {
+            const matches = matchesFilter(review, kind);
+            review.hidden = !matches;
+            if (matches) visible += 1;
+          }
+          section.hidden = visible === 0;
+          const heading = section.previousElementSibling;
+          if (heading && heading.classList.contains('detail-section-heading')) {
+            heading.hidden = visible === 0;
+            heading.querySelector('.count').textContent = `${visible} / ${
+              section.querySelectorAll('.detail-review').length
+            }`;
+          }
         }
       }
+
+      // A default view that matched nothing would render an empty report with no
+      // chip pressed, so fall back to showing everything.
+      const initialFilter =
+        report.details.filter(isDefaultDetail).length > 0 ? DEFAULT_FILTER : 'all';
 
       for (const [kind, label, count, dotClass] of filters) {
         if (count === 0) continue;
@@ -615,7 +759,7 @@
         chip.type = 'button';
         chip.className = 'chip';
         chip.dataset.filter = kind;
-        chip.setAttribute('aria-pressed', String(kind === 'all'));
+        chip.setAttribute('aria-pressed', String(kind === initialFilter));
         if (dotClass) {
           const dot = document.createElement('span');
           dot.className = `dot ${dotClass}`;
@@ -651,11 +795,41 @@
 
       // ---------- detail rows ----------
 
-      report.details.forEach((detail, index) => {
+      const groupedDetails = [...report.details].sort((left, right) => {
+        const statusDelta =
+          STATUS_ORDER.indexOf(detailStatus(left)) - STATUS_ORDER.indexOf(detailStatus(right));
+        if (statusDelta !== 0) return statusDelta;
+        return (
+          CLASSIFICATION_ORDER.indexOf(left.classification ?? '') -
+          CLASSIFICATION_ORDER.indexOf(right.classification ?? '')
+        );
+      });
+      const sectionsByStatus = new Map();
+      function sectionFor(status) {
+        const existing = sectionsByStatus.get(status);
+        if (existing) return existing;
+        const heading = document.createElement('h2');
+        heading.className = 'detail-section-heading';
+        const title = document.createElement('span');
+        title.textContent = STATUS_LABELS[status] ?? status;
+        const count = document.createElement('span');
+        count.className = 'count mono';
+        heading.append(title, count);
+        const section = document.createElement('section');
+        section.className = 'detail-section';
+        reviewsEl.append(heading, section);
+        sectionsByStatus.set(status, section);
+        return section;
+      }
+
+      groupedDetails.forEach((detail, index) => {
         const review = document.createElement('article');
         review.className = 'detail-review';
         review.dataset.kind = detail.kind;
         review.dataset.requiresReview = String(Boolean(detail.requiresReview));
+        review.dataset.ledgerStatus = detailStatus(detail);
+        review.dataset.default = String(isDefaultDetail(detail));
+        if (detail.classification) review.dataset.classification = detail.classification;
         const open =
           detail.kind === 'violation' ||
           Boolean(detail.requiresReview) ||
@@ -673,9 +847,9 @@
 
         const dot = document.createElement('span');
         dot.className = `dot ${
-          detail.kind === 'violation'
+          detail.kind === 'violation' || detail.classification === 'css-defect'
             ? 'dot--fail'
-            : detail.kind === 'insufficient'
+            : detail.kind === 'insufficient' || detail.classification === 'optical-residual'
               ? 'dot--insufficient'
               : 'dot--candidate'
         }`;
@@ -683,7 +857,13 @@
         const copy = document.createElement('div');
         const title = document.createElement('div');
         title.className = 'detail-title';
-        title.textContent = detail.title;
+        if (detail.ledgerStatus) {
+          const badge = document.createElement('span');
+          badge.className = 'status-badge';
+          badge.textContent = STATUS_LABELS[detail.ledgerStatus] ?? detail.ledgerStatus;
+          title.append(badge);
+        }
+        title.append(detail.title);
         const description = document.createElement('p');
         description.className = 'detail-description';
         description.textContent = detail.description;
@@ -700,6 +880,49 @@
         body.className = 'detail-body';
         const inner = document.createElement('div');
         inner.className = 'detail-body-inner';
+
+        const facts = [];
+        if (detail.classification) {
+          facts.push(
+            `分类 ${CLASSIFICATION_LABELS[detail.classification] ?? detail.classification}`
+          );
+        }
+        if (detail.ledgerStatus) {
+          facts.push(`Ledger ${STATUS_LABELS[detail.ledgerStatus] ?? detail.ledgerStatus}`);
+        }
+        if (detail.currentOffset !== undefined) {
+          const baseline =
+            detail.baselineOffset === undefined
+              ? '无基线'
+              : `基线 ${detail.baselineOffset.toFixed(2)}px`;
+          facts.push(`${baseline} → 当前 ${detail.currentOffset.toFixed(2)}px`);
+        }
+        if (detail.captureCount !== undefined) {
+          facts.push(`${detail.captureCount}/${detail.totalCaptureCount} 个捕获`);
+        }
+        facts.push(
+          detail.dimensionSensitivity && detail.dimensionSensitivity.length > 0
+            ? `维度敏感 ${detail.dimensionSensitivity.join('、')}`
+            : detail.ledgerStatus
+              ? '无维度敏感'
+              : null
+        );
+        const factsEl = document.createElement('p');
+        factsEl.className = 'detail-facts mono';
+        for (const fact of facts.filter(Boolean)) {
+          const span = document.createElement('span');
+          span.textContent = fact;
+          factsEl.append(span);
+        }
+        if (factsEl.childElementCount > 0) inner.append(factsEl);
+        for (const text of [detail.repairProposal, detail.inkCenterWitness]) {
+          if (!text) continue;
+          const paragraph = document.createElement('p');
+          paragraph.className = 'detail-repair';
+          paragraph.textContent = text;
+          inner.append(paragraph);
+        }
+
         const pair = document.createElement('div');
         pair.className = 'detail-pair';
         if (detail.images.after) pair.classList.add('has-after');
@@ -711,9 +934,11 @@
               ? '候选轨总览'
               : detail.kind === 'jitter'
                 ? '亚像素抖动'
-                : detail.kind === 'insufficient'
-                  ? '证据不足'
-                  : '失败语义线';
+                : detail.kind === 'measurement-model'
+                  ? '测量模型分歧'
+                  : detail.kind === 'insufficient'
+                    ? '证据不足'
+                    : '失败语义线';
         const figures = [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
           [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
@@ -760,8 +985,10 @@
         });
 
         review.append(toggle, body);
-        reviewsEl.append(review);
+        sectionFor(detailStatus(detail)).append(review);
       });
+
+      applyFilter(initialFilter);
     </script>
   </body>
 </html>

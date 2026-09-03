@@ -1,4 +1,4 @@
-import { readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import path from 'node:path';
@@ -124,8 +124,10 @@ if (/data:image\//i.test(reportHtml)) {
 await writeFile(reportPath, reportHtml, 'utf8');
 
 const imagePaths = [
-  ...reportData.details.flatMap((detail) =>
-    [detail.images.clean, detail.images.annotated, detail.images.after].filter(Boolean)
+  ...new Set(
+    reportData.details.flatMap((detail) =>
+      [detail.images.clean, detail.images.annotated, detail.images.after].filter(Boolean)
+    )
   ),
 ];
 const imageStats = await Promise.all(
@@ -135,7 +137,20 @@ const imageStats = await Promise.all(
   }))
 );
 const detailImageBytes = imageStats.reduce((total, { file }) => total + file.size, 0);
+// A screenshot budget, enforced rather than intended. Cards are chosen by how
+// much they deviate, so an unbounded report is one nobody opens: the run fails
+// instead of quietly growing.
+const MAX_REPORT_SCREENSHOTS = 80;
+const assetFiles = (await readdir(path.join(outputDirectory, 'assets'))).filter((name) =>
+  name.endsWith('.png')
+);
+if (assetFiles.length >= MAX_REPORT_SCREENSHOTS) {
+  throw new Error(
+    `Geometry report wrote ${assetFiles.length} screenshots; the budget is under ${MAX_REPORT_SCREENSHOTS}`
+  );
+}
 console.log(`Geometry report: ${reportPath}`);
+console.log(`${assetFiles.length}/${MAX_REPORT_SCREENSHOTS} screenshots`);
 console.log(
   `${reportData.coverage.captures.length} captures, ${reportData.details.length} details, ${imagePaths.length} images: ${(detailImageBytes / 1024).toFixed(1)} KiB total`
 );

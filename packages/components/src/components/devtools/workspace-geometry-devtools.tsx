@@ -23,6 +23,11 @@ import {
   type SemanticBaselineMode,
   type SemanticGeometryStatus,
 } from '@/lib/chat-workspace-geometry';
+import {
+  geometryCanvasFontString,
+  geometryCapBandCenter,
+  measureGeometryCapBand,
+} from '@/lib/geometry-text-cap-band';
 
 const ENABLE_QUERY_PARAMETER = 'geometry';
 const ENABLE_STORAGE_KEY = 'lody:chat-workspace-geometry-devtools';
@@ -157,7 +162,7 @@ function ReferenceGridOverlay() {
       const element = document.querySelector(`[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${anchor}"]`);
       return element instanceof HTMLElement ? [element] : [];
     });
-    if (elements.length === 0) return;
+    if (elements.length === 0) return undefined;
 
     let frame = 0;
     const measure = () => {
@@ -339,7 +344,7 @@ function SpacingAuditOverlay() {
     const root = document.querySelector(
       `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
     );
-    if (!(root instanceof HTMLElement)) return;
+    if (!(root instanceof HTMLElement)) return undefined;
 
     let frame = 0;
     const audit = () => {
@@ -415,23 +420,18 @@ function measureTextBaseline(element: Element): number {
   return baseline;
 }
 
+/**
+ * The overlay measures text exactly as the Playwright capture does: same font
+ * string (no computed `font-variant`, which a canvas rejects), same cached
+ * cap-band measurement of the same fixed reference glyph, same band centre.
+ * A row the overlay calls centred must be a row capture calls centred.
+ */
 function measureTextVisualCenter(element: Element): number {
   const style = getComputedStyle(element);
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context is unavailable');
-  context.font = [
-    style.fontStyle,
-    style.fontVariant,
-    style.fontWeight,
-    style.fontSize,
-    style.fontFamily,
-  ].join(' ');
-  const metrics = context.measureText(element.textContent ?? '');
-  return (
-    measureTextBaseline(element) +
-    (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2
-  );
+  // No expected-size assertion here: capture is a test and may fail loudly, but
+  // this overlay renders inside the product and must never throw at a font.
+  const band = measureGeometryCapBand(geometryCanvasFontString(style));
+  return geometryCapBandCenter(measureTextBaseline(element), band);
 }
 
 function measureVisualCenter(element: Element): number {
@@ -473,6 +473,7 @@ function measureSemanticAlignmentCoordinate(
     case 'visual-center':
       return measureVisualCenter(element);
   }
+  throw new Error(`Unsupported semantic alignment anchor: ${anchor}`);
 }
 
 function unionRects(rects: readonly GeometryRect[]): GeometryRect {
@@ -551,7 +552,7 @@ function SemanticAlignmentOverlay() {
     const root = document.querySelector(
       `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
     );
-    if (!(root instanceof HTMLElement)) return;
+    if (!(root instanceof HTMLElement)) return undefined;
 
     let frame = 0;
     const measure = () => {
@@ -707,7 +708,7 @@ function SemanticBaselineOverlay() {
     const root = document.querySelector(
       `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
     );
-    if (!(root instanceof HTMLElement)) return;
+    if (!(root instanceof HTMLElement)) return undefined;
 
     let frame = 0;
     const mutationObserver = new MutationObserver(schedule);
@@ -796,11 +797,11 @@ export default function WorkspaceGeometryDevtools({
   const active = enabled || forceEnabled;
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) return undefined;
     const root = document.querySelector(
       `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
     );
-    if (!(root instanceof HTMLElement)) return;
+    if (!(root instanceof HTMLElement)) return undefined;
     root.setAttribute('data-geometry-actions-visible', 'true');
     return () => root.removeAttribute('data-geometry-actions-visible');
   }, [active]);

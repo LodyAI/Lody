@@ -288,6 +288,8 @@ export type SemanticBaselineMemberMeasurement = Readonly<{
 export type SemanticBaselineGroupMeasurement = Readonly<{
   name: string;
   mode: SemanticBaselineMode;
+  /** Coordinates are snapped to this physical-pixel grid before comparison. */
+  deviceScaleFactor?: number;
   members: readonly SemanticBaselineMemberMeasurement[];
 }>;
 
@@ -310,6 +312,8 @@ export type SemanticAlignmentGroupMeasurement = Readonly<{
   minMembers: number;
   tolerance: number;
   policy: SemanticAlignmentPolicy;
+  /** Coordinates are snapped to this physical-pixel grid before comparison. */
+  deviceScaleFactor?: number;
   members: readonly SemanticBaselineMemberMeasurement[];
 }>;
 
@@ -336,8 +340,14 @@ export type AlignmentRailCandidate = Readonly<{
   elementId: string;
   /** Stable row identity so nested boxes on one row cannot inflate support. */
   rowId: string;
+  /** Structural family shared by instances of the same visual row shape. */
+  rowFamily?: string;
+  /** Nearest visual partition inside the discovery scope. */
+  sectionId?: string;
   /** Geometry-derived visual role; semantic contract names never enter discovery. */
   kind?: string;
+  /** Centered text contributes only its center; flow text contributes only its edges. */
+  alignmentMode?: 'flow' | 'centered';
   /** Candidates from different coordinate spaces never establish or join the same rail. */
   space?: AlignmentRailCandidateSpace;
   anchor: AlignmentRailCandidateAnchor;
@@ -371,6 +381,63 @@ export type DiscoveredAlignmentRail = Readonly<{
 
 export type AlignmentRailFamily = Readonly<{
   rails: readonly DiscoveredAlignmentRail[];
+}>;
+
+/**
+ * Vertical anchors. `block-*` read the primitive's measured box, `visual-center`
+ * the ink a reader actually sees (cap-height band for text, transformed path
+ * bounds for an SVG, box centre for an image or field) and `text-baseline` the
+ * font baseline. `block-center` and `visual-center` are BOTH kept: a text box's
+ * centre is content independent but line-height dependent, so only the visual
+ * centre may be compared against an icon.
+ */
+export type BlockRailCandidateAnchor =
+  | 'block-start'
+  | 'block-center'
+  | 'block-end'
+  | 'visual-center'
+  | 'text-baseline';
+
+export type BlockRailCandidate = Readonly<{
+  elementId: string;
+  /** The one visual row this primitive belongs to; a Y rail never leaves it. */
+  rowId: string;
+  /** Structural family shared by instances of the same visual row shape. */
+  rowFamily?: string;
+  /** Nearest visual partition inside the discovery scope. */
+  sectionId?: string;
+  /** Geometry-derived visual role; semantic contract names never enter discovery. */
+  kind?: string;
+  space?: AlignmentRailCandidateSpace;
+  anchor: BlockRailCandidateAnchor;
+  /** Vertical page coordinate of this anchor. */
+  coordinate: number;
+  xStart: number;
+  xEnd: number;
+  yStart: number;
+  yEnd: number;
+}>;
+
+export type BlockRailDiscoveryOptions = Readonly<{
+  /** Maximum distance from the row median at which a member supports the rail. */
+  inlierTolerance?: number;
+  minMembers?: number;
+  /** Coordinates are snapped to this physical-pixel grid before comparison. */
+  deviceScaleFactor?: number;
+}>;
+
+export type DiscoveredBlockRail = Readonly<{
+  rowId: string;
+  rowFamily?: string;
+  sectionId?: string;
+  anchor: BlockRailCandidateAnchor;
+  line: number;
+  spread: number;
+  support: number;
+  sampleSize: number;
+  horizontalSpan: number;
+  members: readonly Readonly<BlockRailCandidate & { delta: number; outlier: boolean }>[];
+  outliers: readonly Readonly<BlockRailCandidate & { delta: number; outlier: true }>[];
 }>;
 
 export type LayoutTopologyNode = Readonly<{
@@ -678,6 +745,14 @@ export function isSpacingRhythmMultiple(
  * member spread, so DOM order cannot select the reference member or hide two
  * members that sit on opposite sides of the displayed guide.
  */
+export function quantizeGeometryCoordinate(value: number, deviceScaleFactor = 1): number {
+  if (!Number.isFinite(value)) throw new RangeError('Geometry coordinate must be finite');
+  if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) {
+    throw new RangeError('deviceScaleFactor must be a positive finite number');
+  }
+  return Math.round(value * deviceScaleFactor) / deviceScaleFactor;
+}
+
 export function evaluateSemanticBaselineGroup(
   group: SemanticBaselineGroupMeasurement,
   tolerance: number = CHAT_WORKSPACE_GEOMETRY_SPEC.defaultTolerance
@@ -689,7 +764,9 @@ export function evaluateSemanticBaselineGroup(
     if (!Number.isFinite(member.coordinate)) {
       throw new RangeError(`${group.name}.${member.name} must have a finite coordinate`);
     }
-    return member.coordinate;
+    return group.deviceScaleFactor === undefined
+      ? member.coordinate
+      : quantizeGeometryCoordinate(member.coordinate, group.deviceScaleFactor);
   });
   const sorted = [...coordinates].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -699,8 +776,9 @@ export function evaluateSemanticBaselineGroup(
       : sorted.length % 2 === 0
         ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
         : (sorted[middle] ?? 0);
-  const members = group.members.map((member) => {
-    return { ...member, delta: Math.abs(member.coordinate - line) };
+  const members = group.members.map((member, index) => {
+    const coordinate = coordinates[index] ?? member.coordinate;
+    return { ...member, coordinate, delta: Math.abs(coordinate - line) };
   });
   const spread = sorted.length < 2 ? 0 : (sorted.at(-1) ?? 0) - (sorted[0] ?? 0);
   const measurable = members.length >= 2;
@@ -741,7 +819,9 @@ export function evaluateSemanticAlignmentGroup(
     if (!Number.isFinite(member.coordinate)) {
       throw new RangeError(`${group.name}.${member.name} must have a finite coordinate`);
     }
-    return member.coordinate;
+    return group.deviceScaleFactor === undefined
+      ? member.coordinate
+      : quantizeGeometryCoordinate(member.coordinate, group.deviceScaleFactor);
   });
   const sorted = [...coordinates].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -751,9 +831,10 @@ export function evaluateSemanticAlignmentGroup(
       : sorted.length % 2 === 0
         ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
         : (sorted[middle] ?? 0);
-  const members = group.members.map((member) => ({
+  const members = group.members.map((member, index) => ({
     ...member,
-    delta: Math.abs(member.coordinate - line),
+    coordinate: coordinates[index] ?? member.coordinate,
+    delta: Math.abs((coordinates[index] ?? member.coordinate) - line),
   }));
   const spread = sorted.length < 2 ? 0 : (sorted.at(-1) ?? 0) - (sorted[0] ?? 0);
   const measurable = members.length >= group.minMembers;
@@ -1002,10 +1083,10 @@ function median(values: readonly number[]): number {
  * Candidates are grouped independently by anchor kind and coordinate space. Repeated coordinate
  * modes establish rails before nearby singleton observations are attached to
  * the nearest compatible mode. A rail supported by one visual primitive kind
- * only accepts that kind; a rail with mixed support may accept mixed kinds.
+ * only accepts that kind unless all members share a repeated row family.
  * This keeps stable indentation levels separate and prevents an unrelated icon
  * from attaching to a nearby text rail. Flow text can define start or end edges,
- * but its box center is content-dependent and cannot define a center rail. The
+ * while centered text can define only its center. The
  * result is diagnostic only: callers decide whether a reviewed rail should
  * later become an explicit semantic contract.
  */
@@ -1047,7 +1128,15 @@ export function discoverAlignmentRails(
 
   const byAnchorAndSpace = new Map<string, AlignmentRailCandidate[]>();
   for (const candidate of candidates) {
-    if (candidate.kind === 'text' && candidate.anchor === 'inline-center') continue;
+    const isText = candidate.kind === 'text' || candidate.kind === 'numeric-text';
+    if (
+      isText &&
+      (candidate.alignmentMode === 'centered'
+        ? candidate.anchor !== 'inline-center'
+        : candidate.anchor === 'inline-center')
+    ) {
+      continue;
+    }
     const key = `${candidate.anchor}\u0000${candidate.space ?? 'layout-box'}`;
     const members = byAnchorAndSpace.get(key) ?? [];
     members.push(candidate);
@@ -1101,6 +1190,18 @@ export function discoverAlignmentRails(
         (member) => Math.abs(member.coordinate - line) <= inlierTolerance
       );
       if (supporters.length < minSupport) return [];
+      const kinds = new Set(supporters.flatMap((member) => (member.kind ? [member.kind] : [])));
+      const rowFamilies = new Set(
+        supporters.flatMap((member) => (member.rowFamily ? [member.rowFamily] : []))
+      );
+      const sharesKind = kinds.size <= 1;
+      const sharesRowFamily =
+        rowFamilies.size === 1 && supporters.every((member) => member.rowFamily !== undefined);
+      if (!sharesKind && !sharesRowFamily) return [];
+      const sectionIds = new Set(
+        supporters.flatMap((member) => (member.sectionId ? [member.sectionId] : []))
+      );
+      if (supporters.length === 2 && sectionIds.size > 1) return [];
       const verticalSpan =
         Math.max(...supporters.map((member) => member.yEnd)) -
         Math.min(...supporters.map((member) => member.yStart));
@@ -1109,7 +1210,8 @@ export function discoverAlignmentRails(
         {
           line,
           verticalSpan,
-          kinds: new Set(supporters.flatMap((member) => (member.kind ? [member.kind] : []))),
+          kinds,
+          rowFamilies,
         },
       ];
     });
@@ -1120,12 +1222,12 @@ export function discoverAlignmentRails(
       let nearestDistance = Number.POSITIVE_INFINITY;
       for (const [modeIndex, mode] of stableModes.entries()) {
         const distance = Math.abs(candidate.coordinate - mode.line);
-        const kindCompatible =
+        const identityCompatible =
           candidate.kind === undefined ||
           mode.kinds.size === 0 ||
-          mode.kinds.size > 1 ||
-          mode.kinds.has(candidate.kind);
-        if (kindCompatible && distance <= mergeTolerance && distance < nearestDistance) {
+          mode.kinds.has(candidate.kind) ||
+          (candidate.rowFamily !== undefined && mode.rowFamilies.has(candidate.rowFamily));
+        if (identityCompatible && distance <= mergeTolerance && distance < nearestDistance) {
           nearestModeIndex = modeIndex;
           nearestDistance = distance;
         }
@@ -1182,6 +1284,215 @@ export function discoverAlignmentRails(
       second.confidence - first.confidence ||
       second.support - first.support ||
       first.line - second.line ||
+      first.anchor.localeCompare(second.anchor)
+  );
+}
+
+/** One candidate row slot, as capture measures it before any rail exists. */
+export type GeometryRowSlotExtent = Readonly<{ top: number; bottom: number }>;
+
+/**
+ * A row is a LINE, not a stack. A composer's `label` sitting above its textarea
+ * is two lines of one column, and calling it a row makes the distance between
+ * those lines a vertical misalignment — which it is not.
+ *
+ * The test is the row band: the median slot height centred on the row, which is
+ * the height an ordinary member of this row has. A slot whose vertical extent
+ * overlaps that band by less than half is on another line, so it is not a row
+ * member (it may still be measured as an atom outside every row). The surviving
+ * indices are returned in input order; a caller needs at least two of them to
+ * have a row at all.
+ *
+ * Keep closure-free: capture serializes this function into the page.
+ */
+export function selectVisualRowSlots(
+  slots: readonly GeometryRowSlotExtent[],
+  rowCenter: number,
+  minimumBandOverlap = 0.5
+): readonly number[] {
+  const heights = slots
+    .map((slot) => slot.bottom - slot.top)
+    .filter((height) => Number.isFinite(height) && height > 0)
+    .sort((first, second) => first - second);
+  const middle = Math.floor(heights.length / 2);
+  const bandHeight =
+    heights.length === 0
+      ? 0
+      : heights.length % 2 === 1
+        ? (heights[middle] ?? 0)
+        : ((heights[middle - 1] ?? 0) + (heights[middle] ?? 0)) / 2;
+  if (bandHeight <= 0) return slots.map((_slot, index) => index);
+  const bandTop = rowCenter - bandHeight / 2;
+  const bandBottom = rowCenter + bandHeight / 2;
+  return slots.flatMap((slot, index) => {
+    const overlap = Math.min(slot.bottom, bandBottom) - Math.max(slot.top, bandTop);
+    return overlap / bandHeight >= minimumBandOverlap ? [index] : [];
+  });
+}
+
+/** Everything about one element a painted-shape decision may read. */
+export type GeometryShapePaint = Readonly<{
+  width: number;
+  height: number;
+  /** Rendered element children; a shape is a leaf, it contains nothing. */
+  renderedChildCount: number;
+  /** Text content; a shape owns no glyph, or it would be a text primitive. */
+  text: string;
+  backgroundColor: string;
+  backgroundImage: string;
+  borderWidths: readonly number[];
+  borderColors: readonly string[];
+}>;
+
+/**
+ * A status dot is a `<span>` with a background and nothing inside it. No text
+ * range, no SVG path and no image describes it, so discovery cannot see it at
+ * all — and a marker rule measuring it can never be removed. It is ink: a
+ * rendered leaf, no text, a painted background or border, and at most 24px in
+ * BOTH dimensions — a mark, not a surface a row sits on.
+ *
+ * Keep closure-free: capture serializes this function into the page.
+ */
+export function isGeometryPaintedShape(paint: GeometryShapePaint): boolean {
+  if (paint.renderedChildCount > 0) return false;
+  if (paint.text.trim() !== '') return false;
+  if (!(paint.width > 0) || !(paint.height > 0)) return false;
+  if (paint.width > 24 || paint.height > 24) return false;
+  const alpha = (color: string) => {
+    if (!color || color === 'transparent' || color === 'none') return 0;
+    const channels = color.match(/[\d.]+/g);
+    if (!channels) return 0;
+    return channels.length >= 4 ? Number(channels[3]) : 1;
+  };
+  if (alpha(paint.backgroundColor) > 0) return true;
+  if (paint.backgroundImage !== '' && paint.backgroundImage !== 'none') return true;
+  return paint.borderWidths.some(
+    (width, index) => width > 0 && alpha(paint.borderColors[index] ?? '') > 0
+  );
+}
+
+/**
+ * Discover vertical rails WITHOUT reading a single alignment marker. A Y rail
+ * is scoped to ONE visual row instance — the same unit the marker-based
+ * `instance` rules use — because two different rows share no vertical line.
+ * Every anchor is discovered independently, so a row can report that its boxes
+ * agree (`block-center`) while the ink a reader sees does not (`visual-center`).
+ * Cross-row aggregation belongs to finding identity, not to discovery.
+ */
+export function discoverBlockAlignmentRails(
+  candidates: readonly BlockRailCandidate[],
+  options: BlockRailDiscoveryOptions = {}
+): readonly DiscoveredBlockRail[] {
+  const inlierTolerance = options.inlierTolerance ?? 0.5;
+  const minMembers = options.minMembers ?? 2;
+  const deviceScaleFactor = options.deviceScaleFactor ?? 1;
+  if (!Number.isFinite(inlierTolerance) || inlierTolerance < 0) {
+    throw new RangeError('inlierTolerance must be a finite, non-negative number');
+  }
+  if (!Number.isInteger(minMembers) || minMembers < 2) {
+    throw new RangeError('minMembers must be an integer greater than one');
+  }
+
+  const byRowAndAnchor = new Map<string, BlockRailCandidate[]>();
+  for (const candidate of candidates) {
+    if (
+      !Number.isFinite(candidate.coordinate) ||
+      !Number.isFinite(candidate.xStart) ||
+      !Number.isFinite(candidate.xEnd) ||
+      candidate.xEnd < candidate.xStart
+    ) {
+      throw new RangeError(`${candidate.elementId}.${candidate.anchor} has invalid geometry`);
+    }
+    const key = `${candidate.rowId} ${candidate.anchor}`;
+    const members = byRowAndAnchor.get(key) ?? [];
+    members.push(candidate);
+    byRowAndAnchor.set(key, members);
+  }
+
+  const rails: DiscoveredBlockRail[] = [];
+  for (const rowCandidates of byRowAndAnchor.values()) {
+    // One member per primitive: an element that reported the same anchor twice
+    // must not double its own vote for the row median.
+    const uniqueByElement = new Map<string, BlockRailCandidate>();
+    for (const candidate of rowCandidates) {
+      if (!uniqueByElement.has(candidate.elementId))
+        uniqueByElement.set(candidate.elementId, candidate);
+    }
+    const snapped = [...uniqueByElement.values()].map((candidate) => ({
+      ...candidate,
+      coordinate: quantizeGeometryCoordinate(candidate.coordinate, deviceScaleFactor),
+    }));
+    if (snapped.length < minMembers) continue;
+    const representative = snapped[0];
+    if (!representative) continue;
+    // An icon's top edge and a text line box's top edge are not a claim about
+    // anything: only primitives of one kind share a block EDGE. The centres are
+    // exactly where a cross-kind comparison is meaningful, so they stay mixed.
+    if (representative.anchor === 'block-start' || representative.anchor === 'block-end') {
+      const kinds = new Set(snapped.map((member) => member.kind ?? ''));
+      if (kinds.size > 1) continue;
+    }
+    // A Y rail claims that these primitives sit on ONE line, so a primitive
+    // that neither reaches that line nor sits within half a row of it is not on
+    // it: it is content of another line that the row snapshot happened to
+    // include, and calling the distance between them a misalignment would be
+    // false. Both tests are needed. Ink alone is too strict — an ellipsis glyph
+    // is barely a pixel tall, so any offset at all would drop it instead of
+    // reporting it. The row band alone is too loose — a tall field would swallow
+    // a label a line above it. The line is then recomputed from what is left.
+    const reachesLine = (
+      members: readonly BlockRailCandidate[],
+      line: number
+    ): readonly BlockRailCandidate[] => {
+      const heights = members
+        .map((member) => member.yEnd - member.yStart)
+        .filter((height) => Number.isFinite(height) && height > 0);
+      const band = (heights.length > 0 ? median(heights) : 0) / 2 + inlierTolerance;
+      return members.filter(
+        (member) =>
+          (member.yStart - inlierTolerance <= line && line <= member.yEnd + inlierTolerance) ||
+          Math.abs(member.coordinate - line) <= band
+      );
+    };
+    const online = reachesLine(snapped, median(snapped.map((member) => member.coordinate)));
+    if (online.length < minMembers) continue;
+    const line = median(online.map((member) => member.coordinate));
+    if (reachesLine(online, line).length < minMembers) continue;
+    const members = online
+      .map((member) => {
+        const delta = Math.abs(member.coordinate - line);
+        return { ...member, delta, outlier: delta > inlierTolerance };
+      })
+      .sort(
+        (first, second) =>
+          first.xStart - second.xStart ||
+          first.coordinate - second.coordinate ||
+          first.elementId.localeCompare(second.elementId)
+      );
+    const coordinates = members.map((member) => member.coordinate);
+    rails.push({
+      rowId: representative.rowId,
+      ...(representative.rowFamily ? { rowFamily: representative.rowFamily } : {}),
+      ...(representative.sectionId ? { sectionId: representative.sectionId } : {}),
+      anchor: representative.anchor,
+      line,
+      spread: Math.max(...coordinates) - Math.min(...coordinates),
+      support: members.filter((member) => !member.outlier).length,
+      sampleSize: members.length,
+      horizontalSpan:
+        Math.max(...members.map((member) => member.xEnd)) -
+        Math.min(...members.map((member) => member.xStart)),
+      members,
+      outliers: members.filter(
+        (member): member is BlockRailCandidate & { delta: number; outlier: true } => member.outlier
+      ),
+    });
+  }
+
+  return rails.sort(
+    (first, second) =>
+      first.line - second.line ||
+      first.rowId.localeCompare(second.rowId) ||
       first.anchor.localeCompare(second.anchor)
   );
 }
