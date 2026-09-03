@@ -81,9 +81,9 @@ describe('classifyBrowserHostname', () => {
 
 describe('classifyResolvedBrowserAddress', () => {
   it.each(['198.18.0.1', '198.18.3.75', '198.19.255.254', '[::ffff:c612:34b]'])(
-    'accepts %s as a fake-IP proxy answer for a public hostname',
+    'prohibits %s, which a fake-IP proxy answer and a hostile DNS record share',
     (address) => {
-      expect(classifyResolvedBrowserAddress(address)).toBe('public');
+      expect(classifyResolvedBrowserAddress(address)).toBe('prohibited');
     }
   );
 
@@ -96,8 +96,14 @@ describe('classifyResolvedBrowserAddress', () => {
     ['198.20.0.0', 'public'],
     ['198.51.100.7', 'prohibited'],
     ['[fe80::1]', 'prohibited'],
-  ])('still classifies resolved %s as %s', (address, targetClass) => {
+  ])('classifies resolved %s as %s', (address, targetClass) => {
     expect(classifyResolvedBrowserAddress(address)).toBe(targetClass);
+  });
+
+  it('gives a resolver answer no exemption a typed hostname would not get', () => {
+    for (const address of ['198.18.3.75', '127.0.0.1', '10.0.0.8', '93.184.216.34']) {
+      expect(classifyResolvedBrowserAddress(address)).toBe(classifyBrowserHostname(address));
+    }
   });
 });
 

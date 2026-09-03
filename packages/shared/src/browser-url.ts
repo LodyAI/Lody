@@ -147,17 +147,21 @@ export const classifyBrowserHostname = (hostname: string): BrowserTargetClass =>
 
 /**
  * Classifies an address that the resolver returned for a public hostname, as opposed to a
- * hostname the user typed. The only difference from `classifyBrowserHostname` is 198.18.0.0/15:
- * a public name resolving there is a fake-IP proxy's synthetic answer, and the connection to it
- * is intercepted by that proxy and forwarded by domain, so it is treated as public. A literal
- * 198.18.x.x address is still prohibited because nothing legitimate lives in that range.
+ * hostname the user typed. It is deliberately identical to `classifyBrowserHostname`: a
+ * resolver answer earns no exemption from the target rules.
+ *
+ * 198.18.0.0/15 is the case this exists to say NO to. Fake-IP proxies (Clash, Surge,
+ * sing-box, Shadowrocket) answer every DNS query from that range and then intercept the
+ * connection by domain, so a synthetic answer there is legitimate for those users — but it
+ * is byte-identical to a hostile DNS record pointing at a real host in that routed range on
+ * the user's network, and nothing in the answer distinguishes them. Neither is the presence
+ * of a proxy sufficient: an ordinary HTTP proxy re-resolves the hostname itself and would
+ * connect to the same address, and Chromium resolves client-side for socks4:// and sends
+ * that very IP to the proxy. Trusting fake-IP answers safely requires the user to say so
+ * explicitly; until such a setting exists, they stay prohibited.
  */
-export const classifyResolvedBrowserAddress = (address: string): BrowserTargetClass => {
-  const host = stripIpv6Brackets(address);
-  const ipv4 = parseIpv4(host) ?? mappedIpv4(parseIpv6(host) ?? []);
-  if (ipv4 && isBenchmarkingIpv4(ipv4)) return 'public';
-  return classifyBrowserHostname(address);
-};
+export const classifyResolvedBrowserAddress = (address: string): BrowserTargetClass =>
+  classifyBrowserHostname(address);
 
 const parseWithDefaultScheme = (input: string): URL => {
   const explicitScheme = input.match(EXPLICIT_SCHEME_PATTERN)?.[1]?.toLowerCase();
