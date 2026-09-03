@@ -98,12 +98,12 @@ Use Node.js 22+ and the pnpm version pinned in `package.json`. Install with
 `pnpm install`. A parent pnpm workspace owns nested checkouts; the public
 preinstall guard rejects a second install. Use a separate clone for standalone
 public development. `pnpm start:local` is the canonical desktop command; root
-`pnpm build` is the same local composition. Before committing, normally run
-`pnpm check` and `pnpm format`. If asked to skip tests, report the narrower
-type/build/static validation instead. Conventional Commits (`feat:`, `fix:`,
-`docs:`, `chore:`, `test:`); AI commits end with `Model: <runtime-model-id>`.
-CI uses `pnpm install --frozen-lockfile`, so manifest changes update
-`pnpm-lock.yaml`.
+`pnpm build` is the same local composition. Before committing, run
+`pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`; ACP
+submodules stay independently formatted. If tests are explicitly skipped,
+report narrower validation. Use Conventional Commits; AI commits end with
+`Model: <runtime-model-id>`. CI uses `pnpm install --frozen-lockfile`, so
+manifests update `pnpm-lock.yaml`.
 
 ## Test quality
 

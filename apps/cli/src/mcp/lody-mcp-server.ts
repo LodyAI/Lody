@@ -1747,7 +1747,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
       execution: SessionExecutionSnapshot;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
-    for (let offset = 0; offset < candidates.length && matches.length <= limit; ) {
+    for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
       const chunk = candidates.slice(offset, offset + readChunkSize);
       offset += chunk.length;
       const liveStatuses = await readSessionLiveStatusesMany({

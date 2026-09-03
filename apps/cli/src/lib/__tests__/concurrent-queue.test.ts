@@ -314,16 +314,18 @@ describe('ConcurrentQueue', () => {
       const queue = new ConcurrentQueue(2);
       const log: string[] = [];
 
-      const task = (name: string, delay: number, shouldFail = false) => async () => {
-        log.push(`${name}:start`);
-        await new Promise((r) => setTimeout(r, delay));
-        if (shouldFail) {
-          log.push(`${name}:error`);
-          throw new Error(`${name} failed`);
-        }
-        log.push(`${name}:end`);
-        return name;
-      };
+      const task =
+        (name: string, delay: number, shouldFail = false) =>
+        async () => {
+          log.push(`${name}:start`);
+          await new Promise((r) => setTimeout(r, delay));
+          if (shouldFail) {
+            log.push(`${name}:error`);
+            throw new Error(`${name} failed`);
+          }
+          log.push(`${name}:end`);
+          return name;
+        };
 
       const results = await Promise.allSettled([
         queue.enqueue('A', task('A1', 30)),
@@ -335,14 +337,7 @@ describe('ConcurrentQueue', () => {
 
       // A 系列应该串行
       const aLogs = log.filter((l) => l.startsWith('A'));
-      expect(aLogs).toEqual([
-        'A1:start',
-        'A1:end',
-        'A2:start',
-        'A2:error',
-        'A3:start',
-        'A3:end',
-      ]);
+      expect(aLogs).toEqual(['A1:start', 'A1:end', 'A2:start', 'A2:error', 'A3:start', 'A3:end']);
 
       // B 系列应该串行
       const bLogs = log.filter((l) => l.startsWith('B'));

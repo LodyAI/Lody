@@ -69,14 +69,9 @@ export function parseWorkspaceWatchParentMessage(
   return null;
 }
 
-export function parseWorkspaceWatchChildMessage(
-  value: unknown
-): WorkspaceWatchChildMessage | null {
+export function parseWorkspaceWatchChildMessage(value: unknown): WorkspaceWatchChildMessage | null {
   if (!isGenerationMessage(value)) return null;
-  if (
-    value.type === 'code-collab-watch/dirty' &&
-    typeof value.root === 'string'
-  ) {
+  if (value.type === 'code-collab-watch/dirty' && typeof value.root === 'string') {
     return { type: value.type, generation: value.generation, root: value.root };
   }
   if (
