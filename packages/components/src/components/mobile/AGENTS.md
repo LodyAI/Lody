@@ -230,10 +230,10 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   `mobile-session-run-config.tsx`. It takes `agentSelection` (no SessionMeta
   dependency) plus model/mode/config props, renders the collapsed
   `mobile-run-config-button.tsx` face
-  (`[agent icon] model · reasoning · [mode face] · plan/fast`; mode face =
+  (`[agent icon] model · reasoning · [mode face] · plan/thinking/fast`; mode face =
   `permission-mode-face.tsx`, classified by `@lody/shared`
   `classifyPermissionModeFace`), and opens `mobile-run-config-sheet.tsx`
-  (Role/Agent/Model/Interaction/Reasoning/Permission/Plan/Fast rows plus
+  (Role/Agent/Model/Interaction/Reasoning/Permission/Plan/Thinking/Fast rows plus
   provider-defined select rows; Agent/Model/Interaction/Reasoning/Permission and
   provider-defined selects use coordinated inline pickers; explicit
   permission selectors take precedence over legacy ACP modes; closing the sheet must not restore

@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
-import { ListChecks, Zap } from 'lucide-react';
+import { Brain, ListChecks, Zap } from 'lucide-react';
 import { classifyPermissionModeFace } from '@lody/shared';
 
 import {
@@ -67,6 +67,7 @@ export function useRunConfigFace({
     permissionModeSelectors,
     modeSelectors,
     thoughtLevelSelectors,
+    thoughtToggleSelectors,
     planModeSelectors,
     fastModeSelectors,
   } = useMemo(() => orderAcpConfigOptionSelectors(configOptionSelectors), [configOptionSelectors]);
@@ -125,8 +126,11 @@ export function useRunConfigFace({
   const fastOn = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
     : false;
+  const thoughtToggleOn = thoughtToggleSelectors.some((selector) =>
+    resolveOnOffConfigOptionEnabled(selector, configOptionValues?.[selector.configId])
+  );
 
-  return { modelLabel, thinkingLabel, modeId, planOn, fastOn };
+  return { modelLabel, thinkingLabel, modeId, planOn, fastOn, thoughtToggleOn };
 }
 
 /** Middle-dot separator between the face's identity/status groups. */
@@ -145,8 +149,9 @@ export function MobileRunConfigButton({
   ariaLabel = 'Run configuration',
   ...faceProps
 }: MobileRunConfigButtonProps) {
-  const { modelLabel, thinkingLabel, modeId, planOn, fastOn } = useRunConfigFace(faceProps);
-  const hasToggle = planOn || fastOn;
+  const { modelLabel, thinkingLabel, modeId, planOn, fastOn, thoughtToggleOn } =
+    useRunConfigFace(faceProps);
+  const hasToggle = planOn || fastOn || thoughtToggleOn;
   // The indicator hides itself for default/unknown modes; mirror that here so
   // the separator dot never renders next to nothing.
   const modeVisible = classifyPermissionModeFace(modeId).kind !== 'hidden';
@@ -199,6 +204,13 @@ export function MobileRunConfigButton({
           <FaceDot />
           {planOn ? (
             <ListChecks
+              className="h-3.5 w-3.5 shrink-0 text-primary"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          ) : null}
+          {thoughtToggleOn ? (
+            <Brain
               className="h-3.5 w-3.5 shrink-0 text-primary"
               strokeWidth={1.8}
               aria-hidden="true"

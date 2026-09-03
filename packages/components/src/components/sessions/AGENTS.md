@@ -354,6 +354,16 @@ Session conversation page chain:
   use `useResolvedMachineMeta()` so machine Flock capability rows override
   legacy machine meta; never read `acpCapabilities` from the raw machine atom.
   The composer is controlled and must not recompute ACP selector options itself.
+  Landing/draft/session catalogs resolve through `resolveAcpConfigOptionsForModel` (the
+  composition rule in `@lody/shared`) inside `acp-selector-options.ts`; the model is read
+  from the channel the composer writes — the `model` config option for registry/custom
+  agents, the dedicated picker for builtin — because a live session seeds the picker
+  candidate from the stale runtime baseline. No `currentValue` fallback: an unselected
+  model composes the probe snapshot. Toggle-shaped `thought_level` options (Cursor's
+  `thinking` true/false, Kimi's `thinking` off/on) are `thoughtToggleSelectors` and render
+  as their own Thinking row beside Plan/Fast on desktop and mobile, with a face mark like
+  Fast; the Reasoning row binds only to multi-level selectors. Fast accepts boolean,
+  on/off, and true/false selects.
 - **The message-list renderer is `../ai-gui/view.tsx`** (markdown/tool calls/terminal);
   most rendering changes land there, not here. `chat_failed` system notices render
   as compact left-aligned Coding Agent errors with no divider or persistent card;
@@ -373,7 +383,7 @@ Session conversation page chain:
   Desktop run knobs are TWO footer buttons from `desktop-run-config-menu.tsx`:
   `DesktopRunConfigMenu` (`[agent icon] model · reasoning ⌄` face; dropdown =
   Agent/Model/Interaction/Reasoning plus provider-defined select side submenus +
-  Plan/Fast toggle rows) and
+  Plan/Thinking/Fast toggle rows) and
   `DesktopPermissionModeButton` (permission icon + full name; flat permission
   list). Explicit `_permission` config options take precedence over legacy ACP
   modes; provider interaction modes stay inside the run-config dropdown. Both
@@ -386,7 +396,7 @@ Session conversation page chain:
   Keep the warning tied to that agent/model combination and its upstream
   discussion rather than turning it into a global banner.
   Agent/Model/Reasoning option selection closes the dropdown and must not return
-  keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
+  keyboard focus to its trigger; Plan/Thinking/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`
   (`lib/fuzzy-option-filter.ts` — the same threshold and matcher the mobile
   sheet uses) the Model submenu gains a fuzzy search row over

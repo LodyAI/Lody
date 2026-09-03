@@ -8,10 +8,12 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
+  type AcpConfigOptionSummary,
   type MachineId,
   type SessionId,
   type SessionMeta,
   getAgentConfigRoomId,
+  resolveAcpConfigOptionsForModel,
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
@@ -37,6 +39,7 @@ const claudeSessionId = 'session-claude' as SessionId;
 const codexId = 'agent-codex' as AgentConfigId;
 const claudeId = 'agent-claude' as AgentConfigId;
 const deepseekId = 'agent-deepseek' as AgentConfigId;
+const cursorId = 'agent-cursor' as AgentConfigId;
 
 const agents: AgentConfigMeta[] = [
   {
@@ -68,6 +71,16 @@ const agents: AgentConfigMeta[] = [
   },
 ];
 
+const cursorAgent: AgentConfigMeta = {
+  id: cursorId,
+  machineId,
+  name: 'Cursor',
+  description: 'Registry Cursor agent',
+  cliType: 'registry',
+  agentType: 'cursor',
+  env: {},
+};
+
 const codexSession: SessionMeta = {
   id: codexSessionId,
   machineId,
@@ -94,6 +107,15 @@ const deepseekSession: SessionMeta = {
   title: 'DeepSeek session',
   agentType: 'deepseek',
   agentConfigId: deepseekId,
+};
+
+const cursorSession: SessionMeta = {
+  ...codexSession,
+  id: 'session-cursor' as SessionId,
+  title: 'Cursor session',
+  cliType: 'registry',
+  agentType: 'cursor',
+  agentConfigId: cursorId,
 };
 
 const codexModelOptions: AcpSessionSelectOption[] = [
@@ -156,6 +178,112 @@ const codexSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
+const cursorThinking: AcpConfigOptionSummary = {
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'true',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+};
+const cursorEffort: AcpConfigOptionSummary = {
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'high', name: 'High' },
+  ],
+};
+const cursorContext: AcpConfigOptionSummary = {
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+};
+const cursorFast: AcpConfigOptionSummary = {
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+};
+const cursorCatalogEntry = {
+  configOptions: [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select' as const,
+      currentValue: 'a',
+      options: [
+        { value: 'a', name: 'A' },
+        { value: 'b', name: 'B' },
+      ],
+    },
+    cursorThinking,
+    cursorEffort,
+    cursorContext,
+    cursorFast,
+  ],
+  configOptionsByModel: {
+    a: [cursorThinking, cursorEffort, cursorContext, cursorFast],
+    b: [
+      {
+        id: 'reasoning',
+        name: 'Reasoning',
+        category: 'thought_level',
+        type: 'select' as const,
+        currentValue: 'minimal',
+        options: [
+          { value: 'minimal', name: 'Minimal' },
+          { value: 'full', name: 'Full' },
+        ],
+      },
+    ],
+  },
+};
+const cursorSelectors: AcpConfigOptionSelector[] = (
+  resolveAcpConfigOptionsForModel(cursorCatalogEntry, 'a') ?? []
+).map((option) =>
+  option.type === 'boolean'
+    ? {
+        type: 'boolean' as const,
+        configId: option.id,
+        label: option.name,
+        category: option.category,
+        currentValue: option.currentValue === true,
+        options: [] as [],
+      }
+    : {
+        type: 'select' as const,
+        configId: option.id,
+        label: option.name,
+        category: option.category,
+        currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
+        options: option.options.map((entry) => ({
+          value: entry.value,
+          label: entry.name,
+          description: entry.description,
+        })),
+      }
+);
+const cursorModelOptions: AcpSessionSelectOption[] = [
+  { value: 'a', label: 'A' },
+  { value: 'b', label: 'B' },
+];
+
 const claudeSelectors: AcpConfigOptionSelector[] = [
   {
     type: 'select',
@@ -186,12 +314,14 @@ function StoryShell({
 }) {
   const store = useMemo(() => {
     const s = createStore();
+    const catalog =
+      session.agentConfigId === cursorAgent.id ? [...agents, cursorAgent] : agents;
     s.set(
       agentConfigMetaCacheAtom,
-      Object.fromEntries(agents.map((a) => [getAgentConfigRoomId(a.id), a]))
+      Object.fromEntries(catalog.map((a) => [getAgentConfigRoomId(a.id), a]))
     );
     return s;
-  }, []);
+  }, [session.agentConfigId]);
 
   const [open, setOpen] = useState(true);
   const [model, setModel] = useState<string | null>(modelOptions[0]?.value ?? null);
@@ -263,6 +393,14 @@ export const Codex: Story = {
 
 export const Claude: Story = {
   args: { session: claudeSession, modelOptions: claudeModelOptions, selectors: claudeSelectors },
+};
+
+export const RegistryCursorCatalog: Story = {
+  args: {
+    session: cursorSession,
+    modelOptions: cursorModelOptions,
+    selectors: cursorSelectors,
+  },
 };
 
 export const DeepSeekDelegationWarning: Story = {
