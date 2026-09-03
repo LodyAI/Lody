@@ -141,9 +141,12 @@ Root `AGENTS.md` also applies.
 - macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
   Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
   `SPARKLE_ED_PUBLIC_KEY` before signing. The release workflow then runs
-  `Innei/electron-sparkle-updater/action@v1` against this release's zips only
+  `Innei/electron-sparkle-updater/action` pinned to a reviewed full commit SHA against
+  this release's zips only
   (`publish: false`); the Action fetches the two previous `v*` zip releases as
-  delta bases. Previous zips stay out of the published asset list. Sparkle load
+  delta bases. Keep Apple signing credentials scoped to the packaging step and the
+  Sparkle private key scoped to validation plus the pinned signing Action; never expose
+  them as job-level environment variables. Previous zips stay out of the published asset list. Sparkle load
   failure falls back to electron-updater. Sparkle UI stays silent; progress and
   ready-to-install go through `ElectronUpdaterState` for the renderer banner.
 - Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
