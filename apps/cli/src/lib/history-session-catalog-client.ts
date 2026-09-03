@@ -24,6 +24,7 @@ import {
   type ACPSessionId,
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryProvider,
+  type CustomAcpLaunchSpec,
 } from '@lody/shared';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
@@ -126,11 +127,19 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
   env: NodeJS.ProcessEnv;
 };
 
+export type HistoryLaunchProvider = LocalProjectHistoryProvider & {
+  customAcp?: CustomAcpLaunchSpec;
+};
+
 export async function resolveHistoryACPProcessLaunch(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryLaunchProvider;
   env?: NodeJS.ProcessEnv;
 }): Promise<ResolvedHistoryACPProcessLaunch> {
-  const launch = await resolveACPProcessLaunchAsync(args.provider);
+  const launch = await resolveACPProcessLaunchAsync({
+    cliType: args.provider.cliType,
+    agentType: args.provider.agentType,
+    customAcp: args.provider.customAcp,
+  });
   return {
     ...launch,
     env: mergeACPProcessEnv(launch, args.env ?? process.env),
@@ -138,7 +147,7 @@ export async function resolveHistoryACPProcessLaunch(args: {
 }
 
 async function createHistoryAcpConnection(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryLaunchProvider;
   workdir: string;
   logger: Logger;
 }): Promise<HistoryAcpConnection> {
@@ -327,7 +336,7 @@ export function dedupeHistorySessionsById(sessions: SessionInfo[]): SessionInfo[
 }
 
 export async function listHistorySessionsForLocalProject(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryLaunchProvider;
   rootPath: string;
   logger: Logger;
   requiredSessionIds?: readonly string[];
@@ -376,7 +385,7 @@ export async function listHistorySessionsForLocalProject(args: {
 }
 
 export async function loadHistorySessionReplay(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryLaunchProvider;
   rootPath: string;
   acpSessionId: ACPSessionId;
   logger: Logger;

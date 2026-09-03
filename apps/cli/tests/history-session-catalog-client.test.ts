@@ -217,6 +217,23 @@ describe('resolveHistoryACPProcessLaunch', () => {
     expect(historyLaunch.env.PATH).toBe('/usr/bin');
   });
 
+  it('resolves a custom ACP launch from the provider launch spec', async () => {
+    const historyLaunch = await resolveHistoryACPProcessLaunch({
+      provider: {
+        cliType: 'custom',
+        agentType: 'my-agent',
+        customAcp: {
+          command: process.execPath,
+          args: ['custom-acp-server.mjs', '--stdio'],
+        },
+      },
+      env: { PATH: '/usr/bin' },
+    });
+
+    expect(historyLaunch.command).toBe(process.execPath);
+    expect(historyLaunch.args).toEqual(['custom-acp-server.mjs', '--stdio']);
+    expect(historyLaunch.env.PATH).toBe('/usr/bin');
+  });
   it('uses the same registry Interactive Claude npx launch as normal sessions', async () => {
     const provider = { cliType: 'registry', agentType: 'claude-p' } as const;
     const sessionLaunch = resolveACPProcessLaunch(provider);

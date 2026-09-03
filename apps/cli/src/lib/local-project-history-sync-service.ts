@@ -35,8 +35,10 @@ import {
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects, upsertMachineLocalProject } from '@/lib/local-project-meta';
+import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
   listHistorySessionsForLocalProject,
+  type HistoryLaunchProvider,
   loadHistorySessionReplay,
   MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS,
 } from './history-session-catalog-client';
@@ -546,6 +548,7 @@ function buildExternalHistoryMeta(args: {
 export class LocalProjectHistorySyncService {
   private readonly provider: LocalProjectHistoryProvider;
   private readonly providerKey: string;
+  private launchProvider: HistoryLaunchProvider;
 
   constructor(
     private readonly manager: LoroDocumentManager,
@@ -559,6 +562,25 @@ export class LocalProjectHistorySyncService {
   ) {
     this.provider = provider;
     this.providerKey = getLocalProjectHistoryProviderKey(provider);
+    this.launchProvider = provider;
+  }
+
+  private async resolveLaunchProvider(): Promise<HistoryLaunchProvider> {
+    if (this.provider.cliType !== 'custom') {
+      return this.provider;
+    }
+    const configs = await listMergedAgentConfigs(this.manager.repo, this.context.workspaceId, [
+      this.context.machineId,
+    ]);
+    const config = configs.find(
+      (candidate) =>
+        candidate.machineId === this.context.machineId &&
+        candidate.cliType === this.provider.cliType &&
+        candidate.agentType === this.provider.agentType
+    );
+    const resolved = { ...this.provider, customAcp: config?.customAcp };
+    this.launchProvider = resolved;
+    return resolved;
   }
 
   async syncLocalProject(args: {
@@ -585,7 +607,8 @@ export class LocalProjectHistorySyncService {
     localProjectId: LocalProjectId;
     rootPath: string;
   }): Promise<LocalProjectHistoryCatalogResult> {
-    const snapshot = await this.listCatalogSnapshot(args);
+    this.launchProvider = await this.resolveLaunchProvider();
+    const snapshot = await this.listCatalogSnapshot(args, this.launchProvider);
     return await this.writeCatalogResult({
       localProjectId: args.localProjectId,
       sessions: snapshot.sessions,
@@ -644,6 +667,7 @@ export class LocalProjectHistorySyncService {
     const summary = emptySummary();
     const selectedIds = [...new Set(args.acpSessionIds)];
     summary.listed = selectedIds.length;
+    this.launchProvider = await this.resolveLaunchProvider();
     const snapshot = await this.listCatalogSnapshot({
       ...args,
       requiredSessionIds: selectedIds,
@@ -672,7 +696,7 @@ export class LocalProjectHistorySyncService {
           snapshot.existingByImportKey.get(importKey);
         if (!existing) {
           const replayNotifications = await loadHistorySessionReplay({
-            provider: this.provider,
+            provider: this.launchProvider,
             rootPath: args.rootPath,
             acpSessionId,
             logger: this.logger,
@@ -730,6 +754,7 @@ export class LocalProjectHistorySyncService {
     sessionId: SessionId;
     acpSessionId: string;
   }): Promise<LocalProjectHistoryConflictResolveResult> {
+    this.launchProvider = await this.resolveLaunchProvider();
     const snapshot = await this.listCatalogSnapshot({
       ...args,
       requiredSessionIds: [args.acpSessionId],
@@ -812,7 +837,7 @@ export class LocalProjectHistorySyncService {
 
     const acpSessionId = args.acpSessionId as unknown as ACPSessionId;
     const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
+      provider: this.launchProvider,
       rootPath: args.rootPath,
       acpSessionId,
       logger: this.logger,
@@ -906,13 +931,16 @@ export class LocalProjectHistorySyncService {
     });
   }
 
-  private async listCatalogSnapshot(args: {
-    localProjectId: LocalProjectId;
-    rootPath: string;
-    requiredSessionIds?: readonly string[];
-  }): Promise<HistoryCatalogSnapshot> {
+  private async listCatalogSnapshot(
+    args: {
+      localProjectId: LocalProjectId;
+      rootPath: string;
+      requiredSessionIds?: readonly string[];
+    },
+    provider: HistoryLaunchProvider = this.launchProvider
+  ): Promise<HistoryCatalogSnapshot> {
     const catalog = await listHistorySessionsForLocalProject({
-      provider: this.provider,
+      provider,
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -1124,7 +1152,7 @@ export class LocalProjectHistorySyncService {
     }
 
     const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
+      provider: this.launchProvider,
       rootPath: args.rootPath,
       acpSessionId: args.acpSessionId,
       logger: this.logger,
