@@ -3,6 +3,7 @@ import {
   createEagerSyncInteractionSignal,
   bindEagerSyncInteractionSignalToDom,
   EAGER_SYNC_INTERACTION_EVENTS,
+  EAGER_SYNC_INTERACTION_QUIET_MS,
 } from '../src/providers/eager-sync-interaction';
 
 function createFakeTime() {
@@ -34,7 +35,7 @@ function createFakeTime() {
   };
 }
 
-function setup(quietMs = 1_000) {
+function setup(quietMs = EAGER_SYNC_INTERACTION_QUIET_MS) {
   const time = createFakeTime();
   const signal = createEagerSyncInteractionSignal({
     quietMs,
@@ -47,14 +48,10 @@ function setup(quietMs = 1_000) {
 }
 
 describe('createEagerSyncInteractionSignal', () => {
-  it('is idle until the first input', () => {
-    const { signal, flips } = setup();
-    expect(signal.isInteracting()).toBe(false);
-    expect(flips).toEqual([]);
-  });
-
   it('reports interacting for the quiet window after input, then flips back once', () => {
     const { signal, time, flips } = setup();
+    expect(signal.isInteracting()).toBe(false);
+    expect(flips).toEqual([]);
 
     signal.mark();
     expect(signal.isInteracting()).toBe(true);
@@ -69,30 +66,24 @@ describe('createEagerSyncInteractionSignal', () => {
     expect(flips).toEqual([true, false]);
   });
 
-  it('extends the quiet window across a continuing gesture without re-notifying', () => {
+  it('extends a continuing gesture without re-notifying or piling up timers', () => {
     const { signal, time, flips } = setup();
 
+    // A scroll fires input events by the dozen per second. Each one must extend
+    // the window in place: no subscriber churn (every notify schedules a drain)
+    // and no timer per event.
     signal.mark();
-    for (let i = 0; i < 5; i++) {
-      time.advance(200);
+    for (let i = 0; i < 20; i++) {
+      time.advance(50);
       signal.mark();
       expect(signal.isInteracting()).toBe(true);
+      expect(time.pending()).toBe(1);
     }
-    // One transition into "interacting", not one per event.
     expect(flips).toEqual([true]);
 
-    time.advance(1_000);
+    time.advance(EAGER_SYNC_INTERACTION_QUIET_MS);
     expect(signal.isInteracting()).toBe(false);
     expect(flips).toEqual([true, false]);
-  });
-
-  it('keeps at most one pending timer regardless of input rate', () => {
-    const { signal, time } = setup();
-    for (let i = 0; i < 20; i++) {
-      signal.mark();
-      time.advance(10);
-    }
-    expect(time.pending()).toBe(1);
   });
 
   it('reports idle and schedules nothing after dispose', () => {
@@ -132,18 +123,24 @@ describe('bindEagerSyncInteractionSignalToDom', () => {
     };
   }
 
-  it('marks the signal from direct-manipulation input and unbinds cleanly', () => {
-    const { signal } = setup();
+  it('marks the signal from every bound input event and unbinds cleanly', () => {
     const fake = createFakeTarget();
-
+    const { signal, time } = setup();
     const unbind = bindEagerSyncInteractionSignalToDom(signal, fake.target);
-    expect(fake.count()).toBe(EAGER_SYNC_INTERACTION_EVENTS.length);
 
-    fake.dispatch('touchmove');
-    expect(signal.isInteracting()).toBe(true);
+    // Each covers an input modality the others miss: tap, drag, trackpad/mouse
+    // scroll, typing. A device that only ever fires one of them still defers.
+    for (const eventName of EAGER_SYNC_INTERACTION_EVENTS) {
+      fake.dispatch(eventName);
+      expect(signal.isInteracting(), eventName).toBe(true);
+      time.advance(1_000);
+      expect(signal.isInteracting(), eventName).toBe(false);
+    }
 
     unbind();
+    fake.dispatch('touchmove');
     expect(fake.count()).toBe(0);
+    expect(signal.isInteracting()).toBe(false);
   });
 
   it('ignores scroll events so a streaming session cannot starve background sync', () => {
@@ -157,10 +154,5 @@ describe('bindEagerSyncInteractionSignalToDom', () => {
 
     fake.dispatch('scroll');
     expect(signal.isInteracting()).toBe(false);
-  });
-
-  it('is a no-op without a DOM target', () => {
-    const { signal } = setup();
-    expect(() => bindEagerSyncInteractionSignalToDom(signal, undefined)()).not.toThrow();
   });
 });

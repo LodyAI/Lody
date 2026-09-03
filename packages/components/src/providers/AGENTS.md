@@ -38,11 +38,19 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
   `tests/background-sync-coordinator.test.ts`, driven by that suite's fake clock.
 - Mobile is not desktop with a smaller screen. Each prefetch deserializes a Loro doc
   on the one main thread a phone has, so `resolveEagerSyncPolicy('mobile')` must keep
-  its own policy — never share the desktop one. Widen the candidate scope through
-  `policy.stages` rather than a single large `candidateWindow`: the ladder starts on
-  the pinned / on-screen / running set and steps outward only after the queue has
-  drained AND the app has then stayed idle for that stage's hold. A stage must never
-  advance on wall-clock time alone.
+  its own policy — never share the desktop one. What protects the phone is the PACING
+  (concurrency, batch cooldown, resident cap), not a smaller eventual scope: mobile
+  reaches the same `candidateWindow` as desktop.
+- `warmupCandidateWindow` narrows that scope until the queue has drained AND the app
+  has then stayed idle for `warmupHoldMs`. It must never widen on wall-clock time
+  alone — queued work, in-flight work, or an interacting user all hold it — and a
+  suspended phone does not run timers, so a hold armed before backgrounding is
+  overdue the moment it resumes. Clear it on pause and restart the warm-up on resume,
+  or every resume widens instantly with no warm-up at all.
+- Do not gate candidates on a `priorityOf` FLOOR. `visibility.isVisible` is fed from
+  `useVisibleSessionMetas`, which is a permission filter over every non-archived
+  session, not a viewport filter — so a floor at the visible weight excludes nothing.
+  The window is what bounds the scope; priority only orders it.
 - Prefetching yields to the user through the `interaction` port
   (`eager-sync-interaction.ts`): while it reports true the coordinator starts nothing
   new. It does NOT abort in-flight work for interaction — that costs a fresh room

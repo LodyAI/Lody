@@ -4193,7 +4193,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       backgroundSyncHighWaterStore = highWaterStore;
       const interactionSignal = createEagerSyncInteractionSignal();
       backgroundSyncInteraction = interactionSignal;
-      unbindBackgroundSyncInteraction = bindEagerSyncInteractionSignalToDom(interactionSignal);
+      unbindBackgroundSyncInteraction =
+        typeof window === 'undefined'
+          ? null
+          : bindEagerSyncInteractionSignalToDom(interactionSignal, window);
 
       backgroundSyncCoordinator = createBackgroundSyncCoordinator({
         activitySource: {

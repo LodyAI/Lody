@@ -66,8 +66,7 @@ export function createEagerSyncInteractionSignal(
   let reported = false;
   let disposed = false;
 
-  const evaluate = (): boolean =>
-    !disposed && lastMarkAt !== null && clock.now() - lastMarkAt < quietMs;
+  const evaluate = (): boolean => lastMarkAt !== null && clock.now() - lastMarkAt < quietMs;
 
   const clearQuietTimer = () => {
     if (quietTimer !== null) {
@@ -122,19 +121,16 @@ export function createEagerSyncInteractionSignal(
 type EagerSyncInteractionTarget = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 
 /**
- * Feed a signal from real input events. Listeners are passive and capturing so
- * they observe input inside nested scrollers without affecting it. Returns an
- * unbind fn; a no-op when there is no DOM (SSR / tests).
+ * Feed a signal from real input events. Returns an unbind fn.
+ *
+ * Listeners are passive (they never affect the gesture) and CAPTURING, so input
+ * still counts when an app-level handler stops its propagation — a swallowed
+ * keystroke is still the user typing.
  */
 export function bindEagerSyncInteractionSignalToDom(
   signal: EagerSyncInteractionSignal,
-  target: EagerSyncInteractionTarget | undefined = typeof window === 'undefined'
-    ? undefined
-    : window
+  target: EagerSyncInteractionTarget
 ): () => void {
-  if (!target) {
-    return () => {};
-  }
   const onInput = () => signal.mark();
   const listenerOptions = { passive: true, capture: true } as const;
   for (const eventName of EAGER_SYNC_INTERACTION_EVENTS) {
