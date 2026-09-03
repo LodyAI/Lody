@@ -9,6 +9,7 @@ import {
   CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE,
   CHAT_WORKSPACE_SEMANTIC_ALIGNMENT_ATTRIBUTES,
   type DiscoveredBlockRail,
+  GEOMETRY_ROW_BAND_OVERLAP,
   resolveMainPaneGridRange,
   validateChatWorkspaceGeometry,
 } from '../../src/lib/chat-workspace-geometry';
@@ -501,22 +502,52 @@ test('a cross-family geometric row reports its outlier and no DOM row', async ({
   const before = await discoverChatWorkspaceBlockRails(page);
   expect(crossFamily(before).length, 'no cross-family geometric row to probe').toBeGreaterThan(0);
 
+  const probeShift = 2;
   // Any singleton control on any cross-family row will do; naming a header icon
   // would make the gate about one product surface rather than about the rule.
   // An odd, tight rail: the median is then one member's coordinate, so the shift
   // moves the probe and not the line it is measured against.
-  const probeOf = (rail: DiscoveredBlockRail) =>
-    rail.members.find((member) => !member.outlier && member.kind === 'svg');
+  //
+  // Row membership is SYMMETRIC, so the probe also has to still be ON the row
+  // once it has moved, or the rail loses the member instead of reporting it.
+  // A member keeps half of both extents when `(band - shift) / member` clears
+  // the overlap, which is what this asks before choosing it — the gate states
+  // the arithmetic rather than trusting a particular icon to survive.
+  const rowBand = (rail: DiscoveredBlockRail) => {
+    const heights = rail.members
+      .map((member) => member.yEnd - member.yStart)
+      .filter((height) => height > 0)
+      .sort((first, second) => first - second);
+    const middle = Math.floor(heights.length / 2);
+    if (heights.length === 0) return 0;
+    return heights.length % 2 === 1
+      ? (heights[middle] ?? 0)
+      : ((heights[middle - 1] ?? 0) + (heights[middle] ?? 0)) / 2;
+  };
+  // The TALLEST such member, because the band height is a MEDIAN: moving the
+  // member that currently sets it drags the whole band, and a shorter member
+  // then falls off the row — the rail vanishes instead of reporting anything.
+  const probeOf = (rail: DiscoveredBlockRail) => {
+    const band = rowBand(rail);
+    return [...rail.members]
+      .sort((first, second) => second.yEnd - second.yStart - (first.yEnd - first.yStart))
+      .find((member) => {
+        const height = member.yEnd - member.yStart;
+        return (
+          !member.outlier &&
+          height > band &&
+          (band - probeShift) / height >= GEOMETRY_ROW_BAND_OVERLAP
+        );
+      });
+  };
   const target = crossFamily(before).find(
     (rail) => rail.sampleSize % 2 === 1 && rail.spread <= 1 && probeOf(rail) !== undefined
   );
-  expect(target, 'no tight cross-family row with an aligned icon to probe').toBeDefined();
+  expect(target, 'no tight cross-family row with a probe that survives the shift').toBeDefined();
   if (!target) return;
   const probe = probeOf(target);
   const probeId = probe ? primitiveIdOf(probe as typeof probe & Identified) : '';
   expect(probeId).not.toBe('');
-
-  const probeShift = 2;
   await page.evaluate(
     ({ primitiveId, shift }) => {
       const index = Number(primitiveId.replace('dom-', '')) - 1;
