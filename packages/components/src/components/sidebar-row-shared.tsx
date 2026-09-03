@@ -754,7 +754,10 @@ export function SidebarSectionHeader({
   return (
     <div
       {...{ [semanticAlignmentAttributes.instance]: geometryInstance }}
-      className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]"
+      // 9px, not pr-2: session and project rows inset their trailing content by
+      // their own 8px padding plus a 1px transparent border, and this header has no
+      // border of its own to contribute that last pixel.
+      className="group flex h-7 items-center gap-1 rounded-md pr-sidebar-trailing has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]"
     >
       <div
         role={canToggle ? 'button' : undefined}

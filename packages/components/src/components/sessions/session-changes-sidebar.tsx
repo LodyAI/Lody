@@ -204,7 +204,10 @@ export function SessionChangesSidebar({
             <AccordionPrimitive.Header className="flex">
               <AccordionPrimitive.Trigger
                 className={cn(
-                  'group flex h-6 w-full items-center gap-1.5 rounded-md px-1 text-left',
+                  // pr-2 matches the file rows' px-2 so this header's stats and its
+                  // rows' stats resolve to the same trailing column; pl-1 keeps the
+                  // group outdented from the files it contains.
+                  'group flex h-6 w-full items-center gap-1.5 rounded-md pl-1 pr-2 text-left',
                   'hover:bg-hover/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                 )}
               >
@@ -215,15 +218,24 @@ export function SessionChangesSidebar({
                 <span className="text-[11px] tabular-nums text-muted-foreground/60">
                   {group.entries.length}
                 </span>
-                <AggregateStats
-                  add={group.add}
-                  del={group.del}
-                  statsUnavailableLabel={
-                    group.entries.some((entry) => entry.statsUnavailable)
-                      ? diffStatsUnavailableLabel
-                      : undefined
-                  }
-                />
+                {/*
+                  Same trailing treatment as `RowTrailing`: ml-auto anchors the pair
+                  to the trailing edge (without it the stats ride on the category
+                  label and slide with its width), and text-[11px] is what the rows
+                  and the panel header give these spans -- inherited here, they would
+                  render at the trigger's own size.
+                */}
+                <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] tabular-nums">
+                  <AggregateStats
+                    add={group.add}
+                    del={group.del}
+                    statsUnavailableLabel={
+                      group.entries.some((entry) => entry.statsUnavailable)
+                        ? diffStatsUnavailableLabel
+                        : undefined
+                    }
+                  />
+                </span>
               </AccordionPrimitive.Trigger>
             </AccordionPrimitive.Header>
             <AccordionPrimitive.Content className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">

@@ -675,7 +675,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
     >
       <div
         data-geometry-align-instance={`sidebar-group:${group.key}`}
-        className="group flex h-7 items-center"
+        // The new-session button rides outside the header row's own box, so this
+        // wrapper carries the shared 9px sidebar trailing inset (a bordered row's
+        // 8px padding plus its 1px transparent border) on the button's behalf.
+        className="group flex h-7 items-center pr-sidebar-trailing"
       >
         <div
           role={canNavigate || canToggle ? 'button' : undefined}

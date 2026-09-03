@@ -12,6 +12,16 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Geometry contract token: shared trailing inset for primary Sidebar rows.
+   This block is deliberately NOT `inline`: the geometry gate reads the token
+   from `getComputedStyle(document.documentElement)`, so the stylesheet must
+   publish the custom property at runtime rather than only inlining 9px into
+   the `pr-sidebar-trailing` utility. CSS stays the single source of truth and
+   `geometry-ledger.json` records only which property carries it. */
+@theme {
+  --spacing-sidebar-trailing: 9px;
+}
+
 @theme inline {
   --font-ios: var(--font-sans);
   --font-material: var(--font-sans);
