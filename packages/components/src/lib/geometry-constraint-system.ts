@@ -361,7 +361,11 @@ export type GeometryDimensionSensitivity = Readonly<{
  * not contain. Three members or more have a majority, so the median is a line
  * and a member off it is an outlier with a sign.
  */
-export type GeometryFindingKind = 'alignment-rail' | 'row-spread' | 'measurement-model-divergence';
+export type GeometryFindingKind =
+  | 'alignment-rail'
+  | 'row-spread'
+  | 'cross-family'
+  | 'measurement-model-divergence';
 
 export type GeometryFinding = Readonly<{
   key: string;
@@ -813,9 +817,14 @@ export function observeGeometryCaptures(
         if (!blockCandidates.has(key)) blockCandidates.set(key, candidate);
       }
     }
-    const blockRails = discoverBlockAlignmentRails([...blockCandidates.values()], {
-      deviceScaleFactor: capture.deviceScaleFactor,
-    });
+    const blockRails = discoverBlockAlignmentRails(
+      [...blockCandidates.values()].map((candidate) =>
+        candidate.scope === undefined && candidate.sectionScope
+          ? { ...candidate, scope: candidate.sectionScope }
+          : candidate
+      ),
+      { deviceScaleFactor: capture.deviceScaleFactor }
+    );
 
     return {
       captureId: capture.captureId,
@@ -864,7 +873,12 @@ export function alignmentFindingKey(
     locator: GeometryStableLocator;
     anchor: GeometryExplainedAnchor;
     axis?: SemanticAlignmentAxis;
-    /** A two-member row is one spread, keyed by the row rather than a member. */
+    /**
+     * A two-member row is one spread, keyed by the row rather than a member; a
+     * `cross-family` outlier is the same element a row Y finding would name, so
+     * the kind is what keeps the two questions apart. No coordinate, scope name
+     * or accessible name ever enters here.
+     */
     kind?: GeometryFindingKind;
   }>
 ): string {
@@ -874,6 +888,7 @@ export function alignmentFindingKey(
     locatorIdentity(input.locator),
     axisTerm,
     ...(input.kind === 'row-spread' ? ['row-spread'] : []),
+    ...(input.kind === 'cross-family' ? ['cross-family'] : []),
   ]);
 }
 
@@ -1640,6 +1655,129 @@ export function selectGeometryVerdictAnchor(rails: readonly DiscoveredBlockRail[
   return null;
 }
 
+/**
+ * A label reads as `role \u201crow title\u201d` exactly when the accessible name
+ * describes the row's contents rather than the control. That is a display
+ * decision now that identity never reads a name at all.
+ */
+function geometryRepeatedRowLabelling(
+  captures: GeometryCaptureArtifact
+): (
+  locator: GeometryStableLocator,
+  naming: GeometryCandidateNaming | undefined,
+  surfaceFamily: GeometrySurfaceFamily
+) => boolean {
+  const repeatedRowFamilies = collectRepeatedGeometryRowFamilies(captures);
+  return (locator, naming, surfaceFamily) =>
+    locator.name !== undefined &&
+    locator.rowFamily !== undefined &&
+    (repeatedRowFamilies.get(surfaceFamily)?.has(locator.rowFamily) ?? false) &&
+    isGeometryContentAggregatedName(locator, naming);
+}
+
+/** One member of a cross-family rail, labelled and identified as a finding would be. */
+export type GeometryCrossFamilyProposalMember = Readonly<{
+  /** Coordinate-free structural identity: how a rail is matched across captures. */
+  identity: string;
+  locator: GeometryStableLocator;
+  /** The key this member carries as a finding once a second capture agrees. */
+  findingKey: string;
+  member: GeometryRowMember;
+}>;
+
+/**
+ * One `cross-family` rail ONE capture proposes. Nothing but the rendering says
+ * these primitives belong on a line together, and one capture agreeing is a
+ * coincidence, so a single capture never promotes one: the report shows the
+ * proposal, and `createGeometryFindings` decides which outliers survive.
+ */
+export type GeometryCrossFamilyProposal = Readonly<{
+  captureId: string;
+  surfaceFamily: GeometrySurfaceFamily;
+  rail: DiscoveredBlockRail;
+  line: number;
+  normalizedLine: number;
+  /** Positionally aligned with `rail.members`. */
+  members: readonly GeometryCrossFamilyProposalMember[];
+}>;
+
+/**
+ * Label and identify every `cross-family` rail the observation proposes. ONE
+ * labelling pipeline: a report card prints exactly what a finding would, so the
+ * two can never disagree about a member's name, its offset, or the key it would
+ * carry.
+ *
+ * A rail with a member discovery cannot name structurally is dropped: it could
+ * never be recognised in the next capture, so it could never earn a finding.
+ */
+export function collectGeometryCrossFamilyProposals(
+  captures: GeometryCaptureArtifact,
+  observations: GeometryObservationArtifact
+): readonly GeometryCrossFamilyProposal[] {
+  const captureById = new Map(captures.captures.map((capture) => [capture.captureId, capture]));
+  const aggregatedRowFamilies = collectAggregatedGeometryRowFamilies(captures);
+  const labelsAsRepeatedRow = geometryRepeatedRowLabelling(captures);
+  type RailMember = DiscoveredBlockRail['members'][number] &
+    Partial<GeometryCapturedBlockCandidate>;
+  return observations.captures.flatMap((captureObservation) => {
+    const viewportHeight = captureById.get(captureObservation.captureId)?.viewport.height;
+    return (captureObservation.blockRails ?? [])
+      .filter((rail) => rail.evidence === 'cross-family')
+      .flatMap((rail): GeometryCrossFamilyProposal[] => {
+        const railMembers = rail.members as readonly RailMember[];
+        const locators = railMembers.map((member) => member.locator);
+        if (locators.some((locator) => locator === undefined)) return [];
+        const members = railMembers.map((member, index): GeometryCrossFamilyProposalMember => {
+          const raw = locators[index] as GeometryStableLocator;
+          const locator = geometryIdentityLocator(raw, {
+            aggregatedRowFamilies: aggregatedRowFamilies.get(captureObservation.surfaceFamily),
+            ...(member.sectionScope ? { section: member.sectionScope } : {}),
+          });
+          return {
+            identity: locatorIdentity(locator),
+            locator,
+            findingKey: alignmentFindingKey({
+              surfaceFamily: captureObservation.surfaceFamily,
+              locator,
+              anchor: 'visual-center',
+              axis: 'y',
+              kind: 'cross-family',
+            }),
+            member: {
+              label: geometryFindingLabel(raw, member.label ?? member.elementId, {
+                ...(member.naming ? { naming: member.naming } : {}),
+                repeatedRow: labelsAsRepeatedRow(
+                  raw,
+                  member.naming,
+                  captureObservation.surfaceFamily
+                ),
+              }),
+              primitiveId: member.primitiveId ?? member.elementId,
+              ...(member.kind ? { kind: member.kind } : {}),
+              coordinate: member.coordinate,
+              offset: member.coordinate - rail.line,
+              outlier: member.outlier,
+              xStart: member.xStart,
+              xEnd: member.xEnd,
+              yStart: member.yStart,
+              yEnd: member.yEnd,
+            },
+          };
+        });
+        return [
+          {
+            captureId: captureObservation.captureId,
+            surfaceFamily: captureObservation.surfaceFamily,
+            rail,
+            line: rail.line,
+            normalizedLine: viewportHeight ? Number((rail.line / viewportHeight).toFixed(4)) : 0,
+            members,
+          },
+        ];
+      });
+  });
+}
+
 export function createGeometryFindings(
   captures: GeometryCaptureArtifact,
   observations: GeometryObservationArtifact
@@ -1714,22 +1852,8 @@ export function createGeometryFindings(
     }
   }
 
-  const repeatedRowFamilies = collectRepeatedGeometryRowFamilies(captures);
   const aggregatedRowFamilies = collectAggregatedGeometryRowFamilies(captures);
-  /**
-   * A label reads as `role \u201crow title\u201d` exactly when the accessible name
-   * describes the row's contents rather than the control. That is a display
-   * decision now that identity never reads a name at all.
-   */
-  const labelsAsRepeatedRow = (
-    locator: GeometryStableLocator,
-    naming: GeometryCandidateNaming | undefined,
-    surfaceFamily: GeometrySurfaceFamily
-  ) =>
-    locator.name !== undefined &&
-    locator.rowFamily !== undefined &&
-    (repeatedRowFamilies.get(surfaceFamily)?.has(locator.rowFamily) ?? false) &&
-    isGeometryContentAggregatedName(locator, naming);
+  const labelsAsRepeatedRow = geometryRepeatedRowLabelling(captures);
   const findingGroups = new Map<
     string,
     {
@@ -1739,7 +1863,7 @@ export function createGeometryFindings(
       labels: Map<string, string>;
       anchor: GeometryExplainedAnchor;
       axis: SemanticAlignmentAxis;
-      kind: 'alignment-rail' | 'row-spread';
+      kind: 'alignment-rail' | 'row-spread' | 'cross-family';
       verdictAnchorReason?: 'mixed-kinds' | 'all-text' | 'boxes-only';
       evidence: GeometryFindingEvidence[];
     }
@@ -1842,6 +1966,10 @@ export function createGeometryFindings(
       capture?.viewport.height ? Number((line / capture.viewport.height).toFixed(4)) : 0;
     const railsByRow = new Map<string, DiscoveredBlockRail[]>();
     for (const rail of captureObservation.blockRails ?? []) {
+      // `cross-family` rails answer the same question with weaker evidence, so
+      // they never reach the one-capture path or pick a verdict anchor: they are
+      // aggregated across captures below, at `visual-center`, or not at all.
+      if (rail.evidence !== 'row-instance') continue;
       railsByRow.set(rail.rowId, [...(railsByRow.get(rail.rowId) ?? []), rail]);
     }
     for (const rowRails of railsByRow.values()) {
@@ -2061,6 +2189,93 @@ export function createGeometryFindings(
     }
   }
 
+  /**
+   * `cross-family` rails. Nothing but the rendering says these primitives share
+   * a line, and one capture agreeing is a coincidence: the SAME member set has
+   * to form the rail, and the same member has to leave the line in the same
+   * direction, in two captures at least. The rail itself is never a finding —
+   * its outliers are, one finding per element, keyed structurally like every
+   * other Y finding and told apart from the row-instance question by its kind.
+   *
+   * Members are matched between captures by structural identity, never by a
+   * coordinate: a line that moved as a whole is still the same line.
+   */
+  const railsByMemberSet = new Map<string, GeometryCrossFamilyProposal[]>();
+  for (const proposal of collectGeometryCrossFamilyProposals(captures, observations)) {
+    const key = `${proposal.surfaceFamily}\u0000${proposal.members
+      .map((member) => member.identity)
+      .sort()
+      .join('\u0001')}`;
+    railsByMemberSet.set(key, [...(railsByMemberSet.get(key) ?? []), proposal]);
+  }
+  for (const proposals of railsByMemberSet.values()) {
+    if (new Set(proposals.map((proposal) => proposal.captureId)).size < 2) continue;
+    const outlierIdentities = [
+      ...new Set(
+        proposals.flatMap((proposal) =>
+          proposal.members.flatMap((member) => (member.member.outlier ? [member.identity] : []))
+        )
+      ),
+    ].sort();
+    for (const identity of outlierIdentities) {
+      const missed = new Map<
+        string,
+        Readonly<{
+          proposal: GeometryCrossFamilyProposal;
+          member: GeometryCrossFamilyProposalMember;
+        }>
+      >();
+      for (const proposal of proposals) {
+        const member = proposal.members.find((candidate) => candidate.identity === identity);
+        if (!member?.member.outlier) continue;
+        if (!missed.has(proposal.captureId)) missed.set(proposal.captureId, { proposal, member });
+      }
+      if (missed.size < 2) continue;
+      // One element, one direction. An element that reads high in one capture
+      // and low in the next is measuring something that moves, not a line it
+      // consistently misses.
+      const directions = new Set(
+        [...missed.values()].map(({ member }) => Math.sign(member.member.offset))
+      );
+      if (directions.size !== 1) continue;
+      const sightings = [...missed.values()].sort((left, right) =>
+        left.proposal.captureId.localeCompare(right.proposal.captureId)
+      );
+      const first = sightings[0];
+      if (!first) continue;
+      const key = first.member.findingKey;
+      const group = findingGroups.get(key) ?? {
+        surfaceFamily: first.proposal.surfaceFamily,
+        locator: first.member.locator,
+        labels: new Map<string, string>(),
+        anchor: 'visual-center' as GeometryExplainedAnchor,
+        axis: 'y' as SemanticAlignmentAxis,
+        kind: 'cross-family' as const,
+        evidence: [],
+      };
+      for (const { proposal, member } of sightings) {
+        if (group.evidence.some((item) => item.captureId === proposal.captureId)) continue;
+        group.labels.set(proposal.captureId, member.member.label);
+        group.evidence.push({
+          captureId: proposal.captureId,
+          scopeKey: proposal.rail.rowId,
+          rowId: proposal.rail.rowId,
+          coordinate: member.member.coordinate,
+          line: proposal.line,
+          normalizedLine: proposal.normalizedLine,
+          offset: member.member.offset,
+          yStart: member.member.yStart,
+          yEnd: member.member.yEnd,
+          xStart: member.member.xStart,
+          xEnd: member.member.xEnd,
+          anchor: 'visual-center',
+          rowMembers: proposal.members.map((item) => item.member),
+        });
+      }
+      findingGroups.set(key, group);
+    }
+  }
+
   const findings: GeometryFinding[] = [...findingGroups.entries()].map(([key, group]) => {
     const offset =
       group.evidence.reduce((sum, evidence) => sum + evidence.offset, 0) / group.evidence.length;
@@ -2263,7 +2478,7 @@ export function compareMarkerAlignmentsToBlockRails(
       alignment.members.flatMap((member) => (member.primitiveId ? [member.primitiveId] : []))
     );
     const scored = blockRails
-      .filter((rail) => rail.anchor === alignment.anchor)
+      .filter((rail) => rail.evidence === 'row-instance' && rail.anchor === alignment.anchor)
       .map((rail) => {
         const members = rail.members as readonly (DiscoveredBlockRail['members'][number] &
           Partial<GeometryCapturedBlockCandidate>)[];
@@ -2435,8 +2650,15 @@ export function assessGeometryMarkerRemoval(
   captures: GeometryCaptureArtifact,
   observations: GeometryObservationArtifact
 ): GeometryMarkerRemovalReadiness {
+  // A marker rule names the members of ONE DOM row, so only a row-instance rail
+  // can answer whether discovery reproduced it. A `cross-family` rail reaching
+  // the same element is a different, weaker claim, and letting it stand in would
+  // report a marker as removable on evidence the marker never had.
   const blockRailsByCapture = new Map(
-    observations.captures.map((capture) => [capture.captureId, capture.blockRails ?? []])
+    observations.captures.map((capture) => [
+      capture.captureId,
+      (capture.blockRails ?? []).filter((rail) => rail.evidence === 'row-instance'),
+    ])
   );
   const quantization = Math.max(
     ...captures.captures.map((capture) =>
