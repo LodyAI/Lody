@@ -11,9 +11,11 @@ long conversation never materializes every turn through a Mirror.
 ## Contracts
 
 - `index(i)` is always loaded and comes from the turn map's shallow value plus
-  `summary`, `itemCount` and `planCount`. Add a field to `TURN_INDEX_FIELDS`
-  only when a reader that must stay O(1) needs it; every field costs one
-  shallow read per turn at open.
+  `summary`, `itemCount` (assistant turns only) and `planCount` (when a plan
+  exists). Open cost is two wasm calls per turn plus one per assistant turn
+  (~20 µs, ~50 ms for 2,400 turns); add a field to `TURN_INDEX_FIELDS` only
+  when a reader that must stay O(1) needs it, and never one that needs
+  another container read per turn.
 - `turn(i)` is synchronous only for hydrated turns. Hydration is per-turn
   `toJSON()`; the LRU never evicts the tail (`tailKeep`), a `retain()`ed
   range, or the range an `ensureRange()` call just asked for. A caller that

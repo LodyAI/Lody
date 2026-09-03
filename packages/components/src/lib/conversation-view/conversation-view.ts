@@ -20,6 +20,11 @@ export const TURN_INDEX_FIELDS = [
 
 export type TurnIndexRow = Pick<SessionHistory, (typeof TURN_INDEX_FIELDS)[number]> & {
   summary?: TurnSummary;
+  /**
+   * Read for assistant turns only: the empty-turn rule and the height
+   * estimate need it there, and each read is one more wasm call per turn
+   * at open. User turns always carry their prompt.
+   */
   itemCount?: number;
   planCount?: number;
 };
@@ -151,17 +156,25 @@ export function createConversationViewFromDoc(
         ? (doc.getContainerById(summary as never)?.toJSON() as TurnSummary | undefined)
         : summary;
     }
-    const itemCount = containerLength(doc, shallow.items);
-    if (itemCount !== undefined) row.itemCount = itemCount;
-    const planCount = containerLength(doc, shallow.plan);
-    if (planCount !== undefined) row.planCount = planCount;
+    if (shallow.role === 'assistant') {
+      const itemCount = containerLength(doc, shallow.items);
+      if (itemCount !== undefined) row.itemCount = itemCount;
+    }
+    if (shallow.plan !== undefined) {
+      const planCount = containerLength(doc, shallow.plan);
+      if (planCount !== undefined) row.planCount = planCount;
+    }
     return row as TurnIndexRow;
   };
+
+  /** Position of every container id in `ids`; rebuilt with the index. */
+  let positionByCid = new Map<string, number>();
 
   const rebuildIndex = () => {
     const shallow = list.getShallowValue() as unknown[];
     const nextIds: (string | null)[] = new Array(shallow.length);
     const nextRows: (TurnIndexRow | undefined)[] = new Array(shallow.length);
+    const nextPositionByCid = new Map<string, number>();
     positionById.clear();
     for (let i = 0; i < shallow.length; i += 1) {
       const cid = shallow[i];
@@ -171,11 +184,12 @@ export function createConversationViewFromDoc(
         continue;
       }
       nextIds[i] = cid;
+      nextPositionByCid.set(cid, i);
       // Reuse the previous row when the container did not move so a structural
       // change costs one shallow read for the list, not one per turn.
-      const previousPosition = ids.indexOf(cid);
+      const previousPosition = positionByCid.get(cid);
       const row =
-        previousPosition >= 0 && previousPosition === i
+        previousPosition === i
           ? (indexRows[previousPosition] ?? readIndexRow(cid))
           : readIndexRow(cid);
       nextRows[i] = row;
@@ -194,6 +208,7 @@ export function createConversationViewFromDoc(
     }
     ids = nextIds;
     indexRows = nextRows;
+    positionByCid = nextPositionByCid;
   };
 
   const materialize = (i: number): SessionHistory | undefined => {
@@ -230,8 +245,8 @@ export function createConversationViewFromDoc(
     if (hydrated.size <= maxHydrated) return;
     const candidates: { cid: string; lastUsed: number }[] = [];
     for (const [cid, entry] of hydrated) {
-      const position = ids.indexOf(cid);
-      if (position >= 0 && isProtected(position, keep)) continue;
+      const position = positionByCid.get(cid);
+      if (position !== undefined && isProtected(position, keep)) continue;
       candidates.push({ cid, lastUsed: entry.lastUsed });
     }
     candidates.sort((left, right) => left.lastUsed - right.lastUsed);
