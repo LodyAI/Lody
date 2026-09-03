@@ -6,7 +6,8 @@
 export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'consumed';
+  delivery: 'absent' | 'pending' | 'attempting' | 'consumed';
+  deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
   archived: boolean;
@@ -25,6 +26,9 @@ export type OrchestrationModelAction =
   | 'enqueue_user'
   | 'schedule'
   | 'complete_turn'
+  | 'fail_turn'
+  | 'interrupt_turn'
+  | 'restart'
   | 'archive'
   | 'restore'
   | 'delete_configuration';
@@ -33,6 +37,7 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   operation: 'absent',
   targetInput: 'absent',
   delivery: 'absent',
+  deliveryAttempts: 0,
   activeTurn: 'none',
   queuedUsers: 0,
   archived: false,
@@ -93,15 +98,42 @@ export const stepOrchestrationModel = (
         next.queuedUsers -= 1;
         next.activeTurn = 'user';
       } else if (next.delivery === 'pending') {
-        next.completionTurnWrites += 1;
-        next.delivery = 'consumed';
-        if (next.configurationAvailable) {
+        if (!next.configurationAvailable || next.deliveryAttempts >= 2) {
+          next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+          next.delivery = 'consumed';
+        } else {
+          next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+          next.delivery = 'attempting';
+          if (next.deliveryAttempts === 0) {
+            next.chainDepth += 1;
+          }
+          next.deliveryAttempts += 1;
           next.activeTurn = 'delivery';
-          next.chainDepth += 1;
         }
       }
       break;
     case 'complete_turn':
+      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+        next.delivery = 'consumed';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'fail_turn':
+      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+        next.delivery = 'consumed';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'interrupt_turn':
+      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+        next.delivery = 'pending';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'restart':
+      if (next.delivery === 'attempting') {
+        next.delivery = 'pending';
+      }
       next.activeTurn = 'none';
       break;
     case 'archive':
@@ -130,8 +162,11 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.operation === 'finished' && state.targetInput === 'retry_scheduled') {
     throw new Error('a terminal Operation retained a materialization retry');
   }
-  if (state.activeTurn === 'delivery' && state.delivery !== 'consumed') {
-    throw new Error('a Delivery continuation started before the Delivery was claimed');
+  if (state.activeTurn === 'delivery' && state.delivery !== 'attempting') {
+    throw new Error('a Delivery continuation is active without a durable attempt claim');
+  }
+  if (state.deliveryAttempts > 2) {
+    throw new Error('a Delivery exceeded its bounded attempt count');
   }
   if (state.chainDepth > 5) {
     throw new Error('machine-originated chain exceeded the fixed depth cap');
@@ -149,6 +184,9 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'enqueue_user',
     'schedule',
     'complete_turn',
+    'fail_turn',
+    'interrupt_turn',
+    'restart',
     'archive',
     'restore',
     'delete_configuration',

@@ -3176,7 +3176,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
         status: z.literal('not_started'),
         reason: z
           .object({
-            code: z.literal('CONFIGURATION_UNAVAILABLE'),
+            code: z.enum(['CONFIGURATION_UNAVAILABLE', 'DELIVERY_ATTEMPTS_EXHAUSTED']),
             message: z.string(),
           })
           .strict(),

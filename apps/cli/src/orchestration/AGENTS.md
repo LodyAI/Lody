@@ -53,9 +53,13 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
   Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
-  dispatch ownership. Delivery consumption must match that exact id with a
-  terminal `finished=true` or numeric `endedAt` footprint; eager entry creation,
-  history position, or an unrelated later Assistant Turn is not completion evidence.
+  dispatch ownership. Assistant `finished`/`endedAt` is never Delivery completion
+  evidence: teardown writes the same terminal footprint. The machine-local Delivery
+  row owns a fenced attempt token; only the execution service's durable handled
+  callback may atomically acknowledge and consume it. Cancellation/interruption
+  releases the attempt without acknowledging it. At most one recovery attempt is
+  allowed; a second interruption records `DELIVERY_ATTEMPTS_EXHAUSTED` and consumes
+  the Delivery without invoking ACP again.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

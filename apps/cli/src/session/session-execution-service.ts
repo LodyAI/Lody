@@ -229,6 +229,7 @@ type TurnRuntimeState = {
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
   prePromptFailureRecorded: boolean;
+  handledOutcome?: 'completed' | 'failed';
   cancelRequested: boolean;
   cancelFinalized: boolean;
   interruptRequested: boolean;
@@ -315,6 +316,7 @@ type VisibleSessionTurnOptions = {
    * mutate user dispatch status or pointers.
    */
   assistantEntryParentTurnId?: string;
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
   /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
@@ -342,6 +344,16 @@ type SessionDispatchOptions = {
    * racing a user dispatch between the idle check and the history write.
    */
   onTurnClaimed?: () => Promise<void>;
+  /**
+   * Delivery acknowledgement hook. It runs after terminal history bookkeeping,
+   * and distinguishes retryable interruption from a durably handled outcome.
+   */
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
+};
+
+export type SessionTurnSettlement = {
+  turnId: string;
+  outcome: 'completed' | 'failed' | 'interrupted';
 };
 
 export type PreparedSessionDispatchRequest =
@@ -2816,11 +2828,16 @@ export class SessionExecutionService {
 
     const fiber = Effect.runFork(program);
     runtime.fiber = fiber;
+    let settlement: SessionTurnSettlement | undefined;
     try {
       await this.awaitTurnFiber(fiber, sessionId, turnId);
       if (outcome === 'unknown') {
         outcome = 'completed';
       }
+      settlement = {
+        turnId,
+        outcome: runtime.handledOutcome ?? 'completed',
+      };
     } catch (error) {
       if (isSessionTurnHalted(error)) {
         outcome = `halted-${error.reason}`;
@@ -2830,10 +2847,8 @@ export class SessionExecutionService {
           turnId: runtime.turnId,
           reason: error.reason,
         });
-        return outcome;
-      }
-
-      if (
+        settlement = { turnId, outcome: 'failed' };
+      } else if (
         isSessionTurnCancelled(error) ||
         runtime.cancelFinalized ||
         runtime.cancelRequested ||
@@ -2841,25 +2856,29 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
-        return outcome;
+        settlement = { turnId, outcome: 'interrupted' };
+      } else {
+        await this.handleVisibleTurnUnhandledError({
+          sessionId,
+          sessionDoc,
+          userTurnId: runtime.userTurnId,
+          runtime,
+          error,
+          code: effectiveErrorContext.code,
+          describe: effectiveErrorContext.describe,
+          onUnhandledError: effectiveErrorContext.onUnhandledError,
+        });
+        outcome = 'unhandled-error-recorded';
+        settlement = { turnId, outcome: 'failed' };
       }
-
-      await this.handleVisibleTurnUnhandledError({
-        sessionId,
-        sessionDoc,
-        userTurnId: runtime.userTurnId,
-        runtime,
-        error,
-        code: effectiveErrorContext.code,
-        describe: effectiveErrorContext.describe,
-        onUnhandledError: effectiveErrorContext.onUnhandledError,
-      });
-      outcome = 'unhandled-error-recorded';
     } finally {
       if (!runtime.promptStarted) {
         this.deps.clearConversationTurn(sessionId, runtime.turnId);
       }
       span.end({ outcome, turnId });
+    }
+    if (settlement && options.onTurnSettled) {
+      await options.onTurnSettled(settlement);
     }
     return outcome;
   }
@@ -3964,6 +3983,7 @@ export class SessionExecutionService {
                 })
             )
           );
+          runtime.handledOutcome = 'failed';
         } else if (completedUserTurnId) {
           yield* self.tryPromise(() =>
             traceAsync(
@@ -3977,6 +3997,9 @@ export class SessionExecutionService {
               async () => await self.setDispatchHandled(sessionId, sessionDoc, completedUserTurnId)
             )
           );
+          runtime.handledOutcome = 'completed';
+        } else {
+          runtime.handledOutcome = 'completed';
         }
 
         yield* abortIfCancelled();
@@ -4012,6 +4035,7 @@ export class SessionExecutionService {
         ...(dispatchOptions?.dispatchSource === 'delivery'
           ? { assistantEntryParentTurnId: userTurnId }
           : {}),
+        ...(dispatchOptions?.onTurnSettled ? { onTurnSettled: dispatchOptions.onTurnSettled } : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
