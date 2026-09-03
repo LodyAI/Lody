@@ -1,11 +1,12 @@
 import { ChevronsUpDown, Loader2 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
 export type MobileNativeSelectOption<T extends string = string> = {
   value: T;
   label: string;
+  group?: string;
   disabled?: boolean;
 };
 
@@ -18,6 +19,7 @@ export type MobileNativeSelectProps<T extends string = string> = {
   disabled?: boolean;
   loading?: boolean;
   loadingText?: ReactNode;
+  showIndicator?: boolean;
   className?: string;
 };
 
@@ -34,15 +36,28 @@ export function MobileNativeSelect<T extends string = string>({
   disabled = false,
   loading = false,
   loadingText,
+  showIndicator = true,
   className,
 }: MobileNativeSelectProps<T>) {
   const hasAlternative = options.some((option) => !option.disabled && option.value !== value);
   const isInteractive = !disabled && !loading && hasAlternative;
+  const groupedOptions = options.reduce<
+    Array<{ label: string | null; options: MobileNativeSelectOption<T>[] }>
+  >((groups, option) => {
+    const label = option.group ?? null;
+    const existing = groups.find((group) => group.label === label);
+    if (existing) {
+      existing.options.push(option);
+    } else {
+      groups.push({ label, options: [option] });
+    }
+    return groups;
+  }, []);
 
   return (
     <div
       className={cn(
-        'relative flex h-9 w-full select-none items-center gap-2 rounded-md px-3 py-1 text-left text-sm font-medium',
+        'relative flex h-8 w-full select-none items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm font-medium',
         'text-foreground/85 transition-colors hover:text-foreground',
         (disabled || loading) && 'opacity-60',
         className
@@ -58,7 +73,7 @@ export function MobileNativeSelect<T extends string = string>({
           triggerContent
         )}
       </span>
-      {isInteractive ? (
+      {isInteractive && showIndicator ? (
         <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
       ) : null}
       <select
@@ -74,11 +89,20 @@ export function MobileNativeSelect<T extends string = string>({
         <option value="" disabled>
           {ariaLabel}
         </option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value} disabled={option.disabled}>
-            {option.label}
-          </option>
-        ))}
+        {groupedOptions.map((group) => {
+          const optionNodes = group.options.map((option) => (
+            <option key={option.value} value={option.value} disabled={option.disabled}>
+              {option.label}
+            </option>
+          ));
+          return group.label ? (
+            <optgroup key={group.label} label={group.label}>
+              {optionNodes}
+            </optgroup>
+          ) : (
+            <Fragment key="ungrouped">{optionNodes}</Fragment>
+          );
+        })}
       </select>
     </div>
   );

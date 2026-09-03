@@ -225,8 +225,15 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   exports the legacy `MobileModelPickerLabel` helpers for any remaining chip
   faces; `mobile-fast-plan-toggles.tsx` is no longer mounted on new-chat
   (Plan/Fast live inside the run-config sheet).
-- New-chat target rows (machine, project/repository, and branch) use the backgroundless
-  `mobile-native-select.tsx` face with `ChevronsUpDown`; its transparent real `<select>`
+- New-chat puts the machine and compact Work/Chat switch on one row. Work shows one unified
+  Local-project/GitHub-repository picker (matching desktop); its native options use Local/GitHub
+  groups instead of appending a source suffix to every project name. Chat hides the entire project
+  section. Project, optional branch, and the local-only Worktree checkbox share one row; direct local
+  files are the implicit unchecked state rather than a second visible mode. The project trigger fits
+  short names, caps long ones, and omits the chevrons so Branch follows it without a false spacer;
+  Branch also fits short names but may consume the flexible middle for a long ref, while the Worktree
+  checkbox stays pinned to the row's right edge.
+  Target selectors use the backgroundless `mobile-native-select.tsx` face; its transparent real `<select>`
   owns the whole hit target so touch opens the platform option picker. Do not route these
   rows back through the app-owned inline picker. When no enabled alternative to the
   current value exists, hide the chevrons and disable the select; the face has no focus

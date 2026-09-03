@@ -11,17 +11,15 @@ export type MobileNewChatSheetLabels = {
   title?: string;
   description?: string;
   closeAriaLabel?: string;
+  /** @deprecated Target rows no longer render separate labels. */
   machineLabel?: string;
+  /** @deprecated Work / Chat is rendered inline with the machine. */
   contextTypeLabel?: string;
-  /** Primary per-type row label — just the project / repo name now
-     (branch lives on its own row, see `branchLabel`). Parent picks
-     the wording (e.g. "项目" / "仓库"). */
+  /** @deprecated The unified project control identifies itself. */
   perTypeLabel?: string;
-  /** Branch row label, shown on the row below the project/repo when
-     a branch picker is wired. Defaults to "分支". */
+  /** @deprecated Branch is rendered beside the project. */
   branchLabel?: string;
-  /** Secondary per-type row label, used by local context for the worktree
-     mode pill. Optional — collapsed when `secondaryPerTypeNode` is null. */
+  /** @deprecated Workdir mode is rendered without a separate label. */
   secondaryPerTypeLabel?: string;
 };
 
@@ -32,23 +30,15 @@ export type MobileNewChatSheetProps = {
 
 export type MobileNewChatSheetContentProps = {
   labels?: MobileNewChatSheetLabels;
-  /** Row 1: machine pill / selector. */
+  /** Target row: machine selector on the left. */
   machineNode: ReactNode;
-  /** Row 2: project type (3-icon) pill switcher. */
+  /** Target row: compact Work / Chat switcher on the right. */
   contextTypeNode: ReactNode;
-  /** Row 3: the project (local) or repo (github) picker on its own
-     row — branch moved to its own row below so neither chip gets
-     truncated on narrow phones. Pass `null` to collapse (chat
-     context has no target). */
+  /** Unified local-project / GitHub-repository picker. Pass `null` for Chat. */
   perTypeNode?: ReactNode | null;
-  /** Row 4 (optional): branch picker, only shown when a project /
-     repo with branches is selected. Splitting it off from
-     `perTypeNode` was the user's call — easier to read at a glance
-     than two side-by-side chips. */
+  /** Optional branch picker rendered beside the unified project picker. */
   branchNode?: ReactNode | null;
-  /** Row 5 (local-only): workdir mode toggle (本地文件 / 新工作树).
-     Renders only when the caller hands a node — github and chat
-     contexts pass `null`. */
+  /** Local-only Worktree toggle rendered inline with the project target. */
   secondaryPerTypeNode?: ReactNode | null;
   /** The composer itself — already wired with footer / bottomBar slots. */
   composer: ReactNode;
@@ -73,12 +63,10 @@ export type MobileNewChatSheetContentProps = {
 /**
  * Bottom sheet that hosts the "new chat" composer flow on mobile home.
  *
- * Layout stacks top-to-bottom per the design comp: machine → project
- * type → per-type selectors (optionally split into project+branch +
- * worktree on local) → composer (footer holds the same
+ * Layout stacks top-to-bottom per the design comp: machine + Work/Chat →
+ * unified project + optional branch / Worktree toggle → composer (footer holds the same
  * `MobileSessionRunConfig` face as the in-session chat). Each row
- * carries a short label (机器 / 类型 / 项目 / 模式) so the surface reads
- * like a form rather than a tag cloud.
+ * stays compact and lets the selected values provide their own context.
  */
 export function MobileNewChatSheet({
   open,
@@ -148,11 +136,6 @@ export function MobileNewChatSheetContent({
   const title = labels.title ?? '新建对话';
   const description = labels.description;
   const closeAriaLabel = labels.closeAriaLabel ?? 'Close';
-  const machineLabel = labels.machineLabel ?? '机器';
-  const contextTypeLabel = labels.contextTypeLabel ?? '类型';
-  const perTypeLabel = labels.perTypeLabel ?? '项目';
-  const branchLabel = labels.branchLabel ?? '分支';
-  const secondaryPerTypeLabel = labels.secondaryPerTypeLabel ?? '模式';
   /* Keep the focused composer centered above the native keyboard so the
      footer run-config control isn't left hidden. */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -218,33 +201,32 @@ export function MobileNewChatSheetContent({
             ...scrollAreaStyle,
           }}
         >
-          {/* Per-type + secondary rows mount / unmount as the user
-             switches context type (e.g. picking Chat collapses the
-             项目 row, picking Local adds the 模式 row).
+          {/* The project target row mounts / unmounts as the user switches
+             between Work and Chat. Local and GitHub share one project picker.
              `AnimatePresence` + height-animated wrappers slide the
              rows in / out so the surrounding stack ripples smoothly
              rather than snapping. */}
           <div className="flex flex-col pb-2 pt-1">
             <AnimatedSheetRow alwaysOn>
-              <Row label={machineLabel}>{machineNode}</Row>
-            </AnimatedSheetRow>
-            <AnimatedSheetRow alwaysOn>
-              <Row label={contextTypeLabel}>{contextTypeNode}</Row>
+              <TargetRow>
+                <div className="min-w-0 flex-1">{machineNode}</div>
+                <div className="shrink-0">{contextTypeNode}</div>
+              </TargetRow>
             </AnimatedSheetRow>
             <AnimatePresence initial={false}>
-              {perTypeNode ? (
+              {perTypeNode || secondaryPerTypeNode ? (
                 <AnimatedSheetRow key="per-type">
-                  <Row label={perTypeLabel}>{perTypeNode}</Row>
-                </AnimatedSheetRow>
-              ) : null}
-              {branchNode ? (
-                <AnimatedSheetRow key="branch">
-                  <Row label={branchLabel}>{branchNode}</Row>
-                </AnimatedSheetRow>
-              ) : null}
-              {secondaryPerTypeNode ? (
-                <AnimatedSheetRow key="secondary-per-type">
-                  <Row label={secondaryPerTypeLabel}>{secondaryPerTypeNode}</Row>
+                  <TargetRow>
+                    <div
+                      className={cn('min-w-0 shrink', branchNode ? 'max-w-[42%]' : 'max-w-[70%]')}
+                    >
+                      {perTypeNode}
+                    </div>
+                    {branchNode ? <div className="min-w-0 flex-1">{branchNode}</div> : null}
+                    {secondaryPerTypeNode ? (
+                      <div className="ml-auto shrink-0 self-center">{secondaryPerTypeNode}</div>
+                    ) : null}
+                  </TargetRow>
                 </AnimatedSheetRow>
               ) : null}
             </AnimatePresence>
@@ -297,31 +279,12 @@ function AnimatedSheetRow({
   );
 }
 
-/* Single labelled row.
-   Label sits left at fixed width; value column flexes to fill the rest
-   so chips render in the remaining width. The whole row is wrapped in a
-   `MobileInlinePickerRowSlot` so any picker dropped inside the value
-   column portals its expansion drawer into the slot rendered just
-   below the row — full row width, escaping the chip's own column.
-   That gives the "list under the entire row" behavior the design comp
-   asks for even when the row holds two side-by-side chips (e.g.
-   project + branch). */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/* Compact target row. The slot still lets a richer picker project a full-width
+   panel below the row if a host supplies one instead of a native select. */
+function TargetRow({ children }: { children: ReactNode }) {
   return (
     <MobileInlinePickerRowSlot>
-      <div className="flex min-w-0 items-stretch gap-3 rounded-xl px-3 py-1">
-        {/* Fixed-width label column so every row's value column starts
-           at the same x regardless of the label's intrinsic width.
-           Without this, "Machine" / "Type" / "Project" / "Branch" /
-           "Mode" each push the value chip to a different x in
-           English (Chinese labels are uniform 2 chars so it accidentally
-           lined up before). `w-16` (64px) fits the longest English
-           label at 0.875rem without wrapping. */}
-        <span className="w-16 shrink-0 self-center text-sm font-semibold leading-5 text-muted-foreground">
-          {label}
-        </span>
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
+      <div className="flex min-w-0 items-stretch gap-1 rounded-xl px-1 py-0.5">{children}</div>
     </MobileInlinePickerRowSlot>
   );
 }

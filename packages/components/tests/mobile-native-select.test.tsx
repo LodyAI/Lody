@@ -74,4 +74,49 @@ describe('MobileNativeSelect', () => {
     expect(container.querySelector('svg.lucide-chevrons-up-down')).toBeNull();
     expect(select?.closest('div')?.className).not.toMatch(/\b(?:border|ring)-/);
   });
+
+  it('can hide the visual indicator without disabling the native select', async () => {
+    await act(async () => {
+      root.render(
+        <MobileNativeSelect
+          value="project-1"
+          onChange={() => undefined}
+          options={[
+            { value: 'project-1', label: 'Project 1' },
+            { value: 'project-2', label: 'Project 2' },
+          ]}
+          triggerContent={<span>Project 1</span>}
+          ariaLabel="Project"
+          showIndicator={false}
+        />
+      );
+    });
+
+    expect(container.querySelector('select')?.disabled).toBe(false);
+    expect(container.querySelector('svg.lucide-chevrons-up-down')).toBeNull();
+  });
+
+  it('renders grouped options with native optgroups', async () => {
+    await act(async () => {
+      root.render(
+        <MobileNativeSelect
+          value="local:lody"
+          onChange={() => undefined}
+          options={[
+            { value: 'local:lody', label: 'Lody', group: 'Local' },
+            { value: 'github:lody', label: 'LodyAI/Lody', group: 'GitHub' },
+          ]}
+          triggerContent={<span>Lody</span>}
+          ariaLabel="Project"
+        />
+      );
+    });
+
+    const groups = Array.from(container.querySelectorAll('optgroup'));
+    expect(groups.map((group) => group.label)).toEqual(['Local', 'GitHub']);
+    expect(groups.map((group) => group.querySelector('option')?.textContent)).toEqual([
+      'Lody',
+      'LodyAI/Lody',
+    ]);
+  });
 });

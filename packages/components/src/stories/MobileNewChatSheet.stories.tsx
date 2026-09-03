@@ -1,15 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import {
-  ArrowUp,
-  Folder,
-  GitBranch,
-  Github,
-  MessageCircle,
-  Monitor,
-  ShieldCheck,
-  Sparkles,
-} from 'lucide-react';
+import { ArrowUp, Folder, GitBranch, Github, Monitor, ShieldCheck, Sparkles } from 'lucide-react';
 
 import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
 import {
@@ -26,10 +17,9 @@ import {
   MobileModelPickerLabel,
   mobileModelPickerTriggerClassName,
 } from '@/components/mobile/mobile-session-composer-footer';
+import { WorktreeCheckboxPill } from '@/components/shared';
 import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -107,60 +97,51 @@ const permissionOptions: MobileInlinePickerOption[] = [
   },
 ];
 
-function MockContextTypeNode({
-  value,
+function MockWorkChatNode({
+  chat,
   onChange,
 }: {
-  value: 'local' | 'github' | 'chat';
-  onChange: (next: 'local' | 'github' | 'chat') => void;
+  chat: boolean;
+  onChange: (chat: boolean) => void;
 }) {
-  const triggerClassName = cn(
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all',
-    'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
-    'text-muted-foreground'
-  );
   return (
-    <Tabs
-      value={value}
-      onValueChange={(v) => onChange(v as 'local' | 'github' | 'chat')}
-      className="w-full"
-    >
-      <TabsList className="flex h-9 w-full rounded-md bg-muted p-1">
-        <TabsTrigger value="local" className={triggerClassName}>
-          <Folder className="h-3.5 w-3.5" />
-          <span>Local</span>
-        </TabsTrigger>
-        <TabsTrigger value="github" className={triggerClassName}>
-          <Github className="h-3.5 w-3.5" />
-          <span>GitHub</span>
-        </TabsTrigger>
-        <TabsTrigger value="chat" className={triggerClassName}>
-          <MessageCircle className="h-3.5 w-3.5" />
-          <span>Chat</span>
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <div className="flex h-8 items-center rounded-lg bg-muted/70 p-0.5 text-xs font-medium">
+      {(['Work', 'Chat'] as const).map((label) => {
+        const active = label === 'Chat' ? chat : !chat;
+        return (
+          <button
+            key={label}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(label === 'Chat')}
+            className={`h-7 rounded-md px-2.5 ${
+              active ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground'
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-function MockWorkdirModeNode({ contextType }: { contextType: 'local' | 'github' | 'chat' }) {
+function MockWorkdirModeNode({
+  contextType,
+  value,
+  onChange,
+}: {
+  contextType: 'local' | 'github' | 'chat';
+  value: 'local' | 'worktree';
+  onChange: (next: 'local' | 'worktree') => void;
+}) {
   if (contextType !== 'local') return null;
-  const triggerClassName =
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all';
   return (
-    <div className="flex h-9 w-full rounded-md bg-muted p-1">
-      <button type="button" className={cn(triggerClassName, 'text-muted-foreground')}>
-        <Folder className="h-3.5 w-3.5" />
-        <span>本地文件</span>
-      </button>
-      <button
-        type="button"
-        className={cn(triggerClassName, 'bg-background text-foreground shadow-xs')}
-      >
-        <GitBranch className="h-3.5 w-3.5" />
-        <span>新工作树</span>
-      </button>
-    </div>
+    <WorktreeCheckboxPill
+      checked={value === 'worktree'}
+      onCheckedChange={(checked) => onChange(checked ? 'worktree' : 'local')}
+      className="h-7 bg-transparent px-1.5 hover:bg-hover/60"
+    />
   );
 }
 
@@ -239,6 +220,7 @@ function MockComposer({
 function StoryHarness({
   initialOpen = true,
   initialContextType = 'github' as 'local' | 'github' | 'chat',
+  initialBranch = 'main',
   initialModel = 'claude-3.5-sonnet',
   modelPickerOptions = modelOptions,
 }) {
@@ -250,11 +232,30 @@ function StoryHarness({
   const [machine, setMachine] = useState('zx-macbook');
   const [repo, setRepo] = useState('loro-dev/lody');
   const [localProject, setLocalProject] = useState('zx-macbook:lody');
-  const [branch, setBranch] = useState('main');
+  const [branch, setBranch] = useState(initialBranch);
+  const [workdirMode, setWorkdirMode] = useState<'local' | 'worktree'>('worktree');
   const [model, setModel] = useState(initialModel);
   const [thinking, setThinking] = useState('high');
   const [agent, setAgent] = useState('claude-code');
   const [permission, setPermission] = useState('askPermission');
+  const selectedProject =
+    contextType === 'local'
+      ? `local:${localProject}`
+      : contextType === 'github'
+        ? `github:${repo}`
+        : null;
+  const projectOptions: MobileNativeSelectOption[] = [
+    ...localProjectOptions.map((option) => ({
+      ...option,
+      value: `local:${option.value}`,
+      group: 'Local',
+    })),
+    ...githubRepoOptions.map((option) => ({
+      ...option,
+      value: `github:${option.value}`,
+      group: 'GitHub',
+    })),
+  ];
   const handleConfigOptionChange = (configId: string, value: AcpConfigOptionValue) => {
     setConfigOptionValues((prev) => ({ ...prev, [configId]: value }));
   };
@@ -284,43 +285,52 @@ function StoryHarness({
             }
           />
         }
-        contextTypeNode={<MockContextTypeNode value={contextType} onChange={setContextType} />}
+        contextTypeNode={
+          <MockWorkChatNode
+            chat={contextType === 'chat'}
+            onChange={(chat) => setContextType(chat ? 'chat' : 'local')}
+          />
+        }
         perTypeNode={
-          contextType === 'chat' ? null : contextType === 'github' ? (
+          contextType === 'chat' ? null : (
             <MobileNativeSelect
-              value={repo}
-              onChange={setRepo}
-              options={githubRepoOptions}
-              ariaLabel="Repository"
-              triggerContent={
-                <>
-                  <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="truncate">{repo}</span>
-                </>
-              }
-            />
-          ) : (
-            <MobileNativeSelect
-              value={localProject}
-              onChange={setLocalProject}
-              options={localProjectOptions}
+              value={selectedProject}
+              onChange={(value) => {
+                if (value.startsWith('local:')) {
+                  setLocalProject(value.slice('local:'.length));
+                  setContextType('local');
+                } else if (value.startsWith('github:')) {
+                  setRepo(value.slice('github:'.length));
+                  setContextType('github');
+                }
+              }}
+              options={projectOptions}
               ariaLabel="Project"
+              showIndicator={false}
+              className="w-fit max-w-full"
               triggerContent={
                 <>
-                  <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="truncate">{localProject.split(':')[1] ?? 'lody'}</span>
+                  {contextType === 'github' ? (
+                    <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  ) : (
+                    <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  )}
+                  <span className="truncate">
+                    {contextType === 'github' ? repo : (localProject.split(':')[1] ?? 'lody')}
+                  </span>
                 </>
               }
             />
           )
         }
         branchNode={
-          contextType === 'chat' ? null : (
+          contextType === 'github' || (contextType === 'local' && workdirMode === 'worktree') ? (
             <MobileNativeSelect
               value={branch}
               onChange={setBranch}
               options={branchOptions}
               ariaLabel="Branch"
+              className="w-fit max-w-full"
               triggerContent={
                 <>
                   <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -328,10 +338,16 @@ function StoryHarness({
                 </>
               }
             />
-          )
+          ) : null
         }
         secondaryPerTypeNode={
-          contextType === 'local' ? <MockWorkdirModeNode contextType={contextType} /> : null
+          contextType === 'local' ? (
+            <MockWorkdirModeNode
+              contextType={contextType}
+              value={workdirMode}
+              onChange={setWorkdirMode}
+            />
+          ) : null
         }
         composer={
           <MockComposer
@@ -409,6 +425,19 @@ export const LocalContext: Story = {
     composer: null,
   },
   render: () => <StoryHarness initialContextType="local" />,
+};
+
+export const LongBranch: Story = {
+  args: {
+    open: true,
+    onOpenChange: () => {},
+    machineNode: null,
+    contextTypeNode: null,
+    composer: null,
+  },
+  render: () => (
+    <StoryHarness initialContextType="local" initialBranch="feat/audit-mobile-coupling" />
+  ),
 };
 
 export const ChatContext: Story = {

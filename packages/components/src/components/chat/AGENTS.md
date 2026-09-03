@@ -28,8 +28,10 @@
   GitHub sessions keep their branch picker. The selected machine filters both
   local projects and agent configs; changing away from a selected local project's
   machine clears that project instead of silently choosing another one. GitHub
-  projects remain machine-independent. Keep the mobile type-specific pickers
-  independent until their sheet is redesigned. A single-member workspace never
+  projects remain machine-independent. Mobile New Chat uses the same unified
+  Local/GitHub project model, grouped by source in its native picker, with Work/Chat as its only
+  top-level mode. Its local Worktree checkbox shares the project row; unchecked directly uses the
+  local folder without spelling out a redundant Local files mode. A single-member workspace never
   passes project-sharing state. In multi-member workspaces, local project options
   and the selected desktop trigger show only an effective `Private` status; Team
   and unresolved states stay hidden. Effective access still combines

@@ -204,9 +204,6 @@ function MobileNewChatDemo() {
   const contentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: '新建对话',
-      machineLabel: '机器',
-      contextTypeLabel: '类型',
-      perTypeLabel: '仓库',
     },
     coordinator: MobileInlinePickerCoordinator,
     machineNode: <SelectorPill icon={Bot} label="Aurora · Mac Studio" />,
