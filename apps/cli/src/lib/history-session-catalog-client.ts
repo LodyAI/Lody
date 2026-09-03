@@ -26,10 +26,10 @@ import {
   type LocalProjectHistoryProvider,
 } from '@lody/shared';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
+import { MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS } from '@lody/history-import';
 
 const ACP_OPERATION_TIMEOUT_MS = 120_000;
 const ACP_PROCESS_EXIT_TIMEOUT_MS = 3_000;
-export const MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS = 100;
 
 function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null) {

@@ -49,6 +49,7 @@
     "@lody/cli-supervisor": "workspace:*",
     "@lody/code-review-helper": "workspace:*",
     "@lody/cloud-api": "workspace:*",
+    "@lody/history-import": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",

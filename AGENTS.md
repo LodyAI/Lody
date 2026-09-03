@@ -90,6 +90,7 @@ after changing package scope or cloud/local composition.
 `apps/cli` (agent, persistence, Machine RPC), `apps/electron` (desktop +
 bundled CLI), `packages/components` (shared UI), `packages/platform` (ports),
 `packages/cloud-api` (optional-cloud DTOs), `packages/shared` (schemas),
+`packages/history-import` (pure local-history import logic),
 `packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`, `site-docs`.
 
 ## Checks and commits

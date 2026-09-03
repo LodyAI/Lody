@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MessageContent } from '../src/ai';
-import { buildHistoryReplayImport } from '../src/acp/history-replay-import';
-import { parseSessionNotification, type AcpSessionNotification } from '../src/acp/schema';
+import {
+  parseSessionNotification,
+  type AcpSessionNotification,
+  type MessageContent,
+} from '@lody/shared';
+
+import { buildHistoryReplayImport } from '../src/replay-import';
 
 function makeNotification(update: unknown): AcpSessionNotification {
   return parseSessionNotification({ sessionId: 'codex-session-1', update });

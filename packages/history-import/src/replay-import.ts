@@ -1,8 +1,12 @@
-import type { ACPSessionId, MessageContent } from '../ai';
-import type { LocalProjectHistoryProvider } from '../project';
-import type { SessionHistoryInput } from '../schema';
-import type { AcpContentBlock, AcpSessionNotification } from './schema';
-import { applyNotificationOnHistoryWithChange } from './history-apply';
+import {
+  applyNotificationOnHistoryWithChange,
+  type ACPSessionId,
+  type AcpContentBlock,
+  type AcpSessionNotification,
+  type LocalProjectHistoryProvider,
+  type MessageContent,
+  type SessionHistoryInput,
+} from '@lody/shared';
 
 export type BuildHistoryReplayImportOptions = {
   acpSessionId: string;
