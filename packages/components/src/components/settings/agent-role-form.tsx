@@ -100,7 +100,13 @@ export function AgentRoleForm({
   const configOptionSelectors = selectorOptions
     ? selectAuthorableAgentRoleConfigOptions(selectorOptions.configOptionSelectors)
     : [];
-  const capabilitiesUnavailable = selectorOptions?.capabilityAuthority === 'unavailable';
+  /* Run-config controls are shown only for capabilities the AGENT reported.
+     `provisional` ones come from the built-in static tables, and a control drawn
+     from those reads as a choice while `applyAgentRoleRunConfigDefaults` refuses
+     to seed it — a boolean would render Off and save as unset, so the Role would
+     promise a configuration the user never picked. The existing copy already
+     says what to do: open the agent once, then edit the Role. */
+  const capabilitiesUnreported = selectorOptions?.capabilityAuthority !== 'authoritative';
   const hasError = (code: AgentRoleFormError) => errors.includes(code);
 
   return (
@@ -223,7 +229,7 @@ export function AgentRoleForm({
             title={t('settings.agentRoles.form.sectionRunConfig')}
             hint={t('settings.agentRoles.form.sectionRunConfigHint')}
           >
-            {capabilitiesUnavailable || !selectorOptions ? (
+            {capabilitiesUnreported || !selectorOptions ? (
               <FormMessage tone="warning">
                 {t('settings.agentRoles.form.capabilitiesUnavailable')}
               </FormMessage>

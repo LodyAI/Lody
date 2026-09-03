@@ -225,6 +225,26 @@ describe('agent run config selection', () => {
     );
   });
 
+  it('spells a snapshot-less control the way the target agent spells it', () => {
+    // Probed under a model with neither control, for each builtin agent.
+    const bare = (agentType: string): AcpCapabilityCacheEntry => ({
+      ...codexCapability(),
+      agentType,
+      configOptions: [],
+    });
+
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, bare('codex'))
+        .configOptionValues
+    ).toEqual({ reasoning_effort: 'high', 'fast-mode': true });
+
+    // Claude spells both differently; Codex's ids would be a silent no-op there.
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, bare('claude'))
+        .configOptionValues
+    ).toEqual({ effort: 'high', fast: true });
+  });
+
   it('reports a missing wire binding as such, not as an unsupported control', () => {
     // A third-party agent Lody has no fast-mode convention for.
     const capability: AcpCapabilityCacheEntry = {
@@ -233,6 +253,9 @@ describe('agent run config selection', () => {
       configOptions: [],
     };
     expect(() => resolveAgentRunConfigSelection({ fastMode: true }, capability)).toThrow(
+      /cannot be encoded/
+    );
+    expect(() => resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toThrow(
       /cannot be encoded/
     );
   });

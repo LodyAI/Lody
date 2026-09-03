@@ -1,3 +1,4 @@
+import { isAcpPerModelConfigId } from '@lody/shared';
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
   isConfigOptionValueValid,
@@ -303,21 +304,24 @@ export const resolveAcpSessionConfigSelection = (
         : selector.currentValue;
     }
 
-    /* A stored value the catalog does not cover is KEPT while no runtime table
+    /* A stored value for a PER-MODEL control is kept while no runtime table
        exists. The catalog describes the model the capability probe happened to
-       run, so a value it omits may belong to the model this turn selects — an
-       Agent Role pinning Fast on a fast-capable model is exactly that. Dropping
-       it made the Role's own value invisible in the composer that is supposed to
-       show what the Role will do. A present runtime table still owns the whole
-       key set: that one is the agent's live state, not a snapshot of another
-       model, so an omission there is an answer. */
+       run, so it drops those controls for any other model — an Agent Role
+       pinning Fast on a fast-capable model is exactly that, and dropping it made
+       the Role's own value invisible in the composer meant to show what the Role
+       will do. The exemption is limited to ids Lody knows name a per-model
+       control: any other uncataloged key has no such excuse, and blanket-keeping
+       it would resend a removed or renamed option forever with no surface left
+       to clear it. A present runtime table still owns the whole key set: that
+       one is the agent's live state, not another model's snapshot, so an
+       omission there is an answer. */
     if (!runtimeTable) {
       const cataloged = new Set(selectors.map((selector) => selector.configId));
       for (const [configId, value] of Object.entries({
         ...preferences.configOptionValues,
         ...edits.configOptions,
       })) {
-        if (!cataloged.has(configId)) {
+        if (!cataloged.has(configId) && isAcpPerModelConfigId(configId)) {
           configOptionValues[configId] = value;
         }
       }
@@ -328,9 +332,10 @@ export const resolveAcpSessionConfigSelection = (
 };
 
 /**
- * Drops values a KNOWN selector rejects. A value with no selector at all is
- * kept: the selector catalog comes from a capability snapshot of one model, so
- * its silence is not a verdict, and the runtime reports any divergence.
+ * Drops values a KNOWN selector rejects, plus uncataloged keys that are not
+ * per-model controls. A per-model id missing from the catalog only means the
+ * probed model lacked it, so its stored value still reaches dispatch and the
+ * runtime reports any divergence; anything else uncataloged is stale.
  */
 export const filterAcpSessionConfigOptionValues = (
   values: Record<string, AcpConfigOptionValue> | undefined,
@@ -339,7 +344,7 @@ export const filterAcpSessionConfigOptionValues = (
   const filtered: Record<string, AcpConfigOptionValue> = {};
   const cataloged = new Set(selectors.map((selector) => selector.configId));
   for (const [configId, value] of Object.entries(values ?? {})) {
-    if (!cataloged.has(configId)) {
+    if (!cataloged.has(configId) && isAcpPerModelConfigId(configId)) {
       filtered[configId] = value;
     }
   }

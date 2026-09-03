@@ -82,42 +82,51 @@ describe('ACP session config derivation', () => {
     ).toBe('gpt-5.6-sol');
   });
 
-  it('keeps a stored key the catalog does not cover, whatever the authority', () => {
+  it('keeps a stored per-model value the catalog omits, and drops other unknown keys', () => {
+    // A catalog captured under a model with no fast tier: it carries the
+    // ordinary option but not `fast-mode`.
     const selectors = [
       {
-        configId: 'fast-mode',
-        label: 'Fast mode',
+        configId: 'approval_policy',
+        label: 'Approval policy',
         type: 'select' as const,
-        currentValue: 'off',
+        currentValue: 'on-request',
         options: [
-          { value: 'off', label: 'Off' },
-          { value: 'on', label: 'On' },
+          { value: 'on-request', label: 'On request' },
+          { value: 'never', label: 'Never' },
         ],
       },
     ];
     const inputs = {
       edits: emptyEdits,
       preferences: {
-        configOptionValues: { future_option: 'enabled', 'fast-mode': 'future-value' },
+        configOptionValues: {
+          approval_policy: 'never',
+          'fast-mode': true,
+          future_option: 'enabled',
+        },
       },
     };
+
+    // Non-authoritative keeps stored values verbatim, as before.
     expect(
       resolveAcpSessionConfigSelection(inputs, {
         ...baseOptions,
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ future_option: 'enabled', 'fast-mode': 'future-value' });
-    // Authoritative only means the catalog is the agent's own — of ONE model.
-    // A value it rejects for a selector it HAS falls back ('future-value' is
-    // not a `fast-mode` value); a key it never mentions is kept, because the
-    // model this turn selects may well have it.
+    ).toEqual({ approval_policy: 'never', 'fast-mode': true, future_option: 'enabled' });
+
+    // Authoritative means the catalog is the agent's own — of ONE model. It
+    // omits `fast-mode` because the probed model had no fast tier, so an Agent
+    // Role pinning Fast keeps its value; `future_option` is simply stale and
+    // has no per-model excuse, so it goes.
     expect(
       resolveAcpSessionConfigSelection(inputs, {
         ...baseOptions,
         capabilityAuthority: 'authoritative',
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ 'fast-mode': 'off', future_option: 'enabled' });
+    ).toEqual({ approval_policy: 'never', 'fast-mode': true });
   });
 
   it('applies the runtime baseline over non-user fields', () => {
@@ -324,20 +333,20 @@ describe('ACP session config derivation', () => {
         ],
       },
     ];
-    // Uncataloged keys survive; a cataloged one with a value the selector
-    // rejects does not.
+    // An uncataloged PER-MODEL id survives to dispatch; other uncataloged keys
+    // do not, and a cataloged one whose value the selector rejects does not.
     expect(
       filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' },
+        { 'fast-mode': true, collaboration_mode: 'plan', future_option: 'enabled' },
         selectors
       )
-    ).toEqual({ 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' });
+    ).toEqual({ 'fast-mode': true, collaboration_mode: 'plan' });
     expect(
       filterAcpSessionConfigOptionValues(
         { 'plan-mode': 'on', collaboration_mode: 'invalid' },
         selectors
       )
-    ).toEqual({ 'plan-mode': 'on' });
+    ).toEqual({});
   });
 });
 

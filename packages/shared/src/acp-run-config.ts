@@ -169,28 +169,41 @@ const findFastModeOption = (
   );
 
 /**
- * Wire binding for the fast toggle when the snapshot does not carry the option.
+ * Wire spelling per agent for the controls a snapshot can legitimately omit.
  *
- * A binding hint answers "how would this agent spell it", never "does this
- * model support it". Both builtin agents publish the toggle as a boolean while
- * the client advertises boolean config options — which Lody always does — so
- * the shape is known even when the captured model had no fast tier. An agent we
- * have no convention for gets no guess: dispatching an invented id would be a
- * silent no-op, which is worse than saying we cannot encode the request.
+ * A binding answers "how would THIS agent spell it", never "does this model
+ * support it". It is needed exactly when the captured model lacked the control,
+ * because then the snapshot carries no option to read the id off. There is no
+ * default: the ids differ per agent (Codex `reasoning_effort` / `fast-mode`,
+ * Claude `effort` / `fast`), so falling back to one agent's spelling would send
+ * another agent an id it has never heard of — a silent no-op, which is worse
+ * than saying the request cannot be encoded.
  */
-const findFastModeBindingHint = (
-  capability: RunConfigCapabilitySource | undefined,
-  enabled: boolean
-): { configId: string; value: AcpConfigOptionValue } | undefined => {
-  switch (capability?.agentType?.toLowerCase()) {
-    case 'codex':
-      return { configId: 'fast-mode', value: enabled };
-    case 'claude':
-      return { configId: 'fast', value: enabled };
-    default:
-      return undefined;
-  }
+const AGENT_PER_MODEL_BINDINGS: Record<
+  string,
+  { fastModeConfigId?: string; reasoningEffortConfigId?: string }
+> = {
+  codex: { fastModeConfigId: 'fast-mode', reasoningEffortConfigId: ACP_REASONING_EFFORT_CONFIG_ID },
+  claude: { fastModeConfigId: 'fast', reasoningEffortConfigId: 'effort' },
+  grok: { reasoningEffortConfigId: ACP_REASONING_EFFORT_CONFIG_ID },
 };
+
+const findAgentPerModelBinding = (capability: RunConfigCapabilitySource | undefined) =>
+  capability?.agentType ? AGENT_PER_MODEL_BINDINGS[capability.agentType.toLowerCase()] : undefined;
+
+/**
+ * Ids Lody knows name a PER-MODEL control for some agent. Such an id missing
+ * from a capability snapshot means the captured model lacked the control, not
+ * that the option is gone — so a stored value for one must survive a snapshot
+ * that does not list it. Any other unknown id has no such excuse.
+ */
+export const isAcpPerModelConfigId = (configId: string): boolean =>
+  isAcpFastModeConfigId(configId) ||
+  configId === ACP_REASONING_EFFORT_CONFIG_ID ||
+  Object.values(AGENT_PER_MODEL_BINDINGS).some(
+    (binding) =>
+      binding.fastModeConfigId === configId || binding.reasoningEffortConfigId === configId
+  );
 
 const findReasoningEffortOption = (
   capability: RunConfigCapabilitySource | undefined
@@ -328,10 +341,16 @@ export const resolveAgentRunConfigSelection = (
       ? targetModelEfforts.includes(selection.reasoningEffort)
       : !switchesModel &&
         option?.options.some((value) => value.value === selection.reasoningEffort) === true;
+    const configId = option?.id ?? findAgentPerModelBinding(capability)?.reasoningEffortConfigId;
+    if (!configId) {
+      throw new Error(
+        'Reasoning effort cannot be encoded for the selected agent: it publishes no reasoning effort option and Lody knows no binding for it.'
+      );
+    }
     if (!confirmed) {
       unverifiedSelections.push(`reasoningEffort=${selection.reasoningEffort}`);
     }
-    configOptionValues[option?.id ?? ACP_REASONING_EFFORT_CONFIG_ID] = selection.reasoningEffort;
+    configOptionValues[configId] = selection.reasoningEffort;
   }
 
   if (selection.fastMode !== undefined) {
@@ -340,15 +359,17 @@ export const resolveAgentRunConfigSelection = (
     // decide anything. What it CAN decide is the wire shape, and when it does
     // not know that either the agent's own convention does.
     const option = findFastModeOption(capability);
-    const binding = option
-      ? { configId: option.id, value: toggleValue(option, selection.fastMode) }
-      : findFastModeBindingHint(capability, selection.fastMode);
-    if (!binding) {
+    const configId = option?.id ?? findAgentPerModelBinding(capability)?.fastModeConfigId;
+    if (!configId) {
       throw new Error(
-        'Fast mode cannot be encoded for the selected agent: it publishes no fast mode option and no known binding for it.'
+        'Fast mode cannot be encoded for the selected agent: it publishes no fast mode option and Lody knows no binding for it.'
       );
     }
-    configOptionValues[binding.configId] = binding.value;
+    // Both builtin agents publish the toggle as a boolean while the client
+    // advertises boolean config options, which Lody always does.
+    configOptionValues[configId] = option
+      ? toggleValue(option, selection.fastMode)
+      : selection.fastMode;
     if (!option || switchesModel) {
       unverifiedSelections.push(`fastMode=${selection.fastMode}`);
     }
