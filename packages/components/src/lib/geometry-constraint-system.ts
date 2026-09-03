@@ -69,6 +69,14 @@ export type GeometryBoxModelContribution = Readonly<{
 export type GeometryBoxModelPathStep = Readonly<{
   nodeId: string;
   element: string;
+  /**
+   * The node's `class` attribute verbatim, and the nearest function component
+   * above it in the React fiber tree. Both are LABELS on a repair ticket, so
+   * that an agent handed a finding can open a file instead of hunting a
+   * rendered DOM description; neither may ever reach a finding key.
+   */
+  className?: string;
+  component?: string;
   parentId?: string;
   startToParent: number;
   endToParent: number;
@@ -282,6 +290,9 @@ export type GeometryRepairTerm = Readonly<{
   term: GeometryDeclaredBoxModelTerm;
   /** Rendered description of the box-model node that owns the differing term. */
   element: string;
+  /** That node's `class` attribute and owning component: source pointers, not identity. */
+  className?: string;
+  component?: string;
   memberElement?: string;
   referenceElement?: string;
   memberValue: number;
@@ -292,6 +303,9 @@ export type GeometryRepairTerm = Readonly<{
 
 export type GeometryRepairProposal = Readonly<{
   commonAncestor: string;
+  /** The common ancestor's own source pointers, on the same evidence footing. */
+  className?: string;
+  component?: string;
   edge: 'inline-start' | 'inline-end' | 'block-start' | 'block-end';
   terms: readonly GeometryRepairTerm[];
 }>;
@@ -1116,7 +1130,7 @@ function proposeBoxModelRepair(
   const dominantOwner = (
     chain: readonly GeometryBoxModelPathStep[],
     term: GeometryDeclaredBoxModelTerm
-  ) => {
+  ): GeometryBoxModelPathStep | undefined => {
     let bestIndex = -1;
     let bestValue = 0;
     chain.forEach((step, index) => {
@@ -1130,8 +1144,8 @@ function proposeBoxModelRepair(
     // padding, border and gap are declared on the containing box; margin sits
     // on the node itself.
     return PARENT_OWNED_TERMS.has(term)
-      ? (chain[bestIndex - 1]?.element ?? commonAncestor.element)
-      : chain[bestIndex]?.element;
+      ? (chain[bestIndex - 1] ?? commonAncestor)
+      : chain[bestIndex];
   };
   const terms: GeometryRepairTerm[] = [];
   for (const term of DECLARED_BOX_MODEL_TERMS) {
@@ -1139,19 +1153,22 @@ function proposeBoxModelRepair(
     const referenceValue = total(referenceChain, term);
     const delta = memberValue - referenceValue;
     if (Math.abs(delta) < 0.5) continue;
-    const memberElement = dominantOwner(memberChain, term);
-    const referenceElement = dominantOwner(referenceChain, term);
+    const memberOwner = dominantOwner(memberChain, term);
+    const referenceOwner = dominantOwner(referenceChain, term);
     const dominantSide = Math.abs(memberValue) >= Math.abs(referenceValue) ? 'member' : 'reference';
+    const owner =
+      (dominantSide === 'member' ? memberOwner : referenceOwner) ??
+      memberOwner ??
+      referenceOwner ??
+      commonAncestor;
     terms.push({
       side: dominantSide,
       term,
-      element:
-        (dominantSide === 'member' ? memberElement : referenceElement) ??
-        memberElement ??
-        referenceElement ??
-        commonAncestor.element,
-      ...(memberElement ? { memberElement } : {}),
-      ...(referenceElement ? { referenceElement } : {}),
+      element: owner.element,
+      ...(owner.className ? { className: owner.className } : {}),
+      ...(owner.component ? { component: owner.component } : {}),
+      ...(memberOwner ? { memberElement: memberOwner.element } : {}),
+      ...(referenceOwner ? { referenceElement: referenceOwner.element } : {}),
       memberValue: Number(memberValue.toFixed(4)),
       referenceValue: Number(referenceValue.toFixed(4)),
       delta: Number(delta.toFixed(4)),
@@ -1160,6 +1177,8 @@ function proposeBoxModelRepair(
   if (terms.length === 0) return undefined;
   return {
     commonAncestor: commonAncestor.element,
+    ...(commonAncestor.className ? { className: commonAncestor.className } : {}),
+    ...(commonAncestor.component ? { component: commonAncestor.component } : {}),
     edge,
     terms: terms.sort(
       (left, right) =>
@@ -2856,6 +2875,62 @@ export function summarizeGeometryInkCenters(
         }
       : {}),
   };
+}
+
+/**
+ * The CSS property a repair term actually edits. `padding` and `margin` have
+ * logical longhands per edge; a border edge is a width; a gap belongs to the
+ * axis, not to one of its two edges. Guessing `gap-inline-end` would hand an
+ * agent a property that does not exist.
+ */
+export function geometryRepairCssProperty(
+  term: GeometryDeclaredBoxModelTerm,
+  edge: GeometryRepairProposal['edge']
+): string {
+  if (term === 'gap') return edge.startsWith('inline') ? 'column-gap' : 'row-gap';
+  if (term === 'border') return `border-${edge}-width`;
+  return `${term}-${edge}`;
+}
+
+export type GeometryRepairTextOptions = Readonly<{
+  maxTerms?: number;
+  /**
+   * A Tailwind class list runs to hundreds of characters, which is what an
+   * agent greps for and what makes a one-line summary unreadable. So the card
+   * body keeps it and the summary line leaves it out; neither truncates it,
+   * because half a class list greps for nothing.
+   */
+  includeClassName?: boolean;
+}>;
+
+/**
+ * One repair term as a sentence an agent can act on: which component, which
+ * rendered node inside it, which property, how far off, and the class list that
+ * most likely declares it.
+ */
+export function formatGeometryRepairTerm(
+  term: GeometryRepairTerm,
+  proposal: Pick<GeometryRepairProposal, 'edge' | 'commonAncestor' | 'component'>,
+  options: GeometryRepairTextOptions = {}
+): string {
+  const owner = term.component ?? proposal.component ?? proposal.commonAncestor;
+  const property = geometryRepairCssProperty(term.term, proposal.edge);
+  const magnitude = Number(Math.abs(term.delta).toFixed(2));
+  const direction = term.delta > 0 ? '多' : '少';
+  const className =
+    term.className && options.includeClassName !== false ? `（class: ${term.className}）` : '';
+  return `${owner} 里 ${term.element} 的 ${property} ${direction} ${magnitude}px${className}`;
+}
+
+/** The proposal's terms as sentences, strongest first. */
+export function formatGeometryRepairProposal(
+  proposal: GeometryRepairProposal,
+  options: GeometryRepairTextOptions = {}
+): string {
+  return proposal.terms
+    .slice(0, options.maxTerms ?? 3)
+    .map((term) => formatGeometryRepairTerm(term, proposal, options))
+    .join('；');
 }
 
 export type GeometryRatchetViolation = Readonly<{

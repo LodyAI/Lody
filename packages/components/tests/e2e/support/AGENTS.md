@@ -78,6 +78,12 @@ to make the gate cheaper moves every merged offset the ledger recorded.
   context, a device scale cannot, and a fresh context's cold cache re-parses the whole
   Storybook bundle — minutes of wall clock. A fresh PAGE per capture inside it, though: a
   page that loaded a dozen stories runs out of memory.
+- Every box-model node also records its `class` and the nearest function component above it
+  in the fiber tree (`geometry-react-fiber.ts`: walk `fiber.return`, unwrap `memo` and
+  `forwardRef`). Both are EVIDENCE — they turn a rendered DOM description into a file an
+  agent can open — and neither may reach a key, for the reason an accessible name may not.
+  React 19 has no `_debugSource`, so the NAME is the whole pointer; a node React never
+  rendered has none and nothing fails.
 - A card clip holds the row plus a margin, draws the row median and verdict anchor only,
   and names it. Zoomed Y cards are the largest-|offset| findings anywhere. Discovery cards
   use product-region names, count unique elements not anchor votes, fold one element's

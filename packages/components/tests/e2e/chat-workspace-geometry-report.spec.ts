@@ -21,6 +21,7 @@ import {
   computeGeometryQualityMetrics,
   createGeometryFindings,
   diffGeometryFindings,
+  formatGeometryRepairProposal,
   geometryIdentityLocator,
   geometryLocatorMatches,
   observeGeometryCaptures,
@@ -342,27 +343,18 @@ const CLASSIFICATION_LABELS: Readonly<Record<GeometryFindingClassification, stri
   structural: '结构性',
 };
 
-const BOX_MODEL_TERM_LABELS: Readonly<Record<string, string>> = {
-  padding: 'padding',
-  border: 'border',
-  margin: 'margin',
-  gap: 'gap',
-};
-
-function formatRepairProposal(proposal: GeometryRepairProposal): string {
-  const edge = proposal.edge === 'inline-start' ? '起始边' : '结束边';
-  const terms = proposal.terms
-    .slice(0, 3)
-    .map((term) => {
-      const owner = term.side === 'member' ? '本项' : '参照';
-      return `${BOX_MODEL_TERM_LABELS[term.term] ?? term.term} 本项 ${Number(
-        term.memberValue.toFixed(2)
-      )} vs 参照 ${Number(term.referenceValue.toFixed(2))}（Δ${Number(
-        term.delta.toFixed(2)
-      )}px；差值来自${owner}的 ${term.element}）`;
-    })
-    .join('；');
-  return `修复建议（${edge}）：${terms}`;
+/**
+ * One executable sentence per term — which component, which node, which CSS
+ * property, how far off, and the class list that most likely declares it. The
+ * old text printed the two box-model totals and a rendered DOM description,
+ * which told a reviewer the size of the problem and an agent nothing about
+ * where to make the edit.
+ */
+function formatRepairProposal(
+  proposal: GeometryRepairProposal,
+  options?: Parameters<typeof formatGeometryRepairProposal>[1]
+): string {
+  return `修复建议：${formatGeometryRepairProposal(proposal, options)}`;
 }
 
 function semanticAlignmentTitle(entry: BrowserSemanticAlignmentEntry): string {
@@ -2263,7 +2255,11 @@ test('captures the visual geometry report', async ({ browser }) => {
     const repairProposal = finding.repairProposal
       ? formatRepairProposal(finding.repairProposal)
       : undefined;
-    const repairFinding = repairProposal ? ` · ${repairProposal}` : '';
+    // The collapsed summary line drops the class list the card body keeps: a
+    // Tailwind class list is hundreds of characters and would swamp it.
+    const repairFinding = finding.repairProposal
+      ? ` · ${formatRepairProposal(finding.repairProposal, { includeClassName: false })}`
+      : '';
     const dimensionSensitivity = (finding.dimensionSensitivity ?? []).map(
       (item) => `${item.axis}=${item.value}`
     );

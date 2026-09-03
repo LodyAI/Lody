@@ -16,7 +16,9 @@ import {
   explainGeometryOffset,
   checkGeometryLedgerRatchet,
   formatGeometryRatchetViolations,
+  formatGeometryRepairProposal,
   geometryFindingDevicePixel,
+  geometryRepairCssProperty,
   verifyGeometryFixes,
   geometryFindingLabel,
   geometryIdentityLocator,
@@ -37,6 +39,7 @@ import {
   type GeometryCaptureArtifact,
   type GeometryFinding,
   type GeometryLedger,
+  type GeometryRepairProposal,
 } from '../src/lib/geometry-constraint-system';
 
 const locator = (name: string) => ({
@@ -2035,4 +2038,68 @@ describe('geometry ledger ratchet', () => {
 
     expect(compileGeometryContracts(ledger)).toEqual({ version: 1, contracts: [] });
   });
+});
+
+describe('geometry repair tickets', () => {
+  const proposal = (
+    overrides: Partial<GeometryRepairProposal> & {
+      term?: Partial<GeometryRepairProposal['terms'][number]>;
+    } = {}
+  ): GeometryRepairProposal => {
+    const { term, ...rest } = overrides;
+    return {
+      commonAncestor: 'div[data-slot=sidebar-row]',
+      component: 'SidebarRowShared',
+      edge: 'inline-end',
+      terms: [
+        {
+          side: 'member',
+          term: 'padding',
+          element: 'div[role=button]',
+          className: 'pe-3',
+          component: 'SidebarRowShared',
+          memberValue: 12,
+          referenceValue: 10,
+          delta: 2,
+          ...term,
+        },
+      ],
+      ...rest,
+    };
+  };
+
+  it('names the CSS property an agent would actually edit', () => {
+    expect(geometryRepairCssProperty('padding', 'inline-end')).toBe('padding-inline-end');
+    expect(geometryRepairCssProperty('margin', 'block-start')).toBe('margin-block-start');
+    expect(geometryRepairCssProperty('border', 'inline-start')).toBe('border-inline-start-width');
+    // A gap belongs to the axis; `gap-inline-end` is not a property.
+    expect(geometryRepairCssProperty('gap', 'inline-end')).toBe('column-gap');
+    expect(geometryRepairCssProperty('gap', 'block-end')).toBe('row-gap');
+  });
+
+  it('renders a repair a reader can act on without opening the artifact', () => {
+    expect(formatGeometryRepairProposal(proposal())).toBe(
+      'SidebarRowShared 里 div[role=button] 的 padding-inline-end 多 2px（class: pe-3）'
+    );
+    expect(
+      formatGeometryRepairProposal(proposal({ term: { className: undefined, delta: -2 } }))
+    ).toBe('SidebarRowShared 里 div[role=button] 的 padding-inline-end 少 2px');
+  });
+
+  it('leaves the class list out where a whole class list would not fit', () => {
+    // A real Tailwind class list is hundreds of characters. The card body keeps
+    // it whole, because half of one greps for nothing; the one-line summary
+    // drops it rather than truncate it.
+    expect(formatGeometryRepairProposal(proposal(), { includeClassName: false })).toBe(
+      'SidebarRowShared 里 div[role=button] 的 padding-inline-end 多 2px'
+    );
+  });
+
+  it('falls back to the common ancestor when React rendered no component name', () => {
+    // A node React never rendered still gets a sentence, just a less precise one.
+    expect(
+      formatGeometryRepairProposal(proposal({ component: undefined, term: { component: undefined } }))
+    ).toBe('div[data-slot=sidebar-row] 里 div[role=button] 的 padding-inline-end 多 2px（class: pe-3）');
+  });
+
 });

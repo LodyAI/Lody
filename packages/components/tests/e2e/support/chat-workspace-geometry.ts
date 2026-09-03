@@ -38,6 +38,10 @@ import {
   measureGeometryCapBand,
 } from '../../../src/lib/geometry-text-cap-band';
 import {
+  geometryElementReactFiber,
+  geometryReactFiberComponentName,
+} from '../../../src/lib/geometry-react-fiber';
+import {
   evaluateGeometryContractResolutions,
   geometryContractRelationProperties,
   materializeGeometryObservationScope,
@@ -646,6 +650,8 @@ export async function installGeometryBrowserHelpers(page: Page): Promise<void> {
       `globalThis.__lodyGeometrySelectRowSlots = ${selectVisualRowSlots.toString()};`,
       `globalThis.__lodyGeometryIsPaintedShape = ${isGeometryPaintedShape.toString()};`,
       `globalThis.__lodyMeasureGeometryBlockAnchors = ${measureGeometryBlockAnchorsInBrowser.toString()};`,
+      `globalThis.__lodyGeometryElementFiber = ${geometryElementReactFiber.toString()};`,
+      `globalThis.__lodyGeometryFiberComponentName = ${geometryReactFiberComponentName.toString()};`,
     ].join('\n'),
   });
 }
@@ -687,6 +693,19 @@ export async function captureChatWorkspaceGeometryScopes(
         }
       ).__lodyGeometryIsPaintedShape;
       if (!isPaintedShapeStyle) throw new Error('Geometry painted-shape helper is missing');
+      const elementFiber = (
+        globalThis as typeof globalThis & {
+          __lodyGeometryElementFiber?: typeof geometryElementReactFiber;
+        }
+      ).__lodyGeometryElementFiber;
+      const fiberComponentName = (
+        globalThis as typeof globalThis & {
+          __lodyGeometryFiberComponentName?: typeof geometryReactFiberComponentName;
+        }
+      ).__lodyGeometryFiberComponentName;
+      if (!elementFiber || !fiberComponentName) {
+        throw new Error('Geometry React component-name helper is missing');
+      }
       const isRendered = (element: Element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -759,6 +778,24 @@ export async function captureChatWorkspaceGeometryScopes(
           .join('');
         return `${element.tagName.toLowerCase()}${attributes}`;
       };
+      /**
+       * The two source pointers a repair ticket needs. Both are optional and
+       * failure-tolerant: a node React never rendered, or a production build
+       * with no readable fiber, simply contributes no component name.
+       */
+      const sourcePointers = (element: Element) => {
+        const className = element.getAttribute('class')?.replace(/\s+/g, ' ').trim();
+        let component: string | undefined;
+        try {
+          component = fiberComponentName(elementFiber(element));
+        } catch {
+          component = undefined;
+        }
+        return {
+          ...(className ? { className } : {}),
+          ...(component ? { component } : {}),
+        };
+      };
       const boxModelPath = (
         element: Element,
         boundary: Element
@@ -816,6 +853,7 @@ export async function captureChatWorkspaceGeometryScopes(
           path.push({
             nodeId: idByElement.get(node) ?? 'dom-unknown',
             element: describeBoxModelNode(node),
+            ...sourcePointers(node),
             ...(parent ? { parentId: idByElement.get(parent) ?? 'dom-unknown' } : {}),
             startToParent,
             endToParent,
