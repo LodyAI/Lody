@@ -578,7 +578,11 @@ export class LocalProjectHistorySyncService {
         candidate.cliType === this.provider.cliType &&
         candidate.agentType === this.provider.agentType
     );
-    const resolved = { ...this.provider, customAcp: config?.customAcp };
+    const resolved = {
+      ...this.provider,
+      customAcp: config?.customAcp,
+      env: config?.env,
+    };
     this.launchProvider = resolved;
     return resolved;
   }

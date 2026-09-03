@@ -25,6 +25,7 @@ import {
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryProvider,
   type CustomAcpLaunchSpec,
+  type BuiltinRuntimeOverrides,
 } from '@lody/shared';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
@@ -129,6 +130,8 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
 
 export type HistoryLaunchProvider = LocalProjectHistoryProvider & {
   customAcp?: CustomAcpLaunchSpec;
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+  env?: NodeJS.ProcessEnv;
 };
 
 export async function resolveHistoryACPProcessLaunch(args: {
@@ -139,10 +142,14 @@ export async function resolveHistoryACPProcessLaunch(args: {
     cliType: args.provider.cliType,
     agentType: args.provider.agentType,
     customAcp: args.provider.customAcp,
+    runtimeOverrides: args.provider.runtimeOverrides,
   });
   return {
     ...launch,
-    env: mergeACPProcessEnv(launch, args.env ?? process.env),
+    env: mergeACPProcessEnv(launch, {
+      ...(args.env ?? process.env),
+      ...(args.provider.env ?? {}),
+    }),
   };
 }
 
