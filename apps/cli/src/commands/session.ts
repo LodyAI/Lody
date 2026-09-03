@@ -49,6 +49,8 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  resolveAcpConfigOptionsForModel,
+  resolveAcpTargetModelId,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -1474,16 +1476,25 @@ export function validateTurnConfigOptionValues(
    * capability's `configOptions` only describe the probed model, so re-checking
    * them here would reject values that are valid for the target model.
    */
-  skipIds?: ReadonlySet<string>
+  skipIds?: ReadonlySet<string>,
+  modelId?: string | null
 ): void {
   const entries = Object.entries(values ?? {}).filter(([id]) => !skipIds?.has(id));
   if (entries.length === 0) {
     return;
   }
-  if (!capability?.configOptions) {
+  const targetModelId = resolveAcpTargetModelId({
+    modelId,
+    configOptionValues: values,
+    configOptions: capability?.configOptions,
+  });
+  const configOptions = capability
+    ? resolveAcpConfigOptionsForModel(capability, targetModelId)
+    : undefined;
+  if (!configOptions) {
     throw new Error('ACP config options are unavailable for the selected agent.');
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(configOptions.map((option) => [option.id, option]));
   for (const [id, value] of entries) {
     const option = optionsById.get(id);
     if (!option) {
@@ -1498,12 +1509,21 @@ export function validateTurnConfigOptionValues(
 
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string | null
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  const resolvedTargetModelId = resolveAcpTargetModelId({
+    modelId: targetModelId,
+    configOptionValues: values,
+    configOptions: capability?.configOptions,
+  });
+  const configOptions = capability
+    ? resolveAcpConfigOptionsForModel(capability, resolvedTargetModelId)
+    : undefined;
+  if (!values || !configOptions) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(configOptions.map((option) => [option.id, option]));
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
@@ -1547,18 +1567,58 @@ export function validateTurnModeAndModel(
   }
 }
 
+/** Drop a superseded inherited `model` option so a Turn does not name two models. */
+function dropSupersededInheritedModelOption(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  explicitModelId: string | null | undefined
+): Record<string, string | boolean> | undefined {
+  if (!values) {
+    return undefined;
+  }
+  if (typeof explicitModelId !== 'string' || explicitModelId === '') {
+    return values;
+  }
+  const modelOption = capability?.configOptions?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  if (modelOption === undefined) {
+    return values;
+  }
+  const inheritedModel = values[modelOption.id];
+  if (typeof inheritedModel !== 'string' || inheritedModel === explicitModelId) {
+    return values;
+  }
+  const next = { ...values };
+  delete next[modelOption.id];
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 export function filterCompatibleInheritedTurnConfig(
   config: ResolvedTurnDispatchConfig | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  options?: { targetModelId?: string | null }
 ): ResolvedTurnDispatchConfig | undefined {
   if (!config) {
     return undefined;
   }
   const supportedModes = getSupportedTurnSelectorIds(capability, 'mode');
   const supportedModels = getSupportedTurnSelectorIds(capability, 'model');
-  const configOptionValues = filterCompatibleTurnConfigOptionValues(
-    config.configOptionValues,
-    capability
+  const inheritedModelId =
+    typeof config.modelId === 'string' && supportedModels.has(config.modelId)
+      ? config.modelId
+      : undefined;
+  const targetModelId =
+    options?.targetModelId ||
+    inheritedModelId ||
+    resolveAcpTargetModelId({
+      configOptionValues: config.configOptionValues,
+      configOptions: capability?.configOptions,
+    });
+  const configOptionValues = dropSupersededInheritedModelOption(
+    filterCompatibleTurnConfigOptionValues(config.configOptionValues, capability, targetModelId),
+    capability,
+    options?.targetModelId
   );
   return {
     ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
@@ -2777,13 +2837,16 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
     capability,
-    requested.validatedConfigIds
+    requested.validatedConfigIds,
+    requested.config.modelId
   );
   return {
     ...withBuiltinDefaultTurnMode(
       mergeTurnDispatchConfig(
         requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
+        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability, {
+          targetModelId: requested.config.modelId,
+        })
       ),
       args.agentConfig
     ),
@@ -3153,7 +3216,12 @@ export async function sendSessionChatResult(
       agentConfigId: session.agentConfigId,
     });
     validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
+    validateTurnConfigOptionValues(
+      dispatchConfig.configOptionValues,
+      capability,
+      undefined,
+      dispatchConfig.modelId
+    );
   }
   const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
 

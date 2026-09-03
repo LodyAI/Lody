@@ -276,7 +276,12 @@ Two things the dev build does deliberately, both load-bearing:
   publish the legacy `model[effort]` list (Codex); effort is validated against the
   TARGET model and the ids so validated come back as `validatedConfigIds`, which
   `validateTurnConfigOptionValues(..., skipIds)` must skip (the probed model's list
-  would wrongly reject them). What cannot be checked offline is dispatched as
+  would wrongly reject them). When the cache carries `configOptionsByModel` (registry
+  Cursor), the semantic mapping, turn validation, and inherited-default filtering all
+  read the TARGET model's composed options through `resolveAcpConfigOptionsForModel`;
+  inherited create defaults are filtered against the MERGED target model, and an
+  explicit create `modelId` drops a parent's superseded `model` option so the frozen
+  Turn names one model. What cannot be checked offline is dispatched as
   requested. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
   for model, reasoning effort, Fast, or Plan are not promoted to visible
   `agent_warning` notices, while other rejected selections still are. Compatibility exception: Claude
