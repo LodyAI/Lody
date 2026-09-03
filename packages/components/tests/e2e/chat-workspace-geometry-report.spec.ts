@@ -17,6 +17,7 @@ import {
   alignmentFindingKey,
   assessGeometryMarkerRemoval,
   collectAggregatedGeometryRowFamilies,
+  collectGeometryCrossFamilyProposals,
   compileGeometryContracts,
   computeGeometryQualityMetrics,
   createGeometryFindings,
@@ -35,6 +36,7 @@ import {
   type GeometryRowMember,
   type GeometryLedger,
   type GeometryLedgerStatus,
+  type GeometryCrossFamilyProposal,
   type GeometryObservationCache,
   type GeometryRepairProposal,
 } from '../../src/lib/geometry-constraint-system';
@@ -70,7 +72,15 @@ const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:600
 const reportPhase = process.env.GEOMETRY_REPORT_PHASE ?? 'before';
 
 type ReportDetail = Readonly<{
-  kind: 'violation' | 'candidate' | 'overview' | 'jitter' | 'insufficient' | 'measurement-model';
+  kind:
+    | 'violation'
+    | 'candidate'
+    | 'overview'
+    /** A cross-family rail one capture proposes; two make its outliers findings. */
+    | 'cross-family-candidate'
+    | 'jitter'
+    | 'insufficient'
+    | 'measurement-model';
   requiresReview: boolean;
   classification?: GeometryFindingClassification;
   findingKey?: string;
@@ -121,6 +131,8 @@ type ReportDetail = Readonly<{
       line: number;
       xStart: number;
       xEnd: number;
+      /** A cross-family candidate line, drawn apart from a row's own median. */
+      dashed?: boolean;
       members: readonly Readonly<{
         coordinate: number;
         xStart: number;
@@ -155,6 +167,7 @@ function reportDetailPriority(detail: ReportDetail): number {
   if (detail.kind === 'violation') return 0;
   if (detail.kind === 'candidate' && detail.requiresReview) return 1;
   if (detail.kind === 'overview') return 2;
+  if (detail.kind === 'cross-family-candidate') return 3;
   if (detail.kind === 'insufficient') return 3;
   if (detail.kind === 'jitter') return 4;
   if (detail.kind === 'measurement-model') return 5;
@@ -705,7 +718,9 @@ async function showOnlyDetailSemanticGuides(page: Page, detail: ReportDetail): P
           top: `${guide.line}px`,
           width: `${Math.max(1, guide.xEnd - guide.xStart + 12)}px`,
           height: '1.5px',
-          background: 'rgb(14 116 144 / 0.24)',
+          ...(guide.dashed
+            ? { borderTop: '1.5px dashed rgb(14 116 144 / 0.42)' }
+            : { background: 'rgb(14 116 144 / 0.24)' }),
           boxShadow: '0 0 0 0.5px rgb(255 255 255 / 0.58)',
         });
         overlay.append(line);
@@ -1226,11 +1241,16 @@ function createFindingBlockDetail({
   evidence,
   index,
   viewport,
+  detailKind = 'candidate',
+  idPrefix = 'block',
 }: Readonly<{
   finding: GeometryFinding;
   evidence: GeometryFindingEvidence;
   index: number;
   viewport: Readonly<{ width: number; height: number }>;
+  /** A cross-family rail one capture proposes uses this same annotator. */
+  detailKind?: ReportDetail['kind'];
+  idPrefix?: string;
 }>): ReportDetail {
   const members = evidence.rowMembers ?? [];
   const rowStart = Math.min(...members.map((member) => member.xStart), evidence.xStart ?? 0);
@@ -1245,32 +1265,53 @@ function createFindingBlockDetail({
     finding.anchor;
   const rowLabel = members.map((member) => member.label).join(' · ') || finding.label;
   const isSpread = finding.kind === 'row-spread';
+  // A cross-family line crosses the whole capture, so its guide does too: drawn
+  // only between its outermost members it would read as a wide DOM row.
+  const isCrossFamily = finding.kind === 'cross-family';
+  const isProposal = detailKind === 'cross-family-candidate';
   const measurementOf = (member: GeometryRowMember) =>
     isSpread
       ? `${anchorLabel} 行内跨度 ${Number(Math.abs(evidence.offset).toFixed(2))}px`
       : `${anchorLabel} ${formatDirectionalOffset('y', member.offset)}`;
+  const id = `${idPrefix}-${index + 1}`;
+  const kindLabel = isCrossFamily ? '跨行族几何行' : '行内垂直对齐';
+  const findingLead = isProposal
+    ? '跨行族候选轨'
+    : isCrossFamily
+      ? '跨行族偏移'
+      : isSpread
+        ? '行内跨度'
+        : '候选';
+  const lineLabel = isCrossFamily ? '几何行中位线' : '行中位线';
   return {
-    kind: 'candidate',
-    requiresReview: true,
-    findingKey: finding.key,
-    id: `block-${index + 1}`,
-    title: `${finding.surfaceFamily} · 行内垂直对齐 · ${rowLabel}`,
-    description: `${finding.label} · ${anchorLabel} · 行内 ${members.length} 个元素`,
-    finding: `${isSpread ? '行内跨度' : '候选'} · ${finding.label} ${anchorLabel} ${
+    kind: detailKind,
+    requiresReview: !isProposal,
+    ...(finding.key ? { findingKey: finding.key } : {}),
+    id,
+    title: `${finding.surfaceFamily} · ${kindLabel} · ${rowLabel}`,
+    description: `${finding.label} · ${anchorLabel} · ${members.length} 个元素`,
+    finding: `${findingLead} · ${finding.label} ${anchorLabel} ${
       isSpread
         ? `${Number(Math.abs(evidence.offset).toFixed(2))}px`
         : formatDirectionalOffset('y', evidence.offset)
-    } · 行中位线 ${Number(evidence.line.toFixed(2))}px`,
+    } · ${lineLabel} ${Number(evidence.line.toFixed(2))}px`,
     clip: clampClip(
-      {
-        x: rowStart - 12,
-        y: (rowTop + rowBottom) / 2 - bandHeight / 2,
-        width: rowEnd - rowStart + 420,
-        height: bandHeight,
-      },
+      isCrossFamily
+        ? {
+            x: 0,
+            y: (rowTop + rowBottom) / 2 - bandHeight / 2,
+            width: viewport.width,
+            height: bandHeight,
+          }
+        : {
+            x: rowStart - 12,
+            y: (rowTop + rowBottom) / 2 - bandHeight / 2,
+            width: rowEnd - rowStart + 420,
+            height: bandHeight,
+          },
       viewport
     ),
-    images: reportImages(`block-${index + 1}`),
+    images: reportImages(id),
     overlay: {
       alignmentGroups: [],
       baselineGroups: [],
@@ -1298,8 +1339,9 @@ function createFindingBlockDetail({
       blockGuides: [
         {
           line: evidence.line,
-          xStart: rowStart,
-          xEnd: rowEnd,
+          xStart: isCrossFamily ? 0 : rowStart,
+          xEnd: isCrossFamily ? viewport.width : rowEnd,
+          ...(isCrossFamily ? { dashed: true } : {}),
           members: members.map((member) => ({
             coordinate: member.coordinate,
             xStart: member.xStart,
@@ -1347,6 +1389,51 @@ function selectYFindingCards(
         left.finding.key.localeCompare(right.finding.key)
     )
     .slice(0, limit);
+}
+
+/**
+ * A cross-family rail one capture proposes, shaped as the finding it is not yet
+ * so the SAME annotator draws it. Every number the card prints is the rail's own
+ * measurement of that member; nothing here measures anything a second time.
+ */
+function crossFamilyProposalCard(
+  proposal: GeometryCrossFamilyProposal
+): Readonly<{ finding: GeometryFinding; evidence: GeometryFindingEvidence }> {
+  const members = proposal.members.map((item) => item.member);
+  const worst = [...members].sort(
+    (left, right) =>
+      Math.abs(right.offset) - Math.abs(left.offset) ||
+      left.primitiveId.localeCompare(right.primitiveId)
+  )[0];
+  return {
+    finding: {
+      // A proposal has no key: it is not in `findings.json`, not in the ledger.
+      key: '',
+      kind: 'cross-family',
+      surfaceFamily: proposal.surfaceFamily,
+      label: worst?.label ?? 'geometric row',
+      axis: 'y',
+      anchor: 'visual-center',
+      offset: worst?.offset ?? 0,
+      captureCount: 1,
+      totalCaptureCount: 1,
+      evidence: [],
+    },
+    evidence: {
+      captureId: proposal.captureId,
+      scopeKey: proposal.rail.rowId,
+      coordinate: worst?.coordinate ?? proposal.line,
+      line: proposal.line,
+      normalizedLine: proposal.normalizedLine,
+      offset: worst?.offset ?? 0,
+      yStart: Math.min(...members.map((member) => member.yStart)),
+      yEnd: Math.max(...members.map((member) => member.yEnd)),
+      xStart: Math.min(...members.map((member) => member.xStart)),
+      xEnd: Math.max(...members.map((member) => member.xEnd)),
+      anchor: 'visual-center',
+      rowMembers: members,
+    },
+  };
 }
 
 function createDiscoveryOverviewDetail({
@@ -2023,14 +2110,44 @@ test('captures the visual geometry report', async ({ browser }) => {
       .filter((capture) => geometryReplayContextKey(capture) === mainContextKey)
       .map((capture) => capture.captureId)
   );
-  const yCards = selectYFindingCards(
-    persistedFindings.findings,
-    MAX_Y_FINDING_CARDS,
-    warmCaptureIds
+  // Cross-family rails a single capture proposed but no second capture
+  // confirmed. They are not findings, so they carry no key and never reach the
+  // ledger; they share the finding cards' deviation order and screenshot budget
+  // rather than asking for one of their own.
+  const confirmedCrossFamilyKeys = new Set(
+    persistedFindings.findings.flatMap((finding) =>
+      finding.kind === 'cross-family' ? [finding.key] : []
+    )
   );
+  const crossFamilyProposalCards = collectGeometryCrossFamilyProposals(
+    persistedCapture,
+    persistedObservation
+  )
+    .filter((proposal) =>
+      proposal.members.some(
+        (member) => member.member.outlier && !confirmedCrossFamilyKeys.has(member.findingKey)
+      )
+    )
+    .map((proposal) => crossFamilyProposalCard(proposal));
+  const yCards = [
+    ...selectYFindingCards(persistedFindings.findings, MAX_Y_FINDING_CARDS, warmCaptureIds).map(
+      (card) => ({ ...card, detailKind: 'candidate' as const, idPrefix: 'block' })
+    ),
+    ...crossFamilyProposalCards.map((card) => ({
+      ...card,
+      detailKind: 'cross-family-candidate' as const,
+      idPrefix: 'cross-family',
+    })),
+  ]
+    .sort(
+      (left, right) =>
+        Math.abs(right.finding.offset) - Math.abs(left.finding.offset) ||
+        left.finding.label.localeCompare(right.finding.label)
+    )
+    .slice(0, MAX_Y_FINDING_CARDS);
   const yCardDetails: ReportDetail[] = [];
   const yCardsByCapture = new Map<string, Array<{ detail: ReportDetail; index: number }>>();
-  for (const [index, { finding, evidence }] of yCards.entries()) {
+  for (const [index, { finding, evidence, detailKind, idPrefix }] of yCards.entries()) {
     const capture = coverageByCaptureId.get(evidence.captureId);
     if (!capture) continue;
     const detail = createFindingBlockDetail({
@@ -2038,6 +2155,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       evidence,
       index,
       viewport: capture.viewport,
+      detailKind,
+      idPrefix,
     });
     // The addendum's check, made executable: an annotation on a Y card is the
     // finding's own evidence for that member, or the card is a second opinion
@@ -2336,6 +2455,11 @@ test('captures the visual geometry report', async ({ browser }) => {
     ];
   });
   displayedDetails.push(...details.filter((detail) => detail.kind === 'measurement-model'));
+  // A cross-family proposal is shown as itself: no ledger status, no
+  // classification, no baseline — nothing has reviewed it, it is not a finding.
+  displayedDetails.push(
+    ...yCardDetails.filter((detail) => detail.kind === 'cross-family-candidate')
+  );
 
   const reportData = {
     generatedAt: new Date().toISOString(),

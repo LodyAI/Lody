@@ -331,6 +331,11 @@
         background: var(--candidate-soft);
       }
 
+      .detail-review[data-kind='cross-family-candidate'] .detail-finding {
+        color: var(--text-muted);
+        background: var(--hover);
+      }
+
       .detail-review[data-kind='insufficient'] .detail-finding {
         color: var(--text-muted);
         background: var(--hover);
@@ -585,6 +590,9 @@
       const reviewCandidates = candidates.filter((d) => d.requiresReview);
       const stableCandidates = candidates.filter((d) => !d.requiresReview);
       const overviews = report.details.filter((d) => d.kind === 'overview');
+      const crossFamilyCandidates = report.details.filter(
+        (d) => d.kind === 'cross-family-candidate'
+      );
       const jitters = report.details.filter((d) => d.kind === 'jitter');
       const insufficient = report.details.filter((d) => d.kind === 'insufficient');
       const measurementModels = report.details.filter((d) => d.kind === 'measurement-model');
@@ -725,6 +733,12 @@
         ['overview', '整体视图', overviews.length, null],
         ['jitter', '亚像素抖动', jitters.length, 'dot--candidate'],
         ['measurement-model', '测量模型分歧', measurementModels.length, 'dot--candidate'],
+        [
+          'cross-family-candidate',
+          '跨行族候选轨',
+          crossFamilyCandidates.length,
+          'dot--insufficient',
+        ],
         ['insufficient', '证据不足', insufficient.length, 'dot--insufficient'],
         ['stable', '稳定候选轨', stableCandidates.length, 'dot--candidate'],
       ];
@@ -956,13 +970,15 @@
             ? '候选轨与偏移'
             : detail.kind === 'overview'
               ? '候选轨总览'
-              : detail.kind === 'jitter'
-                ? '亚像素抖动'
-                : detail.kind === 'measurement-model'
-                  ? '测量模型分歧'
-                  : detail.kind === 'insufficient'
-                    ? '证据不足'
-                    : '失败语义线';
+              : detail.kind === 'cross-family-candidate'
+                ? '跨行族候选轨'
+                : detail.kind === 'jitter'
+                  ? '亚像素抖动'
+                  : detail.kind === 'measurement-model'
+                    ? '测量模型分歧'
+                    : detail.kind === 'insufficient'
+                      ? '证据不足'
+                      : '失败语义线';
         const figures = [
           ['原始界面', detail.images.clean, `${detail.title} 原始局部截图`],
           [annotatedLabel, detail.images.annotated, `${detail.title} ${annotatedLabel}局部截图`],
