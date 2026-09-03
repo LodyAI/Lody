@@ -161,10 +161,10 @@ async function main(): Promise<void> {
 
     const rows = bench.tasks.map((task) => ({
       task: task.name,
-      'mean ms': Number((task.result?.latency.mean ?? 0).toFixed(1)),
-      'p99 ms': Number((task.result?.latency.p99 ?? 0).toFixed(1)),
-      'ops/sec': Number((task.result?.throughput.mean ?? 0).toFixed(1)),
-      samples: task.result?.latency.samples.length ?? 0,
+      'mean ms': Number((task.result?.mean ?? 0).toFixed(1)),
+      'p99 ms': Number((task.result?.p99 ?? 0).toFixed(1)),
+      'ops/sec': Number((task.result?.hz ?? 0).toFixed(1)),
+      samples: task.result?.samples.length ?? 0,
     }));
 
     process.stdout.write(
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
         `${containers} containers, snapshot ${(snapshot.byteLength / 1024 / 1024).toFixed(1)} MiB\n`
     );
     console.table(rows);
-    const mirrorMean = bench.tasks.find((task) => task.name === 'Mirror')?.result?.latency.mean ?? 0;
+    const mirrorMean = bench.tasks.find((task) => task.name === 'Mirror')?.result?.mean ?? 0;
     process.stdout.write(
       `  ${(mirrorMean * 1000).toFixed(0)} µs/turn, ` +
         `${((mirrorMean * 1000) / Math.max(containers, 1)).toFixed(1)} µs/container\n\n`
