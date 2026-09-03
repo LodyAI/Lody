@@ -962,4 +962,30 @@ describe('one-time acceptance of a wider permission', () => {
       buildSessionTurnInputConfig({ ...base, acceptWiderPermission: false }).acceptWiderPermission
     ).toBeUndefined();
   });
+
+  it('survives the normalizer every transport runs it through', () => {
+    // Direct RPC, `session/dispatch-turn`, steer, the Loro history readback and
+    // queue promotion all rebuild the config through this one function, so a
+    // field it does not copy never reaches the daemon — however carefully the
+    // client set it.
+    expect(
+      normalizeSessionTurnInputConfig(
+        buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true })
+      )?.acceptWiderPermission
+    ).toBe(true);
+
+    // One-time semantics survive the round trip too: only an explicit `true` is
+    // carried, so nothing can read an acceptance out of a turn that made none.
+    expect(
+      normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermission
+    ).toBeUndefined();
+    expect(
+      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: false })
+        ?.acceptWiderPermission
+    ).toBeUndefined();
+    expect(
+      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermission: 'yes' })
+        ?.acceptWiderPermission
+    ).toBeUndefined();
+  });
 });

@@ -350,7 +350,17 @@ Two things the dev build does deliberately, both load-bearing:
   queue, guide), because each route rebuilds the turn config from composer
   state: a route that forwarded three of four silently produced a turn with no
   acceptance, which the daemon stopped again. Required, not optional, so a new
-  route fails to compile rather than dropping it.
+  route fails to compile rather than dropping it. The same field must survive
+  every REBUILD on the way to the daemon, and there are three hand-written ones:
+  `normalizeSessionTurnInputConfig` (which direct RPC, `session/dispatch-turn`,
+  steer, the Loro history readback and queue promotion all run the config
+  through), the dispatch watcher's two `acpSessionConfig` constructions, and
+  queue promotion's `buildSessionTurnInputConfig` call. A rebuild that omits it
+  stops the very turn the user just accepted. Each copies ONLY an explicit
+  `true`: `false` and absent are the same answer, and neither may be written
+  back as something a later turn could read. `buildCliHistoryInputConfig` is the
+  deliberate exception — CLI and MCP turns never carry an acceptance, and it
+  must not become inheritable there.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from

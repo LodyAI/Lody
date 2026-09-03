@@ -489,6 +489,17 @@ export const normalizeSessionTurnInputConfig = (
     normalized.taskToolsEnabled = taskToolsEnabled;
   }
 
+  /* Only an explicit `true` survives. This is one-time informed acceptance of a
+     permission the agent reported as wider than the turn asked for, so `false`
+     and absent are the same thing — "not accepted" — and neither may be written
+     back as a value that another turn could read. Every transport normalizes
+     through here (direct RPC, the dispatch-turn and steer entries, the Loro
+     history readback, queue promotion), so a field this rebuild does not copy
+     never reaches the daemon at all. */
+  if (maybeParseField(z.boolean(), record.acceptWiderPermission) === true) {
+    normalized.acceptWiderPermission = true;
+  }
+
   if (record.agentRoleId === null) {
     normalized.agentRoleId = null;
   } else {
@@ -925,6 +936,7 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
+    acceptWiderPermission: z.boolean().optional(),
   })
   .strict();
 
