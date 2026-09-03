@@ -31,6 +31,7 @@ export type MobileInlinePickerOption<T extends string = string> = {
      `searchable` is true. Falls back to `String(label)` if omitted. */
   searchText?: string;
   description?: ReactNode;
+  provider?: string;
   icon?: ReactNode;
   disabled?: boolean;
   /** Tooltip / aria title for disabled options. */
@@ -237,7 +238,7 @@ export function MobileInlinePicker<T extends string = string>({
     () =>
       filterFuzzyOptions(options, query, (opt) => ({
         primary: opt.searchText ?? String(opt.label ?? ''),
-        secondary: [opt.value],
+        secondary: [opt.value, opt.provider],
       })),
     [options, query]
   );
@@ -431,6 +432,9 @@ export function MobileInlinePicker<T extends string = string>({
           ) : null}
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate">{opt.label}</span>
+            {opt.provider ? (
+              <span className="truncate text-xs text-muted-foreground">{opt.provider}</span>
+            ) : null}
             {opt.description ? (
               <span className="truncate text-xs text-muted-foreground">{opt.description}</span>
             ) : null}

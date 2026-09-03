@@ -15,6 +15,7 @@ export type AcpSessionSelectOption = {
   value: string;
   label: string;
   description?: string;
+  provider?: string;
   disabled?: boolean;
 };
 
@@ -110,10 +111,15 @@ export function AcpSessionSelect({
               key={option.value}
               disabled={option.disabled}
               onSelect={() => onChange(option.value)}
-              className="justify-between"
+              className="items-start"
             >
-              <span>{option.label}</span>
-              {isSelected ? <Check className="h-3 w-3 opacity-70" /> : null}
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate">{option.label}</span>
+                {option.provider ? (
+                  <span className="truncate text-xs text-muted-foreground">{option.provider}</span>
+                ) : null}
+              </span>
+              {isSelected ? <Check className="mt-0.5 h-3 w-3 opacity-70" /> : null}
             </DropdownMenuItem>
           );
 

@@ -61,6 +61,70 @@ const codexModelAndReasoningOptions = (
 ];
 
 describe('buildAcpSelectorOptions', () => {
+  it('separates provider fallbacks from real model descriptions', () => {
+    const target = {
+      configId: agentConfigId,
+      cliType: 'builtin' as const,
+      agentType: 'kimi',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'kimi',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime' as const,
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select' as const,
+              currentValue: 'kimi-k2',
+              options: [
+                {
+                  value: 'kimi-k2',
+                  name: 'Kimi K2',
+                  description: 'Kimi Code',
+                  provider: 'Kimi Code',
+                },
+                {
+                  value: 'kimi-k2-thinking',
+                  name: 'Kimi K2 Thinking',
+                  description: 'Best for complex tasks',
+                  provider: 'Kimi Code',
+                },
+              ],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      }),
+    };
+
+    expect(buildAcpSelectorOptions(target).modelOptions[0]).toMatchObject({
+      value: 'kimi-k2',
+      description: undefined,
+      provider: 'Kimi Code',
+    });
+    expect(buildAcpSelectorOptions(target).modelOptions[1]).toMatchObject({
+      value: 'kimi-k2-thinking',
+      description: 'Best for complex tasks',
+      provider: 'Kimi Code',
+    });
+    const genericOptions = buildAllConfigOptionSelectors(target)[0]?.options;
+    expect(genericOptions?.[0]).toMatchObject({
+      value: 'kimi-k2',
+      description: undefined,
+      provider: 'Kimi Code',
+    });
+    expect(genericOptions?.[1]).toMatchObject({
+      value: 'kimi-k2-thinking',
+      description: 'Best for complex tasks',
+      provider: 'Kimi Code',
+    });
+  });
+
   it('synthesizes registry model selectors when a stale cache stores empty config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,

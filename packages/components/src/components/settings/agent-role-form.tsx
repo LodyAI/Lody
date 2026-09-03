@@ -11,6 +11,7 @@ import type {
   AcpConfigOptionSelector,
   AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
+import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import {
   selectAuthorableAgentRoleConfigOptions,
   type AgentRoleFormError,
@@ -449,7 +450,7 @@ function ValueSelect({
 }: {
   label: string;
   value: string | null;
-  options: readonly { value: string; label: string }[];
+  options: readonly AcpSessionSelectOption[];
   onChange: (value: string) => void;
 }) {
   return (
@@ -459,8 +460,17 @@ function ValueSelect({
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            textValue={[option.label, option.provider].filter(Boolean).join(' · ')}
+          >
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate">{option.label}</span>
+              {option.provider ? (
+                <span className="truncate text-xs text-muted-foreground">{option.provider}</span>
+              ) : null}
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

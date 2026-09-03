@@ -235,6 +235,8 @@ arrive: context/message-flow.md "Upstream".
   non-blocking cache update before the first prompt. Machine Flock writes ignore
   `fetchedAt` when comparing entries, so unchanged runtime capabilities do not
   commit or sync.
+  Model provider labels are read only from version 1 `_meta.lody.modelOption` on
+  `category: 'model'` options; malformed or unsupported metadata is ignored.
 - `login-shell-env.ts` — login-shell env capture for spawned agents.
 - Builtin Claude owns session title generation through ACP
   `session_info_update`; `AgentClient` forwards those titles and `MessageHandler`

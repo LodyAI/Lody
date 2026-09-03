@@ -85,6 +85,7 @@ function OptionItem({
   icon,
   label,
   description,
+  provider,
   selected,
   disabled,
   onSelect,
@@ -92,6 +93,7 @@ function OptionItem({
   icon?: ReactNode;
   label: string;
   description?: string;
+  provider?: string;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -106,7 +108,7 @@ function OptionItem({
         onSelect();
       }}
       // Tighter vertical rhythm than the default menu item (py-2): these rows
-      // carry a two-line label + description, so a smaller pad keeps the list
+      // can carry secondary text, so a smaller pad keeps the list
       // from getting tall enough to overflow.
       className="items-start gap-2 py-1"
     >
@@ -116,6 +118,9 @@ function OptionItem({
       {icon ? <span className="flex h-4 shrink-0 items-center">{icon}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
+        {provider ? (
+          <span className="truncate text-xs leading-snug text-muted-foreground">{provider}</span>
+        ) : null}
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
@@ -849,6 +854,7 @@ export function DesktopRunConfigMenu({
                     key={opt.value}
                     label={opt.label}
                     description={opt.description}
+                    provider={opt.provider}
                     selected={opt.value === modelValue}
                     disabled={opt.disabled}
                     onSelect={select}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   normalizeAcpSessionCapabilities,
+  normalizeConfigOptions,
   readLegacySessionModelState,
 } from '@/agent/acp-capability-normalization';
 
@@ -48,6 +49,103 @@ const codexSessionResponse = {
 };
 
 describe('ACP capability normalization', () => {
+  it('preserves versioned model provider metadata for flat and grouped options', () => {
+    const flat = normalizeConfigOptions([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'kimi-k2',
+        options: [
+          {
+            value: 'kimi-k2',
+            name: 'Kimi K2',
+            _meta: { lody: { modelOption: { version: 1, provider: 'Kimi Code' } } },
+          },
+          {
+            value: 'legacy',
+            name: 'Legacy',
+            _meta: { provider: 'ignored' },
+          },
+          {
+            value: 'future',
+            name: 'Future',
+            _meta: { lody: { modelOption: { version: 2, provider: 'ignored' } } },
+          },
+          {
+            value: 'unnamed',
+            name: 'Unnamed',
+            _meta: { lody: { modelOption: { version: 1, provider: ' ' } } },
+          },
+        ],
+      },
+    ]);
+    expect(flat?.[0]?.options).toEqual([
+      {
+        value: 'kimi-k2',
+        name: 'Kimi K2',
+        description: undefined,
+        provider: 'Kimi Code',
+      },
+      { value: 'legacy', name: 'Legacy', description: undefined },
+      { value: 'future', name: 'Future', description: undefined },
+      { value: 'unnamed', name: 'Unnamed', description: undefined },
+    ]);
+
+    const grouped = normalizeConfigOptions([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'kimi-k2',
+        options: [
+          {
+            group: 'Moonshot',
+            name: 'Moonshot',
+            options: [
+              {
+                value: 'kimi-k2',
+                name: 'Kimi K2',
+                _meta: { lody: { modelOption: { version: 1, provider: 'Kimi Code' } } },
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(grouped?.[0]?.options[0]).toEqual({
+      value: 'kimi-k2',
+      name: 'Kimi K2',
+      description: undefined,
+      provider: 'Kimi Code',
+      group: 'Moonshot',
+    });
+
+    const nonModel = normalizeConfigOptions([
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning effort',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'high',
+        options: [
+          {
+            value: 'high',
+            name: 'High',
+            _meta: { lody: { modelOption: { version: 1, provider: 'ignored' } } },
+          },
+        ],
+      },
+    ]);
+    expect(nonModel?.[0]?.options[0]).toEqual({
+      value: 'high',
+      name: 'High',
+      description: undefined,
+    });
+  });
+
   it('reads the complete legacy model state used for model switching', () => {
     expect(readLegacySessionModelState(codexSessionResponse)).toEqual({
       currentModelId: 'gpt-5.6-sol[xhigh]',

@@ -4,12 +4,14 @@ import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
   AGENT_ROLE_VERSION,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
+  type MachineViewMeta,
 } from '@lody/shared';
 
 import { AgentRoleDetailPane } from '../src/components/sessions/agent-role-detail-pane';
@@ -99,6 +101,41 @@ describe('AgentRoleDetailPane', () => {
     // the bound agent's own defaults and present it as the Role's.
     expect(rowValue(view, 'Reasoning')).toBeUndefined();
     expect(rowValue(view, 'Permission')).toBeUndefined();
+  });
+
+  it('keeps the provider visible for a pinned model', async () => {
+    const machine = {
+      acpCapabilities: {
+        'config-1': {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gpt-5.6-sol',
+              options: [
+                {
+                  value: 'gpt-5.6-sol',
+                  name: 'GPT-5.6-Sol',
+                  provider: 'OpenAI',
+                },
+              ],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      },
+    } as Pick<MachineViewMeta, 'acpCapabilities'>;
+
+    const view = await render({ machine });
+    expect(rowValue(view, 'Model')).toBe('5.6-Sol · OpenAI');
   });
 
   it('names the machine only where the surface passes one', async () => {

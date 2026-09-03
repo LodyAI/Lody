@@ -2,8 +2,14 @@ import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
+  type AcpConfigOptionValueSummary,
 } from '@lody/shared';
-import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
+import type {
+  SessionConfigOption,
+  SessionConfigSelectGroup,
+  SessionConfigSelectOption,
+} from '@agentclientprotocol/sdk';
+import { LODY_MODEL_OPTION_META_KEY, type LodyModelOptionMeta } from 'acp-extension-core';
 import { z } from 'zod';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
 
@@ -19,6 +25,35 @@ export type AcpCapabilitiesResult = {
 
 function isSelectGroup(item: unknown): item is SessionConfigSelectGroup {
   return typeof item === 'object' && item !== null && 'group' in item;
+}
+
+const LodyModelOptionMetaSchema: z.ZodType<LodyModelOptionMeta> = z.object({
+  version: z.literal(1),
+  provider: z.string().trim().min(1).optional(),
+});
+const LodyModelOptionEnvelopeSchema = z.object({
+  lody: z.object({
+    [LODY_MODEL_OPTION_META_KEY]: LodyModelOptionMetaSchema,
+  }),
+});
+
+function normalizeSelectOption(
+  option: SessionConfigSelectOption,
+  category: string | undefined,
+  group?: string
+): AcpConfigOptionValueSummary {
+  const parsedMeta =
+    category === 'model' ? LodyModelOptionEnvelopeSchema.safeParse(option._meta) : undefined;
+  const provider = parsedMeta?.success
+    ? parsedMeta.data.lody[LODY_MODEL_OPTION_META_KEY].provider
+    : undefined;
+  return {
+    value: option.value,
+    name: option.name,
+    description: option.description ?? undefined,
+    ...(provider ? { provider } : {}),
+    ...(group !== undefined ? { group } : {}),
+  };
 }
 
 /** Normalize ACP session config options into the flattened cache representation. */
@@ -49,19 +84,10 @@ export function normalizeConfigOptions(
     for (const entry of opt.options) {
       if (isSelectGroup(entry)) {
         for (const child of entry.options) {
-          flatOptions.push({
-            value: child.value,
-            name: child.name,
-            description: child.description ?? undefined,
-            group: entry.name,
-          });
+          flatOptions.push(normalizeSelectOption(child, opt.category ?? undefined, entry.name));
         }
       } else {
-        flatOptions.push({
-          value: entry.value,
-          name: entry.name,
-          description: entry.description ?? undefined,
-        });
+        flatOptions.push(normalizeSelectOption(entry, opt.category ?? undefined));
       }
     }
     return {

@@ -63,7 +63,7 @@ const manyModels = [
   { value: 'gpt-5.5', label: 'GPT-5.5' },
   { value: 'gpt-5.5-codex', label: 'GPT-5.5 Codex' },
   { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
-  { value: 'grok-4', label: 'Grok 4' },
+  { value: 'grok-4', label: 'Grok 4', provider: 'xAI' },
   { value: 'kimi-k2', label: 'Kimi K2' },
 ];
 const fewModels = manyModels.slice(0, 2);
@@ -161,6 +161,13 @@ describe('composer model picker search', () => {
     const { search, rows } = await openModelSubmenu();
     await typeInto(search as HTMLInputElement, 'haiku-4');
     expect(rows()).toEqual(['Haiku 4.5']);
+  });
+
+  it('finds a model by its provider and shows the provider in the row', async () => {
+    const { search, rows } = await openModelSubmenu();
+    await typeInto(search as HTMLInputElement, 'xai');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain('xAI');
   });
 
   it('says so when nothing matches instead of showing an empty menu', async () => {
@@ -361,6 +368,13 @@ describe('composer model picker search', () => {
 
     await typeInto(search as HTMLInputElement, 'gem3');
     expect(rows()).toEqual(['Gemini 3 Pro']);
+  });
+
+  it('matches model providers in the mobile sheet too', async () => {
+    const { search, rows } = await openMobileModelPicker();
+    await typeInto(search as HTMLInputElement, 'xai');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain('xAI');
   });
 
   it('names its empty state on mobile too', async () => {

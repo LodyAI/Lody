@@ -7,6 +7,7 @@ export type MenuSearchableOption = {
   value: string;
   label: string;
   description?: string;
+  provider?: string;
   disabled?: boolean;
 };
 
@@ -47,9 +48,9 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
     () =>
       filterFuzzyOptions(options, query, (option) => ({
         primary: option.label,
-        // The id behind a pretty label and the provider's own blurb are worth
-        // finding by, but never ahead of a visible name.
-        secondary: [option.value, option.description],
+        // The id, provider name, and provider's own blurb are worth finding by,
+        // but never ahead of a visible name.
+        secondary: [option.value, option.description, option.provider],
       })),
     [options, query]
   );

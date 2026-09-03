@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import {
-  Bot,
-  Check,
-  ListChecks,
-  Monitor,
-  ShieldAlert,
-  Zap,
-} from 'lucide-react';
+import { Bot, Check, ListChecks, Monitor, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   classifyPermissionModeFace,
@@ -29,6 +22,7 @@ import {
   type AcpConfigOptionValue,
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
+import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { cn } from '@/lib/utils';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
@@ -70,6 +64,7 @@ const recentTaskAgentCombosAtom = atomWithStorage<RecentTaskAgentCombo[]>(
 function OptionItem({
   icon,
   label,
+  provider,
   description,
   selected,
   disabled,
@@ -77,6 +72,7 @@ function OptionItem({
 }: {
   icon?: ReactNode;
   label: string;
+  provider?: string;
   description?: string;
   selected: boolean;
   disabled?: boolean;
@@ -96,6 +92,9 @@ function OptionItem({
       {icon}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
+        {provider ? (
+          <span className="truncate text-xs leading-snug text-muted-foreground">{provider}</span>
+        ) : null}
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
@@ -267,7 +266,9 @@ export function TaskAgentRunConfigMenu({
     [configOptionSelectors]
   );
 
-  const modelConfigSelector = ordered.modelSelectors[0] as AcpSelectConfigOptionSelector | undefined;
+  const modelConfigSelector = ordered.modelSelectors[0] as
+    | AcpSelectConfigOptionSelector
+    | undefined;
   const extraSelectSelectors = useMemo(
     () =>
       ordered.otherSelectors.filter(
@@ -453,6 +454,8 @@ export function TaskAgentRunConfigMenu({
 
   const agentLabel = selectedConfig?.name ?? null;
   const triggerSecondary = [modelLabel, thinkingLabel].filter(Boolean).join(' · ');
+  const modelSearchPlaceholder = t('chat.runConfig.modelSearchPlaceholder', 'Search models');
+  const modelSearchEmptyLabel = t('chat.runConfig.modelSearchEmpty', 'No models match');
 
   return (
     <DropdownMenu>
@@ -565,11 +568,7 @@ export function TaskAgentRunConfigMenu({
                   />
                 }
                 label={entry.name}
-                description={
-                  entry.online
-                    ? undefined
-                    : t('tasks.slots.offline', 'Offline')
-                }
+                description={entry.online ? undefined : t('tasks.slots.offline', 'Offline')}
                 selected={entry.machineId === machineFilterId}
                 onSelect={() => setMachineFilterId(entry.machineId)}
               />
@@ -646,6 +645,7 @@ export function TaskAgentRunConfigMenu({
                   <OptionItem
                     key={option.value}
                     label={option.label}
+                    provider={option.provider}
                     description={option.description}
                     selected={option.value === selectedValue}
                     disabled={option.disabled || !value?.agentConfigId}
@@ -659,41 +659,45 @@ export function TaskAgentRunConfigMenu({
 
         {modelPickerOptions.length > 0 ? (
           <DropdownMenuSub>
-            <ValueSubTrigger
-              label={t('chat.runConfig.modelLabel', 'Model')}
-              value={modelLabel}
-            />
+            <ValueSubTrigger label={t('chat.runConfig.modelLabel', 'Model')} value={modelLabel} />
             <DropdownMenuSubContent
-              className={tasksMenuClassName('max-w-80')}
+              className={tasksMenuClassName('flex max-w-80 flex-col overflow-y-hidden p-0')}
               style={{
                 ...tasksMenuSurfaceStyle,
                 maxHeight: 'min(20rem, var(--radix-dropdown-menu-content-available-height, 20rem))',
               }}
             >
-              {modelPickerOptions.map((opt) => (
-                <OptionItem
-                  key={opt.value}
-                  label={opt.label}
-                  description={opt.description}
-                  selected={opt.value === modelValue}
-                  disabled={opt.disabled || !value?.agentConfigId}
-                  onSelect={() => {
-                    if (!value?.agentConfigId) return;
-                    if (modelOptions.length > 0) {
-                      commit({
-                        agentConfigId: value.agentConfigId as AgentConfigId,
-                        modelId: opt.value,
-                        ...(value.modeId ? { modeId: value.modeId } : {}),
-                        ...(value.configOptionValues
-                          ? { configOptionValues: value.configOptionValues }
-                          : {}),
-                      });
-                    } else if (modelConfigSelector) {
-                      patchConfigOption(modelConfigSelector.configId, opt.value);
-                    }
-                  }}
-                />
-              ))}
+              <MenuOptionSearchList
+                options={modelPickerOptions}
+                searchPlaceholder={modelSearchPlaceholder}
+                emptyText={modelSearchEmptyLabel}
+                onSelect={(opt) => {
+                  if (!value?.agentConfigId) return;
+                  if (modelOptions.length > 0) {
+                    commit({
+                      agentConfigId: value.agentConfigId as AgentConfigId,
+                      modelId: opt.value,
+                      ...(value.modeId ? { modeId: value.modeId } : {}),
+                      ...(value.configOptionValues
+                        ? { configOptionValues: value.configOptionValues }
+                        : {}),
+                    });
+                  } else if (modelConfigSelector) {
+                    patchConfigOption(modelConfigSelector.configId, opt.value);
+                  }
+                }}
+                renderOption={(opt, select) => (
+                  <OptionItem
+                    key={opt.value}
+                    label={opt.label}
+                    provider={opt.provider}
+                    description={opt.description}
+                    selected={opt.value === modelValue}
+                    disabled={opt.disabled || !value?.agentConfigId}
+                    onSelect={select}
+                  />
+                )}
+              />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         ) : null}
@@ -704,10 +708,7 @@ export function TaskAgentRunConfigMenu({
               label={t('chat.runConfig.reasoningLabel', 'Reasoning')}
               value={thinkingLabel}
             />
-            <DropdownMenuSubContent
-              className={tasksMenuClassName()}
-              style={tasksMenuSurfaceStyle}
-            >
+            <DropdownMenuSubContent className={tasksMenuClassName()} style={tasksMenuSurfaceStyle}>
               {thinkingSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
@@ -767,9 +768,7 @@ export function TaskAgentRunConfigMenu({
           </DropdownMenuSub>
         ) : null}
 
-        {(planSelector || fastSelector) && value?.agentConfigId ? (
-          <DropdownMenuSeparator />
-        ) : null}
+        {(planSelector || fastSelector) && value?.agentConfigId ? <DropdownMenuSeparator /> : null}
         {planSelector && value?.agentConfigId ? (
           <ToggleItem
             icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}

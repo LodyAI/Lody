@@ -358,8 +358,8 @@ Session conversation page chain:
   is not a way to find one. A search field inside a Radix menu must be
   `DropdownMenuSearchInput`, which owns the fight with the menu's typeahead and
   roving focus (its jsdoc has the details); the same tasks-side Model submenu
-  (`tasks/task-agent-run-config-menu.tsx`) is still an unsearchable clone and
-  should adopt it.
+  (`tasks/task-agent-run-config-menu.tsx`) shares `MenuOptionSearchList` and its
+  provider-name search.
   `DesktopRunConfigMenu` gains a **Role** row when the caller passes
   `agentRoles`. It sits ABOVE Agent, since a Role answers every row under it at
   once. The callers split by whether a Session exists yet, and that difference

@@ -288,6 +288,11 @@ const formatModeLabel = (value: string, text: string, target?: AcpSelectorTarget
   return stripRecommended(text);
 };
 
+const displayDescription = (
+  description: string | undefined,
+  provider: string | undefined
+): string | undefined => (description === provider ? undefined : description);
+
 /**
  * Builds config option selectors from AcpConfigOptionSummary[].
  */
@@ -336,7 +341,8 @@ const buildConfigOptionSelectors = (
             : opt.category === 'mode'
               ? formatModeLabel(v.value, v.name, target)
               : stripRecommended(v.name),
-        description: v.description,
+        description: displayDescription(v.description, v.provider),
+        provider: v.provider,
       })),
     };
   });
@@ -442,10 +448,11 @@ const buildModelOptions = (
   if (!modelOption) {
     return [];
   }
-  const options = modelOption.options.map((opt) => ({
+  const options: AcpSessionSelectOption[] = modelOption.options.map((opt) => ({
     value: opt.value,
     label: formatModelLabel(opt.name, target),
-    description: opt.description,
+    description: displayDescription(opt.description, opt.provider),
+    provider: opt.provider,
   }));
   if (
     authority !== 'authoritative' &&

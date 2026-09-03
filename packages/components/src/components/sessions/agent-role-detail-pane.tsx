@@ -19,6 +19,7 @@ import {
 } from '@lody/shared';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
+import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
@@ -88,10 +89,9 @@ export function AgentRoleDetailPane({
   const { thoughtLevelSelectors } = orderAcpConfigOptionSelectors(
     selectorOptions.configOptionSelectors
   );
-  const labelFor = (
-    options: ReadonlyArray<{ value: string; label: string; description?: string }>,
-    value: string
-  ) => options.find((option) => option.value === value);
+  const labelFor = (options: readonly AcpSessionSelectOption[], value: string) =>
+    options.find((option) => option.value === value);
+  const modelOption = modelId ? labelFor(selectorOptions.modelOptions, modelId) : undefined;
 
   /* Only what the Role PINS. `resolveConfigOptionValue` would fall back to the
      agent's own current value, which would print a reasoning level or a
@@ -182,7 +182,11 @@ export function AgentRoleDetailPane({
             <DetailRow
               icon={<Cpu className="h-3.5 w-3.5" strokeWidth={1.8} />}
               label={t('chat.runConfig.modelLabel', 'Model')}
-              value={labelFor(selectorOptions.modelOptions, modelId)?.label ?? modelId}
+              value={
+                modelOption?.provider
+                  ? `${modelOption.label} · ${modelOption.provider}`
+                  : (modelOption?.label ?? modelId)
+              }
               /* A model id is prefix-heavy and tail-distinctive
                  (`claude-opus-5` vs `claude-sonnet-5`), so the START is what
                  gives way when the line runs out. */

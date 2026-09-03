@@ -310,6 +310,7 @@ function MobileRunConfigSheetRows({
       label: opt.label,
       searchText: opt.label,
       description: opt.description,
+      provider: opt.provider,
       disabled: opt.disabled,
     }));
   }, [modelConfigSelector, modelOptions]);

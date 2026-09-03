@@ -226,6 +226,8 @@ export type AcpConfigOptionValueSummary = {
   value: string;
   name: string;
   description?: string;
+  /** Human-readable model provider from `_meta.lody.modelOption`. */
+  provider?: string;
   /** Group name when the option was part of a SessionConfigSelectGroup. */
   group?: string;
 };
