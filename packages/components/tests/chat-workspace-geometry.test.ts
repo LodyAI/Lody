@@ -1188,6 +1188,23 @@ describe('geometric rows', () => {
     ]);
   });
 
+  it('keeps a tall heading out of the narrow row it spans', () => {
+    // `workspace:wide-expanded`, verbatim: the landing `<h1>` and the sidebar
+    // row beside it. The heading covers the row's 10.5px median band whole, so
+    // an overlap measured against the SMALLER extent read 100% and put it on
+    // that line — where its centre then sat 12px "off" a line it was never on.
+    const landing = [
+      extent('h1', 362, 406),
+      extent('row-title', 363, 380),
+      extent('row-time', 364, 379),
+      extent('row-archive', 366.75, 377.25),
+      extent('row-avatar', 367.5, 376.5),
+    ];
+    const rows = assignGeometricRows(landing);
+    expect(rows[0]).not.toBe(rows[1]);
+    expect(new Set(rows.slice(1)).size).toBe(1);
+  });
+
   it('refuses to chain one line into the next through a half-overlapping neighbour', () => {
     // Pairwise transitivity would put all three on one row: each overlaps its
     // neighbour by exactly half. The MEDIAN band is what stops the ladder, the

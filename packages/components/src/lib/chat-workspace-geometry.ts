@@ -448,11 +448,11 @@ export type DiscoveredBlockRail = Readonly<{
 }>;
 
 /**
- * How much of the SMALLER of two vertical extents has to fall inside the other
- * for them to be on ONE line: the same "at least half" `selectVisualRowSlots`
- * asks of a row slot, so a row and a rail cannot mean different things by it.
- * That function repeats the literal because capture serializes it into the
- * page, where this binding does not exist; keep the two in step.
+ * How much of BOTH vertical extents has to fall inside the other for them to be
+ * on ONE line: the same "at least half" `selectVisualRowSlots` asks of a row
+ * slot, so a row and a rail cannot mean different things by it. That function
+ * repeats the literal because capture serializes it into the page, where this
+ * binding does not exist; keep the two in step.
  */
 export const GEOMETRY_ROW_BAND_OVERLAP = 0.5;
 
@@ -1398,11 +1398,13 @@ export function isGeometryPaintedShape(paint: GeometryShapePaint): boolean {
  * input, in input order; an extent with no height belongs to no row (`-1`).
  *
  * An extent joins the row whose MEDIAN band — the median member height centred
- * on the median member centre — it overlaps by at least half, and the best such
- * overlap wins. The median band is what stops a chain: neighbour-to-neighbour
- * transitivity would let a ladder of half-overlapping extents link two lines of
- * different heights into one row, exactly as chaining intermediate coordinates
- * would link two indentation levels into one X rail.
+ * on the median member centre — it overlaps by at least half OF BOTH, and the
+ * best such overlap wins. The median band is what stops a chain:
+ * neighbour-to-neighbour transitivity would let a ladder of half-overlapping
+ * extents link two lines of different heights into one row, exactly as chaining
+ * intermediate coordinates would link two indentation levels into one X rail.
+ * Half of BOTH is what stops the other direction: an extent far taller than the
+ * row covers its band completely without being on the row's line at all.
  */
 export function assignGeometricRows(
   extents: readonly GeometricRowExtent[],
@@ -1438,8 +1440,13 @@ export function assignGeometricRows(
       const bandStart = bandCenter - bandHeight / 2;
       const bandEnd = bandCenter + bandHeight / 2;
       const shared = Math.min(extent.yEnd, bandEnd) - Math.max(extent.yStart, bandStart);
-      const smaller = Math.min(height, bandHeight);
-      const ratio = smaller > 0 ? shared / smaller : 0;
+      // SYMMETRIC: the overlap has to cover half the member AND half the band,
+      // which is what dividing by the LARGER of the two says. Dividing by the
+      // smaller one let a 44px heading join a 17px row at "100%" — it covered
+      // that band completely while the band covered a third of it — and the
+      // heading's centre then read 12px off a line it was never on.
+      const span = Math.max(height, bandHeight);
+      const ratio = span > 0 ? shared / span : 0;
       if (ratio >= minimumBandOverlap && ratio > chosenOverlap) {
         chosen = rowIndex;
         chosenOverlap = ratio;
