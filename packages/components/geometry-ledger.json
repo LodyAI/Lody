@@ -9,7 +9,7 @@
   },
   "findings": {
     "geometry/right-sidebar/11pscs0": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2
       },
@@ -21,7 +21,7 @@
       }
     },
     "geometry/right-sidebar/171u7h8": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -33,7 +33,7 @@
       }
     },
     "geometry/right-sidebar/177rmie": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2
       },
@@ -45,9 +45,9 @@
       }
     },
     "geometry/right-sidebar/1e5wvsl": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": 4
+        "offset": 6.5
       },
       "identity": {
         "label": "Files",
@@ -57,7 +57,7 @@
       }
     },
     "geometry/right-sidebar/1ls7j8z": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -69,9 +69,9 @@
       }
     },
     "geometry/right-sidebar/1mxwyl5": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -1
+        "offset": -1.5
       },
       "identity": {
         "label": "app.tsx",
@@ -81,7 +81,7 @@
       }
     },
     "geometry/right-sidebar/1r5c99a": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -93,7 +93,7 @@
       }
     },
     "geometry/right-sidebar/1simiqu": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -105,7 +105,7 @@
       }
     },
     "geometry/right-sidebar/1vnwrqv": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -117,7 +117,7 @@
       }
     },
     "geometry/right-sidebar/57h0zw": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.5
       },
@@ -129,9 +129,9 @@
       }
     },
     "geometry/right-sidebar/6ijj9r": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": 0.75
+        "offset": 1
       },
       "identity": {
         "label": "Docs 2 + 100 − 20",
@@ -141,7 +141,7 @@
       }
     },
     "geometry/right-sidebar/6q3vy3": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.5
       },
@@ -153,7 +153,7 @@
       }
     },
     "geometry/right-sidebar/8s2gxh": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2
       },
@@ -165,9 +165,9 @@
       }
     },
     "geometry/right-sidebar/b0m4s": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": 6.5
+        "offset": 4
       },
       "identity": {
         "label": "Files",
@@ -177,7 +177,7 @@
       }
     },
     "geometry/right-sidebar/b8dyq5": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -189,7 +189,7 @@
       }
     },
     "geometry/right-sidebar/d3cw9u": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -201,7 +201,7 @@
       }
     },
     "geometry/right-sidebar/d4c4q": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -213,9 +213,9 @@
       }
     },
     "geometry/right-sidebar/daf70p": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -1
+        "offset": -1.5
       },
       "identity": {
         "label": "Conversation Diff",
@@ -225,7 +225,7 @@
       }
     },
     "geometry/right-sidebar/gvz5jb": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -0.75
       },
@@ -237,7 +237,7 @@
       }
     },
     "geometry/right-sidebar/hdgowf": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2
       },
@@ -249,7 +249,7 @@
       }
     },
     "geometry/right-sidebar/im7aci": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -261,7 +261,7 @@
       }
     },
     "geometry/right-sidebar/kbsjam": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -273,7 +273,7 @@
       }
     },
     "geometry/right-sidebar/l4kgf": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -285,7 +285,7 @@
       }
     },
     "geometry/right-sidebar/nerzug": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -297,7 +297,7 @@
       }
     },
     "geometry/right-sidebar/u9ipw4": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -309,7 +309,7 @@
       }
     },
     "geometry/right-sidebar/vvedhu": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -0.75
       },
@@ -321,7 +321,7 @@
       }
     },
     "geometry/right-sidebar/x7rij5": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -333,7 +333,7 @@
       }
     },
     "geometry/right-sidebar/xrp5i4": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 0.75
       },
@@ -345,7 +345,7 @@
       }
     },
     "geometry/session/1aje3gt": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1.25
       },
@@ -357,7 +357,7 @@
       }
     },
     "geometry/session/1euuz5v": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3
       },
@@ -369,7 +369,7 @@
       }
     },
     "geometry/session/1p4pgog": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3
       },
@@ -381,9 +381,9 @@
       }
     },
     "geometry/session/1t257v2": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -1.25
+        "offset": -1
       },
       "identity": {
         "label": "Private to you: lody is not shared with the team.",
@@ -393,7 +393,7 @@
       }
     },
     "geometry/session/1xffq47": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -405,7 +405,7 @@
       }
     },
     "geometry/session/1y86m8m": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 25
       },
@@ -417,7 +417,7 @@
       }
     },
     "geometry/session/37kibv": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3
       },
@@ -429,7 +429,7 @@
       }
     },
     "geometry/session/5875hb": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2.5
       },
@@ -441,7 +441,7 @@
       }
     },
     "geometry/session/88iul9": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 9.5
       },
@@ -453,7 +453,7 @@
       }
     },
     "geometry/session/9slq61": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 3
       },
@@ -465,7 +465,7 @@
       }
     },
     "geometry/session/i4jvzg": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -477,7 +477,7 @@
       }
     },
     "geometry/session/le2uqr": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3
       },
@@ -489,7 +489,7 @@
       }
     },
     "geometry/session/nu8q04": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1.25
       },
@@ -501,7 +501,7 @@
       }
     },
     "geometry/session/pothvh": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.25
       },
@@ -513,7 +513,7 @@
       }
     },
     "geometry/session/r7rfec": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1.5
       },
@@ -525,7 +525,7 @@
       }
     },
     "geometry/session/wy7fax": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 12.5
       },
@@ -537,7 +537,7 @@
       }
     },
     "geometry/session/y2yn1n": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.5
       },
@@ -549,7 +549,7 @@
       }
     },
     "geometry/session/zhdd1c": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 9.5
       },
@@ -561,7 +561,7 @@
       }
     },
     "geometry/workspace/14n6pir": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -573,9 +573,9 @@
       }
     },
     "geometry/workspace/1fccih": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": 1.75
+        "offset": -4
       },
       "identity": {
         "label": "Machine",
@@ -585,9 +585,9 @@
       }
     },
     "geometry/workspace/1jrw0q7": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -0.75
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -597,7 +597,7 @@
       }
     },
     "geometry/workspace/1lbwj6e": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.5
       },
@@ -609,7 +609,7 @@
       }
     },
     "geometry/workspace/1my7gbo": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -2.5
       },
@@ -621,7 +621,7 @@
       }
     },
     "geometry/workspace/1oezpj5": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 5.269230769230769
       },
@@ -633,7 +633,7 @@
       }
     },
     "geometry/workspace/1p79krt": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -4
       },
@@ -645,9 +645,9 @@
       }
     },
     "geometry/workspace/1t2nsoi": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -0.8181818181818182
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -657,7 +657,7 @@
       }
     },
     "geometry/workspace/1y8h8dm": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.375
       },
@@ -669,7 +669,7 @@
       }
     },
     "geometry/workspace/1ysr2o": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -0.75
       },
@@ -681,7 +681,7 @@
       }
     },
     "geometry/workspace/23ysa1": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1.5
       },
@@ -693,7 +693,7 @@
       }
     },
     "geometry/workspace/3qj791": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -4.076923076923077
       },
@@ -705,7 +705,7 @@
       }
     },
     "geometry/workspace/4gx82n": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2.25
       },
@@ -717,7 +717,7 @@
       }
     },
     "geometry/workspace/4ik93p": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3.375
       },
@@ -729,7 +729,7 @@
       }
     },
     "geometry/workspace/5p59kz": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 5
       },
@@ -741,7 +741,7 @@
       }
     },
     "geometry/workspace/6bmnyr": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1.8125
       },
@@ -753,7 +753,7 @@
       }
     },
     "geometry/workspace/bu6kch": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1
       },
@@ -765,9 +765,9 @@
       }
     },
     "geometry/workspace/cqs9ix": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -0.8181818181818182
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -777,7 +777,7 @@
       }
     },
     "geometry/workspace/fi8gpa": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -3.375
       },
@@ -789,7 +789,7 @@
       }
     },
     "geometry/workspace/h1bkqs": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -4
       },
@@ -801,7 +801,7 @@
       }
     },
     "geometry/workspace/hg2c2f": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -4
       },
@@ -813,7 +813,7 @@
       }
     },
     "geometry/workspace/k13zs1": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 3
       },
@@ -825,9 +825,9 @@
       }
     },
     "geometry/workspace/ky1uql": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": 5.269230769230769
+        "offset": 12.5
       },
       "identity": {
         "label": "Message",
@@ -837,7 +837,7 @@
       }
     },
     "geometry/workspace/lkcnsw": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 1.8125
       },
@@ -886,7 +886,7 @@
       }
     },
     "geometry/workspace/mcouew": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -898,7 +898,7 @@
       }
     },
     "geometry/workspace/qltk66": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": -1
       },
@@ -946,7 +946,7 @@
       }
     },
     "geometry/workspace/u25p0b": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
         "offset": 2.5
       },
@@ -958,9 +958,9 @@
       }
     },
     "geometry/workspace/w5fbub": {
-      "status": "accepted-debt",
+      "status": "debt",
       "baseline": {
-        "offset": -4.076923076923077
+        "offset": -4
       },
       "identity": {
         "label": "Machine",

@@ -69,6 +69,14 @@ export type GeometryBoxModelContribution = Readonly<{
 export type GeometryBoxModelPathStep = Readonly<{
   nodeId: string;
   element: string;
+  /**
+   * The node's `class` attribute verbatim, and the nearest function component
+   * above it in the React fiber tree. Both are LABELS on a repair ticket, so
+   * that an agent handed a finding can open a file instead of hunting a
+   * rendered DOM description; neither may ever reach a finding key.
+   */
+  className?: string;
+  component?: string;
   parentId?: string;
   startToParent: number;
   endToParent: number;
@@ -282,6 +290,9 @@ export type GeometryRepairTerm = Readonly<{
   term: GeometryDeclaredBoxModelTerm;
   /** Rendered description of the box-model node that owns the differing term. */
   element: string;
+  /** That node's `class` attribute and owning component: source pointers, not identity. */
+  className?: string;
+  component?: string;
   memberElement?: string;
   referenceElement?: string;
   memberValue: number;
@@ -292,8 +303,17 @@ export type GeometryRepairTerm = Readonly<{
 
 export type GeometryRepairProposal = Readonly<{
   commonAncestor: string;
+  /** The common ancestor's own source pointers, on the same evidence footing. */
+  className?: string;
+  component?: string;
   edge: 'inline-start' | 'inline-end' | 'block-start' | 'block-end';
   terms: readonly GeometryRepairTerm[];
+  /**
+   * Which repair this proposal IS, independent of which element reported it.
+   * Findings never merge on it — the key is untouched — but a report folds one
+   * card per group, so ten rows sharing one wrong padding read as one ticket.
+   */
+  repairGroup?: string;
 }>;
 
 export type GeometryOffsetExplanation = Readonly<{
@@ -368,6 +388,12 @@ export type GeometryFinding = Readonly<{
   /** Alignment-rail findings only; derived from evidence explanations alone. */
   classification?: GeometryFindingClassification;
   repairProposal?: GeometryRepairProposal;
+  /**
+   * Which REPAIR this finding belongs to, for `css-defect` findings that name
+   * one. Grouping only: the key, the evidence and the review are untouched, and
+   * a finding without a repair proposal simply has none.
+   */
+  repairGroup?: string;
   /** Set when every evidence row shares one value of a varying capture axis. */
   dimensionSensitivity?: readonly GeometryDimensionSensitivity[];
   evidence: readonly GeometryFindingEvidence[];
@@ -378,7 +404,35 @@ export type GeometryFindingArtifact = Readonly<{
   findings: readonly GeometryFinding[];
 }>;
 
-export type GeometryLedgerStatus = 'new' | 'accepted-debt' | 'ignored' | 'promoted';
+/**
+ * How a human reviewed one finding.
+ *
+ * `accepted-debt` used to carry two different decisions under one word — "this
+ * is wrong and we will fix it later" and "this is not a defect" — so a queue
+ * built from it mixed work with non-work. They are `debt` and `wont-fix` now.
+ * `fixed` is the other end of the same flywheel: a finding measured back to
+ * zero, re-baselined there, and therefore held to the STRICTEST ratchet of
+ * all — reopening it is a regression, not a new review.
+ *
+ * Only `promoted` compiles into a contract. `new`, `debt`, `wont-fix`, `fixed`
+ * and `ignored` compile into nothing; what separates them is the ratchet,
+ * which skips `ignored` and holds every other status to its baseline.
+ */
+export type GeometryLedgerStatus =
+  | 'new'
+  | 'debt'
+  | 'wont-fix'
+  | 'fixed'
+  | 'ignored'
+  | 'promoted';
+
+/** Statuses the ratchet holds to their reviewed baseline. */
+export const GEOMETRY_RATCHETED_LEDGER_STATUSES: readonly GeometryLedgerStatus[] = [
+  'new',
+  'debt',
+  'wont-fix',
+  'fixed',
+];
 
 /**
  * The stylesheet is the single source of truth for a named geometry token. A
@@ -1088,7 +1142,7 @@ function proposeBoxModelRepair(
   const dominantOwner = (
     chain: readonly GeometryBoxModelPathStep[],
     term: GeometryDeclaredBoxModelTerm
-  ) => {
+  ): GeometryBoxModelPathStep | undefined => {
     let bestIndex = -1;
     let bestValue = 0;
     chain.forEach((step, index) => {
@@ -1102,8 +1156,8 @@ function proposeBoxModelRepair(
     // padding, border and gap are declared on the containing box; margin sits
     // on the node itself.
     return PARENT_OWNED_TERMS.has(term)
-      ? (chain[bestIndex - 1]?.element ?? commonAncestor.element)
-      : chain[bestIndex]?.element;
+      ? (chain[bestIndex - 1] ?? commonAncestor)
+      : chain[bestIndex];
   };
   const terms: GeometryRepairTerm[] = [];
   for (const term of DECLARED_BOX_MODEL_TERMS) {
@@ -1111,33 +1165,57 @@ function proposeBoxModelRepair(
     const referenceValue = total(referenceChain, term);
     const delta = memberValue - referenceValue;
     if (Math.abs(delta) < 0.5) continue;
-    const memberElement = dominantOwner(memberChain, term);
-    const referenceElement = dominantOwner(referenceChain, term);
+    const memberOwner = dominantOwner(memberChain, term);
+    const referenceOwner = dominantOwner(referenceChain, term);
     const dominantSide = Math.abs(memberValue) >= Math.abs(referenceValue) ? 'member' : 'reference';
+    const owner =
+      (dominantSide === 'member' ? memberOwner : referenceOwner) ??
+      memberOwner ??
+      referenceOwner ??
+      commonAncestor;
     terms.push({
       side: dominantSide,
       term,
-      element:
-        (dominantSide === 'member' ? memberElement : referenceElement) ??
-        memberElement ??
-        referenceElement ??
-        commonAncestor.element,
-      ...(memberElement ? { memberElement } : {}),
-      ...(referenceElement ? { referenceElement } : {}),
+      element: owner.element,
+      ...(owner.className ? { className: owner.className } : {}),
+      ...(owner.component ? { component: owner.component } : {}),
+      ...(memberOwner ? { memberElement: memberOwner.element } : {}),
+      ...(referenceOwner ? { referenceElement: referenceOwner.element } : {}),
       memberValue: Number(memberValue.toFixed(4)),
       referenceValue: Number(referenceValue.toFixed(4)),
       delta: Number(delta.toFixed(4)),
     });
   }
   if (terms.length === 0) return undefined;
-  return {
+  const sorted = terms.sort(
+    (left, right) =>
+      Math.abs(right.delta) - Math.abs(left.delta) || left.term.localeCompare(right.term)
+  );
+  const proposal: GeometryRepairProposal = {
     commonAncestor: commonAncestor.element,
+    ...(commonAncestor.className ? { className: commonAncestor.className } : {}),
+    ...(commonAncestor.component ? { component: commonAncestor.component } : {}),
     edge,
-    terms: terms.sort(
-      (left, right) =>
-        Math.abs(right.delta) - Math.abs(left.delta) || left.term.localeCompare(right.term)
-    ),
+    terms: sorted,
   };
+  return { ...proposal, repairGroup: geometryRepairGroupKey(proposal) };
+}
+
+/**
+ * Repair identity: WHICH edit closes this, not which element reported it. The
+ * component that owns the edit (or, unrendered by React, the common ancestor's
+ * DOM description), the term, the edge, and the node the term sits on. It is a
+ * grouping label only — findings are never merged on it and no key reads it —
+ * so ten rows sharing one wrong padding stay ten reviewed findings and become
+ * one ticket.
+ */
+export function geometryRepairGroupKey(
+  proposal: Omit<GeometryRepairProposal, 'repairGroup'>
+): string | undefined {
+  const dominant = proposal.terms[0];
+  if (!dominant) return undefined;
+  const owner = dominant.component ?? proposal.component ?? proposal.commonAncestor;
+  return makeFindingKey(['repair', owner, dominant.term, proposal.edge, dominant.element]);
 }
 
 function declaredTermDelta(explanation: GeometryOffsetExplanation): number {
@@ -2041,6 +2119,7 @@ export function createGeometryFindings(
       totalCaptureCount: totalBySurface.get(group.surfaceFamily) ?? evidence.length,
       classification,
       ...(repairProposal ? { repairProposal } : {}),
+      ...(repairProposal?.repairGroup ? { repairGroup: repairProposal.repairGroup } : {}),
       ...(sensitivity.length > 0 ? { dimensionSensitivity: sensitivity } : {}),
       evidence,
     };
@@ -2503,11 +2582,15 @@ export function diffGeometryFindings(
   };
 }
 
-/** Record previously unseen findings without moving an existing baseline. */
+/**
+ * Record previously unseen findings without moving an existing baseline. New
+ * entries land on `debt`, never `wont-fix`: telling those two apart is the
+ * review, and a tool that guessed it would be recording a decision nobody made.
+ */
 export function triageGeometryFindings(
   artifact: GeometryFindingArtifact,
   ledger: GeometryLedger,
-  status: Extract<GeometryLedgerStatus, 'new' | 'accepted-debt'> = 'accepted-debt'
+  status: Extract<GeometryLedgerStatus, 'new' | 'debt'> = 'debt'
 ): GeometryLedger {
   const findings: Record<string, GeometryLedgerEntry> = { ...ledger.findings };
   const reviewedIdentity = (finding: GeometryFinding): GeometryReviewedIdentity => ({
@@ -2826,6 +2909,268 @@ export function summarizeGeometryInkCenters(
   };
 }
 
+/**
+ * The CSS property a repair term actually edits. `padding` and `margin` have
+ * logical longhands per edge; a border edge is a width; a gap belongs to the
+ * axis, not to one of its two edges. Guessing `gap-inline-end` would hand an
+ * agent a property that does not exist.
+ */
+export function geometryRepairCssProperty(
+  term: GeometryDeclaredBoxModelTerm,
+  edge: GeometryRepairProposal['edge']
+): string {
+  if (term === 'gap') return edge.startsWith('inline') ? 'column-gap' : 'row-gap';
+  if (term === 'border') return `border-${edge}-width`;
+  return `${term}-${edge}`;
+}
+
+export type GeometryRepairTextOptions = Readonly<{
+  maxTerms?: number;
+  /**
+   * A Tailwind class list runs to hundreds of characters, which is what an
+   * agent greps for and what makes a one-line summary unreadable. So the card
+   * body keeps it and the summary line leaves it out; neither truncates it,
+   * because half a class list greps for nothing.
+   */
+  includeClassName?: boolean;
+}>;
+
+/**
+ * One repair term as a sentence an agent can act on: which component, which
+ * rendered node inside it, which property, how far off, and the class list that
+ * most likely declares it.
+ */
+export function formatGeometryRepairTerm(
+  term: GeometryRepairTerm,
+  proposal: Pick<GeometryRepairProposal, 'edge' | 'commonAncestor' | 'component'>,
+  options: GeometryRepairTextOptions = {}
+): string {
+  const owner = term.component ?? proposal.component ?? proposal.commonAncestor;
+  const property = geometryRepairCssProperty(term.term, proposal.edge);
+  const magnitude = Number(Math.abs(term.delta).toFixed(2));
+  const direction = term.delta > 0 ? '多' : '少';
+  const className =
+    term.className && options.includeClassName !== false ? `（class: ${term.className}）` : '';
+  return `${owner} 里 ${term.element} 的 ${property} ${direction} ${magnitude}px${className}`;
+}
+
+/** The proposal's terms as sentences, strongest first. */
+export function formatGeometryRepairProposal(
+  proposal: GeometryRepairProposal,
+  options: GeometryRepairTextOptions = {}
+): string {
+  return proposal.terms
+    .slice(0, options.maxTerms ?? 3)
+    .map((term) => formatGeometryRepairTerm(term, proposal, options))
+    .join('；');
+}
+
+export type GeometryRatchetViolation = Readonly<{
+  kind: 'offset-regression' | 'unreviewed-finding';
+  key: string;
+  label: string;
+  surfaceFamily: GeometrySurfaceFamily;
+  axis: SemanticAlignmentAxis;
+  anchor: SemanticAlignmentAnchor;
+  status?: GeometryLedgerStatus;
+  baseline?: number;
+  current: number;
+  /** The slack allowed above `|baseline|`, in CSS pixels. */
+  tolerance?: number;
+}>;
+
+/**
+ * The coarsest device pixel this finding was measured with. A finding merged
+ * across a 2× and a 1× capture is only as precise as the 1× one, so holding it
+ * to half a pixel would fail on rounding the measurement cannot avoid.
+ */
+export function geometryFindingDevicePixel(
+  finding: GeometryFinding,
+  captures: GeometryCaptureArtifact
+): number {
+  const scaleByCapture = new Map(
+    captures.captures.map((capture) => [capture.captureId, capture.deviceScaleFactor])
+  );
+  const devicePixels = finding.evidence.map((evidence) => {
+    const scale = scaleByCapture.get(evidence.captureId);
+    return scale && scale > 0 ? 1 / scale : 1;
+  });
+  return devicePixels.length > 0 ? Math.max(...devicePixels) : 1;
+}
+
+/**
+ * The ratchet. A ledger baseline used to be a number the report PRINTED; this
+ * is what makes it a number CI enforces.
+ *
+ * Two rules, both about the ledger being complete and monotonic:
+ * every measured finding must be reviewed, and no reviewed finding may drift
+ * further from its line than the review recorded, allowing one device pixel for
+ * the rounding the measurement itself cannot avoid. `ignored` opts out — that
+ * is what ignoring one means — and `promoted` is left to the contract check
+ * that already gates it exactly, rather than being gated twice and loosely.
+ */
+export function checkGeometryLedgerRatchet(
+  artifact: GeometryFindingArtifact,
+  ledger: GeometryLedger,
+  captures: GeometryCaptureArtifact
+): readonly GeometryRatchetViolation[] {
+  const ratcheted = new Set<GeometryLedgerStatus>(GEOMETRY_RATCHETED_LEDGER_STATUSES);
+  return artifact.findings.flatMap((finding): GeometryRatchetViolation[] => {
+    const identity = {
+      key: finding.key,
+      label: finding.label,
+      surfaceFamily: finding.surfaceFamily,
+      axis: finding.axis,
+      anchor: finding.anchor,
+      current: finding.offset,
+    };
+    const entry = ledger.findings[finding.key];
+    if (!entry) return [{ kind: 'unreviewed-finding', ...identity }];
+    if (!ratcheted.has(entry.status)) return [];
+    const baseline = entry.baseline?.offset;
+    if (baseline === undefined) return [];
+    const tolerance = geometryFindingDevicePixel(finding, captures);
+    if (Math.abs(finding.offset) <= Math.abs(baseline) + tolerance) return [];
+    return [
+      {
+        kind: 'offset-regression',
+        ...identity,
+        status: entry.status,
+        baseline,
+        tolerance,
+      },
+    ];
+  });
+}
+
+export type GeometryFixVerification = Readonly<{
+  key: string;
+  label: string;
+  /** Absent from findings: the rail no longer reports this element at all. */
+  resolved: boolean;
+  offset: number;
+  tolerance: number;
+  passed: boolean;
+  reason?: string;
+}>;
+
+/**
+ * Close the flywheel: a finding whose offset is now within one device pixel of
+ * its line is `fixed`, and its baseline moves to what was just measured — which
+ * makes it the STRICTEST entry in the ledger from then on. Everything else is
+ * reported and changes nothing: a verification that re-baselined a failure
+ * would be a ratchet that only ever loosens.
+ */
+export function verifyGeometryFixes(
+  artifact: GeometryFindingArtifact,
+  ledger: GeometryLedger,
+  captures: GeometryCaptureArtifact,
+  keys: readonly string[]
+): Readonly<{
+  verifications: readonly GeometryFixVerification[];
+  ledger: GeometryLedger;
+}> {
+  const byKey = new Map(artifact.findings.map((finding) => [finding.key, finding]));
+  const findings: Record<string, GeometryLedgerEntry> = { ...ledger.findings };
+  const verifications = keys.map((key): GeometryFixVerification => {
+    const entry = ledger.findings[key];
+    const finding = byKey.get(key);
+    const label = finding?.label ?? entry?.identity?.label ?? key;
+    const refuse = (reason: string): GeometryFixVerification => ({
+      key,
+      label,
+      resolved: !finding,
+      offset: finding?.offset ?? 0,
+      tolerance: 0,
+      passed: false,
+      reason,
+    });
+    if (!entry) return refuse('no ledger entry reviews this finding');
+    // A promoted finding is gated EXACTLY by its contract. Moving it to `fixed`
+    // would leave that contract uncompiled and silently drop the tightest rule
+    // in the file, so retiring the contract has to be the deliberate step.
+    if (entry.status === 'promoted') {
+      return refuse('a promoted finding is gated by its contract; retire the contract first');
+    }
+    if (!finding) {
+      // The element is no longer measured off any line: nothing left to allow.
+      findings[key] = { ...entry, status: 'fixed', baseline: { offset: 0 } };
+      return { key, label, resolved: true, offset: 0, tolerance: 0, passed: true };
+    }
+    const tolerance = geometryFindingDevicePixel(finding, captures);
+    const passed = Math.abs(finding.offset) <= tolerance;
+    if (passed) {
+      findings[key] = { ...entry, status: 'fixed', baseline: { offset: finding.offset } };
+    }
+    return {
+      key,
+      label,
+      resolved: false,
+      offset: finding.offset,
+      tolerance,
+      passed,
+      ...(passed
+        ? {}
+        : {
+            reason: `|offset| ${Math.abs(finding.offset).toFixed(3)}px exceeds one device pixel (${tolerance.toFixed(3)}px)`,
+          }),
+    };
+  });
+  if (verifications.some((verification) => !verification.passed)) {
+    return { verifications, ledger };
+  }
+  return {
+    verifications,
+    ledger: {
+      version: 1,
+      ...(ledger.tokens ? { tokens: ledger.tokens } : {}),
+      findings: Object.fromEntries(
+        Object.entries(findings).sort(([left], [right]) => left.localeCompare(right))
+      ),
+    },
+  };
+}
+
+/** Every finding key the artifact assigns to one repair group. */
+export function geometryFindingKeysInRepairGroup(
+  artifact: GeometryFindingArtifact,
+  repairGroup: string
+): readonly string[] {
+  return artifact.findings
+    .filter((finding) => finding.repairGroup === repairGroup)
+    .map((finding) => finding.key)
+    .sort();
+}
+
+export function formatGeometryRatchetViolations(
+  violations: readonly GeometryRatchetViolation[]
+): string {
+  return violations
+    .map((violation) =>
+      violation.kind === 'unreviewed-finding'
+        ? [
+            `unreviewed finding ${violation.key}`,
+            `  ${violation.surfaceFamily} · ${violation.label} · ${violation.axis}/${violation.anchor}`,
+            `  measured ${violation.current.toFixed(3)}px and no ledger entry reviews it.`,
+            '  Run `pnpm geometry:report <dir>` then `pnpm geometry:triage <dir>` and commit the ledger.',
+          ].join('\n')
+        : [
+            `regressed finding ${violation.key}`,
+            `  ${violation.surfaceFamily} · ${violation.label} · ${violation.axis}/${violation.anchor} (${violation.status})`,
+            `  baseline ${(violation.baseline ?? 0).toFixed(3)}px → current ${violation.current.toFixed(3)}px`,
+            `  allowed |offset| ≤ ${(Math.abs(violation.baseline ?? 0) + (violation.tolerance ?? 0)).toFixed(3)}px (baseline + ${(violation.tolerance ?? 0).toFixed(3)}px device pixel)`,
+          ].join('\n')
+    )
+    .join('\n\n');
+}
+
+/**
+ * Only `promoted` compiles. `new`, `debt`, `wont-fix`, `fixed` and `ignored`
+ * produce no contract at all — a status is a REVIEW, and a review that started
+ * gating the product without a human writing the contract would be a rule
+ * nobody wrote. A `fixed` finding is held to its own near-zero baseline by the
+ * ratchet; promoting it to a contract is a separate, deliberate step.
+ */
 export function compileGeometryContracts(ledger: GeometryLedger): GeometryContractArtifact {
   const contracts = Object.entries(ledger.findings).flatMap(([findingKey, entry]) => {
     if (entry.status !== 'promoted') return [];

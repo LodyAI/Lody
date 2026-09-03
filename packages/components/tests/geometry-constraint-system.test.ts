@@ -14,6 +14,14 @@ import {
   evaluateGeometryContractResolutions,
   evaluateGeometryContractValues,
   explainGeometryOffset,
+  checkGeometryLedgerRatchet,
+  formatGeometryRatchetViolations,
+  formatGeometryRepairProposal,
+  geometryFindingDevicePixel,
+  geometryFindingKeysInRepairGroup,
+  geometryRepairCssProperty,
+  geometryRepairGroupKey,
+  verifyGeometryFixes,
   geometryFindingLabel,
   geometryIdentityLocator,
   geometryRowFamilyKey,
@@ -30,8 +38,12 @@ import {
   type GeometryCapturedCandidate,
   type GeometryCapturedScope,
   type GeometryContract,
+  type GeometryBoxModelPathStep,
+  type GeometryCaptureArtifact,
   type GeometryFinding,
+  type GeometryFindingArtifact,
   type GeometryLedger,
+  type GeometryRepairProposal,
 } from '../src/lib/geometry-constraint-system';
 
 const locator = (name: string) => ({
@@ -171,6 +183,77 @@ describe('geometry constraint artifacts', () => {
     ]);
   });
 
+  it('carries the repair group onto the finding without touching its key', () => {
+    // Two rails whose outlier is off by the same declared padding, on the same
+    // component: one ticket, two reviewed findings.
+    const contribution = (padding: number) => ({
+      padding,
+      border: 0,
+      margin: 0,
+      gap: 0,
+      layout: 0,
+    });
+    const node = (
+      nodeId: string,
+      padding: number,
+      parentId?: string
+    ): GeometryBoxModelPathStep => ({
+      nodeId,
+      element: 'div[role=button]',
+      className: 'pe-3',
+      component: 'SidebarRowShared',
+      ...(parentId ? { parentId } : {}),
+      startToParent: 0,
+      endToParent: padding,
+      centerToParent: 0,
+      inlineStart: contribution(0),
+      inlineEnd: contribution(padding),
+    });
+    const measuredRail = (suffix: string) =>
+      railCandidates(suffix).map((item) => ({ ...item, boxModelNodeRef: item.primitiveId }));
+    // The outlier's own trailing padding is 4px short of its row's, which is
+    // exactly the offset the rail measured.
+    const boxModelNodes = Object.fromEntries(
+      ['a', 'b'].flatMap((suffix) => [
+        ...['one', 'two', 'three'].map(
+          (name) => [`${name}-${suffix}`, node(`${name}-${suffix}`, 14, 'root')] as const
+        ),
+        [`shifted-${suffix}`, node(`shifted-${suffix}`, 10, 'root')] as const,
+        ['root', { ...node('root', 0), element: 'aside[complementary]' }] as const,
+      ])
+    );
+    const captureArtifact = {
+      version: 1 as const,
+      captures: [
+        {
+          ...capture('one', [scope('sidebar-one', 'sidebar', 200, measuredRail('-a'))]),
+          boxModelNodes,
+        },
+        {
+          ...capture('two', [scope('sidebar-two', 'sidebar', 240, measuredRail('-b'))]),
+          boxModelNodes,
+        },
+      ],
+    };
+    const findings = createGeometryFindings(
+      captureArtifact,
+      observeGeometryCaptures(captureArtifact)
+    );
+
+    const finding = findings.findings[0];
+    expect(finding?.classification).toBe('css-defect');
+    expect(finding?.repairGroup).toBe(finding?.repairProposal?.repairGroup);
+    expect(finding?.repairGroup).toBe(geometryRepairGroupKey(finding!.repairProposal!));
+    // Grouping is evidence, so the key is exactly what it was without it.
+    expect(finding?.key).toBe(
+      alignmentFindingKey({
+        surfaceFamily: 'workspace',
+        locator: geometryIdentityLocator(finding!.locator!),
+        anchor: 'inline-end',
+      })
+    );
+  });
+
   it('explains an offset as box-model arithmetic to a common ancestor', () => {
     const contribution = (padding: number, border = 0) => ({
       padding,
@@ -227,6 +310,8 @@ describe('geometry constraint artifacts', () => {
       residual: 0,
       repair: {
         commonAncestor: 'aside[complementary]',
+        // Grouping evidence: the ticket this offset belongs to, never identity.
+        repairGroup: expect.stringMatching(/^geometry\/repair\//),
         edge: 'inline-end',
         terms: [
           {
@@ -374,7 +459,7 @@ describe('geometry constraint artifacts', () => {
           },
         },
         'geometry/workspace/resolved': {
-          status: 'accepted-debt',
+          status: 'debt',
           baseline: { offset: 2 },
         },
       },
@@ -421,7 +506,7 @@ describe('geometry constraint artifacts', () => {
     );
 
     expect(second.findings[finding.key]).toEqual({
-      status: 'accepted-debt',
+      status: 'debt',
       baseline: { offset: 4 },
       identity: {
         label: 'Shifted',
@@ -734,6 +819,7 @@ describe('geometry constraint artifacts', () => {
       expect(explanation?.residual).toBe(0);
       expect(explanation?.repair).toEqual({
         commonAncestor: 'div[role=tabpanel]',
+        repairGroup: expect.stringMatching(/^geometry\/repair\//),
         edge: 'inline-start',
         terms: [
           {
@@ -1554,7 +1640,7 @@ describe('re-keying a reviewed finding', () => {
     version: 1,
     findings: {
       'geometry/workspace/old-machine': {
-        status: 'accepted-debt',
+        status: 'debt',
         reason: 'Reviewed: optical centring of the machine icon.',
         baseline: { offset: -4 },
         identity: {
@@ -1565,7 +1651,7 @@ describe('re-keying a reviewed finding', () => {
         },
       },
       'geometry/workspace/old-zh-machine': {
-        status: 'accepted-debt',
+        status: 'debt',
         baseline: { offset: -4 },
         identity: {
           label: '机器',
@@ -1575,7 +1661,7 @@ describe('re-keying a reviewed finding', () => {
         },
       },
       'geometry/workspace/old-unreviewed': {
-        status: 'accepted-debt',
+        status: 'debt',
         baseline: { offset: 9 },
       },
     },
@@ -1653,7 +1739,7 @@ describe('re-keying a reviewed finding', () => {
 
     expect(migrated.findings['geometry/workspace/old-machine']).toBeUndefined();
     expect(migrated.findings['geometry/workspace/new-machine']).toEqual({
-      status: 'accepted-debt',
+      status: 'debt',
       reason: 'Reviewed: optical centring of the machine icon.',
       // The baseline travels: a structural re-key must not silently accept the
       // current offset as the reviewed one.
@@ -1749,3 +1835,416 @@ describe('marker removal readiness', () => {
     expect(ready.rules[0]?.matchedMemberCount).toBe(ready.rules[0]?.memberCount);
   });
 });
+
+describe('geometry ledger ratchet', () => {
+  const ratchetFinding = (
+    key: string,
+    offset: number,
+    captureId = 'workspace:wide-expanded'
+  ): GeometryFinding => ({
+    key,
+    kind: 'alignment-rail',
+    surfaceFamily: 'workspace',
+    locator: locator('Shifted'),
+    label: `label for ${key}`,
+    axis: 'x',
+    anchor: 'inline-end',
+    offset,
+    captureCount: 1,
+    totalCaptureCount: 1,
+    evidence: [
+      {
+        captureId,
+        scopeKey: 'sidebar.shell',
+        coordinate: offset,
+        line: 0,
+        normalizedLine: 0.5,
+        offset,
+        yStart: 0,
+        yEnd: 16,
+      },
+    ],
+  });
+
+  const captures = (scales: Readonly<Record<string, number>>): GeometryCaptureArtifact => ({
+    version: 1,
+    captures: Object.entries(scales).map(([captureId, deviceScaleFactor]) => ({
+      captureId,
+      surfaceFamily: 'workspace',
+      surface: 'Workspace',
+      storyId: 'story',
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor,
+      screenshot: '',
+      scopes: [],
+    })),
+  });
+
+  const retina = captures({ 'workspace:wide-expanded': 2 });
+
+  it('allows a device pixel of drift above the reviewed baseline and no more', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: -2 } } },
+    };
+
+    // 2.5 is exactly baseline + one device pixel at 2x; 2.51 is past it.
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [ratchetFinding('geometry/workspace/a', 2.5)] },
+        ledger,
+        retina
+      )
+    ).toEqual([]);
+    const regressed = checkGeometryLedgerRatchet(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 2.51)] },
+      ledger,
+      retina
+    );
+    expect(regressed).toEqual([
+      expect.objectContaining({
+        kind: 'offset-regression',
+        key: 'geometry/workspace/a',
+        label: 'label for geometry/workspace/a',
+        status: 'debt',
+        baseline: -2,
+        current: 2.51,
+        tolerance: 0.5,
+      }),
+    ]);
+    // The message has to carry enough to act on without opening the artifact.
+    const message = formatGeometryRatchetViolations(regressed);
+    expect(message).toContain('geometry/workspace/a');
+    expect(message).toContain('baseline -2.000px → current 2.510px');
+  });
+
+  it('fails a finding no ledger entry reviews and says how to record it', () => {
+    const violations = checkGeometryLedgerRatchet(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/unknown', 0.1)] },
+      { version: 1, findings: {} },
+      retina
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({ kind: 'unreviewed-finding', key: 'geometry/workspace/unknown' }),
+    ]);
+    expect(formatGeometryRatchetViolations(violations)).toContain('pnpm geometry:triage');
+  });
+
+  it('skips ignored entries and leaves promoted ones to the contract check', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/ignored': { status: 'ignored', baseline: { offset: 0 } },
+        'geometry/workspace/promoted': {
+          status: 'promoted',
+          baseline: { offset: 0 },
+          contract: {
+            name: 'workspace.rail',
+            story: 'geometry--landing',
+            members: [locator('First'), locator('Second')],
+            axis: 'x',
+            anchor: 'inline-end',
+            space: 'ink',
+            tolerance: 0.5,
+          },
+        },
+      },
+    };
+
+    expect(
+      checkGeometryLedgerRatchet(
+        {
+          version: 1,
+          findings: [
+            ratchetFinding('geometry/workspace/ignored', 40),
+            ratchetFinding('geometry/workspace/promoted', 40),
+          ],
+        },
+        ledger,
+        retina
+      )
+    ).toEqual([]);
+  });
+
+  it('holds a fixed finding to its near-zero baseline', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'fixed', baseline: { offset: 0 } } },
+    };
+
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [ratchetFinding('geometry/workspace/a', 1.2)] },
+        ledger,
+        retina
+      )
+    ).toEqual([
+      expect.objectContaining({ kind: 'offset-regression', status: 'fixed', baseline: 0 }),
+    ]);
+  });
+
+  it('takes its tolerance from the coarsest capture the finding was measured on', () => {
+    const finding: GeometryFinding = {
+      ...ratchetFinding('geometry/workspace/a', 1),
+      evidence: [
+        { ...ratchetFinding('geometry/workspace/a', 1).evidence[0]!, captureId: 'retina' },
+        { ...ratchetFinding('geometry/workspace/a', 1).evidence[0]!, captureId: 'standard' },
+      ],
+    };
+    const mixed = captures({ retina: 2, standard: 1 });
+
+    expect(geometryFindingDevicePixel(finding, mixed)).toBe(1);
+    // A finding merged across 1x and 2x is only as precise as the 1x capture.
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [finding] },
+        { version: 1, findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: 0 } } } },
+        mixed
+      )
+    ).toEqual([]);
+  });
+
+  it('marks a finding fixed only when it is inside one device pixel', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/a': { status: 'debt', baseline: { offset: -3 } },
+        'geometry/workspace/b': { status: 'debt', baseline: { offset: 5 } },
+      },
+    };
+
+    const still = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 1.5)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+    expect(still.verifications[0]).toMatchObject({ passed: false });
+    expect(still.verifications[0]?.reason).toContain('exceeds one device pixel');
+    expect(still.ledger).toBe(ledger);
+
+    const fixed = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0.25)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+    expect(fixed.verifications[0]).toMatchObject({ passed: true, offset: 0.25 });
+    expect(fixed.ledger.findings['geometry/workspace/a']).toEqual({
+      status: 'fixed',
+      baseline: { offset: 0.25 },
+    });
+    // Untouched entries keep their review.
+    expect(fixed.ledger.findings['geometry/workspace/b']).toEqual(
+      ledger.findings['geometry/workspace/b']
+    );
+  });
+
+  it('treats a finding no rail reports any more as fixed at zero', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'debt', baseline: { offset: -3 } } },
+    };
+
+    const result = verifyGeometryFixes({ version: 1, findings: [] }, ledger, retina, [
+      'geometry/workspace/a',
+    ]);
+
+    expect(result.verifications[0]).toMatchObject({ passed: true, resolved: true });
+    expect(result.ledger.findings['geometry/workspace/a']).toEqual({
+      status: 'fixed',
+      baseline: { offset: 0 },
+    });
+  });
+
+  it('refuses to unpromote a finding its contract already gates', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/a': {
+          status: 'promoted',
+          baseline: { offset: 0 },
+          contract: {
+            name: 'workspace.rail',
+            story: 'geometry--landing',
+            members: [locator('First'), locator('Second')],
+            axis: 'x',
+            anchor: 'inline-end',
+            space: 'ink',
+            tolerance: 0.5,
+          },
+        },
+      },
+    };
+
+    // Marking it `fixed` would stop compiling the contract and quietly drop the
+    // tightest rule in the file.
+    const result = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0)] },
+      ledger,
+      retina,
+      ['geometry/workspace/a']
+    );
+
+    expect(result.verifications[0]).toMatchObject({ passed: false });
+    expect(result.verifications[0]?.reason).toContain('retire the contract');
+    expect(result.ledger).toBe(ledger);
+  });
+
+  it('refuses to verify a finding no ledger entry reviews', () => {
+    const result = verifyGeometryFixes(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 0)] },
+      { version: 1, findings: {} },
+      retina,
+      ['geometry/workspace/a']
+    );
+
+    expect(result.verifications[0]).toMatchObject({ passed: false });
+    expect(result.verifications[0]?.reason).toContain('no ledger entry');
+  });
+
+  it('compiles no contract from a fixed, debt or wont-fix entry', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/fixed': { status: 'fixed', baseline: { offset: 0 } },
+        'geometry/workspace/debt': { status: 'debt', baseline: { offset: 2 } },
+        'geometry/workspace/wont-fix': { status: 'wont-fix', baseline: { offset: 2 } },
+      },
+    };
+
+    expect(compileGeometryContracts(ledger)).toEqual({ version: 1, contracts: [] });
+  });
+});
+
+describe('geometry repair identity', () => {
+  const proposal = (
+    overrides: Partial<GeometryRepairProposal> & {
+      term?: Partial<GeometryRepairProposal['terms'][number]>;
+    } = {}
+  ): GeometryRepairProposal => {
+    const { term, ...rest } = overrides;
+    return {
+      commonAncestor: 'div[data-slot=sidebar-row]',
+      component: 'SidebarRowShared',
+      edge: 'inline-end',
+      terms: [
+        {
+          side: 'member',
+          term: 'padding',
+          element: 'div[role=button]',
+          className: 'pe-3',
+          component: 'SidebarRowShared',
+          memberValue: 12,
+          referenceValue: 10,
+          delta: 2,
+          ...term,
+        },
+      ],
+      ...rest,
+    };
+  };
+
+  it('groups by the edit, not by the element that reported it', () => {
+    const first = geometryRepairGroupKey(proposal());
+    const sameEdit = geometryRepairGroupKey(
+      // A different row, a different label, a different measured value: the
+      // edit that closes it is the same one.
+      proposal({ term: { memberValue: 14, referenceValue: 12, delta: 2, side: 'reference' } })
+    );
+    const otherComponent = geometryRepairGroupKey(
+      proposal({ component: 'ProjectRow', term: { component: 'ProjectRow' } })
+    );
+    const otherEdge = geometryRepairGroupKey(proposal({ edge: 'inline-start' }));
+    const otherTerm = geometryRepairGroupKey(proposal({ term: { term: 'margin' } }));
+
+    expect(first).toBeDefined();
+    expect(sameEdit).toBe(first);
+    expect(otherComponent).not.toBe(first);
+    expect(otherEdge).not.toBe(first);
+    expect(otherTerm).not.toBe(first);
+  });
+
+  it('groups by the common ancestor when React rendered no component name', () => {
+    const withoutComponent = proposal({ component: undefined, term: { component: undefined } });
+
+    expect(geometryRepairGroupKey(withoutComponent)).toBeDefined();
+    expect(geometryRepairGroupKey(withoutComponent)).not.toBe(geometryRepairGroupKey(proposal()));
+  });
+
+  it('has no group when there is nothing to repair', () => {
+    expect(geometryRepairGroupKey({ ...proposal(), terms: [] })).toBeUndefined();
+  });
+
+  it('names the CSS property an agent would actually edit', () => {
+    expect(geometryRepairCssProperty('padding', 'inline-end')).toBe('padding-inline-end');
+    expect(geometryRepairCssProperty('margin', 'block-start')).toBe('margin-block-start');
+    expect(geometryRepairCssProperty('border', 'inline-start')).toBe('border-inline-start-width');
+    // A gap belongs to the axis; `gap-inline-end` is not a property.
+    expect(geometryRepairCssProperty('gap', 'inline-end')).toBe('column-gap');
+    expect(geometryRepairCssProperty('gap', 'block-end')).toBe('row-gap');
+  });
+
+  it('renders a repair a reader can act on without opening the artifact', () => {
+    expect(formatGeometryRepairProposal(proposal())).toBe(
+      'SidebarRowShared 里 div[role=button] 的 padding-inline-end 多 2px（class: pe-3）'
+    );
+    expect(
+      formatGeometryRepairProposal(proposal({ term: { className: undefined, delta: -2 } }))
+    ).toBe('SidebarRowShared 里 div[role=button] 的 padding-inline-end 少 2px');
+  });
+
+  it('leaves the class list out where a whole class list would not fit', () => {
+    // A real Tailwind class list is hundreds of characters. The card body keeps
+    // it whole, because half of one greps for nothing; the one-line summary
+    // drops it rather than truncate it.
+    expect(formatGeometryRepairProposal(proposal(), { includeClassName: false })).toBe(
+      'SidebarRowShared 里 div[role=button] 的 padding-inline-end 多 2px'
+    );
+  });
+
+  it('falls back to the common ancestor when React rendered no component name', () => {
+    // A node React never rendered still gets a sentence, just a less precise one.
+    expect(
+      formatGeometryRepairProposal(
+        proposal({ component: undefined, term: { component: undefined } })
+      )
+    ).toBe(
+      'div[data-slot=sidebar-row] 里 div[role=button] 的 padding-inline-end 多 2px（class: pe-3）'
+    );
+  });
+
+  it('collects every finding one repair group covers', () => {
+    const artifact: GeometryFindingArtifact = {
+      version: 1,
+      findings: [
+        { ...ratchetLikeFinding('geometry/workspace/a'), repairGroup: 'geometry/repair/x' },
+        { ...ratchetLikeFinding('geometry/workspace/c'), repairGroup: 'geometry/repair/x' },
+        { ...ratchetLikeFinding('geometry/workspace/b'), repairGroup: 'geometry/repair/y' },
+        ratchetLikeFinding('geometry/workspace/d'),
+      ],
+    };
+
+    expect(geometryFindingKeysInRepairGroup(artifact, 'geometry/repair/x')).toEqual([
+      'geometry/workspace/a',
+      'geometry/workspace/c',
+    ]);
+    expect(geometryFindingKeysInRepairGroup(artifact, 'geometry/repair/missing')).toEqual([]);
+  });
+});
+
+function ratchetLikeFinding(key: string): GeometryFinding {
+  return {
+    key,
+    kind: 'alignment-rail',
+    surfaceFamily: 'workspace',
+    label: key,
+    axis: 'x',
+    anchor: 'inline-end',
+    offset: 1,
+    captureCount: 1,
+    totalCaptureCount: 1,
+    evidence: [],
+  };
+}

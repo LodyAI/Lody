@@ -26,6 +26,11 @@ import {
   type LayoutTopologyNode,
 } from '../src/lib/chat-workspace-geometry';
 import { geometryCanvasFontString } from '../src/lib/geometry-text-cap-band';
+import {
+  geometryElementReactFiber,
+  geometryReactFiberComponentName,
+  type GeometryReactFiberLike,
+} from '../src/lib/geometry-react-fiber';
 
 const anchors = CHAT_WORKSPACE_GEOMETRY_ANCHORS;
 
@@ -1346,5 +1351,59 @@ describe('the canvas font string', () => {
 
     expect(geometryCanvasFontString(style)).toBe('normal 600 13px Inter, sans-serif');
     expect(geometryCanvasFontString(style)).not.toContain('tabular-nums');
+  });
+});
+
+describe('React component names as repair evidence', () => {
+  const fiber = (type: unknown, parent?: GeometryReactFiberLike): GeometryReactFiberLike => ({
+    type,
+    return: parent ?? null,
+  });
+
+  it('walks up to the nearest function component', () => {
+    function SidebarRowShared() {
+      return null;
+    }
+    const host = fiber('span', fiber('div', fiber(SidebarRowShared)));
+
+    expect(geometryReactFiberComponentName(host)).toBe('SidebarRowShared');
+  });
+
+  it('unwraps forwardRef and memo, and prefers an explicit displayName', () => {
+    function Inner() {
+      return null;
+    }
+    const forwarded = { $$typeof: Symbol.for('react.forward_ref'), render: Inner };
+    const memoized = { $$typeof: Symbol.for('react.memo'), type: forwarded };
+    const renamed = { $$typeof: Symbol.for('react.memo'), type: Inner, displayName: 'SidebarRow' };
+
+    expect(geometryReactFiberComponentName(fiber(memoized))).toBe('Inner');
+    expect(geometryReactFiberComponentName(fiber(renamed))).toBe('SidebarRow');
+  });
+
+  it('returns nothing rather than a blank when no ancestor names a component', () => {
+    expect(geometryReactFiberComponentName(fiber('div', fiber('span')))).toBeUndefined();
+    expect(geometryReactFiberComponentName(fiber(() => null))).toBeUndefined();
+    expect(geometryReactFiberComponentName(undefined)).toBeUndefined();
+    expect(geometryReactFiberComponentName(null)).toBeUndefined();
+  });
+
+  it('stops walking instead of looping on a cyclic return chain', () => {
+    const cycle: { type: unknown; return: unknown } = { type: 'div', return: null };
+    cycle.return = cycle;
+
+    expect(geometryReactFiberComponentName(cycle as GeometryReactFiberLike, 8)).toBeUndefined();
+  });
+
+  it('finds the fiber React attached under its per-renderer key', () => {
+    function Row() {
+      return null;
+    }
+    const attached = { __reactFiber$abc123: fiber(Row) } as unknown as Element;
+    const bare = {} as unknown as Element;
+
+    expect(geometryReactFiberComponentName(geometryElementReactFiber(attached))).toBe('Row');
+    // A node React never rendered simply contributes no component name.
+    expect(geometryElementReactFiber(bare)).toBeUndefined();
   });
 });
