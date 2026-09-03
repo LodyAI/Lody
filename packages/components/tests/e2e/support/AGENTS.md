@@ -39,15 +39,14 @@ the overlay and capture cannot disagree about one row.
   `auditChatWorkspaceSemanticAlignments` / `…Baselines` use one cap-band measurement, and
   all number `[document.body, ...document.body.querySelectorAll('*')]` the same way, so a
   marker member and a discovered Y candidate are comparable as ONE `dom-N` element. No
-  pass may leave the document mutated; the parity artifact reports unmatched members
-  rather than trusting overlapping rectangles.
+  pass may leave the document mutated.
 - Accessible names come from one deliberately small accname subset
   (`computeAccessibleNameInBrowser`), sized to what `getByRole(…, { name })` resolves for
-  the widgets captured, so a captured name is one Playwright resolves. A content-named
-  role owns the locator of the primitives inside it. Names are LABELS, never identity: a
-  repeated row prints `role “row title”` (the longest direct text in it), another named
-  primitive its own text minus its nested controls' names (`Files Close Files` → `Files`),
-  an unnamed primitive its row family plus same-role index — never a raw family string.
+  the widgets captured, so a captured name is one Playwright resolves. A content-named role
+  owns the locator of the primitives inside it. Names are LABELS, never identity: a repeated
+  row prints `role “row title”` (its longest direct text), another named primitive its own
+  text minus its nested controls' names (`Files Close Files` → `Files`), an unnamed
+  primitive its row family plus same-role index — never a raw family string.
 
 ## Proving the markers can go
 
@@ -61,16 +60,28 @@ the overlay and capture cannot disagree about one row.
   companion for the rule actually being retired: re-ask its marker and Y discovery about
   one capture, matched by ELEMENT — `coordinateDelta` is whether they measure an element
   alike, `offsetDelta` whether they place the row line alike; a member only one side saw is
-  listed, never averaged away. `sidebar.row.visual-center` was the first rule proven this
-  way (18/18 members, zero deltas) and its declaration, gate coverage, and product
-  `data-geometry-align-*` markers are gone — discovery alone now covers those rows. Wire
-  this function into the report again for the NEXT candidate; it is not part of the
-  standing report run.
+  listed, never averaged away. `sidebar.row.visual-center` was proven this way (18/18
+  members, zero deltas) and its declaration, gate coverage and product
+  `data-geometry-align-*` markers are gone. Wire this function into the report again for
+  the NEXT candidate; it is not part of the standing run.
 
-- Replaying a capture — the `--after` repair images, the zoomed Y cards — opens ONE context
-  per scale and theme, never one per capture: a viewport can be set on an open context, a
-  device scale cannot, and a fresh context's cold cache re-parses the whole Storybook
-  bundle, which is minutes of wall clock and a missed readiness deadline.
+## The capture plan
+
+`GEOMETRY_CAPTURE_PLAN` (`geometry-capture-plan.ts`) is the ONE list of captures: the
+report shoots it, the gate only measures it, and both open a story through
+`showGeometryCaptureStory`, so one cannot settle a page the other could not. The
+representative capture alone carries the marker-rule observations, and dropping any capture
+to make the gate cheaper moves every merged offset the ledger recorded.
+
+- Opening a capture — the plan walk, `--after` repair images, zoomed Y cards — opens ONE
+  context per scale and theme, never one per capture: a viewport can be set on an open
+  context, a device scale cannot, and a fresh context's cold cache re-parses the whole
+  Storybook bundle — minutes of wall clock. A fresh PAGE per capture inside it, though: a
+  page that loaded a dozen stories runs out of memory.
+- A card clip holds the row plus a margin, draws the row median and verdict anchor only,
+  and names it. Zoomed Y cards are the largest-|offset| findings anywhere. Discovery cards
+  use product-region names, count unique elements not anchor votes, fold one element's
+  start/center/end offsets into one annotation, and keep candidate rails under outliers.
 
 ## Contract resolution and witnesses
 

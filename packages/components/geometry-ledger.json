@@ -47,7 +47,7 @@
     "geometry/right-sidebar/1e5wvsl": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": 4
+        "offset": 6.5
       },
       "identity": {
         "label": "Files",
@@ -71,7 +71,7 @@
     "geometry/right-sidebar/1mxwyl5": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -1
+        "offset": -1.5
       },
       "identity": {
         "label": "app.tsx",
@@ -131,7 +131,7 @@
     "geometry/right-sidebar/6ijj9r": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": 0.75
+        "offset": 1
       },
       "identity": {
         "label": "Docs 2 + 100 − 20",
@@ -167,7 +167,7 @@
     "geometry/right-sidebar/b0m4s": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": 6.5
+        "offset": 4
       },
       "identity": {
         "label": "Files",
@@ -215,7 +215,7 @@
     "geometry/right-sidebar/daf70p": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -1
+        "offset": -1.5
       },
       "identity": {
         "label": "Conversation Diff",
@@ -383,7 +383,7 @@
     "geometry/session/1t257v2": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -1.25
+        "offset": -1
       },
       "identity": {
         "label": "Private to you: lody is not shared with the team.",
@@ -575,7 +575,7 @@
     "geometry/workspace/1fccih": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": 1.75
+        "offset": -4
       },
       "identity": {
         "label": "Machine",
@@ -587,7 +587,7 @@
     "geometry/workspace/1jrw0q7": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -0.75
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -647,7 +647,7 @@
     "geometry/workspace/1t2nsoi": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -0.8181818181818182
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -767,7 +767,7 @@
     "geometry/workspace/cqs9ix": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -0.8181818181818182
+        "offset": -1
       },
       "identity": {
         "label": "More actions",
@@ -827,7 +827,7 @@
     "geometry/workspace/ky1uql": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": 5.269230769230769
+        "offset": 12.5
       },
       "identity": {
         "label": "Message",
@@ -960,7 +960,7 @@
     "geometry/workspace/w5fbub": {
       "status": "accepted-debt",
       "baseline": {
-        "offset": -4.076923076923077
+        "offset": -4
       },
       "identity": {
         "label": "Machine",

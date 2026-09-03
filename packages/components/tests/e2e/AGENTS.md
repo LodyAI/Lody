@@ -6,10 +6,10 @@ Package `AGENTS.md` and the repository root also apply.
 Measures rendered geometry, turns it into findings, gates what a human promoted.
 `src/lib/chat-workspace-geometry.ts` (spec, grid, discovery) and
 `geometry-constraint-system.ts` (pipeline, ledger, contracts, tokens, metrics); grid and
-classification: [src/lib](../../src/lib/AGENTS.md); what a primitive, a row and a name ARE:
-[support](support/AGENTS.md); `*-geometry-report.spec.ts` (report); `*-geometry.spec.ts`
-(gate). Neither `geometry:report [dir]` nor root `pnpm geometry:triage <dir>` moves a
-baseline.
+classification: [src/lib](../../src/lib/AGENTS.md); what a primitive, a row and a name ARE,
+and the shared capture plan: [support](support/AGENTS.md); `*-geometry-report.spec.ts`
+(report), `*-geometry.spec.ts` (gate). Neither `geometry:report` nor `geometry:triage`
+moves a baseline.
 
 ## X rails
 
@@ -48,9 +48,9 @@ Marker-free, same pipeline, over the anchors [support](support/AGENTS.md) lists.
 - Exactly two members is one `row-spread` naming both, never two outliers at half the gap:
   their median is their midpoint, so a signed offset would invent a direction. Three or more
   have a majority, so their median is a line.
-- `y-axis-parity.json` and `marker-removal-readiness.json` ask whether discovery has
-  replaced the markers ([support](support/AGENTS.md)). The gate proves outlier reporting
-  with its OWN injected `translateY`, diffing before and after, asserting no product row.
+- `marker-removal-readiness.json` asks whether discovery has replaced the markers
+  ([support](support/AGENTS.md)). The gate proves outlier reporting with its OWN injected
+  `translateY`, diffing before and after, asserting no product row.
 
 ## Pipeline and finding identity
 
@@ -86,13 +86,18 @@ beside the code ([src/lib](../../src/lib/AGENTS.md)). Review lives in checked-in
 `geometry-ledger.json`; `geometry-contracts.json` compiles only `promoted` entries, each
 declaring `ink` or `layout-box`.
 
+- A baseline is EXECUTED, not printed: the gate reruns the pipeline over the whole capture
+  plan with no screenshots, and fails when a finding's |offset| passes |baseline| plus one
+  device pixel (1/DPR of its COARSEST capture) or when a finding has no ledger entry
+  (`geometry:triage`, like a lockfile). `ignored` opts out; `promoted` belongs to the
+  contract check. Offsets are means over the WHOLE plan, so a baseline belongs to the
+  platform that recorded it: re-baseline where CI runs, never trim the plan for speed.
 - Two contract members never cover one element twice; member resolution, the ink witness
   and named tokens (the ledger records only the `--spacing-*` property): see
-  [support](support/AGENTS.md).
-- Relations are a small deterministic algebra ([support](support/AGENTS.md)). Widen the
-  relation before loosening a tolerance.
-- Ledger labels give discovery precision, promoted locators geometry coverage, PNG edge
-  sampling only confidence.
+  [support](support/AGENTS.md). Relations are a small deterministic algebra there; widen
+  the relation before loosening a tolerance.
+- Ledger labels give discovery precision, promoted locators coverage, PNG edges only
+  confidence.
 
 ## Report
 
@@ -101,18 +106,14 @@ Discovery or proposal presence is never a report assertion; coverage:
 
 - Each detail persists the capture id owning its Story, viewport and scale; `--after`
   replays that capture and clip and appends only the repair image, never rediscovering
-  findings or replacing evidence. Replay and Y cards: [support](support/AGENTS.md).
-- Steady state, not delta: every finding gets a card grouped by ledger status (`new`,
-  `changed`, `accepted-debt`, `promoted`, `ignored`) and classification, with baseline vs
-  current offset, capture count, dimension sensitivity and repair text. Chips filter both,
-  default new + changed + css-defect + promoted; the meta line prints the total beside
-  new/changed/resolved. One embedded JSON payload, one renderer, images as files.
+  findings or replacing evidence. Replay: [support](support/AGENTS.md).
+- Steady state, not delta: every finding gets a card grouped by ledger status and
+  classification, with baseline vs current offset, capture count, dimension sensitivity and
+  repair text. Chips filter both, default new + changed + css-defect + promoted; the meta
+  line totals new/changed/resolved. One JSON payload, one renderer, images as files.
 - Violation images label each deviating member in place with role, physical direction,
   measured offset, actual anchor and a leader to it. A Y card comes from the FINISHED
   findings, never a second pipeline printing another number: each annotation IS that
-  finding's evidence for that member, asserted before the shot; its clip holds the whole
-  row plus a margin; it draws the row median and the verdict anchor only, and names the row.
-  Zoomed Y cards are the largest-|offset| findings over every surface. Discovery cards use
-  product-region names, count unique elements not anchor votes, fold one element's
-  start/center/end offsets into one annotation, and keep candidate rails under emphasised
-  outliers. Cards are picked by deviation, inside the generator's budget.
+  finding's evidence for that member, asserted before the shot. Card clips, zoomed Y cards
+  and discovery cards: [support](support/AGENTS.md). Cards are picked by deviation, inside
+  the generator's budget.

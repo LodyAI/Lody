@@ -14,6 +14,9 @@ import {
   evaluateGeometryContractResolutions,
   evaluateGeometryContractValues,
   explainGeometryOffset,
+  checkGeometryLedgerRatchet,
+  formatGeometryRatchetViolations,
+  geometryFindingDevicePixel,
   geometryFindingLabel,
   geometryIdentityLocator,
   geometryRowFamilyKey,
@@ -30,6 +33,7 @@ import {
   type GeometryCapturedCandidate,
   type GeometryCapturedScope,
   type GeometryContract,
+  type GeometryCaptureArtifact,
   type GeometryFinding,
   type GeometryLedger,
 } from '../src/lib/geometry-constraint-system';
@@ -1748,4 +1752,173 @@ describe('marker removal readiness', () => {
     expect(ready.readyRules).toEqual(['sidebar.row.visual-center']);
     expect(ready.rules[0]?.matchedMemberCount).toBe(ready.rules[0]?.memberCount);
   });
+});
+
+describe('geometry ledger ratchet', () => {
+  const ratchetFinding = (
+    key: string,
+    offset: number,
+    captureId = 'workspace:wide-expanded'
+  ): GeometryFinding => ({
+    key,
+    kind: 'alignment-rail',
+    surfaceFamily: 'workspace',
+    locator: locator('Shifted'),
+    label: `label for ${key}`,
+    axis: 'x',
+    anchor: 'inline-end',
+    offset,
+    captureCount: 1,
+    totalCaptureCount: 1,
+    evidence: [
+      {
+        captureId,
+        scopeKey: 'sidebar.shell',
+        coordinate: offset,
+        line: 0,
+        normalizedLine: 0.5,
+        offset,
+        yStart: 0,
+        yEnd: 16,
+      },
+    ],
+  });
+
+  const captures = (scales: Readonly<Record<string, number>>): GeometryCaptureArtifact => ({
+    version: 1,
+    captures: Object.entries(scales).map(([captureId, deviceScaleFactor]) => ({
+      captureId,
+      surfaceFamily: 'workspace',
+      surface: 'Workspace',
+      storyId: 'story',
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor,
+      screenshot: '',
+      scopes: [],
+    })),
+  });
+
+  const retina = captures({ 'workspace:wide-expanded': 2 });
+
+  it('allows a device pixel of drift above the reviewed baseline and no more', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: -2 } } },
+    };
+
+    // 2.5 is exactly baseline + one device pixel at 2x; 2.51 is past it.
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [ratchetFinding('geometry/workspace/a', 2.5)] },
+        ledger,
+        retina
+      )
+    ).toEqual([]);
+    const regressed = checkGeometryLedgerRatchet(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/a', 2.51)] },
+      ledger,
+      retina
+    );
+    expect(regressed).toEqual([
+      expect.objectContaining({
+        kind: 'offset-regression',
+        key: 'geometry/workspace/a',
+        label: 'label for geometry/workspace/a',
+        status: 'accepted-debt',
+        baseline: -2,
+        current: 2.51,
+        tolerance: 0.5,
+      }),
+    ]);
+    // The message has to carry enough to act on without opening the artifact.
+    const message = formatGeometryRatchetViolations(regressed);
+    expect(message).toContain('geometry/workspace/a');
+    expect(message).toContain('baseline -2.000px → current 2.510px');
+  });
+
+  it('fails a finding no ledger entry reviews and says how to record it', () => {
+    const violations = checkGeometryLedgerRatchet(
+      { version: 1, findings: [ratchetFinding('geometry/workspace/unknown', 0.1)] },
+      { version: 1, findings: {} },
+      retina
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({ kind: 'unreviewed-finding', key: 'geometry/workspace/unknown' }),
+    ]);
+    expect(formatGeometryRatchetViolations(violations)).toContain('pnpm geometry:triage');
+  });
+
+  it('skips ignored entries and leaves promoted ones to the contract check', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: {
+        'geometry/workspace/ignored': { status: 'ignored', baseline: { offset: 0 } },
+        'geometry/workspace/promoted': {
+          status: 'promoted',
+          baseline: { offset: 0 },
+          contract: {
+            name: 'workspace.rail',
+            story: 'geometry--landing',
+            members: [locator('First'), locator('Second')],
+            axis: 'x',
+            anchor: 'inline-end',
+            space: 'ink',
+            tolerance: 0.5,
+          },
+        },
+      },
+    };
+
+    expect(
+      checkGeometryLedgerRatchet(
+        {
+          version: 1,
+          findings: [
+            ratchetFinding('geometry/workspace/ignored', 40),
+            ratchetFinding('geometry/workspace/promoted', 40),
+          ],
+        },
+        ledger,
+        retina
+      )
+    ).toEqual([]);
+  });
+
+  it('holds an entry baselined at zero to zero', () => {
+    const ledger: GeometryLedger = {
+      version: 1,
+      findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: 0 } } },
+    };
+
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [ratchetFinding('geometry/workspace/a', 1.2)] },
+        ledger,
+        retina
+      )
+    ).toEqual([expect.objectContaining({ kind: 'offset-regression', baseline: 0 })]);
+  });
+
+  it('takes its tolerance from the coarsest capture the finding was measured on', () => {
+    const finding: GeometryFinding = {
+      ...ratchetFinding('geometry/workspace/a', 1),
+      evidence: [
+        { ...ratchetFinding('geometry/workspace/a', 1).evidence[0]!, captureId: 'retina' },
+        { ...ratchetFinding('geometry/workspace/a', 1).evidence[0]!, captureId: 'standard' },
+      ],
+    };
+    const mixed = captures({ retina: 2, standard: 1 });
+
+    expect(geometryFindingDevicePixel(finding, mixed)).toBe(1);
+    // A finding merged across 1x and 2x is only as precise as the 1x capture.
+    expect(
+      checkGeometryLedgerRatchet(
+        { version: 1, findings: [finding] },
+        { version: 1, findings: { 'geometry/workspace/a': { status: 'accepted-debt', baseline: { offset: 0 } } } },
+        mixed
+      )
+    ).toEqual([]);
+  });
+
 });

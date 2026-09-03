@@ -381,6 +381,16 @@ export type GeometryFindingArtifact = Readonly<{
 export type GeometryLedgerStatus = 'new' | 'accepted-debt' | 'ignored' | 'promoted';
 
 /**
+ * Statuses the ratchet holds to their reviewed baseline. `ignored` opts out —
+ * that is what ignoring one means — and `promoted` is left to the contract
+ * check that already gates it exactly, rather than gated twice and loosely.
+ */
+export const GEOMETRY_RATCHETED_LEDGER_STATUSES: readonly GeometryLedgerStatus[] = [
+  'new',
+  'accepted-debt',
+];
+
+/**
  * The stylesheet is the single source of truth for a named geometry token. A
  * ledger entry only says WHICH custom property carries it; `expected` is
  * documentation for a human reader and is never used as a gate value.
@@ -2824,6 +2834,106 @@ export function summarizeGeometryInkCenters(
         }
       : {}),
   };
+}
+
+export type GeometryRatchetViolation = Readonly<{
+  kind: 'offset-regression' | 'unreviewed-finding';
+  key: string;
+  label: string;
+  surfaceFamily: GeometrySurfaceFamily;
+  axis: SemanticAlignmentAxis;
+  anchor: SemanticAlignmentAnchor;
+  status?: GeometryLedgerStatus;
+  baseline?: number;
+  current: number;
+  /** The slack allowed above `|baseline|`, in CSS pixels. */
+  tolerance?: number;
+}>;
+
+/**
+ * The coarsest device pixel this finding was measured with. A finding merged
+ * across a 2× and a 1× capture is only as precise as the 1× one, so holding it
+ * to half a pixel would fail on rounding the measurement cannot avoid.
+ */
+export function geometryFindingDevicePixel(
+  finding: GeometryFinding,
+  captures: GeometryCaptureArtifact
+): number {
+  const scaleByCapture = new Map(
+    captures.captures.map((capture) => [capture.captureId, capture.deviceScaleFactor])
+  );
+  const devicePixels = finding.evidence.map((evidence) => {
+    const scale = scaleByCapture.get(evidence.captureId);
+    return scale && scale > 0 ? 1 / scale : 1;
+  });
+  return devicePixels.length > 0 ? Math.max(...devicePixels) : 1;
+}
+
+/**
+ * The ratchet. A ledger baseline used to be a number the report PRINTED; this
+ * is what makes it a number CI enforces.
+ *
+ * Two rules, both about the ledger being complete and monotonic:
+ * every measured finding must be reviewed, and no reviewed finding may drift
+ * further from its line than the review recorded, allowing one device pixel for
+ * the rounding the measurement itself cannot avoid. `ignored` opts out — that
+ * is what ignoring one means — and `promoted` is left to the contract check
+ * that already gates it exactly, rather than being gated twice and loosely.
+ */
+export function checkGeometryLedgerRatchet(
+  artifact: GeometryFindingArtifact,
+  ledger: GeometryLedger,
+  captures: GeometryCaptureArtifact
+): readonly GeometryRatchetViolation[] {
+  const ratcheted = new Set<GeometryLedgerStatus>(GEOMETRY_RATCHETED_LEDGER_STATUSES);
+  return artifact.findings.flatMap((finding): GeometryRatchetViolation[] => {
+    const identity = {
+      key: finding.key,
+      label: finding.label,
+      surfaceFamily: finding.surfaceFamily,
+      axis: finding.axis,
+      anchor: finding.anchor,
+      current: finding.offset,
+    };
+    const entry = ledger.findings[finding.key];
+    if (!entry) return [{ kind: 'unreviewed-finding', ...identity }];
+    if (!ratcheted.has(entry.status)) return [];
+    const baseline = entry.baseline?.offset;
+    if (baseline === undefined) return [];
+    const tolerance = geometryFindingDevicePixel(finding, captures);
+    if (Math.abs(finding.offset) <= Math.abs(baseline) + tolerance) return [];
+    return [
+      {
+        kind: 'offset-regression',
+        ...identity,
+        status: entry.status,
+        baseline,
+        tolerance,
+      },
+    ];
+  });
+}
+
+export function formatGeometryRatchetViolations(
+  violations: readonly GeometryRatchetViolation[]
+): string {
+  return violations
+    .map((violation) =>
+      violation.kind === 'unreviewed-finding'
+        ? [
+            `unreviewed finding ${violation.key}`,
+            `  ${violation.surfaceFamily} · ${violation.label} · ${violation.axis}/${violation.anchor}`,
+            `  measured ${violation.current.toFixed(3)}px and no ledger entry reviews it.`,
+            '  Run `pnpm geometry:report <dir>` then `pnpm geometry:triage <dir>` and commit the ledger.',
+          ].join('\n')
+        : [
+            `regressed finding ${violation.key}`,
+            `  ${violation.surfaceFamily} · ${violation.label} · ${violation.axis}/${violation.anchor} (${violation.status})`,
+            `  baseline ${(violation.baseline ?? 0).toFixed(3)}px → current ${violation.current.toFixed(3)}px`,
+            `  allowed |offset| ≤ ${(Math.abs(violation.baseline ?? 0) + (violation.tolerance ?? 0)).toFixed(3)}px (baseline + ${(violation.tolerance ?? 0).toFixed(3)}px device pixel)`,
+          ].join('\n')
+    )
+    .join('\n\n');
 }
 
 export function compileGeometryContracts(ledger: GeometryLedger): GeometryContractArtifact {

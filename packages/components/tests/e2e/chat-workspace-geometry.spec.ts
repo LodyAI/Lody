@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
@@ -12,10 +13,18 @@ import {
   validateChatWorkspaceGeometry,
 } from '../../src/lib/chat-workspace-geometry';
 import {
+  checkGeometryLedgerRatchet,
   compileGeometryContracts,
+  formatGeometryRatchetViolations,
   type GeometryContractArtifact,
   type GeometryLedger,
+  type GeometryObservationCache,
 } from '../../src/lib/geometry-constraint-system';
+import {
+  GEOMETRY_CAPTURE_PLAN,
+  runGeometryCapturePlan,
+  runGeometryFindingPipeline,
+} from './support/geometry-capture-plan';
 import {
   auditChatWorkspaceSemanticAlignments,
   captureChatWorkspaceGeometryScopes,
@@ -28,6 +37,13 @@ import {
   requireGeometryRect,
   validateCompiledGeometryContracts,
 } from './support/chat-workspace-geometry';
+
+/**
+ * Set to write `capture.json` / `observation.json` / `findings.json` beside the
+ * ratchet run. CI does not need them and does not set it, so the gate stays a
+ * measurement with no artifacts.
+ */
+const pipelineOutputDirectory = process.env.GEOMETRY_PIPELINE_OUTPUT_DIR;
 
 const STORY_IDS = {
   expanded: 'geometry-chatworkspace--expanded-sidebar',
@@ -58,6 +74,56 @@ test('compiled promoted geometry contracts are current and pass by stable locato
     violations.push(...(await validateCompiledGeometryContracts(page, contracts, storyId)));
   }
   expect(violations).toEqual([]);
+});
+
+/**
+ * The ratchet. Every other test here proves a RULE; this one proves the LEDGER,
+ * which until now was a file the report printed and nothing executed: a
+ * baseline could be exceeded, and a brand new finding could appear, with every
+ * check still green.
+ *
+ * It runs the same `capture → observation → findings` pipeline the report runs,
+ * over the same capture plan, with no screenshots — the screenshots are what
+ * make the report a 40-minute review artifact, and none of them are evidence.
+ */
+test('every measured geometry finding stays inside its reviewed ledger baseline', async ({
+  browser,
+}) => {
+  test.setTimeout(1_800_000);
+  const ledger = JSON.parse(
+    await readFile(new URL('../../geometry-ledger.json', import.meta.url), 'utf8')
+  ) as GeometryLedger;
+
+  const observationCache: GeometryObservationCache = new Map();
+  const blockedRequests: string[] = [];
+  const capture = await runGeometryCapturePlan(browser, GEOMETRY_CAPTURE_PLAN, {
+    observationCache,
+    blockedRequests,
+  });
+  expect(blockedRequests, 'Geometry fixture made an external request').toEqual([]);
+  const { observation, findings } = runGeometryFindingPipeline(capture);
+
+  if (pipelineOutputDirectory) {
+    await mkdir(pipelineOutputDirectory, { recursive: true });
+    for (const [name, artifact] of [
+      ['capture.json', capture],
+      ['observation.json', observation],
+      ['findings.json', findings],
+    ] as const) {
+      await writeFile(
+        path.join(pipelineOutputDirectory, name),
+        `${JSON.stringify(artifact, null, 2)}\n`,
+        'utf8'
+      );
+    }
+  }
+
+  const violations = checkGeometryLedgerRatchet(findings, ledger, capture);
+  expect(
+    violations,
+    `Geometry ledger ratchet failed:\n\n${formatGeometryRatchetViolations(violations)}`
+  ).toEqual([]);
+
 });
 
 for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {

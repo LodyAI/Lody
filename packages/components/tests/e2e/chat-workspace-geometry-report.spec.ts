@@ -38,10 +38,7 @@ import {
   type GeometryRepairProposal,
 } from '../../src/lib/geometry-constraint-system';
 import {
-  auditChatWorkspaceSemanticAlignments,
-  auditChatWorkspaceSemanticBaselines,
   auditChatWorkspaceSpacing,
-  discoverChatWorkspaceAlignmentRails,
   measureGeometryContractOpticalInsets,
   type BrowserAlignmentRailDiscoveryScope,
   type BrowserSemanticAlignmentEntry,
@@ -49,6 +46,23 @@ import {
   measureSettledChatWorkspace,
   requireGeometryRect,
 } from './support/chat-workspace-geometry';
+import {
+  DEFAULT_CAPTURE_DIMENSIONS,
+  GEOMETRY_REPRESENTATIVE_CAPTURE,
+  GEOMETRY_RIGHT_SIDEBAR_STATE_CAPTURES,
+  GEOMETRY_SESSION_STATE_CAPTURES,
+  GEOMETRY_WORKSPACE_DIMENSION_CAPTURES,
+  GEOMETRY_WORKSPACE_MATRIX_CAPTURES,
+  GEOMETRY_WORKSPACE_STATE_CAPTURES,
+  buildGeometryCapture,
+  enableGeometryCaptureMode,
+  geometryReplayContextKey,
+  observeGeometryPlanEntry,
+  openGeometryReplayContext,
+  showGeometryCaptureStory,
+  type GeometryCapturePlanEntry,
+  type GeometryPlanObservation,
+} from './support/geometry-capture-plan';
 
 const outputDirectory = process.env.GEOMETRY_REPORT_OUTPUT_DIR;
 const storybookOrigin = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:6006';
@@ -191,7 +205,7 @@ async function collectGeometryPixelWitnesses(
     const storyUrl = `${storybookOrigin}/iframe.html?id=${contract.story}&viewMode=story`;
     const storyResponse = await witnessPage.goto(storyUrl);
     if (!storyResponse?.ok()) throw new Error(`Witness story failed: ${contract.story}`);
-    await enableReportCaptureMode(witnessPage);
+    await enableGeometryCaptureMode(witnessPage);
     if (contract.story.startsWith('geometry-chatworkspace--')) {
       await measureSettledChatWorkspace(witnessPage);
     }
@@ -393,115 +407,6 @@ const DISCOVERY_SURFACE_LABELS: Readonly<Record<string, string>> = {
   'Workspace / Chat Landing / Pasted Text': 'Workspace / Chat Landing 长粘贴文本',
   'Workspace / Chat Landing / Submitting': 'Workspace / Chat Landing 提交中',
 };
-
-type GeometryCaptureDimensions = Readonly<{ theme: string; locale: string; density: string }>;
-
-/** Storybook's own globals; there is no density global, so it stays constant. */
-const DEFAULT_CAPTURE_DIMENSIONS: GeometryCaptureDimensions = {
-  theme: 'light',
-  locale: 'en',
-  density: 'default',
-};
-
-/**
- * Dimensions vary ONE capture family rather than every story: they exist to show
- * whether a finding survives a theme or a locale, and a full matrix would
- * multiply the report runtime for evidence nobody reads.
- */
-const WORKSPACE_DIMENSION_CAPTURES = [
-  {
-    id: 'wide-expanded-dark',
-    surface: 'Workspace / Chat Landing / Dark',
-    globals: 'theme:dark',
-    colorScheme: 'dark' as const,
-    dimensions: { ...DEFAULT_CAPTURE_DIMENSIONS, theme: 'dark' },
-  },
-  {
-    id: 'wide-expanded-zh',
-    surface: 'Workspace / Chat Landing / 中文',
-    globals: 'locale:zh_CN',
-    colorScheme: 'light' as const,
-    dimensions: { ...DEFAULT_CAPTURE_DIMENSIONS, locale: 'zh_CN' },
-    // A zh_CN capture that still rendered English strings would silently claim a
-    // locale axis it never varied, so the capture asserts a translated label.
-    // The Sidebar's Chats section header is the one this fixture translates.
-    expectedText: '对话',
-  },
-] as const;
-
-const WORKSPACE_STATE_CAPTURES = [
-  {
-    id: 'landing-submitting',
-    surface: 'Workspace / Chat Landing / Submitting',
-    storyId: 'geometry-chatworkspace--submission-pending',
-  },
-  {
-    id: 'landing-no-machine-download',
-    surface: 'Workspace / Chat Landing / No Machine Download',
-    storyId: 'geometry-chatworkspace--no-machine-download',
-  },
-  {
-    id: 'landing-no-machine-starting',
-    surface: 'Workspace / Chat Landing / No Machine Starting',
-    storyId: 'geometry-chatworkspace--no-machine-starting',
-  },
-  {
-    id: 'landing-no-agent',
-    surface: 'Workspace / Chat Landing / No Agent',
-    storyId: 'geometry-chatworkspace--no-agent-config',
-  },
-  {
-    id: 'landing-long-model',
-    surface: 'Workspace / Chat Landing / Long Model',
-    storyId: 'geometry-chatworkspace--long-model',
-  },
-  {
-    id: 'landing-pasted-text',
-    surface: 'Workspace / Chat Landing / Pasted Text',
-    storyId: 'geometry-chatworkspace--pasted-text',
-  },
-] as const;
-
-const SESSION_STATE_CAPTURES = [
-  {
-    id: 'session-idle',
-    surface: 'Chat Session / Idle',
-    storyId: 'sessions-sessionconversationpage--desktop-idle',
-  },
-  {
-    id: 'session-working',
-    surface: 'Chat Session / Working',
-    storyId: 'sessions-sessionconversationpage--desktop-working-settled',
-  },
-  {
-    id: 'session-permission',
-    surface: 'Chat Session / Permission',
-    storyId: 'sessions-sessionconversationpage--desktop-permission-approval',
-  },
-  {
-    id: 'session-question',
-    surface: 'Chat Session / Agent Question',
-    storyId: 'sessions-sessionconversationpage--desktop-agent-question',
-  },
-] as const;
-
-const RIGHT_SIDEBAR_STATE_CAPTURES = [
-  {
-    id: 'session-right-sidebar-changes',
-    surface: 'Chat Session / Right Sidebar / Changes',
-    storyId: 'sessions-sessionsidepaneltabbar--geometry-report',
-  },
-  {
-    id: 'session-right-sidebar-tabs',
-    surface: 'Chat Session / Right Sidebar / Tabs',
-    storyId: 'sessions-sessionsidepaneltabbar--unified-tabs',
-  },
-  {
-    id: 'session-right-sidebar-empty',
-    surface: 'Chat Session / Right Sidebar / Empty',
-    storyId: 'sessions-sessionsidepaneltabbar--empty-state',
-  },
-] as const;
 
 const GEOMETRY_COVERAGE_EXCLUSIONS = [
   {
@@ -1525,173 +1430,6 @@ function createDiscoveryOverviewDetail({
   };
 }
 
-async function waitForSessionConversationStory(page: Page): Promise<void> {
-  await page.locator('[data-testid="session-conversation-story"]').waitFor({
-    state: 'visible',
-    timeout: 90_000,
-  });
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    });
-  });
-}
-
-async function enableReportCaptureMode(page: Page): Promise<void> {
-  // Generous on purpose: the FIRST story in a cold browser context compiles and
-  // parses the whole Storybook bundle, which is a minute on a loaded machine
-  // and 4 seconds once warm. This is an explicit readiness signal, never a
-  // sleep — the deadline only decides how loaded a machine may be.
-  await page
-    .locator('[data-geometry-fixture-ready="true"], [data-testid="session-conversation-story"]')
-    .first()
-    .waitFor({ state: 'attached', timeout: 180_000 });
-  await page.addStyleTag({
-    content: `
-      [data-geometry-report-capture="true"] * {
-        pointer-events: none !important;
-        animation: none !important;
-        transition: none !important;
-      }
-      [data-geometry-actions-visible="true"] [data-geometry-hover-action] {
-        opacity: 1 !important;
-        pointer-events: none !important;
-      }
-      [data-geometry-actions-visible="true"] [data-geometry-hover-rest] {
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
-      [data-geometry-report-capture="true"] [data-geometry-capture-reveal="true"] {
-        opacity: 1 !important;
-        pointer-events: none !important;
-      }
-    `,
-  });
-  const workspace = page.locator(
-    `[${CHAT_WORKSPACE_GEOMETRY_ATTRIBUTE}="${CHAT_WORKSPACE_GEOMETRY_ANCHORS.workspaceShell}"]`
-  );
-  await page.locator('body').evaluate((element) => {
-    element.setAttribute('data-geometry-report-capture', 'true');
-    element.setAttribute('data-geometry-actions-visible', 'true');
-
-    const interactiveSelector =
-      'button, [role="button"], a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
-    for (const candidate of element.querySelectorAll<HTMLElement>('*')) {
-      if (candidate.closest('[data-geometry-hover-rest]')) continue;
-      const style = getComputedStyle(candidate);
-      const rect = candidate.getBoundingClientRect();
-      const occupiesViewport =
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.right >= 0 &&
-        rect.bottom >= 0 &&
-        rect.left <= innerWidth &&
-        rect.top <= innerHeight;
-      const ownsInteraction =
-        candidate.matches(interactiveSelector) || candidate.querySelector(interactiveSelector);
-      if (
-        Number.parseFloat(style.opacity) <= 0.01 &&
-        style.display !== 'none' &&
-        style.visibility !== 'hidden' &&
-        occupiesViewport &&
-        ownsInteraction
-      ) {
-        candidate.setAttribute('data-geometry-capture-reveal', 'true');
-      }
-    }
-  });
-  if ((await workspace.count()) > 0) {
-    await workspace.evaluate((element) => {
-      element.setAttribute('data-geometry-report-capture', 'true');
-      element.setAttribute('data-geometry-actions-visible', 'true');
-    });
-  }
-
-  const revealedSurfaces = page.locator('[data-geometry-capture-reveal="true"]');
-  await revealedSurfaces.count();
-}
-
-type GeometryReplayCapture = Readonly<{
-  storyId: string;
-  storyGlobals?: string;
-  viewport: Readonly<{ width: number; height: number }>;
-  deviceScaleFactor: number;
-  dimensions?: Readonly<{ theme?: string }>;
-}>;
-
-/**
- * A context is only worth opening once per SCALE and THEME. Device scale and
- * colour scheme are fixed when a context is created, but a viewport is not, and
- * a fresh context starts with a cold HTTP cache — so one context per capture
- * re-downloads and re-parses the whole Storybook bundle every time, which is
- * minutes of wall clock and the reason a story can miss its readiness deadline.
- */
-function geometryReplayContextKey(capture: GeometryReplayCapture): string {
-  return `${capture.deviceScaleFactor}|${capture.dimensions?.theme === 'dark' ? 'dark' : 'light'}`;
-}
-
-async function openGeometryReplayContext(
-  browser: Browser,
-  capture: GeometryReplayCapture,
-  blockedRequests: string[]
-): Promise<BrowserContext> {
-  const context = await browser.newContext({
-    viewport: capture.viewport,
-    deviceScaleFactor: capture.deviceScaleFactor,
-    reducedMotion: 'reduce',
-    colorScheme: capture.dimensions?.theme === 'dark' ? 'dark' : 'light',
-  });
-  await context.route(/https?:\/\//, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.origin === storybookOrigin) {
-      await route.continue();
-      return;
-    }
-    blockedRequests.push(url.href);
-    await route.abort('blockedbyclient');
-  });
-  return context;
-}
-
-/**
- * Show the story a capture came from, at that capture's viewport and settled
- * the same way the original pass settled it. Shared by the `--after` replay and
- * by the Y cards, so a card and a repair image are never shot against a
- * differently composed page.
- */
-async function showGeometryCaptureStory(
-  context: BrowserContext,
-  capture: GeometryReplayCapture
-): Promise<Page> {
-  // A fresh PAGE per capture, inside the shared context: the context keeps the
-  // HTTP cache warm, and a page that has loaded a dozen stories in a row runs
-  // its renderer out of memory and crashes mid-navigation.
-  const page = await context.newPage();
-  await page.setViewportSize(capture.viewport);
-  const response = await page.goto(
-    `${storybookOrigin}/iframe.html?id=${capture.storyId}&viewMode=story${
-      capture.storyGlobals ? `&globals=${capture.storyGlobals}` : ''
-    }`
-  );
-  if (!response?.ok()) throw new Error(`Story capture failed: ${capture.storyId}`);
-  if (capture.storyId.includes('sessionconversationpage')) {
-    await waitForSessionConversationStory(page);
-  }
-  await enableReportCaptureMode(page);
-  if (capture.storyId.startsWith('geometry-chatworkspace--')) {
-    await measureSettledChatWorkspace(page);
-  } else {
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-    });
-  }
-  return page;
-}
-
 async function captureAfterReport(browser: Browser, reportOutputDirectory: string): Promise<void> {
   const dataPath = path.join(reportOutputDirectory, 'report-data.json');
   const reportData = JSON.parse(await readFile(dataPath, 'utf8')) as PersistedReportData;
@@ -1758,30 +1496,20 @@ test('captures the visual geometry report', async ({ browser }) => {
     return;
   }
 
-  const viewport = { width: 1440, height: 900 };
-  const context = await browser.newContext({
-    viewport,
-    deviceScaleFactor: 2,
-    reducedMotion: 'reduce',
-    colorScheme: 'light',
-  });
+  const viewport = GEOMETRY_REPRESENTATIVE_CAPTURE.viewport;
   const unexpectedNetworkRequests: string[] = [];
-  await context.route(/https?:\/\//, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.origin === storybookOrigin) {
-      await route.continue();
-      return;
-    }
-    unexpectedNetworkRequests.push(url.href);
-    await route.abort('blockedbyclient');
-  });
+  const context = await openGeometryReplayContext(
+    browser,
+    GEOMETRY_REPRESENTATIVE_CAPTURE,
+    unexpectedNetworkRequests
+  );
 
   const page = await context.newPage();
   const geometryObservationCache: GeometryObservationCache = new Map();
-  const cleanUrl = `${storybookOrigin}/iframe.html?id=geometry-chatworkspace--expanded-sidebar&viewMode=story`;
+  const cleanUrl = `${storybookOrigin}/iframe.html?id=${GEOMETRY_REPRESENTATIVE_CAPTURE.storyId}&viewMode=story`;
   const cleanResponse = await page.goto(cleanUrl);
   if (!cleanResponse?.ok()) throw new Error(`Story capture failed: ${cleanUrl}`);
-  await enableReportCaptureMode(page);
+  await enableGeometryCaptureMode(page);
   const hoverActions = page.locator('[data-geometry-hover-action]');
   await hoverActions.count();
 
@@ -1792,14 +1520,16 @@ test('captures the visual geometry report', async ({ browser }) => {
   });
 
   const spacingAudit = await auditChatWorkspaceSpacing(page);
-  const semanticAlignments = await auditChatWorkspaceSemanticAlignments(page);
-  const semanticBaselines = await auditChatWorkspaceSemanticBaselines(page);
-  const railDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
-    aggregateScopes: ['sidebar.shell'],
-    captureId: 'workspace:wide-expanded',
-    surfaceFamily: 'workspace',
-    observationCache: geometryObservationCache,
-  });
+  const planObservations: GeometryPlanObservation[] = [];
+  const representativeObservation = await observeGeometryPlanEntry(
+    page,
+    GEOMETRY_REPRESENTATIVE_CAPTURE,
+    geometryObservationCache
+  );
+  planObservations.push(representativeObservation);
+  const semanticAlignments = representativeObservation.semanticAlignments ?? [];
+  const semanticBaselines = representativeObservation.semanticBaselines ?? [];
+  const railDiscovery = representativeObservation.railDiscovery;
   const mainPane = requireGeometryRect(
     measurement.snapshot,
     CHAT_WORKSPACE_GEOMETRY_ANCHORS.mainPane
@@ -1862,7 +1592,7 @@ test('captures the visual geometry report', async ({ browser }) => {
   const annotatedUrl = `${storybookOrigin}/iframe.html?id=geometry-chatworkspace--geometry-audit&viewMode=story`;
   const annotatedResponse = await page.goto(annotatedUrl);
   if (!annotatedResponse?.ok()) throw new Error(`Story capture failed: ${annotatedUrl}`);
-  await enableReportCaptureMode(page);
+  await enableGeometryCaptureMode(page);
   await measureSettledChatWorkspace(page);
   const spacingOverlay = page.locator('[data-geometry-devtool="spacing-audit"]');
   await spacingOverlay.waitFor({ state: 'attached' });
@@ -1892,87 +1622,36 @@ test('captures the visual geometry report', async ({ browser }) => {
     });
   }
 
-  const discoverySurfaces: Array<
-    Readonly<{
-      captureId: string;
-      contractDomain: 'workspace' | 'session' | 'right-sidebar';
-      surface: string;
-      viewport: Readonly<{ width: number; height: number }>;
-      railDiscovery: readonly BrowserAlignmentRailDiscoveryScope[];
-    }>
-  > = [
-    {
-      captureId: 'workspace:wide-expanded',
-      contractDomain: 'workspace',
-      surface: 'Workspace / Chat Landing',
-      viewport,
-      railDiscovery,
-    },
-  ];
-  const coverageCaptures: Array<
-    Readonly<{
-      captureId: string;
-      area: 'workspace' | 'session' | 'right-sidebar';
-      surface: string;
-      storyId: string;
-      storyGlobals?: string;
-      viewport: Readonly<{ width: number; height: number }>;
-      deviceScaleFactor: number;
-      dimensions: GeometryCaptureDimensions;
-    }>
-  > = [
-    {
-      captureId: 'workspace:wide-expanded',
-      area: 'workspace',
-      surface: 'Workspace / Chat Landing',
-      storyId: 'geometry-chatworkspace--expanded-sidebar',
-      viewport,
-      deviceScaleFactor: 2,
-      dimensions: DEFAULT_CAPTURE_DIMENSIONS,
-    },
-  ];
+  // One context per device scale and theme, exactly as the gate walk opens
+  // them: a viewport can be set on an open context, a device scale cannot, and
+  // a fresh context re-parses the whole Storybook bundle.
+  const planContexts = new Map<string, BrowserContext>([
+    [geometryReplayContextKey(GEOMETRY_REPRESENTATIVE_CAPTURE), context],
+  ]);
+  const planContextFor = async (entry: GeometryCapturePlanEntry) => {
+    const key = geometryReplayContextKey(entry);
+    const existing = planContexts.get(key);
+    if (existing) return existing;
+    const opened = await openGeometryReplayContext(browser, entry, unexpectedNetworkRequests);
+    planContexts.set(key, opened);
+    return opened;
+  };
 
-  for (const verificationCase of CHAT_WORKSPACE_GEOMETRY_SPEC.verificationCases) {
-    if (verificationCase.name === 'wide-expanded') continue;
-    const matrixContext = await browser.newContext({
-      viewport: verificationCase.viewport,
-      deviceScaleFactor: 1,
-      reducedMotion: 'reduce',
-      colorScheme: 'light',
-    });
-    await matrixContext.route(/https?:\/\//, async (route) => {
-      const url = new URL(route.request().url());
-      if (url.origin === storybookOrigin) {
-        await route.continue();
-        return;
-      }
-      unexpectedNetworkRequests.push(url.href);
-      await route.abort('blockedbyclient');
-    });
-    const matrixPage = await matrixContext.newPage();
-    const storyId =
-      verificationCase.sidebar === 'expanded'
-        ? 'geometry-chatworkspace--expanded-sidebar'
-        : 'geometry-chatworkspace--collapsed-sidebar';
-    const response = await matrixPage.goto(
-      `${storybookOrigin}/iframe.html?id=${storyId}&viewMode=story`
+  for (const entry of GEOMETRY_WORKSPACE_MATRIX_CAPTURES) {
+    const matrixPage = await showGeometryCaptureStory(await planContextFor(entry), entry);
+    const matrixObservation = await observeGeometryPlanEntry(
+      matrixPage,
+      entry,
+      geometryObservationCache
     );
-    if (!response?.ok()) throw new Error(`Story capture failed: ${storyId}`);
-    await enableReportCaptureMode(matrixPage);
-    await measureSettledChatWorkspace(matrixPage);
-    const matrixDiscovery = await discoverChatWorkspaceAlignmentRails(matrixPage, {
-      aggregateScopes: ['sidebar.shell'],
-      captureId: `workspace:${verificationCase.name}`,
-      surfaceFamily: 'workspace',
-      observationCache: geometryObservationCache,
-    });
+    planObservations.push(matrixObservation);
     const matrixOverview = createDiscoveryOverviewDetail({
-      surface: `Workspace / ${verificationCase.name}`,
-      idPrefix: `workspace-${verificationCase.name}`,
-      viewport: verificationCase.viewport,
-      railDiscovery: matrixDiscovery,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
+      railDiscovery: matrixObservation.railDiscovery,
     });
-    assignDetailsToCapture([matrixOverview], `workspace:${verificationCase.name}`);
+    assignDetailsToCapture([matrixOverview], entry.captureId);
     await matrixPage.screenshot({
       path: path.join(outputDirectory, matrixOverview.images.clean),
       clip: matrixOverview.clip,
@@ -1989,75 +1668,24 @@ test('captures the visual geometry report', async ({ browser }) => {
       scale: 'device',
     });
     workspaceDetails.push(matrixOverview);
-    discoverySurfaces.push({
-      captureId: `workspace:${verificationCase.name}`,
-      contractDomain: 'workspace',
-      surface: `Workspace / ${verificationCase.name}`,
-      viewport: verificationCase.viewport,
-      railDiscovery: matrixDiscovery,
-    });
-    coverageCaptures.push({
-      captureId: `workspace:${verificationCase.name}`,
-      area: 'workspace',
-      surface: `Workspace / ${verificationCase.name}`,
-      storyId,
-      viewport: verificationCase.viewport,
-      deviceScaleFactor: 1,
-      dimensions: DEFAULT_CAPTURE_DIMENSIONS,
-    });
-    await matrixContext.close();
+    await matrixPage.close();
   }
 
-  for (const dimension of WORKSPACE_DIMENSION_CAPTURES) {
-    const dimensionContext = await browser.newContext({
-      viewport,
-      deviceScaleFactor: 2,
-      reducedMotion: 'reduce',
-      colorScheme: dimension.colorScheme,
-    });
-    await dimensionContext.route(/https?:\/\//, async (route) => {
-      const url = new URL(route.request().url());
-      if (url.origin === storybookOrigin) {
-        await route.continue();
-        return;
-      }
-      unexpectedNetworkRequests.push(url.href);
-      await route.abort('blockedbyclient');
-    });
-    const dimensionPage = await dimensionContext.newPage();
-    const dimensionStoryId = 'geometry-chatworkspace--expanded-sidebar';
-    const dimensionUrl = `${storybookOrigin}/iframe.html?id=${dimensionStoryId}&viewMode=story&globals=${dimension.globals}`;
-    const dimensionResponse = await dimensionPage.goto(dimensionUrl);
-    if (!dimensionResponse?.ok()) throw new Error(`Story capture failed: ${dimensionUrl}`);
-    await enableReportCaptureMode(dimensionPage);
-    await measureSettledChatWorkspace(dimensionPage);
-    const expectedText = 'expectedText' in dimension ? dimension.expectedText : undefined;
-    if (expectedText) {
-      await dimensionPage
-        .getByText(expectedText, { exact: false })
-        .first()
-        .waitFor({ state: 'visible', timeout: 30_000 });
-    }
-    if (dimension.dimensions.theme === 'dark') {
-      const isDark = await dimensionPage.evaluate(() =>
-        document.documentElement.classList.contains('dark')
-      );
-      if (!isDark) throw new Error(`${dimension.id} did not apply the dark theme global`);
-    }
-    const dimensionCaptureId = `workspace:${dimension.id}`;
-    const dimensionDiscovery = await discoverChatWorkspaceAlignmentRails(dimensionPage, {
-      aggregateScopes: ['sidebar.shell'],
-      captureId: dimensionCaptureId,
-      surfaceFamily: 'workspace',
-      observationCache: geometryObservationCache,
-    });
+  for (const entry of GEOMETRY_WORKSPACE_DIMENSION_CAPTURES) {
+    const dimensionPage = await showGeometryCaptureStory(await planContextFor(entry), entry);
+    const dimensionObservation = await observeGeometryPlanEntry(
+      dimensionPage,
+      entry,
+      geometryObservationCache
+    );
+    planObservations.push(dimensionObservation);
     const dimensionOverview = createDiscoveryOverviewDetail({
-      surface: dimension.surface,
-      idPrefix: dimension.id,
-      viewport,
-      railDiscovery: dimensionDiscovery,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
+      railDiscovery: dimensionObservation.railDiscovery,
     });
-    assignDetailsToCapture([dimensionOverview], dimensionCaptureId);
+    assignDetailsToCapture([dimensionOverview], entry.captureId);
     await dimensionPage.screenshot({
       path: path.join(outputDirectory, dimensionOverview.images.clean),
       clip: dimensionOverview.clip,
@@ -2074,39 +1702,19 @@ test('captures the visual geometry report', async ({ browser }) => {
       scale: 'device',
     });
     workspaceDetails.push(dimensionOverview);
-    discoverySurfaces.push({
-      captureId: dimensionCaptureId,
-      contractDomain: 'workspace',
-      surface: dimension.surface,
-      viewport,
-      railDiscovery: dimensionDiscovery,
-    });
-    coverageCaptures.push({
-      captureId: dimensionCaptureId,
-      area: 'workspace',
-      surface: dimension.surface,
-      storyId: dimensionStoryId,
-      storyGlobals: dimension.globals,
-      viewport,
-      deviceScaleFactor: 2,
-      dimensions: dimension.dimensions,
-    });
-    await dimensionContext.close();
+    await dimensionPage.close();
   }
 
-  for (const story of WORKSPACE_STATE_CAPTURES) {
-    const response = await page.goto(
-      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
+  for (const entry of GEOMETRY_WORKSPACE_STATE_CAPTURES) {
+    const statePage = await showGeometryCaptureStory(await planContextFor(entry), entry);
+    const stateMeasurement = await measureSettledChatWorkspace(statePage);
+    const stateObservation = await observeGeometryPlanEntry(
+      statePage,
+      entry,
+      geometryObservationCache
     );
-    if (!response?.ok()) throw new Error(`Story capture failed: ${story.storyId}`);
-    await enableReportCaptureMode(page);
-    const stateMeasurement = await measureSettledChatWorkspace(page);
-    const stateRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
-      aggregateScopes: ['sidebar.shell'],
-      captureId: `workspace:${story.id}:1440x900`,
-      surfaceFamily: 'workspace',
-      observationCache: geometryObservationCache,
-    });
+    planObservations.push(stateObservation);
+    const stateRailDiscovery = stateObservation.railDiscovery;
     const stateMainPane = requireGeometryRect(
       stateMeasurement.snapshot,
       CHAT_WORKSPACE_GEOMETRY_ANCHORS.mainPane
@@ -2115,22 +1723,21 @@ test('captures the visual geometry report', async ({ browser }) => {
       (scope) => scope.scope === 'main.chat-landing' || scope.rect.x >= stateMainPane.x - 1
     );
     const discoveredStateDetails = createDiscoveryDetails({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: mainDiscovery,
     });
     const stateOverview = createDiscoveryOverviewDetail({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: stateRailDiscovery,
     });
     const stateDetails = [stateOverview, ...discoveredStateDetails];
-    const captureId = `workspace:${story.id}:1440x900`;
-    assignDetailsToCapture(stateDetails, captureId);
+    assignDetailsToCapture(stateDetails, entry.captureId);
     for (const detail of stateDetails) {
-      await page.screenshot({
+      await statePage.screenshot({
         path: path.join(outputDirectory, detail.images.clean),
         clip: detail.clip,
         animations: 'disabled',
@@ -2139,8 +1746,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     for (const detail of stateDetails) {
-      await showOnlyDetailSemanticGuides(page, detail);
-      await page.screenshot({
+      await showOnlyDetailSemanticGuides(statePage, detail);
+      await statePage.screenshot({
         path: path.join(outputDirectory, detail.images.annotated),
         clip: detail.clip,
         animations: 'disabled',
@@ -2149,66 +1756,37 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     workspaceDetails.push(...stateDetails);
-    discoverySurfaces.push({
-      captureId,
-      contractDomain: 'workspace',
-      surface: story.surface,
-      viewport,
-      railDiscovery: stateRailDiscovery,
-    });
-    coverageCaptures.push({
-      captureId,
-      area: 'workspace',
-      surface: story.surface,
-      storyId: story.storyId,
-      viewport,
-      deviceScaleFactor: 2,
-      dimensions: DEFAULT_CAPTURE_DIMENSIONS,
-    });
+    await statePage.close();
   }
 
   const sessionDetails: ReportDetail[] = [];
 
-  for (const story of SESSION_STATE_CAPTURES) {
-    const response = await page.goto(
-      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
+  for (const entry of GEOMETRY_SESSION_STATE_CAPTURES) {
+    const sessionPage = await showGeometryCaptureStory(await planContextFor(entry), entry);
+    const sessionObservation = await observeGeometryPlanEntry(
+      sessionPage,
+      entry,
+      geometryObservationCache
     );
-    if (!response?.ok()) throw new Error(`Story capture failed: ${story.storyId}`);
-    await waitForSessionConversationStory(page);
-    await enableReportCaptureMode(page);
-    if (story.id === 'session-working') {
-      await page.locator('[data-stream-phase="indicator-only"]').waitFor({ state: 'attached' });
-    }
-    if (story.id === 'session-permission') {
-      const responseActionBar = page.locator(
-        '[data-geometry-capture-reveal="true"]:has(.lucide-info)'
-      );
-      await responseActionBar.first().waitFor({ state: 'attached' });
-    }
-    const sessionRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
-      aggregateScopes: ['session.page'],
-      captureId: `${story.id}:1440x900`,
-      surfaceFamily: 'session',
-      observationCache: geometryObservationCache,
-    });
+    planObservations.push(sessionObservation);
+    const sessionRailDiscovery = sessionObservation.railDiscovery;
     const storyDetails = createDiscoveryDetails({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: sessionRailDiscovery,
     });
     const sessionOverview = createDiscoveryOverviewDetail({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: sessionRailDiscovery,
     });
     const sessionReportDetails = [sessionOverview, ...storyDetails];
-    const captureId = `${story.id}:1440x900`;
-    assignDetailsToCapture(sessionReportDetails, captureId);
+    assignDetailsToCapture(sessionReportDetails, entry.captureId);
 
     for (const detail of sessionReportDetails) {
-      await page.screenshot({
+      await sessionPage.screenshot({
         path: path.join(outputDirectory, detail.images.clean),
         clip: detail.clip,
         animations: 'disabled',
@@ -2217,8 +1795,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     for (const detail of sessionReportDetails) {
-      await showOnlyDetailSemanticGuides(page, detail);
-      await page.screenshot({
+      await showOnlyDetailSemanticGuides(sessionPage, detail);
+      await sessionPage.screenshot({
         path: path.join(outputDirectory, detail.images.annotated),
         clip: detail.clip,
         animations: 'disabled',
@@ -2228,50 +1806,32 @@ test('captures the visual geometry report', async ({ browser }) => {
     }
 
     sessionDetails.push(...sessionReportDetails);
-    discoverySurfaces.push({
-      captureId,
-      contractDomain: 'session',
-      surface: story.surface,
-      viewport,
-      railDiscovery: sessionRailDiscovery,
-    });
-    coverageCaptures.push({
-      captureId,
-      area: 'session',
-      surface: story.surface,
-      storyId: story.storyId,
-      viewport,
-      deviceScaleFactor: 2,
-      dimensions: DEFAULT_CAPTURE_DIMENSIONS,
-    });
+    await sessionPage.close();
   }
 
-  for (const story of RIGHT_SIDEBAR_STATE_CAPTURES) {
-    const response = await page.goto(
-      `${storybookOrigin}/iframe.html?id=${story.storyId}&viewMode=story`
+  for (const entry of GEOMETRY_RIGHT_SIDEBAR_STATE_CAPTURES) {
+    const sidebarPage = await showGeometryCaptureStory(await planContextFor(entry), entry);
+    const sidebarObservation = await observeGeometryPlanEntry(
+      sidebarPage,
+      entry,
+      geometryObservationCache
     );
-    if (!response?.ok()) throw new Error(`Story capture failed: ${story.storyId}`);
-    await enableReportCaptureMode(page);
-    const rightSidebarRailDiscovery = await discoverChatWorkspaceAlignmentRails(page, {
-      aggregateScopes: ['session.side-panel'],
-      captureId: `${story.id}:1440x900`,
-      surfaceFamily: 'right-sidebar',
-      observationCache: geometryObservationCache,
-    });
+    planObservations.push(sidebarObservation);
+    const rightSidebarRailDiscovery = sidebarObservation.railDiscovery;
     const discoveredRightSidebarDetails = createDiscoveryDetails({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: rightSidebarRailDiscovery,
     });
     const sidePanelScope = rightSidebarRailDiscovery.find(
       (scope) => scope.scope === 'session.side-panel'
     );
-    if (!sidePanelScope) throw new Error(`${story.storyId} did not expose session.side-panel`);
+    if (!sidePanelScope) throw new Error(`${entry.storyId} did not expose session.side-panel`);
     const rightSidebarOverview = createDiscoveryOverviewDetail({
-      surface: story.surface,
-      idPrefix: story.id,
-      viewport,
+      surface: entry.surface,
+      idPrefix: entry.detailId,
+      viewport: entry.viewport,
       railDiscovery: rightSidebarRailDiscovery,
       clip: {
         x: sidePanelScope.rect.x - 8,
@@ -2281,10 +1841,9 @@ test('captures the visual geometry report', async ({ browser }) => {
       },
     });
     const rightSidebarDetails = [rightSidebarOverview, ...discoveredRightSidebarDetails];
-    const captureId = `${story.id}:1440x900`;
-    assignDetailsToCapture(rightSidebarDetails, captureId);
+    assignDetailsToCapture(rightSidebarDetails, entry.captureId);
     for (const detail of rightSidebarDetails) {
-      await page.screenshot({
+      await sidebarPage.screenshot({
         path: path.join(outputDirectory, detail.images.clean),
         clip: detail.clip,
         animations: 'disabled',
@@ -2293,8 +1852,8 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     for (const detail of rightSidebarDetails) {
-      await showOnlyDetailSemanticGuides(page, detail);
-      await page.screenshot({
+      await showOnlyDetailSemanticGuides(sidebarPage, detail);
+      await sidebarPage.screenshot({
         path: path.join(outputDirectory, detail.images.annotated),
         clip: detail.clip,
         animations: 'disabled',
@@ -2303,23 +1862,28 @@ test('captures the visual geometry report', async ({ browser }) => {
       });
     }
     sessionDetails.push(...rightSidebarDetails);
-    discoverySurfaces.push({
-      captureId,
-      contractDomain: 'right-sidebar',
-      surface: story.surface,
-      viewport,
-      railDiscovery: rightSidebarRailDiscovery,
-    });
-    coverageCaptures.push({
-      captureId,
-      area: 'right-sidebar',
-      surface: story.surface,
-      storyId: story.storyId,
-      viewport,
-      deviceScaleFactor: 2,
-      dimensions: DEFAULT_CAPTURE_DIMENSIONS,
-    });
+    await sidebarPage.close();
   }
+
+  // Both derived from the ONE walk above: a surface the report draws and a
+  // capture the pipeline reads can never be two different lists.
+  const discoverySurfaces = planObservations.map((observation) => ({
+    captureId: observation.entry.captureId,
+    contractDomain: observation.entry.area,
+    surface: observation.entry.surface,
+    viewport: observation.entry.viewport,
+    railDiscovery: observation.railDiscovery,
+  }));
+  const coverageCaptures = planObservations.map(({ entry }) => ({
+    captureId: entry.captureId,
+    area: entry.area,
+    surface: entry.surface,
+    storyId: entry.storyId,
+    ...(entry.storyGlobals ? { storyGlobals: entry.storyGlobals } : {}),
+    viewport: entry.viewport,
+    deviceScaleFactor: entry.deviceScaleFactor,
+    dimensions: entry.dimensions,
+  }));
 
   const details = [...workspaceDetails, ...sessionDetails]
     .map((detail, sourceIndex) => ({ detail, sourceIndex }))
@@ -2385,72 +1949,14 @@ test('captures the visual geometry report', async ({ browser }) => {
   );
   const captureArtifact: GeometryCaptureArtifact = {
     version: 1,
-    captures: discoverySurfaces.map((surface) => {
-      const coverage = coverageByCaptureId.get(surface.captureId);
-      if (!coverage) throw new Error(`Missing coverage for geometry capture ${surface.captureId}`);
-      const representative = detailsByCaptureId
-        .get(surface.captureId)
-        ?.find((detail) => detail.kind === 'overview');
-      const boxModelNodes = Object.assign(
-        {},
-        ...surface.railDiscovery.map((scope) => scope.capturedScope.boxModelNodes ?? {})
-      );
-      return {
-        captureId: surface.captureId,
-        surfaceFamily: surface.contractDomain,
-        surface: surface.surface,
-        storyId: coverage.storyId,
-        viewport: coverage.viewport,
-        deviceScaleFactor: coverage.deviceScaleFactor,
-        dimensions: coverage.dimensions,
-        screenshot: representative?.images.clean ?? '',
-        scopes: surface.railDiscovery.map((scope) => {
-          const { boxModelNodes: _boxModelNodes, ...capturedScope } = scope.capturedScope;
-          return capturedScope;
-        }),
-        boxModelNodes,
-        ...(surface.captureId === 'workspace:wide-expanded'
-          ? {
-              semanticAlignments: semanticAlignments.map((entry) => {
-                const [group, instance] = entry.groupLabel.split(' · ');
-                return {
-                  group: group ?? entry.groupLabel,
-                  instance: instance ?? null,
-                  axis: entry.axis,
-                  anchor: entry.anchor,
-                  status: entry.status,
-                  line: entry.line,
-                  members: entry.members.map((member) => ({
-                    name: member.name,
-                    coordinate: member.coordinate,
-                    ...(member.primitiveId ? { primitiveId: member.primitiveId } : {}),
-                    rect: member.rect,
-                  })),
-                };
-              }),
-              // The baseline rules travel with the alignment rules so
-              // marker-removal readiness asks one question of every marker.
-              semanticBaselines: semanticBaselines.map((entry) => {
-                const [group, instance] = entry.groupLabel.split(' · ');
-                return {
-                  group: group ?? entry.groupLabel,
-                  instance: instance ?? null,
-                  axis: 'y' as const,
-                  anchor: 'text-baseline' as const,
-                  status: entry.status,
-                  line: entry.line,
-                  members: entry.members.map((member) => ({
-                    name: member.name,
-                    coordinate: member.coordinate,
-                    ...(member.primitiveId ? { primitiveId: member.primitiveId } : {}),
-                    rect: member.rect,
-                  })),
-                };
-              }),
-            }
-          : {}),
-      };
-    }),
+    captures: planObservations.map((observation) =>
+      buildGeometryCapture(
+        observation,
+        detailsByCaptureId
+          .get(observation.entry.captureId)
+          ?.find((detail) => detail.kind === 'overview')?.images.clean ?? ''
+      )
+    ),
   };
   const capturePath = path.join(outputDirectory, 'capture.json');
   const observationPath = path.join(outputDirectory, 'observation.json');
@@ -2897,5 +2403,7 @@ test('captures the visual geometry report', async ({ browser }) => {
   if (unexpectedNetworkRequests.length > 0) {
     throw new Error(`Unexpected network requests: ${unexpectedNetworkRequests.join(', ')}`);
   }
-  await context.close();
+  for (const planContext of planContexts.values()) {
+    await planContext.close().catch(() => undefined);
+  }
 });
