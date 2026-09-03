@@ -136,23 +136,18 @@ function SessionRowIndicator({
   hasUnreadMessages?: boolean;
 }) {
   let icon: ReactNode = null;
-  const visualAlignmentProps = {
-    [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowVisualCenter.name,
-    [semanticAlignmentAttributes.member]: 'leading-indicator-ink',
-  };
 
   if (isWaitingPermission) {
-    icon = <Hand {...visualAlignmentProps} className="h-3 w-3 text-status-warning" />;
+    icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
     icon = (
       <Loader2
-        {...visualAlignmentProps}
         data-session-working-spinner=""
         className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
       />
     );
   } else if (hasUnreadMessages) {
-    icon = <span {...visualAlignmentProps} className="h-2 w-2 rounded-full bg-primary" />;
+    icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }
 
   return (
@@ -754,7 +749,10 @@ export function SidebarSectionHeader({
   return (
     <div
       {...{ [semanticAlignmentAttributes.instance]: geometryInstance }}
-      className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]"
+      // 9px, not pr-2: session and project rows inset their trailing content by
+      // their own 8px padding plus a 1px transparent border, and this header has no
+      // border of its own to contribute that last pixel.
+      className="group flex h-7 items-center gap-1 rounded-md pr-sidebar-trailing has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]"
     >
       <div
         role={canToggle ? 'button' : undefined}

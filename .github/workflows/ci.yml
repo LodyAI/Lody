@@ -80,6 +80,9 @@ jobs:
       - name: Prepare ACP adapters
         run: pnpm --filter lody prepare:acp-adapters
 
+      - name: Install geometry test browser
+        run: pnpm --filter @lody/components exec playwright install --with-deps chromium
+
       - name: Run tests
         env:
           GIT_CONFIG_COUNT: 1

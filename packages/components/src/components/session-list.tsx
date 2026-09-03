@@ -462,14 +462,7 @@ function SessionRowTime({
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
     <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span
-        data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
-        data-geometry-align-member="session-time-ink"
-        data-geometry-align-visual="text"
-        className="select-none tabular-nums"
-      >
-        {relativeTime}
-      </span>
+      <span className="select-none tabular-nums">{relativeTime}</span>
     </span>
   );
 }
@@ -675,7 +668,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
     >
       <div
         data-geometry-align-instance={`sidebar-group:${group.key}`}
-        className="group flex h-7 items-center"
+        // The new-session button rides outside the header row's own box, so this
+        // wrapper carries the shared 9px sidebar trailing inset (a bordered row's
+        // 8px padding plus its 1px transparent border) on the button's behalf.
+        className="group flex h-7 items-center pr-sidebar-trailing"
       >
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
@@ -886,14 +882,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const sessionHref = isSelectable ? getSessionHref?.(session.sessionId) : undefined;
             const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
             const renderTitle = (extraClassName?: string) => (
-              <span
-                data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
-                data-geometry-align-member="session-title-ink"
-                data-geometry-align-visual="text"
-                className={cn('truncate', extraClassName)}
-              >
-                {session.title}
-              </span>
+              <span className={cn('truncate', extraClassName)}>{session.title}</span>
             );
             const handleAnchorClick = useAnchor
               ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -1069,26 +1058,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
                             <SessionMergeablePill />
                           ) : hasChanges && !isMergeable ? (
                             <span className="flex items-center gap-1">
-                              <span
-                                data-geometry-align-y={
-                                  sidebarAlignmentRules.sidebarRowVisualCenter.name
-                                }
-                                data-geometry-align-member="session-added-lines-ink"
-                                data-geometry-align-visual="text"
-                                className="text-code-added"
-                              >
-                                +{session.addedLines}
-                              </span>
-                              <span
-                                data-geometry-align-y={
-                                  sidebarAlignmentRules.sidebarRowVisualCenter.name
-                                }
-                                data-geometry-align-member="session-removed-lines-ink"
-                                data-geometry-align-visual="text"
-                                className="text-code-removed"
-                              >
-                                -{session.deletedLines}
-                              </span>
+                              <span className="text-code-added">+{session.addedLines}</span>
+                              <span className="text-code-removed">-{session.deletedLines}</span>
                             </span>
                           ) : null}
                           {hasPr ? (

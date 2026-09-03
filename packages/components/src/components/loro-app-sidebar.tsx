@@ -638,16 +638,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     if (!canRename) return;
     setRenameTarget({ sessionId: session.id, initialTitle: title });
   }, [canRename, session.id, title]);
-  const titleContent = (
-    <span
-      data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
-      data-geometry-align-member="local-session-title-ink"
-      data-geometry-align-visual="text"
-      className="truncate"
-    >
-      {title}
-    </span>
-  );
+  const titleContent = <span className="truncate">{title}</span>;
   // Copy URL is always available (a private link still works for the owner);
   // sharing is a separate menu item that only appears when the conversation
   // isn't already team-visible.
@@ -1065,14 +1056,20 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-scope-item="row"
               data-sidebar-project-key={`${machineId}:${project.id}`}
               className={cn(
-                'group relative w-full rounded-md pl-2 pr-3 py-1 text-left',
+                // px-2 + the 1px transparent border below puts this row's trailing
+                // content on the shared 9px sidebar trailing rail, like session rows.
+                'group relative w-full rounded-md px-2 py-1 text-left',
                 'border border-transparent bg-transparent',
                 !showSelectedState &&
                   !isMobile &&
                   'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 showSelectedState &&
                   'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                'flex min-w-0 flex-1 select-none items-center gap-2 text-xs font-semibold transition-colors',
+                // gap-1.5, matching the session rows below: the leading control's
+                // -mr-1.5 already trims its 20px box down to the shared 14px icon
+                // advance, so only this gap decides whether the project name lands
+                // on the same leading rail as the session titles it contains.
+                'flex min-w-0 flex-1 select-none items-center gap-1.5 text-xs font-semibold transition-colors',
                 projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                 removalState && 'text-muted-foreground',
                 showSelectedState

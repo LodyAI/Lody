@@ -8,19 +8,24 @@ import {
   calculateMainPaneGrid,
   calculateSidebarGrid,
   discoverAlignmentRails,
+  discoverBlockAlignmentRails,
   discoverRepeatedLayoutScopes,
   inferAlignmentRailContractProposals,
   evaluateSemanticAlignmentGroup,
   evaluateSemanticBaselineGroup,
+  isGeometryPaintedShape,
   isSpacingRhythmMultiple,
   resolveConversationHorizontalInset,
   resolveMainPaneGridRange,
   selectCanonicalAlignmentRails,
+  selectVisualRowSlots,
   validateChatWorkspaceGeometry,
   type AlignmentRailCandidate,
+  type BlockRailCandidate,
   type ChatWorkspaceGeometrySnapshot,
   type LayoutTopologyNode,
 } from '../src/lib/chat-workspace-geometry';
+import { geometryCanvasFontString } from '../src/lib/geometry-text-cap-band';
 
 const anchors = CHAT_WORKSPACE_GEOMETRY_ANCHORS;
 
@@ -238,6 +243,30 @@ describe('conversation, spacing, and semantic baselines', () => {
       aligned: false,
       spread: 0.75,
       status: 'sub-pixel-jitter',
+    });
+  });
+
+  it('snaps semantic coordinates to the capture physical-pixel grid', () => {
+    expect(
+      evaluateSemanticAlignmentGroup({
+        name: 'sidebar.row.visual-center',
+        instance: 'row-1',
+        axis: 'y',
+        anchor: 'visual-center',
+        minMembers: 2,
+        tolerance: 0.5,
+        policy: 'observe',
+        deviceScaleFactor: 2,
+        members: [
+          { name: 'icon', coordinate: 40.24 },
+          { name: 'label', coordinate: 40.26 },
+        ],
+      })
+    ).toMatchObject({
+      line: 40.25,
+      spread: 0.5,
+      status: 'aligned',
+      members: [{ coordinate: 40 }, { coordinate: 40.5 }],
     });
   });
 
@@ -532,6 +561,90 @@ describe('conversation, spacing, and semantic baselines', () => {
         sampleSize: 3,
       }),
     ]);
+  });
+
+  it('lets centered text contribute only its center coordinate', () => {
+    const candidates: AlignmentRailCandidate[] = [
+      'inline-start',
+      'inline-center',
+      'inline-end',
+    ].map((anchor, index) => ({
+      elementId: `centered-${index}`,
+      rowId: `row-${index}`,
+      kind: 'text',
+      alignmentMode: 'centered',
+      anchor: anchor as AlignmentRailCandidate['anchor'],
+      coordinate: 100,
+      yStart: index * 32,
+      yEnd: index * 32 + 20,
+    }));
+
+    expect(discoverAlignmentRails(candidates, { minSupport: 2, minVerticalSpan: 0 })).toEqual([]);
+  });
+
+  it('rejects a two-support rail that crosses visual partitions', () => {
+    const candidates: AlignmentRailCandidate[] = [
+      {
+        elementId: 'heading',
+        rowId: 'heading-row',
+        sectionId: 'hero',
+        kind: 'text',
+        anchor: 'inline-start',
+        coordinate: 100,
+        yStart: 0,
+        yEnd: 20,
+      },
+      {
+        elementId: 'chip',
+        rowId: 'chip-row',
+        sectionId: 'composer',
+        kind: 'text',
+        anchor: 'inline-start',
+        coordinate: 100,
+        yStart: 800,
+        yEnd: 820,
+      },
+    ];
+
+    expect(discoverAlignmentRails(candidates, { minSupport: 2 })).toEqual([]);
+  });
+
+  it('requires mixed-kind supporters to share one row family', () => {
+    const makeCandidates = (rowFamily: readonly string[]): AlignmentRailCandidate[] => [
+      {
+        elementId: 'heading',
+        rowId: 'heading-row',
+        rowFamily: rowFamily[0],
+        kind: 'text',
+        anchor: 'inline-start',
+        coordinate: 100,
+        yStart: 0,
+        yEnd: 20,
+      },
+      {
+        elementId: 'icon',
+        rowId: 'icon-row',
+        rowFamily: rowFamily[1],
+        kind: 'svg',
+        anchor: 'inline-start',
+        coordinate: 100,
+        yStart: 32,
+        yEnd: 52,
+      },
+    ];
+
+    expect(
+      discoverAlignmentRails(makeCandidates(['hero', 'composer']), {
+        minSupport: 2,
+        minVerticalSpan: 0,
+      })
+    ).toEqual([]);
+    expect(
+      discoverAlignmentRails(makeCandidates(['sidebar-row', 'sidebar-row']), {
+        minSupport: 2,
+        minVerticalSpan: 0,
+      })
+    ).toHaveLength(1);
   });
 
   it('collapses repeated slot anchors to the boundary-facing canonical rail', () => {
@@ -915,6 +1028,133 @@ describe('conversation, spacing, and semantic baselines', () => {
   });
 });
 
+describe('vertical rail discovery', () => {
+  const rowMember = (
+    elementId: string,
+    row: number,
+    coordinate: number,
+    overrides: Partial<BlockRailCandidate> = {}
+  ): BlockRailCandidate => ({
+    elementId,
+    rowId: `visual-row:${row}`,
+    rowFamily: 'div[text]>div[button]',
+    kind: 'text',
+    space: 'ink',
+    anchor: 'visual-center',
+    coordinate,
+    xStart: 40,
+    xEnd: 220,
+    yStart: coordinate - 8,
+    yEnd: coordinate + 8,
+    ...overrides,
+  });
+
+  it('measures a row against its own median and reports the member that leaves it', () => {
+    const [rail] = discoverBlockAlignmentRails([
+      rowMember('icon', 1, 42, { kind: 'svg', xStart: 20, xEnd: 32 }),
+      rowMember('title', 1, 40),
+      rowMember('time', 1, 40, { xStart: 240, xEnd: 262 }),
+    ]);
+
+    expect(rail).toMatchObject({ anchor: 'visual-center', line: 40, support: 2, sampleSize: 3 });
+    expect(rail?.outliers.map((member) => member.elementId)).toEqual(['icon']);
+    expect(rail?.outliers[0]?.delta).toBe(2);
+  });
+
+  it('never lets one row establish another row\u2019s vertical line', () => {
+    const rails = discoverBlockAlignmentRails([
+      rowMember('title-a', 1, 40),
+      rowMember('icon-a', 1, 40, { kind: 'svg' }),
+      rowMember('title-b', 2, 72),
+      rowMember('icon-b', 2, 74, { kind: 'svg' }),
+    ]);
+
+    expect(rails.map((rail) => rail.rowId)).toEqual(['visual-row:1', 'visual-row:2']);
+    expect(rails[0]?.outliers).toEqual([]);
+    // The second row is judged against 73, its own median, not against row one.
+    expect(rails[1]?.line).toBe(73);
+    expect(rails[1]?.outliers).toHaveLength(2);
+  });
+
+  it('compares a block edge only between primitives of one kind', () => {
+    const mixed = discoverBlockAlignmentRails([
+      rowMember('icon', 1, 36, { kind: 'svg', anchor: 'block-start' }),
+      rowMember('title', 1, 32, { anchor: 'block-start' }),
+    ]);
+    const sameKind = discoverBlockAlignmentRails([
+      rowMember('title', 1, 32, { anchor: 'block-start' }),
+      rowMember('time', 1, 36, { anchor: 'block-start' }),
+    ]);
+
+    expect(mixed).toEqual([]);
+    expect(sameKind).toHaveLength(1);
+  });
+
+  it('snaps to the physical pixel grid before deciding what left the line', () => {
+    const [rail] = discoverBlockAlignmentRails(
+      [
+        rowMember('title', 1, 40.1),
+        rowMember('time', 1, 40.1),
+        rowMember('icon', 1, 40.3, { kind: 'svg' }),
+      ],
+      { deviceScaleFactor: 2 }
+    );
+
+    expect(rail?.line).toBe(40);
+    expect(rail?.outliers).toEqual([]);
+  });
+
+  it('does not report a row that renders a single measurable primitive', () => {
+    expect(discoverBlockAlignmentRails([rowMember('title', 1, 40)])).toEqual([]);
+  });
+
+  it('refuses to call the distance between two lines of one block a misalignment', () => {
+    // A composer label above its textarea is captured as one visual row, but
+    // neither box reaches the other's centre: they are two lines, not one.
+    const stacked = discoverBlockAlignmentRails([
+      rowMember('label', 1, 608, { yStart: 600, yEnd: 617 }),
+      rowMember('textarea', 1, 647, { kind: 'field', yStart: 623, yEnd: 671 }),
+    ]);
+    expect(stacked).toEqual([]);
+
+    // The same row with a third primitive on the label's line still reports
+    // that line, and the far primitive is simply not on it.
+    const [rail] = discoverBlockAlignmentRails([
+      rowMember('label', 1, 608, { yStart: 600, yEnd: 617 }),
+      rowMember('hint', 1, 610, { yStart: 601, yEnd: 618 }),
+      rowMember('textarea', 1, 647, { kind: 'field', yStart: 623, yEnd: 671 }),
+    ]);
+    expect(rail?.members.map((member) => member.elementId)).toEqual(['label', 'hint']);
+    expect(rail?.line).toBe(609);
+  });
+
+  it('reports a thin glyph that moved, instead of dropping it off the line', () => {
+    // An ellipsis icon is about a pixel of ink: its own extent stops containing
+    // the line as soon as it moves at all, so the row band has to carry it.
+    const [rail] = discoverBlockAlignmentRails([
+      rowMember('title', 1, 40, { yStart: 32, yEnd: 48 }),
+      rowMember('time', 1, 40, { yStart: 33, yEnd: 47 }),
+      rowMember('ellipsis', 1, 43, { kind: 'svg', yStart: 42.4, yEnd: 43.6 }),
+    ]);
+
+    expect(rail?.line).toBe(40);
+    expect(rail?.sampleSize).toBe(3);
+    expect(rail?.outliers.map((member) => member.elementId)).toEqual(['ellipsis']);
+  });
+
+  it('still reports a member that moved but stays on the line', () => {
+    const [rail] = discoverBlockAlignmentRails([
+      rowMember('title', 1, 40, { yStart: 32, yEnd: 48 }),
+      rowMember('time', 1, 40, { yStart: 32, yEnd: 48 }),
+      rowMember('icon', 1, 43, { kind: 'svg', yStart: 37, yEnd: 49 }),
+    ]);
+
+    expect(rail?.line).toBe(40);
+    expect(rail?.outliers.map((member) => member.elementId)).toEqual(['icon']);
+    expect(rail?.outliers[0]?.delta).toBe(3);
+  });
+});
+
 describe('chat workspace validation', () => {
   it('accepts the expanded Sidebar + Main Pane + Chat Landing geometry', () => {
     expect(
@@ -1021,5 +1261,90 @@ describe('chat workspace validation', () => {
         path: `${anchors.mainPane}.width`,
       })
     );
+  });
+});
+
+describe('what belongs to a visual row', () => {
+  it('rejects a composer label stacked above its field', () => {
+    // The real composer: a 18px `label` sitting directly above a 48px field,
+    // both children of one 48px-tall wrapper. Calling that a row makes the
+    // leading between the two lines a 25px vertical misalignment.
+    const label = { top: 806, bottom: 824 };
+    const field = { top: 803, bottom: 851 };
+    const rowCenter = (Math.min(label.top, field.top) + Math.max(label.bottom, field.bottom)) / 2;
+
+    expect(selectVisualRowSlots([label, field], rowCenter)).toEqual([1]);
+  });
+
+  it('keeps every slot of a real row, however differently sized', () => {
+    const icon = { top: 104, bottom: 120 };
+    const title = { top: 102, bottom: 122 };
+    const trailingButton = { top: 96, bottom: 128 };
+    const rowCenter = 112;
+
+    expect(selectVisualRowSlots([icon, title, trailingButton], rowCenter)).toEqual([0, 1, 2]);
+  });
+
+  it('drops a badge that sits a line above the row it shares a box with', () => {
+    const badge = { top: 100, bottom: 116 };
+    const text = { top: 130, bottom: 146 };
+    const rowCenter = 123;
+
+    // Neither slot reaches the other's line, so the proposal has fewer than two
+    // members left and is not a row at all.
+    expect(selectVisualRowSlots([badge, text], rowCenter).length).toBeLessThan(2);
+  });
+});
+
+describe('painted CSS shapes are primitives', () => {
+  const shape = (overrides: Partial<Parameters<typeof isGeometryPaintedShape>[0]> = {}) => ({
+    width: 8,
+    height: 8,
+    renderedChildCount: 0,
+    text: '',
+    backgroundColor: 'rgb(34 197 94)',
+    backgroundImage: 'none',
+    borderWidths: [0, 0, 0, 0],
+    borderColors: ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)'],
+    ...overrides,
+  });
+
+  it('sees the sidebar status dot', () => {
+    expect(isGeometryPaintedShape(shape())).toBe(true);
+    expect(isGeometryPaintedShape(shape({ backgroundColor: 'rgb(34 197 94 / 0.4)' }))).toBe(true);
+    expect(
+      isGeometryPaintedShape(
+        shape({
+          backgroundColor: 'rgba(0, 0, 0, 0)',
+          borderWidths: [1, 1, 1, 1],
+          borderColors: ['rgb(0 0 0)', 'rgb(0 0 0)', 'rgb(0 0 0)', 'rgb(0 0 0)'],
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('is not a surface, a spacer or something with contents', () => {
+    // A page-wide separator is layout, not a mark a row aligns against.
+    expect(isGeometryPaintedShape(shape({ width: 240, height: 1 }))).toBe(false);
+    expect(isGeometryPaintedShape(shape({ backgroundColor: 'rgba(0, 0, 0, 0)' }))).toBe(false);
+    expect(isGeometryPaintedShape(shape({ backgroundColor: 'transparent' }))).toBe(false);
+    expect(isGeometryPaintedShape(shape({ renderedChildCount: 1 }))).toBe(false);
+    expect(isGeometryPaintedShape(shape({ text: '3' }))).toBe(false);
+    expect(isGeometryPaintedShape(shape({ width: 0 }))).toBe(false);
+  });
+});
+
+describe('the canvas font string', () => {
+  it('leaves the computed font-variant out, which a canvas would refuse', () => {
+    const style = {
+      fontStyle: 'normal',
+      fontVariant: 'tabular-nums',
+      fontWeight: '600',
+      fontSize: '13px',
+      fontFamily: 'Inter, sans-serif',
+    };
+
+    expect(geometryCanvasFontString(style)).toBe('normal 600 13px Inter, sans-serif');
+    expect(geometryCanvasFontString(style)).not.toContain('tabular-nums');
   });
 });
