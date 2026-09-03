@@ -122,6 +122,10 @@ export function AgentRoleEditorDialog({
           agentType: selectedAgentConfig.agentType,
           runtimeOverrides: selectedAgentConfig.runtimeOverrides,
           machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
+          // The STORED value names the model whose catalog composes the options;
+          // feeding the derived defaults back in would loop.
+          selectedModelId: editor?.value.modelId ?? null,
+          configOptionValues: editor?.value.configOptionValues,
         }
       : undefined
   );

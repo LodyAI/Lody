@@ -268,12 +268,24 @@ export function TaskAgentRunConfigMenu({
   );
 
   const modelConfigSelector = ordered.modelSelectors[0] as AcpSelectConfigOptionSelector | undefined;
+  // The Reasoning row binds the effort ladder when there is one; a lone thinking
+  // toggle keeps that row. Any other toggle-shaped thought option stays visible
+  // as a provider-defined select, since this menu has no dedicated toggle rows.
+  const thinkingSelector = useMemo(
+    () =>
+      (ordered.thoughtLevelSelectors.find((s) => s.type === 'select') ??
+        ordered.thoughtToggleSelectors.find((s) => s.type === 'select')) as
+        | AcpSelectConfigOptionSelector
+        | undefined,
+    [ordered.thoughtLevelSelectors, ordered.thoughtToggleSelectors]
+  );
   const extraSelectSelectors = useMemo(
     () =>
-      ordered.otherSelectors.filter(
-        (selector): selector is AcpSelectConfigOptionSelector => selector.type === 'select'
+      [...ordered.otherSelectors, ...ordered.thoughtToggleSelectors].filter(
+        (selector): selector is AcpSelectConfigOptionSelector =>
+          selector.type === 'select' && selector !== thinkingSelector
       ),
-    [ordered.otherSelectors]
+    [ordered.otherSelectors, ordered.thoughtToggleSelectors, thinkingSelector]
   );
   const modelPickerOptions = useMemo(
     () => (modelOptions.length > 0 ? modelOptions : (modelConfigSelector?.options ?? [])),
@@ -291,13 +303,6 @@ export function TaskAgentRunConfigMenu({
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
 
-  const thinkingSelector = useMemo(
-    () =>
-      ordered.thoughtLevelSelectors.find((s) => s.type === 'select') as
-        | AcpSelectConfigOptionSelector
-        | undefined,
-    [ordered.thoughtLevelSelectors]
-  );
   const thinkingValue = thinkingSelector
     ? ((resolveConfigOptionValue(
         thinkingSelector,

@@ -4,12 +4,15 @@ import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
   AGENT_ROLE_VERSION,
+  type AcpConfigOptionSummary,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
+  type MachineViewMeta,
 } from '@lody/shared';
 
 import { AgentRoleDetailPane } from '../src/components/sessions/agent-role-detail-pane';
@@ -108,6 +111,54 @@ describe('AgentRoleDetailPane', () => {
     // be a constant that says nothing.
     const withoutMachine = await render({ machineLabel: undefined });
     expect(withoutMachine.textContent).not.toContain('Studio');
+  });
+
+  it('resolves pinned options against the catalog of the model the Role stores', async () => {
+    const select = (
+      id: string,
+      category: string,
+      values: string[],
+      currentValue = values[0] ?? ''
+    ): AcpConfigOptionSummary => ({
+      id,
+      name: id.charAt(0).toUpperCase() + id.slice(1),
+      category,
+      type: 'select',
+      currentValue,
+      options: values.map((value) => ({
+        value,
+        name: value.charAt(0).toUpperCase() + value.slice(1),
+      })),
+    });
+    // The probe snapshot describes model `a`; the Role pins model `b`, whose
+    // catalog entry publishes `reasoning`, an option the snapshot never had.
+    const machine: Pick<MachineViewMeta, 'acpCapabilities'> = {
+      acpCapabilities: {
+        'config-1': {
+          cliType: 'registry',
+          agentType: 'cursor',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            select('model', 'model', ['a', 'b'], 'a'),
+            select('effort', 'thought_level', ['low', 'high']),
+          ],
+          configOptionsByModel: {
+            a: [select('effort', 'thought_level', ['low', 'high'])],
+            b: [select('reasoning', 'thought_level', ['low', 'medium', 'high'])],
+          },
+          fetchedAt: 1,
+        },
+      },
+    };
+    const view = await render({
+      agentConfig: { ...agentConfig, cliType: 'registry', agentType: 'cursor', name: 'Cursor' },
+      machine,
+      role: role({ runConfig: { configOptionValues: { model: 'b', reasoning: 'high' } } }),
+    });
+    expect(rowValue(view, 'Reasoning')).toBe('High');
   });
 
   it('shows the instruction itself and offers editing only where it can be done', async () => {

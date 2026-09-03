@@ -1,4 +1,4 @@
-import { isAcpPlanModeConfigOption } from '@lody/shared';
+import { isAcpPlanModeConfigOption, isAcpToggleSelectValues } from '@lody/shared';
 import {
   isFastModeSelector,
   isThoughtLevelSelector,
@@ -10,6 +10,7 @@ import {
 export type OrderedAcpConfigOptionSelectors = {
   modelSelectors: AcpSelectConfigOptionSelector[];
   thoughtLevelSelectors: AcpConfigOptionSelector[];
+  thoughtToggleSelectors: AcpConfigOptionSelector[];
   fastModeSelectors: AcpConfigOptionSelector[];
   planModeSelectors: AcpConfigOptionSelector[];
   booleanSelectors: AcpBooleanConfigOptionSelector[];
@@ -19,12 +20,20 @@ export type OrderedAcpConfigOptionSelectors = {
   otherSelectors: AcpConfigOptionSelector[];
 };
 
+const selectOptionValues = (selector: AcpSelectConfigOptionSelector): string[] =>
+  selector.options.map((option) => option.value);
+
+const isThoughtToggleSelector = (selector: AcpConfigOptionSelector): boolean =>
+  selector.type === 'boolean' ||
+  (selector.type === 'select' && isAcpToggleSelectValues(selectOptionValues(selector)));
+
 export const orderAcpConfigOptionSelectors = (
   selectors: AcpConfigOptionSelector[]
 ): OrderedAcpConfigOptionSelectors => {
   const ordered: OrderedAcpConfigOptionSelectors = {
     modelSelectors: [],
     thoughtLevelSelectors: [],
+    thoughtToggleSelectors: [],
     fastModeSelectors: [],
     planModeSelectors: [],
     booleanSelectors: [],
@@ -40,7 +49,11 @@ export const orderAcpConfigOptionSelectors = (
       continue;
     }
     if (isThoughtLevelSelector(selector)) {
-      ordered.thoughtLevelSelectors.push(selector);
+      if (isThoughtToggleSelector(selector)) {
+        ordered.thoughtToggleSelectors.push(selector);
+      } else {
+        ordered.thoughtLevelSelectors.push(selector);
+      }
       continue;
     }
     if (selector.configId === 'interaction_mode' && selector.type === 'select') {
