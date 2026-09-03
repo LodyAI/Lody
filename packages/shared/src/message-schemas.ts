@@ -543,6 +543,29 @@ export const normalizeSessionTurnInputConfig = (
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
+/**
+ * A turn config derived from ANOTHER turn's, for a new turn.
+ *
+ * `acceptWiderPermission` is informed acceptance of a permission the agent
+ * reported as wider than what ONE prompt asked for. Copying it onto a different
+ * prompt would carry that consent somewhere the user never gave it, and the new
+ * turn would sail past the stop that exists to ask — a permission bypass built
+ * out of a spread. So any copy that mints a new `userTurnId`, or changes the
+ * prompt or input blocks, must go through here.
+ *
+ * Same-turn rewrites are NOT copies: marking a turn `processing`, tagging its
+ * delivery kind, or retrying its transport keeps the acceptance, because it is
+ * still the turn the user accepted.
+ */
+export const deriveTurnInputConfigForNewTurn = (
+  original: unknown,
+  overrides: Partial<SessionTurnInputConfig> = {}
+): SessionTurnInputConfig => {
+  const { acceptWiderPermission: _dropped, ...carried } =
+    normalizeSessionTurnInputConfig(original) ?? {};
+  return { ...carried, ...overrides };
+};
+
 export const ProjectRefSchema = z.discriminatedUnion('kind', [
   z
     .object({

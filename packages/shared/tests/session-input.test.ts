@@ -15,7 +15,11 @@ import {
   resolveSessionConversationSourceFence,
   resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
-import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
+import {
+  deriveTurnInputConfigForNewTurn,
+  normalizeSessionTurnInputConfig,
+  SessionFileBlockSchema,
+} from '../src/message-schemas';
 import { sessionDocSchema } from '../src/schema';
 import type {
   CommentReferencePayload,
@@ -961,6 +965,30 @@ describe('one-time acceptance of a wider permission', () => {
     expect(
       buildSessionTurnInputConfig({ ...base, acceptWiderPermission: false }).acceptWiderPermission
     ).toBeUndefined();
+  });
+
+  it('does not travel to a turn derived from another one', () => {
+    // Edit-and-resend mints a new userTurnId and a new prompt. The acceptance
+    // was given for the ORIGINAL prompt, so carrying it would let the edited
+    // one past the stop without ever asking — a bypass built out of a spread.
+    const accepted = buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true });
+    expect(accepted.acceptWiderPermission).toBe(true);
+
+    const edited = deriveTurnInputConfigForNewTurn(accepted, {
+      prompt: 'ship something else',
+      inputBlocks: [{ type: 'text', text: 'ship something else' }],
+    });
+    expect(edited.acceptWiderPermission).toBeUndefined();
+    // Everything else the original turn ran with is still carried.
+    expect(edited.modeId).toBe('plan');
+    expect(edited.prompt).toBe('ship something else');
+
+    // The same-turn path is untouched: a status rewrite or a transport retry is
+    // still the turn the user accepted.
+    expect(
+      normalizeSessionTurnInputConfig({ ...accepted, _lodyDeliveryKind: 'steer' })
+        ?.acceptWiderPermission
+    ).toBe(true);
   });
 
   it('survives the normalizer every transport runs it through', () => {

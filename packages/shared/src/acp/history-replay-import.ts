@@ -1,3 +1,4 @@
+import { deriveTurnInputConfigForNewTurn } from '../message-schemas';
 import type { ACPSessionId, MessageContent } from '../ai';
 import type { LocalProjectHistoryProvider } from '../project';
 import type { SessionHistoryInput } from '../schema';
@@ -52,10 +53,11 @@ function appendUserText(entry: SessionHistoryInput, text: string): SessionHistor
     ...entry,
     items: items as unknown as SessionHistoryInput['items'],
     inputConfig: entry.inputConfig
-      ? {
-          ...entry.inputConfig,
+      ? // The prompt changes here, so this is a new turn's config: a one-time
+        // permission acceptance must not ride along with it.
+        deriveTurnInputConfigForNewTurn(entry.inputConfig, {
           prompt: `${entry.inputConfig.prompt ?? ''}${text}`,
-        }
+        })
       : entry.inputConfig,
   };
 }

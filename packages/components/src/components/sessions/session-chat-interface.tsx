@@ -105,6 +105,7 @@ import {
   isSessionGoalCleared,
   isSessionGoalActive,
   normalizeSessionInputBlocks,
+  deriveTurnInputConfigForNewTurn,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
@@ -2957,14 +2958,17 @@ export const SessionChatInterface = memo(
           inputBlocks.push({ type: 'text', text: nextText });
         }
 
-        const originalConfig = normalizeSessionTurnInputConfig(message.inputConfig) ?? {};
-        const inputConfig: SessionTurnInputConfig = {
-          ...originalConfig,
-          prompt: extractPromptPreviewFromInputBlocks(inputBlocks),
-          inputBlocks,
-          cliType: session.cliType,
-          agentType: session.agentType,
-        };
+        // A new turn id and a changed prompt: the one-time permission acceptance
+        // the user gave the ORIGINAL prompt does not travel with it.
+        const inputConfig: SessionTurnInputConfig = deriveTurnInputConfigForNewTurn(
+          message.inputConfig,
+          {
+            prompt: extractPromptPreviewFromInputBlocks(inputBlocks),
+            inputBlocks,
+            cliType: session.cliType,
+            agentType: session.agentType,
+          }
+        );
         const replacementUserTurnId = uuidv4();
         try {
           const response = await runtime.requestSessionEditAndResend(

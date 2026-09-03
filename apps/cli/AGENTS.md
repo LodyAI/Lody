@@ -361,6 +361,13 @@ Two things the dev build does deliberately, both load-bearing:
   back as something a later turn could read. `buildCliHistoryInputConfig` is the
   deliberate exception — CLI and MCP turns never carry an acceptance, and it
   must not become inheritable there.
+  The mirror image is just as load-bearing: making the field survive rebuilds
+  also made it copyable. Any derivation that mints a new `userTurnId` or changes
+  the prompt/input blocks — edit-and-resend, history replay import — must go
+  through `deriveTurnInputConfigForNewTurn`, which drops it. The acceptance was
+  given for ONE prompt; carrying it onto another is a permission bypass built
+  out of a spread. Same-turn rewrites (status, `_lodyDeliveryKind`, transport
+  retry) are not copies and keep it.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from
