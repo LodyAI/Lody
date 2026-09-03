@@ -32,7 +32,7 @@ import {
 } from '@/lib/app-location';
 import { isSafeAuthRedirect } from '@/lib/auth-redirect';
 import { openExternalUrl } from '@/lib/native-browser';
-import { prewarmMainLayoutChunk } from '@/lib/prewarm-main-layout';
+import { scheduleIdleTask } from '@/lib/idle-task';
 import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -644,8 +644,14 @@ export function LoginPage({
   const emailEntryLabel = t('login.continueWithEmail', 'Continue with email');
 
   // Warm the workspace layout chunk while this page waits on the user, so the
-  // post-sign-in route swap does not start by fetching it.
-  useEffect(() => prewarmMainLayoutChunk(), []);
+  // post-sign-in route swap does not start by fetching it. Idle-scheduled so it
+  // never competes with this page's own paint, and swallowing the failure keeps
+  // a cache warm-up from being reported as a renderer error; the real import
+  // runs again and surfaces its own.
+  useEffect(
+    () => scheduleIdleTask(() => void import('@/components/main-layout').catch(() => {})),
+    []
+  );
 
   useEffect(() => {
     if (loginViewedRef.current) {

@@ -10,10 +10,14 @@ import { cn } from '@/lib/utils';
  * inside that window reads worse than the quiet canvas it replaced. The delay
  * is CSS, not React state, so the deferral costs no timer and no re-render.
  *
- * `fill-mode-both` is what applies the animation's `from` state (opacity 0)
- * during the delay. Under `prefers-reduced-motion: reduce` the global reset in
- * `tailwind/index.css` collapses the duration but leaves the delay, so the
- * indicator simply appears after 300ms without the fade.
+ * All four of `animate-in`, `fade-in`, `delay-300` and `fill-mode-both` are
+ * required, and dropping any one of them fails SILENTLY — `fade-in` is what
+ * sets the animation's `from` opacity to 0, and `fill-mode-both` is what
+ * applies that `from` state during the delay, so without either the indicator
+ * simply animates from fully visible and nothing is ever deferred. Under
+ * `prefers-reduced-motion: reduce` the global reset in `tailwind/index.css`
+ * collapses the duration but leaves the delay, so the indicator appears after
+ * 300ms without the fade, which is the intended degradation.
  */
 const DEFERRED_INDICATOR_CLASS = 'animate-in fade-in duration-300 delay-300 fill-mode-both ease-out';
 
@@ -52,7 +56,6 @@ export function LoadingPlaceholder({
           'flex max-w-sm flex-col items-center gap-3 text-center',
           deferIndicator && DEFERRED_INDICATOR_CLASS
         )}
-        data-loading-placeholder-deferred={deferIndicator ? '' : undefined}
         role="status"
         aria-live="polite"
       >

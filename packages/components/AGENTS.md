@@ -93,9 +93,12 @@ mobile surfaces.
 - A `Suspense` fallback for a lazy route is never `null`. `RouteSuspense` paints
   `bg-background` on the first frame; a `null` fallback left the window on the
   bare `<body>` canvas for the whole chunk fetch, which is the white flash right
-  after signing in. Its `scope` must match where the boundary sits — `viewport`
-  only where no shell is mounted, `content` inside a mounted layout, or the
-  placeholder paints over the live sidebar. `LoadingPlaceholder`'s
+  after signing in. Its `scope` must match where the boundary sits: `viewport`
+  where no shell is mounted, `content` inside a mounted layout. The two are
+  identical wherever the pane is the full viewport height, and diverge where it
+  is not — with the iPad shell's top safe-area inset a `100dvh` placeholder
+  measures one inset taller than its pane, so `overflow-hidden` clips it and the
+  spinner sits half an inset below the pane's centre. `LoadingPlaceholder`'s
   `deferIndicator` holds the spinner and label back by CSS for 300ms, never by a
   timer, so a chunk that arrives quickly shows only the canvas. Reserve it for
   waits that are usually imperceptible; a known-real wait (signing in, loading

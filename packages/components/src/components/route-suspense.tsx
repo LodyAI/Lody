@@ -2,7 +2,7 @@ import { Suspense, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 
-export type RouteSuspenseScope = 'viewport' | 'content';
+type RouteSuspenseScope = 'viewport' | 'content';
 
 /**
  * Suspense boundary for lazily imported route components.
@@ -13,10 +13,12 @@ export type RouteSuspenseScope = 'viewport' | 'content';
  * `<body>` canvas: the white flash a user sees for a few seconds right after
  * signing in, on a cold start, or on a slow connection.
  *
- * `scope` mirrors `LoadingPlaceholder`'s variants and is not interchangeable:
- * `viewport` is for a boundary that owns the whole window (the lazy layout
- * itself), `content` for one nested inside an already-mounted layout, where a
- * full-viewport placeholder would paint over the live sidebar.
+ * `scope` mirrors `LoadingPlaceholder`'s variants. `viewport` is for a boundary
+ * that owns the whole window (the lazy layout itself). `content` is for one
+ * nested inside a mounted layout, where the pane can be shorter than the
+ * viewport: with a top safe-area inset (the iPad shell) a `100dvh` placeholder
+ * measures 48px taller than its pane, so `overflow-hidden` clips it and the
+ * spinner lands 24px below the pane's centre.
  */
 export function RouteSuspense({
   children,

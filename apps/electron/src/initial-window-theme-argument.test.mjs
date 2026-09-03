@@ -7,20 +7,15 @@ import {
 
 void test('round-trips the resolved window theme from main to preload', () => {
   for (const theme of ['light', 'dark']) {
-    const argument = serializeInitialWindowThemeArgument(theme)
-    assert.equal(readInitialWindowThemeArgument(['electron', argument]), theme)
+    assert.equal(
+      readInitialWindowThemeArgument([
+        'electron',
+        '--lody-preferred-system-languages=%5B%22en-US%22%5D',
+        serializeInitialWindowThemeArgument(theme)
+      ]),
+      theme
+    )
   }
-})
-
-void test('reads the theme alongside the other bootstrap arguments', () => {
-  assert.equal(
-    readInitialWindowThemeArgument([
-      'electron',
-      '--lody-preferred-system-languages=%5B%22en-US%22%5D',
-      serializeInitialWindowThemeArgument('dark')
-    ]),
-    'dark'
-  )
 })
 
 void test('reports no theme rather than guessing one', () => {

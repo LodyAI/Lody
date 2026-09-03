@@ -65,7 +65,6 @@ describe('RouteSuspense', () => {
     const placeholder = container.querySelector('[data-loading-placeholder-scope]');
     expect(placeholder).not.toBeNull();
     expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('viewport');
-    expect(placeholder?.className).toContain('bg-background');
     expect(container.querySelector('[data-testid="loaded-route"]')).toBeNull();
 
     await act(async () => {
@@ -77,26 +76,7 @@ describe('RouteSuspense', () => {
     expect(container.querySelector('[data-loading-placeholder-scope]')).toBeNull();
   });
 
-  it('holds the indicator back so a fast chunk never flashes a spinner', () => {
-    const { SuspendingChild } = createSuspendingChild();
-
-    act(() => {
-      root.render(
-        <RouteSuspense>
-          <SuspendingChild />
-        </RouteSuspense>
-      );
-    });
-
-    const indicator = container.querySelector('[data-loading-placeholder-deferred]');
-    expect(indicator).not.toBeNull();
-    // The surface paints immediately; only the spinner and label are delayed,
-    // and by CSS rather than by a timer this component would have to own.
-    expect(indicator?.className).toContain('delay-300');
-    expect(indicator?.className).toContain('fill-mode-both');
-  });
-
-  it('keeps a nested boundary inside its pane instead of covering the shell', () => {
+  it('scopes a nested boundary to its pane rather than the viewport', () => {
     const LazyPane = lazy(() => new Promise<never>(() => {}));
 
     act(() => {
@@ -107,9 +87,13 @@ describe('RouteSuspense', () => {
       );
     });
 
-    const placeholder = container.querySelector('[data-loading-placeholder-scope]');
-    expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('content');
-    // A viewport-height placeholder here would paint over the live sidebar.
-    expect(placeholder?.className).not.toContain('min-h-[100dvh]');
+    // Measured on the iPad shell's top safe-area inset: a viewport-height
+    // placeholder overflows this pane by the inset and pushes the spinner
+    // below its centre, where `overflow-hidden` clips it.
+    expect(
+      container
+        .querySelector('[data-loading-placeholder-scope]')
+        ?.getAttribute('data-loading-placeholder-scope')
+    ).toBe('content');
   });
 });

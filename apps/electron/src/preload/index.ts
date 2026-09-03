@@ -12,7 +12,7 @@ setupRenderer()
 // Before anything else: paint the window in the user's theme. Everything below
 // runs long before the renderer bundle, but so does the first frame.
 const initialWindowTheme = readInitialWindowThemeArgument(process.argv)
-if (initialWindowTheme && typeof document !== 'undefined') {
+if (initialWindowTheme) {
   installInitialWindowThemeClass(document, initialWindowTheme)
 }
 

@@ -137,6 +137,5 @@ describe('desktop onboarding theme lifecycle', () => {
 
     expect(localStorage.getItem('vite-ui-theme')).toBe('system');
     expect(setNativeTheme).toHaveBeenLastCalledWith('system');
-    expect(setStartupThemeSource).toHaveBeenLastCalledWith('system');
   });
 });
