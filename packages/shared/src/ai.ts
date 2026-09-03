@@ -7,7 +7,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
-import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
+import type { AgentConfigId, AgentRoleId, MachineId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
@@ -1473,6 +1473,14 @@ export type MessageContent =
       locations?: ToolCallLocation[];
       rawInput?: { [k: string]: unknown };
       rawOutput?: { [k: string]: unknown };
+      /**
+       * Pointer to the execution payload of a sealed tool_call skeleton.
+       * Sealed turns may store only the skeleton (`kind`/`status`/`title`/
+       * `locations`/`ref`); `content`/`rawInput`/`rawOutput` then live in the
+       * origin machine's local store and are fetched on demand. Readers must
+       * tolerate their absence whenever `ref` is present.
+       */
+      ref?: ToolCallRef;
       /** Small provider-neutral marker for tool-like status rows rendered in the transcript. */
       activityKind?: 'context_compaction' | 'codex_retry';
       /**
@@ -1567,6 +1575,47 @@ export type ToolCallContent =
   | TerminalCommandBlock
   | TerminalOutputBlock
   | DiffBlock;
+
+/**
+ * Pointer from a sealed tool_call skeleton to its full execution payload.
+ * The payload lives in the origin machine's local store, keyed by the owning
+ * turn and the item's index inside that turn's `items` list.
+ */
+export type ToolCallRef = {
+  machineId: MachineId;
+  turnId: string;
+  index: number;
+};
+
+/**
+ * The execution payload of a tool_call that a sealed skeleton omits. Fetched
+ * on demand from the origin machine via `useToolCallPayload` / Machine RPC.
+ */
+export type ToolCallPayload = {
+  content?: ToolCallContent[];
+  rawInput?: { [k: string]: unknown };
+  rawOutput?: { [k: string]: unknown };
+};
+
+/**
+ * Derived per-turn summary stored on sealed history turns. Computed when the
+ * turn is sealed so readers can render collapsed views without walking every
+ * item.
+ */
+export type TurnSummary = {
+  itemCount: number;
+  textChars: number;
+  thoughtChars: number;
+  headText: string;
+  activity: {
+    commandCount: number;
+    editFileCount: number;
+    readFileCount: number;
+    searchCount: number;
+    failedCount: number;
+  };
+  editedPaths: string[];
+};
 
 export type ACPSessionId = string & { __brand: 'ACPSessionId' };
 

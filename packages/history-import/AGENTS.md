@@ -7,13 +7,13 @@ Pure domain logic for importing a local agent CLI's own conversation history
 into a Lody session. No process spawning, no Loro doc, no repo, no logger, no
 network: every function here is a deterministic transform over values.
 
-| Module            | Owns                                                          |
-| ----------------- | ------------------------------------------------------------- |
-| `replay-import`   | ACP replay notifications -> `SessionHistoryInput[]`.           |
-| `materialize`     | Replay -> history rows + turn hashes + replay digest.          |
-| `decisions`       | Refresh / conflict-resolution decisions over those hashes.     |
-| `catalog`         | Catalog rows, import keys, external-history meta.              |
-| `hashing`         | Stable JSON + sha256 used by the turn hashes.                  |
+| Module          | Owns                                                       |
+| --------------- | ---------------------------------------------------------- |
+| `replay-import` | ACP replay notifications -> `SessionHistoryInput[]`.       |
+| `materialize`   | Replay -> history rows + turn hashes + replay digest.      |
+| `decisions`     | Refresh / conflict-resolution decisions over those hashes. |
+| `catalog`       | Catalog rows, import keys, external-history meta.          |
+| `hashing`       | Stable JSON + sha256 used by the turn hashes.              |
 
 `apps/cli/src/lib/local-project-history-sync-service.ts` is the only orchestrator:
 it owns the ACP subprocess, the Loro session doc, the machine Flock catalog write,
@@ -28,8 +28,25 @@ and every clock read. Keep IO there.
 - Turn hashes cover transcript content only (`role`, `items`, `plan`) via
   `stableJson`, never ids/timestamps/read state — those are assigned at import
   time and would otherwise turn every re-import into a sync conflict.
-- Entry ids are content-addressed (`provider:acpSession:turn:<index>:<hash16>`),
-  so re-importing an unchanged transcript reuses the same Loro list keys.
+- There are two canonical hash versions. v1 (`normalizeHistoryEntryForHash` /
+  `hashHistoryEntry`) hashes items verbatim and is kept only to recompute
+  cursors written by older CLIs. v2 (`normalizeHistoryEntryForHashV2` /
+  `hashHistoryEntryV2`, exported as `HASH_VERSION`) reduces each item to a
+  canonical form — tool_call to exactly the sealed-skeleton fields
+  (`type`/`kind`/`title`/`status`/`locations`) — so a transcript hashes the
+  same before and after its tool_calls are sealed to skeletons. The exact
+  dropped-key list lives in a comment above `VOLATILE_ITEM_KEYS_V2`.
+- Every comparison of a new replay against a stored cursor runs in the STORED
+  cursor's version (`ExternalAcpHistorySyncMeta.hashVersion`, absent = v1):
+  `decideHistoryRefresh` / `decideHistoryConflictResolution` recompute the
+  replay's hashes from `materialized.history` when the versions differ, so an
+  upgrade never produces a false `sync_conflict`. Callers passing
+  `currentHistoryHashes` must hash those with `hashHistoryEntryForVersion` in
+  the stored version. `materializeReplay` always emits v2 and records
+  `hashVersion`; `buildExternalHistoryMeta` copies it into the sync meta.
+- Entry ids are content-addressed (`provider:acpSession:turn:<index>:<hash16>`,
+  hash in the materialized replay's version), so re-importing an unchanged
+  transcript reuses the same Loro list keys.
 - `HistorySourceSessionInfo` is a structural subset of the ACP SDK's
   `SessionInfo`. Do not depend on `@agentclientprotocol/sdk` here.
 

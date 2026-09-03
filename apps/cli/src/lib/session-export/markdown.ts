@@ -33,15 +33,21 @@ function renderItem(item: MessageContent, attachmentLinks: Map<string, string>):
     case 'plan':
       return ['#### Plan', ...item.entries.map((entry) => `- [${entry.status}] ${entry.content}`)];
     case 'tool_call': {
-      const parts = [
-        `- id: \`${escapeInlineCode(item.toolCallId)}\``,
-        `- status: \`${escapeInlineCode(item.status)}\``,
-      ];
-      if (item.title?.trim()) {
-        parts.splice(1, 0, `- title: ${item.title.trim()}`);
+      // Sealed turns may persist a skeleton without `toolCallId`/`content`;
+      // its execution payload stays on the origin machine (see `ref`).
+      const parts: string[] = [];
+      if (typeof item.toolCallId === 'string' && item.toolCallId.trim()) {
+        parts.push(`- id: \`${escapeInlineCode(item.toolCallId)}\``);
       }
+      if (item.title?.trim()) {
+        parts.push(`- title: ${item.title.trim()}`);
+      }
+      parts.push(`- status: \`${escapeInlineCode(item.status)}\``);
       if (item.kind?.trim()) {
         parts.push(`- kind: \`${escapeInlineCode(item.kind)}\``);
+      }
+      if (item.ref) {
+        parts.push('- note: execution details stored on the origin machine');
       }
       return ['#### Tool Call', ...parts];
     }

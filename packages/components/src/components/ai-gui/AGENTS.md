@@ -121,6 +121,13 @@ work) and a hover preview.
   without per-file pills.
 - Update `message-content-guards.ts` with every shared `MessageContent` variant.
   `isMessageContent` gates rendering; a missing case silently drops the item.
+- Sealed turns may store `tool_call` items as skeletons (`kind`/`status`/
+  `title`/`locations`/`ref`, no `toolCallId`/`content`); the payload lives on
+  the origin machine and resolves through `use-tool-call-payload.ts`.
+  `tool-call-skeleton.ts` owns the runtime guards (`isToolCallRef`,
+  `isToolCallSkeleton`, `getToolCallStableId`) — never cast around the
+  type-required `toolCallId`, and never read `content` where a skeleton must
+  classify from `kind`/`status` alone.
 - A user entry marked by `SessionMeta.lastMissingHistoryUserMsgId` renders the
   terminal "Not delivered" label. That label is the only recovery entry: its
   dialog resends the same content as a new ordinary message, then marks the old

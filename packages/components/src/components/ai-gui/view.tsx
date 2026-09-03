@@ -204,6 +204,7 @@ import type {
   MessageTextSpan,
   SessionFilePayload,
   TaskProposalMeta,
+  ToolCallRef,
 } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
@@ -218,6 +219,8 @@ import { usePermissionResponse } from '@/hooks/use-permission-response';
 import { TaskProposalNotice } from '@/components/tasks/task-proposal-notice';
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
+import { getShortMachineId, getToolCallStableId, isToolCallSkeleton } from './tool-call-skeleton';
+import { useToolCallPayload } from './use-tool-call-payload';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
 import { ChatFailedDetailDialog } from './chat-failed-detail-dialog';
@@ -965,7 +968,7 @@ export const buildChatVirtualRows = ({
       if (expanded) {
         for (const entry of block.entries) {
           const entrySuffix =
-            entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
+            entry.content.type === 'tool_call' ? getToolCallStableId(entry.content) : 'thought';
           target.push({
             type: 'assistant',
             key: `assistant:${message.id}:${block.key}:item:${entry.itemIndex}:${entrySuffix}`,
@@ -5625,6 +5628,13 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput?: boolean;
 }) {
   const { t } = useTranslation();
+  // A sealed skeleton carries only `kind`/`status`/`title`/`locations`/`ref`;
+  // its payload arrives via `useToolCallPayload` (Machine RPC pending — every
+  // lookup is `unavailable` until then, and the placeholder row below shows).
+  const payload = useToolCallPayload(toolCall.ref);
+  const payloadValue = payload.state === 'ready' ? payload.value : undefined;
+  const effectiveContent = payloadValue?.content ?? toolCall.content;
+  const effectiveRawOutput = payloadValue?.rawOutput ?? toolCall.rawOutput;
   if (toolCall.activityKind === 'codex_retry') {
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
@@ -5662,18 +5672,18 @@ const ToolCallCard = memo(function ToolCallCard({
     ? ACTIVITY_STEP_ICON_CLASS
     : 'h-3.5 w-3.5 flex-none shrink-0 text-current';
 
-  const hasDiffContent = Boolean(toolCall.content?.some((block) => block.type === 'diff'));
+  const hasDiffContent = Boolean(effectiveContent?.some((block) => block.type === 'diff'));
   const hasTerminalContent = Boolean(
-    toolCall.content?.some(
+    effectiveContent?.some(
       (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
     )
   );
-  const contentBlocks = toolCall.content?.filter((block) => {
+  const contentBlocks = effectiveContent?.filter((block) => {
     if (!hasDiffContent) return true;
     return block.type !== 'terminal' && block.type !== 'terminal_output';
   });
 
-  const hasOutput = Boolean(toolCall.rawOutput);
+  const hasOutput = Boolean(effectiveRawOutput);
   const hasContent = Boolean(contentBlocks?.length);
   /* A cancelled request records nothing, so it must not count towards the body:
      otherwise the card stays collapsible and opens onto empty padding. */
@@ -5858,7 +5868,7 @@ const ToolCallCard = memo(function ToolCallCard({
     return nodes;
   };
 
-  return (
+  const card = (
     <CollapsibleCard
       isCollapsible={hasDetails && !isReadOnly}
       defaultExpanded={isRunning || hasTerminalContent || isFailed || hasPermission}
@@ -5972,10 +5982,10 @@ const ToolCallCard = memo(function ToolCallCard({
     >
       {hasDetails && !isReadOnly ? (
         <Fragment>
-          {hasOutput && isRecord(toolCall.rawOutput) ? (
+          {hasOutput && isRecord(effectiveRawOutput) ? (
             <StructuredObject
               label="Output"
-              value={toolCall.rawOutput}
+              value={effectiveRawOutput}
               dense
               unbounded={inlineOutput}
               fontSize={fontSize}
@@ -5997,7 +6007,7 @@ const ToolCallCard = memo(function ToolCallCard({
                 )}
                 style={conversationMonoFontSizeStyle(fontSize)}
               >
-                {formatJsonValue(toolCall.rawOutput)}
+                {formatJsonValue(effectiveRawOutput)}
               </pre>
             </div>
           ) : null}
@@ -6009,7 +6019,36 @@ const ToolCallCard = memo(function ToolCallCard({
       ) : null}
     </CollapsibleCard>
   );
+
+  // A skeleton whose payload has not arrived says where the execution details
+  // live instead of opening onto nothing.
+  if (!isToolCallSkeleton(toolCall) || payload.state === 'ready') return card;
+  return (
+    <Fragment>
+      {card}
+      <ToolCallPayloadStoredRow toolCallRef={toolCall.ref} />
+    </Fragment>
+  );
 });
+
+/**
+ * One small line under a sealed skeleton tool call naming the machine its
+ * execution payload is stored on. The meta lookup falls back to a short id
+ * when the machine's meta has not loaded (or the machine is unknown).
+ */
+const ToolCallPayloadStoredRow = ({ toolCallRef }: { toolCallRef: ToolCallRef }) => {
+  const { t } = useTranslation();
+  const machineMeta = useAtomValue(getMachineMetaByIdAtomFamily(toolCallRef.machineId));
+  const machineName = machineMeta?.name ?? getShortMachineId(toolCallRef.machineId);
+  return (
+    <div className={cn('flex items-center gap-1.5 py-0.5', ACTIVITY_PROCESS_TEXT_CLASS)}>
+      {t('sessions.toolCall.executionDetailsStoredOnMachine', {
+        machine: machineName,
+        defaultValue: 'Execution details are stored on {{machine}}',
+      })}
+    </div>
+  );
+};
 
 const TOOL_KIND_META: Record<
   NonNullable<ToolCallMessage['kind']>,

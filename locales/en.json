@@ -1186,6 +1186,7 @@
   "sessions.activity.compactingContext": "Compacting context",
   "sessions.activity.contextCompacted": "Context compacted",
   "sessions.activity.contextCompactionFailed": "Context compaction failed",
+  "sessions.toolCall.executionDetailsStoredOnMachine": "Execution details are stored on {{machine}}",
   "sessions.askQuestion.answered": "Answered",
   "sessions.askQuestion.autoContinueIn": "Continues in {{seconds}}s",
   "sessions.askQuestion.continuing": "Continuing",

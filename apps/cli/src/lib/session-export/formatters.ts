@@ -164,7 +164,9 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
           turnId: entry.id,
           timestamp: entry.timestamp,
           role: entry.role,
-          toolCallId: item.toolCallId,
+          // Sealed skeletons omit `toolCallId` (and the payload fields below);
+          // their `ref` points at the origin machine's copy instead.
+          toolCallId: typeof item.toolCallId === 'string' ? item.toolCallId : null,
           title: normalizeString(item.title),
           kind: normalizeString(item.kind),
           status: item.status,
@@ -178,6 +180,7 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
           ),
           rawInput: item.rawInput,
           rawOutput: item.rawOutput,
+          ...(item.ref ? { ref: item.ref } : {}),
         });
         continue;
       }

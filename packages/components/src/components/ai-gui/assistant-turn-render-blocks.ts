@@ -4,6 +4,7 @@ import {
   type AssistantMessageRenderItem,
 } from './assistant-message-render-items';
 import { shouldCollapseAssistantMessageItem } from './message-copy';
+import { getToolCallStableId, isToolCallSkeleton } from './tool-call-skeleton';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 type ThoughtMessage = Extract<MessageContent, { type: 'thought' }>;
@@ -129,9 +130,13 @@ export const summarizeAssistantActivity = (
         fetchCount += 1;
         break;
       default: {
-        const hasTerminalContent = toolCall.content?.some(
-          (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
-        );
+        // A sealed skeleton carries no payload; it must classify from
+        // `kind`/`status` alone, so only a full item consults its `content`.
+        const hasTerminalContent =
+          !isToolCallSkeleton(toolCall) &&
+          toolCall.content?.some(
+            (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
+          );
         if (hasTerminalContent) {
           commandCount += 1;
         } else {
@@ -161,7 +166,9 @@ const isActivityGroupEntry = (
     entry.content.activityKind === undefined);
 
 const buildActivityGroupKey = (messageId: string, first: AssistantActivityRenderItem): string => {
-  const suffix = first.content.type === 'tool_call' ? first.content.toolCallId : first.itemIndex;
+  // A sealed skeleton has no `toolCallId`; its ref keeps the key stable.
+  const suffix =
+    first.content.type === 'tool_call' ? getToolCallStableId(first.content) : first.itemIndex;
   return `activity-group:${messageId}:${first.itemIndex}:${suffix}`;
 };
 

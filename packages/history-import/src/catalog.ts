@@ -153,6 +153,7 @@ export function buildExternalHistoryMeta(args: {
     sourceUpdatedAt: args.sourceUpdatedAt ?? undefined,
     replayDigest: args.materialized.replayDigest,
     importedTurnCount: args.materialized.turnHashes.length,
+    hashVersion: args.materialized.hashVersion,
     lastSyncAt: args.lastSyncAt,
     status: args.status ?? 'synced',
     conflictReason: args.conflictReason,
