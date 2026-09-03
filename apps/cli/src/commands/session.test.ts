@@ -66,7 +66,6 @@ import {
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
   validateTurnConfigOptionValues,
-  findUnverifiedTurnSelectors,
   withBuiltinDefaultTurnMode,
 } from './session';
 
@@ -413,22 +412,22 @@ describe('session command helpers', () => {
           runConfig: { modelId: 'model-a', reasoningEffort: 'high' },
         },
         capability
-      ).config
+      )
     ).toEqual({
       modelId: 'model-a',
       configOptionValues: { approval_policy: 'never', reasoning_effort: 'high' },
     });
 
     // No selection: the config passes through untouched, capability or not.
-    expect(applyAgentRunConfigSelection({ modeId: 'default' }, undefined).config).toEqual({
+    expect(applyAgentRunConfigSelection({ modeId: 'default' }, undefined)).toEqual({
       modeId: 'default',
     });
 
     // The snapshot carries no fast toggle, which says nothing about the model
-    // this turn runs: it is dispatched on the agent's own binding and reported.
-    const fast = applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability);
-    expect(fast.config.configOptionValues).toEqual({ 'fast-mode': true });
-    expect(fast.unverifiedSelections).toEqual(['fastMode=true']);
+    // this turn runs: it is dispatched on the agent's own binding.
+    expect(
+      applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability).configOptionValues
+    ).toEqual({ 'fast-mode': true });
   });
 
   it('validates effort against the selected model and skips the probed-model snapshot check', () => {
@@ -465,13 +464,11 @@ describe('session command helpers', () => {
       capability
     );
 
-    expect(requested.config.configOptionValues).toEqual({ reasoning_effort: 'xhigh' });
-    // Confirmed against the breakdown for model-b, so nothing to report…
-    expect(requested.unverifiedSelections).toEqual([]);
-    // …and `xhigh` being absent from the probed model's option list is not a
-    // reason to reject a value the agent published for the model being run.
+    expect(requested.configOptionValues).toEqual({ reasoning_effort: 'xhigh' });
+    // `xhigh` being absent from the probed model's option list is not a reason
+    // to reject a value the agent published for the model being run.
     expect(() =>
-      validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
+      validateTurnConfigOptionValues(requested.configOptionValues, capability)
     ).not.toThrow();
   });
 
@@ -502,7 +499,7 @@ describe('session command helpers', () => {
     const requested = applyAgentRunConfigSelection(roleRunConfig, capability);
 
     expect(() =>
-      validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
+      validateTurnConfigOptionValues(requested.configOptionValues, capability)
     ).not.toThrow();
 
     // Same for the probed model: a snapshot that never carried the toggle is
@@ -512,7 +509,7 @@ describe('session command helpers', () => {
         applyAgentRunConfigSelection(
           { modelId: 'model-a', configOptionValues: { 'fast-mode': true } },
           capability
-        ).config.configOptionValues,
+        ).configOptionValues,
         capability
       )
     ).not.toThrow();
@@ -560,22 +557,10 @@ describe('session command helpers', () => {
       createAcpCapability()
     );
 
-    expect(requested.config.configOptionValues).toEqual({ removed_option: false });
+    expect(requested.configOptionValues).toEqual({ removed_option: false });
     expect(() =>
-      validateTurnConfigOptionValues(requested.config.configOptionValues, createAcpCapability())
+      validateTurnConfigOptionValues(requested.configOptionValues, createAcpCapability())
     ).not.toThrow();
-  });
-
-  it('reports mode and model selectors the snapshot cannot confirm, without rejecting them', () => {
-    const capability = createAcpCapability();
-    expect(
-      findUnverifiedTurnSelectors({ modeId: 'default', modelId: 'model-a' }, capability)
-    ).toEqual([]);
-    expect(findUnverifiedTurnSelectors({ modeId: 'plan', modelId: 'model-b' }, capability)).toEqual(
-      ['mode=plan', 'model=model-b']
-    );
-    // No snapshot at all confirms nothing — and still blocks nothing.
-    expect(findUnverifiedTurnSelectors({ modeId: 'default' }, undefined)).toEqual(['mode=default']);
   });
 
   it('keeps inherited mode and model selectors the snapshot does not list', () => {
@@ -593,35 +578,6 @@ describe('session command helpers', () => {
       modelId: 'model-a',
       configOptionValues: { approval_policy: 'never' },
     });
-  });
-
-  it('accepts mode and model selectors advertised as ACP config options', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      modes: [],
-      models: [],
-      configOptions: [
-        {
-          id: 'mode',
-          name: 'Mode',
-          category: 'mode',
-          type: 'select',
-          currentValue: 'plan',
-          options: [{ value: 'plan', name: 'Plan' }],
-        },
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'model-b',
-          options: [{ value: 'model-b', name: 'Model B' }],
-        },
-      ],
-    };
-    expect(findUnverifiedTurnSelectors({ modeId: 'plan', modelId: 'model-b' }, capability)).toEqual(
-      []
-    );
   });
 
   it('sorts sessions with invalid createdAt timestamps deterministically', () => {

@@ -268,10 +268,11 @@ Two things the dev build does deliberately, both load-bearing:
   selects. `validateTurnConfigOptionValues` therefore rejects only what no model
   could carry: a value the option's own declared TYPE forbids. Everything else is
   dispatched and reconciled against the state the agent publishes.
-  `findUnverifiedTurnSelectors` and `unverifiedSelections` record what could not be
-  confirmed; neither blocks. Do not reintroduce a `validatedConfigIds`-style
-  exemption set: it only made sense while the snapshot could reject, and with
-  rejection gone there is nothing to exempt.
+  Do not reintroduce a `validatedConfigIds`-style exemption set, nor an offline
+  classification of what "could not be confirmed": both only made sense while the
+  snapshot could reject. With rejection gone there is nothing to exempt, and a
+  classification nobody reads is not a diagnostic — the runtime divergence
+  comparison is the report.
   INHERITANCE is the one place that still drops:
   `filterInheritedTurnConfigOptionValues` keeps an uncataloged key only when
   `isAcpPerModelConfigId` recognises it. A value carried forward from an older

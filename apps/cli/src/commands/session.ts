@@ -1347,17 +1347,13 @@ export type ResolvedTurnDispatchConfig = {
  * option values the target agent advertises. Explicit ids on the config win over
  * the semantic selection only where the selection produced nothing.
  *
- * Also returns every selection that could not be confirmed offline, for the
- * dispatch record. None of them blocks the turn: the snapshot describes the
- * model it was captured under, and the runtime is what settles the rest.
+ * Nothing here blocks a turn: the snapshot describes the model it was captured
+ * under, and the runtime is what settles the rest.
  */
 export function applyAgentRunConfigSelection(
   config: ResolvedTurnDispatchConfig,
   capability: AcpCapabilityCacheEntry | undefined
-): {
-  config: ResolvedTurnDispatchConfig;
-  unverifiedSelections: readonly string[];
-} {
+): ResolvedTurnDispatchConfig {
   const { runConfig, ...rest } = config;
   const resolved = hasAgentRunConfigSelection(runConfig)
     ? resolveAgentRunConfigSelection(runConfig, capability)
@@ -1368,18 +1364,11 @@ export function applyAgentRunConfigSelection(
   };
   const modeId = resolved.modeId ?? rest.modeId;
   const modelId = resolved.modelId ?? rest.modelId;
-  const config_ = {
+  return {
     ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
     ...(modeId ? { modeId } : {}),
     ...(modelId ? { modelId } : {}),
     ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
-  };
-  return {
-    config: config_,
-    unverifiedSelections: [
-      ...(resolved.unverifiedSelections ?? []),
-      ...findUnverifiedTurnSelectors(config_, capability),
-    ],
   };
 }
 
@@ -1496,24 +1485,6 @@ export function validateTurnConfigOptionValues(
 }
 
 /**
- * Selections the snapshot cannot confirm, for the dispatch record. Never an
- * error: the snapshot's mode/model lists belong to the probed session.
- */
-export function findUnverifiedTurnSelectors(
-  config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
-  capability: AcpCapabilityCacheEntry | undefined
-): string[] {
-  const unverified: string[] = [];
-  if (config.modeId && !getSupportedTurnSelectorIds(capability, 'mode').has(config.modeId)) {
-    unverified.push(`mode=${config.modeId}`);
-  }
-  if (config.modelId && !getSupportedTurnSelectorIds(capability, 'model').has(config.modelId)) {
-    unverified.push(`model=${config.modelId}`);
-  }
-  return unverified;
-}
-
-/**
  * What a NEW Session may inherit from an older turn's config.
  *
  * Inheritance is not a request. Nobody asked for these values on this turn —
@@ -1555,28 +1526,6 @@ export function filterInheritedTurnConfigOptionValues(
   );
   return Object.keys(compatible).length > 0 ? compatible : undefined;
 }
-
-const getSupportedTurnSelectorIds = (
-  capability: AcpCapabilityCacheEntry | undefined,
-  category: 'mode' | 'model'
-): Set<string> => {
-  const ids = new Set<string>(
-    category === 'mode'
-      ? (capability?.modes ?? []).map((mode) => mode.id)
-      : (capability?.models ?? []).map((model) => model.modelId)
-  );
-  for (const option of capability?.configOptions ?? []) {
-    if (option.category !== category || option.type !== 'select') {
-      continue;
-    }
-    for (const candidate of option.options) {
-      if (typeof candidate.value === 'string') {
-        ids.add(candidate.value);
-      }
-    }
-  }
-  return ids;
-};
 
 export function filterCompatibleInheritedTurnConfig(
   config: ResolvedTurnDispatchConfig | undefined,
@@ -2802,11 +2751,11 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
       })
     : undefined;
   const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
-  validateTurnConfigOptionValues(requested.config.configOptionValues, capability);
+  validateTurnConfigOptionValues(requested.configOptionValues, capability);
   return {
     ...withBuiltinDefaultTurnMode(
       mergeTurnDispatchConfig(
-        requested.config,
+        requested,
         filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
       ),
       args.agentConfig

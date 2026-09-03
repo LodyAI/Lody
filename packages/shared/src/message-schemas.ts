@@ -9,6 +9,7 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
+import { dedupeAcceptedWiderPermissions } from './acp-run-config';
 import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
@@ -375,15 +376,7 @@ export const AcceptedWiderPermissionsSchema = z
   .array(AcceptedWiderPermissionSchema)
   .min(1)
   .max(8)
-  .transform((entries) => {
-    const seen = new Set<string>();
-    return entries.filter((entry) => {
-      const key = `${entry.controlId}\u0000${entry.requestedModeId}\u0000${entry.effectiveModeId}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  });
+  .transform(dedupeAcceptedWiderPermissions);
 
 export const ACPSessionConfigSchema = z
   .object({

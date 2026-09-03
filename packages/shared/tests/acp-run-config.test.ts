@@ -147,10 +147,6 @@ describe('agent run config selection', () => {
         'fast-mode': true,
         collaboration_mode: 'plan',
       },
-      // This agent published no per-model breakdown, and the selection switches
-      // away from the probed model, so neither effort nor fast can be checked
-      // offline: both are dispatched as requested and reported as unverified.
-      unverifiedSelections: ['reasoningEffort=high', 'fastMode=true'],
     });
   });
 
@@ -212,11 +208,9 @@ describe('agent run config selection', () => {
 
     expect(resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toEqual({
       configOptionValues: { reasoning_effort: 'high' },
-      unverifiedSelections: ['reasoningEffort=high'],
     });
     expect(resolveAgentRunConfigSelection({ fastMode: true }, capability)).toEqual({
       configOptionValues: { 'fast-mode': true },
-      unverifiedSelections: ['fastMode=true'],
     });
 
     // Plan mode is the exception, and for a binding reason rather than a
@@ -317,63 +311,6 @@ describe('agent run config selection', () => {
     ]);
     // The flat list still describes only the probed model.
     expect(summary.measuredForModelId).toBe('gpt-5.6-sol');
-  });
-
-  it('validates effort against the model being selected, not the probed one', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...codexCapability(),
-      modelReasoningEfforts: {
-        'gpt-5.6-sol': ['low', 'medium', 'high', 'xhigh'],
-        'gpt-5.4-mini': ['low', 'medium'],
-      },
-    };
-
-    // `xhigh` is absent from the probed model's snapshot options but the agent
-    // published a breakdown saying the selected model takes it: confirmed, so
-    // nothing is reported as unverified.
-    expect(
-      resolveAgentRunConfigSelection(
-        { modelId: 'gpt-5.6-sol', reasoningEffort: 'xhigh' },
-        capability
-      )
-    ).toEqual({
-      modelId: 'gpt-5.6-sol',
-      configOptionValues: { reasoning_effort: 'xhigh' },
-    });
-
-    // Outside the target model's published list. That is real evidence, but it
-    // can be stale (the breakdown is per account and per catalog revision), so
-    // it dispatches and is reported rather than rejected.
-    expect(
-      resolveAgentRunConfigSelection(
-        { modelId: 'gpt-5.4-mini', reasoningEffort: 'high' },
-        capability
-      )
-    ).toEqual({
-      modelId: 'gpt-5.4-mini',
-      configOptionValues: { reasoning_effort: 'high' },
-      unverifiedSelections: ['reasoningEffort=high'],
-    });
-  });
-
-  it('flags selections it cannot verify offline instead of pretending they hold', () => {
-    // No per-model breakdown: a model switch makes effort and fast unverifiable.
-    const resolved = resolveAgentRunConfigSelection(
-      { modelId: 'gpt-5.4-mini', reasoningEffort: 'high', fastMode: true },
-      codexCapability()
-    );
-
-    expect(resolved.unverifiedSelections).toEqual(['reasoningEffort=high', 'fastMode=true']);
-    expect(resolved.configOptionValues).toEqual({
-      reasoning_effort: 'high',
-      'fast-mode': true,
-    });
-
-    // Staying on the probed model keeps the snapshot authoritative.
-    expect(
-      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, codexCapability())
-        .unverifiedSelections
-    ).toBeUndefined();
   });
 
   it('recovers the per-model effort breakdown from a legacy model[effort] list', () => {

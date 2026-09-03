@@ -1015,6 +1015,27 @@ describe('one-time acceptance of a wider permission', () => {
     expect(
       normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermissions
     ).toBeUndefined();
+    // Bounded and deduplicated, both by the whole triple: a list that outgrows
+    // the bound reads as NO acceptance rather than a truncated one, and a
+    // repeated disclosure does not consume the budget.
+    const entry = (n: number) => ({
+      controlId: `control-${n}`,
+      requestedModeId: 'plan',
+      effectiveModeId: 'auto',
+    });
+    expect(
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermissions: Array.from({ length: 9 }, (_unused, index) => entry(index)),
+      })?.acceptWiderPermissions
+    ).toBeUndefined();
+    expect(
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermissions: [entry(0), entry(0), entry(1)],
+      })?.acceptWiderPermissions
+    ).toEqual([entry(0), entry(1)]);
+
     // A malformed or partial acceptance reads as no acceptance: one that cannot
     // name the control and both values would be a blanket one.
     expect(

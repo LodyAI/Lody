@@ -10,7 +10,12 @@
  * actually advertises.
  */
 
-import type { AcpCapabilityCacheEntry, AcpConfigOptionSummary, AcpConfigOptionValue } from './ai';
+import type {
+  AcceptedWiderPermission,
+  AcpCapabilityCacheEntry,
+  AcpConfigOptionSummary,
+  AcpConfigOptionValue,
+} from './ai';
 
 /**
  * Config option ids that carry the agent's "fast mode" toggle: Codex publishes
@@ -85,7 +90,7 @@ const ACP_PERMISSION_MODE_RANKS: Record<string, number> = {
   'always-approve': 4,
 };
 
-export const findAcpPermissionModeRank = (modeId: string | null | undefined): number | undefined =>
+const findAcpPermissionModeRank = (modeId: string | null | undefined): number | undefined =>
   typeof modeId === 'string' ? ACP_PERMISSION_MODE_RANKS[modeId] : undefined;
 
 /**
@@ -136,12 +141,6 @@ export type AgentRunConfigResolution = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
-  /**
-   * Requested controls that could not be verified offline because the agent
-   * publishes no per-model breakdown for them. They are dispatched as
-   * requested; the runtime reports a visible warning if the agent rejects them.
-   */
-  unverifiedSelections?: string[];
 };
 
 type RunConfigCapabilitySource = Pick<
@@ -250,6 +249,27 @@ const findAgentPerModelBinding = (capability: RunConfigCapabilitySource | undefi
  * that the option is gone — so a stored value for one must survive a snapshot
  * that does not list it. Any other unknown id has no such excuse.
  */
+/**
+ * One entry per disclosed difference. Deduplicated by the WHOLE triple, since
+ * that is what the daemon matches on — two entries differing in any field are
+ * two different disclosures.
+ *
+ * Shared so the client that assembles a retry and the schema that validates it
+ * on the way in agree by construction; two copies of this key would drift, and
+ * the bound the schema enforces is counted in these entries.
+ */
+export const dedupeAcceptedWiderPermissions = (
+  entries: readonly AcceptedWiderPermission[]
+): AcceptedWiderPermission[] => {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const key = `${entry.controlId}\u0000${entry.requestedModeId}\u0000${entry.effectiveModeId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 export const isAcpPerModelConfigId = (configId: string): boolean =>
   isAcpFastModeConfigId(configId) ||
   configId === ACP_REASONING_EFFORT_CONFIG_ID ||
@@ -354,9 +374,10 @@ export const summarizeAgentRunConfigCapabilities = (
  * only ever describes the model that was current when it was captured — agents
  * rebuild those options on every model switch — so neither a missing option nor
  * a value outside its list says anything about the model this turn selects.
- * Everything it cannot confirm is dispatched as requested and reported in
- * `unverifiedSelections`; the runtime compares what the agent actually applied
- * and surfaces a visible warning when they differ.
+ * Everything is dispatched as requested; the runtime compares what the agent
+ * actually applied and surfaces a visible warning when they differ. That
+ * comparison is the ONLY report — an offline classification of what "could not
+ * be confirmed" told nobody anything and is deliberately absent.
  *
  * The one thing that still throws is a missing BINDING: when neither the
  * snapshot nor the agent's own convention says how to spell a control on the
@@ -377,31 +398,15 @@ export const resolveAgentRunConfigSelection = (
   }
 
   const configOptionValues: Record<string, AcpConfigOptionValue> = {};
-  const unverifiedSelections: string[] = [];
-  const probedModelId = findCurrentModelId(capability);
-  const targetModelId = selection.modelId ?? probedModelId;
-  const switchesModel = targetModelId !== undefined && targetModelId !== probedModelId;
   let modeId: string | undefined;
 
   if (selection.reasoningEffort !== undefined) {
     const option = findReasoningEffortOption(capability);
-    const targetModelEfforts = targetModelId
-      ? capability.modelReasoningEfforts?.[targetModelId]
-      : undefined;
-    // The published per-model breakdown speaks for the selected model; the
-    // snapshot's own list speaks only for the model it was captured under.
-    const confirmed = targetModelEfforts
-      ? targetModelEfforts.includes(selection.reasoningEffort)
-      : !switchesModel &&
-        option?.options.some((value) => value.value === selection.reasoningEffort) === true;
     const configId = option?.id ?? findAgentPerModelBinding(capability)?.reasoningEffortConfigId;
     if (!configId) {
       throw new Error(
         'Reasoning effort cannot be encoded for the selected agent: it publishes no reasoning effort option and Lody knows no binding for it.'
       );
-    }
-    if (!confirmed) {
-      unverifiedSelections.push(`reasoningEffort=${selection.reasoningEffort}`);
     }
     configOptionValues[configId] = selection.reasoningEffort;
   }
@@ -423,9 +428,6 @@ export const resolveAgentRunConfigSelection = (
     configOptionValues[configId] = option
       ? toggleValue(option, selection.fastMode)
       : selection.fastMode;
-    if (!option || switchesModel) {
-      unverifiedSelections.push(`fastMode=${selection.fastMode}`);
-    }
   }
 
   if (selection.planMode !== undefined) {
@@ -445,6 +447,5 @@ export const resolveAgentRunConfigSelection = (
     ...(modeId ? { modeId } : {}),
     ...(selection.modelId !== undefined ? { modelId: selection.modelId } : {}),
     ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
-    ...(unverifiedSelections.length > 0 ? { unverifiedSelections } : {}),
   };
 };
