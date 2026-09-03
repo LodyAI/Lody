@@ -51,7 +51,6 @@ import {
   hasAgentRunConfigSelection,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
-  resolvePerModelConfigOptionSelection,
   resolveProjectGitHubRepo,
   type AgentRunConfigSelection,
   type AcpCapabilityCacheEntry,
@@ -1347,16 +1346,15 @@ export type ResolvedTurnDispatchConfig = {
  * option values the target agent advertises. Explicit ids on the config win over
  * the semantic selection only where the selection produced nothing.
  *
- * Returns the ids the resolver validated against the TARGET model so the caller
- * can exclude them from the probed-model snapshot check, plus any selection that
- * could not be verified offline.
+ * Also returns every selection that could not be confirmed offline, for the
+ * dispatch record. None of them blocks the turn: the snapshot describes the
+ * model it was captured under, and the runtime is what settles the rest.
  */
 export function applyAgentRunConfigSelection(
   config: ResolvedTurnDispatchConfig,
   capability: AcpCapabilityCacheEntry | undefined
 ): {
   config: ResolvedTurnDispatchConfig;
-  validatedConfigIds: ReadonlySet<string>;
   unverifiedSelections: readonly string[];
 } {
   const { runConfig, ...rest } = config;
@@ -1369,29 +1367,17 @@ export function applyAgentRunConfigSelection(
   };
   const modeId = resolved.modeId ?? rest.modeId;
   const modelId = resolved.modelId ?? rest.modelId;
-  // Concrete values that never passed through the semantic resolver — an Agent
-  // Role's stored run config, `--config-option`, a frozen Operation replay —
-  // still carry per-model options, so the same rule is applied to the merged
-  // table here.
-  const perModel = resolvePerModelConfigOptionSelection({
-    configOptionValues,
-    modelId,
-    capability,
-  });
+  const config_ = {
+    ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
+    ...(modeId ? { modeId } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
+  };
   return {
-    config: {
-      ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
-      ...(modeId ? { modeId } : {}),
-      ...(modelId ? { modelId } : {}),
-      ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
-    },
-    validatedConfigIds: new Set([
-      ...(resolved.validatedConfigIds ?? []),
-      ...perModel.validatedConfigIds,
-    ]),
+    config: config_,
     unverifiedSelections: [
       ...(resolved.unverifiedSelections ?? []),
-      ...perModel.unverifiedSelections,
+      ...findUnverifiedTurnSelectors(config_, capability),
     ],
   };
 }
@@ -1463,7 +1449,7 @@ function mergeTurnDispatchConfig(
   };
 }
 
-function validateConfigOptionValue(
+function validateConfigOptionShape(
   option: AcpConfigOptionSummary,
   value: string | boolean
 ): string | undefined {
@@ -1472,59 +1458,79 @@ function validateConfigOptionValue(
       ? undefined
       : `Config option "${option.id}" expects a boolean value.`;
   }
-  if (typeof value !== 'string') {
-    return `Config option "${option.id}" expects a select value.`;
-  }
-  if (!option.options.some((candidate) => candidate.value === value)) {
-    return `Invalid value for config option "${option.id}": ${value}. Allowed values: ${option.options
-      .map((candidate) => candidate.value)
-      .join(', ')}.`;
-  }
-  return undefined;
+  return typeof value === 'string'
+    ? undefined
+    : `Config option "${option.id}" expects a select value.`;
 }
 
+/**
+ * Rejects only what cannot be dispatched at all.
+ *
+ * The capability snapshot describes ONE model — the one that was current when
+ * it was captured — so an id it omits, or a value outside the list it recorded,
+ * is not evidence about the model this turn runs. Those are dispatched and
+ * reconciled against what the agent actually applied. What stays a local error
+ * is a value the option's own declared TYPE cannot carry: a boolean toggle
+ * cannot take a string, and a select cannot take a boolean, in any model.
+ */
 export function validateTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined,
-  /**
-   * Ids already validated against the model actually being selected. The
-   * capability's `configOptions` only describe the probed model, so re-checking
-   * them here would reject values that are valid for the target model.
-   */
-  skipIds?: ReadonlySet<string>
+  capability: AcpCapabilityCacheEntry | undefined
 ): void {
-  const entries = Object.entries(values ?? {}).filter(([id]) => !skipIds?.has(id));
-  if (entries.length === 0) {
+  const entries = Object.entries(values ?? {});
+  if (entries.length === 0 || !capability?.configOptions) {
     return;
-  }
-  if (!capability?.configOptions) {
-    throw new Error('ACP config options are unavailable for the selected agent.');
   }
   const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
   for (const [id, value] of entries) {
     const option = optionsById.get(id);
     if (!option) {
-      throw new Error(`Unknown ACP config option for the selected agent: ${id}.`);
+      continue;
     }
-    const error = validateConfigOptionValue(option, value);
+    const error = validateConfigOptionShape(option, value);
     if (error) {
       throw new Error(error);
     }
   }
 }
 
+/**
+ * Selections the snapshot cannot confirm, for the dispatch record. Never an
+ * error: the snapshot's mode/model lists belong to the probed session.
+ */
+export function findUnverifiedTurnSelectors(
+  config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
+  capability: AcpCapabilityCacheEntry | undefined
+): string[] {
+  const unverified: string[] = [];
+  if (config.modeId && !getSupportedTurnSelectorIds(capability, 'mode').has(config.modeId)) {
+    unverified.push(`mode=${config.modeId}`);
+  }
+  if (config.modelId && !getSupportedTurnSelectorIds(capability, 'model').has(config.modelId)) {
+    unverified.push(`model=${config.modelId}`);
+  }
+  return unverified;
+}
+
+/**
+ * Drops only what cannot be dispatched. An id the snapshot does not carry is
+ * kept: the snapshot describes one model, and an inherited value may well
+ * belong to another one.
+ */
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
   capability: AcpCapabilityCacheEntry | undefined
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  if (!values) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(
+    (capability?.configOptions ?? []).map((option) => [option.id, option])
+  );
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
-      return option !== undefined && validateConfigOptionValue(option, value) === undefined;
+      return option === undefined || validateConfigOptionShape(option, value) === undefined;
     })
   );
   return Object.keys(compatible).length > 0 ? compatible : undefined;
@@ -1552,18 +1558,6 @@ const getSupportedTurnSelectorIds = (
   return ids;
 };
 
-export function validateTurnModeAndModel(
-  config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
-  capability: AcpCapabilityCacheEntry | undefined
-): void {
-  if (config.modeId && !getSupportedTurnSelectorIds(capability, 'mode').has(config.modeId)) {
-    throw new Error(`Unsupported ACP mode for the selected agent: ${config.modeId}.`);
-  }
-  if (config.modelId && !getSupportedTurnSelectorIds(capability, 'model').has(config.modelId)) {
-    throw new Error(`Unsupported ACP model for the selected agent: ${config.modelId}.`);
-  }
-}
-
 export function filterCompatibleInheritedTurnConfig(
   config: ResolvedTurnDispatchConfig | undefined,
   capability: AcpCapabilityCacheEntry | undefined
@@ -1571,15 +1565,13 @@ export function filterCompatibleInheritedTurnConfig(
   if (!config) {
     return undefined;
   }
-  const supportedModes = getSupportedTurnSelectorIds(capability, 'mode');
-  const supportedModels = getSupportedTurnSelectorIds(capability, 'model');
   const configOptionValues = filterCompatibleTurnConfigOptionValues(
     config.configOptionValues,
     capability
   );
   return {
-    ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
-    ...(config.modelId && supportedModels.has(config.modelId) ? { modelId: config.modelId } : {}),
+    ...(config.modeId ? { modeId: config.modeId } : {}),
+    ...(config.modelId ? { modelId: config.modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
     ...(config.taskToolsEnabled !== undefined ? { taskToolsEnabled: config.taskToolsEnabled } : {}),
   };
@@ -2790,12 +2782,7 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
       })
     : undefined;
   const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
-  validateTurnModeAndModel(requested.config, capability);
-  validateTurnConfigOptionValues(
-    requested.config.configOptionValues,
-    capability,
-    requested.validatedConfigIds
-  );
+  validateTurnConfigOptionValues(requested.config.configOptionValues, capability);
   return {
     ...withBuiltinDefaultTurnMode(
       mergeTurnDispatchConfig(
@@ -3169,20 +3156,7 @@ export async function sendSessionChatResult(
       machineId: session.machineId,
       agentConfigId: session.agentConfigId,
     });
-    validateTurnModeAndModel(dispatchConfig, capability);
-    // A follow-up turn carries concrete ids only, so the per-model rule is
-    // applied directly: `configOptions` describes the probed model, and this
-    // turn may be running another one.
-    const perModel = resolvePerModelConfigOptionSelection({
-      configOptionValues: dispatchConfig.configOptionValues,
-      modelId: dispatchConfig.modelId,
-      capability,
-    });
-    validateTurnConfigOptionValues(
-      dispatchConfig.configOptionValues,
-      capability,
-      new Set(perModel.validatedConfigIds)
-    );
+    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
   }
   const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
 

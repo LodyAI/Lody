@@ -85,13 +85,6 @@ export type AgentRunConfigResolution = {
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /**
-   * Config option ids this module already validated against the TARGET model.
-   * The caller must skip them in its snapshot-based validation, which only
-   * knows the probed model's option list and would otherwise reject a value
-   * that is valid for the model actually being selected.
-   */
-  validatedConfigIds?: string[];
-  /**
    * Requested controls that could not be verified offline because the agent
    * publishes no per-model breakdown for them. They are dispatched as
    * requested; the runtime reports a visible warning if the agent rejects them.
@@ -102,7 +95,8 @@ export type AgentRunConfigResolution = {
 type RunConfigCapabilitySource = Pick<
   AcpCapabilityCacheEntry,
   'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts'
->;
+> &
+  Partial<Pick<AcpCapabilityCacheEntry, 'agentType'>>;
 
 /**
  * Recovers the per-model effort breakdown from a legacy `model[effort]` model
@@ -173,6 +167,30 @@ const findFastModeOption = (
     capability,
     (option) => isAcpFastModeConfigId(option.id) && isToggleOption(option)
   );
+
+/**
+ * Wire binding for the fast toggle when the snapshot does not carry the option.
+ *
+ * A binding hint answers "how would this agent spell it", never "does this
+ * model support it". Both builtin agents publish the toggle as a boolean while
+ * the client advertises boolean config options — which Lody always does — so
+ * the shape is known even when the captured model had no fast tier. An agent we
+ * have no convention for gets no guess: dispatching an invented id would be a
+ * silent no-op, which is worse than saying we cannot encode the request.
+ */
+const findFastModeBindingHint = (
+  capability: RunConfigCapabilitySource | undefined,
+  enabled: boolean
+): { configId: string; value: AcpConfigOptionValue } | undefined => {
+  switch (capability?.agentType?.toLowerCase()) {
+    case 'codex':
+      return { configId: 'fast-mode', value: enabled };
+    case 'claude':
+      return { configId: 'fast', value: enabled };
+    default:
+      return undefined;
+  }
+};
 
 const findReasoningEffortOption = (
   capability: RunConfigCapabilitySource | undefined
@@ -266,18 +284,18 @@ export const summarizeAgentRunConfigCapabilities = (
 /**
  * Maps a semantic selection onto the target agent's concrete ACP ids.
  *
- * Throws when the agent does not offer the requested control, so an unsupported
- * request fails loudly instead of silently running with different settings.
+ * INVARIANT: a capability snapshot never rejects a selection. `configOptions`
+ * only ever describes the model that was current when it was captured — agents
+ * rebuild those options on every model switch — so neither a missing option nor
+ * a value outside its list says anything about the model this turn selects.
+ * Everything it cannot confirm is dispatched as requested and reported in
+ * `unverifiedSelections`; the runtime compares what the agent actually applied
+ * and surfaces a visible warning when they differ.
  *
- * Reasoning effort and fast mode are per MODEL: an agent rebuilds those options
- * every time the model changes, and `configOptions` only ever describes the
- * model that was current at probe time. So effort is validated against the
- * model actually being selected whenever the agent published that breakdown
- * (`modelReasoningEfforts`); the ids validated that way come back in
- * `validatedConfigIds` for the caller to exclude from its snapshot check.
- * What cannot be checked offline is reported in `unverifiedSelections` and
- * dispatched as requested — the runtime surfaces a visible warning if the agent
- * rejects it, rather than silently running with different settings.
+ * The one thing that still throws is a missing BINDING: when neither the
+ * snapshot nor the agent's own convention says how to spell a control on the
+ * wire, there is no request to send, and inventing an id would be a silent
+ * no-op. That is a different statement from "the agent does not support it".
  */
 export const resolveAgentRunConfigSelection = (
   selection: AgentRunConfigSelection | undefined,
@@ -293,7 +311,6 @@ export const resolveAgentRunConfigSelection = (
   }
 
   const configOptionValues: Record<string, AcpConfigOptionValue> = {};
-  const validatedConfigIds: string[] = [];
   const unverifiedSelections: string[] = [];
   const probedModelId = findCurrentModelId(capability);
   const targetModelId = selection.modelId ?? probedModelId;
@@ -305,37 +322,35 @@ export const resolveAgentRunConfigSelection = (
     const targetModelEfforts = targetModelId
       ? capability.modelReasoningEfforts?.[targetModelId]
       : undefined;
-    if (!option && !targetModelEfforts) {
-      throw new Error('The selected agent does not offer a reasoning effort option.');
-    }
-    const configId = option?.id ?? ACP_REASONING_EFFORT_CONFIG_ID;
-    if (targetModelEfforts) {
-      if (!targetModelEfforts.includes(selection.reasoningEffort)) {
-        throw new Error(
-          `Invalid reasoning effort for model ${targetModelId}: ${selection.reasoningEffort}. Allowed values: ${targetModelEfforts.join(', ')}.`
-        );
-      }
-      // Validated against the target model; the caller's snapshot check knows
-      // only the probed model's list and could reject a legitimate value.
-      validatedConfigIds.push(configId);
-    } else if (switchesModel) {
+    // The published per-model breakdown speaks for the selected model; the
+    // snapshot's own list speaks only for the model it was captured under.
+    const confirmed = targetModelEfforts
+      ? targetModelEfforts.includes(selection.reasoningEffort)
+      : !switchesModel &&
+        option?.options.some((value) => value.value === selection.reasoningEffort) === true;
+    if (!confirmed) {
       unverifiedSelections.push(`reasoningEffort=${selection.reasoningEffort}`);
-      validatedConfigIds.push(configId);
     }
-    configOptionValues[configId] = selection.reasoningEffort;
+    configOptionValues[option?.id ?? ACP_REASONING_EFFORT_CONFIG_ID] = selection.reasoningEffort;
   }
 
   if (selection.fastMode !== undefined) {
+    // Binding, not support: the snapshot may omit the toggle simply because the
+    // model it was captured under had no fast tier, so its absence cannot
+    // decide anything. What it CAN decide is the wire shape, and when it does
+    // not know that either the agent's own convention does.
     const option = findFastModeOption(capability);
-    if (!option) {
-      throw new Error('The selected agent does not offer a fast mode option.');
+    const binding = option
+      ? { configId: option.id, value: toggleValue(option, selection.fastMode) }
+      : findFastModeBindingHint(capability, selection.fastMode);
+    if (!binding) {
+      throw new Error(
+        'Fast mode cannot be encoded for the selected agent: it publishes no fast mode option and no known binding for it.'
+      );
     }
-    configOptionValues[option.id] = toggleValue(option, selection.fastMode);
-    if (switchesModel) {
-      // Agents drop the fast toggle entirely for models that lack fast support,
-      // and no agent publishes which models those are.
+    configOptionValues[binding.configId] = binding.value;
+    if (!option || switchesModel) {
       unverifiedSelections.push(`fastMode=${selection.fastMode}`);
-      validatedConfigIds.push(option.id);
     }
   }
 
@@ -356,89 +371,6 @@ export const resolveAgentRunConfigSelection = (
     ...(modeId ? { modeId } : {}),
     ...(selection.modelId !== undefined ? { modelId: selection.modelId } : {}),
     ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
-    ...(validatedConfigIds.length > 0 ? { validatedConfigIds } : {}),
     ...(unverifiedSelections.length > 0 ? { unverifiedSelections } : {}),
   };
-};
-
-/**
- * Whether a bare config id names an option the agent rebuilds per MODEL.
- *
- * The snapshot is consulted for the option's CATEGORY, because an agent may
- * publish effort under its own id, but an id the snapshot omits still matches:
- * omission is exactly what a per-model option does for a model that lacks the
- * control (Codex publishes `fast-mode` only while the current model has a fast
- * speed tier), so it cannot be the reason to reject one.
- */
-const isPerModelConfigOptionId = (
-  configId: string,
-  capability: RunConfigCapabilitySource | undefined
-): boolean => {
-  if (isAcpFastModeConfigId(configId)) {
-    return true;
-  }
-  const option = findConfigOption(capability, (candidate) => candidate.id === configId);
-  return isAcpThoughtLevelConfigOption(option ?? { id: configId });
-};
-
-export type PerModelConfigOptionResolution = {
-  /**
-   * Ids the caller must exclude from its probed-snapshot check, because this
-   * module either validated them against the target model or established that
-   * the snapshot cannot judge them.
-   */
-  validatedConfigIds: string[];
-  /** Requested values that could not be verified offline. */
-  unverifiedSelections: string[];
-};
-
-/**
- * The same per-model rule `resolveAgentRunConfigSelection` applies, for
- * CONCRETE config option values that never passed through a semantic
- * selection: an Agent Role's stored `runConfig`, an explicit `--config-option`,
- * or a frozen Operation replayed after recovery.
- *
- * Only a turn that runs a model OTHER than the probed one is affected — when
- * the turn runs the probed model the snapshot describes it exactly and stays
- * authoritative. Effort is still validated strictly wherever the agent
- * published its per-model breakdown; what is left is dispatched as requested
- * and reported in `unverifiedSelections`, because a snapshot of a different
- * model cannot prove the agent will reject it.
- */
-export const resolvePerModelConfigOptionSelection = (args: {
-  configOptionValues: Record<string, AcpConfigOptionValue> | undefined;
-  modelId: string | undefined;
-  capability: RunConfigCapabilitySource | undefined;
-}): PerModelConfigOptionResolution => {
-  const entries = Object.entries(args.configOptionValues ?? {});
-  const probedModelId = findCurrentModelId(args.capability);
-  const targetModelId = args.modelId ?? probedModelId;
-  if (entries.length === 0 || targetModelId === undefined || targetModelId === probedModelId) {
-    return { validatedConfigIds: [], unverifiedSelections: [] };
-  }
-
-  const validatedConfigIds: string[] = [];
-  const unverifiedSelections: string[] = [];
-  for (const [configId, value] of entries) {
-    if (!isPerModelConfigOptionId(configId, args.capability)) {
-      continue;
-    }
-    const targetModelEfforts = isAcpFastModeConfigId(configId)
-      ? undefined
-      : args.capability?.modelReasoningEfforts?.[targetModelId];
-    if (targetModelEfforts) {
-      if (typeof value !== 'string' || !targetModelEfforts.includes(value)) {
-        throw new Error(
-          `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${targetModelEfforts.join(
-            ', '
-          )}.`
-        );
-      }
-      validatedConfigIds.push(configId);
-      continue;
-    }
-    validatedConfigIds.push(configId);
-    unverifiedSelections.push(`${configId}=${String(value)}`);
-  }
-  return { validatedConfigIds, unverifiedSelections };
 };

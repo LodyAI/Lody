@@ -66,7 +66,7 @@ import {
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
   validateTurnConfigOptionValues,
-  validateTurnModeAndModel,
+  findUnverifiedTurnSelectors,
   withBuiltinDefaultTurnMode,
 } from './session';
 
@@ -367,20 +367,24 @@ describe('session command helpers', () => {
     });
   });
 
-  it('validates ACP config option ids, types, and select values before dispatch', () => {
+  it('rejects only values the option type cannot carry, in any model', () => {
     const capability = createAcpCapability();
     expect(() =>
       validateTurnConfigOptionValues({ approval_policy: 'never', web_search: true }, capability)
     ).not.toThrow();
-    expect(() => validateTurnConfigOptionValues({ unknown: true }, capability)).toThrow(
-      /Unknown ACP config option/
-    );
+
+    // The snapshot describes one model. An id it does not carry, and a value
+    // outside the list it recorded, are both dispatched and reconciled against
+    // what the agent actually applies.
+    expect(() => validateTurnConfigOptionValues({ unknown: true }, capability)).not.toThrow();
+    expect(() =>
+      validateTurnConfigOptionValues({ approval_policy: 'invalid' }, capability)
+    ).not.toThrow();
+
+    // A boolean is not a select value under any model.
     expect(() => validateTurnConfigOptionValues({ approval_policy: false }, capability)).toThrow(
       /expects a select value/
     );
-    expect(() =>
-      validateTurnConfigOptionValues({ approval_policy: 'invalid' }, capability)
-    ).toThrow(/Allowed values/);
     expect(() => validateTurnConfigOptionValues({ web_search: 'true' }, capability)).toThrow(
       /expects a boolean value/
     );
@@ -420,9 +424,11 @@ describe('session command helpers', () => {
       modeId: 'default',
     });
 
-    expect(() =>
-      applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability)
-    ).toThrow(/does not offer a fast mode option/);
+    // The snapshot carries no fast toggle, which says nothing about the model
+    // this turn runs: it is dispatched on the agent's own binding and reported.
+    const fast = applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability);
+    expect(fast.config.configOptionValues).toEqual({ 'fast-mode': true });
+    expect(fast.unverifiedSelections).toEqual(['fastMode=true']);
   });
 
   it('validates effort against the selected model and skips the probed-model snapshot check', () => {
@@ -460,19 +466,13 @@ describe('session command helpers', () => {
     );
 
     expect(requested.config.configOptionValues).toEqual({ reasoning_effort: 'xhigh' });
-    expect(requested.validatedConfigIds.has('reasoning_effort')).toBe(true);
-    // `xhigh` is absent from the probed model's option list, so the snapshot
-    // check must skip it rather than reject a value valid for model-b.
-    expect(() =>
-      validateTurnConfigOptionValues(
-        requested.config.configOptionValues,
-        capability,
-        requested.validatedConfigIds
-      )
-    ).not.toThrow();
+    // Confirmed against the breakdown for model-b, so nothing to report…
+    expect(requested.unverifiedSelections).toEqual([]);
+    // …and `xhigh` being absent from the probed model's option list is not a
+    // reason to reject a value the agent published for the model being run.
     expect(() =>
       validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
-    ).toThrow(/Allowed values/);
+    ).not.toThrow();
   });
 
   it('accepts a stored per-model config option dispatched with another model', () => {
@@ -501,56 +501,48 @@ describe('session command helpers', () => {
 
     const requested = applyAgentRunConfigSelection(roleRunConfig, capability);
 
-    expect(requested.unverifiedSelections).toEqual(['fast-mode=true']);
     expect(() =>
-      validateTurnConfigOptionValues(
-        requested.config.configOptionValues,
-        capability,
-        requested.validatedConfigIds
-      )
+      validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
     ).not.toThrow();
 
-    // Running the probed model keeps the snapshot authoritative: there the
-    // missing option really is the model's own answer.
-    expect(() => {
-      const probedModel = applyAgentRunConfigSelection(
-        { modelId: 'model-a', configOptionValues: { 'fast-mode': true } },
-        capability
-      );
+    // Same for the probed model: a snapshot that never carried the toggle is
+    // still only a snapshot, and the runtime settles whether Fast is on.
+    expect(() =>
       validateTurnConfigOptionValues(
-        probedModel.config.configOptionValues,
-        capability,
-        probedModel.validatedConfigIds
-      );
-    }).toThrow(/Unknown ACP config option/);
+        applyAgentRunConfigSelection(
+          { modelId: 'model-a', configOptionValues: { 'fast-mode': true } },
+          capability
+        ).config.configOptionValues,
+        capability
+      )
+    ).not.toThrow();
   });
 
-  it('drops inherited ACP config options that are no longer compatible', () => {
+  it('drops inherited ACP config options only when the type cannot carry them', () => {
     expect(
       filterCompatibleTurnConfigOptionValues(
         { approval_policy: 'never', web_search: 'true', removed: false },
         createAcpCapability()
       )
-    ).toEqual({ approval_policy: 'never' });
+      // `web_search` is a boolean option handed a string: undispatchable.
+      // `removed` is simply absent from this snapshot, which the model this
+      // turn runs may well still have.
+    ).toEqual({ approval_policy: 'never', removed: false });
   });
 
-  it('validates explicit mode and model selectors against agent capabilities', () => {
+  it('reports mode and model selectors the snapshot cannot confirm, without rejecting them', () => {
     const capability = createAcpCapability();
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'default', modelId: 'model-a' }, capability)
-    ).not.toThrow();
-    expect(() => validateTurnModeAndModel({ modeId: 'plan' }, capability)).toThrow(
-      'Unsupported ACP mode'
+    expect(
+      findUnverifiedTurnSelectors({ modeId: 'default', modelId: 'model-a' }, capability)
+    ).toEqual([]);
+    expect(findUnverifiedTurnSelectors({ modeId: 'plan', modelId: 'model-b' }, capability)).toEqual(
+      ['mode=plan', 'model=model-b']
     );
-    expect(() => validateTurnModeAndModel({ modelId: 'model-b' }, capability)).toThrow(
-      'Unsupported ACP model'
-    );
-    expect(() => validateTurnModeAndModel({ modeId: 'default' }, undefined)).toThrow(
-      'Unsupported ACP mode'
-    );
+    // No snapshot at all confirms nothing — and still blocks nothing.
+    expect(findUnverifiedTurnSelectors({ modeId: 'default' }, undefined)).toEqual(['mode=default']);
   });
 
-  it('drops incompatible inherited mode and model selectors', () => {
+  it('keeps inherited mode and model selectors the snapshot does not list', () => {
     expect(
       filterCompatibleInheritedTurnConfig(
         {
@@ -561,6 +553,7 @@ describe('session command helpers', () => {
         createAcpCapability()
       )
     ).toEqual({
+      modeId: 'plan',
       modelId: 'model-a',
       configOptionValues: { approval_policy: 'never' },
     });
@@ -590,9 +583,9 @@ describe('session command helpers', () => {
         },
       ],
     };
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'plan', modelId: 'model-b' }, capability)
-    ).not.toThrow();
+    expect(findUnverifiedTurnSelectors({ modeId: 'plan', modelId: 'model-b' }, capability)).toEqual(
+      []
+    );
   });
 
   it('sorts sessions with invalid createdAt timestamps deterministically', () => {

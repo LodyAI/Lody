@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   resolveAgentRunConfigSelection,
-  resolvePerModelConfigOptionSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
@@ -147,9 +146,8 @@ describe('agent run config selection', () => {
         collaboration_mode: 'plan',
       },
       // This agent published no per-model breakdown, and the selection switches
-      // away from the probed model, so effort/fast cannot be checked offline:
-      // both are dispatched as requested and excluded from the snapshot check.
-      validatedConfigIds: ['reasoning_effort', 'fast-mode'],
+      // away from the probed model, so neither effort nor fast can be checked
+      // offline: both are dispatched as requested and reported as unverified.
       unverifiedSelections: ['reasoningEffort=high', 'fastMode=true'],
     });
   });
@@ -202,19 +200,40 @@ describe('agent run config selection', () => {
     expect(resolveAgentRunConfigSelection({ planMode: false }, claudeCapability())).toEqual({});
   });
 
-  it('rejects controls the agent does not offer instead of running with other settings', () => {
+  it('dispatches controls the snapshot does not carry instead of rejecting them', () => {
+    // A snapshot captured under a model with no fast tier and no effort list
+    // looks exactly like this. It cannot decide anything for another model.
     const capability: AcpCapabilityCacheEntry = {
       ...codexCapability(),
       configOptions: [],
     };
-    expect(() => resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toThrow(
-      /does not offer a reasoning effort option/
-    );
-    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, capability)).toThrow(
-      /does not offer a fast mode option/
-    );
+
+    expect(resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toEqual({
+      configOptionValues: { reasoning_effort: 'high' },
+      unverifiedSelections: ['reasoningEffort=high'],
+    });
+    expect(resolveAgentRunConfigSelection({ fastMode: true }, capability)).toEqual({
+      configOptionValues: { 'fast-mode': true },
+      unverifiedSelections: ['fastMode=true'],
+    });
+
+    // Plan mode is the exception, and for a binding reason rather than a
+    // capability one: with neither a collaboration_mode option nor a plan
+    // permission mode there is no way to express the request at all.
     expect(() => resolveAgentRunConfigSelection({ planMode: true }, capability)).toThrow(
       /does not offer a plan mode/
+    );
+  });
+
+  it('reports a missing wire binding as such, not as an unsupported control', () => {
+    // A third-party agent Lody has no fast-mode convention for.
+    const capability: AcpCapabilityCacheEntry = {
+      ...codexCapability(),
+      agentType: 'some-registry-agent',
+      configOptions: [],
+    };
+    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, capability)).toThrow(
+      /cannot be encoded/
     );
   });
 
@@ -276,9 +295,9 @@ describe('agent run config selection', () => {
       },
     };
 
-    // `xhigh` is absent from the probed model's snapshot options but valid for
-    // the model being selected: it must be accepted and marked pre-validated so
-    // the caller's snapshot check does not reject it.
+    // `xhigh` is absent from the probed model's snapshot options but the agent
+    // published a breakdown saying the selected model takes it: confirmed, so
+    // nothing is reported as unverified.
     expect(
       resolveAgentRunConfigSelection(
         { modelId: 'gpt-5.6-sol', reasoningEffort: 'xhigh' },
@@ -287,16 +306,21 @@ describe('agent run config selection', () => {
     ).toEqual({
       modelId: 'gpt-5.6-sol',
       configOptionValues: { reasoning_effort: 'xhigh' },
-      validatedConfigIds: ['reasoning_effort'],
     });
 
-    // Valid for the probed model, unsupported by the target model.
-    expect(() =>
+    // Outside the target model's published list. That is real evidence, but it
+    // can be stale (the breakdown is per account and per catalog revision), so
+    // it dispatches and is reported rather than rejected.
+    expect(
       resolveAgentRunConfigSelection(
         { modelId: 'gpt-5.4-mini', reasoningEffort: 'high' },
         capability
       )
-    ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini.*Allowed values: low, medium/s);
+    ).toEqual({
+      modelId: 'gpt-5.4-mini',
+      configOptionValues: { reasoning_effort: 'high' },
+      unverifiedSelections: ['reasoningEffort=high'],
+    });
   });
 
   it('flags selections it cannot verify offline instead of pretending they hold', () => {
@@ -353,89 +377,5 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
-  });
-});
-
-describe('per-model config options carried as concrete ids', () => {
-  /** Codex probed under a model without a fast speed tier: no `fast-mode` at all. */
-  const withoutFastMode = (): AcpCapabilityCacheEntry => {
-    const capability = codexCapability();
-    return {
-      ...capability,
-      configOptions: (capability.configOptions ?? []).filter((option) => option.id !== 'fast-mode'),
-    };
-  };
-
-  it('keeps a stored fast toggle dispatchable when the turn runs another model', () => {
-    // An Agent Role's stored run config: concrete ids, no semantic selection.
-    expect(
-      resolvePerModelConfigOptionSelection({
-        configOptionValues: { 'fast-mode': true, mode: 'agent' },
-        modelId: 'gpt-5.4-mini',
-        capability: codexCapability(),
-      })
-    ).toEqual({ validatedConfigIds: ['fast-mode'], unverifiedSelections: ['fast-mode=true'] });
-
-    // The probe never saw the option because its model had no fast tier. That
-    // says nothing about the model this turn selects.
-    expect(
-      resolvePerModelConfigOptionSelection({
-        configOptionValues: { 'fast-mode': true },
-        modelId: 'gpt-5.4-mini',
-        capability: withoutFastMode(),
-      })
-    ).toEqual({ validatedConfigIds: ['fast-mode'], unverifiedSelections: ['fast-mode=true'] });
-  });
-
-  it('leaves the snapshot authoritative for the model it was probed under', () => {
-    for (const modelId of ['gpt-5.6-sol', undefined]) {
-      expect(
-        resolvePerModelConfigOptionSelection({
-          configOptionValues: { 'fast-mode': true },
-          modelId,
-          capability: withoutFastMode(),
-        })
-      ).toEqual({ validatedConfigIds: [], unverifiedSelections: [] });
-    }
-  });
-
-  it('still validates a stored effort against the target model breakdown', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...codexCapability(),
-      modelReasoningEfforts: {
-        'gpt-5.6-sol': ['low', 'medium', 'high'],
-        'gpt-5.4-mini': ['low', 'medium'],
-      },
-    };
-
-    expect(
-      resolvePerModelConfigOptionSelection({
-        configOptionValues: { reasoning_effort: 'medium' },
-        modelId: 'gpt-5.4-mini',
-        capability,
-      })
-    ).toEqual({ validatedConfigIds: ['reasoning_effort'], unverifiedSelections: [] });
-
-    expect(() =>
-      resolvePerModelConfigOptionSelection({
-        configOptionValues: { reasoning_effort: 'high' },
-        modelId: 'gpt-5.4-mini',
-        capability,
-      })
-    ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini.*Allowed values: low, medium/s);
-  });
-
-  it('recognizes an agent that publishes effort under its own id', () => {
-    // Claude: `effort` by category, `fast` as the toggle id.
-    expect(
-      resolvePerModelConfigOptionSelection({
-        configOptionValues: { effort: 'high', fast: 'on', mode: 'auto' },
-        modelId: 'opus',
-        capability: claudeCapability(),
-      })
-    ).toEqual({
-      validatedConfigIds: ['effort', 'fast'],
-      unverifiedSelections: ['effort=high', 'fast=on'],
-    });
   });
 });
