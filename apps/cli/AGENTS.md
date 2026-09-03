@@ -252,29 +252,39 @@ Two things the dev build does deliberately, both load-bearing:
   mapping onto each agent's advertised option ids (also the source of truth for the
   web selectors), `applyAgentRunConfigSelection` in `src/commands/session.ts` applies it
   once the target agent's cached capabilities are read, and
-  `validateSessionCreateOptions({ dispatchConfig })` rejects unsupported selections
-  before the Operation is accepted. `lody_session_create_options` publishes the valid
+  `validateSessionCreateOptions({ dispatchConfig })` resolves the effective dispatch
+  config before the Operation is accepted (it no longer rejects on capability
+  evidence — see the snapshot invariant below). `lody_session_create_options` publishes the valid
   values per agent config as `runConfig`. Its default response is sparse: online Machines,
   one default/current agent config, the current local project, and no GitHub repository
   fetch. Agent configs/local projects/repos expand only through their query inputs.
   Durable create acceptance stores each target's resolved effective dispatch config;
   recovery must use it instead of inheriting again from mutable requester history.
-- INVARIANT: reasoning effort and fast mode are per MODEL. An ACP probe's
-  `configOptions` only describe the model that was current at probe time — agents
-  rebuild those options on every model switch and then REJECT a value the new model
-  does not support. `acp-capability-normalization.ts` recovers the model-independent
-  view into `AcpCapabilityCacheEntry.modelReasoningEfforts` from agents that also
-  publish the legacy `model[effort]` list (Codex); effort is validated against the
-  TARGET model and the ids so validated come back as `validatedConfigIds`, which
-  `validateTurnConfigOptionValues(..., skipIds)` must skip (the probed model's list
-  would wrongly reject them). What cannot be checked offline is dispatched as
-  requested. The rule follows the VALUES, not the caller: concrete ids that never
-  passed through a semantic selection — an Agent Role's stored `runConfig`, an
-  explicit `--config-option`, a frozen Operation replayed after recovery — go
-  through `resolvePerModelConfigOptionSelection` for the same exemption, because a
-  per-model option's ABSENCE from the snapshot is exactly what the probed model's
-  lack of the control looks like and can never be the reason to reject another
-  model's turn. Runtime rejections remain in debug diagnostics; what becomes a visible
+- INVARIANT: a capability snapshot never rejects a run config. `configOptions`
+  describes the model that was current when it was captured — and every created
+  session rewrites it (`scheduleCreatedSessionCapabilityUpdate`), so it describes
+  whichever model ran last. Neither a missing option, nor a value outside the list
+  it recorded, nor an unseen model/mode id is evidence about the model a turn
+  selects. `validateTurnConfigOptionValues` therefore rejects only what no model
+  could carry: a value the option's own declared TYPE forbids. Everything else is
+  dispatched and reconciled against the state the agent publishes.
+  `findUnverifiedTurnSelectors` and `unverifiedSelections` record what could not be
+  confirmed; neither blocks. Do not reintroduce a `validatedConfigIds`-style
+  exemption set: it only made sense while the snapshot could reject, and with
+  rejection gone there is nothing to exempt.
+  The one thing that still fails loudly is a missing wire BINDING — no snapshot
+  option and no agent convention for how to spell a control, so there is no
+  request to send and an invented id would be a silent no-op. That is a different
+  statement from "unsupported" and must be worded as such.
+  `acp-capability-normalization.ts` still recovers `modelReasoningEfforts` from the
+  legacy `model[effort]` list (Codex): a published per-model breakdown CONFIRMS a
+  value for the selected model, which is the only thing that keeps it out of
+  `unverifiedSelections`. It never rejects one.
+  Client side: a Role may be seeded only from `authoritative` capabilities —
+  `provisional` means the built-in static tables, and seeding from those persists a
+  guess as a durable promise. The composer keeps stored keys its selector catalog
+  does not cover; only a present runtime table (the agent's live state) owns the
+  whole key set. Runtime rejections remain in debug diagnostics; what becomes a visible
   `agent_warning` is DIVERGENCE — the state the agent publishes after applying the
   turn's config contradicts what was requested. A rejection is not that signal in
   either direction: Codex accepts `fast-mode` on a model with no fast speed tier and
@@ -287,6 +297,21 @@ Two things the dev build does deliberately, both load-bearing:
   Claude Fable models omit the Fast mode option, so an explicit `fast=false` is
   skipped as an already-effective no-op and is judged for neither; `fast=true` must
   still be dispatched and retained in debug diagnostics if rejected.
+- INVARIANT: permission-bearing config (the mode option, plan/collaboration mode)
+  is applied LAST, after the model and the ordinary options. Claude rebuilds the
+  available permission modes on a model switch and downgrades the current one to
+  `default` when the new model lacks it, so a mode set before the model is
+  silently widened by the model that follows. `applyPromptConfig` runs before
+  `prompt`, so the state read after applying is still taken before the agent acts.
+  A successful `session/set_mode` is an acknowledgement, not proof of the resulting
+  state: it may only FILL a mode the agent's own state does not report, never
+  overwrite one — echoing the request back as the outcome makes every mode
+  divergence invisible. Divergence is reported, not blocked: no run-config
+  mismatch may prevent Session creation or prompt submission, and Agent Roles and
+  frozen Operations behave exactly like ordinary preferences at run time,
+  differing only in warning wording and follow-up marking. A Role that would run
+  diverged is surfaced, not refused — an upgrade must never turn a Role that used
+  to run into one that fails.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from
