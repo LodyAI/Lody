@@ -1471,6 +1471,61 @@ export async function captureChatWorkspaceGeometryScopes(
               yStart: rect.y,
               yEnd: rect.y + rect.height,
             };
+            // An atom is measured on the Y axis too. A row REJECTED it, and a
+            // rejected slot is still an atom: leaving it out here is the DOM row
+            // acting as an eligibility test one layer before discovery, so a
+            // control rendering outside every detected row could not be compared
+            // to anything vertically no matter what the rules downstream said.
+            // Its `rowId` is its own, so it can never reach the two-member
+            // row-instance bar by itself; a geometric row is what may group it.
+            const atomAnchors = blockAnchorsOf(primitive.element, primitive.kind, rect);
+            const atomBlockCommon = {
+              ...common,
+              // Its OWN row, named after the primitive rather than after its
+              // coordinates. Two atoms whose centre and left edge happen to
+              // round alike would otherwise share the coordinate-derived row id
+              // and be compared at the two-member bar — the one place a single
+              // capture is evidence enough — on a coincidence rather than on
+              // any structure relating them.
+              rowId: `visual-atom:${primitive.primitiveId}`,
+              elementId: `${primitive.primitiveId}:${primitive.label}`,
+              xStart: rect.x,
+              xEnd: rect.x + rect.width,
+              ...(atomAnchors.typographyOffset === 0
+                ? {}
+                : { typographyOffset: atomAnchors.typographyOffset }),
+            };
+            blockCandidates.push(
+              {
+                ...atomBlockCommon,
+                anchor: 'block-start' as const,
+                coordinate: atomAnchors.blockStart,
+              },
+              {
+                ...atomBlockCommon,
+                anchor: 'block-center' as const,
+                coordinate: atomAnchors.blockCenter,
+              },
+              {
+                ...atomBlockCommon,
+                anchor: 'block-end' as const,
+                coordinate: atomAnchors.blockEnd,
+              },
+              {
+                ...atomBlockCommon,
+                anchor: 'visual-center' as const,
+                coordinate: atomAnchors.visualCenter,
+              },
+              ...(atomAnchors.textBaseline === null
+                ? []
+                : [
+                    {
+                      ...atomBlockCommon,
+                      anchor: 'text-baseline' as const,
+                      coordinate: atomAnchors.textBaseline,
+                    },
+                  ])
+            );
             return [
               { ...common, anchor: 'inline-start' as const, coordinate: rect.x },
               {

@@ -1754,6 +1754,231 @@ describe('re-keying a reviewed finding', () => {
   });
 });
 
+describe('a cross-family rail has to survive a second capture', () => {
+  /**
+   * Three singleton controls in three discovery scopes. Each renders in a DOM
+   * row of its own, so only a geometric row can put them on one line.
+   */
+  const singleton = (
+    scopeName: string,
+    coordinate: number,
+    xStart: number,
+    overrides: Partial<GeometryCapturedBlockCandidate> = {}
+  ): GeometryCapturedBlockCandidate => ({
+    elementId: `${scopeName}-icon:icon`,
+    primitiveId: `${scopeName}-icon`,
+    locator: {
+      role: 'button',
+      name: `${scopeName} action`,
+      landmark: { role: 'banner', name: scopeName },
+      rowFamily: `div[${scopeName}]>button[svg]`,
+      roleIndex: 0,
+    },
+    label: 'icon',
+    sectionScope: scopeName,
+    rowId: `visual-row:${scopeName}`,
+    rowFamily: `div[${scopeName}]>button[svg]`,
+    kind: 'svg',
+    space: 'ink',
+    anchor: 'visual-center',
+    coordinate,
+    xStart,
+    xEnd: xStart + 16,
+    yStart: coordinate - 8,
+    yEnd: coordinate + 8,
+    ...overrides,
+  });
+
+  const rowCapture = (captureId: string, lastOffset: number): GeometryCapture => ({
+    ...capture(captureId, [
+      {
+        key: 'shell',
+        identity: 'shell',
+        source: 'hint',
+        depth: 2,
+        rect: { x: 0, y: 0, width: 1440, height: 64 },
+        candidates: [],
+        blockCandidates: [
+          singleton('sidebar.shell', 40, 24),
+          singleton('session.topbar', 40, 320),
+          singleton('session.info', 40 + lastOffset, 1200),
+        ],
+      },
+    ]),
+    viewport: { width: 1440, height: 900 },
+  });
+  const crossFamilyRails = (observation: ReturnType<typeof observeGeometryCaptures>) =>
+    (observation.captures[0]?.blockRails ?? []).filter((rail) => rail.evidence === 'cross-family');
+
+  it('proposes the rail in one capture and reports no finding for it', () => {
+    const captureArtifact = { version: 1 as const, captures: [rowCapture('one', 2)] };
+    const observation = observeGeometryCaptures(captureArtifact);
+
+    const [rail] = crossFamilyRails(observation);
+    expect(rail).toMatchObject({ anchor: 'visual-center', line: 40, sampleSize: 3 });
+    expect(rail?.outliers.map((member) => member.elementId)).toEqual(['session.info-icon:icon']);
+    // Nothing but the rendering says these three share a line, and one capture
+    // agreeing is a coincidence: it stays a report proposal.
+    expect(createGeometryFindings(captureArtifact, observation).findings).toEqual([]);
+  });
+
+  it('reports the outlier once the same members line up again in a second capture', () => {
+    const captureArtifact = {
+      version: 1 as const,
+      captures: [rowCapture('one', 2), rowCapture('two', 2)],
+    };
+    const findings = createGeometryFindings(
+      captureArtifact,
+      observeGeometryCaptures(captureArtifact)
+    );
+
+    expect(findings.findings).toEqual([
+      expect.objectContaining({
+        kind: 'cross-family',
+        axis: 'y',
+        anchor: 'visual-center',
+        label: 'session.info action',
+        offset: 2,
+        captureCount: 2,
+      }),
+    ]);
+    // The rail is not a finding; the element that leaves it is, and the whole
+    // row travels as its evidence so a card annotates rather than measures.
+    expect(findings.findings[0]?.evidence.map((item) => item.captureId)).toEqual(['one', 'two']);
+    expect(findings.findings[0]?.evidence[0]?.rowMembers?.map((member) => member.outlier)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('keys the finding structurally, apart from the row-instance question', () => {
+    const captureArtifact = {
+      version: 1 as const,
+      captures: [rowCapture('one', 2), rowCapture('two', 2)],
+    };
+    const [finding] = createGeometryFindings(
+      captureArtifact,
+      observeGeometryCaptures(captureArtifact)
+    ).findings;
+    const identity = geometryIdentityLocator(
+      {
+        role: 'button',
+        name: 'session.info action',
+        landmark: { role: 'banner', name: 'session.info' },
+        rowFamily: 'div[session.info]>button[svg]',
+        roleIndex: 0,
+      },
+      { section: 'session.info' }
+    );
+
+    expect(finding?.key).toBe(
+      alignmentFindingKey({
+        surfaceFamily: 'workspace',
+        locator: identity,
+        anchor: 'visual-center',
+        axis: 'y',
+        kind: 'cross-family',
+      })
+    );
+    // Same element, same axis, same anchor: only the kind keeps them apart.
+    expect(finding?.key).not.toBe(
+      alignmentFindingKey({
+        surfaceFamily: 'workspace',
+        locator: identity,
+        anchor: 'visual-center',
+        axis: 'y',
+      })
+    );
+  });
+
+  it('matches members between captures structurally, never by coordinate', () => {
+    // The whole line moved 6px down in the second capture. Same members, same
+    // relationship to it, so the evidence still merges.
+    const moved: GeometryCapture = {
+      ...rowCapture('two', 2),
+      scopes: [
+        {
+          ...(rowCapture('two', 2).scopes[0] as GeometryCapturedScope),
+          blockCandidates: [
+            singleton('sidebar.shell', 46, 24),
+            singleton('session.topbar', 46, 320),
+            singleton('session.info', 48, 1200),
+          ],
+        },
+      ],
+    };
+    const captureArtifact = { version: 1 as const, captures: [rowCapture('one', 2), moved] };
+    const findings = createGeometryFindings(
+      captureArtifact,
+      observeGeometryCaptures(captureArtifact)
+    );
+
+    expect(findings.findings).toHaveLength(1);
+    expect(findings.findings[0]?.evidence.map((item) => item.line)).toEqual([40, 46]);
+  });
+
+  it('refuses an element that reads high in one capture and low in the next', () => {
+    const captureArtifact = {
+      version: 1 as const,
+      captures: [rowCapture('one', 2), rowCapture('two', -2)],
+    };
+
+    expect(
+      createGeometryFindings(captureArtifact, observeGeometryCaptures(captureArtifact)).findings
+    ).toEqual([]);
+  });
+
+  it('leaves a DOM row to the row-instance path and never re-explains its members', () => {
+    const rowMember = (
+      primitiveId: string,
+      coordinate: number,
+      xStart: number
+    ): GeometryCapturedBlockCandidate => ({
+      ...singleton('sidebar.shell', coordinate, xStart),
+      elementId: `${primitiveId}:label`,
+      primitiveId,
+      rowId: 'visual-row:sidebar-row',
+      locator: {
+        role: 'button',
+        name: `Row ${primitiveId}`,
+        landmark: { role: 'banner', name: 'sidebar.shell' },
+        rowFamily: 'div[sidebar.shell]>button[svg]',
+        roleIndex: 0,
+      },
+    });
+    const withRow = (captureId: string): GeometryCapture => ({
+      ...rowCapture(captureId, 2),
+      scopes: [
+        {
+          ...(rowCapture(captureId, 2).scopes[0] as GeometryCapturedScope),
+          blockCandidates: [
+            rowMember('row-a', 40, 24),
+            rowMember('row-b', 40, 60),
+            rowMember('row-c', 42, 96),
+            singleton('session.topbar', 40, 320),
+            singleton('session.info', 40, 1200),
+          ],
+        },
+      ],
+    });
+    const captureArtifact = { version: 1 as const, captures: [withRow('one'), withRow('two')] };
+    const observation = observeGeometryCaptures(captureArtifact);
+
+    // The DOM prior wins: the row explains its three members, and the two
+    // singletons left on that geometric row are not three.
+    expect(
+      (observation.captures[0]?.blockRails ?? []).filter(
+        (rail) => rail.evidence === 'row-instance'
+      )[0]?.sampleSize
+    ).toBe(3);
+    expect(crossFamilyRails(observation)).toEqual([]);
+    expect(
+      createGeometryFindings(captureArtifact, observation).findings.map((finding) => finding.kind)
+    ).toEqual(['alignment-rail']);
+  });
+});
+
 describe('marker removal readiness', () => {
   it('holds a rule back until discovery reproduces every member on every capture', () => {
     const member = (
