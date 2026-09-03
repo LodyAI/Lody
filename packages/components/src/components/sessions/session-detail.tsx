@@ -94,7 +94,16 @@ import {
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
 } from '@/atoms/layout-state';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
 import {
@@ -2600,6 +2609,12 @@ const SessionDetail = ({
   } else if (restoredPrSidebar !== null) {
     setRestoredPrSidebar(null);
   }
+
+  // The PR restore token is committed with the open panel and restore sequence.
+  // Clear the transient Zen override before paint without writing Jotai during render.
+  useLayoutEffect(() => {
+    if (restoredPrSidebar !== null) setZenLayoutMode(false);
+  }, [restoredPrSidebar, setZenLayoutMode]);
 
   // Once restored, a user switching away from the PR tab (or closing the
   // sidebar) clears `?pr` so the URL stays consistent. The URL write must be
