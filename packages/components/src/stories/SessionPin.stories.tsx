@@ -84,7 +84,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   args: {
     pinnedHistoryId: 'msg-1',
-    history: mockHistory,
+    pinnedMessage: mockHistory.find((entry) => entry.id === 'msg-1') ?? null,
     onUnpin: fn(),
     onScrollToMessage: fn(),
   },
@@ -93,7 +93,7 @@ export const Default: Story = {
 export const LongText: Story = {
   args: {
     pinnedHistoryId: 'msg-long',
-    history: longTextHistory,
+    pinnedMessage: longTextHistory.find((entry) => entry.id === 'msg-long') ?? null,
     onUnpin: fn(),
     onScrollToMessage: fn(),
   },
@@ -102,7 +102,7 @@ export const LongText: Story = {
 export const NoPinned: Story = {
   args: {
     pinnedHistoryId: null,
-    history: mockHistory,
+    pinnedMessage: null,
     onUnpin: fn(),
     onScrollToMessage: fn(),
   },

@@ -225,6 +225,7 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
   {
     type: 'message' as const,
     sessionId: integrationSessionId,
+    turnIndex: round * 2,
     message: historyMessage(
       `user-${round}`,
       'user',
@@ -238,6 +239,7 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
   {
     type: 'message' as const,
     sessionId: integrationSessionId,
+    turnIndex: round * 2 + 1,
     message: historyMessage(
       `assistant-${round}`,
       'assistant',
@@ -313,6 +315,7 @@ const extremeItems: ChatStreamItem[] = (() => {
     items.push({
       type: 'message',
       sessionId: extremeSessionId,
+      turnIndex: items.length,
       message: historyMessage(`x-user-${round}`, 'user', extremeUserText(round)),
     });
 
@@ -326,6 +329,7 @@ const extremeItems: ChatStreamItem[] = (() => {
     items.push({
       type: 'message',
       sessionId: extremeSessionId,
+      turnIndex: items.length,
       message: historyMessage(
         `x-assistant-${round}`,
         'assistant',

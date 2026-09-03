@@ -28,6 +28,22 @@
   scroll target; never overlay or persist it. A `session_create` completion
   renders one card per successful target and reads only that target's title.
 
+## Conversation View (windowed history)
+
+Invariants of the view, writer, and control-plane Mirror live in
+`lib/conversation-view/AGENTS.md`. Renderer-side:
+
+- `SessionChatStream` takes `view`, never `sessionDoc.history`; no component
+  may hold the materialized array (`tests/no-materialized-history-in-components.test.ts`).
+- `buildChatStreamItems(view, …)` yields one item per turn: a parsed message
+  when hydrated, else a `placeholder` carrying the index row. Both carry
+  `turnIndex`; rows, outline entries, and `scrollToIndex` use absolute turn
+  indexes. `TurnPlaceholderRow` renders under the turn's id, sized from the
+  row summary, and hydration swaps the content in like group expansion.
+- The hydrated window is the viewport ± two screens from Virtua's
+  `findItemIndex` (`onVisibleTurnRangeChange`); the tail is hydrated by the
+  view itself. Pair every `ensureRange` with `release`.
+
 ## Turn Folding And Layout
 
 - Finished turns keep the answer/result tail visible and fold earlier work.
@@ -70,8 +86,11 @@
 `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
 work) and a hover preview.
 
-- Build entries from `items`, never DOM. Reader position uses Virtua offsets and
-  selects the last round whose anchor is above the viewport top.
+- Build entries from `items`, never DOM: hydrated messages digest their prose,
+  placeholders digest the index row's summary (filled by the view's idle pass,
+  or by hydrating a hovered round through `onPreviewRound`). Reader position
+  uses Virtua offsets and selects the last round whose anchor is above the
+  viewport top.
 - The rail is a page-level absolute portal outside the shrinking message area.
   It is not a Virtua row or viewport child. Keep it page-centred as the composer
   grows and pane-local in splits; never use `position: fixed` or composer height.

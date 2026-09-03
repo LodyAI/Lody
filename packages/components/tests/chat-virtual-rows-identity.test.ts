@@ -43,10 +43,12 @@ const makeMessage = (
     finished,
   }) as unknown as SessionHistoryParsed;
 
+let nextTurnIndex = 0;
 const wrap = (message: SessionHistoryParsed): ChatStreamItem => ({
   type: 'message',
   sessionId,
   message,
+  turnIndex: (nextTurnIndex += 1),
 });
 
 const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number }) =>
@@ -134,7 +136,17 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     const { finishedTurn, streamingTurn, items } = makeConversation();
     const first = build(items);
     const userTurn = wrap(makeMessage('turn-user', 'user', [text('hi')]));
-    const second = build([userTurn, finishedTurn, streamingTurn]);
+    // A prepend moves every later turn's absolute index, and
+    // `buildChatStreamItems` re-wraps a turn whose index changed.
+    const shifted = (item: ChatStreamItem & { type: 'message' }): ChatStreamItem => ({
+      ...item,
+      turnIndex: item.turnIndex + 1,
+    });
+    const second = build([
+      userTurn,
+      shifted(finishedTurn as ChatStreamItem & { type: 'message' }),
+      shifted(streamingTurn as ChatStreamItem & { type: 'message' }),
+    ]);
     const secondAssistantRows = second.filter((row) => row.type === 'assistant');
     secondAssistantRows.forEach((row) => {
       expect(first).not.toContain(row);

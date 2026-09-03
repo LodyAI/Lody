@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistoryParsed } from '@lody/shared';
+import type { TurnIndexRow } from './conversation-view';
 import { getSearchableMarkdownText } from './session-chat-search';
 
 /**
@@ -81,10 +82,16 @@ export interface ConversationOutlineEntry {
   readonly weight: ConversationOutlineWeight;
 }
 
-/** The subset of a chat stream item this module reads. */
+/**
+ * The subset of a chat stream item this module reads: a hydrated message, or
+ * a placeholder carrying the turn's index row. `turnIndex` is the absolute
+ * position; without it the list position is used (fully hydrated lists).
+ */
 export interface ConversationOutlineSource {
   readonly type: string;
   readonly message?: SessionHistoryParsed;
+  readonly row?: TurnIndexRow;
+  readonly turnIndex?: number;
 }
 
 const EMPTY_OUTLINE: readonly ConversationOutlineEntry[] = [];
@@ -169,18 +176,41 @@ type MessageDigest = {
  */
 const digestByMessage = new WeakMap<SessionHistoryParsed, MessageDigest>();
 
+const digestFromSource = (source: string | null, proseLength: number): MessageDigest => {
+  const summary = source === null ? '' : collapseWhitespace(getSearchableMarkdownText(source));
+  return {
+    title: truncateToLength(summary, OUTLINE_TITLE_MAX_LENGTH),
+    preview: truncateToLength(summary, OUTLINE_PREVIEW_MAX_LENGTH),
+    proseLength,
+  };
+};
+
 const getMessageDigest = (message: SessionHistoryParsed): MessageDigest => {
   const cached = digestByMessage.get(message);
   if (cached) return cached;
-
-  const source = firstTextOf(message.items);
-  const summary = source === null ? '' : collapseWhitespace(getSearchableMarkdownText(source));
-  const digest: MessageDigest = {
-    title: truncateToLength(summary, OUTLINE_TITLE_MAX_LENGTH),
-    preview: truncateToLength(summary, OUTLINE_PREVIEW_MAX_LENGTH),
-    proseLength: proseLengthOf(message),
-  };
+  const digest = digestFromSource(firstTextOf(message.items), proseLengthOf(message));
   digestByMessage.set(message, digest);
+  return digest;
+};
+
+/**
+ * A non-hydrated turn's digest comes from its index row summary (the same
+ * head text and prose length, read shallowly by the view). Keyed by the row
+ * object: the view replaces the row when the summary arrives or changes.
+ */
+const digestByRow = new WeakMap<TurnIndexRow, MessageDigest>();
+const EMPTY_DIGEST: MessageDigest = { title: '', preview: '', proseLength: 0 };
+
+const getRowDigest = (row: TurnIndexRow): MessageDigest => {
+  const summary = row.summary;
+  if (!summary) return EMPTY_DIGEST;
+  const cached = digestByRow.get(row);
+  if (cached) return cached;
+  const digest = digestFromSource(
+    summary.headText.trim() ? summary.headText.slice(0, SUMMARY_SOURCE_WINDOW) : null,
+    summary.textChars
+  );
+  digestByRow.set(row, digest);
   return digest;
 };
 
@@ -211,17 +241,30 @@ export function buildConversationOutline(
     openRoundHasPreview = false;
   };
 
-  for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
-    const item = items[messageIndex];
-    if (!item || item.type !== 'message' || !item.message) continue;
-    const message = item.message;
-    const isUser = message.role === 'user';
-    const digest = getMessageDigest(message);
+  for (let position = 0; position < items.length; position += 1) {
+    const item = items[position];
+    if (!item) continue;
+    let key: string;
+    let role: string;
+    let digest: MessageDigest;
+    if (item.type === 'message' && item.message) {
+      key = item.message.id;
+      role = item.message.role;
+      digest = getMessageDigest(item.message);
+    } else if (item.type === 'placeholder' && item.row) {
+      key = item.row.id;
+      role = item.row.role;
+      digest = getRowDigest(item.row);
+    } else {
+      continue;
+    }
+    const messageIndex = item.turnIndex ?? position;
+    const isUser = role === 'user';
 
     if (isUser || openRound === undefined) {
       closeRound();
       openRound = {
-        key: message.id,
+        key,
         messageIndex,
         title: digest.title,
         preview: isUser ? '' : digest.preview,
@@ -235,7 +278,7 @@ export function buildConversationOutline(
     }
 
     openRoundProseLength += digest.proseLength;
-    if (openRoundHasPreview || message.role !== 'assistant' || !digest.preview) continue;
+    if (openRoundHasPreview || role !== 'assistant' || !digest.preview) continue;
     openRound.preview = digest.preview;
     openRoundHasPreview = true;
   }

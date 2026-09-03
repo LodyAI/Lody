@@ -99,6 +99,11 @@ export interface ConversationOutlineRailProps {
   enableArrivalIntent?: boolean;
   /** Storybook/dev instrumentation only. The rail never persists or uploads it. */
   onArrivalIntentDebugEvent?: (event: ConversationOutlineArrivalIntentDebugEvent) => void;
+  /**
+   * The pointer reached this round's tick. The stream uses it to hydrate a
+   * round whose preview is still empty so the card can fill in.
+   */
+  onPreviewRound?: (index: number) => void;
   className?: string;
 }
 
@@ -259,6 +264,7 @@ export function ConversationOutlineRail({
   overlayRoot = null,
   enableArrivalIntent = false,
   onArrivalIntentDebugEvent,
+  onPreviewRound,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -278,6 +284,7 @@ export function ConversationOutlineRail({
 
   const activeIndexRef = useLatestRef(activeIndex);
   const arrivalIntentDebugRef = useLatestRef(onArrivalIntentDebugEvent);
+  const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
 
@@ -416,6 +423,7 @@ export function ConversationOutlineRail({
       // Magnify immediately — this is direct manipulation and must not wait on
       // the card's warmup, or the rail would feel unresponsive to the cursor.
       setPointerIndex(index);
+      onPreviewRoundRef.current?.(index);
       clearOpenTimer();
       const now = performance.now();
       const isWarm =
@@ -461,7 +469,7 @@ export function ConversationOutlineRail({
         });
       }, HOVER_WARMUP_MS);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, onPreviewRoundRef]
   );
 
   const handlePointerLeave = useCallback(() => {
