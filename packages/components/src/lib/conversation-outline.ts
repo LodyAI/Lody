@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistoryParsed } from '@lody/shared';
+import type { TurnIndexRow } from './conversation-view';
 import { getSearchableMarkdownText } from './session-chat-search';
 
 /**
@@ -81,10 +82,17 @@ export interface ConversationOutlineEntry {
   readonly weight: ConversationOutlineWeight;
 }
 
-/** The subset of a chat stream item this module reads. */
+/**
+ * The subset of a chat stream item this module reads: a hydrated message, or
+ * a placeholder's index row (role, id and the sealed-turn summary), which is
+ * enough for a tick and — when the turn carries `summary.headText` — a title
+ * or preview. A placeholder without a summary keeps an empty title until the
+ * stream hydrates it on hover.
+ */
 export interface ConversationOutlineSource {
   readonly type: string;
   readonly message?: SessionHistoryParsed;
+  readonly row?: TurnIndexRow;
 }
 
 const EMPTY_OUTLINE: readonly ConversationOutlineEntry[] = [];
@@ -169,19 +177,52 @@ type MessageDigest = {
  */
 const digestByMessage = new WeakMap<SessionHistoryParsed, MessageDigest>();
 
+const digestOf = (source: string | null, proseLength: number): MessageDigest => {
+  const summary = source === null ? '' : collapseWhitespace(getSearchableMarkdownText(source));
+  return {
+    title: truncateToLength(summary, OUTLINE_TITLE_MAX_LENGTH),
+    preview: truncateToLength(summary, OUTLINE_PREVIEW_MAX_LENGTH),
+    proseLength,
+  };
+};
+
 const getMessageDigest = (message: SessionHistoryParsed): MessageDigest => {
   const cached = digestByMessage.get(message);
   if (cached) return cached;
-
-  const source = firstTextOf(message.items);
-  const summary = source === null ? '' : collapseWhitespace(getSearchableMarkdownText(source));
-  const digest: MessageDigest = {
-    title: truncateToLength(summary, OUTLINE_TITLE_MAX_LENGTH),
-    preview: truncateToLength(summary, OUTLINE_PREVIEW_MAX_LENGTH),
-    proseLength: proseLengthOf(message),
-  };
+  const digest = digestOf(firstTextOf(message.items), proseLengthOf(message));
   digestByMessage.set(message, digest);
   return digest;
+};
+
+/**
+ * Keyed by index ROW, which `ConversationView` replaces only when the turn
+ * changes, so a placeholder costs one lookup per rebuild too.
+ */
+const digestByRow = new WeakMap<TurnIndexRow, MessageDigest>();
+
+const getRowDigest = (row: TurnIndexRow): MessageDigest => {
+  const cached = digestByRow.get(row);
+  if (cached) return cached;
+  const summary = row.summary;
+  const head = summary?.headText;
+  const source =
+    typeof head === 'string' && head.trim() ? head.slice(0, SUMMARY_SOURCE_WINDOW) : null;
+  const digest = digestOf(source, (summary?.textChars ?? 0) + (summary?.thoughtChars ?? 0));
+  digestByRow.set(row, digest);
+  return digest;
+};
+
+/** What one item contributes to the outline, whichever shape it arrived in. */
+const readOutlineMessage = (
+  item: ConversationOutlineSource
+): { id: string; role: string; digest: MessageDigest } | null => {
+  if (item.type === 'message' && item.message) {
+    return { id: item.message.id, role: item.message.role, digest: getMessageDigest(item.message) };
+  }
+  if (item.type === 'placeholder' && item.row) {
+    return { id: item.row.id, role: item.row.role, digest: getRowDigest(item.row) };
+  }
+  return null;
 };
 
 /**
@@ -213,10 +254,10 @@ export function buildConversationOutline(
 
   for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
     const item = items[messageIndex];
-    if (!item || item.type !== 'message' || !item.message) continue;
-    const message = item.message;
+    const message = item ? readOutlineMessage(item) : null;
+    if (!message) continue;
     const isUser = message.role === 'user';
-    const digest = getMessageDigest(message);
+    const digest = message.digest;
 
     if (isUser || openRound === undefined) {
       closeRound();

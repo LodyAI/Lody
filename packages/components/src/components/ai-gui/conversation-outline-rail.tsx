@@ -99,6 +99,11 @@ export interface ConversationOutlineRailProps {
   enableArrivalIntent?: boolean;
   /** Storybook/dev instrumentation only. The rail never persists or uploads it. */
   onArrivalIntentDebugEvent?: (event: ConversationOutlineArrivalIntentDebugEvent) => void;
+  /**
+   * The round whose hover card just opened, by index into `entries`. The
+   * stream uses it to hydrate a round whose preview is not loaded yet.
+   */
+  onHoverRound?: (index: number) => void;
   className?: string;
 }
 
@@ -259,6 +264,7 @@ export function ConversationOutlineRail({
   overlayRoot = null,
   enableArrivalIntent = false,
   onArrivalIntentDebugEvent,
+  onHoverRound,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -278,6 +284,11 @@ export function ConversationOutlineRail({
 
   const activeIndexRef = useLatestRef(activeIndex);
   const arrivalIntentDebugRef = useLatestRef(onArrivalIntentDebugEvent);
+  const onHoverRoundRef = useLatestRef(onHoverRound);
+  const hoverCardIndex = hoverCard?.index ?? -1;
+  useEffect(() => {
+    if (hoverCardIndex !== -1) onHoverRoundRef.current?.(hoverCardIndex);
+  }, [hoverCardIndex, onHoverRoundRef]);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
 

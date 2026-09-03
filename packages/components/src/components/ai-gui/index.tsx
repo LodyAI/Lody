@@ -5,11 +5,11 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type MutableRefObject,
   type ReactNode,
 } from 'react';
 import type {
-  SessionDoc,
   SessionFilePayload,
   SessionHistory,
   SessionHistoryParsed,
@@ -28,10 +28,21 @@ import {
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
 } from './view';
-import { buildChatStreamItems, type BuildChatStreamItemsCache } from './build-chat-stream-items';
+import {
+  buildChatStreamItems,
+  buildChatStreamItemsFromView,
+  type BuildChatStreamItemsCache,
+} from './build-chat-stream-items';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useConversationViewSelector } from '@/hooks/use-conversation-view-selector';
+import { useTurnRange } from '@/hooks/use-turn-range';
 import type { ConversationView } from '@/lib/conversation-view';
+import {
+  computeHydrationRange,
+  isSameTurnRange,
+  type TurnRange,
+} from '@/lib/conversation-view/hydration-range';
+import { useSessionSearch } from '@/components/sessions/session-search-context';
 import { useCloudQuery } from '@lody/platform/react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type {
@@ -39,7 +50,10 @@ import type {
   SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
 
-const emptyHistory = [] as SessionDoc['history'];
+const emptyHistory: readonly SessionHistory[] = [];
+const EMPTY_TURN_RANGE: TurnRange = { from: 0, to: 0 };
+
+const readTurnCount = (view: ConversationView): number => view.turnCount;
 
 const findLastUserTurnId = (view: ConversationView): string | null => {
   for (let index = view.turnCount - 1; index >= 0; index -= 1) {
@@ -84,13 +98,15 @@ export { MarkdownRenderer, type MarkdownRendererSize } from './markdown-renderer
 export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
-  sessionDoc: SessionDoc;
   /**
-   * Windowed history reader for `sessionDoc`'s session. Present on the
-   * ConversationView path; `null` (or omitted) on the full-Mirror rollback
-   * path, where `sessionDoc.history` is the only source.
+   * Windowed history reader for the session. The stream renders through it:
+   * placeholders from index rows, message rows for the hydrated window
+   * around the viewport. `null` is the full-Mirror rollback path, which
+   * renders `fallbackHistory` instead.
    */
-  conversationView?: ConversationView | null;
+  conversationView: ConversationView | null;
+  /** The full history array for the rollback path. Not read while a view is present. */
+  fallbackHistory?: readonly SessionHistory[];
   sessionCreatedAt?: string;
   dividerLabel?: string;
   className?: string;
@@ -174,8 +190,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     {
       sessionId,
       workspaceId,
-      sessionDoc,
-      conversationView = null,
+      conversationView,
+      fallbackHistory,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
       className,
@@ -207,14 +223,60 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     },
     ref
   ) => {
-    const sessionHistory = (sessionDoc.history as SessionHistory[]) ?? emptyHistory;
+    // The rollback array is only consulted without a view, so the bridge's
+    // lazy `history` getter is never touched on the view path.
+    const sessionHistory = conversationView ? emptyHistory : (fallbackHistory ?? emptyHistory);
     const chatStreamItemsCacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
     if (chatStreamItemsCacheRef.current === undefined) {
       chatStreamItemsCacheRef.current = getChatStreamItemsCache(sessionId);
     }
+
+    // ---- Hydration window ----------------------------------------------------
+    // The view reports which turns intersect the viewport; the stream keeps
+    // that window plus two screens on each side hydrated and retained. An
+    // active in-conversation search hydrates everything instead, because
+    // search navigation needs every matched turn's rows to exist. That is a
+    // temporary bridge until the search index reads through the view.
+    const search = useSessionSearch();
+    const searchActive = Boolean(search?.isOpen && search.query);
+    const turnCount = useConversationViewSelector(conversationView, readTurnCount, 0);
+    const [visibleTurnRange, setVisibleTurnRange] = useState<TurnRange | null>(null);
+    const hydrationRange = useMemo<TurnRange>(() => {
+      if (!conversationView) return EMPTY_TURN_RANGE;
+      if (searchActive) return { from: 0, to: turnCount };
+      return computeHydrationRange(visibleTurnRange, turnCount);
+    }, [conversationView, searchActive, turnCount, visibleTurnRange]);
+    const viewRevision = useTurnRange(conversationView, hydrationRange.from, hydrationRange.to);
+    // Hover hydration (outline previews) does not bump the view's version.
+    const [hoverHydrationRevision, setHoverHydrationRevision] = useState(0);
+    const handleVisibleTurnRangeChange = useCallback((from: number, to: number) => {
+      setVisibleTurnRange((previous) =>
+        isSameTurnRange(previous, { from, to }) ? previous : { from, to }
+      );
+    }, []);
+    const handleOutlineHoverTurn = useCallback(
+      (turnIndex: number) => {
+        if (!conversationView || conversationView.isHydrated(turnIndex)) return;
+        void conversationView.ensureRange(turnIndex, turnIndex + 1).then(() => {
+          setHoverHydrationRevision((revision) => revision + 1);
+        });
+      },
+      [conversationView]
+    );
+
     const { items, lastAssistantMessageId, lastCompletedAssistantMessageId, cache } = useMemo(
-      () => buildChatStreamItems(sessionHistory, sessionId, chatStreamItemsCacheRef.current),
-      [sessionHistory, sessionId]
+      () =>
+        conversationView
+          ? buildChatStreamItemsFromView(
+              conversationView,
+              sessionId,
+              chatStreamItemsCacheRef.current
+            )
+          : buildChatStreamItems(sessionHistory, sessionId, chatStreamItemsCacheRef.current),
+      // The revisions are the view's change signals; the builder reads the
+      // view directly.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationView, hoverHydrationRevision, sessionHistory, sessionId, viewRevision]
     );
     chatStreamItemsCacheRef.current = cache;
     useEffect(() => {
@@ -318,6 +380,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}
+        onVisibleTurnRangeChange={conversationView ? handleVisibleTurnRangeChange : undefined}
+        onOutlineHoverTurn={conversationView ? handleOutlineHoverTurn : undefined}
       />
     );
   }

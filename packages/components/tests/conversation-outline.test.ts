@@ -293,3 +293,56 @@ describe('summary stability while streaming', () => {
     expect(grown[0]?.preview).toBe('short but then longer');
   });
 });
+
+describe('buildConversationOutline with placeholders', () => {
+  const placeholder = (
+    role: 'user' | 'assistant',
+    summary?: { headText: string; textChars: number; thoughtChars?: number }
+  ): ConversationOutlineSource => {
+    nextId += 1;
+    return {
+      type: 'placeholder',
+      row: {
+        id: `row-${nextId}`,
+        role,
+        timestamp: '2026-08-19T00:00:00.000Z',
+        ...(summary
+          ? {
+              summary: {
+                itemCount: 1,
+                textChars: summary.textChars,
+                thoughtChars: summary.thoughtChars ?? 0,
+                headText: summary.headText,
+                activity: {
+                  commandCount: 0,
+                  editFileCount: 0,
+                  readFileCount: 0,
+                  searchCount: 0,
+                  failedCount: 0,
+                },
+                editedPaths: [],
+              },
+            }
+          : {}),
+      },
+    };
+  };
+
+  it('titles and previews rounds from sealed summaries and weighs them by textChars', () => {
+    const outline = buildConversationOutline([
+      placeholder('user', { headText: '# Fix the **flaky** test', textChars: 24 }),
+      placeholder('assistant', { headText: 'Looking at the test now.', textChars: 4_000 }),
+      placeholder('user'),
+      message('assistant', [text('Hydrated reply')]),
+    ]);
+    expect(outline).toHaveLength(2);
+    expect(outline[0]).toMatchObject({
+      title: 'Fix the flaky test',
+      preview: 'Looking at the test now.',
+      weight: 3,
+      startsWithAgent: false,
+    });
+    // A placeholder without a summary keeps an empty title until hydrated.
+    expect(outline[1]).toMatchObject({ title: '', preview: 'Hydrated reply' });
+  });
+});

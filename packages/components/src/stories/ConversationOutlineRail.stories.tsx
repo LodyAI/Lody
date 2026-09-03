@@ -7,13 +7,27 @@
  * `@container` box wide enough to satisfy that query — a narrower frame renders
  * nothing, which is the production behaviour, not a broken story.
  */
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import { LoroDoc } from 'loro-crdt';
+import type { SessionHistoryInput, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { ConversationOutlineRail } from '@/components/ai-gui/conversation-outline-rail';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import { buildChatStreamItemsFromView } from '@/components/ai-gui/build-chat-stream-items';
+import { useConversationViewSelector } from '@/hooks/use-conversation-view-selector';
+import { useTurnRange } from '@/hooks/use-turn-range';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
+import {
+  appendHistoryEntry,
+  createConversationViewFromDoc,
+  type ConversationView,
+} from '@/lib/conversation-view';
+import {
+  computeHydrationRange,
+  isSameTurnRange,
+  type TurnRange,
+} from '@/lib/conversation-view/hydration-range';
 
 const meta = {
   title: 'Sessions/ConversationOutlineRail',
@@ -354,4 +368,148 @@ export const ExtremeConversation: Story = {
       />
     </div>
   ),
+};
+
+/**
+ * 3,000 synthetic turns through a real Loro doc and `ConversationView`: the
+ * production read path minus the workspace runtime. Every third assistant
+ * turn is sealed with a `summary`, so its placeholder and outline entry come
+ * from index rows; the rest hydrate when scrolled into the window, on an
+ * outline hover, or when a search is active. Exercises far scrolling over
+ * placeholders, outline jumps into never-measured territory, and expanding a
+ * folded turn after it hydrates.
+ */
+const EXTREME_VIEW_TURNS = 3_000;
+const extremeViewSessionId = 'extreme-view' as SessionId;
+
+const buildExtremeViewDoc = (): LoroDoc => {
+  const doc = new LoroDoc();
+  for (let index = 0; index < EXTREME_VIEW_TURNS; index += 1) {
+    const round = Math.floor(index / 2);
+    const historyEntry: SessionHistoryInput =
+      index % 2 === 0
+        ? {
+            id: `xv-user-${round}`,
+            role: 'user',
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, round % 60)).toISOString(),
+            status: 'seen',
+            read: true,
+            finished: true,
+            fileDiff: [],
+            items: [{ type: 'text', text: extremeUserText(round) }] as never,
+            inputConfig: {
+              prompt: `Round ${round + 1}`,
+              cliType: 'builtin',
+              agentType: 'claude',
+            } as never,
+          }
+        : {
+            id: `xv-assistant-${round}`,
+            role: 'assistant',
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, round % 60, 30)).toISOString(),
+            finished: true,
+            endedAt: Date.UTC(2026, 0, 1, 0, round % 60, 45),
+            fileDiff: [],
+            items: [
+              { type: 'thought', text: `Thinking about round ${round + 1}.` },
+              {
+                type: 'tool_call',
+                toolCallId: `xv-tool-${round}`,
+                title: 'Run tests',
+                kind: 'execute',
+                status: 'completed',
+                content: [{ type: 'terminal_command', command: 'pnpm test', cwd: '/repo' }],
+              },
+              {
+                type: 'text',
+                text: `Answer for round ${round + 1}.\n\n${paragraphs(1 + (round % 4), round)}`,
+              },
+            ] as never,
+            ...(round % 3 === 0
+              ? {
+                  summary: {
+                    itemCount: 3,
+                    textChars: 200 + (round % 4) * 400,
+                    thoughtChars: 30,
+                    headText: `Answer for round ${round + 1}.`,
+                    activity: {
+                      commandCount: 1,
+                      editFileCount: round % 2,
+                      readFileCount: 0,
+                      searchCount: 0,
+                      failedCount: 0,
+                    },
+                    editedPaths: [],
+                  },
+                }
+              : {}),
+          };
+    appendHistoryEntry(doc, historyEntry);
+  }
+  return doc;
+};
+
+let extremeViewDoc: LoroDoc | null = null;
+const getExtremeView = (): ConversationView => {
+  extremeViewDoc ??= buildExtremeViewDoc();
+  return createConversationViewFromDoc(extremeViewDoc, { sessionId: extremeViewSessionId });
+};
+
+const readTurnCount = (view: ConversationView): number => view.turnCount;
+
+function ExtremeConversationViewFrame() {
+  const view = useMemo(() => getExtremeView(), []);
+  const turnCount = useConversationViewSelector(view, readTurnCount, 0);
+  const [visibleRange, setVisibleRange] = useState<TurnRange | null>(null);
+  const hydrationRange = useMemo(
+    () => computeHydrationRange(visibleRange, turnCount),
+    [turnCount, visibleRange]
+  );
+  const revision = useTurnRange(view, hydrationRange.from, hydrationRange.to);
+  const [hoverRevision, setHoverRevision] = useState(0);
+  const { items, lastAssistantMessageId, lastCompletedAssistantMessageId } = useMemo(
+    () => buildChatStreamItemsFromView(view, extremeViewSessionId),
+    // Revisions are the view's change signals.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, revision, hoverRevision]
+  );
+  const handleVisibleTurnRangeChange = useCallback((from: number, to: number) => {
+    setVisibleRange((previous) =>
+      isSameTurnRange(previous, { from, to }) ? previous : { from, to }
+    );
+  }, []);
+  const handleOutlineHoverTurn = useCallback(
+    (turnIndex: number) => {
+      if (view.isHydrated(turnIndex)) return;
+      void view.ensureRange(turnIndex, turnIndex + 1).then(() => setHoverRevision((r) => r + 1));
+    },
+    [view]
+  );
+  const hydratedCount = items.filter((item) => item.type === 'message').length;
+  return (
+    <div className="flex h-[720px] w-full flex-col bg-background">
+      <div className="border-b px-3 py-1 font-mono text-xs text-muted-foreground">
+        turns {turnCount} · hydrated {hydratedCount} · window {hydrationRange.from}–
+        {hydrationRange.to}
+      </div>
+      <div className="min-h-0 flex-1">
+        <SessionChatStreamView
+          items={items}
+          sessionId={extremeViewSessionId}
+          className="h-full"
+          renderMessageRow={renderMessageRow}
+          showScrollToLatest={false}
+          lastAssistantMessageId={lastAssistantMessageId}
+          lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+          onVisibleTurnRangeChange={handleVisibleTurnRangeChange}
+          onOutlineHoverTurn={handleOutlineHoverTurn}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const ExtremeConversationView: Story = {
+  args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
+  render: () => <ExtremeConversationViewFrame />,
 };

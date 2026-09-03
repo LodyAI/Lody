@@ -1,5 +1,6 @@
 import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
-import type { ChatStreamItem } from './view';
+import type { ConversationView, TurnIndexRow } from '@/lib/conversation-view';
+import type { ChatStreamItem, SessionMessageItem, TurnPlaceholderItem } from './view';
 import { normalizeMessageContent } from './message-content-guards';
 
 export type BuildChatStreamItemsCache = ReadonlyMap<string, CachedChatStreamMessageItem>;
@@ -12,7 +13,7 @@ export type BuildChatStreamItemsResult = {
 };
 
 type CachedChatStreamMessageItem = {
-  readonly item: ChatStreamItem & { type: 'message' };
+  readonly item: SessionMessageItem;
   readonly rawEntry: SessionHistory;
   readonly rawAcpTurnId: unknown;
   readonly rawItems: unknown;
@@ -42,16 +43,22 @@ const isEmptyAssistantMessage = (message: SessionHistoryParsed): boolean =>
   !message.items.length &&
   !(message.plan && message.plan.length > 0);
 
+/** The same rule read from an index row, for a turn that is not hydrated. */
+const isEmptyAssistantRow = (row: TurnIndexRow): boolean =>
+  row.role === 'assistant' && (row.itemCount ?? 0) === 0 && (row.planCount ?? 0) === 0;
+
 function canReuseCachedMessageItem(
   cached: CachedChatStreamMessageItem | undefined,
   entry: SessionHistory,
   sessionId: SessionId,
+  turnIndex: number,
   /** Resolved config we would attach to this message (user's own or inherited). */
   expectedInputConfig: SessionHistoryParsed['inputConfig']
 ): cached is CachedChatStreamMessageItem {
   return (
     cached !== undefined &&
     cached.item.sessionId === sessionId &&
+    cached.item.turnIndex === turnIndex &&
     cached.rawEntry === entry &&
     cached.rawAcpTurnId === entry.acpTurnId &&
     cached.rawItems === entry.items &&
@@ -73,10 +80,11 @@ function canReuseCachedMessageItem(
 function createCachedMessageItem(
   entry: SessionHistory,
   sessionId: SessionId,
+  turnIndex: number,
   message: SessionHistoryParsed
 ): CachedChatStreamMessageItem {
   return {
-    item: { type: 'message', sessionId, message },
+    item: { type: 'message', sessionId, turnIndex, message },
     rawEntry: entry,
     rawAcpTurnId: entry.acpTurnId,
     rawItems: entry.items,
@@ -87,6 +95,125 @@ function createCachedMessageItem(
     rawTurnInputConfig: message.inputConfig,
   };
 }
+
+/**
+ * Placeholders are keyed by index ROW: `ConversationView` hands out the same
+ * row object until the turn changes, so an unchanged placeholder keeps its
+ * identity across rebuilds and the memoized row components stay quiet.
+ */
+const placeholderByRow = new WeakMap<TurnIndexRow, TurnPlaceholderItem>();
+
+const placeholderItem = (
+  row: TurnIndexRow,
+  sessionId: SessionId,
+  turnIndex: number
+): TurnPlaceholderItem => {
+  const cached = placeholderByRow.get(row);
+  if (cached && cached.sessionId === sessionId && cached.turnIndex === turnIndex) return cached;
+  const item: TurnPlaceholderItem = { type: 'placeholder', sessionId, turnIndex, row };
+  placeholderByRow.set(row, item);
+  return item;
+};
+
+type Builder = {
+  items: ChatStreamItem[];
+  seenIds: Set<string>;
+  cache: Map<string, CachedChatStreamMessageItem>;
+  previousCache: BuildChatStreamItemsCache | undefined;
+  sessionId: SessionId;
+  lastAssistantMessageId: string | null;
+  lastCompletedAssistantMessageId: string | null;
+  /** Config from the latest user turn — attached to the following assistant
+   *  so the model meta row can show the full turn run-config on demand. */
+  lastUserInputConfig: SessionHistoryParsed['inputConfig'] | undefined;
+};
+
+const createBuilder = (
+  sessionId: SessionId,
+  previousCache: BuildChatStreamItemsCache | undefined
+): Builder => ({
+  items: [],
+  seenIds: new Set(),
+  cache: new Map(),
+  previousCache,
+  sessionId,
+  lastAssistantMessageId: null,
+  lastCompletedAssistantMessageId: null,
+  lastUserInputConfig: undefined,
+});
+
+const noteAssistant = (builder: Builder, id: string, finished: boolean | undefined): void => {
+  builder.lastAssistantMessageId = id;
+  if (finished === true) builder.lastCompletedAssistantMessageId = id;
+};
+
+const pushHydratedEntry = (builder: Builder, entry: SessionHistory, turnIndex: number): void => {
+  if (entry.role === 'user' && entry.inputConfig) {
+    builder.lastUserInputConfig = entry.inputConfig;
+  }
+
+  const expectedInputConfig =
+    entry.role === 'user'
+      ? entry.inputConfig
+      : entry.role === 'assistant'
+        ? (entry.inputConfig ?? builder.lastUserInputConfig)
+        : entry.inputConfig;
+
+  const cached = builder.previousCache?.get(entry.id);
+  if (canReuseCachedMessageItem(cached, entry, builder.sessionId, turnIndex, expectedInputConfig)) {
+    if (builder.seenIds.has(entry.id)) return;
+    builder.seenIds.add(entry.id);
+    if (entry.role === 'assistant') noteAssistant(builder, entry.id, entry.finished);
+    builder.cache.set(entry.id, cached);
+    builder.items.push(cached.item);
+    return;
+  }
+
+  const message: SessionHistoryParsed = {
+    id: entry.id,
+    items: parseHistoryItemsForRender(entry.items),
+    role: entry.role,
+    status: entry.status,
+    read: entry.read ?? false,
+    timestamp: entry.timestamp,
+    endedAt: entry.endedAt,
+    userId: entry.userId,
+    acpTurnId: entry.acpTurnId,
+    modelInfo: entry.modelInfo,
+    fileDiff: entry.fileDiff,
+    finished: entry.finished,
+    plan: entry.plan,
+    // User turns keep their own config; assistant turns inherit the
+    // preceding user's so the header can list mode / effort / plan / fast.
+    inputConfig: expectedInputConfig,
+  };
+
+  if (isEmptyAssistantMessage(message)) return;
+  if (builder.seenIds.has(message.id)) return;
+  builder.seenIds.add(message.id);
+
+  const cachedMessageItem = createCachedMessageItem(entry, builder.sessionId, turnIndex, message);
+  builder.cache.set(message.id, cachedMessageItem);
+  if (message.role === 'assistant') noteAssistant(builder, message.id, message.finished);
+  builder.items.push(cachedMessageItem.item);
+};
+
+const finish = (builder: Builder): BuildChatStreamItemsResult => {
+  if (!builder.items.length) {
+    return {
+      items: [EMPTY_CHAT_STREAM_ITEM],
+      lastAssistantMessageId: null,
+      lastCompletedAssistantMessageId: null,
+      cache: builder.cache,
+    };
+  }
+  return {
+    items: builder.items,
+    lastAssistantMessageId: builder.lastAssistantMessageId,
+    lastCompletedAssistantMessageId: builder.lastCompletedAssistantMessageId,
+    cache: builder.cache,
+  };
+};
 
 /**
  * Build the Virtua VList item list from raw session history.
@@ -106,89 +233,52 @@ function createCachedMessageItem(
  *
  * `lastAssistantMessageId` is computed over the normalized list so context-window
  * usage / quick actions attach to the last *rendered* assistant message.
+ *
+ * This is the rollback path (no `ConversationView`); `turnIndex` is the
+ * position in `history`.
  */
 export function buildChatStreamItems(
   history: readonly SessionHistory[],
   sessionId: SessionId,
   previousCache?: BuildChatStreamItemsCache
 ): BuildChatStreamItemsResult {
-  const items: ChatStreamItem[] = [];
-  const seenIds = new Set<string>();
-  const cache = new Map<string, CachedChatStreamMessageItem>();
-  let lastAssistantMessageId: string | null = null;
-  let lastCompletedAssistantMessageId: string | null = null;
-  /** Config from the latest user turn — attached to the following assistant
-   *  so the model meta row can show the full turn run-config on demand. */
-  let lastUserInputConfig: SessionHistoryParsed['inputConfig'] | undefined;
+  const builder = createBuilder(sessionId, previousCache);
+  for (let turnIndex = 0; turnIndex < history.length; turnIndex += 1) {
+    const entry = history[turnIndex];
+    if (entry) pushHydratedEntry(builder, entry, turnIndex);
+  }
+  return finish(builder);
+}
 
-  for (const entry of history) {
-    if (entry.role === 'user' && entry.inputConfig) {
-      lastUserInputConfig = entry.inputConfig;
-    }
-
-    const expectedInputConfig =
-      entry.role === 'user'
-        ? entry.inputConfig
-        : entry.role === 'assistant'
-          ? (entry.inputConfig ?? lastUserInputConfig)
-          : entry.inputConfig;
-
-    const cached = previousCache?.get(entry.id);
-    if (canReuseCachedMessageItem(cached, entry, sessionId, expectedInputConfig)) {
-      if (seenIds.has(entry.id)) continue;
-      seenIds.add(entry.id);
-      if (entry.role === 'assistant') {
-        lastAssistantMessageId = entry.id;
-        if (entry.finished === true) {
-          lastCompletedAssistantMessageId = entry.id;
-        }
-      }
-      cache.set(entry.id, cached);
-      items.push(cached.item);
+/**
+ * The same list read through a `ConversationView`: one item per turn, a
+ * full message item where the turn is hydrated and a placeholder built from
+ * the index row everywhere else. Both carry the turn's index and share the
+ * entry id as their Virtua key, so hydration swaps content under a stable
+ * key. The normalizations above apply to placeholders from their index row
+ * (`itemCount` / `planCount`), and the last-assistant ids come from index
+ * rows too, so they never wait on hydration.
+ *
+ * O(turnCount) in cheap work per rebuild; the only `toJSON` cost is what the
+ * caller already hydrated.
+ */
+export function buildChatStreamItemsFromView(
+  view: ConversationView,
+  sessionId: SessionId,
+  previousCache?: BuildChatStreamItemsCache
+): BuildChatStreamItemsResult {
+  const builder = createBuilder(sessionId, previousCache);
+  for (let turnIndex = 0; turnIndex < view.turnCount; turnIndex += 1) {
+    const entry = view.turn(turnIndex);
+    if (entry) {
+      pushHydratedEntry(builder, entry, turnIndex);
       continue;
     }
-
-    const message: SessionHistoryParsed = {
-      id: entry.id,
-      items: parseHistoryItemsForRender(entry.items),
-      role: entry.role,
-      status: entry.status,
-      read: entry.read ?? false,
-      timestamp: entry.timestamp,
-      endedAt: entry.endedAt,
-      userId: entry.userId,
-      acpTurnId: entry.acpTurnId,
-      modelInfo: entry.modelInfo,
-      fileDiff: entry.fileDiff,
-      finished: entry.finished,
-      plan: entry.plan,
-      // User turns keep their own config; assistant turns inherit the
-      // preceding user's so the header can list mode / effort / plan / fast.
-      inputConfig: expectedInputConfig,
-    };
-
-    if (isEmptyAssistantMessage(message)) continue;
-    if (seenIds.has(message.id)) continue;
-    seenIds.add(message.id);
-
-    const cachedMessageItem = createCachedMessageItem(entry, sessionId, message);
-    cache.set(message.id, cachedMessageItem);
-    if (message.role === 'assistant') {
-      lastAssistantMessageId = message.id;
-      if (message.finished === true) {
-        lastCompletedAssistantMessageId = message.id;
-      }
-    }
-    items.push(cachedMessageItem.item);
+    const row = view.index(turnIndex);
+    if (!row?.id || isEmptyAssistantRow(row) || builder.seenIds.has(row.id)) continue;
+    builder.seenIds.add(row.id);
+    if (row.role === 'assistant') noteAssistant(builder, row.id, row.finished);
+    builder.items.push(placeholderItem(row, sessionId, turnIndex));
   }
-
-  if (!items.length) {
-    return {
-      items: [EMPTY_CHAT_STREAM_ITEM],
-      lastAssistantMessageId: null,
-      lastCompletedAssistantMessageId: null,
-      cache,
-    };
-  }
-  return { items, lastAssistantMessageId, lastCompletedAssistantMessageId, cache };
+  return finish(builder);
 }

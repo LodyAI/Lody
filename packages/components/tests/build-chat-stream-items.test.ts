@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionHistory, SessionId } from '@lody/shared';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { LoroDoc } from 'loro-crdt';
+import type { SessionHistory, SessionHistoryInput, SessionId } from '@lody/shared';
+import {
+  buildChatStreamItems,
+  buildChatStreamItemsFromView,
+} from '../src/components/ai-gui/build-chat-stream-items';
+import { appendHistoryEntry, createConversationViewFromDoc } from '../src/lib/conversation-view';
 
 const sessionId = 'session-test' as SessionId;
 
@@ -194,5 +199,100 @@ describe('buildChatStreamItems', () => {
 
     expect(renderedIds(second.items)).toEqual(['assistant-1', 'assistant-2']);
     expect(second.lastAssistantMessageId).toBe('assistant-2');
+  });
+});
+
+describe('buildChatStreamItemsFromView', () => {
+  const viewSessionId = 'session-view' as SessionId;
+  const turn = (index: number): SessionHistoryInput =>
+    index % 2 === 0
+      ? {
+          id: `u${index}`,
+          role: 'user',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          status: 'seen',
+          read: true,
+          finished: true,
+          fileDiff: [],
+          items: [{ type: 'text', text: `prompt ${index}` }] as never,
+          inputConfig: {
+            prompt: `prompt ${index}`,
+            cliType: 'builtin',
+            agentType: 'claude',
+          } as never,
+        }
+      : {
+          id: `a${index}`,
+          role: 'assistant',
+          timestamp: '2026-01-01T00:01:00.000Z',
+          finished: index !== 9,
+          fileDiff: [],
+          items: index === 5 ? [] : ([{ type: 'text', text: `answer ${index}` }] as never),
+        };
+  const docWithTurns = (count: number): LoroDoc => {
+    const doc = new LoroDoc();
+    for (let index = 0; index < count; index += 1) appendHistoryEntry(doc, turn(index));
+    return doc;
+  };
+
+  it('renders placeholders outside the hydrated window under the entry id, and messages inside', async () => {
+    const doc = docWithTurns(12);
+    const view = createConversationViewFromDoc(doc, { sessionId: viewSessionId, tailKeep: 2 });
+    const first = buildChatStreamItemsFromView(view, viewSessionId);
+
+    // a5 is an empty assistant turn: dropped from its index row, as the array path drops it.
+    expect(
+      first.items.map((item) =>
+        item.type === 'placeholder'
+          ? `p:${item.row.id}`
+          : item.type === 'message'
+            ? `m:${item.message.id}`
+            : 'empty'
+      )
+    ).toEqual([
+      'p:u0',
+      'p:a1',
+      'p:u2',
+      'p:a3',
+      'p:u4',
+      'p:u6',
+      'p:a7',
+      'p:u8',
+      'p:a9',
+      'm:u10',
+      'm:a11',
+    ]);
+    expect(first.items.map((item) => (item.type === 'empty' ? -1 : item.turnIndex))).toEqual([
+      0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11,
+    ]);
+    // Last-assistant ids come from index rows, so they do not wait on hydration.
+    expect(first.lastAssistantMessageId).toBe('a11');
+    expect(first.lastCompletedAssistantMessageId).toBe('a11');
+
+    await view.ensureRange(2, 4);
+    const second = buildChatStreamItemsFromView(view, viewSessionId, first.cache);
+    expect(second.items[2]).toMatchObject({ type: 'message', message: { id: 'u2' }, turnIndex: 2 });
+    expect(second.items[3]).toMatchObject({ type: 'message', message: { id: 'a3' }, turnIndex: 3 });
+    // Untouched placeholders and hydrated tail messages keep their identity.
+    expect(second.items[0]).toBe(first.items[0]);
+    expect(second.items[9]).toBe(first.items[9]);
+    expect(second.items[10]).toBe(first.items[10]);
+    view.dispose();
+  });
+
+  it('tracks the open tail turn and index-only completion state', () => {
+    const doc = docWithTurns(10);
+    const view = createConversationViewFromDoc(doc, { sessionId: viewSessionId, tailKeep: 0 });
+    const result = buildChatStreamItemsFromView(view, viewSessionId);
+    expect(result.items.every((item) => item.type === 'placeholder')).toBe(true);
+    expect(result.lastAssistantMessageId).toBe('a9');
+    expect(result.lastCompletedAssistantMessageId).toBe('a7');
+    view.dispose();
+  });
+
+  it('gives the array path the same turn indexes', () => {
+    const history = [0, 1, 2].map((index) => turn(index)) as unknown as SessionHistory[];
+    const { items } = buildChatStreamItems(history, viewSessionId);
+    expect(items.map((item) => (item.type === 'message' ? item.turnIndex : -1))).toEqual([0, 1, 2]);
   });
 });

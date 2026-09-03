@@ -8,6 +8,38 @@
 | Turns   | `assistant-turn-render-blocks.ts`        | Activity groups and foldable segments. |
 | Outline | `conversation-outline-*`                 | Round ticks and navigation.            |
 
+## History Source
+
+- The renderer reads history ONLY through `ConversationView`
+  (`lib/conversation-view`): `SessionChatStream` takes `conversationView`
+  and, on the full-Mirror rollback path, the owner's explicit
+  `fallbackHistory` array. Nothing under this directory reads
+  `sessionDoc.history` / `doc.history`; on the view path that getter
+  materializes the whole transcript. Pinned by
+  `tests/ai-gui-reads-history-through-view.test.ts`.
+- `buildChatStreamItemsFromView` emits one item per turn: a message item where
+  the turn is hydrated, a `placeholder` item (index row) elsewhere. Both carry
+  `turnIndex`, and a placeholder uses the ENTRY ID as its Virtua key so
+  hydration swaps content under a stable key. `TurnPlaceholderRow` renders
+  role, time, `summary.headText` and activity counts when present; its
+  `minHeight` is `estimateTurnHeightPx` (summary `textChars`/activity, else
+  `itemCount`, else a role constant), which Virtua then measures as real.
+- The hydration window is `computeHydrationRange` over the visible turn
+  range the view reports (`onVisibleTurnRangeChange`, from Virtua's offset
+  math after the initial scroll restore): the viewport plus two spans each
+  side, snapped to `HYDRATION_RANGE_QUANTUM`; `useTurnRange` retains and
+  hydrates it and re-renders per frame of view changes. The tail stays
+  hydrated by the view itself; `lastAssistantMessageId` /
+  `lastCompletedAssistantMessageId` come from index rows.
+- Outline entries come from index rows for placeholders (`summary.headText`
+  as title/preview, `textChars + thoughtChars` as weight); a round without
+  a summary shows the untitled fallback until the rail's `onHoverRound`
+  hydrates it (`onOutlineHoverTurn`). An active in-conversation search
+  hydrates every turn so matched rows exist — a temporary bridge until the
+  search index reads through the view.
+- `SessionChatStreamHandle.scrollToIndex` takes a TURN index; rows resolve
+  through `row.turnIndex`, never the item position.
+
 ## Stream And Search
 
 - In-conversation search indexes prose only: user/assistant text, thinking, and
@@ -21,9 +53,10 @@
   history indexes must translate to the matching virtual child row.
 - Keep Virtua `shift={false}`; stale cumulative heights otherwise overlap rows.
   `bufferSize` trades fast-scroll blanks against retaining resizing rows.
-- `buildChatStreamItems()` drops empty assistant entries (a `null` render cannot
-  be measured) and de-duplicates history ids (duplicate Virtua keys desync the
-  list). See `tests/build-chat-stream-items.test.ts`.
+- `buildChatStreamItems()` / `buildChatStreamItemsFromView()` drop empty
+  assistant entries (a `null` render cannot be measured; placeholders decide
+  from `itemCount`/`planCount`) and de-duplicate history ids (duplicate Virtua
+  keys desync the list). See `tests/build-chat-stream-items.test.ts`.
 - `leadingContent` is a real first row. Include it in sticky counts and every
   scroll target; never overlay or persist it. A `session_create` completion
   renders one card per successful target and reads only that target's title.
@@ -100,7 +133,8 @@ work) and a hover preview.
   `OUTLINE_ANCHOR_TOLERANCE_PX` greater than jump tolerance.
 - Follow-output suppression is owned by `pendingOutlineJumpRef`, not a render;
   React may skip the commit when clicking the already-active round.
-- Coverage: `tests/conversation-outline*.test.ts` and `ExtremeConversation`.
+- Coverage: `tests/conversation-outline*.test.ts`, `ExtremeConversation` and
+  the view-backed `ExtremeConversationView` (3,000 turns through a Loro doc).
 
 ## Content Contracts
 
