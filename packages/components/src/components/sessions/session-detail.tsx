@@ -1894,6 +1894,7 @@ const SessionDetail = ({
       modelId: null,
     });
     setDraftTabs((prev) => [...prev, draft]);
+    setTabOrderState((prev) => (prev.includes(draft.id) ? prev : [...prev, draft.id]));
     if (isMobile) {
       setActiveViewerTabId(null);
     }
