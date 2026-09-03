@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   startLocalAcpAgent: vi.fn(),
   shutdownLocalAcpAgent: vi.fn(async () => {}),
   probeBuiltinAuthentication: vi.fn(),
+  fetchCursorModelCatalog: vi.fn(),
 }));
 
 vi.mock('./acp-runner', () => ({
@@ -16,6 +17,14 @@ vi.mock('./acp-runner', () => ({
 vi.mock('./acp-authentication', () => ({
   probeBuiltinAuthentication: mocks.probeBuiltinAuthentication,
 }));
+
+vi.mock('./cursor-acp', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./cursor-acp')>();
+  return {
+    ...actual,
+    fetchCursorModelCatalog: mocks.fetchCursorModelCatalog,
+  };
+});
 
 import { fetchAcpCapabilities } from './acp-capabilities';
 import { AcpAuthenticationRequiredError } from './agent-client';
@@ -72,6 +81,7 @@ describe('fetchAcpCapabilities', () => {
     vi.clearAllMocks();
     mocks.probeBuiltinAuthentication.mockResolvedValue({ status: 'unknown' });
     mocks.startLocalAcpAgent.mockImplementation(async () => createSuccessfulStartupResult());
+    mocks.fetchCursorModelCatalog.mockResolvedValue(undefined);
   });
 
   it('defers builtin Codex authentication to ACP session creation', async () => {
@@ -359,5 +369,46 @@ describe('fetchAcpCapabilities', () => {
     const result = await fetchAcpCapabilities('registry', 'filter-agent', createSilentLogger());
 
     expect(result.configOptions).toBeUndefined();
+  });
+
+  it('attaches the Cursor model catalog for a registry Cursor probe', async () => {
+    const configOptionsByModel = {
+      'model-full': [
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          type: 'select' as const,
+          currentValue: 'true',
+          options: [],
+        },
+      ],
+    };
+    mocks.fetchCursorModelCatalog.mockResolvedValue(configOptionsByModel);
+
+    const result = await fetchAcpCapabilities('registry', 'cursor', createSilentLogger());
+
+    expect(result.configOptionsByModel).toEqual(configOptionsByModel);
+    expect(mocks.fetchCursorModelCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch a model catalog for custom or builtin probes', async () => {
+    const customResult = await fetchAcpCapabilities('custom', 'cursor', createSilentLogger());
+    const builtinResult = await fetchAcpCapabilities('builtin', 'claude', createSilentLogger());
+
+    expect(customResult.configOptionsByModel).toBeUndefined();
+    expect(builtinResult.configOptionsByModel).toBeUndefined();
+    expect(mocks.fetchCursorModelCatalog).not.toHaveBeenCalled();
+  });
+
+  it('shuts down the temp agent when the Cursor catalog fetch is incomplete', async () => {
+    const incomplete = new Error(
+      '[ACP_CAPABILITIES_INCOMPLETE] cursor/list_available_models failed: boom'
+    );
+    mocks.fetchCursorModelCatalog.mockRejectedValue(incomplete);
+
+    await expect(fetchAcpCapabilities('registry', 'cursor', createSilentLogger())).rejects.toBe(
+      incomplete
+    );
+    expect(mocks.shutdownLocalAcpAgent).toHaveBeenCalledTimes(1);
   });
 });

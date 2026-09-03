@@ -77,6 +77,7 @@ import {
   parseLodyExtensionMessage,
   parseRateLimitsSnapshot,
 } from './lody-acp-extension';
+import { isRegistryCursorAgent } from './cursor-acp';
 
 /**
  * Checks if an error is a transport-related error that may be transient.
@@ -213,7 +214,7 @@ function isAcpInvalidRequestError(error: unknown): boolean {
   );
 }
 
-function isAcpMethodNotFoundError(error: unknown): boolean {
+export function isAcpMethodNotFoundError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -1384,6 +1385,40 @@ export class AgentClient implements acp.Client {
     return {};
   }
 
+  async requestExtMethod(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { signal?: AbortSignal } = {}
+  ): Promise<Record<string, unknown>> {
+    const connection = this.connection;
+    if (!connection) {
+      throw new Error('ACP session is not connected');
+    }
+    options.signal?.throwIfAborted();
+    const request = connection.request<Record<string, unknown>, Record<string, unknown>>(
+      method,
+      params
+    );
+    const signal = options.signal;
+    if (!signal) {
+      return request;
+    }
+    let onAbort: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      onAbort = () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      signal.addEventListener('abort', onAbort);
+    });
+    try {
+      return await withAbort(request, abortPromise);
+    } finally {
+      if (onAbort) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    }
+  }
+
   async extNotification?(method: string, params: Record<string, unknown>): Promise<void> {
     try {
       await this.handleExtensionMessage(method, params);
@@ -1750,6 +1785,12 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
+              ...(isRegistryCursorAgent({
+                cliType: this.options.agentConfig?.cliType,
+                agentType: this.options.agentConfig?.agentType,
+              })
+                ? { _meta: { parameterizedModelPicker: true } }
+                : {}),
             },
           }),
           startupAbort
