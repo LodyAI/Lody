@@ -97,12 +97,12 @@ the overlay, alignment lines and spacing diagnostics; dev only.
 
 - Explicit control boxes: repeated slots share an X line across rows.
 - A Y rail's row is GEOMETRIC: `assignGeometricRows` puts an extent on the line whose MEDIAN
-  band it overlaps by half — to that band, never neighbour to neighbour, or a ladder of
-  half-overlaps chains two lines of different heights into one, as chaining intermediate
-  coordinates would merge two indentation levels. The DOM row is a PRIOR setting the EVIDENCE
-  BAR, never eligibility, which as a gate hid every cross-structural line by construction.
-  An atom no row accepted is measured on Y under its own row id, or the DOM would still gate
-  a layer earlier; alone in that row, it can only reach the cross-family bar.
+  band it overlaps by half OF BOTH. To that band, never neighbour to neighbour, or half-overlaps
+  chain two lines of different heights into one, as chaining intermediate X coordinates would
+  merge indentation levels. Of BOTH, or an extent far taller covers the band whole while
+  sitting off its line — a 44px heading joined a 17px row that way. The DOM row is a PRIOR
+  setting the EVIDENCE BAR, never eligibility; as a gate it hid every cross-structural line by
+  construction. An atom no row accepted is measured on Y under its own row id.
 - Cross-font rows compare ink centres — a cap-height band from a fixed reference glyph,
   transformed SVG path bounds, a painted CSS shape's box; baselines compare text only
   ([tests/e2e/support](../../tests/e2e/support/AGENTS.md)). The overlay and the capture take
