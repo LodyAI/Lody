@@ -251,12 +251,21 @@ function MarkdownExternalLink({
 
 const AUTOLINK_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/giu;
 
+// Both autolinkers end a bare URL at whitespace, but CJK prose is written
+// without one, so `见 https://example.com/a。然后` swallows the rest of the
+// sentence into the destination. Non-ASCII punctuation and separators
+// (，。、）「」…　) never appear unencoded in a URL, so end the URL there.
+// Non-ASCII letters still may (`/wiki/中文`), and symbols are left alone
+// because they are not Markdown punctuation for strong-closer purposes.
+const NON_ASCII_URL_BOUNDARY = /(?!\p{ASCII})[\p{P}\p{Z}]/u;
+
 const countChar = (value: string, char: string) =>
   Array.from(value).reduce((count, current) => count + (current === char ? 1 : 0), 0);
 
 const splitAutolinkTrailing = (value: string) => {
-  let url = value;
-  let trailing = '';
+  const boundary = value.search(NON_ASCII_URL_BOUNDARY);
+  let url = boundary >= 0 ? value.slice(0, boundary) : value;
+  let trailing = boundary >= 0 ? value.slice(boundary) : '';
 
   while (url.length > 0) {
     const last = url[url.length - 1];
@@ -266,7 +275,7 @@ const splitAutolinkTrailing = (value: string) => {
     if (last === ']' && countChar(url, ']') <= countChar(url, '[')) break;
     if (last === '}' && countChar(url, '}') <= countChar(url, '{')) break;
 
-    if (!/[\]})"'.,:;!?，。！？；：”’»›]+/u.test(last)) break;
+    if (!/[\]})"'.,:;!?]/u.test(last)) break;
 
     trailing = `${last}${trailing}`;
     url = url.slice(0, -1);
@@ -394,6 +403,20 @@ const isLiteralGfmAutolink = (source: string, link: MdastNode, linkText: MdastNo
   );
 };
 
+// The destination is the normalized form of the link text, so a tail cut from
+// the text may appear percent-encoded in the destination. Refuse the repair
+// when neither form matches rather than guess at a truncation point.
+const truncateAutolinkUrl = (url: string, tail: string) => {
+  if (url.endsWith(tail)) return url.slice(0, -tail.length);
+
+  const encodedTail = encodeURI(tail);
+  if (encodedTail !== tail && url.endsWith(encodedTail)) {
+    return url.slice(0, -encodedTail.length);
+  }
+
+  return undefined;
+};
+
 // GFM can consume a closing strong delimiter and the following inline markup
 // into an autolink. Repair that AST shape after GFM by truncating the already
 // normalized destination, while keeping ordinary URL and email autolinks.
@@ -438,7 +461,6 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
 
     const suffix = linkText.value.slice(textCloser + 2);
     const suffixNodes = suffix ? parseInlineSuffix(suffix) : [];
-    if (!suffixNodes.some((suffixNode) => suffixNode.type !== 'text')) return undefined;
 
     return {
       href: link.url.slice(0, urlCloser),
@@ -500,8 +522,40 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     return { nodes: repaired, consumedSiblings: 1 };
   };
 
+  // Runs before the bold repair. Every boundary character is Markdown
+  // punctuation or whitespace, so a `**` that becomes text-final here was
+  // already a valid strong closer in the source.
+  const trimNonAsciiAutolinkTail = (
+    child: MdastNode,
+    source: string
+  ): MdastChildReplacement | undefined => {
+    if (child.type !== 'link' || typeof child.url !== 'string') return undefined;
+    if (child.children?.length !== 1) return undefined;
+
+    const linkText = child.children[0];
+    if (linkText?.type !== 'text' || typeof linkText.value !== 'string') return undefined;
+    if (!isLiteralGfmAutolink(source, child, linkText)) return undefined;
+
+    const boundary = linkText.value.search(NON_ASCII_URL_BOUNDARY);
+    if (boundary <= 0) return undefined;
+
+    const tail = linkText.value.slice(boundary);
+    const url = truncateAutolinkUrl(child.url, tail);
+    if (url === undefined) return undefined;
+
+    return {
+      nodes: [
+        // Positions stay on the original source span so the bold repair can
+        // still tell this apart from an explicit `[text](url)` link.
+        { ...child, url, children: [{ ...linkText, value: linkText.value.slice(0, boundary) }] },
+        ...parseInlineSuffix(tail),
+      ],
+    };
+  };
+
   return (tree: unknown, file: MarkdownFile) => {
     const source = file.toString();
+    transformMdastChildren(tree, (child) => trimNonAsciiAutolinkTail(child, source));
     transformMdastChildren(tree, (child, nextChild) =>
       tryRepairMalformedBoldAutolink(child, nextChild, source)
     );

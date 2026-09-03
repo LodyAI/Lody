@@ -57,6 +57,10 @@ const LONG_URL_WITH_REPEATED_NON_CLOSERS = `https://example.com/${LONG_URL_SEGME
 const EXPLICIT_BOLD_LINK_MARKDOWN =
   '**[https://example.com**(\\`code\\`)](https://destination.test)**';
 const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
+const BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN =
+  'PR 已开：**https://github.com/LodyAI/Lody/pull/317**，分支 `fix/mobile-staged-background-sync`。';
+const AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN = '见 https://example.com/a。然后是别的';
+const AUTOLINK_WITH_CJK_PATH_MARKDOWN = '见 https://zh.example.com/wiki/中文 页面';
 const URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN = '**https://example.com**𐄀(`code`)';
 const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_branch_)';
 const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
@@ -218,6 +222,33 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(link?.getAttribute('href')).toBe('https://destination.test');
     expect(link?.textContent).toBe('https://example.com**(`code`)');
     expect(container?.querySelector('code')).toBeNull();
+  });
+
+  it('ends a bold autolink at full-width punctuation instead of swallowing the sentence', async () => {
+    await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
+
+    const url = 'https://github.com/LodyAI/Lody/pull/317';
+    const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+    expect(link?.textContent).toBe(url);
+    expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
+    expect(container?.textContent).toContain('，分支');
+    expect(container?.textContent).not.toContain('**');
+  });
+
+  it('ends a bare autolink at full-width punctuation', async () => {
+    await renderMarkdown(AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/a');
+    expect(link?.textContent).toBe('https://example.com/a');
+    expect(container?.textContent).toBe('见 https://example.com/a。然后是别的');
+  });
+
+  it('keeps non-ASCII letters that belong to the URL path', async () => {
+    await renderMarkdown(AUTOLINK_WITH_CJK_PATH_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.textContent).toBe('https://zh.example.com/wiki/中文');
   });
 
   it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {

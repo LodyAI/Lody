@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest';
 
 const AUTOLINK_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/giu;
 
+const NON_ASCII_URL_BOUNDARY = /(?!\p{ASCII})[\p{P}\p{Z}]/u;
+
 const countChar = (value: string, char: string) =>
   Array.from(value).reduce((count, current) => count + (current === char ? 1 : 0), 0);
 
 const splitAutolinkTrailing = (value: string) => {
-  let url = value;
-  let trailing = '';
+  const boundary = value.search(NON_ASCII_URL_BOUNDARY);
+  let url = boundary >= 0 ? value.slice(0, boundary) : value;
+  let trailing = boundary >= 0 ? value.slice(boundary) : '';
 
   while (url.length > 0) {
     const last = url.at(-1);
@@ -17,7 +20,7 @@ const splitAutolinkTrailing = (value: string) => {
     if (last === ']' && countChar(url, ']') <= countChar(url, '[')) break;
     if (last === '}' && countChar(url, '}') <= countChar(url, '{')) break;
 
-    if (!/[\]})"'.,:;!?，。！？；："'»›]+/u.test(last)) break;
+    if (!/[\]})"'.,:;!?]/u.test(last)) break;
 
     trailing = `${last}${trailing}`;
     url = url.slice(0, -1);
@@ -194,6 +197,22 @@ describe('splitAutolinkTrailing', () => {
     expect(result).toEqual({
       url: 'https://github.com/loro-dev/lody/pull/602',
       trailing: '。',
+    });
+  });
+
+  it('should end the URL at Chinese punctuation followed by more prose', () => {
+    const result = splitAutolinkTrailing('https://github.com/loro-dev/lody/pull/602，分支');
+    expect(result).toEqual({
+      url: 'https://github.com/loro-dev/lody/pull/602',
+      trailing: '，分支',
+    });
+  });
+
+  it('should keep non-ASCII letters inside the URL path', () => {
+    const result = splitAutolinkTrailing('https://zh.example.com/wiki/中文');
+    expect(result).toEqual({
+      url: 'https://zh.example.com/wiki/中文',
+      trailing: '',
     });
   });
 });
