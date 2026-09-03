@@ -310,6 +310,12 @@ type VisibleSessionTurnOptions = {
   session?: ISession;
   userTurnId?: string;
   /**
+   * Turn that deterministically owns the assistant history entry. Delivery
+   * uses its system Turn here while leaving userTurnId absent so it cannot
+   * mutate user dispatch status or pointers.
+   */
+  assistantEntryParentTurnId?: string;
+  /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
    * through a TurnHistoryGate (created in beginConversationTurn).
@@ -2530,6 +2536,7 @@ export class SessionExecutionService {
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
     const { sessionId, sessionDoc, session, userTurnId } = options;
+    const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
       sessionId,
       ...(userTurnId ? { userTurnId } : {}),
@@ -2558,7 +2565,7 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
-      turnId = this.deps.beginConversationTurn(sessionId, userTurnId, {
+      turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
         deferACPUpdateTarget: true,
@@ -2697,7 +2704,7 @@ export class SessionExecutionService {
                         sessionDoc,
                         runtime.turnId,
                         runtime.session?.agentClient?.currentModel,
-                        userTurnId
+                        assistantEntryParentTurnId
                       )
                   )
                 );
@@ -4002,6 +4009,9 @@ export class SessionExecutionService {
         sessionDoc,
         ...(session ? { session } : {}),
         userTurnId: executionUserTurnId,
+        ...(dispatchOptions?.dispatchSource === 'delivery'
+          ? { assistantEntryParentTurnId: userTurnId }
+          : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),

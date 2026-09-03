@@ -1121,6 +1121,7 @@ describe('SessionExecutionService', () => {
   const runSilentPromptTurn = async (options: {
     sessionId: string;
     hasPromptOutputForTurn: boolean;
+    dispatchSource?: 'delivery';
   }) => {
     let history: Array<Record<string, unknown>> = [
       {
@@ -1186,18 +1187,21 @@ describe('SessionExecutionService', () => {
     });
 
     const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId: options.sessionId as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    await service.continueSession(
+      {
+        type: 'session/chat',
+        sessionId: options.sessionId as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      },
+      options.dispatchSource ? { dispatchSource: options.dispatchSource } : undefined
+    );
 
     return {
       deps,
@@ -1245,6 +1249,41 @@ describe('SessionExecutionService', () => {
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
     expect(getHistory()[0]?.status).toBe('handled');
     expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds a Delivery assistant to its system turn without claiming user dispatch state', async () => {
+    const { deps, upsertDocMeta, getHistory } = await runSilentPromptTurn({
+      sessionId: 'session-delivery-turn',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+    });
+    const sessionDoc = await deps.workspaceDocument.getOrCreateSessionDoc(
+      'session-delivery-turn' as SessionId
+    );
+
+    expect(deps.beginConversationTurn).toHaveBeenCalledWith(
+      'session-delivery-turn',
+      'turn-user-1',
+      {
+        dispatchSource: 'delivery',
+        sessionDoc,
+        deferACPUpdateTarget: true,
+      }
+    );
+    expect(deps.createAssistantEntryForTurn).toHaveBeenCalledWith(
+      'session-delivery-turn',
+      sessionDoc,
+      'turn-1',
+      undefined,
+      'turn-user-1'
+    );
+    expect(getHistory()[0]?.status).toBe('pending');
+    expect(
+      upsertDocMeta.mock.calls.some(([, patch]) => {
+        const fields = patch as Record<string, unknown>;
+        return 'processingUserMsgId' in fields || 'lastHandledUserMsgId' in fields;
+      })
+    ).toBe(false);
   });
 
   it('rejects a chat turn before prompt when memory pressure persists', async () => {

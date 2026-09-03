@@ -155,14 +155,15 @@ const makeHarness = async (options?: {
   let pendingUser = options?.pendingUser ?? false;
   let busy = options?.busy ?? false;
   const continueSession = vi.fn(async (message: unknown, dispatchOptions: unknown) => {
-    const typedMessage = message as { sessionId: SessionId };
+    const typedMessage = message as { sessionId: SessionId; userTurnId: string };
     const typedOptions = dispatchOptions as { onTurnClaimed?: () => Promise<void> };
     await typedOptions.onTurnClaimed?.();
     histories.set(typedMessage.sessionId, [
       ...(histories.get(typedMessage.sessionId) ?? []),
       {
-        id: `assistant:${histories.get(typedMessage.sessionId)?.length ?? 0}`,
+        id: `assistant:${typedMessage.userTurnId}`,
         role: 'assistant',
+        userTurnId: typedMessage.userTurnId,
         timestamp: '2026-07-20T00:00:01.000Z',
         items: [{ type: 'text', text: 'continued' }],
         fileDiff: [],
@@ -1218,6 +1219,139 @@ describe('LodyOperationCoordinator', () => {
     expect(harness.openFlockDoc).not.toHaveBeenCalled();
     expect(harness.syncMachineFlockDoc).not.toHaveBeenCalled();
     expect(harness.continueSession).not.toHaveBeenCalled();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('consumes the Delivery when a user turn lands before its completed assistant turn', async () => {
+    const systemTurnId = 'operation-completion:requester-1:review-round-1';
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    harness.continueSession.mockImplementation(async (message, dispatchOptions) => {
+      const typedMessage = message as { sessionId: SessionId };
+      const typedOptions = dispatchOptions as { onTurnClaimed?: () => Promise<void> };
+      await typedOptions.onTurnClaimed?.();
+      harness.histories.set(typedMessage.sessionId, [
+        ...(harness.histories.get(typedMessage.sessionId) ?? []),
+        {
+          id: 'ordinary-user-turn',
+          role: 'user',
+          timestamp: '2026-07-20T00:00:00.500Z',
+          items: [{ type: 'text', text: 'new work' }],
+          fileDiff: [],
+          status: 'pending',
+        },
+        {
+          id: `assistant:${systemTurnId}`,
+          role: 'assistant',
+          userTurnId: systemTurnId,
+          timestamp: '2026-07-20T00:00:01.000Z',
+          items: [{ type: 'text', text: 'completion handled' }],
+          fileDiff: [],
+          finished: true,
+        },
+      ]);
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.wake('duplicate-history-event');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('retries a Delivery when only its eager nonterminal assistant entry survived a crash', async () => {
+    const systemTurnId = 'operation-completion:requester-1:review-round-1';
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    harness.histories.set(harness.requesterSessionId, [
+      {
+        id: systemTurnId,
+        role: 'system',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [],
+        fileDiff: [],
+        finished: true,
+      },
+      {
+        id: `assistant:${systemTurnId}`,
+        role: 'assistant',
+        userTurnId: systemTurnId,
+        timestamp: '2026-07-20T00:00:00.500Z',
+        items: [{ type: 'text', text: 'partial output before crash' }],
+        fileDiff: [],
+        finished: false,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('does not consume a Delivery from an unrelated assistant turn', async () => {
+    const systemTurnId = 'operation-completion:requester-1:review-round-1';
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    harness.histories.set(harness.requesterSessionId, [
+      {
+        id: systemTurnId,
+        role: 'system',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [],
+        fileDiff: [],
+        finished: true,
+      },
+      {
+        id: 'assistant:unrelated-user-turn',
+        role: 'assistant',
+        userTurnId: 'unrelated-user-turn',
+        timestamp: '2026-07-20T00:00:00.500Z',
+        items: [],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+    harness.continueSession.mockImplementation(async (message, dispatchOptions) => {
+      const typedMessage = message as { sessionId: SessionId };
+      const typedOptions = dispatchOptions as { onTurnClaimed?: () => Promise<void> };
+      await typedOptions.onTurnClaimed?.();
+      harness.histories.set(typedMessage.sessionId, [
+        ...(harness.histories.get(typedMessage.sessionId) ?? []),
+        {
+          id: `assistant:${systemTurnId}`,
+          role: 'assistant',
+          userTurnId: systemTurnId,
+          timestamp: '2026-07-20T00:00:01.000Z',
+          items: [],
+          fileDiff: [],
+          finished: true,
+        },
+      ]);
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
     const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
       expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);

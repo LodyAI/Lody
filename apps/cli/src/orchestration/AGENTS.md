@@ -52,6 +52,10 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
 - Delivery never writes user dispatch pointers. Pending user input wins every
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
+  Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
+  dispatch ownership. Delivery consumption must match that exact id with a
+  terminal `finished=true` or numeric `endedAt` footprint; eager entry creation,
+  history position, or an unrelated later Assistant Turn is not completion evidence.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.
