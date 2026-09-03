@@ -2,6 +2,7 @@ import {
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
   isAcpFastModeConfigId,
+  isAcpPlanModeConfigOption,
   isSensitiveAcpConfigOptionId,
   type ACPSessionId,
   type AcpConfigOptionValue,
@@ -155,101 +156,36 @@ export async function applyAcpSessionRunConfig(args: {
   const targetModelId =
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
-  if (config.modeId) {
-    const label = `mode=${JSON.stringify(config.modeId)}`;
+  const applyMode = async (value: string, label: string): Promise<void> => {
     let rejected = false;
     try {
-      await agentClient.setSessionMode?.(acpSessionId, config.modeId);
-      confirmedLegacyModeId = config.modeId;
+      await agentClient.setSessionMode?.(acpSessionId, value);
+      confirmedLegacyModeId = value;
     } catch (error) {
       rejected = true;
       rejectedSelections.push(label);
-      logger.debug(
-        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
-      );
+      logger.debug(`[${sessionId}] Failed to set ACP mode ${label}: ${String(error)}`);
     }
-    appliedSelections.push({
-      label,
-      requested: config.modeId,
-      source: { kind: 'mode' },
-      rejected,
-    });
-  }
-  if (config.modelId) {
-    const label = `model=${JSON.stringify(config.modelId)}`;
-    let rejected = false;
-    try {
-      await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
-      confirmedLegacyModelId = config.modelId;
-    } catch (error) {
-      rejected = true;
-      rejectedSelections.push(label);
-      logger.debug(
-        `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
-      );
-    }
-    appliedSelections.push({
-      label,
-      requested: config.modelId,
-      source: { kind: 'model' },
-      rejected,
-    });
-  }
+    appliedSelections.push({ label, requested: value, source: { kind: 'mode' }, rejected });
+  };
 
-  for (const [configId, value] of configOptionEntries) {
-    if (configId === modeConfigId) {
-      // An explicit `config.modeId` outranks this duplicate, and is judged in
-      // its place: losing a precedence contest is not the agent disagreeing.
-      if (!config.modeId && typeof value === 'string') {
-        let rejected = false;
-        try {
-          await agentClient.setSessionMode?.(acpSessionId, value);
-          confirmedLegacyModeId = value;
-        } catch (error) {
-          rejected = true;
-          logger.debug(
-            `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-        appliedSelections.push({
-          label: `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
-          requested: value,
-          source: { kind: 'mode' },
-          rejected,
-        });
-      }
-      continue;
+  const applyModel = async (value: string, label: string): Promise<void> => {
+    let rejected = false;
+    try {
+      await agentClient.unstable_setSessionModel?.(acpSessionId, value);
+      confirmedLegacyModelId = value;
+    } catch (error) {
+      rejected = true;
+      rejectedSelections.push(label);
+      logger.debug(`[${sessionId}] Failed to set ACP model ${label}: ${String(error)}`);
     }
-    if (configId === modelConfigId) {
-      if (!config.modelId && typeof value === 'string') {
-        let rejected = false;
-        try {
-          await agentClient.unstable_setSessionModel?.(acpSessionId, value);
-          confirmedLegacyModelId = value;
-        } catch (error) {
-          rejected = true;
-          logger.debug(
-            `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-        appliedSelections.push({
-          label: `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
-          requested: value,
-          source: { kind: 'model' },
-          rejected,
-        });
-      }
-      continue;
-    }
-    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
-      continue;
-    }
+    appliedSelections.push({ label, requested: value, source: { kind: 'model' }, rejected });
+  };
+
+  const applyConfigOption = async (
+    configId: string,
+    value: AcpConfigOptionValue
+  ): Promise<void> => {
     const label = `${configId}=${formatAcpConfigValueForLog(configId, value)}`;
     let rejected = false;
     try {
@@ -265,6 +201,62 @@ export async function applyAcpSessionRunConfig(args: {
       source: { kind: 'configOption', configId },
       rejected,
     });
+  };
+
+  /**
+   * Permission-bearing controls go LAST, and that ordering is load-bearing.
+   *
+   * Claude rebuilds the available permission modes on every model switch and
+   * downgrades the current one to `default` when the new model does not support
+   * it — so a mode applied before the model is silently widened by the model
+   * that follows it. Applying the model and the ordinary options first, then the
+   * permission-bearing ones, means the last word belongs to what the user asked
+   * for. `applyPromptConfig` runs before `prompt`, so the state read below is
+   * still taken before the agent can act on it.
+   */
+  const isPermissionBearing = (configId: string): boolean =>
+    configId === modeConfigId || isAcpPlanModeConfigOption({ id: configId });
+  const configOptionEntryFor = (configId: string): AcpConfigOptionValue | undefined =>
+    configOptionEntries.find(([id]) => id === configId)?.[1];
+
+  const duplicateModelValue = configOptionEntryFor(modelConfigId);
+  if (config.modelId) {
+    await applyModel(config.modelId, `model=${JSON.stringify(config.modelId)}`);
+  } else if (typeof duplicateModelValue === 'string') {
+    await applyModel(
+      duplicateModelValue,
+      `${modelConfigId}=${formatAcpConfigValueForLog(modelConfigId, duplicateModelValue)}`
+    );
+  }
+
+  for (const [configId, value] of configOptionEntries) {
+    if (configId === modeConfigId || configId === modelConfigId || isPermissionBearing(configId)) {
+      continue;
+    }
+    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
+      continue;
+    }
+    await applyConfigOption(configId, value);
+  }
+
+  for (const [configId, value] of configOptionEntries) {
+    if (configId === modeConfigId || !isPermissionBearing(configId)) {
+      continue;
+    }
+    await applyConfigOption(configId, value);
+  }
+
+  // An explicit `config.modeId` outranks the duplicate config-option entry, and
+  // is judged in its place: losing a precedence contest is not the agent
+  // disagreeing.
+  const duplicateModeValue = configOptionEntryFor(modeConfigId);
+  if (config.modeId) {
+    await applyMode(config.modeId, `mode=${JSON.stringify(config.modeId)}`);
+  } else if (typeof duplicateModeValue === 'string') {
+    await applyMode(
+      duplicateModeValue,
+      `${modeConfigId}=${formatAcpConfigValueForLog(modeConfigId, duplicateModeValue)}`
+    );
   }
 
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
@@ -272,11 +264,18 @@ export async function applyAcpSessionRunConfig(args: {
     acpSessionId,
     agentClient.getConfigOptions()
   );
-  if (confirmedLegacyModeId) {
+  // A `session/set_mode` that did not throw is an acknowledgement, not proof of
+  // the resulting state: the agent may change the mode again while applying the
+  // rest of the turn (Claude downgrades it on an unsupported model switch). So
+  // it only FILLS a mode the agent's own state does not report — never
+  // overwrites one, which would report the request back as if it were the
+  // outcome and leave every mode divergence invisible.
+  if (confirmedLegacyModeId && runtimeConfigPatch.modeId === undefined) {
     runtimeConfigPatch.modeId = confirmedLegacyModeId;
     if (
       !isSensitiveAcpConfigOptionId(modeConfigId) &&
-      agentConfigOptions.some((option) => option.id === modeConfigId)
+      agentConfigOptions.some((option) => option.id === modeConfigId) &&
+      runtimeConfigPatch.configOptionValues?.[modeConfigId] === undefined
     ) {
       runtimeConfigPatch.configOptionValues = {
         ...runtimeConfigPatch.configOptionValues,

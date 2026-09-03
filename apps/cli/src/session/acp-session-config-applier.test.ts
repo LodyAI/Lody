@@ -22,13 +22,18 @@ function createLogger(): Logger {
 
 describe('applyAcpSessionRunConfig', () => {
   it('applies mode, model, and remaining options to an established ACP session', async () => {
-    const setSessionMode = vi.fn(async () => undefined);
+    // A real agent reports back what it accepted, so the fake does too: the
+    // applier reads that state rather than echoing the request.
+    let currentMode = 'default';
+    const setSessionMode = vi.fn(async (_sessionId: string, mode: string) => {
+      currentMode = mode;
+    });
     const setSessionModel = vi.fn(async () => undefined);
     const setSessionConfigOption = vi.fn(async () => undefined);
     const agentClient = {
       isCreated: () => true,
       getConfigOptions: () => [
-        { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'default' },
+        { id: 'permission-mode', category: 'mode', type: 'select', currentValue: currentMode },
         { id: 'engine', category: 'model', type: 'select', currentValue: 'model-a' },
         { id: 'effort', category: 'thought_level', type: 'select', currentValue: 'high' },
       ],
@@ -107,6 +112,49 @@ describe('applyAcpSessionRunConfig', () => {
     });
 
     expect(vi.mocked(logger.debug).mock.calls.flat().join('\n')).not.toContain('private-value');
+  });
+
+  it('keeps the requested permission mode when the model switch would reset it', async () => {
+    // Claude rebuilds the available permission modes on a model switch and
+    // downgrades the current one to `default` when the new model does not
+    // support it. Applying the mode before the model therefore loses it — and
+    // loses it toward WIDER permissions than the turn asked for.
+    let currentMode = 'default';
+    let currentModel = 'model-a';
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [
+        { id: 'permission-mode', category: 'mode', type: 'select', currentValue: currentMode },
+        { id: 'engine', category: 'model', type: 'select', currentValue: currentModel },
+      ],
+      setSessionMode: vi.fn(async (_sessionId: string, mode: string) => {
+        currentMode = mode;
+      }),
+      unstable_setSessionModel: vi.fn(async (_sessionId: string, model: string) => {
+        currentModel = model;
+        currentMode = 'default';
+      }),
+      setSessionConfigOption: vi.fn(async () => undefined),
+    } as unknown as AgentClient;
+
+    const result = await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-8' as SessionId,
+        acpSessionId: 'acp-8' as ACPSessionId,
+        agentClient,
+      },
+      config: {
+        cliType: 'builtin',
+        agentType: 'claude',
+        modeId: 'plan',
+        modelId: 'model-b',
+      },
+      logger: createLogger(),
+    });
+
+    expect(result.runtimeConfigPatch?.modelId).toBe('model-b');
+    expect(result.runtimeConfigPatch?.modeId).toBe('plan');
+    expect(result.warningSelections).toEqual([]);
   });
 
   it('reports a selection the agent accepted but dropped from its own state', async () => {
