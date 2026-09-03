@@ -939,3 +939,27 @@ describe('session-input helpers', () => {
     }
   });
 });
+
+describe('one-time acceptance of a wider permission', () => {
+  const base = {
+    inputBlocks: [{ type: 'text' as const, text: 'ship it' }],
+    cliType: 'builtin' as const,
+    agentType: 'claude',
+    modeId: 'plan',
+  };
+
+  it('writes the flag only into the turn that carries it', () => {
+    expect(
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: true }).acceptWiderPermission
+    ).toBe(true);
+  });
+
+  it('leaves an ordinary send — including a plain resend — without it', () => {
+    // Nothing outside the one dispatch may set it: an omitted, false, or
+    // undefined flag must never become an acceptance the next turn inherits.
+    expect(buildSessionTurnInputConfig(base).acceptWiderPermission).toBeUndefined();
+    expect(
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermission: false }).acceptWiderPermission
+    ).toBeUndefined();
+  });
+});

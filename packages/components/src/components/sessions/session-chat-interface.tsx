@@ -210,6 +210,11 @@ import {
   CAPACITY_RETRY_CONTINUATION_PROMPT,
   useCapacityAutoRetry,
 } from './use-capacity-auto-retry';
+import {
+  findPermissionNotAppliedRetryTarget,
+  useOneShotAction,
+  type PermissionRetryControl,
+} from '@/lib/permission-not-applied-retry';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -1852,6 +1857,13 @@ export type DispatchInputBlocksOptions = {
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
   /** Role identity frozen beside this Turn's run config; null is explicit None. */
   agentRole?: SessionTurnAgentRoleSelection;
+  /**
+   * Informed acceptance of a permission the agent reported as wider than the
+   * one this turn asks for. Rides the single turn it is passed with: it is
+   * written into that turn's input config and nowhere else — not the composer,
+   * not the Session, not a Role, not a user default.
+   */
+  acceptWiderPermission?: boolean;
 };
 
 function buildEditedMessageQueueItem(
@@ -3535,6 +3547,8 @@ export const SessionChatInterface = memo(
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
           agentRole?: SessionTurnAgentRoleSelection;
+          /** One-time informed acceptance, written into this turn only. */
+          acceptWiderPermission?: boolean;
         }
       ): Promise<boolean> => {
         try {
@@ -3561,6 +3575,7 @@ export const SessionChatInterface = memo(
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
             resume: session.acpSessionId ?? undefined,
           });
 
@@ -3675,7 +3690,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'acceptWiderPermission'
         >
       ): Promise<boolean> => {
         try {
@@ -3772,7 +3791,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'acceptWiderPermission'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3783,6 +3806,7 @@ export const SessionChatInterface = memo(
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -3869,6 +3893,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            ...(options?.acceptWiderPermission === true ? { acceptWiderPermission: true } : {}),
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -3980,6 +4005,84 @@ export const SessionChatInterface = memo(
           t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
         ),
     });
+
+    /* The daemon stopped a turn because the agent reported a wider permission
+       than it asked for. The offer replays THAT turn — its frozen prompt, mode,
+       model, config values and Role — with a one-time acceptance, never the
+       composer's current selection. The flag rides this dispatch only: it is
+       written into the new turn's input config and into nothing that outlives
+       it, so the next ordinary send carries no acceptance at all. */
+    const permissionRetryTarget = useMemo(
+      () => findPermissionNotAppliedRetryTarget(sessionDoc?.history),
+      [sessionDoc?.history]
+    );
+    const handleRunWithAgentPermission = useCallback(async () => {
+      const target = permissionRetryTarget;
+      if (!target) {
+        return;
+      }
+      try {
+        const accepted = await dispatchInputBlocks(target.inputBlocks, {
+          modeIdOverride: target.modeId ?? null,
+          modelIdOverride: target.modelId ?? null,
+          configOptionValuesOverride: target.configOptionValues ?? {},
+          agentRole:
+            typeof target.agentRoleId === 'string' && target.agentRoleRevision !== undefined
+              ? { agentRoleId: target.agentRoleId, agentRoleRevision: target.agentRoleRevision }
+              : target.agentRoleId === null
+                ? null
+                : undefined,
+          acceptWiderPermission: true,
+        });
+        if (!accepted) {
+          toast.error(
+            t('sessions.systemNotices.chatFailed.permissionRunFailed', 'Failed to start the turn')
+          );
+        }
+      } catch (error) {
+        console.warn('Failed to rerun the turn with the agent permission', {
+          sessionId: session.id,
+          userTurnId: target.userTurnId,
+          error,
+        });
+        toast.error(
+          t('sessions.systemNotices.chatFailed.permissionRunFailed', 'Failed to start the turn')
+        );
+      }
+    }, [dispatchInputBlocks, permissionRetryTarget, session.id, t]);
+
+    const { pending: permissionRetryPending, run: runWithAgentPermission } = useOneShotAction(
+      handleRunWithAgentPermission
+    );
+
+    const permissionRetry: PermissionRetryControl | null = useMemo(
+      () =>
+        permissionRetryTarget
+          ? {
+              noticeId: permissionRetryTarget.noticeId,
+              requestedModeId: permissionRetryTarget.requestedModeId,
+              effectiveModeId: permissionRetryTarget.effectiveModeId,
+              pending: permissionRetryPending,
+              canRetry:
+                sessionDocReady &&
+                !isAgentBusy &&
+                !isMachineRemoved &&
+                !isArchivedSession &&
+                !isExternalHistoryRefreshing,
+              retry: runWithAgentPermission,
+            }
+          : null,
+      [
+        runWithAgentPermission,
+        isAgentBusy,
+        isArchivedSession,
+        isExternalHistoryRefreshing,
+        isMachineRemoved,
+        permissionRetryPending,
+        permissionRetryTarget,
+        sessionDocReady,
+      ]
+    );
 
     // Resend a user turn the missing-history recovery negatively acknowledged:
     // the row's "Not delivered" label opens a confirmation dialog that calls
@@ -5856,6 +5959,7 @@ export const SessionChatInterface = memo(
                           }
                           onResendUndelivered={handleResendUndelivered}
                           capacityRetry={capacityRetry ?? undefined}
+                          permissionRetry={permissionRetry ?? undefined}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={

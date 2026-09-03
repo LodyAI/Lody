@@ -4,6 +4,7 @@ import {
   type AgentConfigCliType,
   type AgentConfigMeta,
   type ChatFailedCode,
+  type ChatFailedMeta,
   type ChatFailedReason,
   type IssuePRMention,
   type LocalProjectId,
@@ -456,7 +457,8 @@ export type SessionExecutionServiceDeps = {
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
     message?: string,
-    code?: ChatFailedCode
+    code?: ChatFailedCode,
+    permission?: ChatFailedMeta['permission']
   ) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
@@ -1875,10 +1877,13 @@ export class SessionExecutionService {
     if (error instanceof AcpAuthenticationRequiredError) {
       await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
     } else if (error instanceof AcpPermissionNotAppliedError) {
-      // Keep the specific reason: it is what lets the client name the two modes
-      // and offer to run once with the permission the agent actually has,
-      // instead of a generic "failed before the agent could start".
-      await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message);
+      // Keep the specific reason AND both mode ids: they are what let the client
+      // name the two permissions and offer to run this exact turn once with the
+      // one the agent actually has, instead of a generic pre-prompt error.
+      await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message, undefined, {
+        requestedModeId: error.requestedModeId,
+        effectiveModeId: error.effectiveModeId,
+      });
     } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,

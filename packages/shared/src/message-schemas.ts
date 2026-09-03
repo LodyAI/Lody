@@ -3096,6 +3096,12 @@ export const ChatFailedMetaSchema = z.object({
   reason: ChatFailedReasonSchema,
   code: ChatFailedCodeSchema.optional(),
   message: z.string().optional(),
+  /**
+   * `permission_not_applied` only: the mode the turn asked for and the wider one
+   * the agent reported. Structured so the notice can name both instead of the
+   * client parsing them back out of `message`.
+   */
+  permission: z.object({ requestedModeId: z.string(), effectiveModeId: z.string() }).optional(),
 });
 
 // Non-system notice MessageContent discriminated union

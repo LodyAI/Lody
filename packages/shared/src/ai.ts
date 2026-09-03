@@ -1146,6 +1146,12 @@ export type ChatFailedMeta = {
   code?: ChatFailedCode;
   /** Human-readable error message */
   message?: string;
+  /**
+   * `permission_not_applied` only: the mode the turn asked for and the wider one
+   * the agent reported. Structured so the notice can name both instead of the
+   * client parsing them back out of `message`.
+   */
+  permission?: { requestedModeId: string; effectiveModeId: string };
 };
 
 /**

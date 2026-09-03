@@ -63,6 +63,7 @@ import {
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
+  type ChatFailedMeta,
   type ChatFailedReason,
   type ProjectRef,
   type SessionPreparationCancelSpec,
@@ -1680,7 +1681,8 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
     message?: string,
-    code?: ChatFailedCode
+    code?: ChatFailedCode,
+    permission?: ChatFailedMeta['permission']
   ): Promise<void> {
     // Failure notices append to the history list; order them after the user
     // turn entry for RPC fast-path turns (no-op when no gate is pending).
@@ -1693,6 +1695,7 @@ export class MessageHandler {
       meta: {
         reason,
         ...(code ? { code } : {}),
+        ...(permission ? { permission } : {}),
         message,
       },
     };
@@ -3134,8 +3137,8 @@ export class MessageHandler {
         notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
           await this.notifySessionCompleted(sessionId, userId, occurrenceId),
       },
-      recordChatFailure: async (sessionDoc, reason, message, code) =>
-        await this.recordChatFailure(sessionDoc, reason, message, code),
+      recordChatFailure: async (sessionDoc, reason, message, code, permission) =>
+        await this.recordChatFailure(sessionDoc, reason, message, code, permission),
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
