@@ -53,7 +53,8 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
   Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
-  dispatch ownership. Assistant `finished`/`endedAt` is never Delivery completion
+  dispatch ownership, and remains the settlement identity when steer advances the
+  visible Assistant tail. Assistant `finished`/`endedAt` is never Delivery completion
   evidence: teardown writes the same terminal footprint. The machine-local Delivery
   row owns a fenced attempt token; only the execution service's durable handled
   callback may atomically acknowledge and consume it. Cancellation/interruption
