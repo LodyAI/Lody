@@ -389,7 +389,7 @@ describe('SessionExecutionService', () => {
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('acp-steer'));
   });
 
-  it('completes A to B to C when yielded prompts never settle', async () => {
+  it('keeps the owning settlement identity while steering from A to B to C', async () => {
     const sessionId = 'session-steer-lifecycle' as SessionId;
     const first = createDeferred<unknown>();
     const second = createDeferred<unknown>();
@@ -485,18 +485,22 @@ describe('SessionExecutionService', () => {
       ),
     });
     const service = new SessionExecutionService(deps);
-    const lifecycle = service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
-      userTurnId: 'user-a',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    const onTurnSettled = vi.fn(async () => {});
+    const lifecycle = service.continueSession(
+      {
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
+        userTurnId: 'user-a',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      },
+      { onTurnSettled }
+    );
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     const steerB = service.steerSession({
@@ -596,6 +600,10 @@ describe('SessionExecutionService', () => {
     });
     expect(deps.turnFinalization.notifySessionCompleted).toHaveBeenCalledTimes(1);
     expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
+    expect(onTurnSettled).toHaveBeenCalledWith({
+      turnId: 'assistant:user-a',
+      outcome: 'completed',
+    });
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
   });
 
