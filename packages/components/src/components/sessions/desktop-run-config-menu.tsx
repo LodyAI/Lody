@@ -1,6 +1,16 @@
 import { useMemo, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
+import {
+  Bot,
+  Brain,
+  Check,
+  ListChecks,
+  LockKeyhole,
+  Monitor,
+  Plus,
+  ShieldAlert,
+  Zap,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   classifyPermissionModeFace,
@@ -424,6 +434,7 @@ export function DesktopRunConfigMenu({
     modelSelectors,
     interactionModeSelectors,
     thoughtLevelSelectors,
+    thoughtToggleSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -527,6 +538,9 @@ export function DesktopRunConfigMenu({
   const fastOn = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
     : false;
+  const thoughtToggleOn = thoughtToggleSelectors.some((selector) =>
+    resolveOnOffConfigOptionEnabled(selector, configOptionValues?.[selector.configId])
+  );
 
   /* The Role the composer currently IS: the caller only passes an id while the
      live configuration still matches that Role, so the face can name it. */
@@ -560,6 +574,11 @@ export function DesktopRunConfigMenu({
   if (planOn) {
     configFaceParts.push(
       <ListChecks key="plan" className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+    );
+  }
+  if (thoughtToggleOn) {
+    configFaceParts.push(
+      <Brain key="thought" className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
     );
   }
   if (fastOn) {
@@ -621,6 +640,7 @@ export function DesktopRunConfigMenu({
     extraSelectSelectors.length > 0 ||
     interactionSelector != null ||
     thinkingSelector != null ||
+    thoughtToggleSelectors.length > 0 ||
     planSelector != null ||
     fastSelector != null;
   if (!hasAnyRow) return null;
@@ -924,7 +944,9 @@ export function DesktopRunConfigMenu({
           </DropdownMenuSub>
         ) : null}
 
-        {planSelector || fastSelector ? <DropdownMenuSeparator /> : null}
+        {planSelector || thoughtToggleSelectors.length > 0 || fastSelector ? (
+          <DropdownMenuSeparator />
+        ) : null}
         {planSelector ? (
           <ToggleItem
             icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
@@ -941,6 +963,23 @@ export function DesktopRunConfigMenu({
             }
           />
         ) : null}
+        {thoughtToggleSelectors.map((selector) => (
+          <ToggleItem
+            key={selector.configId}
+            icon={<Brain className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
+            label={selector.label}
+            checked={resolveOnOffConfigOptionEnabled(
+              selector,
+              configOptionValues?.[selector.configId]
+            )}
+            onToggle={() =>
+              onConfigOptionChange?.(
+                selector.configId,
+                toggleOnOffConfigOptionValue(selector, configOptionValues?.[selector.configId])
+              )
+            }
+          />
+        ))}
         {fastSelector ? (
           <ToggleItem
             icon={<Zap className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
