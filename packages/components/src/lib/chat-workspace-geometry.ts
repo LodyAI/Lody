@@ -83,15 +83,6 @@ export const CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS = {
     tolerance: 0.5,
     policy: 'observe',
   },
-  sidebarRowVisualCenter: {
-    name: 'sidebar.row.visual-center',
-    axis: 'y',
-    anchor: 'visual-center',
-    scope: 'instance',
-    minMembers: 2,
-    tolerance: 0.5,
-    policy: 'observe',
-  },
 } as const satisfies Record<string, SemanticAlignmentRule>;
 
 export const CHAT_WORKSPACE_GEOMETRY_ANCHORS = {

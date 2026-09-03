@@ -136,23 +136,18 @@ function SessionRowIndicator({
   hasUnreadMessages?: boolean;
 }) {
   let icon: ReactNode = null;
-  const visualAlignmentProps = {
-    [semanticAlignmentAttributes.y]: sidebarAlignmentRules.sidebarRowVisualCenter.name,
-    [semanticAlignmentAttributes.member]: 'leading-indicator-ink',
-  };
 
   if (isWaitingPermission) {
-    icon = <Hand {...visualAlignmentProps} className="h-3 w-3 text-status-warning" />;
+    icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
     icon = (
       <Loader2
-        {...visualAlignmentProps}
         data-session-working-spinner=""
         className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
       />
     );
   } else if (hasUnreadMessages) {
-    icon = <span {...visualAlignmentProps} className="h-2 w-2 rounded-full bg-primary" />;
+    icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }
 
   return (

@@ -17,7 +17,6 @@ import {
   alignmentFindingKey,
   assessGeometryMarkerRemoval,
   collectAggregatedGeometryRowFamilies,
-  compareMarkerAlignmentsToBlockRails,
   compileGeometryContracts,
   computeGeometryQualityMetrics,
   createGeometryFindings,
@@ -2471,25 +2470,6 @@ test('captures the visual geometry report', async ({ browser }) => {
   const findingArtifact = createGeometryFindings(persistedCapture, persistedObservation);
   await writeFile(findingsPath, `${JSON.stringify(findingArtifact, null, 2)}\n`, 'utf8');
 
-  // Parity, not a second measurement model: the marker rule and marker-free Y
-  // discovery are asked about the same capture, matched by ELEMENT, and every
-  // member only one of them saw is listed instead of being averaged away.
-  const wideExpandedCapture = persistedCapture.captures.find(
-    (capture) => capture.captureId === 'workspace:wide-expanded'
-  );
-  if (!wideExpandedCapture) throw new Error('Geometry report lost the wide-expanded capture');
-  const yAxisParity = compareMarkerAlignmentsToBlockRails(
-    wideExpandedCapture,
-    persistedObservation.captures.find((capture) => capture.captureId === 'workspace:wide-expanded')
-      ?.blockRails ?? [],
-    { group: 'sidebar.row.visual-center' }
-  );
-  await writeFile(
-    path.join(outputDirectory, 'y-axis-parity.json'),
-    `${JSON.stringify(yAxisParity, null, 2)}\n`,
-    'utf8'
-  );
-
   // Can each marker rule be deleted yet? A marker is business-code weight, so
   // the artifact answers per RULE and per member, on every capture the rule
   // appears in: one capture where discovery cannot see a member is one
@@ -2852,7 +2832,6 @@ test('captures the visual geometry report', async ({ browser }) => {
     })),
     contractProposals,
     findingDiff,
-    yAxisParity,
     markerRemoval,
     ...(skippedYCards.length > 0 ? { skippedYCards } : {}),
     qualityMetrics,

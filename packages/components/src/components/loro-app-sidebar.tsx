@@ -638,16 +638,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     if (!canRename) return;
     setRenameTarget({ sessionId: session.id, initialTitle: title });
   }, [canRename, session.id, title]);
-  const titleContent = (
-    <span
-      data-geometry-align-y={sidebarAlignmentRules.sidebarRowVisualCenter.name}
-      data-geometry-align-member="local-session-title-ink"
-      data-geometry-align-visual="text"
-      className="truncate"
-    >
-      {title}
-    </span>
-  );
+  const titleContent = <span className="truncate">{title}</span>;
   // Copy URL is always available (a private link still works for the owner);
   // sharing is a separate menu item that only appears when the conversation
   // isn't already team-visible.

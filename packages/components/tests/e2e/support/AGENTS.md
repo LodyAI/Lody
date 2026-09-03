@@ -51,15 +51,21 @@ the overlay and capture cannot disagree about one row.
 
 ## Proving the markers can go
 
-- `y-axis-parity.json` re-asks marker rule `sidebar.row.visual-center` and Y discovery
-  about `workspace:wide-expanded`, matched by ELEMENT: `coordinateDelta` is whether they
-  measure an element alike, `offsetDelta` whether they place the row line alike; a member
-  only one side saw is listed, never averaged away.
-- `marker-removal-readiness.json` asks that of EVERY marker rule — the alignment rules and
-  the baseline groups — per member and per capture. A marker is business-code weight, so a
+- `marker-removal-readiness.json` asks EVERY marker rule still declared in
+  `CHAT_WORKSPACE_SEMANTIC_ALIGNMENTS` — the alignment rules and the baseline groups —
+  whether it can go, per member and per capture. A marker is business-code weight, so a
   rule is `ready` only when discovery observed each member, at the same anchor and offset
   within quantization, on every capture the rule appears in: one capture where a member is
   invisible is one regression the removal would hide.
+- `compareMarkerAlignmentsToBlockRails` (`geometry-constraint-system.ts`) is the one-off
+  companion for the rule actually being retired: re-ask its marker and Y discovery about
+  one capture, matched by ELEMENT — `coordinateDelta` is whether they measure an element
+  alike, `offsetDelta` whether they place the row line alike; a member only one side saw is
+  listed, never averaged away. `sidebar.row.visual-center` was the first rule proven this
+  way (18/18 members, zero deltas) and its declaration, gate coverage, and product
+  `data-geometry-align-*` markers are gone — discovery alone now covers those rows. Wire
+  this function into the report again for the NEXT candidate; it is not part of the
+  standing report run.
 
 - Replaying a capture — the `--after` repair images, the zoomed Y cards — opens ONE context
   per scale and theme, never one per capture: a viewport can be set on an open context, a
