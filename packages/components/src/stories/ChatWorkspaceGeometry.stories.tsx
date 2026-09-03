@@ -26,11 +26,18 @@ import {
 import WorkspaceGeometryDevtools from '@/components/devtools/workspace-geometry-devtools';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { LoroSidebar } from '@/components/loro-sidebar';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import {
   DesktopMachineMenu,
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
+import {
+  SessionSidePanelTabBar,
+  type SessionSidePanelOption,
+  type SessionSidePanelTabItem,
+} from '@/components/sessions/session-side-panel-tab-bar';
+import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
@@ -456,6 +463,134 @@ function ChatWorkspaceGeometryFixture({
   );
 }
 
+/**
+ * The three region headers — the workspace Sidebar's, the Session tab bar's and
+ * the right panel's — render in three separate stories, so no capture has ever
+ * held more than one of them. A geometric row is per capture, so discovery
+ * could not compare them even in principle. This composition puts all three on
+ * one page through the production shell that positions them:
+ * `WebWorkspaceFrame` → `DesktopSessionDetailLayout` → `SessionTabBar` +
+ * `SessionSidePanelTabBar`. No markers, and no attribute beyond the discovery
+ * scope the side panel already declares in its own story.
+ */
+const GEOMETRY_SIDE_PANEL_TABS: SessionSidePanelTabItem[] = [
+  { id: 'files', label: 'Files', kind: 'files', closeable: true },
+  { id: 'changes', label: 'All Changes', kind: 'changes', closeable: true },
+  {
+    id: 'file:src/app.tsx',
+    label: 'app.tsx',
+    kind: 'file',
+    filePath: 'src/app.tsx',
+    closeable: true,
+  },
+];
+const GEOMETRY_SIDE_PANEL_OPTIONS: SessionSidePanelOption[] = [
+  { id: 'browser', label: 'Browser', kind: 'browser' },
+  { id: 'pr', label: 'PR', kind: 'pr' },
+];
+const geometryTabSessions: SessionMeta[] = geometryLocalSessions.slice(0, 2);
+
+/** `DesktopSessionDetailLayout` persists its split under this `autoSaveId`. */
+const GEOMETRY_PANEL_STORAGE_KEY = 'react-resizable-panels:session-detail-panels';
+
+function ChatWorkspaceSessionGeometryFixture() {
+  const store = useMemo(() => {
+    const nextStore = createStore();
+    nextStore.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(
+        geometryAgentConfigs.map((config) => [getAgentConfigRoomId(config.id), config])
+      )
+    );
+    // Cleared during render, not in an effect: a persisted split from a
+    // previous drag would silently change every measured x in this capture,
+    // and an effect would race the first paint the capture may already have.
+    globalThis.localStorage?.removeItem(GEOMETRY_PANEL_STORAGE_KEY);
+    return nextStore;
+  }, []);
+  const [activeSidePanelTabId, setActiveSidePanelTabId] = useState<string | null>(
+    'file:src/app.tsx'
+  );
+  const parentSession = geometryTabSessions[0];
+  const childSession = geometryTabSessions[1];
+  if (!parentSession || !childSession) throw new Error('Geometry tab fixture is missing a session');
+  const sidebarCard = (
+    <LoroSidebar
+      className="mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+      workspaceName="Geometry Lab"
+      userEmail="geometry@example.test"
+      workspaces={[{ id: 'workspace-geometry', name: 'Geometry Lab' }]}
+      currentWorkspaceId="workspace-geometry"
+      workspaceSwitcherEnabled={false}
+      defaultWidth={CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.defaultWidth}
+      minWidth={CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.minWidth}
+      maxWidth={CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.maxWidth}
+      activeNav="home"
+      repoSections={[]}
+      chats={[]}
+      topContent={<GeometrySidebarTopContent />}
+      sessionListProps={sidebarSessionListProps}
+    />
+  );
+  return (
+    <PlatformContext.Provider value={geometryStoryPlatform}>
+      <Provider store={store}>
+        <div data-geometry-fixture-ready="true" data-geometry-fixture-view="production">
+          <WebWorkspaceFrame
+            pathname="/geometry/session"
+            sidebar={sidebarCard}
+            sidebarCollapsed={false}
+            sidebarSlideWidth={
+              CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.defaultWidth +
+              CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.cardInset.left +
+              CHAT_WORKSPACE_GEOMETRY_SPEC.sidebar.cardInset.right
+            }
+            shouldReduceMotion
+          >
+            <DesktopSessionDetailLayout
+              defaultSizes={{ main: 70, sidebar: 30 }}
+              topBar={
+                <SessionTabBar
+                  variant="session"
+                  parentSession={parentSession}
+                  childSessions={[childSession]}
+                  draftTabs={[]}
+                  archivedChildSessions={[]}
+                  activeTabSessionId={parentSession.id}
+                  tabOrder={[childSession.id]}
+                  onTabSelect={() => {}}
+                  onNewTab={() => {}}
+                />
+              }
+              chatSurfaces={<DeterministicChatLanding scenario="default" />}
+              terminalDock={null}
+              secondaryPanel={
+                <div
+                  {...{ [CHAT_WORKSPACE_RAIL_DISCOVERY_ATTRIBUTE]: 'session.side-panel' }}
+                  className="flex h-full min-h-0 flex-col overflow-hidden"
+                >
+                  <SessionSidePanelTabBar
+                    tabs={GEOMETRY_SIDE_PANEL_TABS}
+                    activeTabId={activeSidePanelTabId}
+                    availablePanels={GEOMETRY_SIDE_PANEL_OPTIONS}
+                    onTabSelect={setActiveSidePanelTabId}
+                    onPanelOpen={() => {}}
+                    onTabClose={() => {}}
+                    closeTabLabel={(tabLabel) => `Close ${tabLabel}`}
+                  />
+                </div>
+              }
+              sidebarOpen
+              onSidebarCollapse={() => {}}
+              deleteConfirmDialog={null}
+            />
+          </WebWorkspaceFrame>
+        </div>
+      </Provider>
+    </PlatformContext.Provider>
+  );
+}
+
 const meta = {
   title: 'Geometry/ChatWorkspace',
   component: ChatWorkspaceGeometryFixture,
@@ -496,6 +631,10 @@ export const LongModel: Story = {
 
 export const PastedText: Story = {
   args: { landingScenario: 'pasted-text' },
+};
+
+export const WorkspaceSessionSidePanel: StoryObj<typeof ChatWorkspaceSessionGeometryFixture> = {
+  render: () => <ChatWorkspaceSessionGeometryFixture />,
 };
 
 export const GeometryAudit: Story = {

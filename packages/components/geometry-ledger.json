@@ -344,15 +344,51 @@
         "surfaceFamily": "right-sidebar"
       }
     },
-    "geometry/session/1aje3gt": {
+    "geometry/session/10cevl5": {
       "status": "debt",
       "baseline": {
-        "offset": 1.25
+        "offset": -1.5
       },
       "identity": {
-        "label": "Cancel",
+        "label": "Toggle project",
+        "axis": "x",
+        "anchor": "inline-start",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1939a5y": {
+      "status": "debt",
+      "baseline": {
+        "offset": 5
+      },
+      "identity": {
+        "label": "text “G” in text row ↔ text “Geometry Lab” in text row",
         "axis": "y",
-        "anchor": "visual-center",
+        "anchor": "text-baseline",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1a0fdze": {
+      "status": "debt",
+      "baseline": {
+        "offset": -4
+      },
+      "identity": {
+        "label": "New session",
+        "axis": "x",
+        "anchor": "inline-end",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/1adqfq9": {
+      "status": "debt",
+      "baseline": {
+        "offset": -3.5
+      },
+      "identity": {
+        "label": "button “Audit Sidebar semantic baselines”",
+        "axis": "x",
+        "anchor": "inline-center",
         "surfaceFamily": "session"
       }
     },
@@ -464,13 +500,37 @@
         "surfaceFamily": "session"
       }
     },
-    "geometry/session/i4jvzg": {
+    "geometry/session/bamjpu": {
+      "status": "debt",
+      "baseline": {
+        "offset": -4
+      },
+      "identity": {
+        "label": "Machine",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/hx7un1": {
+      "status": "debt",
+      "baseline": {
+        "offset": 1.25
+      },
+      "identity": {
+        "label": "More actions",
+        "axis": "y",
+        "anchor": "visual-center",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/kvmavf": {
       "status": "debt",
       "baseline": {
         "offset": -1
       },
       "identity": {
-        "label": "Private to you: lody is not shared with the team.",
+        "label": "More actions",
         "axis": "y",
         "anchor": "visual-center",
         "surfaceFamily": "session"
@@ -485,6 +545,18 @@
         "label": "Message",
         "axis": "y",
         "anchor": "block-start",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/n45o1m": {
+      "status": "debt",
+      "baseline": {
+        "offset": -1.5
+      },
+      "identity": {
+        "label": "app.tsx",
+        "axis": "y",
+        "anchor": "visual-center",
         "surfaceFamily": "session"
       }
     },
@@ -521,6 +593,18 @@
         "label": "text “Message” in text row",
         "axis": "y",
         "anchor": "text-baseline",
+        "surfaceFamily": "session"
+      }
+    },
+    "geometry/session/wvh8i8": {
+      "status": "debt",
+      "baseline": {
+        "offset": -3.5
+      },
+      "identity": {
+        "label": "Settings",
+        "axis": "x",
+        "anchor": "inline-start",
         "surfaceFamily": "session"
       }
     },

@@ -183,11 +183,33 @@ export const GEOMETRY_SESSION_STATE_CAPTURES: readonly GeometryCapturePlanEntry[
     dimensions: DEFAULT_CAPTURE_DIMENSIONS,
     aggregateScopes: ['session.page'],
   },
+  /**
+   * The one capture that holds all THREE region headers at once — the workspace
+   * Sidebar's, the Session tab bar's and the right panel's. Every other capture
+   * renders exactly one of them, and a geometric row is per CAPTURE, so without
+   * this the question "do these three headers share a line?" cannot be measured
+   * at all, whatever discovery does downstream.
+   */
+  {
+    captureId: 'workspace-session:1440x900',
+    detailId: 'workspace-session',
+    area: 'session',
+    surface: 'Workspace / Session + Side Panel',
+    storyId: 'geometry-chatworkspace--workspace-session-side-panel',
+    viewport: WIDE_VIEWPORT,
+    deviceScaleFactor: 2,
+    dimensions: DEFAULT_CAPTURE_DIMENSIONS,
+    aggregateScopes: ['sidebar.shell', 'session.side-panel'],
+  },
 ];
 
 export const GEOMETRY_RIGHT_SIDEBAR_STATE_CAPTURES: readonly GeometryCapturePlanEntry[] = (
   [
-    ['session-right-sidebar-changes', 'Changes', 'sessions-sessionsidepaneltabbar--geometry-report'],
+    [
+      'session-right-sidebar-changes',
+      'Changes',
+      'sessions-sessionsidepaneltabbar--geometry-report',
+    ],
     ['session-right-sidebar-tabs', 'Tabs', 'sessions-sessionsidepaneltabbar--unified-tabs'],
     ['session-right-sidebar-empty', 'Empty', 'sessions-sessionsidepaneltabbar--empty-state'],
   ] as const
