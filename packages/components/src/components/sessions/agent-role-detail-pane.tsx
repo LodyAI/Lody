@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowRight,
   Brain,
   Cpu,
+  Pencil,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Sliders,
@@ -65,13 +66,20 @@ export function AgentRoleDetailPane({
   machine,
   machineLabel,
   onEdit,
+  onSendInstruction,
   className,
 }: AgentRoleDetailSubject & {
   onEdit?: (roleId: AgentRoleId) => void;
+  /** Existing Sessions may send the instruction without applying this Role. */
+  onSendInstruction?: (role: AgentRole) => Promise<boolean>;
   /** The host's box: each menu sizes its own pane to the list beside it. */
   className?: string;
 }) {
   const { t } = useTranslation();
+  const editLabel = t('chat.runConfig.roles.edit', 'Edit role');
+  const sendInstructionLabel = t('chat.runConfig.roles.sendInstruction', 'Send instruction');
+  const canSendInstruction = Boolean(onSendInstruction && role.promptPrefix?.trim());
+  const hasActions = Boolean(onEdit || canSendInstruction);
   const selectorOptions = useAcpSelectorOptions(
     agentConfig
       ? {
@@ -143,7 +151,11 @@ export function AgentRoleDetailPane({
 
   return (
     <div
-      className={cn('flex h-[17rem] w-[16rem] shrink-0 flex-col border-l border-border', className)}
+      className={cn(
+        'flex h-[17rem] w-[16rem] shrink-0 flex-col border-l border-border',
+        hasActions && 'w-[19rem]',
+        className
+      )}
     >
       <header className="flex shrink-0 items-start gap-2.5 px-4 pb-3 pt-3.5">
         <span
@@ -172,10 +184,37 @@ export function AgentRoleDetailPane({
             </span>
           </span>
         </span>
+        {hasActions ? (
+          <span className="flex shrink-0 items-center gap-1.5">
+            {onEdit ? (
+              <button
+                type="button"
+                aria-label={editLabel}
+                title={editLabel}
+                onClick={() => onEdit(role.id)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            ) : null}
+            {canSendInstruction ? (
+              <button
+                type="button"
+                aria-label={sendInstructionLabel}
+                title={sendInstructionLabel}
+                onClick={() => void onSendInstruction?.(role)}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('chat.runConfig.roles.send', 'Send')}
+              </button>
+            ) : null}
+          </span>
+        ) : null}
       </header>
 
-      {/* Only the values scroll. The header says WHICH Role and the footer is
-          how to change it — both stay put however long the instruction runs. */}
+      {/* Only the values scroll. The header says WHICH Role and owns its actions,
+          so both stay put however long the instruction runs. */}
       <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto border-t border-border/60 [scrollbar-gutter:stable]">
         <dl className="flex flex-col gap-2 px-4 py-3">
           {modelId ? (
@@ -244,19 +283,6 @@ export function AgentRoleDetailPane({
           </div>
         ) : null}
       </div>
-
-      {onEdit ? (
-        <div className="shrink-0 border-t border-border/60 px-4 py-2.5">
-          <button
-            type="button"
-            onClick={() => onEdit(role.id)}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-foreground/[0.1]"
-          >
-            {t('chat.runConfig.roles.edit', 'Edit role')}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

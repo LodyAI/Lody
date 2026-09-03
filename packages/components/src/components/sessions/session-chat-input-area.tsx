@@ -439,6 +439,8 @@ export interface SessionChatInputAreaProps {
     inputBlocks: SessionInputBlock[],
     agentRole: SessionTurnAgentRoleSelection
   ) => Promise<boolean>;
+  /** Send only a Role's instruction as a new Turn, preserving this composer draft. */
+  onSendAgentRoleInstruction?: (role: AgentRole) => Promise<boolean>;
   onStop: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
   /** When provided and conversation is empty, the agent config badge becomes a selector. */
@@ -524,6 +526,7 @@ export const SessionChatInputArea = memo(
       onModelChange,
       onConfigOptionChange,
       onSendMessage,
+      onSendAgentRoleInstruction,
       onStop,
       onRemoveQueueItem: _onRemoveQueueItem,
       onAgentConfigChange,
@@ -2269,6 +2272,7 @@ export const SessionChatInputArea = memo(
         items: effectiveAgentRoleControl.items,
         selectedRoleId: effectiveAgentRoleControl.selectedRoleId,
         onSelect: effectiveAgentRoleControl.onSelect,
+        onSendInstruction: onSendAgentRoleInstruction,
         onCreate: () =>
           setAgentRoleEditor(
             openAgentRoleEditorForCreate(
@@ -2290,6 +2294,7 @@ export const SessionChatInputArea = memo(
         session.agentConfigId,
         session.machineId,
         effectiveAgentRoleControl,
+        onSendAgentRoleInstruction,
       ]
     );
     const selectedAgentRolePinsPermissionMode = useMemo(() => {

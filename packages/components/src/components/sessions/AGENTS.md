@@ -381,8 +381,15 @@ Session conversation page chain:
   RUN CONFIG, which is exactly what transfers: model / reasoning / permission
   are the values a session can still change every turn. Keep the Role's real
   availability so a stale binding stays visible but cannot be selected. The
-  Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
-  first turn of a session the Role creates. The row is NOT gated on
+  Role's INSTRUCTION is not applied by selection, because a prompt prefix
+  belongs to the first turn of a session the Role creates. The persisted-Session
+  detail pane may explicitly send that instruction as a standalone shortcut:
+  it dispatches through the existing Session's normal direct/guide/queue route
+  with explicit Role None, never creates or navigates to another Session, and
+  bypasses composer submission so text, mentions, pasted drafts, pending uploads,
+  images, and files remain untouched. Its edit and send actions stay in the pane
+  header so the instruction keeps the full readable body height. Chat Landing and uncreated child-tab drafts
+  do not receive that action. The row is NOT gated on
   `isEmptyConversation`: those values stay changeable for the whole
   conversation. An unsent explicit selection (including None) lives in
   session-keyed app state rather than the composer component: top-level
@@ -493,7 +500,11 @@ Session conversation page chain:
   Mobile (`MobileSessionRunConfig` → `MobileRunConfigSheet`) has the same Role
   row, in the same place — above Agent — as an ordinary `MobileInlinePicker`,
   with no detail pane and no edit: a phone row cannot carry the binding a Role
-  authorizes, so the binding is read on desktop or in Settings. It DOES offer
+  authorizes, so the binding is read on desktop or in Settings. Short tap keeps
+  applying a Role. In a persisted Session only, long press opens Apply Role /
+  Send Instruction actions; Apply retains the Role's availability gate, while
+  Send is available whenever an instruction exists because it is a Role-less
+  Turn, not an attempt to run that Role. It DOES offer
   create, as the last entry in the list. The row renders whenever the caller
   passes `agentRoles`, even with none to list — the row then reads `None` and
   its list is the way to make the first one, which is what the desktop row does

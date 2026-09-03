@@ -25,6 +25,9 @@ import { initI18n } from '../src/i18n';
 // The picker's virtualizer scrolls the active row into view; jsdom has no
 // layout and therefore no `scrollIntoView`.
 Element.prototype.scrollIntoView = () => undefined;
+Element.prototype.setPointerCapture = () => undefined;
+Element.prototype.releasePointerCapture = () => undefined;
+Element.prototype.hasPointerCapture = () => false;
 
 const machineId = 'machine-1' as MachineId;
 const agentConfig: AgentConfigMeta = {
@@ -51,12 +54,21 @@ const makeRole = (overrides: Partial<AgentRole> & Pick<AgentRole, 'id' | 'name'>
 });
 
 const reviewer: ComposerAgentRoleItem = {
-  role: makeRole({ id: 'role-1' as AgentRoleId, name: 'Code Reviewer', emoji: '🔍' }),
+  role: makeRole({
+    id: 'role-1' as AgentRoleId,
+    name: 'Code Reviewer',
+    emoji: '🔍',
+    promptPrefix: 'Review this carefully.',
+  }),
   availability: { kind: 'available' },
   agentConfig,
 };
 const retired: ComposerAgentRoleItem = {
-  role: makeRole({ id: 'role-2' as AgentRoleId, name: 'Retired Reviewer' }),
+  role: makeRole({
+    id: 'role-2' as AgentRoleId,
+    name: 'Retired Reviewer',
+    promptPrefix: 'Review this without applying the retired role.',
+  }),
   availability: { kind: 'unavailable', reason: 'agent_config_missing' },
 };
 
@@ -91,6 +103,7 @@ describe('MobileRunConfigSheet agent-role row', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     if (root) {
       await act(async () => {
         root?.unmount();
@@ -234,6 +247,80 @@ describe('MobileRunConfigSheet agent-role row', () => {
       (option as HTMLElement).click();
     });
     expect(onSelect).toHaveBeenCalledWith('role-1');
+  });
+
+  it('keeps short tap as Apply when instruction actions are available', async () => {
+    const onSelect = vi.fn();
+    const onSendInstruction = vi.fn(async () => true);
+    const view = await render({
+      agentRoles: {
+        items: [reviewer],
+        selectedRoleId: null,
+        onSelect,
+        onSendInstruction,
+      },
+    });
+    await openRolePicker(view);
+    const option = [...view.querySelectorAll('[role="dialog"] button')].find((node) =>
+      node.textContent?.includes('Code Reviewer')
+    );
+    await act(async () => {
+      (option as HTMLElement).click();
+    });
+    expect(onSelect).toHaveBeenCalledWith('role-1');
+    expect(onSendInstruction).not.toHaveBeenCalled();
+  });
+
+  it('long-presses an unavailable Role to send its instruction without applying it', async () => {
+    const onSelect = vi.fn();
+    const onSendInstruction = vi.fn(async () => true);
+    const view = await render({
+      agentRoles: {
+        items: [retired],
+        selectedRoleId: null,
+        onSelect,
+        onSendInstruction,
+      },
+    });
+    await openRolePicker(view);
+    const option = [...view.querySelectorAll('[role="dialog"] button')].find((node) =>
+      node.textContent?.includes('Retired Reviewer')
+    );
+    expect(option?.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => {
+      (option as HTMLElement).click();
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      option?.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          clientX: 10,
+          clientY: 10,
+        })
+      );
+      vi.advanceTimersByTime(500);
+    });
+
+    const actions = view.querySelector('[role="menu"][aria-label="Role actions"]');
+    const apply = [...(actions?.querySelectorAll('button') ?? [])].find((node) =>
+      node.textContent?.includes('Apply role')
+    );
+    const send = [...(actions?.querySelectorAll('button') ?? [])].find((node) =>
+      node.textContent?.includes('Send instruction')
+    );
+    expect((apply as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      send?.click();
+      await Promise.resolve();
+    });
+
+    expect(onSendInstruction).toHaveBeenCalledWith(retired.role);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('keeps an unavailable Role listed, disabled, and says why', async () => {

@@ -389,6 +389,8 @@ export type DesktopRunConfigMenuProps = {
     /** Opens the Role editor seeded with what the composer is set to right now. */
     onCreate?: () => void;
     onEdit?: (roleId: AgentRoleId) => void;
+    /** Existing Sessions may send a Role instruction without applying the Role. */
+    onSendInstruction?: (role: AgentRole) => Promise<boolean>;
     /** The machine those Roles are bound to, for resolving their stored ids. */
     machine?: MachineViewMeta | null;
   };
@@ -731,6 +733,7 @@ export function DesktopRunConfigMenu({
                   onSelect={agentRoles.onSelect}
                   onCreate={agentRoles.onCreate}
                   onEdit={agentRoles.onEdit}
+                  onSendInstruction={agentRoles.onSendInstruction}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
