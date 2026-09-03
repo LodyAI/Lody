@@ -40,6 +40,19 @@ Session conversation page chain:
     A parent with siblings is not closeable and does not close the window. With
     no closer mounted (Chat Landing and other surfaces) the chord closes the
     window.
+    Each Session tab has ONE leading status slot, priority-ordered
+    `waiting > working > unread > agent icon`, matching the sidebar row
+    (`sidebar-row-shared.tsx`) and the mobile tab sheet. Test `isWaiting` BEFORE
+    `isWorking`: a permission request is also live presence, so the busy spinner
+    otherwise swallows the one state that needs the user. Waiting renders the
+    sidebar's `Hand`, never an amber dot — `--primary` and `--status-warning` are
+    both amber in the shipped themes, so an amber waiting dot beside a primary
+    unread dot reads as the same marker. Unread comes from
+    `sessionHasUnreadMessages` (`lib/session-read-receipt.ts`, the same
+    comparison `shouldMarkSessionRead` uses to DECIDE the receipt) and is
+    suppressed on the ACTIVE tab, which is the surface clearing it. A child tab
+    is the only place its own unread state can surface — sub-sessions get no
+    sidebar row — so do not drop the marker from any tab renderer.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
     **The tab pills' top border shares one line with the sidebar and side-panel
