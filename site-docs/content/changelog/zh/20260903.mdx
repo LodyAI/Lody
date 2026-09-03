@@ -1,0 +1,27 @@
+---
+title: '20260903'
+version: 0.90.0
+date: 2026-09-03
+description: 新增 Zen 布局、macOS 增量更新、会话重命名和 DeepSeek Harness 自定义服务地址，并改善 Agent 配置、CLI 稳定性与输入体验。
+---
+
+版本 0.90.0
+
+### ✨ 新功能
+
+- 新增 Zen 布局模式，提供更专注的工作空间体验（[#341](https://github.com/LodyAI/Lody/pull/341)）。
+- 升级 macOS 自动更新体验，支持增量更新、原生进度提示和更可靠的安装验证（[#173](https://github.com/LodyAI/Lody/pull/173)）。
+- 新增会话重命名工具（[#337](https://github.com/LodyAI/Lody/pull/337)）。
+- 支持为 DeepSeek Harness 配置自定义服务地址（[#293](https://github.com/LodyAI/Lody/pull/293)）。
+- 完善 Agent 与 Provider 设置界面，让配置、状态和不可用原因更加清晰（[#257](https://github.com/LodyAI/Lody/pull/257)）。
+
+### 🐛 修复与改进
+
+- 提升 CLI 后台服务的启动恢复、状态诊断和异常提示能力（[#287](https://github.com/LodyAI/Lody/pull/287)）。
+- 修复 Agent 能力刷新失败，以及多轮操作中配置状态可能不一致的问题。
+- 改进 Markdown 链接、粗体网址、中文输入法和提及输入体验（[#274](https://github.com/LodyAI/Lody/pull/274)、[#309](https://github.com/LodyAI/Lody/pull/309)、[#294](https://github.com/LodyAI/Lody/pull/294)）。
+- 优化会话标签、计划审批、设置导航以及移动端紧凑布局（[#326](https://github.com/LodyAI/Lody/pull/326)、[#315](https://github.com/LodyAI/Lody/pull/315)、[#334](https://github.com/LodyAI/Lody/pull/334)、[#285](https://github.com/LodyAI/Lody/pull/285)）。
+- 改进本地项目目录选择、SVG 文件发送和桌面端 Cmd+W 行为（[#291](https://github.com/LodyAI/Lody/pull/291)、[#173](https://github.com/LodyAI/Lody/pull/173)）。
+- 修复部分代理网络环境下内置浏览器无法正常访问的问题（[#299](https://github.com/LodyAI/Lody/pull/299)）。
+- 改进 Codex 目标指令控制和子会话工作区提示（[#144](https://github.com/LodyAI/Lody/pull/144)、[#225](https://github.com/LodyAI/Lody/pull/225)）。
+- 感谢外部贡献者 [@jeffwcx](https://github.com/jeffwcx)、[@EYHN](https://github.com/EYHN)、[@Innei](https://github.com/Innei)、[@MichaelYuhe](https://github.com/MichaelYuhe)、[@sinxy-sai](https://github.com/sinxy-sai)、[@natsustan](https://github.com/natsustan)、[@slashdevcorpse](https://github.com/slashdevcorpse) 和 [@ImSingee](https://github.com/ImSingee)。
