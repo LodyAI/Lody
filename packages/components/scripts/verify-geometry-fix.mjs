@@ -7,11 +7,15 @@ import { fileURLToPath } from 'node:url';
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const argumentsList = process.argv.slice(2);
 const positional = argumentsList.filter((argument) => !argument.startsWith('--'));
+const repairGroupArgument = argumentsList.find((argument) => argument.startsWith('--repair-group='));
 const ledgerArgument = argumentsList.find((argument) => argument.startsWith('--ledger='));
+const repairGroup = repairGroupArgument?.slice('--repair-group='.length);
 const [requestedOutput, ...requestedKeys] = positional;
 
-if (!requestedOutput || requestedKeys.length === 0) {
-  throw new Error('Usage: pnpm geometry:verify-fix <dir> <findingKey...> [--ledger=<path>]');
+if (!requestedOutput || (requestedKeys.length === 0 && !repairGroup)) {
+  throw new Error(
+    'Usage: pnpm geometry:verify-fix <dir> [findingKey...] [--repair-group=<id>] [--ledger=<path>]'
+  );
 }
 
 const outputDirectory = path.resolve(packageRoot, requestedOutput);
@@ -83,6 +87,7 @@ await run(
       ...process.env,
       GEOMETRY_PIPELINE_OUTPUT_DIR: outputDirectory,
       GEOMETRY_VERIFY_FIX_KEYS: requestedKeys.join(','),
+      ...(repairGroup ? { GEOMETRY_VERIFY_FIX_REPAIR_GROUP: repairGroup } : {}),
       PLAYWRIGHT_PORT: String(port),
       PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${port}`,
       VITE_PREVIEW_PUBLIC_BASE_DOMAIN:

@@ -82,6 +82,9 @@ type ReportDetail = Readonly<{
   totalCaptureCount?: number;
   dimensionSensitivity?: readonly string[];
   repairProposal?: string;
+  /** The repair this card stands for, and the findings it folded into it. */
+  repairGroup?: string;
+  repairGroupKeys?: readonly string[];
   inkCenterWitness?: string;
   id: string;
   title: string;
@@ -2164,10 +2167,43 @@ test('captures the visual geometry report', async ({ browser }) => {
         : []
     )
   );
+  const findingLedgerStatus = (finding: GeometryFinding): GeometryLedgerStatus | 'changed' =>
+    newFindingKeys.has(finding.key)
+      ? 'new'
+      : changedFindingKeys.has(finding.key)
+        ? 'changed'
+        : (ledger.findings[finding.key]?.status ?? 'new');
+  /**
+   * Cards fold by REPAIR, not by label. Ten rows that share one wrong padding
+   * are ten reviewed findings — the keys, the baselines and the ratchet are
+   * untouched — and exactly one ticket, so the report shows one card and names
+   * the findings it stands for. Folding never crosses a ledger status: a `new`
+   * finding hidden under a reviewed one would be a review that never happened.
+   */
+  const repairGroupKey = (finding: GeometryFinding) =>
+    finding.repairGroup ? `${finding.repairGroup}\u0000${findingLedgerStatus(finding)}` : undefined;
+  const repairGroups = new Map<string, GeometryFinding[]>();
+  for (const finding of persistedFindings.findings) {
+    const key = repairGroupKey(finding);
+    if (!key) continue;
+    repairGroups.set(key, [...(repairGroups.get(key) ?? []), finding]);
+  }
+  const repairGroupLead = new Map(
+    [...repairGroups.entries()].map(([key, members]) => [
+      key,
+      [...members].sort(
+        (left, right) =>
+          Math.abs(right.offset) - Math.abs(left.offset) || left.key.localeCompare(right.key)
+      )[0]?.key,
+    ])
+  );
+
   // The report shows the steady state, not only the delta: every finding in
   // findings.json gets a card, and the ledger status says how it was reviewed.
   const displayedDetails = persistedFindings.findings.flatMap((finding): ReportDetail[] => {
     if (finding.kind === 'measurement-model-divergence') return [];
+    const groupKey = repairGroupKey(finding);
+    if (groupKey && repairGroupLead.get(groupKey) !== finding.key) return [];
     const evidence = finding.evidence[0];
     if (!evidence) return [];
     let representative = rawDetailByFindingKey.get(finding.key);
@@ -2265,11 +2301,11 @@ test('captures the visual geometry report', async ({ browser }) => {
     );
     const dimensionFinding =
       dimensionSensitivity.length > 0 ? ` · 仅出现在 ${dimensionSensitivity.join('、')}` : '';
-    const ledgerStatus: GeometryLedgerStatus | 'changed' = newFindingKeys.has(finding.key)
-      ? 'new'
-      : changedFindingKeys.has(finding.key)
-        ? 'changed'
-        : (ledger.findings[finding.key]?.status ?? 'new');
+    const ledgerStatus = findingLedgerStatus(finding);
+    const foldedKeys = (groupKey ? (repairGroups.get(groupKey) ?? []) : [])
+      .map((member) => member.key)
+      .filter((key) => key !== finding.key)
+      .sort();
     const baseline = ledger.findings[finding.key]?.baseline?.offset;
     const inkCenters = inkCentersByFindingKey.get(finding.key);
     const inkCenterWitness = inkCenters
@@ -2292,6 +2328,8 @@ test('captures the visual geometry report', async ({ browser }) => {
         ...(dimensionSensitivity.length > 0 ? { dimensionSensitivity } : {}),
         ...(repairProposal ? { repairProposal } : {}),
         ...(inkCenterWitness ? { inkCenterWitness } : {}),
+        ...(finding.repairGroup ? { repairGroup: finding.repairGroup } : {}),
+        ...(foldedKeys.length > 0 ? { repairGroupKeys: foldedKeys } : {}),
         description: `${CLASSIFICATION_LABELS[classification]} · ${finding.label} · ${finding.captureCount}/${finding.totalCaptureCount} 个捕获一致`,
         finding: `[${CLASSIFICATION_LABELS[classification]}] ${finding.label} ${DISCOVERY_ANCHOR_LABELS[finding.anchor as keyof typeof DISCOVERY_ANCHOR_LABELS] ?? finding.anchor} ${direction} · ${finding.evidence.length} 条 evidence${repairFinding}${dimensionFinding}${boxModelFinding}`,
       },
@@ -2354,6 +2392,8 @@ test('captures the visual geometry report', async ({ browser }) => {
         totalCaptureCount,
         dimensionSensitivity,
         repairProposal,
+        repairGroup,
+        repairGroupKeys,
         inkCenterWitness,
         id,
         title,
@@ -2378,6 +2418,8 @@ test('captures the visual geometry report', async ({ browser }) => {
             ? { dimensionSensitivity }
             : {}),
           ...(repairProposal ? { repairProposal } : {}),
+          ...(repairGroup ? { repairGroup } : {}),
+          ...(repairGroupKeys && repairGroupKeys.length > 0 ? { repairGroupKeys } : {}),
           ...(inkCenterWitness ? { inkCenterWitness } : {}),
           id,
           captureId,

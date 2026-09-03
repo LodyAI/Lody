@@ -83,7 +83,8 @@ to make the gate cheaper moves every merged offset the ledger recorded.
   `forwardRef`). Both are EVIDENCE — they turn a rendered DOM description into a file an
   agent can open — and neither may reach a key, for the reason an accessible name may not.
   React 19 has no `_debugSource`, so the NAME is the whole pointer; a node React never
-  rendered has none and nothing fails.
+  rendered has none and nothing fails. `repairGroup` (component, term, edge, owning node)
+  is a label too: it folds report cards and merges no finding.
 - A card clip holds the row plus a margin, draws the row median and verdict anchor only,
   and names it. Zoomed Y cards are the largest-|offset| findings anywhere. Discovery cards
   use product-region names, count unique elements not anchor votes, fold one element's

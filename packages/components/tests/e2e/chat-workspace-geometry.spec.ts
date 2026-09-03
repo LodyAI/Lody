@@ -16,6 +16,7 @@ import {
   checkGeometryLedgerRatchet,
   compileGeometryContracts,
   formatGeometryRatchetViolations,
+  geometryFindingKeysInRepairGroup,
   verifyGeometryFixes,
   type GeometryContractArtifact,
   type GeometryLedger,
@@ -46,7 +47,7 @@ import {
  */
 const pipelineOutputDirectory = process.env.GEOMETRY_PIPELINE_OUTPUT_DIR;
 /**
- * `pnpm geometry:verify-fix` sets this. The DECISION — is this finding fixed,
+ * `pnpm geometry:verify-fix` sets these. The DECISION — is this finding fixed,
  * and what does the ledger become — is made here in TypeScript, beside the
  * ratchet it must not regress; the script only applies the file it writes.
  */
@@ -54,6 +55,7 @@ const verifyFixKeys = (process.env.GEOMETRY_VERIFY_FIX_KEYS ?? '')
   .split(',')
   .map((key) => key.trim())
   .filter(Boolean);
+const verifyFixRepairGroup = process.env.GEOMETRY_VERIFY_FIX_REPAIR_GROUP;
 
 const STORY_IDS = {
   expanded: 'geometry-chatworkspace--expanded-sidebar',
@@ -134,8 +136,16 @@ test('every measured geometry finding stays inside its reviewed ledger baseline'
     `Geometry ledger ratchet failed:\n\n${formatGeometryRatchetViolations(violations)}`
   ).toEqual([]);
 
-  if (!pipelineOutputDirectory || verifyFixKeys.length === 0) return;
-  const keys = [...new Set(verifyFixKeys)];
+  if (!pipelineOutputDirectory || (verifyFixKeys.length === 0 && !verifyFixRepairGroup)) return;
+  const keys = [
+    ...new Set([
+      ...verifyFixKeys,
+      ...(verifyFixRepairGroup
+        ? geometryFindingKeysInRepairGroup(findings, verifyFixRepairGroup)
+        : []),
+    ]),
+  ];
+  expect(keys, 'No finding matches the requested keys or repair group').not.toEqual([]);
   const verification = verifyGeometryFixes(findings, ledger, capture, keys);
   await writeFile(
     path.join(pipelineOutputDirectory, 'fix-verification.json'),

@@ -93,7 +93,7 @@ declaring `ink` or `layout-box` — `new`, `debt`, `wont-fix`, `fixed`, `ignored
   contract check. Offsets are means over the WHOLE plan, so a baseline belongs to the
   platform that recorded it: re-baseline where CI runs, never trim the plan for speed.
 - `debt` and `wont-fix` are two decisions, not one word; `triage` records `debt` rather
-  than guess. `geometry:verify-fix <dir> <key…>` reruns that gate and only
+  than guess. `geometry:verify-fix <dir> <key…|--repair-group=…>` reruns that gate and only
   then moves a finding back inside one device pixel to `fixed` at its new baseline, the
   strictest entry there is.
 - Two contract members never cover one element twice; member resolution, the ink witness
@@ -113,9 +113,10 @@ Discovery or proposal presence is never a report assertion; coverage:
   findings or replacing evidence. Replay: [support](support/AGENTS.md).
 - Steady state, not delta: every finding gets a card grouped by ledger status and
   classification, with baseline vs current offset, capture count, dimension sensitivity and
-  repair text. Chips filter both, default new + changed + css-defect + promoted minus
-  wont-fix and fixed; the meta line totals new/changed/resolved. One JSON payload, one
-  renderer, images as files.
+  repair text. Cards FOLD by `repairGroup` — one per repair, naming the findings it stands
+  for, never across statuses; folding merges no finding and moves no key. Chips filter
+  both, default new + changed + css-defect + promoted minus wont-fix/fixed; the meta line
+  totals new/changed/resolved. One JSON payload, one renderer, images as files.
 - Violation images label each deviating member in place with role, physical direction,
   measured offset, actual anchor and a leader to it. A Y card comes from the FINISHED
   findings, never a second pipeline printing another number: each annotation IS that

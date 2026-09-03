@@ -308,6 +308,12 @@ export type GeometryRepairProposal = Readonly<{
   component?: string;
   edge: 'inline-start' | 'inline-end' | 'block-start' | 'block-end';
   terms: readonly GeometryRepairTerm[];
+  /**
+   * Which repair this proposal IS, independent of which element reported it.
+   * Findings never merge on it — the key is untouched — but a report folds one
+   * card per group, so ten rows sharing one wrong padding read as one ticket.
+   */
+  repairGroup?: string;
 }>;
 
 export type GeometryOffsetExplanation = Readonly<{
@@ -382,6 +388,12 @@ export type GeometryFinding = Readonly<{
   /** Alignment-rail findings only; derived from evidence explanations alone. */
   classification?: GeometryFindingClassification;
   repairProposal?: GeometryRepairProposal;
+  /**
+   * Which REPAIR this finding belongs to, for `css-defect` findings that name
+   * one. Grouping only: the key, the evidence and the review are untouched, and
+   * a finding without a repair proposal simply has none.
+   */
+  repairGroup?: string;
   /** Set when every evidence row shares one value of a varying capture axis. */
   dimensionSensitivity?: readonly GeometryDimensionSensitivity[];
   evidence: readonly GeometryFindingEvidence[];
@@ -1175,16 +1187,35 @@ function proposeBoxModelRepair(
     });
   }
   if (terms.length === 0) return undefined;
-  return {
+  const sorted = terms.sort(
+    (left, right) =>
+      Math.abs(right.delta) - Math.abs(left.delta) || left.term.localeCompare(right.term)
+  );
+  const proposal: GeometryRepairProposal = {
     commonAncestor: commonAncestor.element,
     ...(commonAncestor.className ? { className: commonAncestor.className } : {}),
     ...(commonAncestor.component ? { component: commonAncestor.component } : {}),
     edge,
-    terms: terms.sort(
-      (left, right) =>
-        Math.abs(right.delta) - Math.abs(left.delta) || left.term.localeCompare(right.term)
-    ),
+    terms: sorted,
   };
+  return { ...proposal, repairGroup: geometryRepairGroupKey(proposal) };
+}
+
+/**
+ * Repair identity: WHICH edit closes this, not which element reported it. The
+ * component that owns the edit (or, unrendered by React, the common ancestor's
+ * DOM description), the term, the edge, and the node the term sits on. It is a
+ * grouping label only — findings are never merged on it and no key reads it —
+ * so ten rows sharing one wrong padding stay ten reviewed findings and become
+ * one ticket.
+ */
+export function geometryRepairGroupKey(
+  proposal: Omit<GeometryRepairProposal, 'repairGroup'>
+): string | undefined {
+  const dominant = proposal.terms[0];
+  if (!dominant) return undefined;
+  const owner = dominant.component ?? proposal.component ?? proposal.commonAncestor;
+  return makeFindingKey(['repair', owner, dominant.term, proposal.edge, dominant.element]);
 }
 
 function declaredTermDelta(explanation: GeometryOffsetExplanation): number {
@@ -2088,6 +2119,7 @@ export function createGeometryFindings(
       totalCaptureCount: totalBySurface.get(group.surfaceFamily) ?? evidence.length,
       classification,
       ...(repairProposal ? { repairProposal } : {}),
+      ...(repairProposal?.repairGroup ? { repairGroup: repairProposal.repairGroup } : {}),
       ...(sensitivity.length > 0 ? { dimensionSensitivity: sensitivity } : {}),
       evidence,
     };
@@ -3097,6 +3129,17 @@ export function verifyGeometryFixes(
       ),
     },
   };
+}
+
+/** Every finding key the artifact assigns to one repair group. */
+export function geometryFindingKeysInRepairGroup(
+  artifact: GeometryFindingArtifact,
+  repairGroup: string
+): readonly string[] {
+  return artifact.findings
+    .filter((finding) => finding.repairGroup === repairGroup)
+    .map((finding) => finding.key)
+    .sort();
 }
 
 export function formatGeometryRatchetViolations(

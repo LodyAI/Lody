@@ -932,7 +932,14 @@
           factsEl.append(span);
         }
         if (factsEl.childElementCount > 0) inner.append(factsEl);
-        for (const text of [detail.repairProposal, detail.inkCenterWitness]) {
+        // One card per REPAIR: the findings folded into it are named, so a
+        // reviewer can see they were reviewed rather than dropped.
+        const foldedKeys = detail.repairGroupKeys ?? [];
+        const foldedText =
+          foldedKeys.length > 0
+            ? `同一处修复覆盖 ${foldedKeys.length + 1} 条 finding：${foldedKeys.join('、')}`
+            : undefined;
+        for (const text of [detail.repairProposal, foldedText, detail.inkCenterWitness]) {
           if (!text) continue;
           const paragraph = document.createElement('p');
           paragraph.className = 'detail-repair';
