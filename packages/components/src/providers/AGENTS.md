@@ -10,6 +10,20 @@ build does not declare; without the flag loro-mirror rejects the entire state
 with `Unknown property: <key>`, so the older client can never write to that doc
 again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
+## Session stores never materialize history
+
+`createSessionStore` builds the control-plane Mirror over
+`createControlPlaneDoc` with `sessionControlPlaneSchema` (`history` is
+`schema.Ignore()`), so opening a session costs O(1) in turns. The facade drops
+`history` events before the Mirror sees them and answers root enumeration
+without walking the doc; keep both, or a streaming turn is materialized into
+the ignored slot and `new Mirror` pays ~35 ms per 2,000 turns. Turns are read
+through `store.history` (`ConversationView`) and written through
+`store.historyWriter`; `getState()` has no `history` key. The rollback flag
+(`isConversationViewEnabled()`) swaps in the old full Mirror behind the same
+store surface. Contract tests: `tests/control-plane-mirror.test.ts`,
+`tests/history-writer.test.ts`.
+
 ## Streams connection cardinality
 
 - Capability discovery and refresh must reuse the workspace runtime's existing Machine

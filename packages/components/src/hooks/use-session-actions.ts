@@ -12,7 +12,6 @@ import type {
   SessionToCreate,
   MachineId,
   MachineLegacyMetaFields,
-  SessionDocMeta,
   SessionTurnInputConfig,
   MachineFlockKey,
   MachineFlockRow,
@@ -811,11 +810,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, (sessionStore) => {
+        const turn = sessionStore.historyWriter.read(userTurnId);
+        return turn?.role === 'user' ? turn : undefined;
+      });
       const inputConfig =
         options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
       const dispatchUserId = entry?.userId?.trim();
@@ -919,11 +917,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, (sessionStore) => {
+        const turn = sessionStore.historyWriter.read(userTurnId);
+        return turn?.role === 'user' ? turn : undefined;
+      });
       const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
       const userId = entry?.userId?.trim();
       const roomId = getSessionRoomId(sessionId);
@@ -960,18 +957,15 @@ export function useSessionActions(): SessionActions {
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
         const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
-          let didPromote = false;
-          sessionStore.setState((draft: SessionDocMeta) => {
-            const pendingEntry = draft.history.find(
-              (item) => item.id === userTurnId && item.role === 'user'
-            );
-            if (pendingEntry?.status === 'pending_apply') {
-              pendingEntry.status = 'pending';
-              pendingEntry.read = false;
-              didPromote = true;
-            }
+          const pendingEntry = sessionStore.historyWriter.read(userTurnId);
+          if (pendingEntry?.role !== 'user' || pendingEntry.status !== 'pending_apply') {
+            return false;
+          }
+          return sessionStore.historyWriter.replace(userTurnId, {
+            ...pendingEntry,
+            status: 'pending',
+            read: false,
           });
-          return didPromote;
         });
         // A duplicate response must not reset a turn that another request has
         // already promoted, started, or completed.

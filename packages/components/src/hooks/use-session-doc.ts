@@ -16,8 +16,17 @@ import {
   type SessionDocStore,
 } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
+import {
+  acceptedSessionHistoryProjectionsAtom,
+  getAcceptedSessionHistoryProjections,
+} from '@/atoms/session-history-projection';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
+import {
+  createProjectedConversationView,
+  subscribeConversationViewOnFrame,
+  type ConversationView,
+} from '@/lib/conversation-view';
 
 declare global {
   interface Window {
@@ -38,7 +47,14 @@ export type PushMessageQueueInput = Omit<
 };
 
 export type UseSessionDocResult = {
+  /** Control-plane state (session, queue, preview, fork, cursor, runtime config). */
   doc: SessionDocState;
+  /**
+   * Windowed access to the turns, with this session's accepted optimistic
+   * projections overlaid; null until the store is loaded. Components must read
+   * history only through this view.
+   */
+  history: ConversationView | null;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: { dispatch?: boolean }
@@ -88,19 +104,6 @@ export function sessionMetaSuggestsHistory(session: SessionHistoryHint | null | 
   );
 }
 
-const updateOnlyChangesHistory = (
-  previous: SessionDocState | undefined,
-  next: SessionDocState
-): boolean =>
-  previous !== undefined &&
-  previous.history !== next.history &&
-  previous.session === next.session &&
-  previous.mq === next.mq &&
-  previous.forkOperation === next.forkOperation &&
-  previous.preview === next.preview &&
-  previous.externalHistoryCursor === next.externalHistoryCursor &&
-  previous.acpRuntimeConfig === next.acpRuntimeConfig;
-
 export function useSessionDoc(
   sessionId: SessionId,
   options: UseSessionDocOptions = {}
@@ -115,7 +118,6 @@ export function useSessionDoc(
   const fallbackDoc = useMemo<SessionDocInput>(
     () => ({
       session: { id: sessionId },
-      history: [],
       mq: [],
       forkOperation: undefined,
       preview: undefined,
@@ -180,7 +182,8 @@ export function useSessionDoc(
         unsubscribe = subscribeLatestOnAnimationFrame<SessionDocState>({
           subscribe: (listener) => store.subscribe(listener),
           initialValue: initialState,
-          shouldDefer: updateOnlyChangesHistory,
+          // Control-plane updates are small and rare; publish them right away.
+          shouldDefer: () => false,
           onValue: (nextState) => {
             if (cancelled) return;
             setState((prev) => (prev === nextState ? prev : nextState));
@@ -228,6 +231,18 @@ export function useSessionDoc(
     }
     return loadedStore.acquireSync();
   }, [enabled, loadedStore, syncEnabled]);
+
+  const projections = useAtomValue(acceptedSessionHistoryProjectionsAtom);
+  const sessionProjections = useMemo(
+    () =>
+      runtime ? getAcceptedSessionHistoryProjections(projections, runtime.workspaceId, sessionId) : [],
+    [projections, runtime, sessionId]
+  );
+  const history = useMemo(
+    () =>
+      loadedStore ? createProjectedConversationView(loadedStore.history, sessionProjections) : null,
+    [loadedStore, sessionProjections]
+  );
 
   const withStore = useCallback(
     async <T>(fn: (store: SessionDocStore) => Promise<T> | T): Promise<T> => {
@@ -369,16 +384,13 @@ export function useSessionDoc(
   const updateHistoryEntry = useCallback(
     async (historyId: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput) => {
       // The updater is a function that can't cross the intent wire; resolve it to
-      // the concrete replacement entry against the current snapshot and send that
+      // the concrete replacement entry against the current turn and send that
       // through the writer seam. Preserve the "not found → no-op" short-circuit.
-      const history = await withStore(
-        (store) => (store.getState().history ?? []) as SessionHistoryInput[]
-      );
-      const index = history.findIndex((entry) => entry.id === historyId);
-      if (index < 0) {
+      const current = await withStore((store) => store.historyWriter.read(historyId));
+      if (!current) {
         return;
       }
-      const nextEntry = updater(history[index] as SessionHistoryInput);
+      const nextEntry = updater(current as unknown as SessionHistoryInput);
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
@@ -397,6 +409,7 @@ export function useSessionDoc(
 
   return {
     doc: state,
+    history,
     addHistory,
     pushMessageQueue,
     removeMessageQueueItem,
@@ -447,14 +460,14 @@ export function useSessionDocSyncState(
           return;
         }
 
-        const readHasLocalHistory = (state: SessionDocState) => (state.history?.length ?? 0) > 0;
-        setHasLocalHistory(readHasLocalHistory(store.getState()));
+        const readHasLocalHistory = () => store.history.turnCount > 0;
+        setHasLocalHistory(readHasLocalHistory());
         setSyncState(store.getSyncState());
         setReady(true);
         releaseSync = store.acquireSync();
-        unsubscribeStore = store.subscribe((nextState) => {
+        unsubscribeStore = subscribeConversationViewOnFrame(store.history, () => {
           if (!cancelled) {
-            const nextHasLocalHistory = readHasLocalHistory(nextState);
+            const nextHasLocalHistory = readHasLocalHistory();
             setHasLocalHistory((prev) =>
               prev === nextHasLocalHistory ? prev : nextHasLocalHistory
             );

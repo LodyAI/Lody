@@ -119,6 +119,11 @@ export default defineConfig(({ mode }) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: {
         ...viteEnvDefine,
+        // Rollback switch for windowed conversation rendering; see
+        // packages/components/src/lib/conversation-view/feature-flag.ts.
+        'import.meta.env.LODY_CONVERSATION_VIEW': JSON.stringify(
+          process.env.LODY_CONVERSATION_VIEW ?? ''
+        ),
         __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
         __GIT_COMMIT__: JSON.stringify(getGitCommitHash()),
         __APP_VERSION__: JSON.stringify(getAppVersion())

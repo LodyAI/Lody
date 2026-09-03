@@ -85,7 +85,9 @@ export interface WorkspaceWriter {
   respondSessionPermission(
     sessionId: string,
     requestId: string,
-    outcome: Record<string, unknown>
+    outcome: Record<string, unknown>,
+    /** `turnId` locates the turn directly instead of searching the history. */
+    options?: { turnId?: string }
   ): Promise<void>;
 
   /** Message-queue mutations (durable CRDT on the session doc). */

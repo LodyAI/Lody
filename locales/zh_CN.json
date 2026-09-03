@@ -3643,6 +3643,8 @@
   "settings.experimental.enableHelper": "显示仍在开发中的功能。它们可能变动或出问题。",
   "settings.experimental.reviewAgent": "Review Agent",
   "settings.experimental.reviewAgentHelper": "让 review agent 检查分支、把修改要求交回会话，并在 CI 变绿后合入。可按会话单独开启。",
+  "settings.developer.conversationView": "分窗渲染对话",
+  "settings.developer.conversationViewHelper": "打开长对话时只加载可见的轮次。关闭后回退为加载完整历史；对之后打开的对话生效。",
   "settings.review.title": "Review Agent",
   "settings.review.machineConfigHelper": "为每台机器选择其 session 使用的 reviewer。",
   "settings.review.machineTableLabel": "按机器配置 reviewer",

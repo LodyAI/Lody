@@ -2,6 +2,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '@/ui/switch';
 import {
+  conversationViewEnabledAtom,
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   tasksBetaEnabledAtom,
@@ -23,6 +24,9 @@ export function BetaFeaturesSection() {
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
+  const [conversationViewEnabled, setConversationViewEnabled] = useAtom(
+    conversationViewEnabledAtom
+  );
 
   if (!developerModeEnabled) return null;
 
@@ -52,6 +56,21 @@ export function BetaFeaturesSection() {
           checked={inboxBetaEnabled}
           onCheckedChange={setInboxBetaEnabled}
           aria-label={t('settings.beta.inbox', 'Inbox')}
+        />
+      </CompactRow>
+      {/* Rollback switch, not a beta: on by default and here only so a
+          regression can be worked around without a new build. */}
+      <CompactRow
+        label={t('settings.developer.conversationView', 'Windowed conversation rendering')}
+        helper={t(
+          'settings.developer.conversationViewHelper',
+          'Open long conversations by hydrating only the visible turns. Turn off to fall back to loading the whole history; applies to conversations opened afterwards.'
+        )}
+      >
+        <Switch
+          checked={conversationViewEnabled}
+          onCheckedChange={setConversationViewEnabled}
+          aria-label={t('settings.developer.conversationView', 'Windowed conversation rendering')}
         />
       </CompactRow>
     </CompactSection>
