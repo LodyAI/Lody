@@ -220,8 +220,13 @@ export function AcpFooterSelectorGroup({
   onConfigOptionChange,
   contentClassName,
 }: AcpFooterSelectorGroupProps) {
-  const { modelSelectors, thoughtLevelSelectors, booleanSelectors, otherSelectors } =
-    orderAcpConfigOptionSelectors(configOptionSelectors);
+  const {
+    modelSelectors,
+    thoughtLevelSelectors,
+    thoughtToggleSelectors,
+    booleanSelectors,
+    otherSelectors,
+  } = orderAcpConfigOptionSelectors(configOptionSelectors);
 
   return (
     <>
@@ -250,7 +255,7 @@ export function AcpFooterSelectorGroup({
         })
       ) : null}
 
-      {thoughtLevelSelectors.map((selector) =>
+      {[...thoughtLevelSelectors, ...thoughtToggleSelectors].map((selector) =>
         selector.type === 'select'
           ? renderConfigSelector(selector, {
               tone,

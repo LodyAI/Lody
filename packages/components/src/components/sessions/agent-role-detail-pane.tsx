@@ -80,6 +80,8 @@ export function AgentRoleDetailPane({
           agentType: agentConfig.agentType,
           runtimeOverrides: agentConfig.runtimeOverrides,
           machine: machine ?? null,
+          selectedModelId: role.runConfig.modelId ?? null,
+          configOptionValues: role.runConfig.configOptionValues,
         }
       : undefined
   );

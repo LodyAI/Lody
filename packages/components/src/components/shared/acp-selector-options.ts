@@ -6,12 +6,17 @@ import {
   ACP_COLLABORATION_MODE_PLAN_VALUE,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
+  isAcpToggleSelectEnabledValue,
+  isAcpToggleSelectValues,
   getAcpCapabilityCacheKey,
   getAcpCapabilityCacheEntryAuthority,
   getBuiltinDefaultModeId,
   getStaticBuiltinAcpCapabilities,
   isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
+  resolveAcpConfigOptionsForModel,
+  toggleAcpSelectOptionValue,
   type AcpCapabilityAuthority,
+  type AcpCapabilityCacheEntry,
   type AgentConfigId,
   type AgentConfigCliType,
   type MachineViewMeta,
@@ -83,10 +88,8 @@ const CODEX_EXTENDED_REASONING_VALUES = new Set(
   CODEX_EXTENDED_REASONING_OPTIONS.map((option) => option.value)
 );
 
-const isOnOffSelectSelector = (selector: AcpSelectConfigOptionSelector): boolean => {
-  const values = new Set(selector.options.map((option) => option.value));
-  return values.has(CONFIG_OPTION_ON_VALUE) && values.has(CONFIG_OPTION_OFF_VALUE);
-};
+const selectOptionValues = (selector: AcpSelectConfigOptionSelector): string[] =>
+  selector.options.map((option) => option.value);
 
 /**
  * Classifies a selector as a "fast mode" toggle so it renders in the dedicated
@@ -95,7 +98,8 @@ const isOnOffSelectSelector = (selector: AcpSelectConfigOptionSelector): boolean
  */
 export const isFastModeSelector = (selector: AcpConfigOptionSelector): boolean =>
   isAcpFastModeConfigId(selector.configId) &&
-  (selector.type === 'boolean' || isOnOffSelectSelector(selector));
+  (selector.type === 'boolean' ||
+    (selector.type === 'select' && isAcpToggleSelectValues(selectOptionValues(selector))));
 
 export const isOnOffConfigOptionValue = (
   value: AcpConfigOptionValue | undefined
@@ -107,7 +111,10 @@ export const resolveOnOffConfigOptionEnabled = (
   value: AcpConfigOptionValue | undefined
 ): boolean => {
   const resolved = resolveConfigOptionValue(selector, value);
-  return selector.type === 'boolean' ? resolved === true : resolved === CONFIG_OPTION_ON_VALUE;
+  if (selector.type === 'boolean') {
+    return resolved === true;
+  }
+  return isAcpToggleSelectEnabledValue(resolved);
 };
 
 export const toggleOnOffConfigOptionValue = (
@@ -115,11 +122,10 @@ export const toggleOnOffConfigOptionValue = (
   value: AcpConfigOptionValue | undefined
 ): AcpConfigOptionValue => {
   const enabled = resolveOnOffConfigOptionEnabled(selector, value);
-  return selector.type === 'boolean'
-    ? !enabled
-    : enabled
-      ? CONFIG_OPTION_OFF_VALUE
-      : CONFIG_OPTION_ON_VALUE;
+  if (selector.type === 'boolean') {
+    return !enabled;
+  }
+  return toggleAcpSelectOptionValue(selectOptionValues(selector), !enabled);
 };
 
 export const isConfigOptionValueValid = (
@@ -212,6 +218,42 @@ type ResolvedConfigOptions = {
   configOptions?: AcpConfigOptionSummary[];
 };
 
+const isAcpProbedTarget = (target?: Pick<AcpSelectorTarget, 'cliType'>): boolean =>
+  target?.cliType === 'registry' || target?.cliType === 'custom';
+
+/**
+ * The model must be read from the channel the composer writes (registry/custom write the `model` config option; a live session seeds `selectedModelId` from the stale runtime baseline).
+ */
+const resolveComposerTargetModelId = (
+  configOptions: AcpConfigOptionSummary[],
+  target?: AcpSelectorTarget
+): string | undefined => {
+  const modelOption = configOptions.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const storedModel = modelOption ? target?.configOptionValues?.[modelOption.id] : undefined;
+  const fromConfigOption =
+    typeof storedModel === 'string' && storedModel !== '' ? storedModel : undefined;
+  const fromPicker =
+    typeof target?.selectedModelId === 'string' && target.selectedModelId !== ''
+      ? target.selectedModelId
+      : undefined;
+  if (isAcpProbedTarget(target)) {
+    return fromConfigOption ?? fromPicker;
+  }
+  return fromPicker;
+};
+
+const resolveCatalogForModel = (
+  capability: Pick<AcpCapabilityCacheEntry, 'configOptionsByModel'>,
+  configOptions: AcpConfigOptionSummary[],
+  target?: AcpSelectorTarget
+): AcpConfigOptionSummary[] | undefined =>
+  resolveAcpConfigOptionsForModel(
+    { configOptions, configOptionsByModel: capability.configOptionsByModel },
+    resolveComposerTargetModelId(configOptions, target)
+  );
+
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
   if (!target?.cliType || !target.agentType) {
     return { authority: 'unavailable' };
@@ -222,8 +264,9 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     const capability = target.machine?.acpCapabilities?.[key];
     if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
-      if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions };
+      const snapshot = capability.configOptions;
+      if (snapshot?.length) {
+        return { authority, configOptions: resolveCatalogForModel(capability, snapshot, target) };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -500,7 +543,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
-  const isAcpProbed = target?.cliType === 'registry' || target?.cliType === 'custom';
+  const isAcpProbed = isAcpProbedTarget(target);
   const modeConfigOption = configOptions?.find(
     (opt) => opt.category === 'mode' && opt.type === 'select' && opt.id !== 'interaction_mode'
   );

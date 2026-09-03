@@ -135,8 +135,13 @@ export function describeRunConfigSelection({
   configOptionSelectors: ReadonlyArray<AcpConfigOptionSelector>;
   configOptionValues: Record<string, AcpConfigOptionValue | undefined> | undefined;
 }): RunConfigFace {
-  const { modelSelectors, thoughtLevelSelectors, planModeSelectors, fastModeSelectors } =
-    orderAcpConfigOptionSelectors([...configOptionSelectors]);
+  const {
+    modelSelectors,
+    thoughtLevelSelectors,
+    thoughtToggleSelectors,
+    planModeSelectors,
+    fastModeSelectors,
+  } = orderAcpConfigOptionSelectors([...configOptionSelectors]);
   const modelConfigSelector = modelSelectors[0];
   const pickerOptions =
     modelOptions.length > 0 ? modelOptions : (modelConfigSelector?.options ?? []);
@@ -149,9 +154,10 @@ export function describeRunConfigSelection({
             configOptionValues?.[modelConfigSelector.configId]
           ) as string) ?? null)
         : null;
-  const thinkingSelector = thoughtLevelSelectors.find(
-    (selector): selector is AcpSelectConfigOptionSelector => selector.type === 'select'
-  );
+  const isSelect = (selector: AcpConfigOptionSelector): selector is AcpSelectConfigOptionSelector =>
+    selector.type === 'select';
+  const thinkingSelector =
+    thoughtLevelSelectors.find(isSelect) ?? thoughtToggleSelectors.find(isSelect);
   const thinkingValue = thinkingSelector
     ? ((resolveConfigOptionValue(
         thinkingSelector,
