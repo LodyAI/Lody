@@ -1961,6 +1961,7 @@
   "sessions.imageStoredAsLocalFile": "图片上传处于离线状态，已作为待同步文件附件添加。",
   "sessions.fileDownload": "下载",
   "sessions.fileDownloadFull": "下载完整文件",
+  "sessions.openLivePreview": "打开实时预览",
   "sessions.filePreviewRendered": "渲染",
   "sessions.filePreviewRaw": "原文",
   "sessions.filePreviewTruncated": "预览仅显示文件开头部分。下载完整文件以查看全部内容。",
