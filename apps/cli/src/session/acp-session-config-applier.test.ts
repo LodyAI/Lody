@@ -1,8 +1,68 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ACPSessionId, SessionId } from '@lody/shared';
+import type { ACPSessionId, AcpConfigOptionValue, SessionId } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
 import type { Logger } from '@/utils/logger';
 import { applyAcpSessionRunConfig } from './acp-session-config-applier';
+
+type SessionConfigCall = {
+  method: 'unstable_setSessionModel' | 'setSessionConfigOption';
+  configId?: string;
+  value: AcpConfigOptionValue;
+};
+
+const CURSOR_STYLE_PARAMETER_OPTIONS = [
+  {
+    id: 'model',
+    category: 'model',
+    type: 'select',
+    currentValue: 'model-a',
+    options: [
+      { name: 'Model A', value: 'model-a' },
+      { name: 'Model B', value: 'model-b' },
+    ],
+  },
+  {
+    id: 'thinking',
+    category: 'thought_level',
+    type: 'select',
+    currentValue: 'false',
+    options: [
+      { name: 'On', value: 'true' },
+      { name: 'Off', value: 'false' },
+    ],
+  },
+  {
+    id: 'fast',
+    type: 'select',
+    currentValue: 'false',
+    options: [
+      { name: 'On', value: 'true' },
+      { name: 'Off', value: 'false' },
+    ],
+  },
+] as const;
+
+function createOrderedAgentClient(args?: {
+  setSessionModel?: (sessionId: ACPSessionId, modelId: string) => Promise<void>;
+}): { agentClient: AgentClient; calls: SessionConfigCall[] } {
+  const calls: SessionConfigCall[] = [];
+  const agentClient = {
+    isCreated: () => true,
+    getConfigOptions: () => [...CURSOR_STYLE_PARAMETER_OPTIONS],
+    unstable_setSessionModel: async (sessionId: ACPSessionId, modelId: string) => {
+      calls.push({ method: 'unstable_setSessionModel', value: modelId });
+      await args?.setSessionModel?.(sessionId, modelId);
+    },
+    setSessionConfigOption: async (
+      _sessionId: ACPSessionId,
+      configId: string,
+      value: AcpConfigOptionValue
+    ) => {
+      calls.push({ method: 'setSessionConfigOption', configId, value });
+    },
+  } as unknown as AgentClient;
+  return { agentClient, calls };
+}
 
 function createLogger(): Logger {
   const logger = {
@@ -226,5 +286,116 @@ describe('applyAcpSessionRunConfig', () => {
       warningSelections: ['mode="agent-full-access"'],
       runtimeConfigPatch: { acpSessionId: 'acp-5', configOptionValues: {} },
     });
+  });
+
+  it('applies a config-option model before per-model options even when the model key is last', async () => {
+    const { agentClient, calls } = createOrderedAgentClient();
+
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-6' as SessionId,
+        acpSessionId: 'acp-6' as ACPSessionId,
+        agentClient,
+      },
+      config: {
+        configOptionValues: {
+          thinking: 'true',
+          fast: 'true',
+          model: 'model-b',
+        },
+      },
+      logger: createLogger(),
+    });
+
+    const firstCall = calls[0];
+    expect(firstCall).toEqual({ method: 'unstable_setSessionModel', value: 'model-b' });
+    const optionCalls = calls.filter((call) => call.method === 'setSessionConfigOption');
+    const modelCallIndex = calls.findIndex((call) => call.method === 'unstable_setSessionModel');
+    expect(
+      optionCalls.every((call) => {
+        const callIndex = calls.indexOf(call);
+        return callIndex > modelCallIndex && call.configId !== 'model';
+      })
+    ).toBe(true);
+    expect(optionCalls.filter((call) => call.configId === 'thinking')).toEqual([
+      { method: 'setSessionConfigOption', configId: 'thinking', value: 'true' },
+    ]);
+    expect(optionCalls.filter((call) => call.configId === 'fast')).toEqual([
+      { method: 'setSessionConfigOption', configId: 'fast', value: 'true' },
+    ]);
+  });
+
+  it('applies an explicit modelId once before per-model options and does not resend the model option', async () => {
+    const { agentClient, calls } = createOrderedAgentClient();
+
+    await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-7' as SessionId,
+        acpSessionId: 'acp-7' as ACPSessionId,
+        agentClient,
+      },
+      config: {
+        modelId: 'model-b',
+        configOptionValues: {
+          model: 'model-b',
+          thinking: 'true',
+        },
+      },
+      logger: createLogger(),
+    });
+
+    expect(calls.filter((call) => call.method === 'unstable_setSessionModel')).toEqual([
+      { method: 'unstable_setSessionModel', value: 'model-b' },
+    ]);
+    expect(calls[0]).toEqual({ method: 'unstable_setSessionModel', value: 'model-b' });
+    const thinkingCallIndex = calls.findIndex(
+      (call) => call.method === 'setSessionConfigOption' && call.configId === 'thinking'
+    );
+    expect(thinkingCallIndex).toBeGreaterThan(0);
+    expect(calls[thinkingCallIndex]).toEqual({
+      method: 'setSessionConfigOption',
+      configId: 'thinking',
+      value: 'true',
+    });
+    expect(
+      calls.some((call) => call.method === 'setSessionConfigOption' && call.configId === 'model')
+    ).toBe(false);
+  });
+
+  it('keeps a failed config-option model switch debug-only and still applies remaining options', async () => {
+    const { agentClient, calls } = createOrderedAgentClient({
+      setSessionModel: async () => {
+        throw new Error('model switch rejected');
+      },
+    });
+
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-8' as SessionId,
+          acpSessionId: 'acp-8' as ACPSessionId,
+          agentClient,
+        },
+        config: {
+          configOptionValues: {
+            thinking: 'true',
+            fast: 'true',
+            model: 'model-b',
+          },
+        },
+        logger: createLogger(),
+      })
+    ).resolves.toMatchObject({
+      rejectedSelections: [],
+      warningSelections: [],
+    });
+
+    expect(calls.filter((call) => call.method === 'unstable_setSessionModel')).toEqual([
+      { method: 'unstable_setSessionModel', value: 'model-b' },
+    ]);
+    expect(calls.filter((call) => call.method === 'setSessionConfigOption')).toEqual([
+      { method: 'setSessionConfigOption', configId: 'thinking', value: 'true' },
+      { method: 'setSessionConfigOption', configId: 'fast', value: 'true' },
+    ]);
   });
 });

@@ -159,6 +159,19 @@ export async function applyAcpSessionRunConfig(args: {
         `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
       );
     }
+  } else if (typeof configOptionModelId === 'string') {
+    // The agent validates per-model options against the current model, so the model switch goes first.
+    try {
+      await agentClient.unstable_setSessionModel?.(acpSessionId, configOptionModelId);
+      confirmedLegacyModelId = configOptionModelId;
+    } catch (error) {
+      logger.debug(
+        `[${sessionId}] Failed to set ACP model option ${modelConfigId}=${formatAcpConfigValueForLog(
+          modelConfigId,
+          configOptionModelId
+        )}: ${String(error)}`
+      );
+    }
   }
 
   for (const [configId, value] of configOptionEntries) {
@@ -179,19 +192,6 @@ export async function applyAcpSessionRunConfig(args: {
       continue;
     }
     if (configId === modelConfigId) {
-      if (!config.modelId && typeof value === 'string') {
-        try {
-          await agentClient.unstable_setSessionModel?.(acpSessionId, value);
-          confirmedLegacyModelId = value;
-        } catch (error) {
-          logger.debug(
-            `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-      }
       continue;
     }
     if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
