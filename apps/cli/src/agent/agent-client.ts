@@ -36,6 +36,8 @@ import {
   buildAskUserQuestionElicitationResponse,
   formatMcpResolutionProblem,
   getServerNow,
+  ACP_INIT_TIMEOUT_MS as DEFAULT_ACP_INIT_TIMEOUT_MS,
+  ACP_NEW_SESSION_TIMEOUT_MS as DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -1718,7 +1720,10 @@ export class AgentClient implements acp.Client {
     // connection.initialize() internally spawns the CLI process and waits for it to respond.
     // Missing dependencies or local runtime issues can hang this operation indefinitely.
     // Apply a hard timeout so startup fails fast.
-    const ACP_INIT_TIMEOUT_MS = Math.max(0, timeoutOptions.initTimeoutMs ?? 120_000); // 2 minutes default
+    const ACP_INIT_TIMEOUT_MS = Math.max(
+      0,
+      timeoutOptions.initTimeoutMs ?? DEFAULT_ACP_INIT_TIMEOUT_MS
+    );
 
     let initResponse: acp.InitializeResponse;
     try {
@@ -2067,7 +2072,10 @@ export class AgentClient implements acp.Client {
       // 2. Start the internal query system which spawns another subprocess
       // 3. Call query.supportedModels() and query.supportedCommands()
       // Any of these can hang due to runtime/environment issues. Apply a hard timeout.
-      const ACP_NEW_SESSION_TIMEOUT_MS = Math.max(0, timeoutOptions.newSessionTimeoutMs ?? 120_000); // 2 minutes default
+      const ACP_NEW_SESSION_TIMEOUT_MS = Math.max(
+        0,
+        timeoutOptions.newSessionTimeoutMs ?? DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS
+      );
 
       try {
         sessionResponse = await withTimeout(

@@ -1,3 +1,4 @@
+import { ACP_COLD_NPX_INIT_TIMEOUT_MS } from '@lody/shared';
 import type { AcpStartupTimeoutOptions } from './agent-client';
 import { AcpTimeoutError } from './agent-client';
 import type { Logger } from '@/utils/logger';
@@ -14,7 +15,11 @@ import {
   type NpxCacheIo,
 } from './npx-cache';
 
-export const COLD_NPX_INIT_TIMEOUT_MS = 300_000;
+/**
+ * Re-exported so the client-side backstop in `@lody/shared/acp-startup-budget`
+ * and this startup path cannot drift into two different worst cases.
+ */
+export const COLD_NPX_INIT_TIMEOUT_MS = ACP_COLD_NPX_INIT_TIMEOUT_MS;
 
 export type NpxStartupAttemptInput = {
   attempt: number;

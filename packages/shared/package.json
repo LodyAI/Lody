@@ -12,6 +12,10 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
+    "./acp-startup-budget": {
+      "types": "./src/acp-startup-budget.ts",
+      "import": "./src/acp-startup-budget.ts"
+    },
     "./visual-annotation-inspector": {
       "types": "./src/visual-annotation-inspector.ts",
       "import": "./src/visual-annotation-inspector.ts"
