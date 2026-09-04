@@ -72,6 +72,11 @@ export function indexRowFromEntry(entry: SessionHistory): TurnIndexRow {
 /**
  * Mirrors `buildChatStreamItems`' rule: an assistant entry with no items and no
  * plan renders to nothing, so scans for "the last assistant turn" skip it.
+ *
+ * A row whose counts have not been resolved yet (the doc-backed view fills them
+ * with the summary) is NOT empty: guessing "empty" would drop a real turn from
+ * the stream, while guessing "non-empty" only shows a placeholder for an
+ * interrupted turn until its counts arrive.
  */
 export const isEmptyAssistantIndexRow = (row: TurnIndexRow): boolean =>
-  row.role === 'assistant' && (row.itemCount ?? 0) === 0 && (row.planCount ?? 0) === 0;
+  row.role === 'assistant' && row.itemCount === 0 && (row.planCount ?? 0) === 0;

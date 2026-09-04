@@ -97,14 +97,26 @@ function diffContainer(
     if (!isRecord(oldValue) || !isRecord(newValue)) {
       throw new Error('Failed to diff container(map). Old and new state must be objects');
     }
-    diffMap(container as LoroMap, isMapSchema(schema) ? schema : undefined, oldValue, newValue, effective);
+    diffMap(
+      container as LoroMap,
+      isMapSchema(schema) ? schema : undefined,
+      oldValue,
+      newValue,
+      effective
+    );
     return;
   }
   if (kind === 'List') {
     if (!Array.isArray(oldValue) || !Array.isArray(newValue)) {
       throw new Error('Failed to diff container(list). Old and new state must be arrays');
     }
-    diffList(container as LoroList, isListSchema(schema) ? schema : undefined, oldValue, newValue, effective);
+    diffList(
+      container as LoroList,
+      isListSchema(schema) ? schema : undefined,
+      oldValue,
+      newValue,
+      effective
+    );
     return;
   }
   if (kind === 'Text') {
@@ -149,8 +161,15 @@ function diffMap(
     }
     if (!(key in oldValue)) {
       if (containerType && matchesContainerType(containerType, newItem)) {
-        const containerSchema = fieldSchema && isContainerSchema(fieldSchema) ? fieldSchema : undefined;
-        insertContainerIntoMap(map, containerSchema, key, newItem, containerSchema ? undefined : childInfer);
+        const containerSchema =
+          fieldSchema && isContainerSchema(fieldSchema) ? fieldSchema : undefined;
+        insertContainerIntoMap(
+          map,
+          containerSchema,
+          key,
+          newItem,
+          containerSchema ? undefined : childInfer
+        );
       } else {
         map.set(key, applyEncode(fieldSchema, newItem) as never);
       }
@@ -259,7 +278,9 @@ export function createHistoryWriter(doc: LoroDoc, view: ConversationView): Histo
       }
       for (const index of candidates) {
         const row = view.index(index);
-        if (!row || row.role !== 'assistant' || (row.itemCount ?? 0) === 0) continue;
+        // An unresolved count is not evidence of an empty turn; only skip a
+        // turn known to have no items.
+        if (!row || row.role !== 'assistant' || row.itemCount === 0) continue;
         const value = list.get(index);
         if (!isContainer(value) || value.kind() !== 'Map') continue;
         const turn = readAt(index, value as LoroMap);
@@ -330,8 +351,9 @@ export function createMirrorHistoryWriter(mirror: HistoryMirrorLike): HistoryWri
           const items = entry.items;
           if (!Array.isArray(items)) continue;
           for (const item of items) {
-            const request = (item as { permissionRequest?: { requestId?: string; outcome?: unknown } })
-              .permissionRequest;
+            const request = (
+              item as { permissionRequest?: { requestId?: string; outcome?: unknown } }
+            ).permissionRequest;
             if (request && request.requestId === requestId) {
               request.outcome = outcome;
               responded = true;

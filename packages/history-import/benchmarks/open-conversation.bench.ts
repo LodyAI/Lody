@@ -191,10 +191,22 @@ async function main(): Promise<void> {
     .map((value) => Number.parseInt(value.trim(), 10))
     .filter((value) => Number.isFinite(value) && value > 0);
   const iterations = Number.parseInt(readFlag('iterations') ?? '10', 10);
+  /**
+   * The `Mirror` / `stream(Mirror)` baselines pay today's full-materialization
+   * cost on every iteration — seconds per run at x10, and far worse on a loaded
+   * machine — while the tasks under test cost tens of milliseconds. Measure the
+   * baseline with its own (small) iteration count, or set it to 0 to skip it
+   * when only the windowed path is being compared against a known baseline.
+   */
+  const baselineIterations = Number.parseInt(
+    readFlag('baseline-iterations') ?? String(iterations),
+    10
+  );
 
   process.stdout.write(
     `fixture: ${label}\n${base.length} turns, ${countItems(base)} message items\n` +
-      `scales: ${scales.join(', ')}   iterations: ${iterations}\n\n`
+      `scales: ${scales.join(', ')}   iterations: ${iterations}` +
+      `   baseline iterations: ${baselineIterations}\n\n`
   );
 
   for (const scale of scales) {
@@ -226,26 +238,31 @@ async function main(): Promise<void> {
     // requested number of runs; a 100x doc takes seconds per Mirror run. The
     // per-event tasks get their own bench so their p99 rests on enough samples.
     const bench = new Bench({ time: 0, iterations, warmupIterations: 1 });
+    const baselineBench = new Bench({
+      time: 0,
+      iterations: baselineIterations,
+      warmupIterations: baselineIterations > 0 ? 1 : 0,
+    });
     const eventBench = new Bench({
       time: 0,
       iterations: Math.max(iterations, 100),
       warmupIterations: 1,
     });
 
+    baselineBench.add('Mirror', () => {
+      const doc = importedDoc(snapshot);
+      const mirror = new Mirror({
+        doc,
+        schema: sessionDocSchema,
+        ignoreUnknownProperties: true,
+        initialState: { session: { id: BENCH_SESSION_ID }, history: [] },
+      });
+      mirror.dispose();
+      freeDoc(doc);
+    });
     bench
       .add('import', () => {
         freeDoc(importedDoc(snapshot));
-      })
-      .add('Mirror', () => {
-        const doc = importedDoc(snapshot);
-        const mirror = new Mirror({
-          doc,
-          schema: sessionDocSchema,
-          ignoreUnknownProperties: true,
-          initialState: { session: { id: BENCH_SESSION_ID }, history: [] },
-        });
-        mirror.dispose();
-        freeDoc(doc);
       })
       .add('open', () => {
         const doc = importedDoc(snapshot);
@@ -282,19 +299,24 @@ async function main(): Promise<void> {
         mirrorStreamText.insert(mirrorStreamText.length, ` token${delta}`);
         mirrorStreamDoc.commit();
       });
+    if (baselineIterations <= 0) {
+      eventBench.remove('stream(Mirror)');
+    }
 
     const logCycle = (event: Event) => {
       const task = (event as unknown as { task?: { name: string } }).task;
       if (task) process.stderr.write(`  done: ${task.name}\n`);
     };
     bench.addEventListener('cycle', logCycle);
+    baselineBench.addEventListener('cycle', logCycle);
     eventBench.addEventListener('cycle', logCycle);
     await bench.run();
+    if (baselineIterations > 0) await baselineBench.run();
     await eventBench.run();
     void preImported;
     mirrorStream.dispose();
 
-    const tasks = [...bench.tasks, ...eventBench.tasks];
+    const tasks = [...bench.tasks, ...baselineBench.tasks, ...eventBench.tasks];
     for (const task of tasks) {
       if (task.result?.error) throw task.result.error;
     }

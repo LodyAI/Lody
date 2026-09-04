@@ -172,13 +172,24 @@ export function createConversationViewFromDoc(
     return container && container.kind() === 'Map' ? (container as LoroMap) : undefined;
   };
 
-  const readIndexRow = (map: LoroMap): TurnIndexRow => {
-    const shallow = map.getShallowValue();
-    const row = pickIndexScalars(shallow);
-    row.itemCount = listLengthOf(doc, shallow.items);
-    row.planCount = listLengthOf(doc, shallow.plan);
-    return row;
-  };
+  /**
+   * One shallow read per turn — the whole eager open cost.
+   *
+   * `itemCount` / `planCount` are deliberately NOT resolved here: each costs a
+   * `getContainerById` plus a `length` crossing, which on a 2,400-turn doc adds
+   * ~17 ms to first paint (measured) for a number nothing on screen needs yet.
+   * They arrive with the turn's summary from the idle pass, or exactly when the
+   * turn is hydrated. Until then they read as unknown, and
+   * `isEmptyAssistantIndexRow` treats unknown as "not empty" so a real turn is
+   * never dropped from the stream.
+   */
+  const readIndexRow = (map: LoroMap): TurnIndexRow => pickIndexScalars(map.getShallowValue());
+
+  /** Exact counts for a turn we are already reading in full. */
+  const countsOfTurn = (turn: SessionHistory) => ({
+    itemCount: Array.isArray(turn.items) ? turn.items.length : 0,
+    planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
+  });
 
   const readIndexInputConfig = (map: LoroMap) => {
     const config = map.get('inputConfig');
@@ -187,7 +198,7 @@ export function createConversationViewFromDoc(
   };
 
   const withHydratedFacts = (row: TurnIndexRow, turn: SessionHistory): TurnIndexRow => {
-    const next: TurnIndexRow = { ...row, summary: summarizeTurn(turn) };
+    const next: TurnIndexRow = { ...row, ...countsOfTurn(turn), summary: summarizeTurn(turn) };
     if (next.role === 'user') next.inputConfig = pickIndexInputConfig(turn.inputConfig);
     return next;
   };
@@ -274,8 +285,29 @@ export function createConversationViewFromDoc(
     emit({ kind: hi >= tailStart() ? 'tail' : 'range', from: lo, to: hi + 1 });
   };
 
+  /**
+   * Resolve a row's item / plan counts from the doc. Two extra container
+   * crossings, so this runs only for the turns whose counts are needed before
+   * they are hydrated — the tail — never for the whole history.
+   */
+  const fillRowCounts = (index: number): TurnIndexRow | undefined => {
+    const row = rows[index];
+    const cid = cids[index];
+    if (!row || !cid || row.itemCount !== undefined) return row;
+    const map = turnMapOf(cid);
+    if (!map) return row;
+    const shallow = map.getShallowValue();
+    const next: TurnIndexRow = {
+      ...row,
+      itemCount: listLengthOf(doc, shallow.items),
+      planCount: listLengthOf(doc, shallow.plan),
+    };
+    rows[index] = next;
+    return next;
+  };
+
   /** Cost proxy for hydrating a turn: its item count (at least one). */
-  const itemWeight = (index: number): number => Math.max(1, rows[index]?.itemCount ?? 0);
+  const itemWeight = (index: number): number => Math.max(1, fillRowCounts(index)?.itemCount ?? 0);
 
   /**
    * Hydrate the tail from the end backwards within `budget` items. Anything
@@ -328,8 +360,9 @@ export function createConversationViewFromDoc(
       const cid = cids[i];
       if (!row || !cid) continue;
       const needsSummary = row.summary === undefined;
+      const needsCounts = row.itemCount === undefined;
       const needsConfig = row.role === 'user' && !('inputConfig' in row);
-      if (!needsSummary && !needsConfig) continue;
+      if (!needsSummary && !needsCounts && !needsConfig) continue;
       if (processed >= idleChunkSize || items >= idleItemBudget || deadline.timeRemaining() <= 1) {
         complete = false;
         break;
@@ -340,6 +373,15 @@ export function createConversationViewFromDoc(
       const next: TurnIndexRow = { ...row };
       if (needsSummary) {
         next.summary = turn ? summarizeTurn(turn) : summarizeTurnShallow(doc, map as LoroMap);
+      }
+      if (needsCounts) {
+        if (turn) {
+          Object.assign(next, countsOfTurn(turn));
+        } else {
+          const shallow = (map as LoroMap).getShallowValue();
+          next.itemCount = listLengthOf(doc, shallow.items);
+          next.planCount = listLengthOf(doc, shallow.plan);
+        }
       }
       if (needsConfig) {
         next.inputConfig = turn
@@ -535,13 +577,19 @@ export function createConversationViewFromDoc(
         if (relPath[0] === 'items') {
           rows[index] = {
             ...rows[index]!,
-            itemCount: countAfterListDelta(row.itemCount ?? 0, event.diff.diff),
+            itemCount:
+              row.itemCount === undefined
+                ? undefined
+                : countAfterListDelta(row.itemCount, event.diff.diff),
           };
           indexChanged = true;
         } else if (relPath[0] === 'plan') {
           rows[index] = {
             ...rows[index]!,
-            planCount: countAfterListDelta(row.planCount ?? 0, event.diff.diff),
+            planCount:
+              row.planCount === undefined
+                ? undefined
+                : countAfterListDelta(row.planCount, event.diff.diff),
           };
           indexChanged = true;
         }

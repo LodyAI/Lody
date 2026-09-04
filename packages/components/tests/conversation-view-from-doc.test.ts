@@ -61,11 +61,27 @@ describe('createConversationViewFromDoc', () => {
       expect(scalarsOf(row as unknown as Record<string, unknown>)).toEqual(
         scalarsOf(entry as unknown as Record<string, unknown>)
       );
-      expect(row.itemCount).toBe(entry.items?.length ?? 0);
-      expect(row.planCount).toBe(entry.plan?.length ?? 0);
       expect(view.indexOf(entry.id)).toBe(i);
     });
     expect(view.indexOf('missing')).toBe(-1);
+  });
+
+  it('resolves item counts for the hydrated tail and leaves the rest to the idle pass', async () => {
+    // The eager pass is one shallow read per turn: counts would cost two more
+    // container crossings each and nothing needs them before first paint.
+    const { expected, idle, view } = openView(12, { tailKeep: 4 });
+    const tailFrom = expected.length - 4;
+    for (let i = 0; i < tailFrom; i += 1) expect(view.index(i)?.itemCount).toBeUndefined();
+    for (let i = tailFrom; i < expected.length; i += 1) {
+      expect(view.index(i)?.itemCount).toBe(expected[i]!.items?.length ?? 0);
+      expect(view.index(i)?.planCount).toBe(expected[i]!.plan?.length ?? 0);
+    }
+    idle.runAll();
+    await view.ready;
+    expected.forEach((entry, i) => {
+      expect(view.index(i)?.itemCount).toBe(entry.items?.length ?? 0);
+      expect(view.index(i)?.planCount).toBe(entry.plan?.length ?? 0);
+    });
   });
 
   it('hydrates the tail eagerly and everything else on demand, equal to Mirror output', async () => {
