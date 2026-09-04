@@ -116,6 +116,18 @@ function importedDoc(snapshot: Uint8Array): LoroDoc {
   return doc;
 }
 
+/**
+ * A `LoroDoc`'s memory lives in the wasm heap and is only reclaimed when its JS
+ * wrapper is finalized, which V8 does lazily. A task that opens one doc per
+ * iteration therefore keeps every previous doc's containers resident: at x10
+ * (2,400 turns, ~108k containers) the heap runs out mid-run and the next string
+ * crossing traps with `RuntimeError: unreachable`. Free each doc as soon as the
+ * iteration's Mirror / view has been disposed.
+ */
+function freeDoc(doc: LoroDoc): void {
+  (doc as unknown as { free(): void }).free();
+}
+
 function countItems(history: readonly { items?: unknown }[]): number {
   let total = 0;
   for (const entry of history) if (Array.isArray(entry.items)) total += entry.items.length;
@@ -222,28 +234,34 @@ async function main(): Promise<void> {
 
     bench
       .add('import', () => {
-        importedDoc(snapshot);
+        freeDoc(importedDoc(snapshot));
       })
       .add('Mirror', () => {
+        const doc = importedDoc(snapshot);
         const mirror = new Mirror({
-          doc: importedDoc(snapshot),
+          doc,
           schema: sessionDocSchema,
           ignoreUnknownProperties: true,
           initialState: { session: { id: BENCH_SESSION_ID }, history: [] },
         });
         mirror.dispose();
+        freeDoc(doc);
       })
       .add('open', () => {
-        const view = openView(importedDoc(snapshot));
+        const doc = importedDoc(snapshot);
+        const view = openView(doc);
         readFirstPaint(view);
         view.dispose();
+        freeDoc(doc);
       })
       .add('open+idle', () => {
         const idle = createManualIdle();
-        const view = openView(importedDoc(snapshot), idle);
+        const doc = importedDoc(snapshot);
+        const view = openView(doc, idle);
         readFirstPaint(view);
         idle.runAll();
         view.dispose();
+        freeDoc(doc);
       });
     eventBench
       .add('scroll', async () => {
