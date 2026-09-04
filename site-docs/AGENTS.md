@@ -82,10 +82,13 @@
   values. Marketing pages (landing/pricing/changelog/download) must stay on
   `--landing-*` / `--mkt-*` and reference no `fd-` token, which is what keeps
   this override off them — check that before moving a component between them.
-- SEO lives in `lib/metadata.ts` and TanStack route `head()` functions. Canonical
-  page URLs should match Cloudflare Pages' directory form (`/`, `/zh/`,
-  `/docs/.../`, `/zh/docs/.../`); file URLs keep their extension. `/home` and
-  `/zh/home` are compatibility routes and should stay `noindex,follow`.
+- SEO lives in `lib/metadata.ts` and TanStack route `head()` functions. Docs,
+  blog, changelog, and pricing `head()` titles go through `brandTitle` so they
+  get `| Lody`; landing/download titles already include the brand and must not be
+  double-suffixed. Visible `DocsTitle` stays unbranded. Canonical page URLs
+  should match Cloudflare Pages' directory form (`/`, `/zh/`, `/docs/.../`,
+  `/zh/docs/.../`); file URLs keep their extension. `/home` and `/zh/home` are
+  compatibility routes and should stay `noindex,follow`.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, Tailwind, React, and preview-only aliases there. The deployable static
   build output is `site-docs/out/client`; do not publish the SSR server bundle.

@@ -2,19 +2,14 @@ import { DocsTocLanguageSelect } from '@site/components/docs-toc-language-select
 import { DocsSidebarFooter } from '@site/components/docs-sidebar-footer';
 import { getMDXComponents } from '@site/components/mdx';
 import { baseOptions } from '@site/lib/layout.shared';
-import { pageHead } from '@site/lib/metadata';
+import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
 import browserCollections from '@site/.source/browser';
 import { deserializePageTree } from 'fumadocs-core/source/client';
 import type { TOCItemType } from 'fumadocs-core/toc';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
-import {
-  type DocsRouteData,
-  localeCode,
-  type SerializedTocItem,
-  type SiteLocale,
-} from './shared';
+import { type DocsRouteData, localeCode, type SerializedTocItem, type SiteLocale } from './shared';
 
 const docsContentLoaders = {
   en: browserCollections.docsEn.createClientLoader({
@@ -36,7 +31,7 @@ export function docsHead(locale: SiteLocale, data: DocsRouteData): SiteHead {
   const zhPath = enPath === '/docs' ? '/zh/docs' : `/zh${enPath}`;
 
   return pageHead({
-    title: data.title,
+    title: brandTitle(data.title),
     description: data.description,
     path: data.path,
     locale: localeCode(locale),
