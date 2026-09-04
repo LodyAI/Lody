@@ -13,7 +13,7 @@
     "build": "vite build",
     "pretypecheck": "corepack pnpm run generate && corepack pnpm run generate:routes",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/postinstall.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts"
+    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts"
   },
   "dependencies": {
     "@lody/components": "workspace:*",

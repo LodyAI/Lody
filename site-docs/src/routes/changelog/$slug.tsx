@@ -1,6 +1,7 @@
 import { preloadChangelogContent } from '@site/components/changelog';
+import { notFoundHead } from '@site/lib/not-found-seo';
 import { loadChangelogPostRoute } from '@site/src/changelog-loader';
-import { ChangelogPostRoutePage, changelogIndexHead, changelogPostHead } from '@site/src/site-pages/changelog';
+import { ChangelogPostRoutePage, changelogPostHead } from '@site/src/site-pages/changelog';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/changelog/$slug')({
@@ -10,8 +11,7 @@ export const Route = createFileRoute('/changelog/$slug')({
 
     return data;
   },
-  head: ({ loaderData }) =>
-    loaderData ? changelogPostHead('en', loaderData) : changelogIndexHead('en'),
+  head: ({ loaderData }) => (loaderData ? changelogPostHead('en', loaderData) : notFoundHead('en')),
   component: ChangelogPost,
 });
 

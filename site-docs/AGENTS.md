@@ -88,7 +88,10 @@
   double-suffixed. Visible `DocsTitle` stays unbranded. Canonical page URLs
   should match Cloudflare Pages' directory form (`/`, `/zh/`, `/docs/.../`,
   `/zh/docs/.../`); file URLs keep their extension. `/home` and `/zh/home` are
-  compatibility routes and should stay `noindex,follow`.
+  compatibility routes and should stay `noindex,follow`. Unmatched URLs must not
+  SPA-fallback to the homepage: prerender `/404` to `out/client/404.html`
+  (Cloudflare Pages serves that file with HTTP 404). The 404 document is
+  `noindex,follow` and must not canonicalize to `/`.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, Tailwind, React, and preview-only aliases there. The deployable static
   build output is `site-docs/out/client`; do not publish the SSR server bundle.
