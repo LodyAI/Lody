@@ -59,14 +59,17 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one
   boot id and starts only after the daemon supervisor confirms the previous child exited
   (foreground startup crosses the Host-lease barrier); and each attempt owns a fresh token.
-  Normal claims require no active token and never take over another owner. Once per Worker
-  startup, the coordinator clears tokens owned by older boot ids without resetting the
-  attempt count. Acknowledgement and interruption must match both the boot id and attempt
-  token. Claim contention exits before Assistant creation or ACP startup and records no
-  failure. Only the execution service's durable handled callback may acknowledge and
-  consume an attempt. Cancellation/interruption releases it without acknowledgement. At
-  most one recovery attempt is allowed; after two unsettled attempts and no active token,
-  `DELIVERY_ATTEMPTS_EXHAUSTED` consumes the Delivery without invoking ACP again.
+  Normal claims require no active token and never take over another owner. Paths that write
+  a terminal continuation failure or consume without execution must acquire the same
+  exclusive token first; the history write and token-matched consume happen while it is
+  held. Once per Worker startup, the coordinator clears tokens owned by older boot ids
+  without resetting the attempt count. Acknowledgement, interruption, and terminal consume
+  must match both the boot id and claim token. Claim contention exits before history or ACP
+  side effects and records no failure. Only the execution service's durable handled callback
+  may acknowledge and consume an execution attempt. Cancellation/interruption releases it
+  without acknowledgement. At most one recovery attempt is allowed; after two unsettled
+  attempts, `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed under a terminal claim
+  without invoking ACP again.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.
