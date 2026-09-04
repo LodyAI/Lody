@@ -17,6 +17,10 @@ type ThemeSettingsSchema = {
  *
  * A preview (hovering a theme in Settings) deliberately does not land here:
  * only a committed choice describes how the next launch should look.
+ *
+ * Opening the file cannot fail fatally — `createMainSettingsStore` degrades to
+ * defaults for the launch — so the guards below only cover a file that breaks
+ * AFTER construction, which `conf` notices because it re-reads on every `get`.
  */
 const themeSettingsStore = createMainSettingsStore<ThemeSettingsSchema>({
   configName: 'theme-settings',
@@ -31,8 +35,8 @@ export function readStartupThemeSource(): NativeWindowThemeSource | null {
     const stored = themeSettingsStore.get('startupThemeSource')
     return isNativeWindowThemeSource(stored) ? stored : null
   } catch (error) {
-    // A corrupt or unreadable settings file must not stop the window opening;
-    // falling back to `null` reproduces the pre-persistence `system` behavior.
+    // `null` reproduces the pre-persistence behavior: this window opens on the
+    // OS appearance rather than not opening at all.
     console.warn('[Electron] Failed to read the stored startup theme', error)
     return null
   }
@@ -42,6 +46,8 @@ export function writeStartupThemeSource(source: NativeWindowThemeSource): void {
   try {
     themeSettingsStore.set('startupThemeSource', source)
   } catch (error) {
+    // Losing the mirror costs the next launch its pre-paint color; it must
+    // never turn a theme toggle into a crash.
     console.warn('[Electron] Failed to persist the startup theme', error)
   }
 }

@@ -648,6 +648,12 @@ export function LoginPage({
   // never competes with this page's own paint, and swallowing the failure keeps
   // a cache warm-up from being reported as a renderer error; the real import
   // runs again and surfaces its own.
+  //
+  // The cost is explicit: on web and mobile this is a real network request that
+  // /login did not use to make, and a visitor who never signs in pays it too.
+  // It is deliberately NOT gated on a sign-in click — a social login navigates
+  // away immediately, so a fetch started at click time is usually discarded,
+  // and the whole point is to have the chunk before the redirect returns.
   useEffect(
     () => scheduleIdleTask(() => void import('@/components/main-layout').catch(() => {})),
     []
