@@ -39,14 +39,6 @@ const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
     },
   },
 };
-// Keep Factory Droid's version, package, and metadata sourced from the registry,
-// but avoid the daemon wrapper that breaks MCP forwarding to the child CLI.
-const REGISTRY_AGENT_ARGUMENT_REPLACEMENTS = {
-  'factory-droid': {
-    from: 'acp-daemon',
-    to: 'acp',
-  },
-};
 const LOCAL_REGISTRY_AGENTS = {
   'amp-acp': {
     command: 'npx',
@@ -197,20 +189,6 @@ function normalizeDistribution(value) {
     : null;
 }
 
-function replaceRegistryAgentArguments(id, distribution) {
-  const replacement = REGISTRY_AGENT_ARGUMENT_REPLACEMENTS[id];
-  const args = distribution.npx?.args;
-  if (!replacement || !args) return distribution;
-
-  return {
-    ...distribution,
-    npx: {
-      ...distribution.npx,
-      args: args.map((arg) => (arg === replacement.from ? replacement.to : arg)),
-    },
-  };
-}
-
 function normalizeRegistryAgent(agent) {
   if (!isRecord(agent)) return null;
   const id = typeof agent.id === 'string' ? agent.id.trim() : '';
@@ -232,13 +210,19 @@ function normalizeRegistryAgent(agent) {
     return null;
   }
 
+  if (id === 'factory-droid' && distribution.npx?.args) {
+    distribution.npx.args = distribution.npx.args.map((arg) =>
+      arg === 'acp-daemon' ? 'acp' : arg
+    );
+  }
+
   return {
     id,
     name,
     version,
     description: typeof agent.description === 'string' ? agent.description : undefined,
     icon: typeof agent.icon === 'string' ? agent.icon : undefined,
-    distribution: replaceRegistryAgentArguments(id, distribution),
+    distribution,
   };
 }
 
