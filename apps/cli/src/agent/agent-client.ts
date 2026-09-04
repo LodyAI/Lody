@@ -2403,7 +2403,9 @@ export class AgentClient implements acp.Client {
           prompt,
           ...(options?._meta ? { _meta: options._meta } : {}),
         });
-        if (!submittedPrompt) {
+        if (
+          typeof (submittedPrompt as Promise<acp.PromptResponse> | undefined)?.then !== 'function'
+        ) {
           throw new Error('ACP connection did not return a prompt completion');
         }
         promptPromise = submittedPrompt;
