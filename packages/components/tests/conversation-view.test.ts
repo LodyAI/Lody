@@ -96,7 +96,8 @@ describe('ConversationView', () => {
     const doc = docWithTurns(60);
     const view = createConversationViewFromDoc(doc, { sessionId, tailKeep: 5, maxHydrated: 10 });
     expect(view.turnCount).toBe(60);
-    expect(view.index(0)).toMatchObject({ id: 'u0', role: 'user', itemCount: 1 });
+    expect(view.index(0)).toMatchObject({ id: 'u0', role: 'user' });
+    expect(view.index(0)?.itemCount).toBeUndefined();
     expect(view.index(1)).toMatchObject({ id: 'a1', role: 'assistant', itemCount: 3 });
     expect(view.indexOf('a59')).toBe(59);
     expect(view.isHydrated(59)).toBe(true);

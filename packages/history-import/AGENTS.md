@@ -67,3 +67,17 @@ Baseline on an M-series laptop, real ~170-turn / ~5k-item session doc: phase 2 i
 ~3ms `LoroDoc.import` plus ~445ms of Mirror construction, and phase 2 dominates.
 Mirror init walks every container (one `LoroMap` per message item plus a
 `LoroText` per text item), so its cost tracks container count, not bytes.
+
+`pnpm --filter @lody/history-import bench:open` isolates that open cost and
+compares it with the client's `ConversationView`
+(`packages/components/src/lib/conversation-view`, imported by relative path:
+the view depends only on loro-crdt and `@lody/shared` types, so it is the one
+piece of client code a benchmark here may reach). Default fixture is the
+synthetic replay at `--scale=1,10`; `--fixture=<file>` takes a desensitized
+capture from `bench:capture` (never committed). Tasks: the Mirror baseline,
+`view.open` (import + view + tail hydrate → one row per turn), `view.readAll`
+(what a reader still on the `doc.history` bridge pays), `view.scroll` (a
+30-turn `ensureRange` window advancing 20 times, p99), `view.stream` (100 text
+deltas into the tail turn with the view attached, p99) and `view.append`. It
+prints the phase 1b acceptance checks: `view.open` ≤ 50 ms at x10 and
+`view.stream` p99 ≤ 4 ms.
