@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   type AgentConfigCliType,
-  ACP_EXTENSION_DSH_MODELS_ENV,
+  DEEPSEEK_HARNESS_BASE_URL_ENV,
   type BuiltinRuntimeOverrides,
   type CliType,
   type CustomAcpLaunchSpec,
@@ -222,9 +222,9 @@ export function getAcpCapabilitySourceVersion(
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'deepseek') {
-        const models = input.env?.[ACP_EXTENSION_DSH_MODELS_ENV];
-        return models?.trim()
-          ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+models:${createHash('sha256').update(models).digest('hex').slice(0, 12)}`
+        const baseUrl = input.env?.[DEEPSEEK_HARNESS_BASE_URL_ENV];
+        return baseUrl?.trim()
+          ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
     }
