@@ -842,7 +842,7 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('dispatches a guide as a normal follow-up when its target turn already ended', async () => {
+  it('reuses the same turn id when Web fallback overlaps CLI steer requeue', async () => {
     const sessionId = 'session-steer-fallback' as SessionId;
     const userTurnId = 'user-turn-steer-fallback';
     const machineId = 'machine-1' as MachineId;
@@ -907,6 +907,7 @@ describe('useSessionActions', () => {
     ).resolves.toBe(false);
 
     expect(history[0]).toMatchObject({ status: 'pending', read: false });
+    expect(history).toHaveLength(1);
     expect(requestSessionDispatchTurn).toHaveBeenCalledWith(
       machineId,
       expect.objectContaining({ sessionId, userTurnId })

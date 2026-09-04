@@ -126,5 +126,7 @@ work) and a hover preview.
   dialog resends the same content as a new ordinary message, then marks the old
   entry `canceled`; the producer clears the marker. Never automatically dispatch
   or revive the old turn.
+- `delivery_unknown` renders as "Delivery uncertain" with a duplicate-work warning.
+  It is not editable, and its resend dialog closes if another client clears the state.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).

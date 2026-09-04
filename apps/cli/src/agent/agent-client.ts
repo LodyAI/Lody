@@ -2266,6 +2266,7 @@ export class AgentClient implements acp.Client {
       completion = this.prompt(sessionId, prompt, {
         signal: options?.signal,
         _meta: buildSteerRequestMeta(capability, steerId),
+        classifyPreSubmissionFailureAsSteerNotDelivered: true,
       });
       submission = completion;
     }
@@ -2338,11 +2339,10 @@ export class AgentClient implements acp.Client {
       : undefined;
     try {
       const response = await withAbort(request, abort).catch((error: unknown) => {
-        // Only the agent's own `invalid request` answer proves it declined the
-        // prompt (Codex answers `No active Codex turn to steer`). A closed
-        // connection, a dead agent process, or an internal error may have left
-        // the prompt inside the live turn, so those stay ambiguous — re-sending
-        // one of those would deliver the user's message twice.
+        // Compatibility with adapters predating Core's explicit `failed`
+        // outcome: their own `invalid request` answer was the only conclusive
+        // refusal. A closed connection, dead process, or internal error may
+        // have left the prompt inside the live turn, so those stay ambiguous.
         throw isAcpInvalidRequestError(error)
           ? new AgentSteerNotDeliveredError(
               `Agent refused the acknowledged steer request ${method}: ${formatErrorMessage(error)}`,
@@ -2350,9 +2350,14 @@ export class AgentClient implements acp.Client {
             )
           : error;
       });
-      const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
+      const parsed = z.object({ outcome: z.enum(['injected', 'failed']) }).safeParse(response);
       if (!parsed.success) {
         throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
+      }
+      if (parsed.data.outcome === 'failed') {
+        throw new AgentSteerNotDeliveredError(
+          `Agent conclusively declined the acknowledged steer request ${method}`
+        );
       }
     } finally {
       if (signal && abortListener) {
@@ -2364,7 +2369,11 @@ export class AgentClient implements acp.Client {
   async prompt(
     sessionId: ACPSessionId,
     prompt: acp.ContentBlock[],
-    options?: { signal?: AbortSignal; _meta?: acp.PromptRequest['_meta'] }
+    options?: {
+      signal?: AbortSignal;
+      _meta?: acp.PromptRequest['_meta'];
+      classifyPreSubmissionFailureAsSteerNotDelivered?: boolean;
+    }
   ) {
     const span = startTraceSpan(this.logger, 'agent_client.prompt', {
       sessionId: this.options.sessionId,
@@ -2375,25 +2384,39 @@ export class AgentClient implements acp.Client {
       `[${this.options.sessionId}] AgentClient.prompt called (acpSessionId=${sessionId})`
     );
     try {
-      this.ensureSessionMatch(sessionId);
       const abortSignal = options?.signal;
-      if (abortSignal?.aborted) {
-        throw new Error('Agent prompt aborted');
-      }
-      this.logger.debug(
-        `[${this.options.sessionId}] Session match verified, calling connection.prompt`
-      );
-      const promptPromise = this.connection?.prompt({
-        sessionId,
-        prompt,
-        ...(options?._meta ? { _meta: options._meta } : {}),
-      });
-      if (!promptPromise) {
-        this.logger.error(
-          `[${this.options.sessionId}] connection.prompt returned undefined - connection may be closed`
+      let promptPromise: Promise<acp.PromptResponse>;
+      try {
+        this.ensureSessionMatch(sessionId);
+        if (abortSignal?.aborted) {
+          throw new Error('Agent prompt aborted');
+        }
+        const connection = this.connection;
+        if (!connection) {
+          throw new Error('ACP connection is not available');
+        }
+        this.logger.debug(
+          `[${this.options.sessionId}] Session match verified, calling connection.prompt`
         );
-        span.end({ outcome: 'undefined-promise' });
-        return undefined;
+        const submittedPrompt = connection.prompt({
+          sessionId,
+          prompt,
+          ...(options?._meta ? { _meta: options._meta } : {}),
+        });
+        if (
+          typeof (submittedPrompt as Promise<acp.PromptResponse> | undefined)?.then !== 'function'
+        ) {
+          throw new Error('ACP connection did not return a prompt completion');
+        }
+        promptPromise = submittedPrompt;
+      } catch (error) {
+        if (options?.classifyPreSubmissionFailureAsSteerNotDelivered) {
+          throw new AgentSteerNotDeliveredError(
+            `Could not submit acknowledged steer prompt: ${formatErrorMessage(error)}`,
+            error
+          );
+        }
+        throw error;
       }
 
       let abortListener: (() => void) | undefined;

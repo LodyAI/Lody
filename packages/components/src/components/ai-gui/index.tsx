@@ -27,6 +27,7 @@ import {
   type CapacityRetryControl,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type UserTurnResendReason,
 } from './view';
 import { buildChatStreamItems, type BuildChatStreamItemsCache } from './build-chat-stream-items';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -66,6 +67,7 @@ export type {
   SessionChatStreamViewProps,
   SessionChatUser,
   SessionMessageItem,
+  UserTurnResendReason,
 } from './view';
 
 export { MessageRowView, SessionChatStreamView } from './view';
@@ -96,9 +98,12 @@ export interface SessionChatStreamProps {
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
-  /** Resends an undelivered (missing-history-acked) user turn's content as a
-   * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
-  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  /** Resends a failed delivery's content as a new message after confirmation. */
+  onResendUndelivered?: (
+    userTurnId: string,
+    inputBlocks: SessionInputBlock[],
+    reason: UserTurnResendReason
+  ) => Promise<boolean>;
   /** Bounded continuation control for the latest provider-capacity failure. */
   capacityRetry?: CapacityRetryControl;
   forkingAssistantMessageId?: string | null;
@@ -128,9 +133,12 @@ const MessageRowConnected = memo(function MessageRowConnected({
   workspaceId?: WorkspaceId | null;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
-  /** Resends an undelivered (missing-history-acked) user turn's content as a
-   * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
-  onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  /** Resends a failed delivery's content as a new message after confirmation. */
+  onResendUndelivered?: (
+    userTurnId: string,
+    inputBlocks: SessionInputBlock[],
+    reason: UserTurnResendReason
+  ) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   conversationFontSize: ConversationFontSize;
 }) {

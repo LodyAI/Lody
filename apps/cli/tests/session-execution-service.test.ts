@@ -570,7 +570,11 @@ describe('SessionExecutionService', () => {
     applicationD.reject(new Error('steer application failed'));
     await expect(steerD).resolves.toMatchObject({ applied: false, disposition: 'error' });
     expect(history).toContainEqual(
-      expect.objectContaining({ id: 'user-d', status: 'pending_apply' })
+      expect.objectContaining({
+        id: 'user-d',
+        status: 'failed',
+        sendStatus: 'delivery_unknown',
+      })
     );
     expect(service.getExecutionSnapshot(sessionId).activeTurnId).toBe('assistant:user-c');
 
@@ -983,12 +987,36 @@ describe('SessionExecutionService', () => {
     expect(getDocMeta).not.toHaveBeenCalled();
   });
 
-  it('keeps a steer that failed after submission out of the dispatch queue', async () => {
+  it('defers a delivery-ambiguous failure until its renderer-authored history row arrives', async () => {
+    let history: SessionHistoryInput[] = [];
+    const deferredMarkerApplied = createDeferred<void>();
+    const deferredMarkerDisposed = createDeferred<void>();
+    const noticeRecorded = createDeferred<void>();
+    const unsubscribeHistory = vi.fn(() => deferredMarkerDisposed.resolve());
+    let notifyHistoryChanged!: () => void;
+    const sessionDoc = {
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+          if (history[0]?.sendStatus === 'delivery_unknown') {
+            deferredMarkerApplied.resolve();
+          }
+        }
+      ),
+      mirror: {
+        subscribe: vi.fn((listener: () => void) => {
+          notifyHistoryChanged = listener;
+          return unsubscribeHistory;
+        }),
+      },
+    };
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
+      recordChatFailure: vi.fn(async () => noticeRecorded.resolve()),
       workspaceDocument: {
         repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
@@ -1024,16 +1052,46 @@ describe('SessionExecutionService', () => {
       }
     ).turnRuntimeBySession.set(sessionId, runtime);
 
-    await expect(
-      service.steerSession({
-        sessionId,
-        expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-2',
-        userId: 'user-1',
-        timestamp: '2026-07-19T00:00:00.000Z',
+    const steerResult = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-07-19T00:00:00.000Z',
+      inputConfig: { prompt: 'do it differently' },
+    });
+    await expect(steerResult).resolves.toMatchObject({ applied: false, disposition: 'error' });
+    expect(sessionDoc.mirror.subscribe).toHaveBeenCalledOnce();
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+
+    history = [
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
         inputConfig: { prompt: 'do it differently' },
-      })
-    ).resolves.toMatchObject({ applied: false, disposition: 'error' });
+      } as SessionHistoryInput,
+    ];
+    notifyHistoryChanged();
+    await deferredMarkerApplied.promise;
+    await noticeRecorded.promise;
+    await deferredMarkerDisposed.promise;
+    expect(history[0]).toMatchObject({
+      id: 'user-2',
+      status: 'failed',
+      read: true,
+      sendStatus: 'delivery_unknown',
+    });
+    expect(sessionDoc.updateHistory).toHaveBeenCalledOnce();
+    expect(unsubscribeHistory).toHaveBeenCalledOnce();
+    expect(deps.recordChatFailure).toHaveBeenCalledWith(
+      sessionDoc,
+      'steer_delivery_unknown',
+      expect.stringContaining('may have applied it')
+    );
+    // The still-running user-1 turn retains all three dispatch pointers. In
+    // particular, unknown is not an automatic redispatch signal for user-2.
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 

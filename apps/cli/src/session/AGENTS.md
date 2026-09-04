@@ -131,6 +131,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   qualify: after submission the provider may already have committed the steer, and
   re-sending would duplicate it. An entry that is already active, terminal, or past
   `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
+  An ambiguous post-submission failure marks only the guide as failed with
+  `sendStatus: delivery_unknown`; it never advances dispatch pointers. If its
+  renderer-authored row is not visible yet, defer both marker and notice through
+  the document mirror. Only an explicit user resend may create another turn.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
   sends, edit-and-resend, refused-steer requeue, accepted steer ownership
   transfer, and message-queue promotion) may publish it, and every one of them
