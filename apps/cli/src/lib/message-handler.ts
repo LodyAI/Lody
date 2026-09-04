@@ -671,16 +671,6 @@ export type MessageDispatchContext = {
 
 type ControlMessage = LocalSessionControlRequestValidated;
 
-/**
- * Why an incoming ACP update had no assistant-entry target. `turn_not_owning_acp_updates`
- * is the interesting one: a live visible turn defers ACP ownership until its prompt
- * starts, so output arriving in that window has nowhere to go.
- */
-type ACPUpdateDropReason =
-  | 'session_state_missing'
-  | 'turn_idle_without_late_target'
-  | 'turn_not_owning_acp_updates';
-
 type ConversationTurnGateContext = {
   dispatchSource?: SessionDispatchSource;
   sessionDoc: SessionDocument;
@@ -4733,12 +4723,9 @@ export class MessageHandler {
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
     if (!target) {
-      const reason = this.describeACPUpdateDropReason(sessionId);
-      this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update, {
-        reason,
-      });
+      this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
-        `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate}, reason=${reason}, turnPhase=${this.store.getTurnPhase(sessionId)})`
+        `[${sessionId}] Dropping ACP update without an active/finalized assistant entry target (${update.update.sessionUpdate})`
       );
       return;
     }
@@ -4978,45 +4965,20 @@ export class MessageHandler {
     });
   }
 
-  /**
-   * Why an ACP update found no routing target. Without this the drop counter is
-   * uninterpretable: "no turn at all" and "a live turn that has not claimed ACP
-   * routing yet" are the same event today, and only the second one is a bug.
-   */
-  private describeACPUpdateDropReason(sessionId: SessionId): ACPUpdateDropReason {
-    if (!this.store.has(sessionId)) {
-      return 'session_state_missing';
-    }
-    if (this.store.getTurnPhase(sessionId) === 'idle') {
-      return 'turn_idle_without_late_target';
-    }
-    // A non-idle turn with no resolvable target can only mean the turn has not
-    // taken ACP ownership yet (deferred until prompt start).
-    return 'turn_not_owning_acp_updates';
-  }
-
   private captureACPUpdateInvariant(
     eventName: 'late_acp_update_routed_to_finalized_turn' | 'out_of_turn_acp_update_without_target',
     sessionId: SessionId,
     notification: AcpSessionNotification,
-    extra: {
-      /** Only the drop event needs one; the late-route event name says it already. */
-      reason?: ACPUpdateDropReason;
-      assistantEntryId?: string;
-      turnEpoch?: number;
-    }
+    extra?: { assistantEntryId?: string; turnEpoch?: number }
   ): void {
-    const turnEpoch = extra.turnEpoch ?? this.store.getTurnEpoch(sessionId);
     captureCli(
       eventName,
       {
         workspace_id: this.workspaceId,
         session_id: sessionId,
         session_update: notification.update.sessionUpdate,
-        ...(extra.reason ? { reason: extra.reason } : {}),
-        turn_phase: this.store.getTurnPhase(sessionId),
-        ...(extra.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
-        ...(typeof turnEpoch === 'number' ? { turn_epoch: turnEpoch } : {}),
+        ...(extra?.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
+        ...(typeof extra?.turnEpoch === 'number' ? { turn_epoch: extra.turnEpoch } : {}),
       },
       { tier: 'C' }
     );

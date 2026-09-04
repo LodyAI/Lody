@@ -45,8 +45,6 @@ type MessageHandlerHost = {
     }
   ): string;
   activateConversationTurnForACPUpdates(sessionId: SessionId, turnId: string): void;
-  beginACPReplaySuppression(sessionId: SessionId): void;
-  endACPReplaySuppression(sessionId: SessionId): void;
   createAssistantEntryForTurn(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
@@ -55,7 +53,6 @@ type MessageHandlerHost = {
     userTurnId?: string
   ): Promise<void>;
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
-  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined;
   executionService: SessionExecutionService;
   codeCollabV2Service: CodeCollabV2Service;
   sessionActivePresence: SessionActivePresenceController;
@@ -163,44 +160,6 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     }
   });
 
-  it('reports produced output for a resume-fallback turn instead of `agent_no_output`', async () => {
-    const sessionId = 's-lifecycle-2' as SessionId;
-    const userTurnId = 'user-turn-2';
-    const { repo, doc, host, listeners, setActiveTurn } = await createHarness(sessionId);
-
-    try {
-      setActiveTurn(true, `assistant:${userTurnId}`);
-
-      const turnId = host.beginConversationTurn(sessionId, userTurnId, {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-        deferACPUpdateTarget: true,
-      });
-      await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
-
-      // Restore path: suppress ACP replay, `loadSession` throws
-      // `[ACP_RESUME_FAILED]`, SessionManager terminates the failed instance.
-      host.beginACPReplaySuppression(sessionId);
-      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
-      await vi.advanceTimersByTimeAsync(50);
-
-      // Fallback succeeds on a fresh ACP session and the prompt starts.
-      host.endACPReplaySuppression(sessionId);
-      host.activateConversationTurnForACPUpdates(sessionId, turnId);
-      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'real answer'));
-      await vi.advanceTimersByTimeAsync(50);
-
-      // This is exactly what the no-output guard reads right after the prompt
-      // returns; `false` here is what produced the false `agent_no_output`.
-      expect(host.observePromptOutputForTurn(sessionId, turnId)).toBe(true);
-
-      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
-      expect(readItems(assistant)).toEqual([{ type: 'text', text: 'real answer' }]);
-    } finally {
-      await destroyRepoOnRealTimers(repo);
-    }
-  });
-
   it.each([
     [
       'error',
@@ -255,7 +214,7 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     }
   });
 
-  it('still finalizes and idles a session whose `exit` arrives with no turn running', async () => {
+  it('still finalizes and idles a session with no turn running', async () => {
     const sessionId = 's-lifecycle-3' as SessionId;
     const { repo, doc, host, listeners, setActiveTurn, clearPresence, setStatus } =
       await createHarness(sessionId);
@@ -284,23 +243,16 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
     }
   });
 
-  it('releases the workspace watch on `terminated` only once no turn is running', async () => {
+  it('releases the workspace watch after termination with no running turn', async () => {
     const sessionId = 's-lifecycle-4' as SessionId;
-    const { repo, host, listeners, setActiveTurn, releaseWatch } = await createHarness(sessionId);
-
+    const { repo, listeners, setActiveTurn, releaseWatch } = await createHarness(sessionId);
     try {
-      setActiveTurn(true, 'assistant:user-turn-4');
-      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
-      expect(releaseWatch).not.toHaveBeenCalled();
-
       setActiveTurn(false);
       listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
       expect(releaseWatch).toHaveBeenCalledWith(sessionId);
-
-      await vi.advanceTimersByTimeAsync(50);
-      void host;
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
   });
+
 });

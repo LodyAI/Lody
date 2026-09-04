@@ -285,17 +285,6 @@ export class SessionTransientStore {
   }
 
   /**
-   * Epoch of the current turn regardless of whether it owns ACP update routing.
-   * Diagnostics only: a dropped update has no target to read the epoch from, and
-   * without it a drop rate cannot be attributed to a turn.
-   */
-  getTurnEpoch(sessionId: SessionId): number | undefined {
-    const state = this.sessions.get(sessionId);
-    if (!state || state.turn.phase === 'idle') return undefined;
-    return state.turn.turnEpoch;
-  }
-
-  /**
    * Route ACP notifications that arrive just after finalization back to the turn
    * that produced them. Cleared when the next turn owns ACP updates, so
    * unauthorized/pre-prompt turns cannot steal late output.

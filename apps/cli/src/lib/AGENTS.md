@@ -296,10 +296,7 @@ control-plane path is DEPRECATED; do not add functionality to it.
   replacement. Ownership is INSTANCE identity, never the session id: lifecycle events
   carry the exact `Session` that produced them, and
   `SessionExecutionService.onSessionInstanceClosed` acts only when
-  `runtime.session === instance`. Drop telemetry
-  (`out_of_turn_acp_update_without_target`) carries `reason`/`turn_phase`/`turn_epoch`,
-  because "no turn at all" and "a live turn that has not claimed routing yet" are
-  otherwise the same event and only the second is a bug. Regression coverage:
+  `runtime.session === instance`. Regression coverage:
   `tests/message-handler-lifecycle-turn-ownership.test.ts`.
   This is what lets the web derive the "session will continue" panel from the Cron/ScheduleWakeup
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in
