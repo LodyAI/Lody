@@ -213,13 +213,6 @@ export const sidebarCollapsedAtom = atomWithStorage<boolean>('lody-sidebar-colla
  */
 export const sidebarLastWidthAtom = atomWithStorage<number>('lody-sidebar-last-width', 0);
 
-/**
- * Toggle the collapsed state.
- */
-export const toggleSidebarCollapsedAtom = atom(null, (get, set) => {
-  set(sidebarCollapsedAtom, !get(sidebarCollapsedAtom));
-});
-
 // ============================================================================
 // Sidebar Organize Mode (Workspace vs Updated)
 // ============================================================================

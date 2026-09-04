@@ -144,7 +144,6 @@
     "@web-kits/audio": "^0.1.0",
     "framer-motion": "^12.23.6",
     "frimousse": "^0.3.0",
-    "fuse.js": "^7.1.0",
     "highlight.js": "^11.11.1",
     "i18next": "^25.3.1",
     "jotai": "catalog:",

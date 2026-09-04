@@ -5,7 +5,11 @@ import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
-import { sidebarCollapsedAtom, sidebarLastWidthAtom, WORKSPACE_FOCUS_SCOPES } from '../atoms';
+import {
+  navigationSidebarHiddenAtom,
+  sidebarLastWidthAtom,
+  WORKSPACE_FOCUS_SCOPES,
+} from '../atoms';
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
@@ -22,7 +26,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // resets), so search-only navigations (dialogs, panels) don't re-render the
   // whole workspace shell.
   const pathname = useLocation({ select: (l) => l.pathname });
-  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
+  const sidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
 
@@ -53,7 +57,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   return (
     <div className={getWebWorkspaceLayoutRootClassName()}>
       <AnimatePresence initial={false}>
-        {!sidebarCollapsed && (
+        {!sidebarHidden && (
           <motion.div
             key="app-sidebar"
             className="h-full shrink-0"

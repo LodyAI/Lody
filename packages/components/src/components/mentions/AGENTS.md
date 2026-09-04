@@ -68,11 +68,16 @@ Product-level mention sources built on `src/ui/mention`.
 - Issues and PRs rank over their own slice of the shared cache. The shared
   ranking caps its result set, so ranking the merged list first lets a long issue
   list starve every PR out of the PR category. The slices are partitioned once by
-  `useMentionCategories` and shared with the Fuse indexes, not re-derived per
-  keystroke.
+  `useMentionCategories`, not re-derived per keystroke.
 - Every category caps its candidate count. A row is a registered collection item
   that arrow-key movement walks, so an uncapped source degrades navigation, not
   just render time.
+- File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
+  `scoreFuzzy` algorithm with non-contiguous matching enabled: a query may skip
+  words, spaces, and punctuation, while consecutive, separator, path, case, and
+  camel-case matches receive the same bonuses as VS Code. Existing
+  source-specific ordering rules still wrap the shared fuzzy score. Skills and
+  commands retain their own ranking.
 - Lazy work is `MentionCategory.activation`; category navigation starts its
   destination synchronously through `MentionItem.onMentionNavigate`, while
   `selectMentionViewActivations` covers typed/pasted prefixes, direct triggers,
@@ -109,8 +114,8 @@ Product-level mention sources built on `src/ui/mention`.
   replaced when the machine answers — and the nonce starts `null` so a composer
   MOUNT still reads the cache: one mounts per open tab and side chat.
   Revalidating makes the ENTRY'S IDENTITY load-bearing: `buildMentionFileIndex`
-  and the Fuse index are memoised on it, so a new object for an unchanged listing
-  rebuilds both over the whole repo on every `@`. `resolveLoadedEntry`
+  is memoised on it, so a new object for an unchanged listing re-expands every
+  path into its suggestion tokens on every `@`. `resolveLoadedEntry`
   (`hooks/use-local-project-file-paths.ts`) therefore returns the previous entry
   when paths and `truncated` match, exactly as
   `buildMentionFilePathsEntryFromProviderEntries` already did for the provider —
@@ -301,11 +306,9 @@ Product-level mention sources built on `src/ui/mention`.
   beside an atomic inline and a WORD JOINER does not stop it, so without that
   group the glyph strands at the end of the previous line. Only the pasted-text
   chip stays boxed; it is a `<button>` with a short, fixed label.
-- `mention-fuse.ts` owns the shared, module-cached `fuse.js` import. Keep it
-  module-cached and keyed by menu activation, and reuse provider file entries
-  when paths/lazy dirs are unchanged — the menu must not rebuild either from
-  per-render derived objects. The keying is latched, so closing the menu must
-  not drop the constructor and re-index everything on the next `@`.
+- `vscode-fuzzy-score.ts` is vendored from the pinned VS Code source identified
+  in its header. Keep Microsoft's copyright header, the adjacent complete MIT
+  license, and the generated third-party attribution when updating it.
 - `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
   hydration, and post-insert title hints.
 - `mention-skill-source.tsx` provides `$` skill discovery, provider directory

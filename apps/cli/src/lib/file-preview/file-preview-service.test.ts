@@ -5,7 +5,11 @@ import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { FILE_PREVIEW_V3_LIMITS, type SessionId } from '@lody/shared';
+import {
+  FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
+  FILE_PREVIEW_V3_LIMITS,
+  type SessionId,
+} from '@lody/shared';
 import { FilePreviewService, type FilePreviewWorkspaceResolver } from './file-preview-service';
 
 const SESSION_ID = 'session-preview' as SessionId;
@@ -246,6 +250,70 @@ describe('FilePreviewService', () => {
       sizeBytes: 200,
       limitBytes: 50,
     });
+  });
+
+  it('does not hold a same-machine preview to the remote transport budget', async () => {
+    // The default text ceiling is the REMOTE wire's budget. A same-machine read
+    // does not cross it, so the viewer's "too large" card would be advice about
+    // a limit that is not in play.
+    const workspaceRoot = await makeDir('preview-ws-');
+    const text = 'y'.repeat(FILE_PREVIEW_V3_LIMITS.maxTextBytes + 1024);
+    await writeFile(path.join(workspaceRoot, 'huge.txt'), text);
+    const service = createService({ workspaceRoot });
+
+    const remote = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'huge.txt' });
+    expect(remote).toMatchObject({ status: 'error', code: 'too_large' });
+
+    const local = await service.previewFile(
+      { v: 3, sessionId: SESSION_ID, path: 'huge.txt' },
+      { sameMachine: true }
+    );
+    expect(local).toMatchObject({
+      status: 'ok',
+      kind: 'text',
+      sizeBytes: text.length,
+      // Nothing to compress for: the reply never leaves the machine.
+      content: { encoding: 'utf8-plain' },
+    });
+  });
+
+  it('refuses a same-machine preview that would overrun the local IPC response', async () => {
+    // The local IPC client DESTROYS a body past its cap, which the facade
+    // reports as a retryable I/O error — "try again" about a file that will
+    // never load. This must stay the honest verdict instead.
+    const workspaceRoot = await makeDir('preview-ws-');
+    const text = 'y'.repeat(FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES + 1024);
+    await writeFile(path.join(workspaceRoot, 'over-budget.txt'), text);
+    const service = createService({ workspaceRoot });
+
+    const response = await service.previewFile(
+      { v: 3, sessionId: SESSION_ID, path: 'over-budget.txt' },
+      { sameMachine: true }
+    );
+
+    expect(response).toMatchObject({
+      status: 'error',
+      code: 'too_large',
+      limitBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
+    });
+  });
+
+  it('measures the ESCAPED payload, not the file size, for same-machine text', async () => {
+    // A file of newlines doubles under JSON escaping and one of control bytes
+    // sextuples, so a raw-size cap cannot predict whether the reply fits. This
+    // file is comfortably under every byte limit and still does not fit.
+    const workspaceRoot = await makeDir('preview-ws-');
+    const text = '\u0001'.repeat(Math.ceil(FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES / 5));
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES);
+    await writeFile(path.join(workspaceRoot, 'control.txt'), text);
+    const service = createService({ workspaceRoot });
+
+    const response = await service.previewFile(
+      { v: 3, sessionId: SESSION_ID, path: 'control.txt' },
+      { sameMachine: true }
+    );
+
+    expect(response).toMatchObject({ status: 'error', code: 'too_large' });
   });
 
   it('applies the caller-supplied maxBytes when it is stricter than the machine limit', async () => {

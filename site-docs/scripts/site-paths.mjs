@@ -26,7 +26,15 @@ const STATIC_PATHS = [
   '/zh/support',
   '/account-deletion',
   '/zh/account-deletion',
+  '/404',
+  '/zh/404',
 ];
+
+const SITEMAP_EXCLUDED_PATHS = new Set(['/home', '/zh/home', '/404', '/zh/404']);
+
+export function isSitemapPath(sitePath) {
+  return !SITEMAP_EXCLUDED_PATHS.has(sitePath);
+}
 
 function exists(p) {
   try {

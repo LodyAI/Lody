@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   getMachineFlockDocId,
+  machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  serializeMachineFlockKey,
+  type AcpCapabilityCacheEntry,
+  type AgentConfigId,
   type MachineFlockEvent,
   type MachineFlockRowFamily,
   type MachineFlockRowMap,
@@ -556,7 +560,13 @@ function readMachineFlockRowsSnapshot(
 export async function resyncMachineFlockRows(
   runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
   machineId: MachineId | string | null | undefined,
-  options: { requireRemoteSync?: boolean } = {}
+  options: {
+    requireRemoteSync?: boolean;
+    refreshedCapability?: {
+      configId: AgentConfigId;
+      value: AcpCapabilityCacheEntry;
+    };
+  } = {}
 ): Promise<void> {
   const normalizedMachineId = normalizeMachineId(machineId);
   if (!runtime || !normalizedMachineId) return;
@@ -571,6 +581,18 @@ export async function resyncMachineFlockRows(
     syncedRemote: syncResult.syncedRemote,
     version,
   });
+  if (options.refreshedCapability) {
+    const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
+    notifyMachineFlockRowsCache(cacheKey, {
+      rows: {
+        [serializeMachineFlockKey(key)]: {
+          key,
+          value: options.refreshedCapability.value,
+        },
+      },
+      mode: 'merge',
+    });
+  }
   if (options.requireRemoteSync && !syncResult.syncedRemote) {
     throw new Error(`Failed to sync Machine Flock rows for ${normalizedMachineId}`);
   }
@@ -587,7 +609,7 @@ export function useMachineFlockRows(
   );
   const rowsByMachineId = useMachineFlockRowsByMachineIds(machineIds, options);
   return normalizedMachineId
-    ? rowsByMachineId.get(normalizedMachineId) ?? EMPTY_MACHINE_FLOCK_ROWS
+    ? (rowsByMachineId.get(normalizedMachineId) ?? EMPTY_MACHINE_FLOCK_ROWS)
     : EMPTY_MACHINE_FLOCK_ROWS;
 }
 

@@ -1,15 +1,22 @@
+import { scoreFuzzy } from '@/components/mentions/vscode-fuzzy-score';
+
 /**
- * The one ranking rule every `@` category shares.
+ * Shared matching for file, session, Agent Role, issue, and PR candidates.
  *
- * A prefix match outranks a substring one, and nothing else matches — the menu
- * is a completion surface, not a search engine, and a category that scored
- * differently would make the same typing behave differently depending on which
- * kind of thing the user was reaching for. Sources differ only in which of
- * their fields are matched and how they break a tie.
+ * This uses the vendored VS Code Quick Open scorer: a query such as `filename`
+ * finds `file name`, `file-name`, and `file-generated-name`, with the same
+ * consecutive, separator, path, case, and camel-case bonuses as VS Code.
  *
  * A leaf module on purpose: the registry imports the sources, so the sources
  * cannot import the registry.
  */
+export function scoreMentionMatch(term: string, text: string): number | null {
+  const query = term.trim();
+  if (!query) return 0;
+  const [score] = scoreFuzzy(text, query, query.toLowerCase(), true);
+  return score > 0 ? score : null;
+}
+
 export function rankMentionCandidates<T>(
   items: readonly T[],
   term: string,
@@ -21,30 +28,24 @@ export function rankMentionCandidates<T>(
     tieBreak?: (left: T, right: T) => number;
   }
 ): T[] {
-  const query = term.trim().toLowerCase();
+  const query = term.trim();
   if (!query) return items.slice(0, options.limit);
   const { tieBreak } = options;
   return items
-    .map((item) => {
-      let score = -1;
+    .map((item, index) => {
+      let score: number | null = null;
       for (const field of options.fields(item)) {
-        const value = field.toLowerCase();
-        if (value.startsWith(query)) {
-          score = 0;
-          break;
-        }
-        if (value.includes(query)) score = 1;
+        const fieldScore = scoreMentionMatch(query, field);
+        if (fieldScore !== null && (score === null || fieldScore > score)) score = fieldScore;
       }
-      return { item, score };
+      return { item, index, score };
     })
-    .filter((entry) => entry.score >= 0)
-    .sort((left, right) =>
-      left.score !== right.score
-        ? left.score - right.score
-        : tieBreak
-          ? tieBreak(left.item, right.item)
-          : 0
-    )
+    .filter((entry): entry is { item: T; index: number; score: number } => entry.score !== null)
+    .sort((left, right) => {
+      if (left.score !== right.score) return right.score - left.score;
+      const tied = tieBreak?.(left.item, right.item) ?? 0;
+      return tied || left.index - right.index;
+    })
     .slice(0, options.limit)
     .map((entry) => entry.item);
 }

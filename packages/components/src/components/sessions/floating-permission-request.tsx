@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { Button } from '@/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
@@ -93,6 +93,8 @@ export interface FloatingPermissionRequestProps {
 export interface PermissionRequestCardProps {
   title?: string | null;
   options: PermissionOption[];
+  /** Start behind a disclosure when another surface already presents the active request. */
+  defaultCollapsed?: boolean;
   isResolved?: boolean;
   isCancelled?: boolean;
   isReady?: boolean;
@@ -178,6 +180,7 @@ const getAskQuestionCancelOptionId = (
 export function PermissionRequestCard({
   title,
   options,
+  defaultCollapsed = false,
   isResolved = false,
   isCancelled = false,
   isReady = true,
@@ -187,6 +190,8 @@ export function PermissionRequestCard({
   className,
 }: PermissionRequestCardProps) {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(!defaultCollapsed);
+  const showDetails = !defaultCollapsed || expanded;
   const disabled = isResolved || isCancelled || pendingOptionId !== null || !isReady;
   const selectedOption =
     selectedOptionId == null
@@ -218,16 +223,39 @@ export function PermissionRequestCard({
       <CardHeader
         className={cn(
           CONVERSATION_PANEL_HEADER_CLASS,
-          CONVERSATION_PANEL_HEADER_RULE_CLASS,
+          showDetails && CONVERSATION_PANEL_HEADER_RULE_CLASS,
           'flex-col items-stretch gap-0.5 py-2'
         )}
       >
-        <CardTitle className="text-[13px] font-medium text-muted-foreground">
-          {headerLabel}
-        </CardTitle>
+        {defaultCollapsed ? (
+          <CardTitle className="min-w-0 text-[13px] font-medium text-muted-foreground">
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              <ChevronRight
+                className={cn(
+                  'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
+                  expanded && 'rotate-90'
+                )}
+                aria-hidden="true"
+              />
+              <span className="min-w-0">{headerLabel}</span>
+            </button>
+          </CardTitle>
+        ) : (
+          <CardTitle className="text-[13px] font-medium text-muted-foreground">
+            {headerLabel}
+          </CardTitle>
+        )}
         {title && <CollapsibleCommand title={title} />}
       </CardHeader>
-      <CardContent className={cn('px-3 pt-2', showFooter ? 'pb-1.5' : 'pb-2.5')}>
+      <CardContent
+        hidden={!showDetails}
+        className={cn('px-3 pt-2', showFooter ? 'pb-1.5' : 'pb-2.5')}
+      >
         <div className="flex flex-col gap-0.5">
           {options.map((option) => {
             const isPending = pendingOptionId === option.optionId && !isResolved;
@@ -274,7 +302,7 @@ export function PermissionRequestCard({
           })}
         </div>
       </CardContent>
-      {showFooter && (
+      {showFooter && showDetails && (
         <CardFooter className="px-3 pb-2.5 pt-1">
           <div className="text-xs text-muted-foreground">
             {t(

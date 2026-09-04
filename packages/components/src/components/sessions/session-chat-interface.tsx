@@ -203,6 +203,7 @@ import {
 import {
   canPauseGoalThroughPromptBridge,
   getPromptBridgeGoalCommands,
+  GOAL_PROMPT_DISPATCH_OPTIONS,
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
@@ -3336,23 +3337,29 @@ export const SessionChatInterface = memo(
     // being mounted is not evidence the user saw this conversation: only the
     // visible surface may clear unread state. Otherwise opening a parent session
     // marks every one of its sub-sessions read at once.
-    const shouldMarkRead = useMemo(
-      () =>
-        shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible,
-          lastMessageAt: parseTimestamp(session.lastMessageAt),
-          lastReadAt: parseTimestamp(session.lastReadAt),
-        }),
-      [hideMessageArea, isVisible, session.lastMessageAt, session.lastReadAt]
-    );
+    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
+    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
 
     useEffect(() => {
-      if (!shouldMarkRead) return;
+      const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      if (
+        !shouldMarkSessionRead({
+          rendersConversation: !hideMessageArea,
+          isVisible,
+          lastMessageAt,
+          lastReadAt: lastReadAtForReceiptRef.current,
+        })
+      ) {
+        return;
+      }
       void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-    }, [markSessionRead, session.id, session.lastMessageAt, shouldMarkRead]);
+      // A receipt gets a new opportunity when this surface becomes visible or
+      // a new message arrives. Deliberately do not depend on lastReadAt: moving
+      // that receipt backwards is the user's explicit "Mark as unread" action,
+      // which must remain visible until they leave and reopen the conversation.
+    }, [hideMessageArea, isVisible, markSessionRead, session.id, session.lastMessageAt]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -4099,7 +4106,7 @@ export const SessionChatInterface = memo(
         }
 
         try {
-          const accepted = await dispatchPrompt(`/goal ${command}`);
+          const accepted = await dispatchPrompt(`/goal ${command}`, GOAL_PROMPT_DISPATCH_OPTIONS);
           if (!accepted) {
             throw new Error('Goal command was not accepted for dispatch');
           }
@@ -4937,7 +4944,7 @@ export const SessionChatInterface = memo(
       }
 
       if (goalToPause) {
-        void handleGoalCommand('pause', goalToPause, { showPending: false });
+        await handleGoalCommand('pause', goalToPause, { showPending: false });
       }
     }, [
       activeAssistantTurnId,

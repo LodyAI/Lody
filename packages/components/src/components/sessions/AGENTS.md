@@ -40,6 +40,19 @@ Session conversation page chain:
     A parent with siblings is not closeable and does not close the window. With
     no closer mounted (Chat Landing and other surfaces) the chord closes the
     window.
+    Each Session tab has ONE leading status slot, priority-ordered
+    `waiting > working > unread > agent icon`, matching the sidebar row
+    (`sidebar-row-shared.tsx`) and the mobile tab sheet. Test `isWaiting` BEFORE
+    `isWorking`: a permission request is also live presence, so the busy spinner
+    otherwise swallows the one state that needs the user. Waiting renders the
+    sidebar's `Hand`, never an amber dot — `--primary` and `--status-warning` are
+    both amber in the shipped themes, so an amber waiting dot beside a primary
+    unread dot reads as the same marker. Unread comes from
+    `sessionHasUnreadMessages` (`lib/session-read-receipt.ts`, the same
+    comparison `shouldMarkSessionRead` uses to DECIDE the receipt) and is
+    suppressed on the ACTIVE tab, which is the surface clearing it. A child tab
+    is the only place its own unread state can surface — sub-sessions get no
+    sidebar row — so do not drop the marker from any tab renderer.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
     **The tab pills' top border shares one line with the sidebar and side-panel
@@ -241,20 +254,40 @@ Session conversation page chain:
   self-contained/no-network rule as a hard browser guarantee. The rendered frame exists only while
   its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
   session targets always returns HTML to code mode before the new file can execute.
-- Session Browser has strict dual engines. Public HTTP(S) uses only a declared public-browser
-  capability (Electron `WebContentsView` today); loopback/private targets use Managed Preview and
-  are the only pages eligible for Visual Annotation. Never fall back from a missing public engine
-  to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
-  The public engine resolves every hostname and rejects non-public answers (DNS rebinding), with
-  one deliberate exception: a public name resolving into RFC 2544 `198.18.0.0/15` is a fake-IP
-  proxy's synthetic answer (Clash, Surge, sing-box, Shadowrocket) and is allowed via
-  `classifyResolvedBrowserAddress`; a literal `198.18.x.x` address stays prohibited.
+- Session Browser has strict dual engines, split on exactly one question: is the address the
+  agent machine's own LOOPBACK? Only that uses Managed Preview, where the machine opens one
+  approved port on itself; those are the only pages eligible for Visual Annotation. Everything
+  else — public sites AND private LAN / `.local` / `host.docker.internal` — uses the declared
+  public-browser capability (Electron `WebContentsView` today), which is the user's own browser
+  on the user's own machine reaching the user's own network. Never fall back from a missing
+  public engine to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
+  INVARIANT — a managed preview is never a pivot: routing a LAN address through the machine
+  would let whoever holds the tunnel reach hosts behind that machine that they could never reach
+  themselves, and the approver sits on the OTHER side of the tunnel, so approval cannot make it
+  safe. `parseBrowserAddress` never routes LAN there and `PreviewTargetApproval.targetClass` is
+  the literal `'loopback'`, but the CLI's `normalizeTarget` is the authoritative rejection.
+  The public engine has NO network guard — no resolver check, no per-request hostname policy.
+  It is a sandboxed view with no preload, script injection, page capture, or agent tool, so
+  the only reader of what it renders is the person looking at it, and it is strictly less
+  capable than the user's own Chrome. The DNS guard it once had broke every fake-IP proxy user
+  (Clash, Surge, sing-box, Shadowrocket — all their answers land in `198.18.0.0/15`) while
+  protecting nothing. The engine split is therefore by hostname TEXT: a public name that
+  RESOLVES to loopback still opens in the public engine. Do not document it as
+  resolution-accurate.
+  A guard must return if the view gains a non-human READER, attached to that path rather than
+  to human navigation. A non-human NAVIGATOR already exists and is handled here, not in
+  Electron: a Managed Preview page is served by the agent machine, so the navigation requests
+  its injected script posts up (`handleManagedNavigationRequest`) are agent-authored. Those
+  carry `fromPageContent`, and `openAddress` refuses a private-LAN destination for them —
+  public is an ordinary external link and loopback still needs its own approval in the managed
+  branch, but a LAN address would open silently on the USER's network at a page's request.
+  Only the address bar may reach one.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
   immediately, with no confirmation dialog, because the CLI only accepts LOOPBACK targets from an
-  agent report. Keep the auto-approval keyed on the parsed address being loopback — a private-LAN
-  target, a typed address, and Share all still go through the confirmation flow.
+  agent report. A typed loopback address and Share still go through the confirmation flow. The
+  approver is the session initiator, the same person the CLI already requires.
   Consume the request after handling it so a later panel remount cannot replay stale user intent —
   but NOT while the candidate is still in flight. Session meta carries only the candidate status;
   its target lives in the session doc `preview` state, and the two planes sync independently, so a
@@ -286,6 +319,9 @@ Session conversation page chain:
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
   that prop silently marks every sub-session read the moment the parent opens.
+  A manual Mark as unread moves `lastReadAt` behind the latest message while a
+  surface may already be visible; that receipt gets no new opportunity until a
+  new message arrives or the user leaves and reopens the surface.
   "Copy as Markdown" renders through `@lody/shared`
   `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
   NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay
@@ -826,6 +862,44 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   href parser).
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
+- **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
+  and three surfaces render it**: the Files tree's right-click menu, the side
+  panel's ⋯ button (left of `+`, and absent unless the active tab is a file),
+  and the file-error card. The split it encodes is the invariant, not a detail:
+  `Copy file path` is offered ANYWHERE (every platform can write to the
+  clipboard, and on another machine the path IS the whole answer), while
+  reaching a shell — `Open in default app` / `Open in browser`
+  (`app.openLocalPath` → `shell.openPath`), `Reveal in file manager` /
+  `Show in Finder` / `Show in File Explorer` (`app.revealLocalPath`, labelled per
+  host OS), and `Open in <editor>` (the user's `session-path-launchers`
+  preference) — lives in the optional `localHost` half, resolved only for
+  Electron + the file's machine being this one. `Download file` is the exact
+  complement: offered only where `localHost` is absent, because with the real
+  file one keystroke away a copy in ~/Downloads is a decoy. It reads through
+  `openFile`, i.e. the preview API's ONE bounded response, so it cannot serve a
+  file past those limits — exactly the files whose error card sent the user
+  looking. That is a known ceiling, not a silent failure: say so
+  (`sessions.fileActions.downloadTooLarge`), because a generic "could not
+  download" reads as a glitch worth retrying. Lifting it needs a ranged or
+  streamed Machine RPC method behind a negotiated `protocolCapabilities` key,
+  never a client-side retry loop. Never promote a
+  local-host action to a surface that cannot perform it, and never re-derive
+  that decision per surface — `lib/session-file-actions.ts` states it once.
+  The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
+  local-project root) and is built ONLY from that workspace root plus a
+  genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
+  rejects absolute and `..` paths, so a remote session can never hand this
+  machine's shell a path of its choosing; an unresolved root degrades the copy
+  to the workspace-relative path. `SessionFileErrorState` owns which error kinds
+  get the row (`offersFileActions`): only too-large and unsupported, never a
+  missing, denied, or offline file where every button would fail. That card has
+  NO status glyph and stacks its actions full-width in one column: a 40px icon
+  column indented one short paragraph for decoration, and buttons sized by their
+  own labels gave three ragged widths on three lines in a side panel, where the
+  width difference reads as meaning. The tree passes the menu items down to its
+  memoized rows, so they must stay referentially stable, and only FILE rows get
+  a menu (`item.children === undefined`; `hasChildren` is false for an empty
+  directory too).
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;

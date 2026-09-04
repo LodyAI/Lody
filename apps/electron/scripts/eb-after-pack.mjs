@@ -9,6 +9,12 @@ import {
   stagedRipgrepBinaryPath,
   stagedSqliteBindingPath
 } from './cli-native-deps.mjs'
+import {
+  hasCodeSigningCredentials,
+  shouldAdHocSignSparkleApp,
+  shouldInjectSparklePublicKey,
+  sparkleInfoPlistPath
+} from './sparkle-packaging.mjs'
 
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }
 const SMOKE_TIMEOUT_MS = 120_000
@@ -64,6 +70,29 @@ export default async function afterPack(context) {
     )
     resourcesDir = path.join(context.appOutDir, 'resources')
   }
+  const publicEdKey = process.env.SPARKLE_ED_PUBLIC_KEY
+  if (typeof publicEdKey === 'string' && shouldInjectSparklePublicKey({ platform, publicEdKey })) {
+    const plistPath = sparkleInfoPlistPath({
+      appOutDir: context.appOutDir,
+      productFilename
+    })
+    if (!fs.existsSync(plistPath)) {
+      throw new Error(`[sparkle] missing Info.plist: ${plistPath}`)
+    }
+    const key = publicEdKey.trim()
+    // Must run before electron-builder signs: SUPublicEDKey is part of the sealed Info.plist.
+    const injectResult = spawnSync(
+      'plutil',
+      ['-replace', 'SUPublicEDKey', '-string', key, plistPath],
+      { encoding: 'utf8' }
+    )
+    if (injectResult.error || injectResult.status !== 0) {
+      throw new Error(
+        `[sparkle] failed to inject SUPublicEDKey: ${injectResult.error?.message ?? injectResult.stderr ?? injectResult.stdout}`
+      )
+    }
+  }
+
   const cliRuntimePath = resolvePackedCliRuntimePath({
     binaryPath,
     productFilename,
@@ -121,6 +150,16 @@ export default async function afterPack(context) {
     }
   }
   console.log(`[embedded-cli] copied runtime node_modules into ${packedCliDir}`)
+
+  if (
+    shouldAdHocSignSparkleApp({
+      platform,
+      hasCodeSigningCredentials: hasCodeSigningCredentials(process.env)
+    })
+  ) {
+    const { adHocSignAfterPack } = await import('electron-sparkle-updater/builder')
+    await adHocSignAfterPack(context)
+  }
 
   // Locale gate (Windows): Chromium loads every UI string from
   // locales/<lang>.pak. If the `electronLanguages` filter leaves the Windows

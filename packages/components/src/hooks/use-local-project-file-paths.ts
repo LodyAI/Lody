@@ -31,9 +31,9 @@ const LOCAL_PROJECT_MAX_FILES = 80_000;
 
 /**
  * `fetchedAt` lives on the RECORD, not on the entry, because the entry's
- * identity is load-bearing: `buildMentionFileIndex` and the mention menu's Fuse
- * index are memoised on it, and rebuilding those means expanding every path into
- * its suggestion tokens — O(repo file count). Since the `@` menu now revalidates
+ * identity is load-bearing: the mention menu memoises `buildMentionFileIndex` on
+ * it, and rebuilding that means expanding every path into its suggestion
+ * tokens — O(repo file count). Since the `@` menu now revalidates
  * on every open, stamping a fresh `Date.now()` onto a new object each time would
  * rebuild the whole index on every mention, which is exactly what the provider
  * source already avoids by returning its previous entry unchanged.

@@ -1,0 +1,104 @@
+---
+title: 并行 Coding Agents
+description: 在同一个 Lody 工作空间里以团队方式并行运行多个编程 Agent：隔离 Git Worktree、混用 Claude Code / Kimi 等模型，并让团队看到各会话。
+---
+
+Lody 是做 **multi-agent coding** 的团队工作空间：你可以同时开多条编程 Agent 会话，每条有自己的对话。
+会话使用 [Worktree](/zh/docs/worktrees) 时——GitHub 会话总会用，本地项目也可以开——该会话会有自己的工作目录，
+多个 Agent 可以并排改文件，而不互相覆盖。
+
+搜 “Claude Code team” 或 “parallel coding agents” 的人，要的通常就是这个：好几台 Agent 同时干活，
+而且同事看得到。Lody 提供的是这个工作空间，不是 Claude 专用产品。你可以在同一个工作空间里把
+Claude Code 和 Codex、Kimi、DeepSeek，或任意 [ACP](/zh/docs/cli-runtimes) 运行时放在一起跑。
+
+另见 [Agent Config](/zh/docs/agents)、[团队功能](/zh/docs/team)、
+[共享并交接 Agent 会话](/zh/docs/session-handoff) 和
+[Agent 对话控制](/zh/docs/session-orchestration)。
+
+## 隔离的 Worktree
+
+创建使用 Worktree 的会话时，Lody 会：
+
+1. 新建分支（默认 `session/<shortSessionId>`）
+2. 在独立 Worktree 里检出该分支
+3. 按需运行项目的 setup 脚本
+4. 把文件改动同步到会话界面
+
+不同会话里的 Agent 不共用工作目录，未提交的改动只属于做出它们的那条任务。按会话审阅、丢弃或开 PR
+即可。
+
+<Callout title="Fork 的两个目标">
+[Fork](/zh/docs/session#fork-会话) 会把对话历史复制到**新的**会话。**当前工作区**（以及侧边对话）
+仍占用源会话的目录。出现 **新 Worktree** 时，那条 Fork 会从最新已提交的 `HEAD` 开一条独立会话——
+要隔离又不想丢掉对话历史时用它。要全新隔离任务、不复制历史时，从主页新开一条会话。
+</Callout>
+
+详见[工作树](/zh/docs/worktrees)。
+
+## 多个 Agent，一个工作空间
+
+每条会话都在主页输入框里各自选择 [Agent Config](/zh/docs/agents)、模型和权限范围。你可以跑：
+
+- 机器上已登录的 Claude Code 或 Codex 订阅
+- Kimi Code、DeepSeek Harness，以及其他内置或 Claude 兼容配置
+- [ACP Registry](/zh/docs/cli-runtimes) 里的运行时，或自定义 ACP 启动命令
+
+经常用同一套机器、配置、模型和权限时，可以存成 [Agent Role](/zh/docs/agent-roles)，下次一点即可。
+
+能同时跑多少条，取决于宿主机性能，以及你还能有效盯住多少对话——见[工作流推荐](/zh/docs/workflow)。
+
+## 团队可见性
+
+并行干活时，最好让团队看得到已经在跑的会话。
+
+- 主页侧边栏筛选默认是 **全部任务**。如果只看到自己的会话，把 **我的任务** 改成 **全部任务**（移动端是 **团队任务**）。头像可以区分是谁发起的。
+- 机器**默认私有**。需要同事打开这些对话时，再共享机器，或在会话里使用 **Share with team…**。
+- 要把同事*请进*已经在跑的那一条——同一段对话、差异和工作树——走
+  [共享并交接 Agent 会话](/zh/docs/session-handoff)。
+
+成员、角色和机器共享见[团队功能](/zh/docs/team)。
+
+## 从一条对话里协调
+
+多数并行工作，手开几条会话就够了。如果希望一个 Agent 去拆任务，可以让它使用
+[Agent 对话控制](/zh/docs/session-orchestration)：创建或复用对话、查看状态、发后续指令，再把结果带回来。
+目标机器在线时，这些被委派的对话可以并行跑。
+
+## 一种实用拆法
+
+按[工作流推荐](/zh/docs/workflow)：
+
+1. 把工作拆成小功能或小修复。
+2. 每个条目从主页开一条对话（通常对应一个 PR）。
+3. 各个 Agent 工作时，用实时 [Diff](/zh/docs/diff-viewer) 审阅。
+4. 对 GitHub 上的工作，改动基本就绪后从该会话创建 PR。
+5. 做完后[归档](/zh/docs/session#归档会话)会话，回收对应 Worktree。
+
+## 常见问题
+
+### 这是 Claude Code 自带的 Team 吗？
+
+不是。Claude Code 只是你可以在 Lody 里选用的一种 [Agent Config](/zh/docs/agents)。工作空间、隔离
+Worktree 和团队会话列表是 Lody 的。你可以并行开多条 Claude Code 会话，也可以把 Claude Code 和
+Kimi、DeepSeek、Codex 或其他 ACP Agent 混在一起跑。
+
+### 并行的 Agent 会不会互相覆盖文件？
+
+每条任务各自占用带 [Worktree](/zh/docs/worktrees) 的会话时不会——包括 **新 Worktree** Fork，或从主页
+新开的会话。**当前工作区** Fork 和侧边对话共用源会话的目录，因此能看见彼此的文件改动。新 Worktree
+Fork 从已提交的 `HEAD` 起步；未提交的改动仍留在源会话。
+
+### 同事看得到所有正在跑的 Agent 吗？
+
+他们能看到已共享给工作空间的机器（以及本地项目，如有）上的会话，然后把主页筛选改成 **全部任务**（如果当前是 **我的任务**）。
+未共享机器上的对话不会同步到其他成员的侧边栏。见[团队功能](/zh/docs/team)。
+
+### 能不能让一个 Agent 去开其他 Agent？
+
+可以，通过 [Agent 对话控制](/zh/docs/session-orchestration)——需要先打开 **开发者模式** 和 **Tasks**
+beta。在一条对话里让它创建专注的会话、盯进度、再汇总。范围仅限 Lody 自己的对话数据，不是通用后台调度器。
+
+### 什么时候该交接，而不是再开一个 Agent？
+
+要做**新的**隔离任务时，再开一条会话。要让同事**接着**已有会话往下做，走
+[交接](/zh/docs/session-handoff)。

@@ -9,6 +9,7 @@ import type { IssuePRMention } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
+import { scoreMentionMatch } from '@/components/mentions/mention-rank';
 import {
   useMentionHydration,
   type HydratedMentions,
@@ -49,11 +50,6 @@ export type ItemSuggestion = {
   token: string;
   label: string;
   searchableNumber: string;
-  searchableTitle: string;
-};
-
-type FuseInstance<T> = {
-  search: (pattern: string, options?: { limit?: number }) => Array<{ item: T; score?: number }>;
 };
 
 export type IssuePrKnownItem = {
@@ -226,38 +222,19 @@ export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
       token: `#${numberLabel}`,
       label: numberLabel,
       searchableNumber: numberLabel,
-      searchableTitle: item.title.toLowerCase(),
     };
   });
 }
 
-export function getIssuePrFuseOptions() {
-  return {
-    keys: ['searchableNumber', 'searchableTitle'],
-    includeScore: true,
-    threshold: 0.4,
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-    shouldSort: true,
-  } as const;
-}
-
-// Module-level cache for the dynamically-imported Fuse constructor. Lifting
-// this out of component state means once it has loaded for any consumer, every
-// other consumer reads it synchronously during render — no extra Effect, no
-// "wait one extra commit before fuzzy search activates".
 function githubIssuePrUrl(repoFullName: string, type: 'issue' | 'pr', number: number) {
   const safeRepo = repoFullName.trim();
   const segment = type === 'pr' ? 'pull' : 'issues';
   return `https://github.com/${safeRepo}/${segment}/${number}`;
 }
 
-export function getIssuePrSuggestions(
-  suggestions: ItemSuggestion[],
-  term: string,
-  fuse: FuseInstance<ItemSuggestion> | null
-) {
-  const trimmed = term.trim().toLowerCase();
+export function getIssuePrSuggestions(suggestions: ItemSuggestion[], term: string) {
+  const query = term.trim();
+  const trimmed = query.toLowerCase();
 
   if (!trimmed) {
     const issues = suggestions.filter((s) => s.type === 'issue');
@@ -267,18 +244,25 @@ export function getIssuePrSuggestions(
 
   const isNumericQuery = /^[0-9]+$/.test(trimmed);
 
-  const candidates: Array<{ item: ItemSuggestion; score: number | null }> = (() => {
-    if (fuse) {
-      const results = fuse.search(trimmed, { limit: MAX_ISSUE_PR_SUGGESTIONS * 2 });
-      return results.map((r) => ({
-        item: r.item,
-        score: typeof r.score === 'number' ? r.score : null,
-      }));
-    }
-    return suggestions
-      .filter((s) => s.searchableNumber.includes(trimmed) || s.searchableTitle.includes(trimmed))
-      .map((item) => ({ item, score: null }));
-  })();
+  type Candidate = {
+    item: ItemSuggestion;
+    /** Higher is better, following VS Code's fuzzy scorer. */
+    fuzzyScore: number;
+  };
+
+  const candidates: Candidate[] = [];
+  for (const item of suggestions) {
+    const numberScore = scoreMentionMatch(query, item.searchableNumber);
+    const titleScore = scoreMentionMatch(query, item.title);
+    const fuzzyScore =
+      numberScore === null
+        ? titleScore
+        : titleScore === null
+          ? numberScore
+          : Math.max(numberScore, titleScore);
+    if (fuzzyScore === null) continue;
+    candidates.push({ item, fuzzyScore });
+  }
 
   const sorted = candidates.sort((a, b) => {
     const aExactNumber = a.item.searchableNumber === trimmed;
@@ -295,8 +279,8 @@ export function getIssuePrSuggestions(
       return a.item.type === 'issue' ? -1 : 1;
     }
 
-    if (a.score !== null && b.score !== null && a.score !== b.score) {
-      return a.score - b.score;
+    if (a.fuzzyScore !== b.fuzzyScore) {
+      return b.fuzzyScore - a.fuzzyScore;
     }
 
     if (isNumericQuery && a.item.type !== b.item.type) {
@@ -565,9 +549,9 @@ export function useRepoIssuesAndPRs(
     };
   }, [isPublic, postHog, refresh, repoFullName, workspaceId]);
 
-  // Stable between renders: the menu keys its issue/PR slices and Fuse indexes
-  // off this object, so a fresh one per keystroke re-partitions the cached list
-  // and rebuilds both indexes while the user is only typing.
+  // Stable between renders: the menu keys its issue/PR slices off this object,
+  // so a fresh one per keystroke re-partitions the cached list while the user
+  // is only typing.
   return React.useMemo(() => ({ ...data, refresh }), [data, refresh]);
 }
 

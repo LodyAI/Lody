@@ -9,3 +9,4 @@ public/llms-full.txt
 public/rss.xml
 public/rss-zh.xml
 lib/blog-reading-time.generated.ts
+lib/docs-faq.generated.ts

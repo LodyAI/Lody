@@ -7,6 +7,11 @@ import type { SessionHistory, SessionId } from '@lody/shared';
 
 import { useAppStoreReviewPrompt } from '../src/hooks/use-app-store-review-prompt';
 
+const capture = vi.hoisted(() => vi.fn());
+vi.mock('../src/lib/deferred-posthog', () => ({
+  deferredPostHog: { capture },
+}));
+
 type PromptInput = Parameters<typeof useAppStoreReviewPrompt>[0];
 
 const nowMs = Date.parse('2026-05-10T12:00:00.000Z');
@@ -25,7 +30,7 @@ function assistantTurn(id: string, occurredAtMs: number, userTurnId?: string): S
   } as SessionHistory;
 }
 
-function userTurn(id: string, status: 'handled' | 'processing'): SessionHistory {
+function userTurn(id: string, status: 'handled' | 'processing' | 'failed'): SessionHistory {
   return {
     id,
     role: 'user',
@@ -36,9 +41,11 @@ function userTurn(id: string, status: 'handled' | 'processing'): SessionHistory 
   } as SessionHistory;
 }
 
+// Fifty completed turns inside the sixty-day window, one per minute, in
+// chronological order: the stored watermark only counts turns above it.
 function eligibleHistoricalTurns(): SessionHistory[] {
-  return Array.from({ length: 51 }, (_, index) =>
-    assistantTurn(`historical-${index}`, index % 2 === 0 ? nowMs : nowMs - 24 * 60 * 60 * 1000)
+  return Array.from({ length: 50 }, (_, index) =>
+    assistantTurn(`historical-${index}`, nowMs - (50 - index) * 60_000)
   );
 }
 
@@ -64,6 +71,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     vi.useFakeTimers();
     vi.setSystemTime(nowMs);
     localStorage.clear();
+    capture.mockClear();
     requestReview = vi.fn(async () => undefined);
     window.__LODY_NATIVE__ = true;
     window.__LODY_APP_INFO__ = { app_version: '1.5.0' };
@@ -116,7 +124,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       ...baseInput,
       history: historical,
       historyHydrated: true,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     });
 
     await act(async () => {
@@ -159,7 +167,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     await render({
       ...baseInput,
       history: historical,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     });
 
     const completedHistory = [
@@ -202,7 +210,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       historyHydrated: true,
       history: historical,
       sessionCompleted: true,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     } as const;
 
     await render(input);
@@ -271,5 +279,158 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
 
     expect(setItemSpy).not.toHaveBeenCalled();
     expect(requestReview).not.toHaveBeenCalled();
+  });
+
+  it('reports the request to analytics with the eligibility counters that allowed it', async () => {
+    const historical = eligibleHistoricalTurns();
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'analytics-user',
+      currentUserId: 'analytics-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({ ...baseInput, history: historical, lastCompletedAssistantMessageId: null });
+    await render({
+      ...baseInput,
+      history: [
+        ...historical,
+        userTurn('analytics-user-turn', 'handled'),
+        assistantTurn('analytics-assistant-turn', nowMs, 'analytics-user-turn'),
+      ],
+      lastCompletedAssistantMessageId: 'analytics-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(requestReview).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith(
+      'mobile/app_store_review_prompt_requested',
+      expect.objectContaining({
+        app_version: '1.5.0',
+        // Saturates at the threshold: stored turns are capped there, which is
+        // all eligibility asks. Below the threshold the count is exact, which
+        // is the half the funnel needs.
+        windowed_turn_count: 50,
+        stored_turn_count: 50,
+        has_requested_before: false,
+        native_platform: 'ios',
+      })
+    );
+  });
+
+  it('does not ask for a rating when the session just failed a turn', async () => {
+    const historical = eligibleHistoricalTurns();
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'failure-user',
+      currentUserId: 'failure-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({ ...baseInput, history: historical, lastCompletedAssistantMessageId: null });
+    await render({
+      ...baseInput,
+      history: [
+        ...historical,
+        // A failed send sits among the session's most recent finalized turns.
+        userTurn('failure-user-turn', 'failed'),
+        userTurn('recovered-user-turn', 'handled'),
+        assistantTurn('recovered-assistant-turn', nowMs, 'recovered-user-turn'),
+      ],
+      lastCompletedAssistantMessageId: 'recovered-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(requestReview).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledWith(
+      'mobile/app_store_review_prompt_blocked',
+      expect.objectContaining({ block_reason: 'recent_hard_failure' })
+    );
+  });
+
+  it('drops the v1 blob when it reads v2 state', async () => {
+    const legacyKey = 'lody:app-store-review:v1:legacy-user';
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ effectiveTurnCount: 51, recordedOutcomeIds: ['a', 'b'] })
+    );
+
+    await render({
+      sessionId,
+      sessionOwnerId: 'legacy-user',
+      currentUserId: 'legacy-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+      history: [assistantTurn('legacy-turn', nowMs)],
+      lastCompletedAssistantMessageId: 'legacy-turn',
+    });
+
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+    // The v1 total cannot be reprojected onto day buckets, so v2 starts fresh.
+    expect(localStorage.getItem('lody:app-store-review:v2:legacy-user')).toContain(
+      'recentTurnTimesMs'
+    );
+  });
+
+  it('reports the first blocking gate once per user instead of on every completed turn', async () => {
+    // One completed turn: far below the effective-turn threshold.
+    const completedHistory = [
+      userTurn('blocked-user-turn', 'handled'),
+      assistantTurn('blocked-assistant-turn', nowMs, 'blocked-user-turn'),
+    ];
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'blocked-user',
+      currentUserId: 'blocked-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({ ...baseInput, history: [], lastCompletedAssistantMessageId: null });
+    await render({
+      ...baseInput,
+      history: completedHistory,
+      lastCompletedAssistantMessageId: 'blocked-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(requestReview).not.toHaveBeenCalled();
+    const blockedCalls = capture.mock.calls.filter(
+      ([eventName]) => eventName === 'mobile/app_store_review_prompt_blocked'
+    );
+    expect(blockedCalls).toHaveLength(1);
+    expect(blockedCalls[0]?.[1]).toMatchObject({
+      block_reason: 'insufficient_turns',
+      windowed_turn_count: 1,
+    });
+
+    // A second completed turn for the same user must not emit a second event.
+    const moreHistory = [
+      ...completedHistory,
+      userTurn('blocked-user-turn-2', 'handled'),
+      assistantTurn('blocked-assistant-turn-2', nowMs, 'blocked-user-turn-2'),
+    ];
+    await render({
+      ...baseInput,
+      history: moreHistory,
+      lastCompletedAssistantMessageId: 'blocked-assistant-turn-2',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    expect(
+      capture.mock.calls.filter(
+        ([eventName]) => eventName === 'mobile/app_store_review_prompt_blocked'
+      )
+    ).toHaveLength(1);
   });
 });

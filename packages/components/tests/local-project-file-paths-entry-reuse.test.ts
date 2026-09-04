@@ -12,9 +12,9 @@ const previous: LocalProjectFilePathsEntry = {
 };
 
 describe('resolveLoadedEntry', () => {
-  // The mention menu revalidates on every `@`, and both `buildMentionFileIndex`
-  // and its Fuse index are memoised on the entry object. A new object for an
-  // unchanged listing rebuilds them over the whole repo, once per mention.
+  // The mention menu revalidates on every `@`, and `buildMentionFileIndex` is
+  // memoised on the entry object. A new object for an unchanged listing
+  // re-expands every path into its suggestion tokens, once per mention.
   it('keeps the same object when the machine reported an identical listing', () => {
     const resolved = resolveLoadedEntry(
       previous,

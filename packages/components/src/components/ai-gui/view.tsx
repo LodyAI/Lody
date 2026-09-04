@@ -5460,11 +5460,7 @@ const PlanPanel = ({
       <div className="relative">
         <div
           ref={bodyRef}
-          className={cn(
-            CONVERSATION_PANEL_BODY_CLASS,
-            !isOpen && 'max-h-56 overflow-hidden',
-            isOpen && 'scrollbar-pro max-h-[32rem] overflow-y-auto'
-          )}
+          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
         >
           <MarkdownRenderer
             text={plan.markdown}
@@ -6294,7 +6290,7 @@ const PlanExitBlock = ({
           awaitingDecision={awaitingDecision}
         />
       ) : null}
-      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />
+      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} collapseByDefault />
     </div>
   );
 };
@@ -6302,9 +6298,12 @@ const PlanExitBlock = ({
 const PermissionRequestBlock = ({
   toolCall,
   sessionId,
+  collapseByDefault = false,
 }: {
   toolCall: ToolCallMessage;
   sessionId: SessionId;
+  /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
+  collapseByDefault?: boolean;
 }) => {
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
@@ -6391,6 +6390,7 @@ const PermissionRequestBlock = ({
   return (
     <PermissionRequestCard
       options={permission.options}
+      defaultCollapsed={collapseByDefault}
       isResolved={isResolved}
       isCancelled={isCancelled}
       isReady={isReady}

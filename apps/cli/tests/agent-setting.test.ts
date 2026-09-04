@@ -74,6 +74,30 @@ describe('resolveBuiltinACPSetting', () => {
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'deepseek' })).toBe(
       DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION
     );
+    const customDeepSeekEndpointVersion = getAcpCapabilitySourceVersion({
+      cliType: 'builtin',
+      agentType: 'deepseek',
+      env: { DEEPSEEK_BASE_URL: 'https://gateway.example/v1' },
+    });
+    expect(customDeepSeekEndpointVersion).toMatch(
+      new RegExp(
+        `^${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION.replaceAll('.', '\\.')}\\+endpoint:[a-f0-9]{12}$`
+      )
+    );
+    expect(customDeepSeekEndpointVersion).not.toBe(
+      getAcpCapabilitySourceVersion({
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        env: { DEEPSEEK_BASE_URL: 'https://other.example/v1' },
+      })
+    );
+    expect(customDeepSeekEndpointVersion).not.toBe(
+      getAcpCapabilitySourceVersion({
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        env: { DEEPSEEK_BASE_URL: ' https://gateway.example/v1' },
+      })
+    );
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' }, '0.36.0')).toBe(
       'builtin-kimi:0.36.0'
     );

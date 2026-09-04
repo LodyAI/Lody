@@ -40,7 +40,17 @@ function Probe() {
   return null;
 }
 
-function Harness({ items, initialValue }: { items: ItemSpec[]; initialValue: string }) {
+function Harness({
+  items,
+  initialValue,
+  withChips = false,
+  isReadonly = false,
+}: {
+  items: ItemSpec[];
+  initialValue: string;
+  withChips?: boolean;
+  isReadonly?: boolean;
+}) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -54,8 +64,10 @@ function Harness({ items, initialValue }: { items: ItemSpec[]; initialValue: str
       onMentionsChange={setMentions}
       value={selected}
       onValueChange={setSelected}
+      getMentionChip={withChips ? () => ({}) : undefined}
       onFilter={(options) => options}
       autoCloseOnEmpty={false}
+      readonly={isReadonly}
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
@@ -113,9 +125,22 @@ describe('Mention navigation and insertion', () => {
     originalRequestAnimationFrame = undefined;
   });
 
-  function render(items: ItemSpec[], initialValue: string, caret = initialValue.length) {
+  function render(
+    items: ItemSpec[],
+    initialValue: string,
+    caret = initialValue.length,
+    withChips = false,
+    isReadonly = false
+  ) {
     act(() => {
-      root?.render(<Harness items={items} initialValue={initialValue} />);
+      root?.render(
+        <Harness
+          items={items}
+          initialValue={initialValue}
+          withChips={withChips}
+          isReadonly={isReadonly}
+        />
+      );
     });
     const input = container?.querySelector('textarea');
     if (!input) throw new Error('Expected mention textarea to render');
@@ -138,6 +163,11 @@ describe('Mention navigation and insertion', () => {
       input.dispatchEvent(event);
     });
     return event;
+  }
+
+  function setNativeValue(input: HTMLTextAreaElement, value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setValue?.call(input, value);
   }
 
   it('writes the item insertText instead of composing trigger and label', () => {
@@ -281,5 +311,112 @@ describe('Mention navigation and insertion', () => {
     expect(event.defaultPrevented).toBe(false);
     expect(latest.inputValue).toBe('@');
     expect(latest.mentions).toEqual([]);
+  });
+
+  it('snaps a caret inside a session mention to a boundary before editing', () => {
+    const input = render([{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }], '@');
+    commit('sess_1', 0);
+
+    act(() => {
+      input.setSelectionRange(3, 3);
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(input.selectionStart).toBe(0);
+
+    act(() => {
+      setNativeValue(input, `X${input.value}`);
+      input.setSelectionRange(1, 1);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(latest.inputValue).toBe('X@fix-ci ');
+    expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
+  });
+
+  it('keeps mention mirrors aligned while an IME composes before a session mention', () => {
+    const input = render(
+      [{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }],
+      '@',
+      1,
+      true
+    );
+    commit('sess_1', 0);
+
+    act(() => {
+      input.setSelectionRange(0, 0);
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      setNativeValue(input, 'zhong@fix-ci ');
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(input.selectionStart).toBe(5);
+    expect(container?.querySelector('[data-mention-layer="background"]')?.textContent).toContain(
+      'zhong@fix-ci'
+    );
+    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-mention-layer="chip"] [data-mention-kind="session"]')
+        ?.getAttribute('data-mention-start')
+    ).toBe('5');
+
+    act(() => {
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(input.selectionStart).toBe(5);
+
+    act(() => {
+      setNativeValue(input, '中@fix-ci ');
+      input.setSelectionRange(1, 1);
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中' }));
+    });
+
+    expect(latest.inputValue).toBe('中@fix-ci ');
+    expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
+    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+  });
+
+  it('keeps the native caret above a chip at both edges', () => {
+    const input = render([{ value: 'plan', insertText: '/plan', kind: 'command' }], '/', 1, true);
+    commit('plan', 0);
+
+    act(() => {
+      input.setSelectionRange(5, 5);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
+    expect(input.className).toContain('z-30');
+    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
+
+    act(() => {
+      input.setSelectionRange(0, 0);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
+    expect(input.className).toContain('z-30');
+    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
+
+    act(() => {
+      input.setSelectionRange(6, 6);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    expect(input.className).toContain('z-10');
+    expect(input.className).not.toContain('z-30');
+    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
+  });
+
+  it('keeps a readonly caret out of the opaque chip interior', () => {
+    const items = [{ value: 'plan', insertText: '/plan', kind: 'command' }];
+    const input = render(items, '/', 1, true, true);
+    commit('plan', 0);
+
+    act(() => {
+      input.setSelectionRange(2, 2);
+      input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Home', bubbles: true }));
+    });
+
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
   });
 });

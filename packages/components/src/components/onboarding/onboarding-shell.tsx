@@ -227,7 +227,11 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
 
 const COMPACT_FORM =
   'max-[1080px]:left-[calc(50%_-_min(310px,43%))]! max-[1080px]:top-[9%]! max-[1080px]:bottom-[7%]! max-[1080px]:w-[min(620px,86%)]!';
-const COMPACT_CAMERA = 'max-[1080px]:opacity-20';
+// Below the two-column breakpoint the centred form overlaps the product and
+// the close-up frames an empty patch of the window, so the preview steps out
+// entirely. Opacity (not unmount) is what flips, keeping the camera mounted
+// and letting the existing 700ms fade carry the transition both ways.
+const COMPACT_CAMERA = 'max-[1080px]:opacity-0';
 
 const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurationState>> = {
   login: {

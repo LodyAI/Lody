@@ -6,7 +6,7 @@ import {
   sidebarNavItemsAtom,
   type SidebarNavItem,
 } from '@/atoms/focus-layer';
-import { toggleSidebarCollapsedAtom } from '@/atoms/sidebar-state';
+import { toggleNavigationSidebarAtom } from '@/atoms/layout-state';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useFocusScopeSwitcher } from '@/ui/focus-scope';
 import { useIsMobile } from './use-mobile';
@@ -36,7 +36,7 @@ export function useKeyboardNavigation(): void {
   const { t } = useTranslation();
   const flatItems = useAtomValue(sidebarNavItemsAtom);
   const sidebarCallbacks = useAtomValue(sidebarNavCallbacksAtom);
-  const toggleSidebarCollapsed = useSetAtom(toggleSidebarCollapsedAtom);
+  const toggleNavigationSidebar = useSetAtom(toggleNavigationSidebarAtom);
   const isMobile = useIsMobile();
 
   const flatItemsRef = useRef(flatItems);
@@ -152,7 +152,7 @@ export function useKeyboardNavigation(): void {
     category: 'View',
     keybindings: getCommandKeybindings('sidebar.toggle'),
     when: () => !isMobile,
-    run: () => toggleSidebarCollapsed(),
+    run: () => toggleNavigationSidebar(),
   });
 
   useCommand({

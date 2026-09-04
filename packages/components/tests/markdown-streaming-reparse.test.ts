@@ -37,6 +37,35 @@ class TestIntersectionObserver {
 ).IntersectionObserver = TestIntersectionObserver as typeof IntersectionObserver;
 
 const STREAM_CHUNK_COUNT = 48;
+const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
+  '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
+const MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN = '**www.example.com**(`fix/some-branch` -> `main`)';
+const MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN =
+  '**WWW.example.com**(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_AUTOLINK_MARKDOWN =
+  '\\*\\*https://example.com\\*\\*(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
+  '\\*\\*https://example.com**(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
+  '**https://example.com\\*\\*(`fix/some-branch` -> `main`)';
+const URL_WITH_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/path**segment';
+const URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN = '**https://example.com/path**segment(`code`)';
+const URL_WITH_LATER_VALID_CLOSER_MARKDOWN = '**https://example.com/a**b/c**(`code`)';
+const LONG_URL_SEGMENTS = Array.from({ length: 64 }, (_, index) => `segment${index}**`).join('');
+const LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN = `**https://example.com/${LONG_URL_SEGMENTS}final**(\`code\`)`;
+const LONG_URL_WITH_REPEATED_NON_CLOSERS = `https://example.com/${LONG_URL_SEGMENTS}final`;
+const EXPLICIT_BOLD_LINK_MARKDOWN =
+  '**[https://example.com**(\\`code\\`)](https://destination.test)**';
+const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
+const BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN =
+  'PR 已开：**https://github.com/LodyAI/Lody/pull/317**，分支 `fix/mobile-staged-background-sync`。';
+const AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN = '见 https://example.com/a。然后是别的';
+const AUTOLINK_WITH_CJK_PATH_MARKDOWN = '见 https://zh.example.com/wiki/中文 页面';
+const URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN = '**https://example.com**𐄀(`code`)';
+const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_branch_)';
+const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
+const HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN =
+  '**https://example.com/?a=1&amp;b=2**(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -117,6 +146,165 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.querySelector('a[href="mailto:agent-000@example.com"]')).not.toBeNull();
   });
 
+  it.each([false, true])(
+    'repairs bold URLs followed by inline code while streaming=%s',
+    async (isStreaming) => {
+      await renderMarkdown(MALFORMED_BOLD_AUTOLINK_MARKDOWN, { isStreaming });
+
+      const url = 'https://github.com/LodyAI/Lody/pull/262';
+      const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+      expect(link?.textContent).toBe(url);
+      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(url);
+      expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
+      expect(container?.textContent).toContain('fix/some-branch -> main');
+      expect(container?.textContent).not.toContain('**');
+    }
+  );
+
+  it('preserves an absolute destination when repairing a bold www autolink', async () => {
+    await renderMarkdown(MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector(
+      '[data-streamdown="strong"] a[href="http://www.example.com"]'
+    );
+    expect(link?.textContent).toBe('www.example.com');
+    expect(container?.textContent).toContain('fix/some-branch -> main');
+  });
+
+  it('adds an absolute scheme for mixed-case www autolinks', async () => {
+    await renderMarkdown(MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('http://WWW.example.com');
+    expect(link?.textContent).toBe('WWW.example.com');
+  });
+
+  it('does not split a URL at double asterisks followed by ordinary URL text', async () => {
+    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_MARKDOWN);
+
+    const link = container?.querySelector('a[href="https://example.com/path**segment"]');
+    expect(link?.textContent).toBe('https://example.com/path**segment');
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+  });
+
+  it('does not split a URL when ordinary URL text precedes an inline code suffix', async () => {
+    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/path**segment(%60code%60)');
+    expect(link?.textContent).toBe('https://example.com/path**segment(`code`)');
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('code')).toBeNull();
+  });
+
+  it('searches past an invalid asterisk pair for a later valid closer', async () => {
+    await renderMarkdown(URL_WITH_LATER_VALID_CLOSER_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/a**b/c');
+    expect(link?.textContent).toBe('https://example.com/a**b/c');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
+  });
+
+  it('handles many non-closing asterisk pairs before a valid closer', async () => {
+    await renderMarkdown(LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
+    expect(link?.textContent).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
+    expect(container?.querySelector('code')?.textContent).toBe('code');
+  });
+
+  it('preserves explicit link destinations', async () => {
+    await renderMarkdown(EXPLICIT_BOLD_LINK_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://destination.test');
+    expect(link?.textContent).toBe('https://example.com**(`code`)');
+    expect(container?.querySelector('code')).toBeNull();
+  });
+
+  it('ends a bold autolink at full-width punctuation instead of swallowing the sentence', async () => {
+    await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
+
+    const url = 'https://github.com/LodyAI/Lody/pull/317';
+    const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+    expect(link?.textContent).toBe(url);
+    expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
+    expect(container?.textContent).toContain('，分支');
+    expect(container?.textContent).not.toContain('**');
+  });
+
+  it('ends a bare autolink at full-width punctuation', async () => {
+    await renderMarkdown(AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/a');
+    expect(link?.textContent).toBe('https://example.com/a');
+    expect(container?.textContent).toBe('见 https://example.com/a。然后是别的');
+  });
+
+  it('keeps non-ASCII letters that belong to the URL path', async () => {
+    await renderMarkdown(AUTOLINK_WITH_CJK_PATH_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.textContent).toBe('https://zh.example.com/wiki/中文');
+  });
+
+  it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {
+    await renderMarkdown(URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN);
+
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('code')).toBeNull();
+    expect(container?.textContent).toContain('https://example.com/**€(`code`)');
+  });
+
+  it('recognizes astral Unicode punctuation after a strong closer', async () => {
+    await renderMarkdown(URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com');
+    expect(link?.textContent).toBe('https://example.com');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
+  });
+
+  it('does not reduce triple-star emphasis to a strong link', async () => {
+    await renderMarkdown(TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN);
+
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.textContent).toContain('https://example.com');
+  });
+
+  it('searches past an escaped URL marker for a later valid closer', async () => {
+    await renderMarkdown(ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/%5C*%5C*path');
+    expect(link?.textContent).toBe('https://example.com/\\*\\*path');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
+  });
+
+  it('repairs bold autolinks when the URL contains an HTML entity', async () => {
+    await renderMarkdown(HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/?a=1&amp;b=2');
+    expect(link?.textContent).toBe('https://example.com/?a=1&amp;b=2');
+    expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
+    expect(container?.textContent).toContain('fix/some-branch -> main');
+  });
+
+  it.each([
+    ESCAPED_BOLD_AUTOLINK_MARKDOWN,
+    ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN,
+    ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN,
+  ])('does not turn escaped bold markers into formatting: %s', async (markdown) => {
+    await renderMarkdown(markdown);
+
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.textContent).toContain('**');
+  });
+
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');
 
@@ -129,6 +317,45 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     const copyButton = await waitForElement('[data-streamdown="code-block-copy-button"]');
     expect(copyButton.getAttribute('aria-label')).toBe('Copy code');
+  });
+
+  it('renders headerless diff fences with semantic line rows and existing code controls', async () => {
+    await renderMarkdown(
+      [
+        '```diff',
+        ' resolveSource(session)',
+        '-  return staleProvider',
+        '+  return localFiles',
+        '@@ -8,1 +8,1 @@',
+        '--- a/source.ts',
+        '+++ b/source.ts',
+        '```',
+      ].join('\n')
+    );
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-language')).toBe('diff');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="context"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="hunk"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="metadata"]')).toHaveLength(2);
+    expect(
+      diffBlock
+        .querySelector('[data-streamdown="code-block-copy-button"]')
+        ?.getAttribute('aria-label')
+    ).toBe('Copy code');
+  });
+
+  it('keeps an incomplete streaming diff fence in the semantic renderer', async () => {
+    await renderMarkdown(['```diff', '-old source', '+new source'].join('\n'), {
+      isStreaming: true,
+    });
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-incomplete')).toBe('true');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
   });
 
   it('renders sanitized raw HTML when allowHtml is enabled', async () => {

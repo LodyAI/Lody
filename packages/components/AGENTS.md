@@ -165,7 +165,12 @@ mobile surfaces.
   watch, no All Changes recompute, no Flock publish. A local Electron target uses the
   IPC-only `file/preview-local` method and MUST NOT fall back to Streams RPC while its
   route is unresolved; remote targets use the restricted `file/preview` method. It handles
-  text and binary (PNG/JPEG/…) alike and is size-limited on the machine. So the file
+  text and binary (PNG/JPEG/…) alike and is size-limited on the machine — but that
+  limit is the REMOTE wire's: the local `file/preview-local` path reads to
+  `FILE_PREVIEW_V3_LOCAL_LIMITS`, derived from the 16 MiB local-IPC response cap,
+  so "too large to preview" is mostly a remote verdict rather than a fact about a
+  file on this machine. Every preview answers in ONE bounded response, which is
+  also the ceiling on the remote `Download file` action. So the file
   index is a HINT here, never a gate: a `binary` entry carries no `unavailableReason`
   (or the tree row goes unclickable via `canOpen` in
   `session-file-provider-view-model.ts`), and a path the index has never seen — an
@@ -211,6 +216,9 @@ mobile surfaces.
   `ConversationDropOverlay` immediately, before `dragenter`. A row whose surface is a navigation `<a>` overlay must
   put `draggable` on the ROW and `draggable={false}` on that anchor, or the
   browser starts a link drag instead.
+  EVERY desktop row also exposes Mark as unread from that shared ⋯ menu —
+  Workspace, Local Project, Updated, and Pinned renderers must all wire it;
+  hide the action once the row is unread.
   `SessionMeta.openedBySessionId` (a Session created BY another, e.g. the
   `lody_session_create` MCP tool) indents that row under its opener via
   `lib/session-opened-by-tree.ts`. EVERY session list uses it — `session-list.tsx`
@@ -274,8 +282,10 @@ mobile surfaces.
   `settings/env-vars-textarea.tsx`. DeepSeek Harness official vs custom
   endpoint is dialog form state only: persist `DEEPSEEK_API_KEY` /
   `DEEPSEEK_BASE_URL` (official always writes `https://api.deepseek.com`)
-  and never a new AgentConfigMeta field. Additional env cannot override
-  those keys.
+  and never a new AgentConfigMeta field. Model ids come from the endpoint's
+  OpenAI-compatible discovery response during live verification; do not add a
+  parallel manual catalog field. Additional env cannot override either connection
+  key. Changing endpoint or credential invalidates the dialog's prior live verification.
 - Codex reset forecast: `components/codex-reset/` + `lib/codex-reset-forecast*.ts`.
   A public unauthenticated GET to the third-party `codex-resets.com`, cached in ONE
   module-level store (`lib/codex-reset-forecast-store.ts`) that every surface shares.
