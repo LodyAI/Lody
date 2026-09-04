@@ -272,7 +272,11 @@ export class PublicBrowserService {
       void this.navigate(record.browserId, details.url)
       return { action: 'deny' }
     })
-    contents.on('will-navigate', (details) => {
+    // Both events, as `installNavigationGuard` in `window.ts` does. `will-navigate`
+    // does not fire for a server-side 3xx, so a public page redirecting to loopback
+    // would otherwise commit here — the engine split has to hold for the hop the
+    // server chose, not only the one the page did.
+    const enforceEngineRouting = (details: { url: string; preventDefault: () => void }): void => {
       try {
         if (parseBrowserAddress(details.url).engine === 'public-web') return
       } catch {
@@ -284,7 +288,9 @@ export class PublicBrowserService {
         error: 'Navigation left the public web boundary.',
         blockedUrl: details.url
       })
-    })
+    }
+    contents.on('will-navigate', enforceEngineRouting)
+    contents.on('will-redirect', enforceEngineRouting)
     contents.on('did-start-loading', () => {
       this.publish(record, { phase: 'loading', error: undefined, blockedUrl: undefined })
     })

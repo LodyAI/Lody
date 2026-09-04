@@ -103,6 +103,10 @@ Root `AGENTS.md` also applies.
   protects nothing. The one it used to have blocked every fake-IP proxy user.
   Adding any non-human reader to this view — agent DOM access, screenshots, a
   preload bridge — must bring a guard back, on that agent-driven path.
+  The engine-routing check runs on `will-navigate` AND `will-redirect`, like
+  `installNavigationGuard` in `window.ts`: `will-navigate` does not fire for a
+  server-side 3xx, so a public page redirecting to loopback would otherwise
+  commit here and never reach Managed Preview.
 - Image preview export (`services/image-export-service.ts`) keeps the native
   menu, clipboard, and save dialog here because the renderer holds the only copy
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
