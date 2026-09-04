@@ -64,6 +64,13 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
   runtime must not create or bind the signal when a policy does not ask for it.
   Deferring costs prefetch throughput, and a slower session open is the thing
   eager-sync exists to prevent, so it is only worth paying where the main thread is
-  the bottleneck: mobile and web yes, Electron no. Web defers because it may be a
-  phone browser and nothing can tell — its already-bounded scope is what keeps that
-  cheap on a workstation.
+  the bottleneck: mobile and web yes, Electron no. Web defers even though
+  `detectAppDeviceClass()` could split it, because routing a phone browser to the
+  mobile policy would swap the window, resident cap and pacing too, and web's
+  already-bounded scope is what makes deferring cheap on a workstation anyway.
+- The hold is reset by anything that INTERRUPTS IDLE — `enqueueForPrefetch` and the
+  start of an interaction — not only by pause/stop. Re-checking when the hold fires
+  is not sufficient on its own: it sees one instant, so work or a gesture that both
+  starts and ends inside the window would pass it and the hold would degrade into a
+  plain wall-clock timer. Clearing it is the reset; `drain()` arms a fresh full hold
+  the next time the queue drains.

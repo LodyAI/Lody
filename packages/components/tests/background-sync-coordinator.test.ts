@@ -749,6 +749,74 @@ describe('createBackgroundSyncCoordinator', () => {
     expect(prefetcher.calls).toEqual([sid('a'), sid('a'), sid('b')]);
   });
 
+  it('restarts the hold when work interrupts idle and finishes before it elapses', async () => {
+    const { coordinator, prefetcher, activity, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 100 },
+        { sessionId: sid('tail'), lastMessageAt: 50 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    // Hold armed at t=0. New activity arrives at t=900 and settles immediately,
+    // so by the original deadline the app is idle again — but it has only been
+    // idle for 100ms, not the 1000ms the hold requires.
+    time.advance(900);
+    activity.emit({ sessionId: sid('top'), lastMessageAt: 200 });
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    time.advance(100);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('top')]);
+
+    // A full hold from the moment it went quiet again, and only then the tail.
+    time.advance(900);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('top'), sid('tail')]);
+  });
+
+  it('restarts the hold after an interaction that begins and ends inside it', async () => {
+    const interaction = createFakeInteractionSource();
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 100 },
+        { sessionId: sid('tail'), lastMessageAt: 50 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+      interaction: interaction.view,
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    // The hold only re-checks interaction at the instant it fires, so a gesture
+    // entirely inside the window is invisible to it — but those 300ms were not
+    // idle, and the user was holding the phone the whole time.
+    time.advance(300);
+    interaction.set(true);
+    await tick();
+    time.advance(300);
+    interaction.set(false);
+    await tick();
+
+    time.advance(400);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top')]);
+
+    time.advance(600);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('tail')]);
+  });
+
   it('does not widen while a batch cooldown still has work queued', async () => {
     const { coordinator, prefetcher, activity, time } = setup({
       activity: [{ sessionId: sid('a'), lastMessageAt: 400 }],

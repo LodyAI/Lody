@@ -157,13 +157,20 @@ export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 20,
   candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
-  // Web is the one surface that may be either a phone browser or a workstation,
-  // and nothing here can tell them apart. It defers, because the two mistakes
-  // are not symmetric: on a phone browser, not deferring reproduces exactly the
-  // stall this policy exists to prevent, while on a workstation the cost is
-  // small and bounded BECAUSE web's scope is — 20 candidates, 20 resident, and
-  // persisted high-water marks mean steady state is nearly free. Only the cold
-  // warm-up can be delayed, and only until a second after the user pauses.
+  // Web is the one surface that may be either a phone browser or a workstation.
+  // `detectAppDeviceClass()` could tell them apart, but routing a phone browser
+  // to the mobile policy would not be an equivalent substitution — it also swaps
+  // the candidate window, the resident cap and the pacing, which are separate
+  // decisions made for a native shell — and hanging `deferWhileInteracting`
+  // alone off a device class would add a second, runtime-varying axis to a table
+  // that is otherwise static and readable side by side.
+  //
+  // It is not worth that: web defers either way, because the two mistakes are
+  // not symmetric. On a phone browser, not deferring reproduces exactly the
+  // stall this policy exists to prevent. On a workstation the cost is small and
+  // bounded BECAUSE web's scope is — 20 candidates, 20 resident, and persisted
+  // high-water marks mean steady state is nearly free, so only the cold warm-up
+  // can be delayed, and only until a second after the user pauses.
   deferWhileInteracting: true,
 };
 
@@ -417,10 +424,16 @@ export function createBackgroundSyncCoordinator(
   const canExitWarmup = (): boolean => started && !paused && !isInteracting() && warmingUp;
 
   /**
-   * Widen to the full candidate scope, but only after the warm-up set has
-   * fully drained and the app has THEN stayed idle for the hold. Never on a
-   * wall-clock schedule alone: if work is still queued, in flight, or the user
-   * is interacting, the warm-up holds.
+   * Widen to the full candidate scope, but only after the warm-up set has fully
+   * drained and the app has THEN stayed idle for the hold. Never on a wall-clock
+   * schedule alone.
+   *
+   * The re-check when the hold fires is not enough for that on its own: it only
+   * sees the instant of firing, so work that arrives and finishes inside the
+   * window would pass it. Anything that interrupts idle therefore CLEARS the
+   * hold as it happens — `enqueueForPrefetch` and the start of an interaction —
+   * and this re-arms a full one the next time the queue drains. The one-armed-
+   * timer guard below is why clearing, not extending, is the reset.
    */
   const armWarmupExit = () => {
     if (warmupExitHandle !== null || !canExitWarmup() || !isDrainIdle()) {
@@ -520,6 +533,20 @@ export function createBackgroundSyncCoordinator(
     return true;
   };
 
+  /**
+   * The single way work enters the queue. Enqueuing INTERRUPTS IDLE, so it drops
+   * any armed warm-up hold: that hold means "the app has been quiet since it
+   * drained", and it has not been. Dropping it rather than extending it is what
+   * keeps it from degrading into a wall-clock timer — the queue draining again
+   * re-arms a fresh, full hold from `drain()`.
+   */
+  const enqueueForPrefetch = (sessionId: SessionId, snap: SessionActivitySnapshot) => {
+    clearTrailing(sessionId);
+    queued.set(sessionId, snap);
+    clearWarmupExit();
+    scheduleDrain();
+  };
+
   const evaluate = (sessionId: SessionId) => {
     if (!started || paused) {
       return;
@@ -540,9 +567,7 @@ export function createBackgroundSyncCoordinator(
       scheduleTrailing(sessionId, policy.freshnessTtlMs);
       return;
     }
-    clearTrailing(sessionId);
-    queued.set(sessionId, snap);
-    scheduleDrain();
+    enqueueForPrefetch(sessionId, snap);
   };
 
   const dequeueHighestPriority = (): SessionActivitySnapshot | undefined => {
@@ -742,7 +767,15 @@ export function createBackgroundSyncCoordinator(
   };
 
   const onInteractionChange = () => {
-    if (!started || paused || isInteracting()) {
+    if (!started || paused) {
+      return;
+    }
+    if (isInteracting()) {
+      // The other way idle is interrupted. `canExitWarmup()` only sees the
+      // interaction if it is still going when the hold fires, so a gesture that
+      // starts and ends inside the window would otherwise leave the hold intact
+      // and count time under the user's finger as idle.
+      clearWarmupExit();
       return;
     }
     scheduleDrain();
@@ -804,9 +837,7 @@ export function createBackgroundSyncCoordinator(
         return;
       }
       const snap = latest.get(sessionId) ?? { sessionId };
-      clearTrailing(sessionId);
-      queued.set(sessionId, snap);
-      scheduleDrain();
+      enqueueForPrefetch(sessionId, snap);
     },
   };
 }

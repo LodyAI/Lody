@@ -396,10 +396,13 @@ export function getChatLandingInitialDataLoading({
   // finishes, which on a cold start with many sessions takes long enough that
   // gating on it alone disables the machine selector for the entire sync. It is
   // a guard against empty-state flashes, not a prerequisite for choosing a
-  // machine: a selectable machine already implies at least one reachable
-  // machine AND at least one agent config, so neither empty-state hint can
-  // fire. With one in hand the user may pick and start typing while the rest of
-  // the workspace is still streaming in.
+  // machine. A selectable machine already implies at least one reachable machine
+  // AND at least one agent config, which is what keeps every downstream consumer
+  // safe: neither `getChatLandingHintType` empty-state can fire, mobile
+  // onboarding additionally requires no machines and no chats, and the mobile
+  // machine picker cannot render empty — it is filled from the same reachable
+  // set, minus the agent-config requirement. With one machine in hand the user
+  // may pick and start typing while the rest of the workspace streams in.
   if (!isDocMetaCacheReady && !hasSelectableMachine) {
     return true;
   }
