@@ -8,6 +8,7 @@ export function faqPlainText(value) {
     .replace(/\s*<\/Callout>/gu, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/gu, '$1')
     .replace(/\*\*([^*]+)\*\*/gu, '$1')
+    .replace(/\*([^*]+)\*/gu, '$1')
     .replace(/`([^`]+)`/gu, '$1')
     .replace(/\r\n/gu, '\n')
     .replace(/[ \t]+\n/gu, '\n')

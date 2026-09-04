@@ -16,8 +16,8 @@ function readDoc(relativePath: string) {
 
 await test('faqPlainText strips emphasis and internal links', () => {
   assert.equal(
-    faqPlainText('See [Copy Conversations](/docs/copy-md) and the **existing** session.'),
-    'See Copy Conversations and the existing session.'
+    faqPlainText('See [Copy Conversations](/docs/copy-md) and a *new* **existing** session.'),
+    'See Copy Conversations and a new existing session.'
   );
 });
 
@@ -59,6 +59,7 @@ await test('session-handoff English FAQ matches the page and emits FAQPage JSON-
   assert.equal(items[0]?.question, 'Can I share a Claude Code session so a teammate continues it?');
   assert.match(items[0]?.answer ?? '', /Lody workspace/u);
   assert.match(items[1]?.answer ?? '', /viewable record/u);
+  assert.doesNotMatch(items[1]?.answer ?? '', /\*[^*]+\*/u);
   assert.match(items[4]?.answer ?? '', /Copy as Markdown/u);
 
   const jsonLd = faqJsonLd(items);
