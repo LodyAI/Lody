@@ -188,8 +188,24 @@ export function useSessionFileActions({
     return resolveSelectedPathLauncher(preference.selectedLauncherId, options);
   }, [isElectronRenderer, platform]);
 
+  // ONE decision for both halves, and `hasHostPath` is the real thing: an
+  // Electron renderer on the owning machine still cannot reach a shell until
+  // that machine's path metadata resolves. Deriving it from `localHost` was
+  // circular — it offered editor/reveal actions that could only fail while the
+  // rows loaded, and hid the download that would have worked.
+  const availability = useMemo(
+    () =>
+      resolveSessionFileActionAvailability({
+        isElectronRenderer,
+        isLocalMachine,
+        hasHostPath: workspacePath !== null,
+        hasFileProvider: Boolean(fileProvider),
+      }),
+    [fileProvider, isElectronRenderer, isLocalMachine, workspacePath]
+  );
+
   const localHost = useMemo<SessionFileLocalHostActionSet | null>(() => {
-    if (!session || !isElectronRenderer || !isLocalMachine) return null;
+    if (!session || !availability.localHost) return null;
 
     const withHostPath = (filePath: string, run: (path: string) => void) => {
       const path = resolveHostPath(filePath);
@@ -239,9 +255,8 @@ export function useSessionFileActions({
         : null,
     };
   }, [
+    availability.localHost,
     editorLauncher,
-    isElectronRenderer,
-    isLocalMachine,
     platform,
     reportOpenFailure,
     resolveHostPath,
@@ -250,14 +265,6 @@ export function useSessionFileActions({
   ]);
 
   const download = useMemo(() => {
-    const availability = resolveSessionFileActionAvailability({
-      isElectronRenderer,
-      isLocalMachine,
-      // Download does not need a resolved host path — it reads through the
-      // provider — so it must not be gated on one.
-      hasHostPath: localHost !== null,
-      hasFileProvider: Boolean(fileProvider),
-    });
     if (!session || !availability.download || !fileProvider) return null;
 
     // KNOWN CEILING: this reads through the preview API, which answers in ONE
@@ -311,7 +318,7 @@ export function useSessionFileActions({
         }
       })();
     };
-  }, [fileProvider, isElectronRenderer, isLocalMachine, localHost, session, t]);
+  }, [availability.download, fileProvider, session, t]);
 
   const buildErrorActions = useCallback(
     (filePath: string): SessionFileErrorActions | undefined => {
