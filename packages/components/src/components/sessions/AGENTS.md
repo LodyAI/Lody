@@ -299,6 +299,9 @@ Session conversation page chain:
   that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
   `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
   that prop silently marks every sub-session read the moment the parent opens.
+  A manual Mark as unread moves `lastReadAt` behind the latest message while a
+  surface may already be visible; that receipt gets no new opportunity until a
+  new message arrives or the user leaves and reopens the surface.
   "Copy as Markdown" renders through `@lody/shared`
   `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
   NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay

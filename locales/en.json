@@ -1240,6 +1240,7 @@
   "sessions.contextMenu.rename": "Rename",
   "sessions.contextMenu.unpin": "Unpin Session",
   "sessions.contextMenu.goToOpenerSession": "Go to Opener Session",
+  "sessions.contextMenu.markUnread": "Mark as unread",
   "sessions.openedBy.collapse": "Hide opened sessions",
   "sessions.openedBy.createdAutomaticallyBy": "This session was automatically created by",
   "sessions.openedBy.createdSession": "Session created",

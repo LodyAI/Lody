@@ -1240,6 +1240,7 @@
   "sessions.contextMenu.rename": "重命名",
   "sessions.contextMenu.unpin": "取消置顶",
   "sessions.contextMenu.goToOpenerSession": "跳转到发起会话",
+  "sessions.contextMenu.markUnread": "标记为未读",
   "sessions.openedBy.collapse": "收起打开的会话",
   "sessions.openedBy.createdAutomaticallyBy": "此对话由以下对话自动创建",
   "sessions.openedBy.createdSession": "已创建对话",

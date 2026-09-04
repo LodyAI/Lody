@@ -211,6 +211,9 @@ mobile surfaces.
   `ConversationDropOverlay` immediately, before `dragenter`. A row whose surface is a navigation `<a>` overlay must
   put `draggable` on the ROW and `draggable={false}` on that anchor, or the
   browser starts a link drag instead.
+  EVERY desktop row also exposes Mark as unread from that shared ⋯ menu —
+  Workspace, Local Project, Updated, and Pinned renderers must all wire it;
+  hide the action once the row is unread.
   `SessionMeta.openedBySessionId` (a Session created BY another, e.g. the
   `lody_session_create` MCP tool) indents that row under its opener via
   `lib/session-opened-by-tree.ts`. EVERY session list uses it — `session-list.tsx`

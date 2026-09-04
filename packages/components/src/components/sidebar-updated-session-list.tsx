@@ -15,6 +15,7 @@ import {
   Link2,
   Loader2,
   LockKeyhole,
+  Mail,
   Pencil,
   Pin,
   PinOff,
@@ -161,6 +162,7 @@ export type SidebarUpdatedContextMenuLabels = {
   pin: string;
   unpin: string;
   archive: string;
+  markUnread: string;
   copyUrl: string;
   shareWithTeam: string;
   onlyOwnerCanShare: string;
@@ -310,6 +312,8 @@ export type SidebarUpdatedSessionListProps = {
    * mobile rows expose the same action via left-swipe + tap-to-confirm.
    */
   onArchiveItem?: (id: string) => void;
+  /** Mark a read desktop item unread. */
+  onMarkItemUnread?: (id: string) => void;
   /** Rename an item through the shared Rename Chat dialog. */
   onRenameItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /**
@@ -370,6 +374,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   labels,
   onSelectItem,
   onArchiveItem,
+  onMarkItemUnread,
   onRenameItem,
   onTogglePinItem,
   onCopyItemUrl,
@@ -412,6 +417,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
       onlyOwnerCanShare: t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share'),
@@ -561,6 +567,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           href={getItemHref?.(node.item.id)}
                           onSelect={onSelectItem}
                           onArchive={onArchiveItem}
+                          onMarkUnread={onMarkItemUnread}
                           onRename={onRenameItem}
                           onTogglePin={onTogglePinItem}
                           onCopyUrl={onCopyItemUrl}
@@ -622,6 +629,7 @@ type UpdatedItemRowProps = {
   href?: string;
   onSelect?: (id: string, tabSessionId?: string) => void;
   onArchive?: (id: string) => void;
+  onMarkUnread?: (id: string) => void;
   onRename?: (id: string, nextTitle: string) => void | Promise<void>;
   onTogglePin?: (id: string, nextPinned: boolean) => void;
   onCopyUrl?: (id: string) => void;
@@ -644,6 +652,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   href,
   onSelect,
   onArchive,
+  onMarkUnread,
   onRename,
   onTogglePin,
   onCopyUrl,
@@ -709,6 +718,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     : undefined;
 
   const canArchive = typeof onArchive === 'function';
+  const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
   const canRename = typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
@@ -743,6 +753,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     (canRename ||
       canTogglePin ||
       canArchive ||
+      canMarkUnread ||
       canCopyUrl ||
       Boolean(shareMenuState) ||
       Boolean(branchName) ||
@@ -976,7 +987,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.openPr}
           </ContextMenuItem>
         ) : null}
-        {handlePrOpen && (canRename || canTogglePin || canArchive || canCopyUrl || branchName) ? (
+        {handlePrOpen &&
+        (canRename || canTogglePin || canArchive || canMarkUnread || canCopyUrl || branchName) ? (
           <ContextMenuSeparator />
         ) : null}
         {canRename ? (
@@ -999,6 +1011,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenuItem>
         ) : null}
+        {canMarkUnread ? (
+          <ContextMenuItem
+            onSelect={() => {
+              onMarkUnread?.(item.id);
+            }}
+          >
+            <Mail />
+            {contextMenuLabels.markUnread}
+          </ContextMenuItem>
+        ) : null}
         {canArchive ? (
           <ContextMenuItem
             onSelect={() => {
@@ -1009,7 +1031,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.archive}
           </ContextMenuItem>
         ) : null}
-        {(canRename || canTogglePin || canArchive) && (canCopyUrl || branchName) ? (
+        {(canRename || canTogglePin || canArchive || canMarkUnread) &&
+        (canCopyUrl || branchName) ? (
           <ContextMenuSeparator />
         ) : null}
         {canCopyUrl ? (
