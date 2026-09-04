@@ -91,7 +91,10 @@
   compatibility routes and should stay `noindex,follow`. Unmatched URLs must not
   SPA-fallback to the homepage: prerender `/404` to `out/client/404.html`
   (Cloudflare Pages serves that file with HTTP 404). The 404 document is
-  `noindex,follow` and must not canonicalize to `/`.
+  `noindex,follow` and must not canonicalize to `/`. Do not add a Vite
+  `configurePreviewServer` 404 interceptor — TanStack prerender uses that
+  preview server to fetch pages that do not exist on disk yet. Use
+  `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, Tailwind, React, and preview-only aliases there. The deployable static
   build output is `site-docs/out/client`; do not publish the SSR server bundle.

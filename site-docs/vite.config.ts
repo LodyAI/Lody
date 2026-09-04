@@ -2,7 +2,6 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import mdx from 'fumadocs-mdx/vite';
-import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeRequest, sendNodeResponse } from 'srvx/node';
@@ -100,69 +99,6 @@ function installStartDevServerMiddleware(): Plugin {
           })().catch(next);
         });
       };
-    },
-  };
-}
-
-/**
- * Cloudflare Pages serves `404.html` with HTTP 404 for unmatched paths.
- * Vite preview defaults to SPA fallback (`index.html` + 200), which is the
- * production soft-404. Resolve pretty URLs the same way the static host does,
- * then serve the prerendered 404 document.
- */
-function previewHasStaticFile(clientOut: string, pathname: string): boolean {
-  let decoded = pathname;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    // Keep the raw path when it is not valid percent-encoding.
-  }
-  if (decoded.includes('\0') || decoded.includes('..')) return false;
-
-  const root = path.resolve(clientOut);
-  const relative = decoded.replace(/^\/+/u, '');
-  const candidates =
-    relative === ''
-      ? [path.join(root, 'index.html')]
-      : [
-          path.join(root, relative),
-          path.join(root, relative, 'index.html'),
-          path.join(root, `${relative.replace(/\/$/u, '')}.html`),
-        ];
-
-  return candidates.some((candidate) => {
-    const resolved = path.resolve(candidate);
-    if (!resolved.startsWith(root + path.sep) && resolved !== root) return false;
-    try {
-      return statSync(resolved).isFile();
-    } catch {
-      return false;
-    }
-  });
-}
-
-function previewNotFoundPage(): Plugin {
-  const clientOut = path.resolve(dirname, 'out/client');
-  return {
-    name: 'site-docs-preview-404',
-    configurePreviewServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const pathname = (req.url ?? '/').split('?')[0] ?? '/';
-        if (previewHasStaticFile(clientOut, pathname)) {
-          next();
-          return;
-        }
-
-        const notFoundFile = path.join(clientOut, '404.html');
-        if (!existsSync(notFoundFile)) {
-          next();
-          return;
-        }
-
-        res.statusCode = 404;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(readFileSync(notFoundFile));
-      });
     },
   };
 }
@@ -277,7 +213,6 @@ export default defineConfig({
             : { enabled: true },
       })),
     }),
-    previewNotFoundPage(),
     installStartDevServerMiddleware(),
     mdx(),
     tailwindcss(),
