@@ -54,8 +54,11 @@ export function resolveStaticFile(root, pathname) {
           path.join(root, `${relative.replace(/\/$/u, '')}.html`),
         ];
 
+  const notFoundFile = path.resolve(root, '404.html');
   for (const candidate of candidates) {
     const file = existingFile(root, candidate);
+    // Root 404.html is the error document, not a pretty-URL success.
+    if (file && path.resolve(file) === notFoundFile) continue;
     if (file) return file;
   }
 

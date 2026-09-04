@@ -29,6 +29,8 @@ await test('resolveStaticFile maps pretty URLs and file URLs', () => {
   assert.equal(resolveStaticFile(root, '/price'), path.join(root, 'price.html'));
   assert.equal(resolveStaticFile(root, '/missing'), undefined);
   assert.equal(resolveStaticFile(root, '/docs/nope'), undefined);
+  assert.equal(resolveStaticFile(root, '/404'), undefined);
+  assert.equal(resolveStaticFile(root, '/404.html'), undefined);
 });
 
 await test('resolveStaticFile rejects path escape', () => {
