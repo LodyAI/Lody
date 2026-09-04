@@ -380,6 +380,45 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(await waitForElement('[data-streamdown="mermaid-block"]')).not.toBeNull();
   });
 
+  it('renders Codex-style parenthesis and bracket LaTeX delimiters', async () => {
+    await renderMarkdown(
+      [
+        'Let \\(t_i\\) denote the token allocation.',
+        '',
+        '\\[',
+        '\\boxed{DV(t^*)[a]}',
+        '=',
+        '\\int \\xi_i a_i\\,di',
+        '\\]',
+        '',
+        'where \\(\\xi_i = \\underbrace{V_z / \\Lambda}_{\\text{social value}} r_{i,t}\\).',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(3);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+  });
+
+  it('keeps Codex-style LaTeX delimiters literal inside Markdown code', async () => {
+    await renderMarkdown(
+      [
+        '`\\(inline_code\\)`',
+        '',
+        '```tex',
+        '\\[',
+        'fenced_code',
+        '\\]',
+        '```',
+        '',
+        'Outside \\(x_i\\) renders.',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelector('code')?.textContent).toBe('\\(inline_code\\)');
+    expect(container?.textContent).toContain('\\[fenced_code\\]');
+  });
+
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {
     await renderMarkdown(
       [

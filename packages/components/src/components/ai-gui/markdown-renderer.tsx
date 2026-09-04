@@ -41,7 +41,10 @@ import {
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
-import { remarkSingleDollarTextMath } from '@/lib/markdown-single-dollar-math';
+import {
+  normalizeTexMathDelimiters,
+  remarkSingleDollarTextMath,
+} from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import {
@@ -1113,6 +1116,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
   const [diagramSelection, setDiagramSelection] = useState<MermaidDiagramSelection | null>(null);
   const hasMermaidBlock = useMemo(() => MERMAID_FENCE_PATTERN.test(text), [text]);
+  const normalizedText = useMemo(() => normalizeTexMathDelimiters(text), [text]);
 
   const closeDiagram = useCallback(() => setDiagramSelection(null), []);
 
@@ -1380,7 +1384,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           translations={streamdownTranslations}
           urlTransform={markdownUrlTransform}
         >
-          {text}
+          {normalizedText}
         </Streamdown>
       </div>
       {/* A sibling of the markdown, not a child: a portal's events bubble
