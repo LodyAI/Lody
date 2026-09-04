@@ -59,6 +59,7 @@ jobs:
           SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}
         run: |
           set -o pipefail
+          mkdir -p e2e/artifacts
           pnpm --filter @lody/e2e "$SUITE" 2>&1 | tee e2e/artifacts/cucumber-output.log
 
       - name: Upload desktop E2E evidence

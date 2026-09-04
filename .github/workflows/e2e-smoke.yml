@@ -108,6 +108,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p e2e/artifacts
           pnpm --filter @lody/e2e ${{ needs.gate.outputs.suite }} 2>&1 | tee e2e/artifacts/cucumber-output.log
 
       - name: Upload desktop E2E evidence
