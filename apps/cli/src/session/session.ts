@@ -253,7 +253,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    * successful one keeps it, because `terminated` is a terminal state.
    */
   async terminate(force: boolean = false): Promise<void> {
-    if (force && !this.forceTerminationRequested) {
+    const shouldEscalate = force && !this.forceTerminationRequested;
+    if (shouldEscalate) {
       this.forceTerminationRequested = true;
       for (const resolve of this.forceTerminationWaiters) resolve();
       this.forceTerminationWaiters.clear();
@@ -261,7 +262,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const inFlight = this.terminationPromise;
     if (inFlight) {
       this.logger.debug(`[${this.sessionId}] Terminate already in progress; awaiting it`);
-      if (force) {
+      if (shouldEscalate) {
         await this.forceTerminateResources();
       }
       return await inFlight;

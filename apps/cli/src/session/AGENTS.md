@@ -162,7 +162,8 @@ delegation proofs or a shared-machine gate without a new product and security de
   Turn-scoped finalizers pass `turnId` and `TurnRef`; no-turn-id teardown captures the
   current ref before awaiting. Lifecycle listeners never finalize an owned turn and only
   the registered Session instance may perform session-wide cleanup. `Session.terminate`
-  is idempotent, and a concurrent forced request escalates graceful teardown.
+  is idempotent: only the first forced request escalates a graceful run, and concurrent
+  forced callers share one resource teardown.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
