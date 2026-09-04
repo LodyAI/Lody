@@ -27,9 +27,10 @@ Claude Code 和 Codex、Kimi、DeepSeek，或任意 [ACP](/zh/docs/cli-runtimes)
 不同会话里的 Agent 不共用工作目录，未提交的改动只属于做出它们的那条任务。按会话审阅、丢弃或开 PR
 即可。
 
-<Callout title="Fork 不是第二棵 Worktree">
-[Fork](/zh/docs/session#fork-会话) 会把对话历史复制到**新的**会话，但仍占用**同一台**机器和同一个目录。
-要隔离，从主页新开一条会话。只想在同一批文件上另开一条对话线时，再用 Fork 或 Side Chat。
+<Callout title="Fork 的两个目标">
+[Fork](/zh/docs/session#fork-会话) 会把对话历史复制到**新的**会话。**当前工作区**（以及侧边对话）
+仍占用源会话的目录。出现 **新 Worktree** 时，那条 Fork 会从最新已提交的 `HEAD` 开一条独立会话——
+要隔离又不想丢掉对话历史时用它。要全新隔离任务、不复制历史时，从主页新开一条会话。
 </Callout>
 
 详见[工作树](/zh/docs/worktrees)。
@@ -83,8 +84,9 @@ Kimi、DeepSeek、Codex 或其他 ACP Agent 混在一起跑。
 
 ### 并行的 Agent 会不会互相覆盖文件？
 
-每条任务各自占用带 [Worktree](/zh/docs/worktrees) 的会话时，不会。Fork 和 Side Chat 共用源会话的目录，
-因此能看见彼此的文件改动。
+每条任务各自占用带 [Worktree](/zh/docs/worktrees) 的会话时不会——包括 **新 Worktree** Fork，或从主页
+新开的会话。**当前工作区** Fork 和侧边对话共用源会话的目录，因此能看见彼此的文件改动。新 Worktree
+Fork 从已提交的 `HEAD` 起步；未提交的改动仍留在源会话。
 
 ### 同事看得到所有正在跑的 Agent 吗？
 

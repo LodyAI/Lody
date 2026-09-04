@@ -77,7 +77,7 @@ Lody 里的 **编程 Agent 会话交接**，指的是同事打开你已经在跑
 - 在同一个 [Worktree](/zh/docs/worktrees) 和分支上继续改
 - 发送下一条提示词，steer 同一个 [Agent Config](/zh/docs/agents)
 
-Fork 会话是另一件事：它会把历史复制到**新的**会话里，并共用原来的机器和工作目录。需要自己另开一条对话线时用 Fork；要把同事请进原来的会话，不要用 Fork。见 [Fork 会话](/zh/docs/session#fork-会话)。
+Fork 会话是另一件事：它会把历史复制到**新的**会话里。**当前工作区**仍共用原来的文件；出现 **新 Worktree** 时，会从已提交的 `HEAD` 隔离出去。需要自己另开一条对话线时用 Fork；要把同事请进原来的会话，不要用 Fork。见 [Fork 会话](/zh/docs/session#fork-会话)。
 
 要以团队方式并行跑多条隔离会话，见[并行 Coding Agents](/zh/docs/parallel-agents)。
 如果要让一个 Agent 去协调多段对话，见 [Agent 对话控制](/zh/docs/session-orchestration)。

@@ -29,10 +29,12 @@ When you create a session that uses a worktree, Lody:
 Agents in different sessions do not share a working directory, so uncommitted edits stay with the
 task that made them. Review, discard, or open a PR per session.
 
-<Callout title="Fork is not a second worktree">
-[Fork](/docs/session#fork-a-session) copies conversation history into a **new** session on the
-**same** machine and directory. Start a new home-page session when you want isolation. Use fork or
-Side Chat when you want another thread on the same files.
+<Callout title="Fork destinations">
+[Fork](/docs/session#fork-a-session) copies conversation history into a **new** session. **Current
+workspace** (and Side Chat) stay on the source directory. When **New worktree** is offered, that
+fork is an independent session from the latest committed `HEAD` — use it when you want isolation
+without abandoning the conversation. Start a new home-page session when you want a fresh isolated
+task with no copied history.
 </Callout>
 
 Details: [Worktrees](/docs/worktrees).
@@ -93,8 +95,10 @@ Code with Kimi, DeepSeek, Codex, or other ACP agents.
 
 ### Do parallel agents overwrite each other's files?
 
-Not when each task is its own session with a [worktree](/docs/worktrees). Forks and Side Chats share
-the source session's directory, so they can see each other's file changes.
+Not when each task has its own [worktree](/docs/worktrees) — including a **New worktree** fork or a
+new home-page session. **Current workspace** forks and Side Chats share the source session's
+directory, so they can see each other's file changes. A New worktree fork starts from committed
+`HEAD`; uncommitted edits stay on the source.
 
 ### Can teammates see every running agent?
 

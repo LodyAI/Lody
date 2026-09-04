@@ -25,12 +25,18 @@ When your Agent supports native session forking, the latest completed Agent repl
 session** button below the reply. Forking creates a new session with the conversation history up to
 that reply, then lets you continue in a separate direction without changing the original session.
 
-Codex and Claude Code can also fork from an earlier completed Agent reply. Forked sessions share the
-same machine and working directory as the source session, so file changes made in one are visible to
-the others; only the conversation history and subsequent turns are independent.
+Codex and Claude Code can also fork from an earlier completed Agent reply.
 
-Fork is available only when the active Agent reports native support for it. It is not a separate Git
-branch or worktree.
+On a Git-backed session that advertises worktree forking, **Fork session** offers two destinations:
+
+- **Current workspace** — a new tab that shares files and uncommitted changes with the source
+- **New worktree** — a new independent session from the latest committed `HEAD`; uncommitted and
+  untracked files stay on the source
+
+If **New worktree** is not offered, fork stays on the current workspace. Side Chat always uses the
+shared-directory path.
+
+Fork is available only when the active Agent reports native support for it.
 
 ## Right Sidebar: Browser and Side Chat
 
