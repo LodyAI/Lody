@@ -135,7 +135,7 @@ function isPreviewApproval(value: unknown): boolean {
   if (!isObjectRecord(value)) return false;
   return (
     (value.source === 'browser_address' || value.source === 'share_action') &&
-    (value.targetClass === 'loopback' || value.targetClass === 'private_lan') &&
+    value.targetClass === 'loopback' &&
     isPreviewTarget(value.target) &&
     typeof value.confirmedByUserId === 'string' &&
     typeof value.confirmedAt === 'number' &&

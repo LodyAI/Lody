@@ -94,6 +94,15 @@ Root `AGENTS.md` also applies.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the
   listener after settlement, and treats only the final response as completion.
+- The public browser (`services/public-browser-service.ts`) has NO network guard:
+  no resolver check, no per-request hostname policy — only engine routing, so a
+  loopback address is refused here and sent to Managed Preview. The view is a
+  sandboxed `WebContentsView` with no preload, script injection, page capture,
+  or agent-facing tool; the only reader of what it renders is the person looking
+  at it, so it is strictly less capable than the user's own Chrome and a guard
+  protects nothing. The one it used to have blocked every fake-IP proxy user.
+  Adding any non-human reader to this view — agent DOM access, screenshots, a
+  preload bridge — must bring a guard back, on that agent-driven path.
 - Image preview export (`services/image-export-service.ts`) keeps the native
   menu, clipboard, and save dialog here because the renderer holds the only copy
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the

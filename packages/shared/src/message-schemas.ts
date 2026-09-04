@@ -1878,7 +1878,7 @@ export const SessionPreviewCreateRequestSchema = z
     approval: z
       .object({
         source: z.enum(['browser_address', 'share_action']),
-        targetClass: z.enum(['loopback', 'private_lan']),
+        targetClass: z.literal('loopback'),
         target: PreviewTargetSchema,
         confirmedByUserId: z.string().trim().min(1),
         confirmedAt: z.number().int().nonnegative(),

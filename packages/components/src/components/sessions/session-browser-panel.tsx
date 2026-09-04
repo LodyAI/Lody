@@ -83,7 +83,7 @@ const approvalFor = (
   source: PreviewTargetApproval['source']
 ): PreviewTargetApproval => ({
   source,
-  targetClass: address.targetClass === 'private-lan' ? 'private_lan' : 'loopback',
+  targetClass: 'loopback',
   target: address.target,
   confirmedByUserId: userId,
   confirmedAt: getServerNow(),

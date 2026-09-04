@@ -254,20 +254,31 @@ Session conversation page chain:
   self-contained/no-network rule as a hard browser guarantee. The rendered frame exists only while
   its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
   session targets always returns HTML to code mode before the new file can execute.
-- Session Browser has strict dual engines. Public HTTP(S) uses only a declared public-browser
-  capability (Electron `WebContentsView` today); loopback/private targets use Managed Preview and
-  are the only pages eligible for Visual Annotation. Never fall back from a missing public engine
-  to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
-  The public engine resolves every hostname and rejects non-public answers (DNS rebinding), with
-  one deliberate exception: a public name resolving into RFC 2544 `198.18.0.0/15` is a fake-IP
-  proxy's synthetic answer (Clash, Surge, sing-box, Shadowrocket) and is allowed via
-  `classifyResolvedBrowserAddress`; a literal `198.18.x.x` address stays prohibited.
+- Session Browser has strict dual engines, split on exactly one question: is the address the
+  agent machine's own LOOPBACK? Only that uses Managed Preview, where the machine opens one
+  approved port on itself; those are the only pages eligible for Visual Annotation. Everything
+  else — public sites AND private LAN / `.local` / `host.docker.internal` — uses the declared
+  public-browser capability (Electron `WebContentsView` today), which is the user's own browser
+  on the user's own machine reaching the user's own network. Never fall back from a missing
+  public engine to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
+  INVARIANT — a managed preview is never a pivot: routing a LAN address through the machine
+  would let whoever holds the tunnel reach hosts behind that machine that they could never reach
+  themselves, and the approver sits on the OTHER side of the tunnel, so approval cannot make it
+  safe. `parseBrowserAddress` never routes LAN there and `PreviewTargetApproval.targetClass` is
+  the literal `'loopback'`, but the CLI's `normalizeTarget` is the authoritative rejection.
+  The public engine has NO network guard — no resolver check, no per-request hostname policy.
+  It is a sandboxed view with no preload, script injection, page capture, or agent tool, so
+  the only reader of what it renders is the person looking at it, and it is strictly less
+  capable than the user's own Chrome. The DNS guard it once had broke every fake-IP proxy user
+  (Clash, Surge, sing-box, Shadowrocket — all their answers land in `198.18.0.0/15`) while
+  protecting nothing. If the view ever gains a non-human reader, a guard must return, attached
+  to that agent-driven path, not to human navigation.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
   immediately, with no confirmation dialog, because the CLI only accepts LOOPBACK targets from an
-  agent report. Keep the auto-approval keyed on the parsed address being loopback — a private-LAN
-  target, a typed address, and Share all still go through the confirmation flow.
+  agent report. A typed loopback address and Share still go through the confirmation flow. The
+  approver is the session initiator, the same person the CLI already requires.
   Consume the request after handling it so a later panel remount cannot replay stale user intent —
   but NOT while the candidate is still in flight. Session meta carries only the candidate status;
   its target lives in the session doc `preview` state, and the two planes sync independently, so a

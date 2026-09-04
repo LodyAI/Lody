@@ -1,12 +1,11 @@
-import { WebContentsView, type BrowserWindow, type Rectangle, type Session } from 'electron'
-import nodeNet from 'node:net'
+import { WebContentsView, type BrowserWindow, type Rectangle } from 'electron'
 import {
   ELECTRON_PUBLIC_BROWSER_STATE_CHANNEL,
   type ElectronPublicBrowserBounds,
   type ElectronPublicBrowserResult,
   type ElectronPublicBrowserState
 } from '@lody/shared/electron-ipc'
-import { classifyResolvedBrowserAddress, parseBrowserAddress } from '@lody/shared/browser-url'
+import { parseBrowserAddress } from '@lody/shared/browser-url'
 import { formatUnknownError } from '../utils'
 import { isNavigationAbortError, mergePublicBrowserState } from './public-browser-state'
 
@@ -40,49 +39,25 @@ const toState = (
     patch
   )
 
-const resolvePublicHostname = async (browserSession: Session, hostname: string): Promise<void> => {
-  if (nodeNet.isIP(hostname.replace(/^\[|\]$/g, '')) !== 0) return
-
-  const results = await Promise.allSettled([
-    browserSession.resolveHost(hostname, { queryType: 'A', cacheUsage: 'allowed' }),
-    browserSession.resolveHost(hostname, { queryType: 'AAAA', cacheUsage: 'allowed' })
-  ])
-  const endpoints = results.flatMap((result) =>
-    result.status === 'fulfilled' ? result.value.endpoints : []
-  )
-  if (endpoints.length === 0) {
-    throw new Error(`Unable to resolve public browser host: ${hostname}`)
-  }
-  const blocked = endpoints.find(
-    (endpoint) => classifyResolvedBrowserAddress(endpoint.address) !== 'public'
-  )
-  if (blocked) {
-    throw new Error(`Public browser blocked a non-public destination: ${blocked.address}`)
-  }
-}
-
-const assertPublicUrl = async (browserSession: Session, rawUrl: string): Promise<string> => {
+/**
+ * The only check on a public-browser navigation is engine routing: the address must parse as
+ * public-web, so loopback goes to Managed Preview instead of being shown from this machine.
+ *
+ * There is deliberately NO network guard here — no resolver check, no per-request hostname
+ * policy. This view is a plain sandboxed `WebContentsView` with no preload, no script
+ * injection, no page capture, and no agent-facing tool; the only thing that reads what it
+ * renders is the person looking at it. It is therefore strictly less capable than the user's
+ * own Chrome, which happily reaches the same LAN, and a DNS guard bought nothing except a
+ * broken browser for everyone behind a fake-IP proxy. If this view ever gains a non-human
+ * reader — agent DOM access, screenshots, a preload bridge — that guard must come back,
+ * attached to the agent-driven path rather than to human navigation.
+ */
+const assertPublicUrl = (rawUrl: string): string => {
   const parsed = parseBrowserAddress(rawUrl)
   if (parsed.engine !== 'public-web') {
     throw new Error('Public browser only accepts public HTTP(S) destinations.')
   }
-  const url = new URL(parsed.logicalUrl)
-  await resolvePublicHostname(browserSession, url.hostname)
   return parsed.logicalUrl
-}
-
-const assertPublicRequestUrl = async (browserSession: Session, rawUrl: string): Promise<void> => {
-  const url = new URL(rawUrl)
-  if (url.protocol === 'http:' || url.protocol === 'https:') {
-    await assertPublicUrl(browserSession, rawUrl)
-    return
-  }
-  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
-    throw new Error(`Public browser blocked unsupported request scheme: ${url.protocol}`)
-  }
-  const policyUrl = new URL(url.toString())
-  policyUrl.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-  await assertPublicUrl(browserSession, policyUrl.toString())
 }
 
 const normalizeBounds = (window: BrowserWindow, bounds: ElectronPublicBrowserBounds): Rectangle => {
@@ -188,7 +163,7 @@ export class PublicBrowserService {
     const navigationSequence = ++record.navigationSequence
     try {
       record.lastUsedAt = performance.now()
-      const url = await assertPublicUrl(record.view.webContents.session, rawUrl)
+      const url = assertPublicUrl(rawUrl)
       if (record.navigationSequence !== navigationSequence) {
         return { ok: true, state: record.state }
       }
@@ -289,22 +264,6 @@ export class PublicBrowserService {
       callback(false)
     })
     browserSession.on('will-download', (event) => event.preventDefault())
-    browserSession.webRequest.onBeforeRequest(
-      { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
-      (details, callback) => {
-        void assertPublicRequestUrl(browserSession, details.url).then(
-          () => callback({ cancel: false }),
-          (error: unknown) => {
-            this.publish(record, {
-              phase: 'error',
-              error: formatUnknownError(error),
-              blockedUrl: details.url
-            })
-            callback({ cancel: true })
-          }
-        )
-      }
-    )
   }
 
   private configureWebContents(record: PublicBrowserRecord): void {
