@@ -475,7 +475,8 @@ export function MobileChatListCard({
      pinned-first / latest-activity order the bucket already promises — it
      truncates that order rather than reshuffling it. */
   const showAll = preview?.showAll ?? false;
-  const capped = preview != null && !showAll;
+  const previewEnabled = preview != null;
+  const capped = previewEnabled && !showAll;
   const treeNodes = useMemo(
     () =>
       buildOpenedBySessionTree(chats, {
@@ -491,14 +492,20 @@ export function MobileChatListCard({
   );
   /* Gate the toggle on TOP-LEVEL rows, matching what the cap actually limits:
      five openers plus the Sessions they opened is not an overflowing bucket,
-     so it must not sprout a "Show all" the tap would not change. */
-  const overflowsPreview = useMemo(
-    () =>
-      preview != null &&
-      countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS) >
-        MOBILE_CHAT_PREVIEW_MAX_ROOTS,
-    [chats, preview]
-  );
+     so it must not sprout a "Show all" the tap would not change.
+
+     Deliberately NOT wrapped in `useMemo`. `MobileChatList` calls `groupChats`
+     in its render body, so every bucket receives a freshly built `chats` array
+     on every render — measured: a state-only re-render (tapping one bucket's
+     toggle) hands all buckets a new array. A memo keyed on `chats` therefore
+     cannot ever hit, and one that looks like a cache while caching nothing is
+     worse than the O(rows) scan it fails to avoid. `previewEnabled` exists for
+     the same reason: `preview` is a new object literal each render, so only the
+     one bit of it that matters may be read. */
+  const overflowsPreview =
+    previewEnabled &&
+    countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS) >
+      MOBILE_CHAT_PREVIEW_MAX_ROOTS;
   return (
     /* Flat list — no rounded card shell or inter-row dividers. Rows
        sit directly on the page canvas; `ConversationRow` supplies its
