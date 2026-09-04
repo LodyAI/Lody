@@ -316,6 +316,62 @@ pre,
     display: block;
   }
 
+  /* A `diff` fence is often an explanatory, headerless snippet rather than a
+     parseable patch. Its custom Streamdown renderer marks rows directly so the
+     semantic add/remove treatment works for both forms and while streaming. */
+  .markdown-renderer [data-markdown-diff-block='true'] {
+    --markdown-diff-addition-bg: color-mix(
+      in oklab,
+      hsl(var(--code-added)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-deletion-bg: color-mix(
+      in oklab,
+      hsl(var(--code-removed)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-hunk-bg: color-mix(
+      in oklab,
+      hsl(var(--modified-file)) 9%,
+      var(--markdown-code-block-bg)
+    );
+  }
+
+  .markdown-renderer [data-markdown-diff-block='true'] [data-streamdown='code-block-body'] {
+    padding-inline: 0 !important;
+  }
+
+  .markdown-renderer [data-markdown-diff-block='true'] pre {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .markdown-renderer [data-markdown-diff-line] {
+    min-height: 1.4em;
+    padding-inline: 1rem;
+  }
+
+  .markdown-renderer [data-markdown-diff-line='addition'] {
+    background: var(--markdown-diff-addition-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-added));
+    color: hsl(var(--code-added));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='deletion'] {
+    background: var(--markdown-diff-deletion-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-removed));
+    color: hsl(var(--code-removed));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='hunk'] {
+    background: var(--markdown-diff-hunk-bg);
+    color: hsl(var(--modified-file));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='metadata'] {
+    color: var(--markdown-code-block-language);
+  }
+
   @media (hover: none) {
     .markdown-renderer [data-streamdown='code-block-actions'] {
       opacity: 1;

@@ -122,6 +122,50 @@ export const CodeBlocks: Story = {
   render: (args) => wrap(<MarkdownRenderer {...args} />),
 };
 
+export const DiffCodeBlocks: Story = {
+  name: 'Diff Code Blocks',
+  args: {
+    size: 'default',
+    text: [
+      'Headerless explanatory diffs are the common chat form:',
+      '',
+      '```diff',
+      ' resolveSessionMentionProjectSource(session)',
+      '-  if codeCollabProvider or providerPending',
+      '-    return provider                    # won even on this machine',
+      '+  if no localFileSource',
+      '+    and (codeCollabProvider or providerPending)',
+      '+    return provider                    # remote machine only',
+      '   if localFileSource is session-worktree  -> local + worktree',
+      '   if localFileSource is local-project     -> local',
+      '   if repoFullName                         -> github',
+      '```',
+      '',
+      'Full unified patches keep their metadata and hunk rows distinct:',
+      '',
+      '```diff',
+      'diff --git a/list-files.ts b/list-files.ts',
+      'index 4f5f1c2..8a629bb 100644',
+      '--- a/list-files.ts',
+      '+++ b/list-files.ts',
+      '@@ -1,2 +1,1 @@',
+      '-git ls-files -z',
+      '-git ls-files --others --exclude-standard -z',
+      '+git ls-files -z --cached --others --exclude-standard',
+      '```',
+    ].join('\n'),
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Diff fences use a lightweight row renderer that supports explanatory snippets, full unified patches, and incomplete streaming fences without requiring patch parsing.',
+      },
+    },
+  },
+  render: (args) => wrap(<MarkdownRenderer {...args} />),
+};
+
 export const CodeBlockPaddingSymmetry: Story = {
   name: 'Code Block Layout',
   args: {

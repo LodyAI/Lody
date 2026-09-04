@@ -51,6 +51,7 @@ import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { useTaskImageUrl } from '@/hooks/use-task-image';
+import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
@@ -650,7 +651,6 @@ const MARKDOWN_CODE_LANGUAGES = [
   'bash',
   'shellscript',
   'markdown',
-  'diff',
   'python',
   'rust',
   'go',
@@ -848,6 +848,12 @@ const STREAMDOWN_PLUGINS = {
   code: MARKDOWN_CODE_PLUGIN,
   math: MARKDOWN_MATH_PLUGIN,
   mermaid: MARKDOWN_MERMAID_PLUGIN,
+  renderers: [
+    {
+      language: 'diff',
+      component: MarkdownDiffBlock,
+    },
+  ],
 } satisfies PluginConfig;
 
 const STREAMDOWN_CONTROLS = {

@@ -319,6 +319,45 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(copyButton.getAttribute('aria-label')).toBe('Copy code');
   });
 
+  it('renders headerless diff fences with semantic line rows and existing code controls', async () => {
+    await renderMarkdown(
+      [
+        '```diff',
+        ' resolveSource(session)',
+        '-  return staleProvider',
+        '+  return localFiles',
+        '@@ -8,1 +8,1 @@',
+        '--- a/source.ts',
+        '+++ b/source.ts',
+        '```',
+      ].join('\n')
+    );
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-language')).toBe('diff');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="context"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="hunk"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="metadata"]')).toHaveLength(2);
+    expect(
+      diffBlock
+        .querySelector('[data-streamdown="code-block-copy-button"]')
+        ?.getAttribute('aria-label')
+    ).toBe('Copy code');
+  });
+
+  it('keeps an incomplete streaming diff fence in the semantic renderer', async () => {
+    await renderMarkdown(['```diff', '-old source', '+new source'].join('\n'), {
+      isStreaming: true,
+    });
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-incomplete')).toBe('true');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
+  });
+
   it('renders sanitized raw HTML when allowHtml is enabled', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.', { allowHtml: true });
 
