@@ -33,8 +33,9 @@
 Invariants of the view, writer, and control-plane Mirror live in
 `lib/conversation-view/AGENTS.md`. Renderer-side:
 
-- `SessionChatStream` takes `view`, never `sessionDoc.history`; no component
-  may hold the materialized array (`tests/no-materialized-history-in-components.test.ts`).
+- `SessionChatStream` takes `view`, never `sessionDoc.history`. The one read
+  path and one write path for turns, and the guard that enforces them, are in
+  [components/src/AGENTS.md](../../AGENTS.md).
 - `buildChatStreamItems(view, …)` yields one item per turn: a parsed message
   when hydrated, else a `placeholder` carrying the index row. Both carry
   `turnIndex`; rows, outline entries, and `scrollToIndex` use absolute turn
