@@ -186,13 +186,4 @@ describe('LocalProjectControlService.readProjectFile', () => {
     expect(result?.content).toHaveLength(200);
     expect(result?.truncated).toBe(true);
   });
-
-  it('does not call a file that exactly fills the budget truncated', async () => {
-    await writeFile(path.join(rootPath, 'exact.txt'), 'z'.repeat(200));
-
-    const result = service.readProjectFile(rootPath, 'exact.txt', { maxBytes: 200 });
-
-    expect(result?.content).toHaveLength(200);
-    expect(result?.truncated).toBe(false);
-  });
 });

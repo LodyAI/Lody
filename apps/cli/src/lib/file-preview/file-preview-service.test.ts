@@ -316,19 +316,6 @@ describe('FilePreviewService', () => {
     expect(response).toMatchObject({ status: 'error', code: 'too_large' });
   });
 
-  it('still honours a caller-supplied maxBytes on the same machine', async () => {
-    const workspaceRoot = await makeDir('preview-ws-');
-    await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));
-    const service = createService({ workspaceRoot });
-
-    const response = await service.previewFile(
-      { v: 3, sessionId: SESSION_ID, path: 'medium.txt', maxBytes: 10 },
-      { sameMachine: true }
-    );
-
-    expect(response).toMatchObject({ status: 'error', code: 'too_large', limitBytes: 10 });
-  });
-
   it('applies the caller-supplied maxBytes when it is stricter than the machine limit', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));

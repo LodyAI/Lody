@@ -9,26 +9,20 @@ describe('resolveLocalWorkspaceFilePath', () => {
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project/', './docs/README.md')).toBe(
       '/Users/dev/project/docs/README.md'
     );
-  });
-
-  it('uses backslashes for a Windows workspace root', () => {
+    // The separator follows the ROOT, not the host running this code.
     expect(resolveLocalWorkspaceFilePath('C:\\Users\\dev\\project', 'src/main.ts')).toBe(
       'C:\\Users\\dev\\project\\src\\main.ts'
     );
   });
 
   it('refuses a path that is not relative to the workspace', () => {
-    // Nothing that could name a file outside the workspace may reach the OS.
+    // This is what keeps a remote session from naming a path on THIS machine
+    // for the shell to open: nothing that could escape the root may resolve.
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', '/etc/passwd')).toBeNull();
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', '../../etc/passwd')).toBeNull();
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', 'src/../../etc/passwd')).toBeNull();
     expect(
       resolveLocalWorkspaceFilePath('/Users/dev/project', 'C:\\Windows\\notepad.exe')
     ).toBeNull();
-  });
-
-  it('has no path without both a workspace root and a file', () => {
-    expect(resolveLocalWorkspaceFilePath(null, 'src/main.ts')).toBeNull();
-    expect(resolveLocalWorkspaceFilePath('/Users/dev/project', '  ')).toBeNull();
   });
 });

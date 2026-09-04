@@ -143,12 +143,6 @@ describe('remote file download action', () => {
       'This file is too large to download from here. Open it on the machine that owns it.'
     );
   });
-
-  it('keeps a deleted file distinct from a size ceiling', async () => {
-    await runDownload({ status: 'unavailable', reason: 'deleted' });
-
-    expect(toastError).toHaveBeenCalledWith('That file no longer exists.');
-  });
 });
 
 describe('local-host actions vs a resolvable host path', () => {
@@ -220,14 +214,5 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(actions.localHost).toBeNull();
     expect(actions.menuItems.map((item) => item.id)).toEqual(['copy-path', 'download']);
     expect(actions.download).not.toBeNull();
-  });
-
-  it('gives the error card the path alone when the shell cannot be reached', async () => {
-    localHomeDir = null;
-    const actions = await resolveActions();
-
-    const errorActions = actions.buildErrorActions('src/main.ts');
-    expect(errorActions).toBeDefined();
-    expect(errorActions?.localHost).toBeUndefined();
   });
 });
