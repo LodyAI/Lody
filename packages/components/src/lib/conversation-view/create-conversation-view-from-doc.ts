@@ -607,12 +607,22 @@ export function createConversationViewFromDoc(
         hydrated.set(cid, next);
         changedHydrated.add(index);
         noteChanged(index);
-      } else if (rows[index]!.summary !== undefined && relPath[0] === 'items') {
-        // Content moved under a summarized, non-hydrated turn: let the idle
-        // pass recompute it rather than guessing from the delta.
-        rows[index] = { ...rows[index]!, summary: undefined };
-        indexChanged = true;
-        scheduleIdlePass();
+      } else {
+        if (rows[index]!.summary !== undefined && relPath[0] === 'items') {
+          // Content moved under a summarized, non-hydrated turn: let the idle
+          // pass recompute it rather than guessing from the delta.
+          rows[index] = { ...rows[index]!, summary: undefined };
+          indexChanged = true;
+          scheduleIdlePass();
+        }
+        // Nothing to patch — but the turn DID change, and a consumer caching
+        // anything derived from it (per-turn file diffs, goals, scheduled
+        // tasks) can only notice through this event. Reporting the index for
+        // an unhydrated turn too is what keeps such a cache from outliving the
+        // turn it came from; the alternative left an evicted turn's fact stale
+        // forever, because a `fileDiff` or `modelInfo` write under it touches
+        // no index scalar either.
+        noteChanged(index);
       }
     }
 

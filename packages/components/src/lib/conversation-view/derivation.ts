@@ -46,6 +46,8 @@ export function createConversationDerivation<F>(
   let version = 0;
   let complete = false;
   let disposed = false;
+  let passRunning = false;
+  let passRequested = false;
   let lastTurnCount = view.turnCount;
 
   const notify = () => {
@@ -64,6 +66,37 @@ export function createConversationDerivation<F>(
       facts.set(row.id, derive(turn, row, i));
       derivedFrom.set(row.id, turn);
       changed = true;
+    }
+    return changed;
+  };
+
+  /**
+   * Facts for a range the view reported as CHANGED.
+   *
+   * A hydrated turn is re-derived. A turn that changed while nothing holds it
+   * hydrated cannot be re-derived here, and its cached fact is now stale — an
+   * older assistant turn gaining a file diff is the case that matters — so the
+   * fact is dropped and the background pass is asked to run again. Dropping is
+   * only ever driven by an explicit change event; the speculative tail window
+   * below must keep using {@link deriveHydratedRange}, or every index event
+   * would drop the facts of every turn past the hydrated tail.
+   */
+  const refreshRange = (from: number, to: number): boolean => {
+    let changed = false;
+    for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
+      const row = view.index(i);
+      if (!row) continue;
+      const turn = view.turn(i);
+      if (turn) {
+        if (derivedFrom.get(row.id) === turn) continue;
+        facts.set(row.id, derive(turn, row, i));
+        derivedFrom.set(row.id, turn);
+        changed = true;
+      } else if (facts.delete(row.id)) {
+        derivedFrom.delete(row.id);
+        changed = true;
+        requestPass();
+      }
     }
     return changed;
   };
@@ -88,7 +121,7 @@ export function createConversationDerivation<F>(
       // Appended turns land in the hydrated tail; derive whatever is there.
       changed = deriveHydratedRange(Math.max(0, view.turnCount - 64), view.turnCount) || changed;
     } else if (change.from !== undefined && change.to !== undefined) {
-      changed = deriveHydratedRange(change.from, change.to) || changed;
+      changed = refreshRange(change.from, change.to) || changed;
     }
     if (changed) notify();
   });
@@ -109,21 +142,53 @@ export function createConversationDerivation<F>(
       if (pending.length === 0) continue;
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;
+      // `ensureRange` pins before its first await, so the release has to run
+      // even when this derivation is disposed mid-hydration: the view outlives
+      // it in the warm store cache, and a leaked pin makes those turns
+      // permanently un-evictable.
       await view.ensureRange(lo, hi);
-      if (disposed) return;
-      const changed = deriveHydratedRange(lo, hi);
-      view.release(lo, hi);
-      if (changed) notify();
+      try {
+        if (disposed) return;
+        if (deriveHydratedRange(lo, hi)) notify();
+      } finally {
+        view.release(lo, hi);
+      }
       await yieldToEventLoop();
     }
-    if (disposed) return;
-    complete = true;
-    notify();
   };
+
+  /**
+   * Run background passes until no invalidation is outstanding. A pass that
+   * finishes while another was requested (a turn's fact was dropped while it
+   * ran) starts over rather than declaring the table complete.
+   */
+  const runPasses = async () => {
+    if (passRunning) return;
+    passRunning = true;
+    try {
+      while (passRequested) {
+        // `disposed` flips from `dispose()` while this loop is awaiting.
+        if (disposed) return;
+        passRequested = false;
+        await runBackgroundPass();
+      }
+      if (disposed) return;
+      complete = true;
+      notify();
+    } finally {
+      passRunning = false;
+    }
+  };
+
+  function requestPass(): void {
+    passRequested = true;
+    complete = false;
+    if (!passRunning && !disposed) void runPasses();
+  }
 
   // Facts for what is already hydrated come for free before the pass starts.
   deriveHydratedRange(0, view.turnCount);
-  void runBackgroundPass();
+  requestPass();
 
   return {
     get facts() {
