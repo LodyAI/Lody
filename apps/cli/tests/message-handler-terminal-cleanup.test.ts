@@ -224,6 +224,63 @@ function createHarness(options?: {
 }
 
 describe('MessageHandler terminal cleanup', () => {
+  it('cleans a local worktree when its project metadata exists only in the machine Flock', async () => {
+    const localProjectId = 'local-project-archive' as LocalProjectId;
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-archive-project-'));
+    const originalDataDir = process.env.LODY_DATA_DIR;
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    process.env.LODY_DATA_DIR = path.join(testDir, 'data');
+    process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
+    const rootPath = createLocalRepo(testDir);
+    const sessionId = 'session-archive-worktree' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      userId: 'user-1',
+      cliType: 'codex',
+      agentType: 'codex',
+      status: SessionStatusFactory.idle(),
+      project: { kind: 'local', localProjectId },
+      isWorktree: true,
+    } as SessionMeta;
+    const machineFlockRows = [
+      {
+        key: machineFlockKeys.localProject(localProjectId),
+        value: {
+          id: localProjectId,
+          name: 'Project',
+          rootPath,
+          createdAtMs: 1,
+        },
+      },
+    ];
+    try {
+      const manager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(rootPath),
+        source: { kind: 'local-shared', originalRootPath: rootPath },
+        logger: createSilentLogger(),
+      });
+      const worktree = await manager.createWorktree(sessionId);
+      const { handler, sessionManager } = createHarness({
+        sessionId,
+        sessionMetas: [sessionMeta],
+        machineFlockRows,
+      });
+
+      await handler.archiveSessionResources(sessionId);
+
+      expect(fs.existsSync(worktree.hostPath)).toBe(false);
+      expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+    } finally {
+      if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = originalDataDir;
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
   it('closes session terminals when archiving resources even without an active session', async () => {
     const { handler, sessionId, closeSessionTerminals, sessionManager } = createHarness();
 
