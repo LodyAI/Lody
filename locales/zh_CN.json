@@ -3852,5 +3852,6 @@
   "sessions.fileActions.downloadFailed": "无法下载该文件。",
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.openFailed": "无法打开该文件。",
-  "sessions.fileActions.more": "文件操作"
+  "sessions.fileActions.more": "文件操作",
+  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。"
 }

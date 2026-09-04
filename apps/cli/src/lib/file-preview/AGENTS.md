@@ -91,15 +91,21 @@ save path's text reads.
   to avoid NUL bytes would otherwise ship as mojibake text. Use `isBinaryImagePath`,
   NOT `getImageMimeTypeForPath` — the latter also matches SVG, which is XML text and
   must stay on the text path to keep its source view and its editability.
-- **The default budgets are the WIRE's, not the file's.** `FILE_PREVIEW_V3_LIMITS`
+- **The default budgets are the REMOTE wire's, not the file's.** `FILE_PREVIEW_V3_LIMITS`
   (10 MiB text, 5 MiB binary, 1 MiB gzip ceiling) exists because a remote preview
-  is gzipped and base64'd through one Machine RPC response. A SAME-MACHINE read has
-  no such reply to protect, so `file/preview-local` passes `sameMachine: true` and
-  the service swaps in `FILE_PREVIEW_V3_LOCAL_LIMITS`: 64 MiB, and text always
-  `utf8-plain` because there is nothing to compress for. Do not delete the local
-  ceiling — the remaining one is about what a viewer can render (VS Code stops at
-  50 MB) and about not materializing a multi-hundred-MB string in two processes;
-  past it the honest answer is the OS, which the viewer's error card now offers.
+  is gzipped and base64'd through one Machine RPC response. A SAME-MACHINE read
+  does not cross that wire, so `file/preview-local` passes `sameMachine: true` and
+  the service swaps in `FILE_PREVIEW_V3_LOCAL_LIMITS` and ships text `utf8-plain`.
+  **It is still a transport**, and the local one is the tighter constraint: its
+  client DESTROYS a response body past `LOCAL_IPC_MAX_RESPONSE_BODY_BYTES` (16 MiB,
+  `shared/node/local-ipc.ts`), and the facade reports that as retryable I/O — the
+  viewer would say "try again" about a file that will never load. So the local
+  limits are DERIVED from that cap, and the encoded payload is measured before
+  answering: base64 expands by a fixed 4/3, but JSON string escaping is
+  data-dependent (a file of newlines doubles, one of control bytes sextuples), so
+  no raw-size cap can stand in for `measurePayloadOverflow`. Past it the honest
+  answer is the OS, which the viewer's error card offers. Raising the local limits
+  without raising that IPC cap turns a clear verdict back into a phantom retry.
   `sameMachine` is transport context like `allowArbitraryPaths`: it must never
   become part of the request schema, or a Streams caller could ask for it.
 - `maxBinaryBytes` is pinned to `SESSION_IMAGE_MAX_SIZE_BYTES` because that is the

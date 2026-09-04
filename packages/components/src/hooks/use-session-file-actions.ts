@@ -3,7 +3,11 @@ import { useAtomValue } from 'jotai';
 import { Copy, Download, ExternalLink, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { getMachineFlockLocalProjects, type SessionMeta } from '@lody/shared';
+import {
+  getMachineFlockLocalProjects,
+  type CodeCollabContentUnavailableReason,
+  type SessionMeta,
+} from '@lody/shared';
 import { getMachineMetaByIdAtomFamily } from '@/atoms';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
@@ -255,12 +259,39 @@ export function useSessionFileActions({
       hasFileProvider: Boolean(fileProvider),
     });
     if (!session || !availability.download || !fileProvider) return null;
+
+    // KNOWN CEILING: this reads through the preview API, which answers in ONE
+    // bounded response (10 MiB text / 5 MiB binary remotely). So the download
+    // covers ordinary files and cannot cover the oversized ones — the very
+    // files whose error card sent the user looking for a way out. Saying that
+    // is the point of `downloadTooLarge`: a generic "could not download" reads
+    // as a glitch worth retrying. A real answer for those needs a ranged or
+    // streamed transfer, which is a Machine RPC protocol change (new method
+    // plus a negotiated `protocolCapabilities` key, never inferred from the CLI
+    // version) rather than a client-side fix.
+    const reportUnavailable = (reason: CodeCollabContentUnavailableReason | 'no-bytes') => {
+      if (reason === 'deleted') {
+        toast.error(t('sessions.fileActions.fileMissing', 'That file no longer exists.'));
+        return;
+      }
+      if (reason === 'text-too-large' || reason === 'blob-too-large' || reason === 'no-bytes') {
+        toast.error(
+          t(
+            'sessions.fileActions.downloadTooLarge',
+            'This file is too large to download from here. Open it on the machine that owns it.'
+          )
+        );
+        return;
+      }
+      toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
+    };
+
     return (filePath: string) => {
       void (async () => {
         try {
           const result = await fileProvider.openFile(filePath);
           if (result.status !== 'ready') {
-            reportOpenFailure(result.reason === 'deleted');
+            reportUnavailable(result.reason);
             return;
           }
           const snapshot = result.snapshot;
@@ -272,13 +303,15 @@ export function useSessionFileActions({
             downloadBytesAsFile(filePath, snapshot.bytes);
             return;
           }
-          toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
+          // A `binary` snapshot with no bytes is the machine declining to send
+          // them, which is the same "too big for one response" situation.
+          reportUnavailable('no-bytes');
         } catch {
           toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
         }
       })();
     };
-  }, [fileProvider, isElectronRenderer, isLocalMachine, localHost, reportOpenFailure, session, t]);
+  }, [fileProvider, isElectronRenderer, isLocalMachine, localHost, session, t]);
 
   const buildErrorActions = useCallback(
     (filePath: string): SessionFileErrorActions | undefined => {

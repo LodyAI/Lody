@@ -852,7 +852,14 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   preference) — lives in the optional `localHost` half, resolved only for
   Electron + the file's machine being this one. `Download file` is the exact
   complement: offered only where `localHost` is absent, because with the real
-  file one keystroke away a copy in ~/Downloads is a decoy. Never promote a
+  file one keystroke away a copy in ~/Downloads is a decoy. It reads through
+  `openFile`, i.e. the preview API's ONE bounded response, so it cannot serve a
+  file past those limits — exactly the files whose error card sent the user
+  looking. That is a known ceiling, not a silent failure: say so
+  (`sessions.fileActions.downloadTooLarge`), because a generic "could not
+  download" reads as a glitch worth retrying. Lifting it needs a ranged or
+  streamed Machine RPC method behind a negotiated `protocolCapabilities` key,
+  never a client-side retry loop. Never promote a
   local-host action to a surface that cannot perform it, and never re-derive
   that decision per surface — `lib/session-file-actions.ts` states it once.
   The path is resolved on the OWNING machine (its Flock `dotlodyPath` /

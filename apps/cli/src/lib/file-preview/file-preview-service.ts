@@ -3,6 +3,7 @@ import { open } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { gzip } from 'node:zlib';
 import {
+  FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
   FILE_PREVIEW_PROTOCOL_VERSION,
   FILE_PREVIEW_V3_LIMITS,
   FILE_PREVIEW_V3_LOCAL_LIMITS,
@@ -196,7 +197,7 @@ export class FilePreviewService {
     // extension also forces the binary path so an image whose header happens to
     // avoid NULs still ships as bytes rather than as mojibake text.
     if (isImageByName || hasBinaryNul(bytes)) {
-      return this.binaryOk(resolved, bytes, digest, limits);
+      return this.binaryOk(resolved, bytes, digest, limits, options.sameMachine === true);
     }
 
     let text: string;
@@ -205,7 +206,7 @@ export class FilePreviewService {
     } catch {
       // Not valid UTF-8 and no NUL in the sniff window: still not previewable as
       // text, so hand it back as binary bytes and let the viewer decide.
-      return this.binaryOk(resolved, bytes, digest, limits);
+      return this.binaryOk(resolved, bytes, digest, limits, options.sameMachine === true);
     }
 
     let content: FilePreviewV3Content;
@@ -217,6 +218,23 @@ export class FilePreviewService {
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
         limitBytes: limits.maxCompressedBytes,
+      });
+    }
+
+    // The same-machine reply still crosses one transport, and its client
+    // DESTROYS a body past `FILE_PREVIEW_LOCAL_IPC_RESPONSE_LIMIT_BYTES` — which
+    // surfaces as a retryable I/O error, not as this honest verdict. Size caps
+    // cannot predict that for text (JSON escaping is data-dependent), so the
+    // encoded payload is measured.
+    const payloadOverflow = options.sameMachine
+      ? measurePayloadOverflow(content, FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES)
+      : null;
+    if (payloadOverflow !== null) {
+      return filePreviewV3Error('too_large', {
+        message: 'File is too large to preview.',
+        path: resolved.reportedPath,
+        sizeBytes: bytes.byteLength,
+        limitBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
       });
     }
 
@@ -240,7 +258,8 @@ export class FilePreviewService {
     resolved: ResolvedPreviewPath,
     bytes: Uint8Array,
     digest: FilePreviewV3Digest,
-    limits: FilePreviewV3Limits
+    limits: FilePreviewV3Limits,
+    sameMachine: boolean
   ): FilePreviewV3Response {
     if (bytes.byteLength > limits.maxBinaryBytes) {
       return filePreviewV3Error('too_large', {
@@ -248,6 +267,15 @@ export class FilePreviewService {
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
         limitBytes: limits.maxBinaryBytes,
+      });
+    }
+    const data = Buffer.from(bytes).toString('base64');
+    if (sameMachine && data.length > FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES) {
+      return filePreviewV3Error('too_large', {
+        message: 'Binary file is too large to preview.',
+        path: resolved.reportedPath,
+        sizeBytes: bytes.byteLength,
+        limitBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
       });
     }
     const mimeType = getImageMimeTypeForPath(resolved.reportedPath);
@@ -258,11 +286,7 @@ export class FilePreviewService {
       ...(resolved.external ? { external: true } : {}),
       digest,
       kind: 'binary',
-      content: {
-        encoding: 'base64',
-        data: Buffer.from(bytes).toString('base64'),
-        rawBytes: bytes.byteLength,
-      },
+      content: { encoding: 'base64', data, rawBytes: bytes.byteLength },
       mimeType: mimeType ?? 'application/octet-stream',
       sizeBytes: bytes.byteLength,
       readonly: true,
@@ -288,6 +312,23 @@ export class FilePreviewService {
       compressedBytes: compressed.byteLength,
     };
   }
+}
+
+/**
+ * How much the encoded content overruns `budgetBytes`, or `null` when it fits.
+ *
+ * Text is measured through `JSON.stringify` because that is exactly what the
+ * transport will do to it, and escaping is data-dependent — a file of newlines
+ * doubles, one of control bytes sextuples, so no raw-size cap can stand in for
+ * this. Base64 payloads are already the encoded string, so their length is the
+ * answer. Only the same-machine path pays for this measurement.
+ */
+function measurePayloadOverflow(content: FilePreviewV3Content, budgetBytes: number): number | null {
+  const encodedBytes =
+    content.encoding === 'utf8-plain'
+      ? Buffer.byteLength(JSON.stringify(content.text), 'utf8')
+      : content.data.length;
+  return encodedBytes > budgetBytes ? encodedBytes - budgetBytes : null;
 }
 
 /**
