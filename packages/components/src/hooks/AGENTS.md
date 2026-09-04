@@ -21,6 +21,10 @@ this file; edit `AGENTS.md` only.
 - Follow viewport-size changes from the viewport's `ResizeObserver` records.
   Keyboard and terminal transitions resize that same element, so do not restore
   custom resize-event pumps, guessed transition durations, or stop timers.
+  Only height changes re-anchor the viewport: a flex sibling such as the desktop
+  sidebar can animate width every frame, and sending those width-only records to
+  Virtua competes with the content observer's bottom correction and visibly
+  jitters the conversation.
 - A session composer height change sets a one-shot ref immediately before its
   inline height write. Consume that ref only for the next viewport _height_
   resize, without calling `scrollToRealBottom`; it preserves the reader's
