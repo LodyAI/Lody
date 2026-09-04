@@ -246,6 +246,90 @@ describe('useMachineFlockRows', () => {
     await expect(resyncMachineFlockRows(runtime, machineId)).resolves.toBeUndefined();
   });
 
+  it('keeps a freshly returned ACP capability when remote resync reads the previous snapshot', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-machine-flock-refresh-overlay-test' as WorkspaceId;
+    const workspaceSlug = 'workspace-machine-flock-refresh-overlay-test';
+    const machineId = 'machine-machine-flock-refresh-overlay-test' as MachineId;
+    const configId = 'config-machine-flock-refresh-overlay-test' as AgentConfigId;
+    const capability = {
+      cliType: 'registry' as const,
+      agentType: 'deepseek',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'registry:deepseek:test',
+      modes: [],
+      models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'kimi-k3',
+          options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'max',
+          options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
+        },
+      ],
+      modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+      sessionFork: false,
+      fetchedAt: 1,
+    };
+    const handle = {
+      flock: {
+        // The just-written daemon row has not reached this replica yet.
+        scan: vi.fn(() => []),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce: vi.fn(async () => ({
+        ok: true,
+        transports: [{ transportId: 'cloud', ok: true, failures: [] }],
+      })),
+      joinRoom: vi.fn(),
+    };
+    const runtime = {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc: vi.fn(async () => handle) },
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          remoteMachineIds: [],
+          families: ['acpCapability'],
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+
+    await resyncMachineFlockRows(runtime, machineId, {
+      requireRemoteSync: true,
+      refreshedCapability: { configId, value: capability },
+    });
+    await flushMicrotasks();
+
+    const capabilityRowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+    expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(capability);
+  });
+
   it('resolves ACP capabilities from Machine Flock over legacy machine meta', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

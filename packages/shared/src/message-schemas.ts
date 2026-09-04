@@ -1182,6 +1182,55 @@ const AcpModelSchema = z
   })
   .strict();
 
+const AcpConfigOptionValueSummarySchema = z
+  .object({
+    value: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    group: z.string().optional(),
+  })
+  .strict();
+
+const AcpConfigOptionSummarySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    type: z.enum(['select', 'boolean']),
+    currentValue: AcpConfigOptionValueSchema,
+    options: z.array(AcpConfigOptionValueSummarySchema),
+  })
+  .strict();
+
+const AcpCapabilityCacheEntrySchema = z
+  .object({
+    cliType: AgentConfigCliTypeSchema,
+    agentType: z.string().trim().min(1),
+    cacheVersion: z.number().optional(),
+    provenance: z.literal('runtime').optional(),
+    sourceVersion: z.string().optional(),
+    modes: z.array(AcpModeSchema),
+    models: z.array(AcpModelSchema),
+    configOptions: z.array(AcpConfigOptionSummarySchema).optional(),
+    modelReasoningEfforts: z.record(z.string(), z.array(z.string())).optional(),
+    availableCommands: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            description: z.string().optional(),
+          })
+          .strict()
+      )
+      .optional(),
+    sessionFork: z.boolean().optional(),
+    acknowledgedSteer: z.boolean().optional(),
+    sessionForkWorktree: z.boolean().optional(),
+    fetchedAt: z.number(),
+  })
+  .strict();
+
 const MachineAcpAuthMethodSummarySchema = z
   .object({
     type: z.enum(['agent', 'env_var', 'terminal']),
@@ -1313,6 +1362,7 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
         })
       )
       .optional(),
+    capability: AcpCapabilityCacheEntrySchema.optional(),
     availableCommands: z
       .array(
         z.object({

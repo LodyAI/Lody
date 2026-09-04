@@ -5193,7 +5193,7 @@ export class SessionExecutionService {
       );
 
       options.signal?.throwIfAborted();
-      await this.deps.workspaceDocument.updateAcpCapabilities(
+      const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
         message.cliType,
@@ -5231,6 +5231,7 @@ export class SessionExecutionService {
           category: opt.category,
           optionCount: opt.options.length,
         })),
+        capability,
         availableCommands,
       };
     } catch (error) {
