@@ -676,3 +676,8 @@ export const AgentFileLinks: Story = {
   },
   render: (args) => wrap(<MarkdownRenderer {...args} />),
 };
+
+export const AgentFileLinksWithOpenAction: Story = {
+  ...AgentFileLinks,
+  render: (args) => wrap(<MarkdownRenderer {...args} onAgentFileLinkClick={() => undefined} />),
+};

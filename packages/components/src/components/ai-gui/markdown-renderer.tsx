@@ -37,6 +37,7 @@ import {
   isMarkdownAgentFileHref,
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
 import { remarkSingleDollarTextMath } from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
@@ -870,34 +871,6 @@ const STREAMDOWN_CONTROLS = {
   table: false,
 } satisfies ControlsConfig;
 
-const writeTextToClipboard = async (text: string): Promise<boolean> => {
-  if (!text.trim()) return false;
-
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const el = document.createElement('textarea');
-      el.value = text;
-      el.style.position = 'fixed';
-      el.style.top = '0';
-      el.style.left = '0';
-      el.style.width = '1px';
-      el.style.height = '1px';
-      el.style.opacity = '0';
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(el);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-};
-
 const markdownUrlTransform: UrlTransform = (value, key, node) =>
   isMarkdownAgentFileHref(value) || (key === 'src' && parseTaskImageMarkdownUrl(value))
     ? value
@@ -912,63 +885,93 @@ const AgentFileLink = ({
   children,
   onFilePathClick,
   copyAgentFileLabel,
+  copiedLabel,
   openAgentFileLabel,
 }: {
   href: string;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
+  copiedLabel: string;
   openAgentFileLabel: string;
 }) => {
   const [didCopy, setDidCopy] = useState(false);
   const hasOpenAction = Boolean(onFilePathClick);
-  const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
+  const filePath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
 
-  const handleClick = useCallback(async () => {
-    if (onFilePathClick) {
-      onFilePathClick(href);
-      return;
-    }
-
-    const ok = await writeTextToClipboard(href);
+  const handleCopy = useCallback(async () => {
+    const ok = await writeTextToClipboard(filePath);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [href, onFilePathClick]);
+  }, [filePath]);
 
-  return (
+  const copyButtonContent = didCopy ? (
+    <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden="true" />
+  ) : (
+    <Copy className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+  );
+
+  const primaryButton = (
     <button
       type="button"
       onClick={() => {
-        void handleClick();
+        if (onFilePathClick) {
+          onFilePathClick(href);
+          return;
+        }
+        void handleCopy();
       }}
       title={href}
-      aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
+      aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${filePath}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-px align-[-0.15em] font-mono text-[0.92em] leading-tight text-foreground no-underline shadow-none transition-colors',
-        'hover:border-border hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+        'inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-px text-foreground transition-colors',
+        'hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
       )}
     >
-      <FileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
+      <FileIcon filePath={filePath} className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 truncate">{children}</span>
-      {!hasOpenAction ? (
-        didCopy ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" />
-        ) : (
-          <Copy className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )
-      ) : null}
+      {!hasOpenAction ? copyButtonContent : null}
     </button>
+  );
+
+  return (
+    <span
+      className={cn(
+        'inline-flex max-w-full items-stretch overflow-hidden rounded-md border border-border/60 bg-muted/40 align-[-0.15em] font-mono text-[0.92em] leading-tight no-underline shadow-none transition-colors',
+        'hover:border-border'
+      )}
+    >
+      {primaryButton}
+      {hasOpenAction ? (
+        <button
+          type="button"
+          onClick={() => {
+            void handleCopy();
+          }}
+          title={`${didCopy ? copiedLabel : copyAgentFileLabel}: ${filePath}`}
+          aria-label={`${didCopy ? copiedLabel : copyAgentFileLabel}: ${filePath}`}
+          className={cn(
+            'inline-flex shrink-0 items-center border-l border-border/60 px-1 py-px transition-colors',
+            'hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+          )}
+        >
+          {copyButtonContent}
+        </button>
+      ) : null}
+    </span>
   );
 };
 
 const createMarkdownComponents = ({
   copyAgentFileLabel,
+  copiedLabel,
   openAgentFileLabel,
   onAgentFileLinkClick,
 }: {
   copyAgentFileLabel: string;
+  copiedLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
 }): Components => ({
@@ -1006,6 +1009,7 @@ const createMarkdownComponents = ({
           href={href}
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
+          copiedLabel={copiedLabel}
           openAgentFileLabel={openAgentFileLabel}
         >
           {children}
@@ -1095,15 +1099,17 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const searchMatch = useSessionSearchBlock(searchBlockId ?? '');
   const copyCodeLabel = t('common.copyCode', 'Copy code');
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
+  const copiedLabel = t('common.copied', 'Copied');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const components = useMemo(
     () =>
       createMarkdownComponents({
         copyAgentFileLabel,
+        copiedLabel,
         openAgentFileLabel,
         onAgentFileLinkClick,
       }),
-    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel]
+    [copiedLabel, copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel]
   );
 
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);
