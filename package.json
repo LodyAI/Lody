@@ -28,6 +28,8 @@
     "e2e:scout": "corepack pnpm --filter @lody/e2e scout",
     "e2e:scout:ablation": "corepack pnpm --filter @lody/e2e scout:ablation",
     "e2e:acceptance": "corepack pnpm --filter @lody/e2e acceptance",
+    "e2e:journey:candidate": "corepack pnpm --filter @lody/e2e journey:candidate",
+    "e2e:journey:coverage": "corepack pnpm --filter @lody/e2e journey:coverage",
     "lint:fast": "oxlint --quiet --ignore-pattern packages/acp-extension-kimi",
     "lint": "oxlint --type-aware --quiet --ignore-pattern packages/acp-extension-kimi",
     "lint:i18n": "node scripts/check-i18n.mjs",

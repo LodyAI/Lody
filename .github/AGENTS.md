@@ -101,6 +101,9 @@ their failures and perform expiry.
   current response.
 - Code CI runs on `pull_request` with read-only repository permissions and
   checks out all public submodules recursively.
+- Desktop journey authors have read-only permissions and no persisted checkout
+  credentials. Secretless macOS validates candidates; only a trusted `workflow_run`
+  reconciler publishes them, without checking out or executing candidate code.
 
 ## Other automation
 

@@ -1,0 +1,176 @@
+name: Desktop E2E Journey Author Reconcile
+
+on:
+  workflow_run:
+    workflows: [Desktop E2E Journey Author]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: desktop-e2e-journey-author-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download validated artifact without checkout
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: desktop-e2e-journey-validated-${{ github.event.workflow_run.id }}
+          path: ${{ runner.temp }}/validated
+
+      - name: Validate artifact and open one draft PR
+        uses: actions/github-script@v7
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/validated
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const crypto = require('node:crypto')
+            const fs = require('node:fs')
+            const path = require('node:path')
+            const read = (name, limit) => {
+              const file = path.join(process.env.BUNDLE_ROOT, name)
+              const stat = fs.statSync(file)
+              if (!stat.isFile() || stat.size > limit) throw new Error(`Invalid ${name}`)
+              return JSON.parse(fs.readFileSync(file, 'utf8'))
+            }
+            const digest = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
+            const deferCandidate = async (candidate, failureClass, detail) => {
+              const permanent = failureClass !== 'infra'
+              const retryAfter = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+              const marker = permanent
+                ? `<!-- lody-e2e-journey-blocked:${candidate.candidateId} -->`
+                : `<!-- lody-e2e-journey-cooldown:${candidate.candidateId}:${retryAfter} -->`
+              const summary = String(detail ?? 'The candidate was deferred.')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('`', '&#96;')
+                .slice(0, 2000)
+              const classification = String(failureClass).replace(/[^a-z0-9_-]/gi, '_').slice(0, 80)
+              const body = [
+                marker,
+                'Journey Foundry deferred this registry candidate without weakening the suite.',
+                '',
+                `- Candidate: \`${candidate.candidateId}\``,
+                `- Classification: \`${classification}\``,
+                `- Retry policy: ${permanent ? 'blocked until this Issue is closed' : `eligible again after ${retryAfter}`}`,
+                `- Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.EXPECTED_RUN_ID}`,
+                '',
+                summary,
+                '',
+                permanent
+                  ? 'Close this Issue after the product behavior or deterministic test capability is available.'
+                  : 'The scheduler will skip this row during the cooldown and then retry it without requiring this Issue to close.'
+              ].join('\n')
+              const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
+              const markerPrefix = `<!-- lody-e2e-journey-`
+              const markerSuffix = `:${candidate.candidateId}`
+              const existing = issues.find((issue) =>
+                !issue.pull_request &&
+                issue.user?.login === 'github-actions[bot]' &&
+                issue.body?.includes(markerPrefix) &&
+                issue.body?.includes(markerSuffix)
+              )
+              const title = `[Journey Foundry] ${candidate.candidateId} is ${permanent ? 'blocked' : 'cooling down'}`
+              if (existing) await github.rest.issues.update({ ...context.repo, issue_number: existing.number, title, body })
+              else await github.rest.issues.create({ ...context.repo, title, body })
+            }
+            const attestation = read('attestation.json', 100_000)
+            const task = read('task.json', 500_000)
+            const unsigned = (value) => { const copy = { ...value }; delete copy.digest; return copy }
+            if (digest(unsigned(task)) !== task.digest || digest(unsigned(attestation)) !== attestation.digest) throw new Error('Artifact digest mismatch')
+            if (task.repository !== `${context.repo.owner}/${context.repo.repo}` || task.baseSha !== process.env.EXPECTED_SHA || attestation.baseSha !== task.baseSha) throw new Error('Task provenance mismatch')
+            if (`${task.runId}` !== process.env.EXPECTED_RUN_ID || `${attestation.workflowRunId}` !== process.env.EXPECTED_RUN_ID || attestation.taskDigest !== task.digest) throw new Error('Run provenance mismatch')
+            if (attestation.status === 'task-only') return
+            const candidate = read('candidate.json', 4_000_000)
+            if (
+              candidate.taskDigest !== task.digest ||
+              candidate.candidateId !== task.candidate?.id ||
+              candidate.fingerprint !== task.candidate?.fingerprint ||
+              candidate.baseSha !== task.baseSha ||
+              candidate.leaseId !== task.claim?.leaseId
+            ) throw new Error('Candidate provenance mismatch')
+            if (digest(unsigned(candidate)) !== candidate.digest) throw new Error('Candidate digest mismatch')
+            if (attestation.status === 'blocked') {
+              if (candidate.status !== 'blocked' || attestation.candidateDigest !== candidate.digest) throw new Error('Invalid blocked candidate attestation')
+              await deferCandidate(candidate, candidate.classification?.code ?? 'infra', candidate.classification?.summary)
+              return
+            }
+            if (candidate.status !== 'ready' || attestation.candidateDigest !== candidate.digest) throw new Error('Candidate attestation mismatch')
+            if (attestation.status === 'failed') {
+              const checks = attestation.checks ?? {}
+              const contractFailure =
+                checks.apply === 'failure' ||
+                checks.promote === 'failure' ||
+                checks.contract === 'failure' ||
+                checks.ablateFile === 'failure' ||
+                checks.counterfactual === 'success' ||
+                (checks.counterfactual === 'failure' && checks.counterfactualEvidence !== 'success') ||
+                checks.restore === 'failure' ||
+                checks.patch === 'failure'
+              await deferCandidate(
+                candidate,
+                contractFailure ? 'test-capability' : 'infra',
+                `Independent validation did not pass. Check outcomes: ${JSON.stringify(checks)}`
+              )
+              return
+            }
+            if (attestation.status !== 'passed') throw new Error('Unsupported attestation status')
+            const requiredSuccess = ['apply', 'promote', 'install', 'contract', 'build', 'ablateFile', 'counterfactualEvidence', 'restore', 'focusedRound1', 'focusedRound2', 'focusedRound3', 'full', 'patch']
+            if (requiredSuccess.some((key) => attestation.checks?.[key] !== 'success') || attestation.checks?.counterfactual !== 'failure') throw new Error('Incomplete validation attestation')
+            if (candidate.title !== task.candidate.title) throw new Error('Candidate title mismatch')
+            const current = await github.rest.repos.getCommit({ ...context.repo, ref: context.payload.repository.default_branch })
+            if (current.data.sha !== task.baseSha) throw new Error('Default branch advanced; release this claim and select again')
+            const allowed = (p) => /^(?:e2e\/src\/features\/.+\.feature|e2e\/src\/steps\/.+\.steps\.ts|e2e\/src\/support\/pages\/.+\.ts|e2e\/src\/support\/fixtures\/.+\.(?:ts|mjs|json|txt))$/.test(p) || ['e2e/COVERAGE.md','e2e/journeys/registry.json','e2e/src/features/README.md','e2e/src/steps/README.md','e2e/src/support/README.md'].includes(p)
+            if (!Array.isArray(candidate.files) || candidate.files.length === 0 || candidate.files.length > 24) throw new Error('Invalid candidate file count')
+            const seen = new Set()
+            let totalBytes = 0
+            for (const file of candidate.files) {
+              if (!allowed(file.path) || seen.has(file.path) || file.bytes > 300000) throw new Error(`Forbidden candidate path: ${file.path}`)
+              seen.add(file.path)
+              const body = Buffer.from(file.content, 'utf8')
+              totalBytes += body.length
+              if (body.includes(0) || totalBytes > 1500000 || body.length !== file.bytes || crypto.createHash('sha256').update(body).digest('hex') !== file.sha256) throw new Error(`Invalid file digest or size: ${file.path}`)
+            }
+            if (!seen.has('e2e/COVERAGE.md') || !seen.has('e2e/journeys/registry.json')) throw new Error('Generated registry transition is missing')
+            const featureFiles = candidate.files.filter((file) => file.path.endsWith('.feature') && file.content.includes(`@${candidate.candidateId}`))
+            if (featureFiles.length !== 1) throw new Error('Candidate does not contain exactly one matching Feature')
+            const registryFile = candidate.files.find((file) => file.path === 'e2e/journeys/registry.json')
+            const registry = JSON.parse(registryFile.content)
+            const row = registry.journeys?.find((journey) => journey.id === candidate.candidateId)
+            if (row?.state !== 'active' || row.feature !== featureFiles[0].path.slice('e2e/'.length) || row.fingerprint !== candidate.fingerprint) throw new Error('Registry promotion does not match the candidate')
+            const marker = `<!-- lody-e2e-journey-candidate:${candidate.candidateId} -->`
+            const pulls = await github.paginate(github.rest.pulls.list, { ...context.repo, state: 'open', per_page: 100 })
+            const existing = pulls.some((pull) =>
+              pull.head.repo?.id === pull.base.repo?.id &&
+              pull.head.ref.startsWith('automation/e2e-journey-') &&
+              (pull.body ?? '').includes(marker)
+            )
+            if (existing) return
+            const blobs = []
+            for (const file of candidate.files) {
+              const blob = await github.rest.git.createBlob({ ...context.repo, content: file.content, encoding: 'utf-8' })
+              blobs.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.data.sha })
+            }
+            const tree = await github.rest.git.createTree({ ...context.repo, base_tree: current.data.commit.tree.sha, tree: blobs })
+            const commit = await github.rest.git.createCommit({ ...context.repo, message: `test(e2e): add ${candidate.candidateId} journey\n\nModel: gpt-5.6-sol`, tree: tree.data.sha, parents: [task.baseSha] })
+            const branch = `automation/e2e-journey-${candidate.candidateId.toLowerCase()}-${process.env.EXPECTED_RUN_ID}`
+            await github.rest.git.createRef({ ...context.repo, ref: `refs/heads/${branch}`, sha: commit.data.sha })
+            await github.rest.pulls.create({ ...context.repo, head: branch, base: context.payload.repository.default_branch, draft: true, title: `[E2E Journey] ${candidate.candidateId}: ${candidate.title}`, body: `${marker}\n\nAdds one machine-authored desktop journey from the reviewed registry claim.\n\nValidation: counterfactual rejection, contract check, three fresh focused runs, and full desktop regression passed in the no-secret macOS lane. This Draft is never merged automatically.` })

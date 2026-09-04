@@ -30,9 +30,22 @@ void describe('scripted ACP fixture', () => {
     });
     children.add(child);
     const updates: acp.SessionNotification[] = [];
+    let resolveHeldPromptStarted!: () => void;
+    const heldPromptStarted = new Promise<void>((resolveStarted) => {
+      resolveHeldPromptStarted = resolveStarted;
+    });
     const client = acp
       .client({ name: 'scripted-fixture-test' })
-      .onNotification(acp.methods.client.session.update, ({ params }) => updates.push(params))
+      .onNotification(acp.methods.client.session.update, ({ params }) => {
+        updates.push(params);
+        if (
+          params.update.sessionUpdate === 'agent_message_chunk' &&
+          params.update.content.type === 'text' &&
+          params.update.content.text === 'Synthetic response started.'
+        ) {
+          resolveHeldPromptStarted();
+        }
+      })
       .connect(
         acp.ndJsonStream(
           Writable.toWeb(child.stdin!),
@@ -77,6 +90,7 @@ void describe('scripted ACP fixture', () => {
       sessionId: session.sessionId,
       prompt: [{ type: 'text', text: '[SCOUT:HOLD]' }],
     });
+    await heldPromptStarted;
     await client.agent.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId });
     assert.equal((await held).stopReason, 'cancelled');
 

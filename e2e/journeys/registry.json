@@ -1,0 +1,406 @@
+{
+  "schemaVersion": 1,
+  "scoring": {
+    "criticality": 100,
+    "boundaryRisk": 20,
+    "changeFrequency": 5,
+    "freshness": 5,
+    "escapedDefect": 40,
+    "scoutSignal": 35,
+    "changedPath": 50,
+    "estimatedMinutePenalty": 2
+  },
+  "journeys": [
+    {
+      "id": "LODY-ONBOARDING-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "New user enters an isolated local workspace through the bundled CLI",
+      "owner": "desktop-bootstrap",
+      "feature": "src/features/onboarding.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "ccfecdbae92c8a9848a554d502beb53acc897e21b3c30ab8a45d5c5eebbee1b3",
+      "ownerPaths": [
+        "apps/electron/",
+        "packages/components/src/components/onboarding/",
+        "packages/components/src/routes/onboarding.tsx"
+      ],
+      "actions": [
+        { "id": "desktop.launchFresh" },
+        { "id": "onboarding.waitForLocalBootstrap" },
+        { "id": "onboarding.skipAgentConfiguration" },
+        { "id": "onboarding.enterWorkspace" }
+      ],
+      "checkpoints": [
+        "bundled CLI owns the isolated local runtime",
+        "workspace initialization completes",
+        "session composer is editable"
+      ],
+      "cleanup": ["desktop process tree exits", "isolated endpoint can be rebound"],
+      "coverage": {
+        "renderer": "Intro and local entry",
+        "electronIpc": "Real window and invoke bridge",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Isolated workspace catalog and onboarding state",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 1
+    },
+    {
+      "id": "LODY-SESSION-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "simulator",
+      "title": "Stop and permanently delete a running ACP Session",
+      "owner": "session-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "scripted-acp",
+      "fingerprint": "beb2be11585dd90453549de89982f739c1dac077026294fcdfbd8827d6d8278c",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/sessions/",
+        "packages/components/src/components/chat/"
+      ],
+      "actions": [
+        { "id": "agent.configureScripted" },
+        { "id": "session.createHeld" },
+        { "id": "session.stop" },
+        { "id": "session.archive" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "Stop becomes available while ACP is running",
+        "ACP process exits after Stop",
+        "Session disappears after permanent deletion"
+      ],
+      "cleanup": ["ACP process exits", "Session durable state is deleted"],
+      "coverage": {
+        "renderer": "Session lifecycle",
+        "electronIpc": "Real window and invoke bridge",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Create, stop, archive, and permanent delete",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 5,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
+      "id": "LODY-WORK-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "simulator",
+      "title": "Delete a worktree Session with ACP and Terminal resources",
+      "owner": "work-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "synthetic-git-and-scripted-acp",
+      "fingerprint": "5beb37208e9e503a21177a8291f7f35472d32a9ff241ac459f070a02c413b31c",
+      "ownerPaths": [
+        "apps/cli/src/session/worktree/",
+        "packages/components/src/components/terminal/",
+        "packages/components/src/components/sessions/"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticGit" },
+        { "id": "session.enableWorktree" },
+        { "id": "session.createCompleted" },
+        { "id": "terminal.openAndRunMarker" },
+        { "id": "session.archive" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "worktree Session completes",
+        "Terminal command produces its marker",
+        "worktree, ACP, and Terminal resources are released"
+      ],
+      "cleanup": ["ACP process exits", "Terminal exits", "generated worktree is removed"],
+      "coverage": {
+        "renderer": "Work lifecycle",
+        "electronIpc": "Real window, IPC, and Terminal",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Session, worktree, and terminal cleanup",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["work"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
+      "id": "LODY-REVIEW-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Open, hide, and switch a synthetic large diff",
+      "owner": "review-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "synthetic-large-diff-and-scripted-acp",
+      "fingerprint": "b5f672ce3fafd7b8ebb8223b3b2c79a2b1ef83e0103a43508814920f26bb59f0",
+      "ownerPaths": [
+        "packages/code-review-viewer/",
+        "packages/components/src/ui/diff-viewer/",
+        "packages/components/src/components/sessions/"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticLargeDiff" },
+        { "id": "session.createCompleted" },
+        { "id": "review.openAllChanges" },
+        { "id": "review.switchLargeDiff" },
+        { "id": "review.hideAndShow" },
+        { "id": "review.close" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "both synthetic changed files render",
+        "Review survives hide and restore",
+        "Review state is released after Session deletion"
+      ],
+      "cleanup": ["Review tabs close", "Session durable state is deleted"],
+      "coverage": {
+        "renderer": "Large diff Review lifecycle",
+        "electronIpc": "Real window and diff RPC",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Synthetic project and Session lifecycle",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["review"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-MCP-001",
+      "state": "backlog",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Create a workspace MCP server and preserve explicit turn selection through dispatch",
+      "owner": "workspace-catalog",
+      "fixture": "synthetic-stdio-mcp-and-scripted-acp",
+      "fingerprint": "6b0a21b7f13f9d43adfa0ec34d26d4cae3a4a63871a67dbbcad1ea1eb307cba4",
+      "ownerPaths": [
+        "apps/cli/src/agent/session-mcp-resolver.ts",
+        "apps/cli/src/lib/workspace-mcp-store.ts",
+        "apps/cli/src/mcp/",
+        "packages/components/src/components/settings/mcp-setting.tsx",
+        "packages/components/src/hooks/use-session-mcp-selection.ts"
+      ],
+      "actions": [
+        { "id": "settings.openMcpCatalog" },
+        { "id": "mcp.createSyntheticStdioServer" },
+        { "id": "composer.selectMcpServer" },
+        { "id": "session.createCompleted" },
+        { "id": "mcp.deleteServer" }
+      ],
+      "checkpoints": [
+        "workspace MCP catalog write is durable",
+        "driving turn carries the explicit MCP selection into ACP startup",
+        "catalog entry is removed without changing prior turn input"
+      ],
+      "cleanup": ["synthetic MCP process exits", "workspace MCP catalog entry is deleted"],
+      "coverage": {
+        "renderer": "MCP settings and composer selection",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "Catalog persistence and ACP dispatch",
+        "durableState": "Workspace catalog plus turn input selection",
+        "externalWire": "Synthetic stdio MCP and scripted ACP"
+      },
+      "gap": "No desktop journey proves that an explicit MCP selection survives the renderer, IPC, durable turn input, and bundled CLI dispatch boundaries.",
+      "evidence": [
+        "apps/cli/src/agent/session-mcp-resolver.test.ts",
+        "packages/components/src/hooks/use-session-mcp-selection.ts"
+      ],
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-ROLE-001",
+      "state": "backlog",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Create an Agent Role and freeze its execution target into a Session",
+      "owner": "workspace-catalog",
+      "fixture": "scripted-agent-role",
+      "fingerprint": "1f2bc41853b8b774bf33944b5c7319b200f27190b39f4cd0ef2b773009a2772e",
+      "ownerPaths": [
+        "packages/components/src/components/settings/agent-role-form.tsx",
+        "packages/components/src/components/settings/agent-roles-setting.tsx",
+        "packages/components/src/hooks/use-session-agent-role.ts",
+        "packages/components/src/lib/composer-agent-roles.ts"
+      ],
+      "actions": [
+        { "id": "settings.openAgentRoles" },
+        { "id": "role.createDeterministic" },
+        { "id": "composer.selectAgentRole" },
+        { "id": "session.createCompleted" },
+        { "id": "role.editAfterDispatch" },
+        { "id": "role.delete" }
+      ],
+      "checkpoints": [
+        "Role row is durable and selectable",
+        "Session records Role id and revision",
+        "later Role edits do not alter the accepted Session execution target"
+      ],
+      "cleanup": ["Session is permanently deleted", "Agent Role catalog row is deleted"],
+      "coverage": {
+        "renderer": "Agent Role settings and composer selection",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "Frozen dispatch configuration",
+        "durableState": "Role catalog plus Session provenance",
+        "externalWire": "Scripted ACP"
+      },
+      "gap": "No desktop journey spans Agent Role creation, composer selection, accepted-operation freezing, and Session provenance.",
+      "evidence": [
+        "packages/components/src/components/settings/agent-roles-setting.tsx",
+        "packages/components/src/hooks/use-session-agent-role.ts"
+      ],
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session"],
+      "blockedReason": "A deterministic Agent Role revision fixture and stable Settings Page Object actions are not registered yet.",
+      "estimatedMinutes": 7
+    },
+    {
+      "id": "LODY-FORK-001",
+      "state": "backlog",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Fork a completed Session into an independent worktree Session",
+      "owner": "session-lifecycle",
+      "fixture": "synthetic-git-and-scripted-acp",
+      "fingerprint": "35f80dbd4dd21492ab30c54ff6915cc715f210ad78c1659f5d911e01c1d3b8b0",
+      "ownerPaths": [
+        "apps/cli/src/session/session-fork-service.ts",
+        "apps/cli/src/session/session-fork-operation-store.ts",
+        "packages/components/src/components/sessions/session-fork-destination-menu.tsx"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticGit" },
+        { "id": "session.createCompleted" },
+        { "id": "session.forkToWorktree" },
+        { "id": "session.openFork" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "fork retains the completed conversation prefix",
+        "fork records its origin and owns an independent worktree",
+        "source Session remains unchanged when the fork is deleted"
+      ],
+      "cleanup": ["fork ACP process exits", "fork worktree and Session are deleted"],
+      "coverage": {
+        "renderer": "Session fork destination and origin",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Fork operation and recovery markers",
+        "durableState": "Independent Session history and worktree",
+        "externalWire": "Scripted ACP"
+      },
+      "gap": "Fork durability and compensation have Node coverage but no real desktop journey across renderer, IPC, CLI, Git, and persisted history.",
+      "evidence": [
+        "apps/cli/src/session/session-fork-service.test.ts",
+        "packages/components/src/components/sessions/session-fork-destination-menu.tsx"
+      ],
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session", "work"],
+      "blockedReason": null,
+      "estimatedMinutes": 8
+    },
+    {
+      "id": "LODY-SESSION-002",
+      "state": "backlog",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Rename, pin, archive, and restore a local Session",
+      "owner": "session-lifecycle",
+      "fixture": "seeded-local-session",
+      "fingerprint": "846a5f9696ec4ea5751872782a0a4e294aeafcf3ad30687d96ab5bef01964506",
+      "ownerPaths": [
+        "packages/components/src/components/archive/",
+        "packages/components/src/components/sessions/rename-session-dialog.tsx",
+        "packages/components/src/components/sessions/session-pin.tsx",
+        "packages/components/src/lib/archived-session-tree.ts"
+      ],
+      "actions": [
+        { "id": "session.seedLocal" },
+        { "id": "session.rename" },
+        { "id": "session.pin" },
+        { "id": "session.archive" },
+        { "id": "archive.restoreSession" }
+      ],
+      "checkpoints": [
+        "renamed title survives navigation",
+        "pin state is durable",
+        "archived Session can be restored without losing history"
+      ],
+      "cleanup": ["Session is permanently deleted"],
+      "coverage": {
+        "renderer": "Session metadata and Archive UI",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Title, pin, archive, and restore",
+        "externalWire": "None"
+      },
+      "gap": "The current lifecycle deletes an archived Session but never verifies common metadata edits or restoration from Archive.",
+      "evidence": [
+        "packages/components/src/components/sessions/rename-session-dialog.tsx",
+        "packages/components/src/components/archive/archive-view.tsx"
+      ],
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 3,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 3,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadJourneyRegistry, renderCoverage } from './journey-registry.mjs';
 
 const e2eRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const featureDir = join(e2eRoot, 'src', 'features');
@@ -64,7 +65,7 @@ for (const filename of featureFiles) {
 }
 
 const stableIds = new Map();
-const p0StableIds = new Set();
+const scenarioContracts = new Map();
 let p0Count = 0;
 let p1Count = 0;
 for (const pickle of pickles) {
@@ -97,7 +98,11 @@ for (const pickle of pickles) {
   const previous = stableIds.get(id);
   if (previous) fail(`${location} duplicates ${id} already used by ${previous}`);
   stableIds.set(id, `${location} ${pickle.name}`);
-  if (priorities[0] === '@P0') p0StableIds.add(id.slice(1));
+  scenarioContracts.set(id.slice(1), {
+    feature: pickle.uri,
+    priority: priorities[0]?.slice(1),
+    runtime: runtimes[0]?.replace('@runtime-', ''),
+  });
 }
 
 assertIndexed(featureReadmePath, featureFiles, 'feature');
@@ -113,11 +118,49 @@ if (!readFileSync(featureReadmePath, 'utf8').includes(expectedCount)) {
   fail(`src/features/README.md must contain the current count sentence: ${expectedCount}`);
 }
 
-const coverage = readFileSync(coveragePath, 'utf8');
-for (const stableId of p0StableIds) {
-  if (!coverage.includes(`\`${stableId}\``)) {
-    fail(`COVERAGE.md does not include P0 scenario ${stableId}`);
+const registry = loadJourneyRegistry();
+const repositoryRoot = resolve(e2eRoot, '..');
+for (const journey of registry.journeys) {
+  for (const ownerPath of journey.ownerPaths) {
+    if (!existsSync(resolve(repositoryRoot, ownerPath))) {
+      fail(`journeys/registry.json ${journey.id} owner path does not exist: ${ownerPath}`);
+    }
   }
+  for (const evidencePath of journey.evidence ?? []) {
+    if (!existsSync(resolve(repositoryRoot, evidencePath))) {
+      fail(`journeys/registry.json ${journey.id} evidence does not exist: ${evidencePath}`);
+    }
+  }
+}
+const activeJourneys = registry.journeys.filter((journey) => journey.state === 'active');
+const activeIds = new Set(activeJourneys.map((journey) => journey.id));
+for (const journey of activeJourneys) {
+  const contract = scenarioContracts.get(journey.id);
+  if (!contract) {
+    fail(`journeys/registry.json marks ${journey.id} active but no scenario implements it`);
+    continue;
+  }
+  if (contract.priority !== journey.priority) {
+    fail(`${journey.id} uses @${contract.priority} but registry priority is ${journey.priority}`);
+  }
+  if (contract.runtime !== journey.runtime) {
+    fail(
+      `${journey.id} uses @runtime-${contract.runtime} but registry runtime is ${journey.runtime}`
+    );
+  }
+  if (contract.feature !== journey.feature) {
+    fail(`${journey.id} is in ${contract.feature} but registry feature is ${journey.feature}`);
+  }
+}
+for (const stableId of scenarioContracts.keys()) {
+  if (!activeIds.has(stableId)) {
+    fail(`${stableId} has an executable scenario but is not active in journeys/registry.json`);
+  }
+}
+
+const coverage = readFileSync(coveragePath, 'utf8');
+if (coverage !== renderCoverage(registry)) {
+  fail('COVERAGE.md is stale; run `pnpm --filter @lody/e2e journey:coverage`');
 }
 
 for (const markdownPath of [coveragePath, featureReadmePath, stepReadmePath, supportReadmePath]) {

@@ -40,6 +40,8 @@ pnpm e2e:scout:ablation -- --iterations 12
 pnpm e2e:acceptance -- --subject desktop-local-bootstrap
 pnpm e2e:acceptance -- --subject desktop-session-lifecycle \
   --before before.json --after after.json --retained-path retained-path.txt
+pnpm --filter @lody/e2e journey:candidate -- --json
+pnpm --filter @lody/e2e journey:coverage
 ```
 
 `e2e:build` prepares the renderer and synchronized CLI once. The other commands
@@ -52,6 +54,45 @@ Optional before/after JSON and a retained-path summary are copied into the
 round, then covered by its checksummed manifest.
 Scout operation, classification, and triage are specified in
 [the Scout contract](./SCOUT.md).
+
+## Journey registry
+
+[`journeys/registry.json`](./journeys/registry.json) owns both implemented
+journeys and evidence-backed product gaps. `COVERAGE.md` is generated from the
+registry, while the suite checker proves that every active row and executable
+scenario agree on id, priority, runtime, and feature path in both directions.
+
+Candidate selection is deterministic, removes semantic duplicates, skips rows
+with a `blockedReason`, and emits at most one result with a complete score
+breakdown. It accepts frozen discovery signals without changing the registry:
+
+```bash
+pnpm --filter @lody/e2e journey:candidate -- --changed-files changed.txt --json
+pnpm --filter @lody/e2e journey:candidate -- --escaped-defects escaped-ids.txt --json
+pnpm --filter @lody/e2e journey:candidate -- --scout-summary artifacts/scout/ROUND/summary.json --json
+```
+
+Changed files and escaped-defect inputs are newline-delimited. Scout input uses
+the existing `summary.json` schema. These signals only rank registered gaps;
+they never generate selectors, shell commands, or executable product code.
+
+The [scheduled Journey Foundry](../.github/workflows/e2e-journey-author.yml)
+takes one eligible backlog row at a time under the
+[restricted authoring contract](./journeys/AUTHORING.md). Its author can edit
+only a narrow Feature, step, Page Object, fixture, or suite index surface and has
+no repository write credential. A separate no-secret macOS job must reject a
+bounded counterfactual, restore the exact candidate, pass three fresh focused
+runs, and pass the full suite before the trusted reconciler opens a Draft PR.
+Product or test-capability gaps become bot-owned blocking Issues so the next run
+can advance instead of retrying one impossible row forever. Infrastructure
+failures enter an eight-day cooldown and are retried later. Nothing is merged or
+promoted to `@P0` automatically.
+
+Repository owners enable authoring by configuring `OPENAI_API_KEY` and setting
+the repository variable `E2E_JOURNEY_AUTHORING_ENABLED=true`. Until then, the
+weekly and manual workflow exercise selection and attestation without executing
+an author. Manual candidate inspection is available from the root with
+`pnpm e2e:journey:candidate -- --json`.
 
 ## Failure model
 

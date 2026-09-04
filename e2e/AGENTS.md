@@ -21,6 +21,20 @@ also applies.
 
 ## Scenario contract
 
+- `journeys/registry.json` is the machine-readable source of truth for active
+  journeys and evidence-backed gaps. `COVERAGE.md` is generated from it; never
+  edit the matrix by hand. Every executable scenario has exactly one matching
+  `active` registry row with the same id, priority, runtime, and feature path.
+- Backlog scoring is deterministic. A candidate's semantic fingerprint covers
+  its runtime, fixture, ordered actions, checkpoints, and cleanup. Keep blocked
+  gaps in the registry with an actionable `blockedReason`; selection skips them
+  instead of blocking the rest of the queue.
+- Automated authoring claims at most one backlog row per run. The author has no
+  repository write credential and cannot edit product code, harness policy, the
+  registry, or generated coverage. A separate no-secret macOS lane promotes the
+  claimed row in its candidate bundle, proves one assertion ablation fails,
+  restores exact file hashes, runs three fresh focused rounds plus the full suite,
+  and only then permits a trusted publisher to open a Draft PR. It never merges.
 - Every scenario has `@lody`, `@essence`, exactly one of `@P0` or `@P1`,
   exactly one `@runtime-*` owner, and one stable `@LODY-AREA-NNN` id.
 - `@P0` is a short merge-blocking journey. `@P1` is a deeper scheduled or

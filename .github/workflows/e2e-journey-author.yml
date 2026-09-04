@@ -1,0 +1,495 @@
+name: Desktop E2E Journey Author
+
+on:
+  schedule:
+    - cron: '17 3 * * 2'
+  workflow_dispatch:
+    inputs:
+      candidate_id:
+        description: Registry id to claim, or next for deterministic selection
+        required: true
+        default: next
+        type: string
+      budget_minutes:
+        description: Author lease in minutes
+        required: true
+        default: 90
+        type: number
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: desktop-e2e-journey-author
+  cancel-in-progress: false
+
+jobs:
+  author:
+    name: Claim and author one journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    outputs:
+      base-sha: ${{ steps.base.outputs.sha }}
+      disposition: ${{ steps.task.outputs.disposition }}
+      candidate-id: ${{ steps.task.outputs.candidate-id }}
+    steps:
+      - name: Checkout trusted triggering revision without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 50
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Record trusted base
+        id: base
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Collect active claims and evidence signals
+        uses: actions/github-script@v7
+        env:
+          SIGNAL_ROOT: ${{ runner.temp }}/journey-author-signals
+        with:
+          script: |
+            const fs = require('node:fs')
+            fs.mkdirSync(process.env.SIGNAL_ROOT, { recursive: true })
+            const [pulls, issues] = await Promise.all([
+              github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100
+              }),
+              github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100
+              })
+            ])
+            const collect = (items, pattern) => [...new Set(items.flatMap((item) =>
+              [...(item.body ?? '').matchAll(pattern)].map((match) => match[1])
+            ))].sort()
+            const trustedPulls = pulls.filter((pull) =>
+              pull.head.repo?.id === pull.base.repo?.id &&
+              pull.head.ref.startsWith('automation/e2e-journey-')
+            )
+            const escapedIssues = issues.filter((issue) =>
+              !issue.pull_request &&
+              issue.labels.some((label) => (typeof label === 'string' ? label : label.name) === 'needs-desktop-journey')
+            )
+            const scoutIssues = issues.filter((issue) =>
+              !issue.pull_request &&
+              issue.user?.login === 'github-actions[bot]' &&
+              issue.body?.includes('<!-- desktop-e2e-scout-candidate -->')
+            )
+            const blockedIssues = issues.filter((issue) =>
+              !issue.pull_request &&
+              issue.user?.login === 'github-actions[bot]'
+            )
+            const activeCooldowns = [...new Set(blockedIssues.flatMap((issue) =>
+              [...(issue.body ?? '').matchAll(/<!-- lody-e2e-journey-cooldown:(LODY-[A-Z0-9-]+-\d{3}):(\d{4}-\d{2}-\d{2}) -->/g)]
+                .filter((match) => Date.parse(`${match[2]}T00:00:00Z`) > Date.now())
+                .map((match) => match[1])
+            ))]
+            const claimed = [
+              ...collect(trustedPulls, /<!-- lody-e2e-journey-candidate:(LODY-[A-Z0-9-]+-\d{3}) -->/g),
+              ...collect(blockedIssues, /<!-- lody-e2e-journey-blocked:(LODY-[A-Z0-9-]+-\d{3}) -->/g),
+              ...activeCooldowns
+            ].sort()
+            const escaped = collect(escapedIssues, /<!-- lody-e2e-escaped-defect:(LODY-[A-Z0-9-]+-\d{3}) -->/g)
+            const scout = [...new Set(scoutIssues.flatMap((issue) =>
+              [...(issue.body ?? '').matchAll(/^\| (session|review|work) \|/gm)].map((match) => match[1])
+            ))].sort()
+            fs.writeFileSync(`${process.env.SIGNAL_ROOT}/excluded.json`, JSON.stringify(claimed))
+            fs.writeFileSync(`${process.env.SIGNAL_ROOT}/escaped-defects.json`, JSON.stringify(escaped))
+            fs.writeFileSync(`${process.env.SIGNAL_ROOT}/scout-journeys.json`, JSON.stringify(scout))
+
+      - name: Collect recent path signal
+        shell: bash
+        env:
+          SIGNAL_ROOT: ${{ runner.temp }}/journey-author-signals
+        run: |
+          git log --format= --name-only -n 20 HEAD \
+            | sed '/^$/d' \
+            | sort -u \
+            | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(JSON.stringify(s.trim().split(/\\n/).filter(Boolean))))" \
+            > "$SIGNAL_ROOT/changed-files.json"
+
+      - name: Claim deterministic candidate
+        id: task
+        shell: bash
+        env:
+          SIGNAL_ROOT: ${{ runner.temp }}/journey-author-signals
+          AUTHOR_ROOT: ${{ runner.temp }}/journey-author-draft
+          CANDIDATE_ID: ${{ github.event.inputs.candidate_id || 'next' }}
+          BUDGET_MINUTES: ${{ github.event.inputs.budget_minutes || '90' }}
+        run: |
+          mkdir -p "$AUTHOR_ROOT"
+          mkdir -p "$RUNNER_TEMP/journey-author-trusted/.github/scripts"
+          mkdir -p "$RUNNER_TEMP/journey-author-trusted/e2e/scripts"
+          cp .github/scripts/journey-author-package.mjs \
+            "$RUNNER_TEMP/journey-author-trusted/.github/scripts/journey-author-package.mjs"
+          cp e2e/scripts/journey-registry.mjs \
+            "$RUNNER_TEMP/journey-author-trusted/e2e/scripts/journey-registry.mjs"
+          node .github/scripts/journey-author-task.mjs \
+            --registry e2e/journeys/registry.json \
+            --output "$AUTHOR_ROOT/task.json" \
+            --excluded "$SIGNAL_ROOT/excluded.json" \
+            --changed-files "$SIGNAL_ROOT/changed-files.json" \
+            --escaped-defects "$SIGNAL_ROOT/escaped-defects.json" \
+            --scout-journeys "$SIGNAL_ROOT/scout-journeys.json" \
+            --candidate "$CANDIDATE_ID" \
+            --budget-minutes "$BUDGET_MINUTES" \
+            --repository "$GITHUB_REPOSITORY" \
+            --base-ref "${{ github.event.repository.default_branch }}" \
+            --base-sha "${{ steps.base.outputs.sha }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --trigger "$GITHUB_EVENT_NAME"
+          node -e "const t=require(process.env.AUTHOR_ROOT+'/task.json');console.log('disposition='+t.disposition);console.log('candidate-id='+(t.candidate?.id||''))" >> "$GITHUB_OUTPUT"
+
+      # Enable only after configuring the OPENAI_API_KEY secret and setting the
+      # repository variable E2E_JOURNEY_AUTHORING_ENABLED=true.
+      - name: Author the claimed journey
+        id: codex
+        if: steps.task.outputs.disposition == 'claimed' && vars.E2E_JOURNEY_AUTHORING_ENABLED == 'true'
+        continue-on-error: true
+        uses: openai/codex-action@7c168a233489ca36cb495409e8f1fba7b522bb40 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/journey-author-draft/task.json
+          output-file: ${{ runner.temp }}/journey-author-draft/final-message.txt
+          output-schema-file: e2e/journeys/author-result.schema.json
+          working-directory: ${{ github.workspace }}
+          permission-profile: ':workspace'
+          codex-version: 0.153.2
+          model: gpt-5.6-sol
+          effort: high
+          allow-bots: true
+
+      - name: Package authored files without executing them
+        id: package
+        if: steps.task.outputs.disposition == 'claimed' && vars.E2E_JOURNEY_AUTHORING_ENABLED == 'true' && steps.codex.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          AUTHOR_ROOT: ${{ runner.temp }}/journey-author-draft
+        run: |
+          node "$RUNNER_TEMP/journey-author-trusted/.github/scripts/journey-author-package.mjs" package \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$AUTHOR_ROOT/task.json" \
+            --final-message "$AUTHOR_ROOT/final-message.txt" \
+            --output "$AUTHOR_ROOT/candidate.json"
+
+      - name: Classify an author failure
+        if: steps.task.outputs.disposition == 'claimed' && vars.E2E_JOURNEY_AUTHORING_ENABLED == 'true' && (steps.codex.outcome != 'success' || steps.package.outcome != 'success')
+        shell: bash
+        env:
+          AUTHOR_ROOT: ${{ runner.temp }}/journey-author-draft
+        run: |
+          node "$RUNNER_TEMP/journey-author-trusted/.github/scripts/journey-author-package.mjs" block \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$AUTHOR_ROOT/task.json" \
+            --output "$AUTHOR_ROOT/candidate.json" \
+            --code infra \
+            --summary "The author or trusted packaging stage did not complete inside its bounded lane."
+
+      - name: Upload untrusted author bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-journey-draft-${{ github.run_id }}
+          path: ${{ runner.temp }}/journey-author-draft/
+          if-no-files-found: error
+          retention-days: 14
+
+  validate:
+    name: Validate candidate without secrets
+    needs: author
+    if: always() && needs.author.result == 'success'
+    runs-on: macos-15
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact trusted base without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.author.outputs.base-sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Download untrusted author bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-e2e-journey-draft-${{ github.run_id }}
+          path: ${{ runner.temp }}/journey-author-validated
+
+      - name: Inspect candidate disposition
+        id: candidate
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          if [[ ! -f "$BUNDLE_ROOT/candidate.json" ]]; then
+            echo 'status=task-only' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node -e "const c=require(process.env.BUNDLE_ROOT+'/candidate.json');console.log('status='+c.status)" >> "$GITHUB_OUTPUT"
+
+      - name: Apply validated file payload
+        id: apply
+        if: steps.candidate.outputs.status == 'ready'
+        continue-on-error: true
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          node .github/scripts/journey-author-package.mjs apply \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$BUNDLE_ROOT/task.json" \
+            --candidate "$BUNDLE_ROOT/candidate.json"
+
+      - name: Promote the claimed registry row and regenerate coverage
+        id: promote
+        if: steps.apply.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          node .github/scripts/journey-author-package.mjs promote \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$BUNDLE_ROOT/task.json" \
+            --candidate "$BUNDLE_ROOT/candidate.json" \
+            --output "$BUNDLE_ROOT/candidate.promoted.json"
+          mv "$BUNDLE_ROOT/candidate.promoted.json" "$BUNDLE_ROOT/candidate.json"
+
+      - name: Setup pnpm
+        if: steps.promote.outcome == 'success'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: steps.promote.outcome == 'success'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        id: install
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+
+      - name: Check journey contracts
+        id: contract
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: pnpm e2e:check
+
+      - name: Build OSS desktop and bundled CLI
+        id: build
+        if: steps.contract.outcome == 'success'
+        continue-on-error: true
+        run: pnpm e2e:build
+
+      - name: Apply bounded counterfactual
+        id: ablate-file
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          node .github/scripts/journey-author-package.mjs ablate \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$BUNDLE_ROOT/task.json" \
+            --candidate "$BUNDLE_ROOT/candidate.json"
+
+      - name: Prove the key checkpoint rejects the counterfactual
+        id: counterfactual
+        if: steps.ablate-file.outcome == 'success'
+        continue-on-error: true
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+          LODY_ACCEPTANCE_ROUND_ID: journey-${{ github.run_id }}-counterfactual
+        run: |
+          set -o pipefail
+          pnpm --filter @lody/e2e exec cucumber-js --config cucumber.mjs --tags "@${{ needs.author.outputs.candidate-id }}" \
+            2>&1 | tee "$BUNDLE_ROOT/counterfactual.log"
+
+      - name: Restore checksummed candidate after counterfactual
+        id: restore
+        if: always() && steps.ablate-file.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          node .github/scripts/journey-author-package.mjs restore \
+            --root "$GITHUB_WORKSPACE" \
+            --task "$BUNDLE_ROOT/task.json" \
+            --candidate "$BUNDLE_ROOT/candidate.json"
+
+      - name: Verify the counterfactual failed at the selected checkpoint
+        id: counterfactual-evidence
+        if: steps.counterfactual.outcome == 'failure' && steps.restore.outcome == 'success'
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = process.env.BUNDLE_ROOT
+          const candidate = JSON.parse(fs.readFileSync(path.join(root, 'candidate.json'), 'utf8'))
+          const log = fs.readFileSync(path.join(root, 'counterfactual.log'), 'utf8')
+          if (!log.includes(candidate.ablation.expectedFailure)) {
+            throw new Error('Counterfactual failed outside the selected checkpoint')
+          }
+          NODE
+
+      - name: Focused validation round 1
+        id: round1
+        if: steps.counterfactual-evidence.outcome == 'success'
+        continue-on-error: true
+        env:
+          LODY_ACCEPTANCE_ROUND_ID: journey-${{ github.run_id }}-1
+        run: pnpm --filter @lody/e2e exec cucumber-js --config cucumber.mjs --tags "@${{ needs.author.outputs.candidate-id }}"
+
+      - name: Focused validation round 2
+        id: round2
+        if: steps.round1.outcome == 'success'
+        continue-on-error: true
+        env:
+          LODY_ACCEPTANCE_ROUND_ID: journey-${{ github.run_id }}-2
+        run: pnpm --filter @lody/e2e exec cucumber-js --config cucumber.mjs --tags "@${{ needs.author.outputs.candidate-id }}"
+
+      - name: Focused validation round 3
+        id: round3
+        if: steps.round2.outcome == 'success'
+        continue-on-error: true
+        env:
+          LODY_ACCEPTANCE_ROUND_ID: journey-${{ github.run_id }}-3
+        run: pnpm --filter @lody/e2e exec cucumber-js --config cucumber.mjs --tags "@${{ needs.author.outputs.candidate-id }}"
+
+      - name: Full desktop regression
+        id: full
+        if: steps.round3.outcome == 'success'
+        continue-on-error: true
+        run: pnpm e2e:full
+
+      - name: Verify the restored patch exactly matches the bundle
+        id: patch
+        if: steps.full.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          git diff --check
+          node <<'NODE'
+          const crypto = require('node:crypto')
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const candidate = JSON.parse(fs.readFileSync(path.join(process.env.BUNDLE_ROOT, 'candidate.json'), 'utf8'))
+          for (const file of candidate.files) {
+            const body = fs.readFileSync(file.path)
+            const digest = crypto.createHash('sha256').update(body).digest('hex')
+            if (body.length !== file.bytes || digest !== file.sha256) throw new Error(`Restored patch mismatch: ${file.path}`)
+          }
+          NODE
+
+      - name: Preserve validation evidence
+        if: always()
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: |
+          if [[ -d e2e/artifacts ]]; then
+            mkdir -p "$BUNDLE_ROOT/evidence"
+            cp -R e2e/artifacts/. "$BUNDLE_ROOT/evidence/"
+          fi
+
+      - name: Write validation attestation
+        if: always()
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+          CANDIDATE_STATUS: ${{ steps.candidate.outputs.status }}
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          CONTRACT_OUTCOME: ${{ steps.contract.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          ABLATE_FILE_OUTCOME: ${{ steps.ablate-file.outcome }}
+          COUNTERFACTUAL_OUTCOME: ${{ steps.counterfactual.outcome }}
+          COUNTERFACTUAL_EVIDENCE_OUTCOME: ${{ steps.counterfactual-evidence.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+          ROUND1_OUTCOME: ${{ steps.round1.outcome }}
+          ROUND2_OUTCOME: ${{ steps.round2.outcome }}
+          ROUND3_OUTCOME: ${{ steps.round3.outcome }}
+          FULL_OUTCOME: ${{ steps.full.outcome }}
+          PATCH_OUTCOME: ${{ steps.patch.outcome }}
+        run: |
+          node <<'NODE'
+          const crypto = require('node:crypto')
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = process.env.BUNDLE_ROOT
+          const task = JSON.parse(fs.readFileSync(path.join(root, 'task.json'), 'utf8'))
+          const candidatePath = path.join(root, 'candidate.json')
+          const candidate = fs.existsSync(candidatePath) ? JSON.parse(fs.readFileSync(candidatePath, 'utf8')) : null
+          const checks = {
+            apply: process.env.APPLY_OUTCOME || 'skipped',
+            promote: process.env.PROMOTE_OUTCOME || 'skipped',
+            install: process.env.INSTALL_OUTCOME || 'skipped',
+            contract: process.env.CONTRACT_OUTCOME || 'skipped',
+            build: process.env.BUILD_OUTCOME || 'skipped',
+            ablateFile: process.env.ABLATE_FILE_OUTCOME || 'skipped',
+            counterfactual: process.env.COUNTERFACTUAL_OUTCOME || 'skipped',
+            counterfactualEvidence: process.env.COUNTERFACTUAL_EVIDENCE_OUTCOME || 'skipped',
+            restore: process.env.RESTORE_OUTCOME || 'skipped',
+            focusedRound1: process.env.ROUND1_OUTCOME || 'skipped',
+            focusedRound2: process.env.ROUND2_OUTCOME || 'skipped',
+            focusedRound3: process.env.ROUND3_OUTCOME || 'skipped',
+            full: process.env.FULL_OUTCOME || 'skipped',
+            patch: process.env.PATCH_OUTCOME || 'skipped'
+          }
+          const requiredSuccess = ['apply', 'promote', 'install', 'contract', 'build', 'ablateFile', 'counterfactualEvidence', 'restore', 'focusedRound1', 'focusedRound2', 'focusedRound3', 'full', 'patch']
+          const passed = candidate?.status === 'ready' && requiredSuccess.every((key) => checks[key] === 'success') && checks.counterfactual === 'failure'
+          const core = {
+            schemaVersion: 1,
+            kind: 'lody-e2e-journey-validation-attestation',
+            status: passed ? 'passed' : (candidate?.status === 'blocked' ? 'blocked' : process.env.CANDIDATE_STATUS === 'task-only' ? 'task-only' : 'failed'),
+            repository: process.env.GITHUB_REPOSITORY,
+            workflowRunId: process.env.GITHUB_RUN_ID,
+            baseSha: task.baseSha,
+            candidateId: task.candidate?.id ?? null,
+            taskDigest: task.digest,
+            candidateDigest: candidate?.digest ?? null,
+            checks,
+            finishedAt: new Date().toISOString()
+          }
+          const digest = crypto.createHash('sha256').update(JSON.stringify(core)).digest('hex')
+          fs.writeFileSync(path.join(root, 'attestation.json'), `${JSON.stringify({ ...core, digest }, null, 2)}\n`)
+          NODE
+
+      - name: Upload validated candidate and attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-journey-validated-${{ github.run_id }}
+          path: ${{ runner.temp }}/journey-author-validated/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce validation result
+        if: always() && steps.candidate.outputs.status == 'ready'
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ runner.temp }}/journey-author-validated
+        run: node -e "const a=require(process.env.BUNDLE_ROOT+'/attestation.json');if(a.status!=='passed')process.exit(1)"
