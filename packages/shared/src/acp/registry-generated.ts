@@ -418,16 +418,16 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
   {
     id: 'factory-droid',
     name: 'Factory Droid',
-    version: '0.208.2',
+    version: '0.212.0',
     description: 'Factory Droid - AI coding agent powered by Factory AI',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/factory-droid.svg',
     distribution: {
       npx: {
-        package: 'droid@0.208.2',
+        package: 'droid@0.212.0',
         args: [
           'exec',
           '--output-format',
-          'acp-daemon'
+          'acp'
         ],
         env: {
           DROID_DISABLE_AUTO_UPDATE: 'true',
