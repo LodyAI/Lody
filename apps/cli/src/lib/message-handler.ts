@@ -3196,9 +3196,14 @@ export class MessageHandler {
       workspaceDocument: this.workspaceDocument,
       machineId: this.machineId,
       workspaceId: this.workspaceId,
-      userId: this.userId,
       authToken: () => this.token,
       remoteGatewayUrl: this.cloudPort.remotePreview?.gatewayBaseUrl ?? null,
+      verifyPreviewRequest: async (args) =>
+        await this.cloudPort.access.verifyPreviewRequest({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          ...args,
+        }),
     });
     const streamsTokens = this.cloudPort.streamsTokens;
     if (streamsTokens) {
@@ -3420,6 +3425,8 @@ export class MessageHandler {
         createSessionPreview: async ({
           sessionId,
           requestedByUserId,
+          requestId,
+          requestToken,
           target,
           approval,
           replaceExisting,
@@ -3430,6 +3437,8 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             sessionId,
             requestedByUserId,
+            requestId,
+            requestToken,
             target,
             approval,
             replaceExisting,
@@ -3569,8 +3578,7 @@ export class MessageHandler {
     try {
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const supportsStreamsRpc = !!this.machineRpcServer;
 
       const hasMeta = !!machineMeta;
@@ -4068,8 +4076,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToArchiveSessions?.[sessionId]) {
       if (!removedFlockRow) {
         this.logger.debug(`[archive] Archive request already cleared (${sessionId})`);
@@ -4640,8 +4647,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToDeleteSessions?.[sessionId]) {
       if (removedFlockRow || removedLaunchConfigRow) {
         this.logger.debug(`[delete] Delete Flock request removed (${sessionId})`);
@@ -6078,8 +6084,7 @@ export class MessageHandler {
 
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const existingName = machineMeta?.name?.trim();
       // The CLI startup name is only a bootstrap default. Settings-page renames own the
       // persisted display name, so reconnect/registration must not overwrite synced edits.

@@ -627,6 +627,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
       typeof value.requestedByUserId === 'string' &&
+      typeof value.requestId === 'string' &&
+      value.requestId.trim().length > 0 &&
+      typeof value.requestToken === 'string' &&
+      value.requestToken.trim().length > 0 &&
       isPreviewTarget(value.target) &&
       isPreviewApproval(value.approval) &&
       (typeof value.replaceExisting === 'undefined' || typeof value.replaceExisting === 'boolean')

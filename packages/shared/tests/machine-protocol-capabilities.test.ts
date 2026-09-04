@@ -4,6 +4,8 @@ import {
   ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   MACHINE_PROTOCOL_CAPABILITIES,
+  SIGNED_PREVIEW_REQUESTS_PROTOCOL_VERSION,
+  machineSupportsSignedPreviewRequests,
   machineSupportsAcpAuthenticationInteractionsProtocol,
 } from '../src/machine-protocol-capabilities';
 
@@ -19,6 +21,18 @@ describe('ACP authentication interaction protocol capability', () => {
         protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       })
     ).toBe(true);
+  });
+
+  it('advertises and negotiates signed preview requests', () => {
+    expect(
+      CURRENT_MACHINE_PROTOCOL_CAPABILITIES[MACHINE_PROTOCOL_CAPABILITIES.signedPreviewRequests]
+    ).toBe(SIGNED_PREVIEW_REQUESTS_PROTOCOL_VERSION);
+    expect(
+      machineSupportsSignedPreviewRequests({
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      })
+    ).toBe(true);
+    expect(machineSupportsSignedPreviewRequests({ protocolCapabilities: {} })).toBe(false);
   });
 
   it('treats a missing or older capability as unsupported', () => {

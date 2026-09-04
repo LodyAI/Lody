@@ -28,6 +28,7 @@ import { NotificationService } from './notifications';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage/usage-tracking-service';
 import { GitHubTokenManager } from './github-token-manager';
 import { submitBugReportFromMachine } from './bug-report';
+import { verifyPreviewRequestWithCloud } from './preview-authorization';
 
 type WorkspaceListResult =
   | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
@@ -103,6 +104,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     logger: options.logger,
   });
   const billing = createCloudBillingPort({ token: options.token });
+  const fetchImpl = getCliHttpFetch({ logger: options.logger });
 
   return {
     kind: 'cloud',
@@ -136,6 +138,13 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
           localProjectId: request.localProjectId,
         });
       },
+      verifyPreviewRequest: async (request) =>
+        await verifyPreviewRequestWithCloud({
+          siteUrl: authSiteUrl,
+          cliToken: options.token,
+          request,
+          fetchImpl,
+        }),
       registerMachineAccess: async (request) => {
         await registerMachineAccessForCliToken({
           token: options.token,

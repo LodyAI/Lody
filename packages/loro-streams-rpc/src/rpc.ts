@@ -513,6 +513,8 @@ export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.ext
     .object({
       sessionId: z.string().trim().min(1),
       requestedByUserId: z.string().trim().min(1),
+      requestId: z.string().trim().min(1),
+      requestToken: z.string().trim().min(1),
       target: PreviewTargetSchema,
       approval: z
         .object({
@@ -2877,6 +2879,8 @@ export class LoroStreamsMachineRpcClient {
   async requestSessionPreviewCreate(options: {
     sessionId: string;
     requestedByUserId: string;
+    requestId: string;
+    requestToken: string;
     target: PreviewTarget;
     approval: PreviewTargetApproval;
     replaceExisting?: boolean;
@@ -2888,6 +2892,8 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         requestedByUserId: options.requestedByUserId,
+        requestId: options.requestId,
+        requestToken: options.requestToken,
         target: options.target,
         approval: options.approval,
         replaceExisting: options.replaceExisting,
@@ -3174,6 +3180,8 @@ export class LoroStreamsMachineRpcClient {
           params: {
             sessionId: string;
             requestedByUserId: string;
+            requestId: string;
+            requestToken: string;
             target: PreviewTarget;
             approval: PreviewTargetApproval;
             replaceExisting?: boolean;

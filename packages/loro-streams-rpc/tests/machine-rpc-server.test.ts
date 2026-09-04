@@ -2240,6 +2240,8 @@ describe('LoroStreamsMachineRpcServer', () => {
           params: {
             sessionId: 'session-1',
             requestedByUserId: 'user-1',
+            requestId: 'preview-request-1',
+            requestToken: 'signed-preview-token',
             target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
             approval: {
               source: 'browser_address',
@@ -2265,6 +2267,8 @@ describe('LoroStreamsMachineRpcServer', () => {
     expect(createSessionPreview).toHaveBeenCalledWith({
       sessionId,
       requestedByUserId: 'user-1',
+      requestId: 'preview-request-1',
+      requestToken: 'signed-preview-token',
       target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
       approval: {
         source: 'browser_address',

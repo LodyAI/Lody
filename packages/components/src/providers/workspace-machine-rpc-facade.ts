@@ -815,7 +815,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestedByUserId: string,
     target: PreviewTarget,
     approval: PreviewTargetApproval,
-    options?: { replaceExisting?: boolean; timeoutMs?: number }
+    options: {
+      requestId: string;
+      requestToken: string;
+      replaceExisting?: boolean;
+      timeoutMs?: number;
+    }
   ): Promise<SessionPreviewCreateResponse | null> => {
     try {
       return await (
@@ -823,6 +828,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       ).requestSessionPreviewCreate({
         sessionId,
         requestedByUserId,
+        requestId: options.requestId,
+        requestToken: options.requestToken,
         target,
         approval,
         replaceExisting: options?.replaceExisting,

@@ -8,6 +8,7 @@ import type {
   ACPSessionId,
   BillingPlanTier,
   MachineId,
+  PreviewTarget,
   SessionId,
   WorkspaceId,
   createLoroStreamsTokenProvider,
@@ -91,6 +92,24 @@ export type MachineAccessVerdict =
   | { allowed: true }
   | { allowed: false; reason: MachineAccessDenyReason };
 
+export interface PreviewRequestVerificationRequest {
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  sessionId: SessionId;
+  requesterUserId: string;
+  requestId: string;
+  requestToken: string;
+  target: PreviewTarget;
+  replaceExisting: boolean;
+  expectedGrantId?: string;
+  localProjectId?: string;
+}
+
+export type PreviewRequestVerification =
+  | { outcome: 'allowed' }
+  | { outcome: 'denied'; reason: MachineAccessDenyReason }
+  | { outcome: 'indeterminate'; cause: 'network' | 'auth'; error: string };
+
 export type CloudAccessSnapshot =
   | {
       status: 'authorized';
@@ -112,6 +131,10 @@ export interface CloudAccessPort {
     onError: (error: unknown) => void
   ): () => void;
   verifyMachineAccess(request: MachineAccessRequest): Promise<MachineAccessVerdict>;
+  /** Verifies a browser-authenticated, request-bound preview attestation. */
+  verifyPreviewRequest(
+    request: PreviewRequestVerificationRequest
+  ): Promise<PreviewRequestVerification>;
   registerMachineAccess(request: MachineAccessRegistration): Promise<void>;
   resolveWorkspaceUser(request: {
     workspaceId: WorkspaceId;

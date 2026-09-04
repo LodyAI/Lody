@@ -18,12 +18,13 @@ import type {
 } from '@lody/shared';
 import { getMachineRoomId } from '@lody/shared';
 
-import { runtimeAtom, userAtom, type WorkspaceRuntime } from '../src/atoms';
+import { authTokenAtom, runtimeAtom, userAtom, type WorkspaceRuntime } from '../src/atoms';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { SessionBrowserPanel } from '../src/components/sessions/session-browser-panel';
 import { clearSessionBrowserResumeState } from '../src/components/sessions/session-browser-resume-state';
 
 const publicBrowserSurfaceRender = vi.hoisted(() => vi.fn());
+const mintPreviewRequestTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -71,6 +72,10 @@ vi.mock('../src/lib/clipboard', () => ({
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('../src/lib/preview-authorization-api', () => ({
+  mintPreviewRequestToken: mintPreviewRequestTokenMock,
 }));
 
 const session: SessionMeta = {
@@ -240,6 +245,12 @@ describe('SessionBrowserPanel controller', () => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    mintPreviewRequestTokenMock.mockReset();
+    mintPreviewRequestTokenMock.mockResolvedValue({
+      ok: true,
+      requestToken: 'signed-preview-token',
+      requesterUserId: 'user-1',
+    });
   });
 
   afterEach(async () => {
@@ -258,21 +269,23 @@ describe('SessionBrowserPanel controller', () => {
     options?: {
       candidateNavigationRequestId?: number;
       machineName?: string;
+      supportsSignedPreviewRequests?: boolean;
       panelSession?: SessionMeta;
       onCandidateNavigationRequestHandled?: (requestId: number) => void;
     }
   ) => {
     const store = createStore();
     store.set(userAtom, { id: 'user-1', name: 'Browser User', email: 'browser@example.com' });
+    store.set(authTokenAtom, 'browser-session-token');
     store.set(runtimeAtom, runtime);
-    if (options?.machineName) {
-      store.set(machineMetaCacheAtom, {
-        [getMachineRoomId(session.machineId)]: {
-          id: session.machineId,
-          name: options.machineName,
-        } as MachineMeta,
-      });
-    }
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(session.machineId)]: {
+        id: session.machineId,
+        ...(options?.machineName ? { name: options.machineName } : {}),
+        protocolCapabilities:
+          options?.supportsSignedPreviewRequests === false ? {} : { signedPreviewRequests: 1 },
+      } as MachineMeta,
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -438,7 +451,22 @@ describe('SessionBrowserPanel controller', () => {
         target: localTarget,
         confirmedByUserId: 'user-1',
       }),
-      expect.objectContaining({ replaceExisting: false })
+      expect.objectContaining({
+        requestId: expect.any(String),
+        requestToken: 'signed-preview-token',
+        replaceExisting: false,
+      })
+    );
+    expect(mintPreviewRequestTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: 'workspace-browser-id',
+        machineId: session.machineId,
+        sessionId: session.id,
+        target: localTarget,
+        replaceExisting: false,
+        requestId: expect.any(String),
+        sessionToken: 'browser-session-token',
+      })
     );
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
   });
@@ -480,6 +508,22 @@ describe('SessionBrowserPanel controller', () => {
     );
   });
 
+  it('does not mint or send a preview request to a legacy daemon', async () => {
+    const testRuntime = createRuntime({ plane: 'cloud' });
+    const rendered = await renderPanel(testRuntime.runtime, {
+      supportsSignedPreviewRequests: false,
+    });
+
+    await enterAddress(rendered, 'http://127.0.0.1:5173');
+    await confirmDialog();
+
+    expect(mintPreviewRequestTokenMock).not.toHaveBeenCalled();
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      'Update the target machine before creating a shared preview.'
+    );
+  });
+
   it('opens a reported candidate from the composer bar and creates its tunnel directly', async () => {
     const onCandidateNavigationRequestHandled = vi.fn();
     const testRuntime = createRuntime({
@@ -511,7 +555,11 @@ describe('SessionBrowserPanel controller', () => {
         target: localTarget,
         confirmedByUserId: 'user-1',
       }),
-      expect.objectContaining({ replaceExisting: false })
+      expect.objectContaining({
+        requestId: expect.any(String),
+        requestToken: 'signed-preview-token',
+        replaceExisting: false,
+      })
     );
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledOnce();
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();

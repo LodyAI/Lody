@@ -225,6 +225,8 @@ export type SessionPreviewCreateRequest = {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   requestedByUserId: string;
+  requestId: string;
+  requestToken: string;
   target: PreviewTarget;
   approval: PreviewTargetApproval;
   replaceExisting?: boolean;

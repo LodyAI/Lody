@@ -340,7 +340,12 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     target: PreviewTarget,
     approval: PreviewTargetApproval,
-    options?: { replaceExisting?: boolean; timeoutMs?: number }
+    options: {
+      requestId: string;
+      requestToken: string;
+      replaceExisting?: boolean;
+      timeoutMs?: number;
+    }
   ) => Promise<SessionPreviewCreateResponse | null>;
   resolveMachineTargetPlane: (
     machineId: MachineId,

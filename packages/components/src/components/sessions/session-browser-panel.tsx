@@ -7,6 +7,7 @@ import {
   formatPreviewTargetUrl,
   getServerNow,
   getSessionPreviewLegacyFields,
+  machineSupportsSignedPreviewRequests,
   parseBrowserAddress,
   type BrowserAddress,
   type ElectronPublicBrowserState,
@@ -21,7 +22,7 @@ import {
   type VisualAnnotationReferencePayload,
 } from '@lody/shared';
 
-import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
+import { activeWorkspaceRuntimeAtom, authTokenAtom, userAtom } from '@/atoms';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { Button } from '@/ui/button';
 import {
@@ -40,6 +41,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { hasUsableManagedPreviewUrl } from '@/lib/managed-preview-connection';
+import { mintPreviewRequestToken } from '@/lib/preview-authorization-api';
 import { buildManagedViewerUrl, samePreviewTargetOrigin } from '@/lib/session-browser-url';
 import { cn } from '@/lib/utils';
 import { ManagedPreviewSurface } from './managed-preview-surface';
@@ -92,6 +94,11 @@ const approvalFor = (
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const createPreviewRequestId = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 export function SessionBrowserPanel(props: SessionBrowserPanelProps) {
   return <SessionBrowserPanelController key={props.session.id} {...props} />;
 }
@@ -109,6 +116,7 @@ function SessionBrowserPanelController({
 }: SessionBrowserPanelProps) {
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const authToken = useAtomValue(authTokenAtom);
   const user = useAtomValue(userAtom);
   const sessionMachine = useAtomValue(getMachineMetaByIdAtomFamily(session.machineId));
   const sessionDoc = useSessionDoc(session.id);
@@ -326,7 +334,7 @@ function SessionBrowserPanelController({
       source: PreviewTargetApproval['source'],
       options: { historyIndex?: number; activateViewer?: boolean }
     ): Promise<{ publicUrl: string; viewerUrl: string } | null> => {
-      if (!runtime || !user?.id) {
+      if (!runtime || !authToken) {
         setError(
           t(
             'sessions.browser.errors.runtimeUnavailable',
@@ -335,17 +343,46 @@ function SessionBrowserPanelController({
         );
         return null;
       }
+      if (!machineSupportsSignedPreviewRequests(sessionMachine)) {
+        setError('Update the target machine before creating a shared preview.');
+        return null;
+      }
       const connection = effectivePreview.connection;
+      const replaceExisting =
+        connection?.status === 'active' && !samePreviewTargetOrigin(connection.target, next.target);
+      const expectedGrantId = connection?.grantId;
+      if (replaceExisting && !expectedGrantId) {
+        setError('The existing preview is missing its grant identity. Revoke it and try again.');
+        return null;
+      }
+      const requestId = createPreviewRequestId();
+      const minted = await mintPreviewRequestToken({
+        workspaceId: runtime.workspaceId,
+        machineId: session.machineId,
+        sessionId: session.id,
+        target: next.target,
+        replaceExisting,
+        ...(expectedGrantId ? { expectedGrantId } : {}),
+        requestId,
+        ...(session.project?.kind === 'local'
+          ? { localProjectId: session.project.localProjectId }
+          : {}),
+        sessionToken: authToken,
+      });
+      if (!minted.ok) {
+        setError(minted.error);
+        return null;
+      }
       const response = await runtime.requestSessionPreviewCreate(
         session.machineId,
         session.id,
-        user.id,
+        minted.requesterUserId,
         next.target,
-        approvalFor(next, user.id, source),
+        approvalFor(next, minted.requesterUserId, source),
         {
-          replaceExisting:
-            connection?.status === 'active' &&
-            !samePreviewTargetOrigin(connection.target, next.target),
+          requestId,
+          requestToken: minted.requestToken,
+          replaceExisting,
         }
       );
       if (!response) {
@@ -380,12 +417,14 @@ function SessionBrowserPanelController({
     },
     [
       commitOpenedAddress,
+      authToken,
       effectivePreview.connection,
       runtime,
       session.id,
       session.machineId,
+      session.project,
+      sessionMachine,
       t,
-      user?.id,
     ]
   );
 
@@ -713,12 +752,14 @@ function SessionBrowserPanelController({
       publicState?.canGoBack &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.back(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.back(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack) {
@@ -741,12 +782,14 @@ function SessionBrowserPanelController({
       publicState?.canGoForward &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.forward(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.forward(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward) {
@@ -765,12 +808,14 @@ function SessionBrowserPanelController({
 
   const handleReload = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.reload(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.reload(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (viewerUrl) {
@@ -788,12 +833,14 @@ function SessionBrowserPanelController({
 
   const handleStop = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.stop(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.stop(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && annotationAvailable) {

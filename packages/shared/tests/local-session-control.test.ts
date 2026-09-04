@@ -599,6 +599,31 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
   });
 
+  it('requires signed request fields for preview creation in ts and cjs validators', () => {
+    const request = {
+      type: 'session/preview-create' as const,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      requestedByUserId: 'user-1',
+      requestId: 'request-1',
+      requestToken: 'signed-preview-token',
+      target: { protocol: 'http' as const, host: '127.0.0.1', port: 5173 },
+      approval: {
+        source: 'browser_address' as const,
+        targetClass: 'loopback' as const,
+        target: { protocol: 'http' as const, host: '127.0.0.1', port: 5173 },
+        confirmedByUserId: 'user-1',
+        confirmedAt: 1000,
+      },
+    };
+
+    expect(isLocalSessionControlRequest(request)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+    expect(isLocalSessionControlRequest({ ...request, requestToken: '' })).toBe(false);
+    expect(isLocalSessionControlRequestCjs({ ...request, requestId: '' })).toBe(false);
+  });
+
   it('accepts preview responses in ts and cjs validators', () => {
     const response = {
       type: 'session/preview-create_response' as const,

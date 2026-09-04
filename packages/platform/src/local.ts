@@ -106,6 +106,8 @@ export function createLocalCloudPort(options: LocalCloudPortOptions): CloudPort 
             ? { allowed: true }
             : { allowed: false, reason: 'requester_not_member' }
         ),
+      verifyPreviewRequest: () =>
+        Promise.resolve({ outcome: 'denied', reason: 'not_visible' as const }),
       registerMachineAccess: () => Promise.resolve(),
       resolveWorkspaceUser: (request) =>
         Promise.resolve(request.userId === identity.userId ? { id: identity.userId } : null),

@@ -33,6 +33,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { PreviewRequestVerification } from '@lody/platform';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { withFileLock } from '@/utils/file-lock';
@@ -55,9 +56,18 @@ type PreviewServiceDeps = {
   workspaceDocument: LoroDocumentManager;
   machineId: MachineId;
   workspaceId: WorkspaceId;
-  userId: string;
   authToken: () => string;
   remoteGatewayUrl: string | null;
+  verifyPreviewRequest: (args: {
+    requesterUserId: string;
+    sessionId: SessionId;
+    requestId: string;
+    requestToken: string;
+    target: PreviewTarget;
+    replaceExisting: boolean;
+    expectedGrantId?: string;
+    localProjectId?: string;
+  }) => Promise<PreviewRequestVerification>;
   now?: () => number;
 };
 
@@ -90,6 +100,8 @@ const PREVIEW_REGISTRY_FILE = path.join(getLodyDataDir(), 'preview-tunnels.json'
 const PREVIEW_REGISTRY_FUTURE_SKEW_MS = 60_000;
 const PREVIEW_APPROVAL_MAX_AGE_MS = 5 * 60 * 1000;
 const PREVIEW_APPROVAL_FUTURE_SKEW_MS = 60 * 1000;
+const PREVIEW_CREATE_REQUEST_CACHE_MS = 5 * 60 * 1000;
+const PREVIEW_CREATE_REQUEST_CACHE_MAX = 512;
 
 const normalizeHost = (host: string): string => {
   const trimmed = host.trim().toLowerCase();
@@ -385,8 +397,20 @@ const summarizePreviewConnectionForMeta = (
 
 export class PreviewService {
   private readonly activeTunnels = new Map<SessionId, PreviewTunnelHandle>();
+  private readonly activeTunnelGrantIds = new Map<SessionId, string>();
   private readonly activeRegistryKeys = new Map<SessionId, string>();
   private readonly previewCreateAttempts: number[] = [];
+  private readonly previewCreateRequests = new Map<
+    string,
+    {
+      fingerprint: string;
+      createdAt: number;
+      completed: boolean;
+      response: Promise<SessionPreviewCreateResponse>;
+    }
+  >();
+  private readonly previewSessionTransitionTails = new Map<SessionId, Promise<void>>();
+  private isClosingForCleanup = false;
   private readonly localProxyManager: LocalPreviewProxyManager;
 
   constructor(private readonly deps: PreviewServiceDeps) {
@@ -467,6 +491,96 @@ export class PreviewService {
   }
 
   async createPreview(request: SessionPreviewCreateRequest): Promise<SessionPreviewCreateResponse> {
+    if (this.isClosingForCleanup) {
+      return this.rejectCreate(request.sessionId, {
+        code: 'grant_denied',
+        message: 'Preview service is shutting down.',
+        retryable: true,
+      });
+    }
+
+    const now = this.now();
+    for (const [requestId, entry] of this.previewCreateRequests) {
+      if (entry.createdAt < now - PREVIEW_CREATE_REQUEST_CACHE_MS) {
+        this.previewCreateRequests.delete(requestId);
+      }
+    }
+
+    const fingerprint = JSON.stringify(request);
+    const existing = this.previewCreateRequests.get(request.requestId);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        return this.rejectCreate(request.sessionId, {
+          code: 'grant_denied',
+          message: 'This preview request id was already used for a different request.',
+          retryable: false,
+        });
+      }
+      if (!existing.completed) {
+        return await existing.response;
+      }
+      return await this.runSerializedPreviewOperation(request.sessionId, async () => {
+        const session = await this.getSessionMeta(request.sessionId);
+        return this.rejectCreate(
+          request.sessionId,
+          {
+            code: 'grant_denied',
+            message: 'This preview request was already processed.',
+            retryable: false,
+          },
+          session.ok ? session.meta.previewConnection : undefined
+        );
+      });
+    }
+    if (this.previewCreateRequests.size >= PREVIEW_CREATE_REQUEST_CACHE_MAX) {
+      return this.rejectCreate(request.sessionId, {
+        code: 'resource_limit_exceeded',
+        message: 'Too many preview requests are pending. Try again shortly.',
+        retryable: true,
+      });
+    }
+
+    const response = this.runSerializedPreviewOperation(request.sessionId, async () =>
+      this.createPreviewOnce(request)
+    );
+    this.previewCreateRequests.set(request.requestId, {
+      fingerprint,
+      createdAt: now,
+      completed: false,
+      response,
+    });
+    const markCompleted = () => {
+      const stored = this.previewCreateRequests.get(request.requestId);
+      if (stored?.response === response) stored.completed = true;
+    };
+    void response.then(markCompleted, markCompleted);
+    return await response;
+  }
+
+  private async runSerializedPreviewOperation<Result>(
+    sessionId: SessionId,
+    operation: () => Promise<Result>
+  ): Promise<Result> {
+    const previous = this.previewSessionTransitionTails.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.previewSessionTransitionTails.set(sessionId, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.previewSessionTransitionTails.get(sessionId) === tail) {
+        this.previewSessionTransitionTails.delete(sessionId);
+      }
+    }
+  }
+
+  private async createPreviewOnce(
+    request: SessionPreviewCreateRequest
+  ): Promise<SessionPreviewCreateResponse> {
     const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
     if (scopeFailure) {
       return {
@@ -481,16 +595,15 @@ export class PreviewService {
     const session = await this.getSessionMeta(request.sessionId);
     const now = this.now();
     if (!session.ok) {
-      return this.failCreate(request.sessionId, session.failure, now);
+      return this.rejectCreate(request.sessionId, session.failure);
     }
-
-    if (request.requestedByUserId !== session.meta.userId) {
-      const failure: ValidationFailure = {
-        code: 'grant_denied',
-        message: 'Only the session initiator can approve a team preview in v1.',
+    const existing = session.meta.previewConnection;
+    if (request.replaceExisting && existing?.status !== 'active') {
+      return this.rejectCreate(request.sessionId, {
+        code: 'target_changed',
+        message: 'The preview selected for replacement is no longer active.',
         retryable: false,
-      };
-      return this.failCreate(request.sessionId, failure, now);
+      });
     }
 
     if (
@@ -504,12 +617,12 @@ export class PreviewService {
         message: 'Remote preview requires a recent confirmation from the requesting user.',
         retryable: false,
       };
-      return this.failCreate(request.sessionId, failure, now, request.target);
+      return this.rejectCreate(request.sessionId, failure);
     }
 
     const requestedTarget = normalizeTarget(request.target);
     if (isValidationFailure(requestedTarget)) {
-      return this.failCreate(request.sessionId, requestedTarget, now, request.target);
+      return this.rejectCreate(request.sessionId, requestedTarget);
     }
 
     const approvedTarget = normalizeTarget(request.approval.target);
@@ -525,15 +638,31 @@ export class PreviewService {
         message: 'The approved preview target origin does not match the requested target.',
         retryable: false,
       };
-      return this.failCreate(request.sessionId, failure, now, requestedTarget);
+      return this.rejectCreate(request.sessionId, failure);
+    }
+
+    const accessFailure = await this.validatePreviewRequestAccess({
+      sessionId: request.sessionId,
+      requesterUserId: request.requestedByUserId,
+      requestId: request.requestId,
+      requestToken: request.requestToken,
+      target: requestedTarget,
+      replaceExisting: request.replaceExisting === true,
+      session: session.meta,
+    });
+    if (accessFailure) {
+      return this.rejectCreate(request.sessionId, accessFailure, session.meta.previewConnection);
     }
 
     const validation = await this.validateTargetForCreate(requestedTarget);
     if ('failure' in validation) {
-      return this.failCreate(request.sessionId, validation.failure, now, requestedTarget);
+      return this.rejectCreate(
+        request.sessionId,
+        validation.failure,
+        session.meta.previewConnection
+      );
     }
 
-    const existing = session.meta.previewConnection;
     if (
       existing?.status === 'active' &&
       !this.isConnectionLeaseExpired(existing) &&
@@ -562,7 +691,7 @@ export class PreviewService {
 
     const rateLimitFailure = this.enforceCreateRateLimit(now);
     if (rateLimitFailure) {
-      return this.failCreate(request.sessionId, rateLimitFailure, now);
+      return this.rejectCreate(request.sessionId, rateLimitFailure, existing);
     }
 
     const grantId = randomUUID();
@@ -604,6 +733,7 @@ export class PreviewService {
     }
 
     try {
+      this.activeTunnelGrantIds.set(request.sessionId, grantId);
       const handle = await startPreviewTunnel({
         gatewayUrl,
         authToken: this.deps.authToken(),
@@ -618,14 +748,21 @@ export class PreviewService {
           idleTimeoutMs: creating.idleTimeoutMs ?? DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
         },
         onClosed: async (error) => {
-          this.activeTunnels.delete(request.sessionId);
-          await this.releaseMachinePreviewSlot(request.sessionId);
-          if (!error) {
-            return;
-          }
-          await this.markTunnelClosedWithError(request.sessionId, creating, error);
+          if (this.activeTunnelGrantIds.get(request.sessionId) !== grantId) return;
+          await this.runSerializedPreviewOperation(request.sessionId, async () => {
+            if (this.activeTunnelGrantIds.get(request.sessionId) !== grantId) return;
+            this.activeTunnelGrantIds.delete(request.sessionId);
+            this.activeTunnels.delete(request.sessionId);
+            await this.releaseMachinePreviewSlot(request.sessionId, registryReservation.key);
+            if (error) {
+              await this.markTunnelClosedWithError(request.sessionId, creating, error);
+            }
+          });
         },
       });
+      if (this.activeTunnelGrantIds.get(request.sessionId) !== grantId) {
+        throw new Error('Preview tunnel closed during creation.');
+      }
       this.activeTunnels.set(request.sessionId, handle);
 
       const active: PreviewConnection = {
@@ -652,6 +789,9 @@ export class PreviewService {
         connection: active,
       };
     } catch (error) {
+      if (this.activeTunnelGrantIds.get(request.sessionId) === grantId) {
+        this.activeTunnelGrantIds.delete(request.sessionId);
+      }
       if (this.activeTunnels.has(request.sessionId)) {
         await this.closeActiveTunnel(request.sessionId, 'Preview tunnel creation failed');
       } else {
@@ -776,6 +916,15 @@ export class PreviewService {
   }
 
   async closeSessionPreviewForCleanup(sessionId: SessionId, reason: string): Promise<void> {
+    await this.runSerializedPreviewOperation(sessionId, async () => {
+      await this.closeSessionPreviewForCleanupOnce(sessionId, reason);
+    });
+  }
+
+  private async closeSessionPreviewForCleanupOnce(
+    sessionId: SessionId,
+    reason: string
+  ): Promise<void> {
     let current: PreviewConnection | undefined;
     try {
       const session = await this.getSessionMeta(sessionId);
@@ -819,9 +968,13 @@ export class PreviewService {
   }
 
   async closeAllActiveTunnelsForCleanup(reason: string): Promise<void> {
-    const sessionIds = [...this.activeTunnels.keys()];
+    this.isClosingForCleanup = true;
+    const sessionIds = new Set([
+      ...this.activeTunnels.keys(),
+      ...this.previewSessionTransitionTails.keys(),
+    ]);
     await Promise.allSettled(
-      sessionIds.map(async (sessionId) => {
+      [...sessionIds].map(async (sessionId) => {
         await this.closeSessionPreviewForCleanup(sessionId, reason);
       })
     );
@@ -829,6 +982,14 @@ export class PreviewService {
   }
 
   async revokePreview(request: SessionPreviewRevokeRequest): Promise<SessionPreviewRevokeResponse> {
+    return await this.runSerializedPreviewOperation(request.sessionId, async () =>
+      this.revokePreviewOnce(request)
+    );
+  }
+
+  private async revokePreviewOnce(
+    request: SessionPreviewRevokeRequest
+  ): Promise<SessionPreviewRevokeResponse> {
     const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
     if (scopeFailure) {
       return {
@@ -895,6 +1056,7 @@ export class PreviewService {
       return;
     }
     this.activeTunnels.delete(sessionId);
+    this.activeTunnelGrantIds.delete(sessionId);
     try {
       await handle.close(reason);
     } catch (error) {
@@ -1026,9 +1188,12 @@ export class PreviewService {
     }
   }
 
-  private async releaseMachinePreviewSlot(sessionId: SessionId): Promise<void> {
+  private async releaseMachinePreviewSlot(
+    sessionId: SessionId,
+    expectedKey?: string
+  ): Promise<void> {
     const key = this.activeRegistryKeys.get(sessionId);
-    if (!key) {
+    if (!key || (expectedKey !== undefined && key !== expectedKey)) {
       return;
     }
     this.activeRegistryKeys.delete(sessionId);
@@ -1118,6 +1283,59 @@ export class PreviewService {
     };
   }
 
+  private async validatePreviewRequestAccess(args: {
+    sessionId: SessionId;
+    requesterUserId: string;
+    requestId: string;
+    requestToken: string;
+    target: PreviewTarget;
+    replaceExisting: boolean;
+    session: PreviewSessionMeta;
+  }): Promise<ValidationFailure | null> {
+    let access: PreviewRequestVerification;
+    try {
+      access = await this.deps.verifyPreviewRequest({
+        requesterUserId: args.requesterUserId,
+        sessionId: args.sessionId,
+        requestId: args.requestId,
+        requestToken: args.requestToken,
+        target: args.target,
+        replaceExisting: args.replaceExisting,
+        ...(args.session.previewConnection?.grantId
+          ? { expectedGrantId: args.session.previewConnection.grantId }
+          : {}),
+        ...(args.session.project?.kind === 'local'
+          ? { localProjectId: args.session.project.localProjectId }
+          : {}),
+      });
+    } catch (error) {
+      this.deps.logger.error(
+        `[${args.sessionId}] Preview request attestation failed: ${formatErrorMessage(error)}`
+      );
+      return {
+        code: 'cloud_authorization_failed',
+        message: 'Could not verify this preview request. Try again.',
+        retryable: true,
+      };
+    }
+
+    if (access.outcome === 'allowed') {
+      return null;
+    }
+    if (access.outcome === 'denied') {
+      return {
+        code: 'grant_denied',
+        message: 'This preview request is invalid, expired, or no longer authorized.',
+        retryable: false,
+      };
+    }
+    return {
+      code: 'cloud_authorization_failed',
+      message: 'Could not verify this preview request. Try again.',
+      retryable: true,
+    };
+  }
+
   private isConnectionLeaseExpired(connection: PreviewConnection): boolean {
     return typeof connection.leaseExpiresAt === 'number' && connection.leaseExpiresAt <= this.now();
   }
@@ -1189,16 +1407,20 @@ export class PreviewService {
     };
   }
 
-  /** Persists a create failure raised before the `creating` state was written. */
-  private async failCreate(
+  /** Rejects pre-create validation without mutating an existing connection. */
+  private rejectCreate(
     sessionId: SessionId,
     failure: ValidationFailure,
-    now: number,
-    target?: PreviewTarget
-  ): Promise<SessionPreviewCreateResponse> {
-    const connection = this.failedConnection('create', failure, now, target);
-    await this.patchSessionPreview(sessionId, { previewConnection: connection });
-    return this.connectionResponse(sessionId, false, connection, failure);
+    connection?: PreviewConnection
+  ): SessionPreviewCreateResponse {
+    return {
+      type: 'session/preview-create_response',
+      sessionId,
+      success: false,
+      ...(connection ? { connection } : {}),
+      error: failure.code,
+      message: failure.message,
+    };
   }
 
   /** Persists a create failure raised after the `creating` state was written. */

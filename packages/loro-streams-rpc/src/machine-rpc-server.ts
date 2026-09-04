@@ -409,6 +409,8 @@ type RpcServerDeps = {
   createSessionPreview?: (args: {
     sessionId: SessionId;
     requestedByUserId: string;
+    requestId: string;
+    requestToken: string;
     target: PreviewTarget;
     approval: PreviewTargetApproval;
     replaceExisting?: boolean;
@@ -1425,6 +1427,8 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.createSessionPreview({
             sessionId: request.params.sessionId as SessionId,
             requestedByUserId: request.params.requestedByUserId,
+            requestId: request.params.requestId,
+            requestToken: request.params.requestToken,
             target: request.params.target,
             approval: request.params.approval,
             replaceExisting: request.params.replaceExisting,

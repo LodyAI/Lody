@@ -1874,6 +1874,8 @@ export const SessionPreviewCreateRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     sessionId: SessionIdSchema,
     requestedByUserId: z.string().trim().min(1),
+    requestId: z.string().trim().min(1),
+    requestToken: z.string().trim().min(1),
     target: PreviewTargetSchema,
     approval: z
       .object({
