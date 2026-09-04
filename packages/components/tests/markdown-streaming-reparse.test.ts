@@ -419,6 +419,36 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.textContent).toContain('\\[fenced_code\\]');
   });
 
+  it('keeps LaTeX delimiters literal in container-nested fenced code', async () => {
+    await renderMarkdown(
+      [
+        '> ```tex',
+        '> \\(blockquote_literal\\)',
+        '> ```',
+        '',
+        '- ~~~tex',
+        '  \\[list_literal\\]',
+        '  ~~~',
+        '',
+        '> - ````tex',
+        '>   \\(nested_literal\\)',
+        '>   ````',
+        '',
+        '10. ```tex',
+        '    \\(ordered_list_literal\\)',
+        '    ```',
+        '',
+        'Outside \\(x_i\\) renders.',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.textContent).toContain('\\(blockquote_literal\\)');
+    expect(container?.textContent).toContain('\\[list_literal\\]');
+    expect(container?.textContent).toContain('\\(nested_literal\\)');
+    expect(container?.textContent).toContain('\\(ordered_list_literal\\)');
+  });
+
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {
     await renderMarkdown(
       [

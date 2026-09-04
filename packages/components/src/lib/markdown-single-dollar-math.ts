@@ -20,7 +20,15 @@ type TexMathDelimiter = {
   index: number;
 };
 
+type MarkdownContainer =
+  | { kind: 'blockquote' }
+  | {
+      kind: 'indent';
+      size: number;
+    };
+
 type MarkdownFence = {
+  containers: MarkdownContainer[];
   marker: '`' | '~';
   size: number;
 };
@@ -36,12 +44,59 @@ const lineContentEnd = (value: string, lineStart: number): number => {
   return end > lineStart && value[end - 1] === '\r' ? end - 1 : end;
 };
 
+const spacesEnd = (value: string, start: number, end: number, maximum: number): number => {
+  let cursor = start;
+  while (cursor < end && cursor - start < maximum && value[cursor] === ' ') cursor += 1;
+  return cursor;
+};
+
+const listMarkerEnd = (value: string, start: number, end: number): number | null => {
+  let cursor = start;
+  const marker = value[cursor];
+
+  if (marker === '-' || marker === '+' || marker === '*') {
+    cursor += 1;
+  } else {
+    const digitStart = cursor;
+    while (cursor < end && cursor - digitStart < 9 && /\d/.test(value[cursor])) cursor += 1;
+    if (cursor === digitStart || (value[cursor] !== '.' && value[cursor] !== ')')) return null;
+    cursor += 1;
+  }
+
+  if (value[cursor] !== ' ' && value[cursor] !== '\t') return null;
+
+  const whitespaceStart = cursor;
+  while (cursor < end && (value[cursor] === ' ' || value[cursor] === '\t')) cursor += 1;
+
+  // CommonMark treats one to four spaces as list-marker padding. With five or
+  // more, only the first belongs to the marker and the rest indent the content.
+  return cursor - whitespaceStart <= 4 ? cursor : whitespaceStart + 1;
+};
+
 const markdownFenceAt = (value: string, lineStart: number): MarkdownFence | null => {
   const contentEnd = lineContentEnd(value, lineStart);
   let cursor = lineStart;
+  const containers: MarkdownContainer[] = [];
 
-  while (cursor < contentEnd && cursor - lineStart < 3 && value[cursor] === ' ') {
-    cursor += 1;
+  while (cursor < contentEnd) {
+    const containerStart = cursor;
+    cursor = spacesEnd(value, cursor, contentEnd, 3);
+
+    if (value[cursor] === '>') {
+      containers.push({ kind: 'blockquote' });
+      cursor += 1;
+      if (value[cursor] === ' ' || value[cursor] === '\t') cursor += 1;
+      continue;
+    }
+
+    const markerEnd = listMarkerEnd(value, cursor, contentEnd);
+    if (markerEnd != null) {
+      containers.push({ kind: 'indent', size: markerEnd - containerStart });
+      cursor = markerEnd;
+      continue;
+    }
+
+    break;
   }
 
   const marker = value[cursor];
@@ -55,7 +110,33 @@ const markdownFenceAt = (value: string, lineStart: number): MarkdownFence | null
   // A backtick fence cannot contain another backtick in its info string.
   if (marker === '`' && value.slice(runEnd, contentEnd).includes('`')) return null;
 
-  return { marker, size };
+  return { containers, marker, size };
+};
+
+const markdownContainerContentStart = (
+  value: string,
+  lineStart: number,
+  contentEnd: number,
+  containers: readonly MarkdownContainer[]
+): number | null => {
+  let cursor = lineStart;
+
+  for (const container of containers) {
+    if (container.kind === 'blockquote') {
+      cursor = spacesEnd(value, cursor, contentEnd, 3);
+      if (value[cursor] !== '>') return null;
+      cursor += 1;
+      if (value[cursor] === ' ' || value[cursor] === '\t') cursor += 1;
+      continue;
+    }
+
+    for (let index = 0; index < container.size; index += 1) {
+      if (value[cursor] !== ' ') return null;
+      cursor += 1;
+    }
+  }
+
+  return cursor;
 };
 
 const isClosingMarkdownFence = (
@@ -64,11 +145,14 @@ const isClosingMarkdownFence = (
   fence: MarkdownFence
 ): boolean => {
   const contentEnd = lineContentEnd(value, lineStart);
-  let cursor = lineStart;
-
-  while (cursor < contentEnd && cursor - lineStart < 3 && value[cursor] === ' ') {
-    cursor += 1;
-  }
+  const contentStart = markdownContainerContentStart(
+    value,
+    lineStart,
+    contentEnd,
+    fence.containers
+  );
+  if (contentStart == null) return false;
+  let cursor = spacesEnd(value, contentStart, contentEnd, 3);
 
   const runStart = cursor;
   while (cursor < contentEnd && value[cursor] === fence.marker) cursor += 1;

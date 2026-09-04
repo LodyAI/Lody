@@ -40,4 +40,48 @@ describe('normalizeTexMathDelimiters', () => {
       ['`\\(inline\\)`', '', '~~~tex', '\\[', 'display', '\\]', '~~~', '', '$$outside$$'].join('\n')
     );
   });
+
+  it('leaves delimiters inside container-nested fenced code unchanged', () => {
+    const markdown = [
+      '> ```tex',
+      '> \\(blockquote_literal\\)',
+      '> ```',
+      '',
+      '- ~~~tex',
+      '  \\[list_literal\\]',
+      '  ~~~',
+      '',
+      '> - ````tex',
+      '>   \\(nested_literal\\)',
+      '>   ````',
+      '',
+      '10. ```tex',
+      '    \\(ordered_list_literal\\)',
+      '    ```',
+      '',
+      '\\(outside\\)',
+    ].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      [
+        '> ```tex',
+        '> \\(blockquote_literal\\)',
+        '> ```',
+        '',
+        '- ~~~tex',
+        '  \\[list_literal\\]',
+        '  ~~~',
+        '',
+        '> - ````tex',
+        '>   \\(nested_literal\\)',
+        '>   ````',
+        '',
+        '10. ```tex',
+        '    \\(ordered_list_literal\\)',
+        '    ```',
+        '',
+        '$$outside$$',
+      ].join('\n')
+    );
+  });
 });
