@@ -13,6 +13,7 @@
  */
 
 import type { ChangelogEntry } from '@site/lib/changelog';
+import type { FaqItem } from '@site/lib/docs-faq';
 import type { SerializedPageTree } from 'fumadocs-core/source/client';
 import type { TOCItemType } from 'fumadocs-core/toc';
 
@@ -30,6 +31,8 @@ export type DocsRouteData = {
   pageTree: SerializedPageTree;
   toc: SerializedTocItem[];
   slug?: string[];
+  /** FAQPage items extracted from the MDX `## FAQ` / `## 常见问题` section. */
+  faq?: FaqItem[];
 };
 
 export type ChangelogPostRouteData = {

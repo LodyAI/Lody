@@ -14,7 +14,7 @@
     "preview:static": "node scripts/serve-static.mjs",
     "pretypecheck": "corepack pnpm run generate && corepack pnpm run generate:routes",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs scripts/finalize-404-html.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts"
+    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs scripts/finalize-404-html.test.mjs scripts/llms-answers.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts lib/docs-faq.test.ts"
   },
   "dependencies": {
     "@lody/components": "workspace:*",

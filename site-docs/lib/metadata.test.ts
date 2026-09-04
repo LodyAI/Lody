@@ -23,6 +23,25 @@ await test('brandTitle does not double-brand titles that already include Lody', 
   assert.equal(brandTitle('Download Lody'), 'Download Lody');
 });
 
+await test('pageHead serializes JSON-LD scripts and does not noindex by default', () => {
+  const head = pageHead({
+    title: 'Share a Coding Agent Session | Lody',
+    path: '/docs/session-handoff',
+    locale: 'en-US',
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: [],
+    },
+  });
+  assert.equal(head.scripts?.[0]?.type, 'application/ld+json');
+  assert.match(head.scripts?.[0]?.children ?? '', /"@type":"FAQPage"/u);
+  assert.equal(
+    head.meta.some((entry) => entry.name === 'robots' && /noindex/u.test(entry.content ?? '')),
+    false
+  );
+});
+
 await test('pageHead falls back to the product description', () => {
   const head = pageHead({
     title: 'Introduction | Lody',
