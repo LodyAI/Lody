@@ -20,6 +20,7 @@ import {
   type MentionLocalFetchErrorCode,
 } from '@/components/mentions/mention-analytics';
 import {
+  areStringArraysEqual,
   useLocalProjectFilePaths,
   type LocalProjectFilePathsSource,
   type LocalProjectFilePathsEntry,
@@ -114,15 +115,6 @@ export function buildMentionFilePathsEntryFromProviderEntries(
     truncated: false,
     fetchedAt,
   };
-}
-
-function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
 }
 
 function areMentionLazyDirectoriesEqual(

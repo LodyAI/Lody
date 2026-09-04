@@ -100,6 +100,15 @@ Product-level mention sources built on `src/ui/mention`.
   It stays stale-while-revalidate — the cached list paints immediately and is
   replaced when the machine answers — and the nonce starts `null` so a composer
   MOUNT still reads the cache: one mounts per open tab and side chat.
+  Revalidating makes the ENTRY'S IDENTITY load-bearing: `buildMentionFileIndex`
+  and the Fuse index are memoised on it, so a new object for an unchanged listing
+  rebuilds both over the whole repo on every `@`. `resolveLoadedEntry`
+  (`hooks/use-local-project-file-paths.ts`) therefore returns the previous entry
+  when paths and `truncated` match, exactly as
+  `buildMentionFilePathsEntryFromProviderEntries` already did for the provider —
+  and `fetchedAt` moved OFF the entry onto the cache record, because stamping a
+  fresh one is what would churn the identity. Coverage:
+  `tests/local-project-file-paths-entry-reuse.test.ts`.
 - `enableAtMentions` is the one list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`. Every source with its own `enabled`
   rule (sessions: having any) belongs there too, or the composer falls back to a
