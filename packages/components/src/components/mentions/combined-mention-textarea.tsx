@@ -7,17 +7,11 @@ import {
 } from '@/components/mentions/mention-analytics';
 import {
   buildItemSuggestions,
-  getIssuePrFuseOptions,
   IssuePrMentionHydrator,
   IssuePrMentionTitleHint,
   useKnownIssuePrItems,
-  type ItemSuggestion as IssuePrSuggestion,
 } from '@/components/mentions/issue-pr-hash-mention';
-import {
-  getFuseOptions,
-  hydrateFileMentionsFromText,
-  type PathSuggestion,
-} from '@/components/mentions/file-at-mention';
+import { hydrateFileMentionsFromText } from '@/components/mentions/file-at-mention';
 import {
   buildSessionMentionInsertion,
   filterSessionMentionItemsByProject,
@@ -36,7 +30,6 @@ import {
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { applyAgentRoleEmojiChip } from '@/components/mentions/mention-chips';
-import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
 import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import {
   sanitizeMentionRanges,
@@ -84,8 +77,7 @@ function isLazySourceLoading(status: string, hasData: boolean) {
 
 /**
  * Builds the mention registry from the composer's already-fetched data and
- * renders the single `@` menu. Lives inside `<Mention>` so Fuse loading stays
- * keyed to the menu actually being open.
+ * renders the single `@` menu.
  */
 function TwoLevelMentionMenu({
   fileData,
@@ -169,36 +161,11 @@ function TwoLevelMentionMenu({
       enableFileMentions ? buildMentionFileIndex(fileData.entry, buildLazyDirectoryToken) : null,
     [enableFileMentions, fileData.entry]
   );
-  const fileFuseCtor = useMentionFuseCtor<PathSuggestion>(active && fileIndex !== null);
-  const fileFuse = React.useMemo(() => {
-    if (!fileFuseCtor || !fileIndex) return null;
-    try {
-      return new fileFuseCtor(fileIndex.allSuggestions, getFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [fileFuseCtor, fileIndex]);
-
   const issuePrSuggestions = React.useMemo(
     () =>
       enableIssueMentions && issuePrData.entry ? buildItemSuggestions(issuePrData.entry.items) : [],
     [enableIssueMentions, issuePrData.entry]
   );
-  const issuePrFuseCtor = useMentionFuseCtor<IssuePrSuggestion>(
-    active && issuePrSuggestions.length > 0
-  );
-  const createIssuePrFuse = React.useCallback(
-    (list: IssuePrSuggestion[]) => {
-      if (!issuePrFuseCtor || list.length === 0) return null;
-      try {
-        return new issuePrFuseCtor(list, getIssuePrFuseOptions());
-      } catch {
-        return null;
-      }
-    },
-    [issuePrFuseCtor]
-  );
-
   const fileSource = React.useMemo<MentionCategorySources['file']>(
     () => ({
       enabled: enableFileMentions,
@@ -224,9 +191,8 @@ function TwoLevelMentionMenu({
             )
         : undefined,
       index: fileIndex,
-      fuse: fileFuse,
     }),
-    [enableFileMentions, fileData, fileFuse, fileIndex, fileSourceKind, t]
+    [enableFileMentions, fileData, fileIndex, fileSourceKind, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -253,17 +219,8 @@ function TwoLevelMentionMenu({
           : undefined,
       onActivate: activateIssuePr,
       suggestions: issuePrSuggestions,
-      createFuse: createIssuePrFuse,
     }),
-    [
-      activateIssuePr,
-      createIssuePrFuse,
-      enableIssueMentions,
-      issuePrData,
-      issuePrSuggestions,
-      repoFullName,
-      t,
-    ]
+    [activateIssuePr, enableIssueMentions, issuePrData, issuePrSuggestions, repoFullName, t]
   );
 
   const skillSource = React.useMemo<MentionCategorySources['skill']>(
