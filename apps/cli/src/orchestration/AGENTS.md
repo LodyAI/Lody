@@ -53,8 +53,7 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
   Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
-  dispatch ownership, and remains the settlement identity when steer advances the
-  visible Assistant tail. Assistant `finished`/`endedAt` is never Delivery completion
+  dispatch ownership. Assistant `finished`/`endedAt` is never Delivery completion
   evidence: teardown writes the same terminal footprint. Delivery execution has three
   fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one
   boot id and starts only after the daemon supervisor confirms the previous child exited
@@ -63,13 +62,15 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   a terminal continuation failure or consume without execution must acquire the same
   exclusive token first; the history write and token-matched consume happen while it is
   held. Once per Worker startup, the coordinator clears tokens owned by older boot ids
-  without resetting the attempt count. Acknowledgement, interruption, and terminal consume
-  must match both the boot id and claim token. Claim contention exits before history or ACP
+  without resetting the attempt count. Release and consume must match both the boot id and
+  claim token. Claim contention exits before history or ACP
   side effects and records no failure. Only the execution service's durable handled callback
-  may acknowledge and consume an execution attempt. Cancellation/interruption releases it
-  without acknowledgement. At most one recovery attempt is allowed; after two unsettled
+  may consume an execution claim; settlement carries no Assistant identity because the
+  callback is already bound to that claim. Cancellation/interruption releases it. At most one
+  recovery attempt is allowed; after two unsettled
   attempts, `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed under a terminal claim
-  without invoking ACP again.
+  without invoking ACP again. A pending Delivery from the pre-claim schema counts as one
+  unknown prior attempt, leaving exactly one recovery opportunity after upgrade.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

@@ -30,13 +30,13 @@ const TERMINAL_RETENTION_MS = 7 * DAY_MS;
 export const MATERIALIZATION_CLAIM_MS = 60_000;
 export const DELIVERY_MAX_ATTEMPTS = 2;
 
-export type DeliveryAttemptClaim =
+type DeliveryExecutionClaim =
   | { status: 'claimed'; delivery: StoredLodyDelivery }
   | { status: 'in_flight'; delivery: StoredLodyDelivery }
   | { status: 'exhausted'; delivery: StoredLodyDelivery }
   | { status: 'consumed'; delivery: StoredLodyDelivery };
 
-export type DeliveryFinalizationClaim =
+type DeliveryFinalizationClaim =
   | { status: 'claimed'; delivery: StoredLodyDelivery }
   | { status: 'in_flight'; delivery: StoredLodyDelivery }
   | { status: 'not_ready'; delivery: StoredLodyDelivery }
@@ -173,12 +173,8 @@ const DeliveryRowSchema = z
     system_turn_id: z.string(),
     state: z.enum(['pending', 'consumed']),
     attempt_count: z.number().int().nonnegative(),
-    active_attempt_id: z.string().nullable(),
-    active_attempt_owner_id: z.string().nullable(),
-    last_attempt_at: z.string().nullable(),
-    continuation_turn_id: z.string().nullable(),
-    continuation_outcome: z.enum(['completed', 'failed']).nullable(),
-    acknowledged_at: z.string().nullable(),
+    active_claim_id: z.string().nullable(),
+    active_claim_worker_boot_id: z.string().nullable(),
     initiator_chain_depth: z.number().int().nonnegative(),
     completion_json: z.string(),
     consumed_at: z.string().nullable(),
@@ -773,53 +769,51 @@ export class LodyOperationStore {
     const result = this.db
       .prepare(
         `UPDATE deliveries
-         SET active_attempt_id = NULL, active_attempt_owner_id = NULL
+         SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
          WHERE workspace_id = ? AND state = 'pending'
-           AND (active_attempt_id IS NOT NULL OR active_attempt_owner_id IS NOT NULL)
+           AND (active_claim_id IS NOT NULL OR active_claim_worker_boot_id IS NOT NULL)
            AND (
-             active_attempt_id IS NULL
-             OR active_attempt_owner_id IS NULL
-             OR active_attempt_owner_id <> ?
+             active_claim_id IS NULL
+             OR active_claim_worker_boot_id IS NULL
+             OR active_claim_worker_boot_id <> ?
            )`
       )
       .run(workspaceId, workerBootId);
     return result.changes;
   }
 
-  claimDeliveryAttempt(
+  claimDeliveryExecution(
     requesterSessionId: SessionId,
     operationId: string,
-    attempt: { attemptId: string; ownerId: string; attemptedAt?: string }
-  ): DeliveryAttemptClaim {
-    const transaction = this.db.transaction((): DeliveryAttemptClaim => {
+    claim: { claimId: string; workerBootId: string }
+  ): DeliveryExecutionClaim {
+    const transaction = this.db.transaction((): DeliveryExecutionClaim => {
       const current = this.getDelivery(requesterSessionId, operationId);
       if (current.state === 'consumed') return { status: 'consumed', delivery: current };
       if (
-        current.activeAttemptId === attempt.attemptId &&
-        current.activeAttemptOwnerId === attempt.ownerId
+        current.activeClaimId === claim.claimId &&
+        current.activeClaimWorkerBootId === claim.workerBootId
       ) {
         return { status: 'claimed', delivery: current };
       }
-      if (current.activeAttemptId !== undefined || current.activeAttemptOwnerId !== undefined) {
+      if (current.activeClaimId !== undefined || current.activeClaimWorkerBootId !== undefined) {
         return { status: 'in_flight', delivery: current };
       }
       if (current.attemptCount >= DELIVERY_MAX_ATTEMPTS) {
         return { status: 'exhausted', delivery: current };
       }
-      const attemptedAt = attempt.attemptedAt ?? new Date(this.now()).toISOString();
       const result = this.db
         .prepare(
           `UPDATE deliveries
            SET attempt_count = attempt_count + 1,
-               active_attempt_id = ?, active_attempt_owner_id = ?, last_attempt_at = ?
+               active_claim_id = ?, active_claim_worker_boot_id = ?
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
              AND attempt_count < ?
-             AND active_attempt_id IS NULL AND active_attempt_owner_id IS NULL`
+             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL`
         )
         .run(
-          attempt.attemptId,
-          attempt.ownerId,
-          attemptedAt,
+          claim.claimId,
+          claim.workerBootId,
           requesterSessionId,
           operationId,
           DELIVERY_MAX_ATTEMPTS
@@ -827,7 +821,7 @@ export class LodyOperationStore {
       if (result.changes !== 1) {
         const latest = this.getDelivery(requesterSessionId, operationId);
         if (latest.state === 'consumed') return { status: 'consumed', delivery: latest };
-        if (latest.activeAttemptId !== undefined || latest.activeAttemptOwnerId !== undefined) {
+        if (latest.activeClaimId !== undefined || latest.activeClaimWorkerBootId !== undefined) {
           return { status: 'in_flight', delivery: latest };
         }
         return { status: 'exhausted', delivery: latest };
@@ -845,7 +839,7 @@ export class LodyOperationStore {
     operationId: string,
     claim: {
       claimId: string;
-      ownerId: string;
+      workerBootId: string;
       requireAttemptsExhausted?: boolean;
     }
   ): DeliveryFinalizationClaim {
@@ -853,12 +847,12 @@ export class LodyOperationStore {
       const current = this.getDelivery(requesterSessionId, operationId);
       if (current.state === 'consumed') return { status: 'consumed', delivery: current };
       if (
-        current.activeAttemptId === claim.claimId &&
-        current.activeAttemptOwnerId === claim.ownerId
+        current.activeClaimId === claim.claimId &&
+        current.activeClaimWorkerBootId === claim.workerBootId
       ) {
         return { status: 'claimed', delivery: current };
       }
-      if (current.activeAttemptId !== undefined || current.activeAttemptOwnerId !== undefined) {
+      if (current.activeClaimId !== undefined || current.activeClaimWorkerBootId !== undefined) {
         return { status: 'in_flight', delivery: current };
       }
       const minimumAttemptCount = claim.requireAttemptsExhausted ? DELIVERY_MAX_ATTEMPTS : 0;
@@ -868,16 +862,22 @@ export class LodyOperationStore {
       const result = this.db
         .prepare(
           `UPDATE deliveries
-           SET active_attempt_id = ?, active_attempt_owner_id = ?
+           SET active_claim_id = ?, active_claim_worker_boot_id = ?
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
              AND attempt_count >= ?
-             AND active_attempt_id IS NULL AND active_attempt_owner_id IS NULL`
+             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL`
         )
-        .run(claim.claimId, claim.ownerId, requesterSessionId, operationId, minimumAttemptCount);
+        .run(
+          claim.claimId,
+          claim.workerBootId,
+          requesterSessionId,
+          operationId,
+          minimumAttemptCount
+        );
       if (result.changes !== 1) {
         const latest = this.getDelivery(requesterSessionId, operationId);
         if (latest.state === 'consumed') return { status: 'consumed', delivery: latest };
-        if (latest.activeAttemptId !== undefined || latest.activeAttemptOwnerId !== undefined) {
+        if (latest.activeClaimId !== undefined || latest.activeClaimWorkerBootId !== undefined) {
           return { status: 'in_flight', delivery: latest };
         }
         return { status: 'not_ready', delivery: latest };
@@ -894,76 +894,18 @@ export class LodyOperationStore {
     requesterSessionId: SessionId,
     operationId: string,
     workerBootId: string,
-    attemptId: string
+    claimId: string
   ): boolean {
     const result = this.db
       .prepare(
         `UPDATE deliveries
-         SET active_attempt_id = NULL, active_attempt_owner_id = NULL
+         SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
          WHERE requester_session_id = ? AND operation_id = ?
            AND state = 'pending'
-           AND active_attempt_owner_id = ? AND active_attempt_id = ?`
+           AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
       )
-      .run(requesterSessionId, operationId, workerBootId, attemptId);
+      .run(requesterSessionId, operationId, workerBootId, claimId);
     return result.changes === 1;
-  }
-
-  acknowledgeDelivery(
-    requesterSessionId: SessionId,
-    operationId: string,
-    acknowledgement: {
-      workerBootId: string;
-      attemptId: string;
-      assistantTurnId: string;
-      outcome: 'completed' | 'failed';
-      acknowledgedAt?: string;
-    }
-  ): { acknowledged: boolean; delivery: StoredLodyDelivery } {
-    const transaction = this.db.transaction(() => {
-      const current = this.getDelivery(requesterSessionId, operationId);
-      const expectedTurnId = `assistant:${current.systemTurnId}`;
-      if (acknowledgement.assistantTurnId !== expectedTurnId) {
-        throw new LodyOperationStoreError(
-          'DELIVERY_TURN_MISMATCH',
-          `Delivery acknowledgement expected Turn ${expectedTurnId}.`,
-          false
-        );
-      }
-      if (
-        current.state === 'consumed' ||
-        current.activeAttemptOwnerId !== acknowledgement.workerBootId ||
-        current.activeAttemptId !== acknowledgement.attemptId
-      ) {
-        return { acknowledged: false, delivery: current };
-      }
-      const acknowledgedAt = acknowledgement.acknowledgedAt ?? new Date(this.now()).toISOString();
-      const result = this.db
-        .prepare(
-          `UPDATE deliveries
-           SET state = 'consumed', consumed_at = ?,
-               continuation_turn_id = ?, continuation_outcome = ?, acknowledged_at = ?,
-               active_attempt_id = NULL, active_attempt_owner_id = NULL
-           WHERE requester_session_id = ? AND operation_id = ?
-             AND state = 'pending'
-             AND active_attempt_owner_id = ? AND active_attempt_id = ?`
-        )
-        .run(
-          acknowledgedAt,
-          acknowledgement.assistantTurnId,
-          acknowledgement.outcome,
-          acknowledgedAt,
-          requesterSessionId,
-          operationId,
-          acknowledgement.workerBootId,
-          acknowledgement.attemptId
-        );
-      const latest = this.getDelivery(requesterSessionId, operationId);
-      return {
-        acknowledged: result.changes === 1,
-        delivery: latest,
-      };
-    });
-    return transaction.immediate();
   }
 
   consumeClaimedDelivery(
@@ -977,8 +919,8 @@ export class LodyOperationStore {
       const current = this.getDelivery(requesterSessionId, operationId);
       if (
         current.state === 'consumed' ||
-        current.activeAttemptOwnerId !== workerBootId ||
-        current.activeAttemptId !== claimId
+        current.activeClaimWorkerBootId !== workerBootId ||
+        current.activeClaimId !== claimId
       ) {
         return { consumed: false, delivery: current };
       }
@@ -986,9 +928,9 @@ export class LodyOperationStore {
         .prepare(
           `UPDATE deliveries
            SET state = 'consumed', consumed_at = ?,
-               active_attempt_id = NULL, active_attempt_owner_id = NULL
+               active_claim_id = NULL, active_claim_worker_boot_id = NULL
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
-             AND active_attempt_owner_id = ? AND active_attempt_id = ?`
+             AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
         )
         .run(consumedAt, requesterSessionId, operationId, workerBootId, claimId);
       const latest = this.getDelivery(requesterSessionId, operationId);
@@ -1110,14 +1052,10 @@ export class LodyOperationStore {
       systemTurnId: parsed.system_turn_id,
       state: parsed.state,
       attemptCount: parsed.attempt_count,
-      ...(parsed.active_attempt_id ? { activeAttemptId: parsed.active_attempt_id } : {}),
-      ...(parsed.active_attempt_owner_id
-        ? { activeAttemptOwnerId: parsed.active_attempt_owner_id }
+      ...(parsed.active_claim_id ? { activeClaimId: parsed.active_claim_id } : {}),
+      ...(parsed.active_claim_worker_boot_id
+        ? { activeClaimWorkerBootId: parsed.active_claim_worker_boot_id }
         : {}),
-      ...(parsed.last_attempt_at ? { lastAttemptAt: parsed.last_attempt_at } : {}),
-      ...(parsed.continuation_turn_id ? { continuationTurnId: parsed.continuation_turn_id } : {}),
-      ...(parsed.continuation_outcome ? { continuationOutcome: parsed.continuation_outcome } : {}),
-      ...(parsed.acknowledged_at ? { acknowledgedAt: parsed.acknowledged_at } : {}),
       initiatorChainDepth: parsed.initiator_chain_depth,
       completion: parseJson(
         parsed.completion_json,
@@ -1223,12 +1161,8 @@ export class LodyOperationStore {
         system_turn_id TEXT NOT NULL UNIQUE,
         state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
         attempt_count INTEGER NOT NULL DEFAULT 0,
-        active_attempt_id TEXT,
-        active_attempt_owner_id TEXT,
-        last_attempt_at TEXT,
-        continuation_turn_id TEXT,
-        continuation_outcome TEXT CHECK (continuation_outcome IN ('completed', 'failed')),
-        acknowledged_at TEXT,
+        active_claim_id TEXT,
+        active_claim_worker_boot_id TEXT,
         initiator_chain_depth INTEGER NOT NULL,
         completion_json TEXT NOT NULL,
         consumed_at TEXT,
@@ -1261,27 +1195,31 @@ export class LodyOperationStore {
   }
 
   private ensureDeliveryColumns(): void {
-    const columns = new Set(
-      (
-        this.db.pragma('table_info(deliveries)') as Array<{
-          name: string;
-        }>
-      ).map((column) => column.name)
-    );
-    const additions = [
-      ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
-      ['active_attempt_id', 'TEXT'],
-      ['active_attempt_owner_id', 'TEXT'],
-      ['last_attempt_at', 'TEXT'],
-      ['continuation_turn_id', 'TEXT'],
-      ['continuation_outcome', "TEXT CHECK (continuation_outcome IN ('completed', 'failed'))"],
-      ['acknowledged_at', 'TEXT'],
-    ] as const;
-    for (const [name, declaration] of additions) {
-      if (!columns.has(name)) {
-        this.db.exec(`ALTER TABLE deliveries ADD COLUMN ${name} ${declaration}`);
-      }
-    }
+    this.db
+      .transaction(() => {
+        const columns = new Set(
+          (
+            this.db.pragma('table_info(deliveries)') as Array<{
+              name: string;
+            }>
+          ).map((column) => column.name)
+        );
+        const isLegacyDeliverySchema = !columns.has('attempt_count');
+        const additions = [
+          ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+          ['active_claim_id', 'TEXT'],
+          ['active_claim_worker_boot_id', 'TEXT'],
+        ] as const;
+        for (const [name, declaration] of additions) {
+          if (!columns.has(name)) {
+            this.db.exec(`ALTER TABLE deliveries ADD COLUMN ${name} ${declaration}`);
+          }
+        }
+        if (isLegacyDeliverySchema) {
+          this.db.prepare("UPDATE deliveries SET attempt_count = 1 WHERE state = 'pending'").run();
+        }
+      })
+      .immediate();
   }
 
   private repairTerminalDeliveries(): void {

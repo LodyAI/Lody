@@ -388,7 +388,7 @@ describe('SessionExecutionService', () => {
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('acp-steer'));
   });
 
-  it('keeps the owning settlement identity while steering from A to B to C', async () => {
+  it('completes A to B to C when yielded prompts never settle', async () => {
     const sessionId = 'session-steer-lifecycle' as SessionId;
     const first = createDeferred<unknown>();
     const second = createDeferred<unknown>();
@@ -484,22 +484,18 @@ describe('SessionExecutionService', () => {
       ),
     });
     const service = new SessionExecutionService(deps);
-    const onTurnSettled = vi.fn(async () => {});
-    const lifecycle = service.continueSession(
-      {
-        type: 'session/chat',
-        sessionId,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        project: undefined,
-        acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
-        userTurnId: 'user-a',
-        userId: 'user-1',
-        userName: 'User',
-        userEmail: 'user@example.com',
-      },
-      { onTurnSettled }
-    );
+    const lifecycle = service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
+      userTurnId: 'user-a',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     const steerB = service.steerSession({
@@ -599,10 +595,6 @@ describe('SessionExecutionService', () => {
     });
     expect(deps.turnFinalization.notifySessionCompleted).toHaveBeenCalledTimes(1);
     expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
-    expect(onTurnSettled).toHaveBeenCalledWith({
-      turnId: 'assistant:user-a',
-      outcome: 'completed',
-    });
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
   });
 
@@ -1297,10 +1289,7 @@ describe('SessionExecutionService', () => {
       'turn-user-1'
     );
     expect(getHistory()[0]?.status).toBe('pending');
-    expect(onTurnSettled).toHaveBeenCalledWith({
-      turnId: 'assistant:turn-user-1',
-      outcome: 'completed',
-    });
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
     expect(
       upsertDocMeta.mock.calls.some(([, patch]) => {
         const fields = patch as Record<string, unknown>;
@@ -1309,17 +1298,14 @@ describe('SessionExecutionService', () => {
     ).toBe(false);
   });
 
-  it('settles a silent Delivery turn as a durable failure', async () => {
+  it('settles a silent Delivery turn as durably handled', async () => {
     const { onTurnSettled } = await runSilentPromptTurn({
       sessionId: 'session-silent-delivery-turn',
       hasPromptOutputForTurn: false,
       dispatchSource: 'delivery',
     });
 
-    expect(onTurnSettled).toHaveBeenCalledWith({
-      turnId: 'assistant:turn-user-1',
-      outcome: 'failed',
-    });
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
   });
 
   it('silently releases a Delivery turn when its durable attempt claim loses contention', async () => {
@@ -4759,10 +4745,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'turn-prompt-cancel',
       processingUserMsgId: undefined,
     });
-    expect(onTurnSettled).toHaveBeenCalledWith({
-      turnId: 'assistant-prompt-cancel',
-      outcome: 'interrupted',
-    });
+    expect(onTurnSettled).toHaveBeenCalledWith('interrupted');
   });
 
   it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {

@@ -27,10 +27,7 @@ const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 type DeliveryDispatchOptions = {
   onTurnClaimed?: () => Promise<boolean>;
-  onTurnSettled?: (settlement: {
-    turnId: string;
-    outcome: 'completed' | 'failed' | 'interrupted';
-  }) => Promise<void>;
+  onTurnSettled?: (settlement: 'handled' | 'interrupted') => Promise<void>;
 };
 
 const makeHarness = async (options?: {
@@ -180,7 +177,7 @@ const makeHarness = async (options?: {
         finished: true,
       },
     ]);
-    await typedOptions.onTurnSettled?.({ turnId: assistantTurnId, outcome: 'completed' });
+    await typedOptions.onTurnSettled?.('handled');
   });
   const logger = { warn: vi.fn(), debug: vi.fn() };
   const syncMachineFlockDoc = vi.fn(
@@ -897,10 +894,7 @@ describe('LodyOperationCoordinator', () => {
           finished: true,
         },
       ]);
-      await typedOptions.onTurnSettled?.({
-        turnId: 'assistant:operation-completion:requester-1:review-round-1',
-        outcome: 'completed',
-      });
+      await typedOptions.onTurnSettled?.('handled');
     });
 
     harness.coordinator.start();
@@ -1063,10 +1057,7 @@ describe('LodyOperationCoordinator', () => {
           finished: true,
         },
       ]);
-      await typedOptions.onTurnSettled?.({
-        turnId: 'assistant:operation-completion:requester-1:review-round-1',
-        outcome: 'failed',
-      });
+      await typedOptions.onTurnSettled?.('handled');
     });
 
     harness.coordinator.start();
@@ -1232,9 +1223,9 @@ describe('LodyOperationCoordinator', () => {
     const competitorStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
       expect(
-        competitorStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-          attemptId: 'attempt-b',
-          ownerId: 'worker-b',
+        competitorStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
     } finally {
@@ -1250,8 +1241,8 @@ describe('LodyOperationCoordinator', () => {
     try {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'pending',
-        activeAttemptId: 'attempt-b',
-        activeAttemptOwnerId: 'worker-b',
+        activeClaimId: 'attempt-b',
+        activeClaimWorkerBootId: 'worker-b',
       });
     } finally {
       finalStore.close();
@@ -1307,9 +1298,9 @@ describe('LodyOperationCoordinator', () => {
     try {
       shutdownStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
       expect(
-        shutdownStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-          attemptId: 'attempt-before-graceful-shutdown',
-          ownerId: 'daemon-before-restart',
+        shutdownStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+          claimId: 'attempt-before-graceful-shutdown',
+          workerBootId: 'daemon-before-restart',
         })
       ).toMatchObject({ status: 'claimed' });
       expect(
@@ -1354,7 +1345,6 @@ describe('LodyOperationCoordinator', () => {
       expect(store.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'consumed',
         attemptCount: 2,
-        continuationOutcome: 'completed',
       });
     } finally {
       store.close();
@@ -1388,10 +1378,7 @@ describe('LodyOperationCoordinator', () => {
           finished: true,
         },
       ]);
-      await typedOptions.onTurnSettled?.({
-        turnId: `assistant:${systemTurnId}`,
-        outcome: 'completed',
-      });
+      await typedOptions.onTurnSettled?.('handled');
     });
 
     harness.coordinator.start();
@@ -1483,10 +1470,7 @@ describe('LodyOperationCoordinator', () => {
           finished: true,
         },
       ]);
-      await typedOptions.onTurnSettled?.({
-        turnId: `assistant:${systemTurnId}`,
-        outcome: 'completed',
-      });
+      await typedOptions.onTurnSettled?.('handled');
     });
 
     harness.coordinator.start();
@@ -1556,9 +1540,9 @@ describe('LodyOperationCoordinator', () => {
     try {
       oldStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
       expect(
-        oldStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-          attemptId: 'attempt-before-crash',
-          ownerId: 'daemon-old',
+        oldStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+          claimId: 'attempt-before-crash',
+          workerBootId: 'daemon-old',
         })
       ).toMatchObject({ status: 'claimed' });
     } finally {
@@ -1575,7 +1559,6 @@ describe('LodyOperationCoordinator', () => {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'consumed',
         attemptCount: 2,
-        continuationOutcome: 'completed',
       });
     } finally {
       finalStore.close();
@@ -1591,18 +1574,18 @@ describe('LodyOperationCoordinator', () => {
     try {
       crashedStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
       expect(
-        crashedStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-          attemptId: 'attempt-a',
-          ownerId: 'worker-a',
+        crashedStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+          claimId: 'attempt-a',
+          workerBootId: 'worker-a',
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       expect(
         crashedStore.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')
       ).toBe(1);
       expect(
-        crashedStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-          attemptId: 'attempt-b',
-          ownerId: 'worker-b',
+        crashedStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
     } finally {
@@ -1648,9 +1631,9 @@ describe('LodyOperationCoordinator', () => {
       const competitorStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
       try {
         expect(
-          competitorStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
-            attemptId: 'attempt-b',
-            ownerId: 'worker-b',
+          competitorStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+            claimId: 'attempt-b',
+            workerBootId: 'worker-b',
           })
         ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       } finally {
@@ -1671,25 +1654,21 @@ describe('LodyOperationCoordinator', () => {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'pending',
         attemptCount: 1,
-        activeAttemptId: 'attempt-b',
-        activeAttemptOwnerId: 'worker-b',
+        activeClaimId: 'attempt-b',
+        activeClaimWorkerBootId: 'worker-b',
       });
     } finally {
       finalStore.close();
     }
   });
 
-  it('does not replay after the Delivery ack commits even if the coordinator tail fails', async () => {
+  it('does not replay after claimed consume commits even if the coordinator tail fails', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
-    harness.continueSession.mockImplementation(async (message, dispatchOptions) => {
-      const typedMessage = message as { userTurnId: string };
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
       const typedOptions = dispatchOptions as DeliveryDispatchOptions;
       await typedOptions.onTurnClaimed?.();
-      await typedOptions.onTurnSettled?.({
-        turnId: `assistant:${typedMessage.userTurnId}`,
-        outcome: 'completed',
-      });
-      throw new Error('coordinator crashed after durable acknowledgement');
+      await typedOptions.onTurnSettled?.('handled');
+      throw new Error('coordinator crashed after durable consume');
     });
 
     harness.coordinator.start();
@@ -1704,7 +1683,6 @@ describe('LodyOperationCoordinator', () => {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'consumed',
         attemptCount: 1,
-        continuationOutcome: 'completed',
       });
     } finally {
       finalStore.close();
@@ -1714,18 +1692,14 @@ describe('LodyOperationCoordinator', () => {
   it('recovers once when execution exits after claim without reporting a settlement', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
     let executionCount = 0;
-    harness.continueSession.mockImplementation(async (message, dispatchOptions) => {
-      const typedMessage = message as { userTurnId: string };
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
       const typedOptions = dispatchOptions as DeliveryDispatchOptions;
       await typedOptions.onTurnClaimed?.();
       executionCount += 1;
       if (executionCount === 1) {
         throw new Error('execution exited without a settlement');
       }
-      await typedOptions.onTurnSettled?.({
-        turnId: `assistant:${typedMessage.userTurnId}`,
-        outcome: 'completed',
-      });
+      await typedOptions.onTurnSettled?.('handled');
     });
 
     harness.coordinator.start();
@@ -1740,7 +1714,6 @@ describe('LodyOperationCoordinator', () => {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'consumed',
         attemptCount: 2,
-        continuationOutcome: 'completed',
       });
     } finally {
       finalStore.close();
@@ -1768,8 +1741,6 @@ describe('LodyOperationCoordinator', () => {
     try {
       const delivery = finalStore.getDelivery(harness.requesterSessionId, 'review-round-1');
       expect(delivery).toMatchObject({ state: 'consumed', attemptCount: 2 });
-      expect(delivery).not.toHaveProperty('continuationOutcome');
-      expect(delivery).not.toHaveProperty('acknowledgedAt');
     } finally {
       finalStore.close();
     }
@@ -1783,10 +1754,7 @@ describe('LodyOperationCoordinator', () => {
     harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
       const typedOptions = dispatchOptions as DeliveryDispatchOptions;
       await typedOptions.onTurnClaimed?.();
-      await typedOptions.onTurnSettled?.({
-        turnId: 'assistant:operation-completion:requester-1:review-round-1',
-        outcome: 'interrupted',
-      });
+      await typedOptions.onTurnSettled?.('interrupted');
     });
 
     harness.coordinator.start();
@@ -1805,8 +1773,6 @@ describe('LodyOperationCoordinator', () => {
         state: 'consumed',
         attemptCount: 2,
       });
-      expect(delivery).not.toHaveProperty('continuationOutcome');
-      expect(delivery).not.toHaveProperty('acknowledgedAt');
     } finally {
       finalStore.close();
     }
