@@ -1067,7 +1067,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const hasExplicitDeepSeekModels =
     isDeepSeekBuiltin &&
     deepseekEndpointMode === 'custom' &&
-    parseDeepSeekModelIds(formData.deepseekCustomModels).length > 0;
+    !!formData.deepseekCustomModels?.trim();
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
     mode.kind === 'create' && !isPreset && (isManagedBuiltin || hasExplicitDeepSeekModels);

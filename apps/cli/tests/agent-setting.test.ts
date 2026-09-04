@@ -91,6 +91,13 @@ describe('resolveBuiltinACPSetting', () => {
         env: { ACP_EXTENSION_DSH_MODELS: '["other-model"]' },
       })
     );
+    expect(customDeepSeekModelsVersion).not.toBe(
+      getAcpCapabilitySourceVersion({
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        env: { ACP_EXTENSION_DSH_MODELS: ' ["gateway-model"]' },
+      })
+    );
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' }, '0.36.0')).toBe(
       'builtin-kimi:0.36.0'
     );
