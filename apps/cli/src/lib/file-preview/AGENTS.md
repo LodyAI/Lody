@@ -91,6 +91,17 @@ save path's text reads.
   to avoid NUL bytes would otherwise ship as mojibake text. Use `isBinaryImagePath`,
   NOT `getImageMimeTypeForPath` — the latter also matches SVG, which is XML text and
   must stay on the text path to keep its source view and its editability.
+- **The default budgets are the WIRE's, not the file's.** `FILE_PREVIEW_V3_LIMITS`
+  (10 MiB text, 5 MiB binary, 1 MiB gzip ceiling) exists because a remote preview
+  is gzipped and base64'd through one Machine RPC response. A SAME-MACHINE read has
+  no such reply to protect, so `file/preview-local` passes `sameMachine: true` and
+  the service swaps in `FILE_PREVIEW_V3_LOCAL_LIMITS`: 64 MiB, and text always
+  `utf8-plain` because there is nothing to compress for. Do not delete the local
+  ceiling — the remaining one is about what a viewer can render (VS Code stops at
+  50 MB) and about not materializing a multi-hundred-MB string in two processes;
+  past it the honest answer is the OS, which the viewer's error card now offers.
+  `sameMachine` is transport context like `allowArbitraryPaths`: it must never
+  become part of the request schema, or a Streams caller could ask for it.
 - `maxBinaryBytes` is pinned to `SESSION_IMAGE_MAX_SIZE_BYTES` because that is the
   only budget for this payload shape (base64 image bytes in one Machine RPC
   response) already proven in production, via `local-project/control` image reads.

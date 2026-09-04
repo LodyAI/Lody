@@ -3840,5 +3840,17 @@
   "emojiPicker.placeholder": "Select an emoji…",
   "settings.agentRoles.form.emojiReset": "Reset to {{emoji}}",
   "settings.agentRoles.form.memory": "Memory",
-  "settings.agentRoles.form.memoryHint": "Not supported yet. Every session this role creates starts fresh — it remembers nothing from earlier ones."
+  "settings.agentRoles.form.memoryHint": "Not supported yet. Every session this role creates starts fresh — it remembers nothing from earlier ones.",
+  "sessions.fileViewer.pathCopyFailed": "Failed to copy file path",
+  "sessions.fileActions.openInBrowser": "Open in browser",
+  "sessions.fileActions.openInDefaultApp": "Open in default app",
+  "sessions.fileActions.revealInFinder": "Show in Finder",
+  "sessions.fileActions.revealInExplorer": "Show in File Explorer",
+  "sessions.fileActions.revealInFileManager": "Reveal in file manager",
+  "sessions.fileActions.openInEditor": "Open in {{editor}}",
+  "sessions.fileActions.download": "Download file",
+  "sessions.fileActions.downloadFailed": "Could not download that file.",
+  "sessions.fileActions.fileMissing": "That file no longer exists.",
+  "sessions.fileActions.openFailed": "Could not open that file.",
+  "sessions.fileActions.more": "File actions"
 }

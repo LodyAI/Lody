@@ -187,10 +187,15 @@ function readLocalFileAtRoot(
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) return null;
 
-    const buffer = Buffer.alloc(maxBytes + 1);
-    const bytesRead = fs.readSync(fd, buffer, 0, maxBytes + 1, 0);
-    const truncated = bytesRead > maxBytes;
-    const safeBytes = truncated ? maxBytes : bytesRead;
+    // Allocate for the FILE, not for the ceiling. `Buffer.alloc(maxBytes + 1)`
+    // reserved the whole budget on every read, so raising the budget for a
+    // same-machine viewer would tax every small read with it. The extra byte
+    // still catches a file that is exactly at the limit.
+    const capacity = Math.max(1, Math.min(maxBytes + 1, stat.size + 1));
+    const buffer = Buffer.alloc(capacity);
+    const bytesRead = fs.readSync(fd, buffer, 0, capacity, 0);
+    const truncated = bytesRead > maxBytes || stat.size > maxBytes;
+    const safeBytes = Math.min(bytesRead, maxBytes);
     const resolvedRelativePath = toProjectRelativePath(rootRealPath, targetRealPath);
     // Image files are read as raw bytes and base64-encoded so they survive the
     // JSON/Streams transport intact; a UTF-8 decode would corrupt them. A

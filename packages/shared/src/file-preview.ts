@@ -58,6 +58,27 @@ export const FILE_PREVIEW_V3_LIMITS = {
 } as const;
 export type FilePreviewV3Limits = typeof FILE_PREVIEW_V3_LIMITS;
 
+/**
+ * Limits for a SAME-MACHINE preview (the Electron `file/preview-local` path).
+ *
+ * The default limits are shaped by the wire: a remote preview is gzipped and
+ * base64'd through Loro Streams, so a 1 MiB compressed ceiling is what keeps
+ * one file read off everyone else's connection. Locally there is no wire — the
+ * file is already on this disk — so a "too large to preview" verdict there was
+ * an artifact of the transport, not a fact about the file. The remaining cap is
+ * about what a VIEWER can render (VS Code stops at 50 MB for the same reason)
+ * and about not turning one read into a multi-hundred-MB string in two
+ * processes; past it, opening the file with the OS is the honest answer, which
+ * is what the viewer's error card offers.
+ */
+export const FILE_PREVIEW_V3_LOCAL_LIMITS = {
+  maxTextBytes: 64 * 1024 * 1024,
+  maxBinaryBytes: 64 * 1024 * 1024,
+  /** No transport to compress for, so text always ships as plain UTF-8. */
+  plainTextBytes: 64 * 1024 * 1024,
+  maxCompressedBytes: 64 * 1024 * 1024,
+} as const satisfies FilePreviewV3Limits;
+
 export const FilePreviewV3DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 export type FilePreviewV3Digest = z.infer<typeof FilePreviewV3DigestSchema>;
 

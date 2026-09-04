@@ -5,11 +5,13 @@ import { gzip } from 'node:zlib';
 import {
   FILE_PREVIEW_PROTOCOL_VERSION,
   FILE_PREVIEW_V3_LIMITS,
+  FILE_PREVIEW_V3_LOCAL_LIMITS,
   filePreviewV3Error,
   getImageMimeTypeForPath,
   isBinaryImagePath,
   type FilePreviewV3Content,
   type FilePreviewV3Digest,
+  type FilePreviewV3Limits,
   type FilePreviewV3Request,
   type FilePreviewV3Response,
   type FilePreviewV3TextFormat,
@@ -62,6 +64,13 @@ export type FilePreviewRequestOptions = {
    * schema, so a Loro Streams request can never widen its readable roots.
    */
   readonly allowArbitraryPaths?: boolean;
+  /**
+   * Same-machine IPC: the reply never crosses a network, so the transport-shaped
+   * budgets (gzip ceiling, 10 MiB text) are replaced by `FILE_PREVIEW_V3_LOCAL_LIMITS`
+   * and the text ships uncompressed. Same transport-only context as above — a
+   * Streams request must never be able to ask for it.
+   */
+  readonly sameMachine?: boolean;
 };
 
 /**
@@ -85,6 +94,11 @@ export class FilePreviewService {
     request: FilePreviewV3Request,
     options: FilePreviewRequestOptions = {}
   ): Promise<FilePreviewV3Response> {
+    // Explicit per-request limits rather than a second service instance: the
+    // same session can be previewed over both transports.
+    const limits = options.sameMachine
+      ? { ...FILE_PREVIEW_V3_LOCAL_LIMITS, ...this.deps.limits }
+      : this.limits;
     const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) {
       return filePreviewV3Error(workspace.code, {
@@ -122,7 +136,7 @@ export class FilePreviewService {
     // source view and the editing it has today, so SVG must stay on the text path.
     const isImageByName = isBinaryImagePath(resolved.reportedPath);
     const limitBytes = Math.min(
-      isImageByName ? this.limits.maxBinaryBytes : this.limits.maxTextBytes,
+      isImageByName ? limits.maxBinaryBytes : limits.maxTextBytes,
       request.maxBytes ?? Number.MAX_SAFE_INTEGER
     );
     if (resolved.sizeBytes > limitBytes) {
@@ -182,7 +196,7 @@ export class FilePreviewService {
     // extension also forces the binary path so an image whose header happens to
     // avoid NULs still ships as bytes rather than as mojibake text.
     if (isImageByName || hasBinaryNul(bytes)) {
-      return this.binaryOk(resolved, bytes, digest);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let text: string;
@@ -191,18 +205,18 @@ export class FilePreviewService {
     } catch {
       // Not valid UTF-8 and no NUL in the sniff window: still not previewable as
       // text, so hand it back as binary bytes and let the viewer decide.
-      return this.binaryOk(resolved, bytes, digest);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let content: FilePreviewV3Content;
     try {
-      content = await this.encodeTextContent(bytes, text);
+      content = await this.encodeTextContent(bytes, text, limits);
     } catch (error) {
       return filePreviewV3Error('too_large', {
         message: formatErrorMessage(error),
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
-        limitBytes: this.limits.maxCompressedBytes,
+        limitBytes: limits.maxCompressedBytes,
       });
     }
 
@@ -225,14 +239,15 @@ export class FilePreviewService {
   private binaryOk(
     resolved: ResolvedPreviewPath,
     bytes: Uint8Array,
-    digest: FilePreviewV3Digest
+    digest: FilePreviewV3Digest,
+    limits: FilePreviewV3Limits
   ): FilePreviewV3Response {
-    if (bytes.byteLength > this.limits.maxBinaryBytes) {
+    if (bytes.byteLength > limits.maxBinaryBytes) {
       return filePreviewV3Error('too_large', {
         message: 'Binary file is too large to preview.',
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
-        limitBytes: this.limits.maxBinaryBytes,
+        limitBytes: limits.maxBinaryBytes,
       });
     }
     const mimeType = getImageMimeTypeForPath(resolved.reportedPath);
@@ -254,15 +269,17 @@ export class FilePreviewService {
     };
   }
 
-  private async encodeTextContent(bytes: Uint8Array, text: string): Promise<FilePreviewV3Content> {
-    if (bytes.byteLength <= this.limits.plainTextBytes) {
+  private async encodeTextContent(
+    bytes: Uint8Array,
+    text: string,
+    limits: FilePreviewV3Limits
+  ): Promise<FilePreviewV3Content> {
+    if (bytes.byteLength <= limits.plainTextBytes) {
       return { encoding: 'utf8-plain', text, rawBytes: bytes.byteLength };
     }
     const compressed = await gzipAsync(bytes);
-    if (compressed.byteLength > this.limits.maxCompressedBytes) {
-      throw new Error(
-        `Compressed preview payload exceeds ${this.limits.maxCompressedBytes} bytes.`
-      );
+    if (compressed.byteLength > limits.maxCompressedBytes) {
+      throw new Error(`Compressed preview payload exceeds ${limits.maxCompressedBytes} bytes.`);
     }
     return {
       encoding: 'utf8-gzip-base64',

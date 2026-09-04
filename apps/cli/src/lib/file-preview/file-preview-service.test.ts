@@ -248,6 +248,44 @@ describe('FilePreviewService', () => {
     });
   });
 
+  it('does not hold a same-machine preview to the remote transport budget', async () => {
+    // The default text ceiling is a WIRE budget. Locally there is no wire, so a
+    // file past it is still just a file on this disk — and the viewer's
+    // "too large" card would be advice about a limit that does not apply.
+    const workspaceRoot = await makeDir('preview-ws-');
+    const text = 'y'.repeat(FILE_PREVIEW_V3_LIMITS.maxTextBytes + 1024);
+    await writeFile(path.join(workspaceRoot, 'huge.txt'), text);
+    const service = createService({ workspaceRoot });
+
+    const remote = await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'huge.txt' });
+    expect(remote).toMatchObject({ status: 'error', code: 'too_large' });
+
+    const local = await service.previewFile(
+      { v: 3, sessionId: SESSION_ID, path: 'huge.txt' },
+      { sameMachine: true }
+    );
+    expect(local).toMatchObject({
+      status: 'ok',
+      kind: 'text',
+      sizeBytes: text.length,
+      // Nothing to compress for: the reply never leaves the machine.
+      content: { encoding: 'utf8-plain' },
+    });
+  });
+
+  it('still honours a caller-supplied maxBytes on the same machine', async () => {
+    const workspaceRoot = await makeDir('preview-ws-');
+    await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));
+    const service = createService({ workspaceRoot });
+
+    const response = await service.previewFile(
+      { v: 3, sessionId: SESSION_ID, path: 'medium.txt', maxBytes: 10 },
+      { sameMachine: true }
+    );
+
+    expect(response).toMatchObject({ status: 'error', code: 'too_large', limitBytes: 10 });
+  });
+
   it('applies the caller-supplied maxBytes when it is stricter than the machine limit', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));

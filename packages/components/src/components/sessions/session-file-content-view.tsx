@@ -38,6 +38,7 @@ import {
   resolveSessionLocalFileSource,
   resolveSessionLocalProjectRootPath,
 } from '@/lib/session-local-file-source';
+import { useSessionFileActions } from '@/hooks/use-session-file-actions';
 import { chooseSessionFileSurfaceSource } from '@/lib/session-file-source-selection';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import {
@@ -191,6 +192,12 @@ export type SessionFileContentViewProps = {
 
 const isHtmlPath = (filePath: string): boolean => /\.(?:html|htm)$/iu.test(filePath);
 
+// The local-project read defaults to a 64 KiB PREVIEW budget, which is right
+// for a mention popover and wrong for the file viewer — it truncated anything
+// past 64 KiB behind a banner. Ask for the machine's whole allowance instead;
+// it clamps this to its own hard ceiling.
+const LOCAL_FILE_VIEWER_READ_MAX_BYTES = 5 * 1024 * 1024;
+
 function getCodeCollabTextChangeChecker(
   provider: SessionFileProvider
 ): CodeCollabTextChangeChecker | null {
@@ -246,6 +253,7 @@ function SessionFileContentViewImpl({
   const machineFlockRows = useMachineFlockRows(session.machineId, {
     families: ['localProject'],
   });
+  const sessionFileActions = useSessionFileActions({ session, fileProvider });
   const sessionMachineLocalProjects = useMemo(
     () => ({
       ...(sessionMachine?.localProjects ?? {}),
@@ -333,6 +341,14 @@ function SessionFileContentViewImpl({
     () => createSelectedLines(startLine, endLine, focusRequestSeq),
     [endLine, focusRequestSeq, startLine]
   );
+
+  // Lody refuses to render some files it can locate perfectly well — too large,
+  // unsupported encoding, one endless line. The error state then says "open it
+  // on the host machine", so it also carries the ways to do that. Which ones
+  // exist is `useSessionFileActions`' call, shared with the file tree context
+  // menu and the side panel ⋯ menu: copying the path works anywhere, handing
+  // the file to the OS needs the desktop bridge and this machine.
+  const fileErrorActions = sessionFileActions.buildErrorActions(normalizedPath);
   const contentTargetKey = [
     fileContentSource,
     localFileSourceKind ?? '',
@@ -432,7 +448,10 @@ function SessionFileContentViewImpl({
                     return createLocalProjectIpcFileTransport({
                       workspaceId: localProjectWorkspaceId,
                       localProjectId,
-                    }).readFile({ relativePath: normalizedPath });
+                    }).readFile({
+                      relativePath: normalizedPath,
+                      maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                    });
                   }
                   if (!workspaceRuntime || !currentUserId || !localProjectMachineId) {
                     throw new Error(
@@ -449,7 +468,10 @@ function SessionFileContentViewImpl({
                     requestedByUserId: currentUserId,
                     requestLocalProjectControl: (request, requestOptions) =>
                       workspaceRuntime.requestLocalProjectControl(request, requestOptions),
-                  }).readFile({ relativePath: normalizedPath });
+                  }).readFile({
+                    relativePath: normalizedPath,
+                    maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                  });
                 })()
               : (() => {
                   const reader = getIpcServices()?.localProjects.readSessionWorktreeFile.bind(
@@ -471,7 +493,9 @@ function SessionFileContentViewImpl({
                       )
                     );
                   }
-                  return reader(localWorktreeRepoKey, localWorktreeSessionId, normalizedPath);
+                  return reader(localWorktreeRepoKey, localWorktreeSessionId, normalizedPath, {
+                    maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                  });
                 })();
 
           const result = await readResult;
@@ -1129,7 +1153,13 @@ function SessionFileContentViewImpl({
       </div>
     );
   } else if (data.status === 'error') {
-    body = <SessionFileErrorState message={data.message} reason={data.reason} />;
+    body = (
+      <SessionFileErrorState
+        message={data.message}
+        reason={data.reason}
+        {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
+      />
+    );
   } else if (data.snapshot.kind === 'binary') {
     body = <SessionFileBinaryPreview path={normalizedPath} bytes={data.snapshot.bytes} />;
   } else if (data.snapshot.kind === 'missing') {

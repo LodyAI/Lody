@@ -3840,5 +3840,17 @@
   "emojiPicker.placeholder": "选择一个 Emoji…",
   "settings.agentRoles.form.emojiReset": "恢复为 {{emoji}}",
   "settings.agentRoles.form.memory": "记忆",
-  "settings.agentRoles.form.memoryHint": "暂不支持。该角色创建的每个会话都从零开始，不会记住此前会话中的任何内容。"
+  "settings.agentRoles.form.memoryHint": "暂不支持。该角色创建的每个会话都从零开始，不会记住此前会话中的任何内容。",
+  "sessions.fileViewer.pathCopyFailed": "复制文件路径失败",
+  "sessions.fileActions.openInBrowser": "在浏览器中打开",
+  "sessions.fileActions.openInDefaultApp": "用默认应用打开",
+  "sessions.fileActions.revealInFinder": "在访达中显示",
+  "sessions.fileActions.revealInExplorer": "在文件资源管理器中显示",
+  "sessions.fileActions.revealInFileManager": "在文件管理器中显示",
+  "sessions.fileActions.openInEditor": "用 {{editor}} 打开",
+  "sessions.fileActions.download": "下载文件",
+  "sessions.fileActions.downloadFailed": "无法下载该文件。",
+  "sessions.fileActions.fileMissing": "该文件已不存在。",
+  "sessions.fileActions.openFailed": "无法打开该文件。",
+  "sessions.fileActions.more": "文件操作"
 }
