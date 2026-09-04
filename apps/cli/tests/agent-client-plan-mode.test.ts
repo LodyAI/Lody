@@ -408,6 +408,27 @@ describe('AgentClient plan mode permission restoration', () => {
       expect(onUpdateMessage).toHaveBeenCalledOnce();
     });
 
+    it('classifies a prompt-transport pre-submission failure as not delivered', async () => {
+      const { client } = createTestClient({ agentType: 'claude' });
+      // @ts-expect-error - focused protocol-boundary setup
+      client.connection = { prompt: () => undefined };
+      // @ts-expect-error - focused capability-negotiation setup
+      client.acknowledgedSteerCapability = {
+        transport: 'prompt',
+        promptMetaNamespace: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      };
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.completion).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+    });
+
     /** Wire an acknowledged-steer-capable Codex client around one steer request. */
     const createSteerClient = (
       request: () => Promise<unknown>,

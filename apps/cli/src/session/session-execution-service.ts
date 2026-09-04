@@ -1537,9 +1537,19 @@ export class SessionExecutionService {
       );
     }
     if (!marked) {
-      this.deferUncertainSteerHistoryMarker(options);
+      if (this.deferUncertainSteerHistoryMarker(options)) {
+        return;
+      }
     }
 
+    await this.recordUncertainSteerNotice(options);
+  }
+
+  private async recordUncertainSteerNotice(options: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId: string;
+  }): Promise<void> {
     try {
       await this.deps.recordChatFailure(
         options.sessionDoc,
@@ -1591,13 +1601,13 @@ export class SessionExecutionService {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
     userTurnId: string;
-  }): void {
+  }): boolean {
     const mirror = options.sessionDoc.mirror;
     if (!mirror) {
       this.deps.logger.error(
         `[${options.sessionId}] Cannot defer uncertain steer ${options.userTurnId}: session mirror is unavailable`
       );
-      return;
+      return false;
     }
 
     let done = false;
@@ -1609,6 +1619,7 @@ export class SessionExecutionService {
         if (done) return;
         try {
           if (await this.markUncertainSteerHistoryEntry(options)) {
+            await this.recordUncertainSteerNotice(options);
             done = true;
             unsubscribe?.();
             this.deps.logger.debug(
@@ -1625,6 +1636,7 @@ export class SessionExecutionService {
 
     unsubscribe = mirror.subscribe(requestCheck);
     requestCheck();
+    return true;
   }
 
   /**

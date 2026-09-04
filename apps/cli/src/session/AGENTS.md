@@ -131,19 +131,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   qualify: after submission the provider may already have committed the steer, and
   re-sending would duplicate it. An entry that is already active, terminal, or past
   `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
-  An ambiguous post-submission failure instead marks only that guide entry
-  `failed` with `sendStatus: delivery_unknown` and appends a visible
-  `steer_delivery_unknown` notice. It must not write `lastHandledUserMsgId`,
-  `processingUserMsgId`, or `latestUserMsgId`: the predecessor still owns the
-  physical prompt, and automatic replay could duplicate work. The user may
-  inspect the transcript/worktree and explicitly resend the content as a new turn.
-  Machine RPC can reach the CLI before the renderer-authored guide row, so an
-  initial empty history check retains a mirror subscription that applies the
-  marker when the exact row arrives. Install the subscription before the second
-  check to close the check-to-subscribe race. Neither `waitUntilSynced()` (which
-  only confirms outgoing writes) nor one initial remote-sync boundary proves
-  that the row has arrived; never silently discard the classification after an
-  empty history map.
+  An ambiguous post-submission failure marks only the guide as failed with
+  `sendStatus: delivery_unknown`; it never advances dispatch pointers. If its
+  renderer-authored row is not visible yet, defer both marker and notice through
+  the document mirror. Only an explicit user resend may create another turn.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
   sends, edit-and-resend, refused-steer requeue, accepted steer ownership
   transfer, and message-queue promotion) may publish it, and every one of them

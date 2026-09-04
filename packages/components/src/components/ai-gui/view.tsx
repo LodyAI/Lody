@@ -2726,6 +2726,7 @@ const UserMessageRowView = ({
   );
   const isDeliveryUnknown =
     message.status === 'failed' && message.sendStatus === 'delivery_unknown';
+  const canResend = isUndelivered || isDeliveryUnknown;
   const isFailed = message.status === 'failed';
   const deliveryFailureLabel = isDeliveryUnknown
     ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
@@ -2749,6 +2750,12 @@ const UserMessageRowView = ({
 
   const isPinned = pinCtx?.pinnedHistoryId === message.id;
 
+  useEffect(() => {
+    if (resendDialogOpen && !canResend) {
+      setResendDialogOpen(false);
+    }
+  }, [canResend, resendDialogOpen]);
+
   const handleCopy = useCallback(async () => {
     if (!hasTextContent) return;
 
@@ -2767,7 +2774,8 @@ const UserMessageRowView = ({
   }, [pinCtx, isPinned, message.id]);
 
   const handleConfirmResend = useCallback(async () => {
-    if (!onResendUndelivered || isResending) {
+    if (!onResendUndelivered || isResending || !canResend) {
+      setResendDialogOpen(false);
       return;
     }
     const inputBlocks = buildResendInputBlocks(message);
@@ -2795,7 +2803,7 @@ const UserMessageRowView = ({
       setIsResending(false);
       setResendDialogOpen(false);
     }
-  }, [isDeliveryUnknown, isResending, message, onResendUndelivered, sessionId, t]);
+  }, [canResend, isDeliveryUnknown, isResending, message, onResendUndelivered, sessionId, t]);
 
   const handleSaveEdit = useCallback(async () => {
     if (!onEdit || isSavingEdit || !editText.trim()) return;
@@ -2822,7 +2830,7 @@ const UserMessageRowView = ({
       >
         <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered || isDeliveryUnknown ? (
+          {canResend ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -2919,7 +2927,7 @@ const UserMessageRowView = ({
             the editor's Cancel / Save & resend — hide them until it closes. */}
         {hasTextContent && !isEditing ? (
           <div className="flex gap-0.5">
-            {onEdit ? (
+            {onEdit && !isDeliveryUnknown ? (
               <TooltipProvider>
                 <Tooltip delayDuration={500}>
                   <TooltipTrigger asChild>

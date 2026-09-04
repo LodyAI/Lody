@@ -991,7 +991,9 @@ describe('SessionExecutionService', () => {
     let history: SessionHistoryInput[] = [];
     const deferredMarkerApplied = createDeferred<void>();
     const deferredMarkerDisposed = createDeferred<void>();
+    const noticeRecorded = createDeferred<void>();
     const unsubscribeHistory = vi.fn(() => deferredMarkerDisposed.resolve());
+    let notifyHistoryChanged!: () => void;
     const sessionDoc = {
       getHistory: vi.fn(async () => history),
       updateHistory: vi.fn(
@@ -1004,23 +1006,14 @@ describe('SessionExecutionService', () => {
       ),
       mirror: {
         subscribe: vi.fn((listener: () => void) => {
-          // The renderer row arrives while subscription is being installed.
-          history = [
-            {
-              id: 'user-2',
-              role: 'user',
-              status: 'pending_apply',
-              read: false,
-              inputConfig: { prompt: 'do it differently' },
-            } as SessionHistoryInput,
-          ];
-          listener();
+          notifyHistoryChanged = listener;
           return unsubscribeHistory;
         }),
       },
     };
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
+      recordChatFailure: vi.fn(async () => noticeRecorded.resolve()),
       workspaceDocument: {
         repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
@@ -1069,7 +1062,20 @@ describe('SessionExecutionService', () => {
     });
     await expect(steerResult).resolves.toMatchObject({ applied: false, disposition: 'error' });
     expect(sessionDoc.mirror.subscribe).toHaveBeenCalledOnce();
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+
+    history = [
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: { prompt: 'do it differently' },
+      } as SessionHistoryInput,
+    ];
+    notifyHistoryChanged();
     await deferredMarkerApplied.promise;
+    await noticeRecorded.promise;
     await deferredMarkerDisposed.promise;
     expect(history[0]).toMatchObject({
       id: 'user-2',

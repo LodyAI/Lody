@@ -2884,6 +2884,7 @@ export const SessionChatInterface = memo(
       if (
         !userMessage ||
         userMessage.status === 'pending_apply' ||
+        userMessage.sendStatus === 'delivery_unknown' ||
         (userMessage.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind ===
           'steer'
       ) {

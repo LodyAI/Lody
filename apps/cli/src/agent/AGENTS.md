@@ -75,7 +75,7 @@ arrive: context/message-flow.md "Upstream".
   Acknowledged steer is inject-or-refuse, and `AgentSteerNotDeliveredError` marks
   ONLY the provable refusal: a local pre-write failure, or the agent's own
   Core `outcome: "failed"` response. A legacy adapter's JSON-RPC `invalid request`
-  answer remains the compatibility form of that refusal. A closed connection, a dead agent process, or
+  answer remains the compatibility form. A closed connection, a dead agent process, or
   an internal error may have left the prompt inside the live turn — the caller
   re-sends an undelivered steer, so widening that classification sends the user's
   message twice. The applied-waiter must also wait for the steer request's own

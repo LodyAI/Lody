@@ -108,7 +108,8 @@ describe('UserMessageRowView undelivered resend dialog', () => {
       inputBlocks: unknown,
       reason: UserTurnResendReason
     ) => Promise<boolean>,
-    message: SessionHistoryParsed = undeliveredMessage
+    message: SessionHistoryParsed = undeliveredMessage,
+    onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>
   ) => {
     const store = createStore();
     store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
@@ -121,6 +122,7 @@ describe('UserMessageRowView undelivered resend dialog', () => {
             message,
             sessionId,
             onResendUndelivered,
+            onEdit,
           })
         )
       );
@@ -160,11 +162,25 @@ describe('UserMessageRowView undelivered resend dialog', () => {
 
   it('warns before manually resending a delivery-ambiguous steer', async () => {
     const onResendUndelivered = vi.fn(async () => true);
-    await renderRow(onResendUndelivered, uncertainMessage);
+    const onEdit = vi.fn(async () => true);
+    await renderRow(onResendUndelivered, uncertainMessage, onEdit);
+
+    expect(document.body.querySelector('[aria-label="Edit message"]')).toBeNull();
 
     await click(queryBodyButton('Delivery uncertain'));
     expect(document.body.textContent).toContain('may already have received');
     expect(document.body.textContent).toContain('may repeat work');
+
+    await renderRow(
+      onResendUndelivered,
+      { ...uncertainMessage, status: 'handled', sendStatus: undefined } as SessionHistoryParsed,
+      onEdit
+    );
+    expect(document.body.textContent).not.toContain('may repeat work');
+    expect(onResendUndelivered).not.toHaveBeenCalled();
+
+    await renderRow(onResendUndelivered, uncertainMessage, onEdit);
+    await click(queryBodyButton('Delivery uncertain'));
 
     await click(queryBodyButton('Resend message'));
     expect(onResendUndelivered).toHaveBeenCalledWith(
