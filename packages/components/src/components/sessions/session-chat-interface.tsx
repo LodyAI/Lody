@@ -187,6 +187,8 @@ import { Separator } from '@/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useActiveAssistantTurnId } from '@/hooks/use-session-turn-selectors';
+import { useConversationViewSelector } from '@/hooks/use-conversation-view-selector';
+import type { ConversationView } from '@/lib/conversation-view';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
@@ -1898,6 +1900,8 @@ function buildEditedMessageQueueItem(
  * Session chat interface component
  * Only loads the active session document; allows switching history from the header.
  */
+const readTurnCount = (view: ConversationView): number => view.turnCount;
+
 export const SessionChatInterface = memo(
   forwardRef<SessionChatInterfaceHandle, SessionChatInterfaceProps>(function SessionChatInterface(
     {
@@ -2415,7 +2419,12 @@ export const SessionChatInterface = memo(
       [waitUntilSynced]
     );
 
-    const sessionHistoryLength = sessionDoc?.history?.length ?? 0;
+    const fallbackHistoryLength = conversationView ? 0 : (sessionDoc?.history?.length ?? 0);
+    const sessionHistoryLength = useConversationViewSelector(
+      conversationView,
+      readTurnCount,
+      fallbackHistoryLength
+    );
     const conversationPreparationSignalRef = useRef<SessionConversationPreparationState | null>(
       null
     );
@@ -5840,8 +5849,8 @@ export const SessionChatInterface = memo(
                           ref={chatStreamRef}
                           sessionId={session?.id}
                           workspaceId={workspaceId}
-                          sessionDoc={sessionDoc}
                           conversationView={conversationView}
+                          fallbackHistory={conversationView ? undefined : sessionHistory}
                           sessionCreatedAt={session?.createdAt}
                           dividerLabel={sessionDividerLabel}
                           className="h-full"

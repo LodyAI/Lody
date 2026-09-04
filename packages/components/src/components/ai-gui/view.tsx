@@ -76,6 +76,8 @@ import { authTokenAtom } from '@/atoms/runtime';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
+import { TurnPlaceholderRow } from './turn-placeholder-row';
+import type { TurnIndexRow } from '@/lib/conversation-view';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
@@ -304,11 +306,25 @@ const getFileNameFromPath = (filePath: string): string => {
 export interface SessionMessageItem {
   type: 'message';
   sessionId: SessionId;
+  /** Position in the conversation (ConversationView index, or history index on the rollback path). */
+  turnIndex?: number;
   message: SessionHistoryParsed;
 }
 
 export interface EmptySessionItem {
   type: 'empty';
+}
+
+/**
+ * A turn the `ConversationView` has not hydrated. Rendered from its index row
+ * with an estimated height under the SAME key its message rows will use, so
+ * hydration swaps content without disturbing Virtua's element↔index map.
+ */
+export interface TurnPlaceholderItem {
+  type: 'placeholder';
+  sessionId: SessionId;
+  turnIndex: number;
+  row: TurnIndexRow;
 }
 
 export type MessageFileDiffEntriesByTurn = Readonly<
@@ -326,7 +342,7 @@ const OUTLINE_JUMP_TOLERANCE_PX = 2;
  */
 const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
 
-export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
+export type ChatStreamItem = SessionMessageItem | EmptySessionItem | TurnPlaceholderItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
@@ -357,6 +373,7 @@ type AssistantChatVirtualRow = {
   type: 'assistant';
   key: string;
   messageIndex: number;
+  turnIndex: number;
   itemIndex?: number;
   item: SessionMessageItem;
   content: AssistantVirtualContent;
@@ -368,14 +385,28 @@ type StandardChatVirtualRow = {
   type: 'standard';
   key: string;
   messageIndex: number;
-  item: ChatStreamItem;
+  /** -1 for the empty-conversation row. */
+  turnIndex: number;
+  item: SessionMessageItem | EmptySessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow;
+type PlaceholderChatVirtualRow = {
+  type: 'placeholder';
+  key: string;
+  messageIndex: number;
+  turnIndex: number;
+  item: TurnPlaceholderItem;
+};
+
+export type ChatVirtualRow =
+  | AssistantChatVirtualRow
+  | StandardChatVirtualRow
+  | PlaceholderChatVirtualRow;
 
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
-  scrollToIndex: (index: number, smooth?: boolean) => void;
+  /** Scroll the turn at `turnIndex` (a `ConversationView` index, or a history index on the rollback path) to the top. */
+  scrollToIndex: (turnIndex: number, smooth?: boolean) => void;
 }
 
 export type SessionChatUser =
@@ -453,6 +484,14 @@ export interface SessionChatStreamViewProps {
    * (e.g. during search result navigation).
    */
   suppressStickyAutoScrollRef?: React.RefObject<boolean>;
+  /**
+   * The turns whose rows intersect the viewport, `[from, to)`, whenever that
+   * window changes. Reported only after the initial scroll restore so the
+   * pre-restore top-of-list position never drives hydration.
+   */
+  onVisibleTurnRangeChange?: (from: number, to: number) => void;
+  /** The turn whose outline hover card just opened; the stream hydrates it for its preview. */
+  onOutlineHoverTurn?: (turnIndex: number) => void;
 }
 
 const SessionChatActionContext = createContext<{
@@ -823,6 +862,7 @@ const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLay
 type AssistantTurnRowsCacheEntry = {
   rows: AssistantChatVirtualRow[];
   messageIndex: number;
+  turnIndex: number;
   isLastAssistantMessage: boolean;
   fileDiffs: readonly AssistantEditedFileEntry[];
   scopedAssistantActions: AssistantMessageAction[] | undefined;
@@ -854,17 +894,29 @@ export const buildChatVirtualRows = ({
   for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
     const item = items[messageIndex];
     if (!item) continue;
+    if (item.type === 'placeholder') {
+      rows.push({
+        type: 'placeholder',
+        key: item.row.id,
+        messageIndex,
+        turnIndex: item.turnIndex,
+        item,
+      });
+      continue;
+    }
     if (item.type !== 'message' || item.message.role !== 'assistant') {
       rows.push({
         type: 'standard',
         key: item.type === 'message' ? item.message.id : `empty-${messageIndex}`,
         messageIndex,
+        turnIndex: item.type === 'message' ? (item.turnIndex ?? messageIndex) : -1,
         item,
       });
       continue;
     }
 
     const message = item.message;
+    const turnIndex = item.turnIndex ?? messageIndex;
     const fileDiffs =
       messageFileDiffEntriesByTurn === undefined
         ? (message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES)
@@ -879,6 +931,7 @@ export const buildChatVirtualRows = ({
     if (
       cachedRows &&
       cachedRows.messageIndex === messageIndex &&
+      cachedRows.turnIndex === turnIndex &&
       cachedRows.isLastAssistantMessage === isLastAssistantMessage &&
       cachedRows.fileDiffs === fileDiffs &&
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
@@ -915,6 +968,7 @@ export const buildChatVirtualRows = ({
         type: 'assistant',
         key: `assistant:${message.id}:plan`,
         messageIndex,
+        turnIndex,
         item,
         content: { kind: 'plan' },
         isLastRowForMessage: false,
@@ -932,6 +986,7 @@ export const buildChatVirtualRows = ({
           type: 'assistant',
           key: `assistant:${message.id}:${block.key}`,
           messageIndex,
+          turnIndex,
           itemIndex: block.entry.itemIndex,
           item,
           content: { kind: 'content', block },
@@ -960,6 +1015,7 @@ export const buildChatVirtualRows = ({
         type: 'assistant',
         key: `assistant:${message.id}:${block.key}:header`,
         messageIndex,
+        turnIndex,
         item,
         content: { kind: 'activity_group_header', block, expanded, isThinking },
         isWorkedDetail,
@@ -973,6 +1029,7 @@ export const buildChatVirtualRows = ({
             type: 'assistant',
             key: `assistant:${message.id}:${block.key}:item:${entry.itemIndex}:${entrySuffix}`,
             messageIndex,
+            turnIndex,
             itemIndex: entry.itemIndex,
             item,
             content: {
@@ -994,6 +1051,7 @@ export const buildChatVirtualRows = ({
         type: 'assistant',
         key: `assistant:${message.id}:subagent-tasks`,
         messageIndex,
+        turnIndex,
         item,
         content: { kind: 'subagent_tasks' },
         isWorkedDetail,
@@ -1081,6 +1139,7 @@ export const buildChatVirtualRows = ({
           type: 'assistant',
           key: `assistant:${message.id}:${segment.key}:worked-header`,
           messageIndex,
+          turnIndex,
           item,
           content: {
             kind: 'worked_group_header',
@@ -1130,6 +1189,7 @@ export const buildChatVirtualRows = ({
         type: 'assistant',
         key: `assistant:${message.id}:footer`,
         messageIndex,
+        turnIndex,
         item,
         content: { kind: 'footer', showDuration: showDurationInFooter },
         isLastRowForMessage: false,
@@ -1141,6 +1201,7 @@ export const buildChatVirtualRows = ({
     assistantTurnRowsCache.set(item, {
       rows: assistantRows,
       messageIndex,
+      turnIndex,
       isLastAssistantMessage,
       fileDiffs,
       scopedAssistantActions,
@@ -1151,6 +1212,28 @@ export const buildChatVirtualRows = ({
   }
 
   return rows;
+};
+
+/**
+ * The `[from, to)` turn window covered by rows `startRow..endRow` (both may
+ * fall outside the row list — the leading content row or the agent activity
+ * row — and are clamped). Exported for tests.
+ */
+export const resolveVisibleTurnRange = (
+  rows: readonly { turnIndex: number }[],
+  startRow: number,
+  endRow: number
+): { from: number; to: number } | null => {
+  if (rows.length === 0) return null;
+  const last = rows.length - 1;
+  let start = Math.min(Math.max(startRow, 0), last);
+  let end = Math.min(Math.max(endRow, start), last);
+  while (start < end && (rows[start]?.turnIndex ?? -1) < 0) start += 1;
+  while (end > start && (rows[end]?.turnIndex ?? -1) < 0) end -= 1;
+  const from = rows[start]?.turnIndex ?? -1;
+  const to = rows[end]?.turnIndex ?? -1;
+  if (from < 0 || to < 0) return null;
+  return { from, to: to + 1 };
 };
 
 /**
@@ -1196,6 +1279,8 @@ export const SessionChatStreamView = forwardRef<
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
+      onVisibleTurnRangeChange,
+      onOutlineHoverTurn,
     },
     ref
   ) => {
@@ -1546,20 +1631,52 @@ export const SessionChatStreamView = forwardRef<
     // message while the list sits at its start. setState with an unchanged
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
+
+    // ---- Visible turn window -------------------------------------------------
+    // Which turns intersect the viewport, from Virtua's own offset math (no
+    // layout read): the row under the top edge and the row under the bottom
+    // edge, mapped back to turn indices. The stream hydrates around it.
+    const lastVisibleTurnRangeRef = useRef<{ from: number; to: number } | null>(null);
+    const virtualRowsRef = useLatestRef(virtualRows);
+    const onVisibleTurnRangeChangeRef = useLatestRef(onVisibleTurnRangeChange);
+    const reportVisibleTurnRange = useCallback(() => {
+      const vlist = vlistRef.current;
+      const report = onVisibleTurnRangeChangeRef.current;
+      const rows = virtualRowsRef.current;
+      if (!vlist || !report || rows.length === 0) return;
+      const range = resolveVisibleTurnRange(
+        rows,
+        vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount,
+        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+      );
+      if (!range) return;
+      const last = lastVisibleTurnRangeRef.current;
+      if (last && last.from === range.from && last.to === range.to) return;
+      lastVisibleTurnRangeRef.current = range;
+      report(range.from, range.to);
+    }, [leadingRowCount, onVisibleTurnRangeChangeRef, virtualRowsRef]);
+    useEffect(() => {
+      if (!initialScrollRestored) return;
+      reportVisibleTurnRange();
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
         syncActiveOutlineIndex();
+        if (initialScrollRestored) reportVisibleTurnRange();
       },
-      [handleScroll, syncActiveOutlineIndex]
+      [handleScroll, initialScrollRestored, reportVisibleTurnRange, syncActiveOutlineIndex]
     );
 
     const scrollToIndex = useCallback(
-      (messageIndex: number, smooth?: boolean) => {
-        const messageItem = items[messageIndex];
+      (turnIndex: number, smooth?: boolean) => {
+        const firstRow = virtualRows.find((row) => row.turnIndex === turnIndex);
+        if (!firstRow) return;
         let virtualIndex = -1;
-        if (messageItem?.type === 'message' && activeSearchBlockId) {
+        const messageItem = firstRow.item;
+        if (messageItem.type === 'message' && activeSearchBlockId) {
           const prefix = getMessageItemPrefix(messageItem.message.id, 0).slice(0, -1);
           if (activeSearchBlockId.startsWith(prefix)) {
             const itemIndexText = activeSearchBlockId.slice(prefix.length).split(':', 1)[0];
@@ -1568,19 +1685,35 @@ export const SessionChatStreamView = forwardRef<
               virtualIndex = virtualRows.findIndex(
                 (row) =>
                   row.type === 'assistant' &&
-                  row.messageIndex === messageIndex &&
+                  row.turnIndex === turnIndex &&
                   row.itemIndex === itemIndex
               );
             }
           }
         }
         if (virtualIndex === -1) {
-          virtualIndex = virtualRows.findIndex((row) => row.messageIndex === messageIndex);
+          virtualIndex = virtualRows.indexOf(firstRow);
         }
         if (virtualIndex === -1) return;
         scrollRowToTop(virtualIndex, smooth ?? true);
       },
-      [activeSearchBlockId, items, scrollRowToTop, virtualRows]
+      [activeSearchBlockId, scrollRowToTop, virtualRows]
+    );
+
+    const handleOutlineHoverRound = useCallback(
+      (outlineIndex: number) => {
+        if (!onOutlineHoverTurn) return;
+        const entry = outlineEntries[outlineIndex];
+        const item = entry ? items[entry.messageIndex] : undefined;
+        const turnIndex =
+          item?.type === 'placeholder'
+            ? item.turnIndex
+            : item?.type === 'message'
+              ? (item.turnIndex ?? entry?.messageIndex)
+              : undefined;
+        if (turnIndex !== undefined) onOutlineHoverTurn(turnIndex);
+      },
+      [items, onOutlineHoverTurn, outlineEntries]
     );
 
     useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex }), [
@@ -1697,6 +1830,9 @@ export const SessionChatStreamView = forwardRef<
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
                 {virtualRows.map((row) => {
+                  if (row.type === 'placeholder') {
+                    return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+                  }
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
@@ -1767,6 +1903,7 @@ export const SessionChatStreamView = forwardRef<
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                onHoverRound={onOutlineHoverTurn ? handleOutlineHoverRound : undefined}
                 overlayRoot={outlineOverlayRoot}
                 enableArrivalIntent
               />

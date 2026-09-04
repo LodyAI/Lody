@@ -142,3 +142,30 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     });
   });
 });
+
+describe('buildChatVirtualRows placeholders', () => {
+  it('emits one row per placeholder under the entry id and carries turn indexes', () => {
+    const row = { id: 'p-1', role: 'assistant', timestamp: '2026-01-01T00:00:00.000Z' } as const;
+    const items: ChatStreamItem[] = [
+      { ...wrap(makeMessage('u-1', 'user', [text('hello')])), turnIndex: 0 },
+      { type: 'placeholder', sessionId, turnIndex: 1, row },
+      { ...wrap(makeMessage('a-2', 'assistant', [text('answer')], true)), turnIndex: 2 },
+    ];
+    const rows = build(items);
+    expect(rows.slice(0, 2).map((r) => [r.type, r.key, r.turnIndex])).toEqual([
+      ['standard', 'u-1', 0],
+      ['placeholder', 'p-1', 1],
+    ]);
+    const assistantRows = rows.slice(2);
+    expect(assistantRows.length).toBeGreaterThan(0);
+    expect(assistantRows.every((r) => r.type === 'assistant' && r.turnIndex === 2)).toBe(true);
+    // Rebuilding with the same items hands back the same placeholder row item.
+    const again = build(items);
+    expect(again[1]?.item).toBe(rows[1]?.item);
+  });
+
+  it('defaults a message turn index to its position on the rollback path', () => {
+    const rows = build([wrap(makeMessage('u-1', 'user', [text('hello')]))]);
+    expect(rows[0]?.turnIndex).toBe(0);
+  });
+});
