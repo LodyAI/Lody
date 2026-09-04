@@ -21,10 +21,10 @@ let fileRefreshAvailable = true;
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useMentionProjectFiles: () => ({
-    fileData: {
-      entry: { paths: ['src/app.ts'], truncated: false, fetchedAt: 0 },
-      status: 'ready' as const,
-    },
+    // Deliberately empty: activation is driven by the resolved menu VIEW, not by
+    // the source having candidates, and giving every test in this file a real
+    // entry made each one build a Fuse index and render file rows.
+    fileData: { entry: null, status: 'ready' as const },
     initializeLazyDirectory: async () => undefined,
     getKnownFileTokens: () => new Set<string>(),
     refreshFiles: fileRefreshAvailable
