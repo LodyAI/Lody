@@ -203,13 +203,13 @@ export class LodyOperationCoordinator {
     // event loop (multiple workspace coordinators watching the shared
     // machine-level store amplify it).
     this.store = this.storeFactory();
-    const recoveredAttempts = this.store.recoverOrphanedDeliveryAttempts(
+    const recoveredClaims = this.store.recoverOrphanedDeliveryClaims(
       this.options.workspaceId,
       this.workerBootId
     );
-    if (recoveredAttempts > 0) {
+    if (recoveredClaims > 0) {
       this.options.logger.warn(
-        `[orchestration] Recovered ${recoveredAttempts} orphaned Delivery attempt(s) from an exited Worker`
+        `[orchestration] Recovered ${recoveredClaims} orphaned Delivery claim(s) from an exited Worker`
       );
     }
     const storePath = this.options.storePath ?? getLodyOperationStorePath(this.options.machineId);
@@ -826,7 +826,13 @@ export class LodyOperationCoordinator {
       store.get(delivery.requesterSessionId, delivery.operationId)
     );
     if (this.now() >= Date.parse(operation.deadlineAt) + DELIVERY_EXPIRY_GRACE_MS) {
-      this.consumeDelivery(delivery, reason, 'expired_stale');
+      await this.finalizeDeliveryWithoutExecution(
+        sessionDoc,
+        operation,
+        delivery,
+        reason,
+        'expired_stale'
+      );
       return;
     }
     if (execution.hasActiveTurn) return;
@@ -842,11 +848,17 @@ export class LodyOperationCoordinator {
       return;
     }
     if (configuration === 'unavailable') {
-      await this.writeCompletionTurn(sessionDoc, operation, delivery, {
-        code: 'CONFIGURATION_UNAVAILABLE',
-        message: 'The frozen continuation agent configuration is no longer available.',
-      });
-      this.consumeDelivery(delivery, reason, 'configuration_unavailable');
+      await this.finalizeDeliveryWithoutExecution(
+        sessionDoc,
+        operation,
+        delivery,
+        reason,
+        'configuration_unavailable',
+        {
+          code: 'CONFIGURATION_UNAVAILABLE',
+          message: 'The frozen continuation agent configuration is no longer available.',
+        }
+      );
       return;
     }
 
@@ -895,7 +907,7 @@ export class LodyOperationCoordinator {
             await this.writeCompletionTurn(sessionDoc, operation, delivery);
           } catch (error) {
             this.withStore((store) =>
-              store.interruptDeliveryAttempt(
+              store.releaseDeliveryClaim(
                 delivery.requesterSessionId,
                 delivery.operationId,
                 this.workerBootId,
@@ -910,7 +922,7 @@ export class LodyOperationCoordinator {
           const outcome = settlement.outcome;
           if (outcome === 'interrupted') {
             this.withStore((store) =>
-              store.interruptDeliveryAttempt(
+              store.releaseDeliveryClaim(
                 delivery.requesterSessionId,
                 delivery.operationId,
                 this.workerBootId,
@@ -939,7 +951,7 @@ export class LodyOperationCoordinator {
       await continuation;
     } catch (error) {
       const afterInterruption = this.withStore((store) => {
-        store.interruptDeliveryAttempt(
+        store.releaseDeliveryClaim(
           delivery.requesterSessionId,
           delivery.operationId,
           this.workerBootId,
@@ -974,29 +986,71 @@ export class LodyOperationCoordinator {
     delivery: StoredLodyDelivery,
     wakeReason: string
   ): Promise<void> {
-    await this.writeCompletionTurn(sessionDoc, operation, delivery, {
-      code: 'DELIVERY_ATTEMPTS_EXHAUSTED',
-      message: 'The completion continuation was interrupted twice and was not started again.',
-    });
-    const result = this.withStore((store) =>
-      store.failExhaustedDelivery(delivery.requesterSessionId, delivery.operationId)
-    );
-    this.options.logger.warn(
-      `[orchestration] Delivery ${delivery.deliveryId} attempts exhausted consumed=${String(
-        result.consumed
-      )} wake=${wakeReason}`
+    await this.finalizeDeliveryWithoutExecution(
+      sessionDoc,
+      operation,
+      delivery,
+      wakeReason,
+      'attempts_exhausted',
+      {
+        code: 'DELIVERY_ATTEMPTS_EXHAUSTED',
+        message: 'The completion continuation was interrupted twice and was not started again.',
+      },
+      true
     );
   }
 
-  private consumeDelivery(
+  private async finalizeDeliveryWithoutExecution(
+    sessionDoc: SessionDocument,
+    operation: StoredLodyOperation,
     delivery: StoredLodyDelivery,
     wakeReason: string,
-    evidence: string
-  ): void {
+    evidence: string,
+    continuationFailure?: {
+      code: 'CONFIGURATION_UNAVAILABLE' | 'DELIVERY_ATTEMPTS_EXHAUSTED';
+      message: string;
+    },
+    requireAttemptsExhausted = false
+  ): Promise<boolean> {
     const startedAt = performance.now();
-    this.withStore((store) =>
-      store.consumeDelivery(delivery.requesterSessionId, delivery.operationId)
+    const claimId = randomUUID();
+    const claim = this.withStore((store) =>
+      store.claimDeliveryFinalization(delivery.requesterSessionId, delivery.operationId, {
+        claimId,
+        ownerId: this.workerBootId,
+        requireAttemptsExhausted,
+      })
     );
+    if (claim.status !== 'claimed') {
+      this.options.logger.debug(
+        `[orchestration] Delivery ${delivery.deliveryId} finalization skipped status=${claim.status} reason=${evidence} wake=${wakeReason}`
+      );
+      return false;
+    }
+    try {
+      if (continuationFailure) {
+        await this.writeCompletionTurn(sessionDoc, operation, delivery, continuationFailure);
+      }
+    } catch (error) {
+      this.withStore((store) =>
+        store.releaseDeliveryClaim(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          claimId
+        )
+      );
+      throw error;
+    }
+    const result = this.withStore((store) =>
+      store.consumeClaimedDelivery(
+        delivery.requesterSessionId,
+        delivery.operationId,
+        this.workerBootId,
+        claimId
+      )
+    );
+    if (!result.consumed) return false;
     const timer = this.configurationTimers.get(delivery.requesterSessionId);
     if (timer) clearTimeout(timer);
     this.configurationTimers.delete(delivery.requesterSessionId);
@@ -1005,6 +1059,7 @@ export class LodyOperationCoordinator {
         performance.now() - startedAt
       ).toFixed(2)}`
     );
+    return true;
   }
 
   /**
@@ -1133,18 +1188,31 @@ export class LodyOperationCoordinator {
     await sessionDoc.updateHistory((history) => {
       const existing = history.find((entry) => entry.id === delivery.systemTurnId);
       if (!existing) return [...history, turn];
-      if (!continuationFailure || existing.role !== 'system') return history;
+      if (existing.role !== 'system') return history;
       return history.map((entry) =>
         entry.id !== delivery.systemTurnId
           ? entry
           : {
               ...entry,
-              items: entry.items?.map((existingItem) =>
-                existingItem.type === 'operation_completion' &&
-                existingItem.deliveryId === delivery.deliveryId
-                  ? { ...existingItem, continuation: item.continuation }
-                  : existingItem
-              ),
+              items: entry.items?.map((existingItem) => {
+                if (
+                  existingItem.type !== 'operation_completion' ||
+                  existingItem.deliveryId !== delivery.deliveryId
+                ) {
+                  return existingItem;
+                }
+                if (continuationFailure) {
+                  return {
+                    ...existingItem,
+                    continuation: {
+                      status: 'not_started' as const,
+                      reason: continuationFailure,
+                    },
+                  };
+                }
+                const { continuation: _continuation, ...withoutContinuation } = existingItem;
+                return withoutContinuation;
+              }),
             }
       );
     });

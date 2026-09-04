@@ -36,6 +36,12 @@ export type DeliveryAttemptClaim =
   | { status: 'exhausted'; delivery: StoredLodyDelivery }
   | { status: 'consumed'; delivery: StoredLodyDelivery };
 
+export type DeliveryFinalizationClaim =
+  | { status: 'claimed'; delivery: StoredLodyDelivery }
+  | { status: 'in_flight'; delivery: StoredLodyDelivery }
+  | { status: 'not_ready'; delivery: StoredLodyDelivery }
+  | { status: 'consumed'; delivery: StoredLodyDelivery };
+
 const OperationKindSchema = z.enum([
   'session_create',
   'session_create_many',
@@ -763,7 +769,7 @@ export class LodyOperationStore {
   }
 
   /** Run once after the Worker lifecycle barrier, never during ordinary reconciliation. */
-  recoverOrphanedDeliveryAttempts(workspaceId: WorkspaceId, workerBootId: string): number {
+  recoverOrphanedDeliveryClaims(workspaceId: WorkspaceId, workerBootId: string): number {
     const result = this.db
       .prepare(
         `UPDATE deliveries
@@ -834,7 +840,57 @@ export class LodyOperationStore {
     return transaction.immediate();
   }
 
-  interruptDeliveryAttempt(
+  claimDeliveryFinalization(
+    requesterSessionId: SessionId,
+    operationId: string,
+    claim: {
+      claimId: string;
+      ownerId: string;
+      requireAttemptsExhausted?: boolean;
+    }
+  ): DeliveryFinalizationClaim {
+    const transaction = this.db.transaction((): DeliveryFinalizationClaim => {
+      const current = this.getDelivery(requesterSessionId, operationId);
+      if (current.state === 'consumed') return { status: 'consumed', delivery: current };
+      if (
+        current.activeAttemptId === claim.claimId &&
+        current.activeAttemptOwnerId === claim.ownerId
+      ) {
+        return { status: 'claimed', delivery: current };
+      }
+      if (current.activeAttemptId !== undefined || current.activeAttemptOwnerId !== undefined) {
+        return { status: 'in_flight', delivery: current };
+      }
+      const minimumAttemptCount = claim.requireAttemptsExhausted ? DELIVERY_MAX_ATTEMPTS : 0;
+      if (current.attemptCount < minimumAttemptCount) {
+        return { status: 'not_ready', delivery: current };
+      }
+      const result = this.db
+        .prepare(
+          `UPDATE deliveries
+           SET active_attempt_id = ?, active_attempt_owner_id = ?
+           WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
+             AND attempt_count >= ?
+             AND active_attempt_id IS NULL AND active_attempt_owner_id IS NULL`
+        )
+        .run(claim.claimId, claim.ownerId, requesterSessionId, operationId, minimumAttemptCount);
+      if (result.changes !== 1) {
+        const latest = this.getDelivery(requesterSessionId, operationId);
+        if (latest.state === 'consumed') return { status: 'consumed', delivery: latest };
+        if (latest.activeAttemptId !== undefined || latest.activeAttemptOwnerId !== undefined) {
+          return { status: 'in_flight', delivery: latest };
+        }
+        return { status: 'not_ready', delivery: latest };
+      }
+      return {
+        status: 'claimed',
+        delivery: this.getDelivery(requesterSessionId, operationId),
+      };
+    });
+    return transaction.immediate();
+  }
+
+  releaseDeliveryClaim(
     requesterSessionId: SessionId,
     operationId: string,
     workerBootId: string,
@@ -910,18 +966,19 @@ export class LodyOperationStore {
     return transaction.immediate();
   }
 
-  failExhaustedDelivery(
+  consumeClaimedDelivery(
     requesterSessionId: SessionId,
     operationId: string,
+    workerBootId: string,
+    claimId: string,
     consumedAt = new Date(this.now()).toISOString()
   ): { consumed: boolean; delivery: StoredLodyDelivery } {
     const transaction = this.db.transaction(() => {
       const current = this.getDelivery(requesterSessionId, operationId);
       if (
         current.state === 'consumed' ||
-        current.attemptCount < DELIVERY_MAX_ATTEMPTS ||
-        current.activeAttemptId !== undefined ||
-        current.activeAttemptOwnerId !== undefined
+        current.activeAttemptOwnerId !== workerBootId ||
+        current.activeAttemptId !== claimId
       ) {
         return { consumed: false, delivery: current };
       }
@@ -931,10 +988,9 @@ export class LodyOperationStore {
            SET state = 'consumed', consumed_at = ?,
                active_attempt_id = NULL, active_attempt_owner_id = NULL
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
-             AND attempt_count >= ?
-             AND active_attempt_id IS NULL AND active_attempt_owner_id IS NULL`
+             AND active_attempt_owner_id = ? AND active_attempt_id = ?`
         )
-        .run(consumedAt, requesterSessionId, operationId, DELIVERY_MAX_ATTEMPTS);
+        .run(consumedAt, requesterSessionId, operationId, workerBootId, claimId);
       const latest = this.getDelivery(requesterSessionId, operationId);
       return {
         consumed: result.changes === 1,
@@ -942,21 +998,6 @@ export class LodyOperationStore {
       };
     });
     return transaction.immediate();
-  }
-
-  consumeDelivery(
-    requesterSessionId: SessionId,
-    operationId: string,
-    consumedAt = new Date(this.now()).toISOString()
-  ): boolean {
-    const result = this.db
-      .prepare(
-        `UPDATE deliveries SET state = 'consumed', consumed_at = ?
-         WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
-           AND active_attempt_id IS NULL AND active_attempt_owner_id IS NULL`
-      )
-      .run(consumedAt, requesterSessionId, operationId);
-    return result.changes === 1;
   }
 
   deleteRequesterSession(requesterSessionId: SessionId): void {

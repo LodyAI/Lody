@@ -41,9 +41,20 @@ describe('Operation delivery executable model', () => {
   });
 
   it('writes the result once without starting an assistant when configuration is gone', () => {
-    expect(
-      trace('accept', 'materialize_success', 'delete_configuration', 'finish', 'schedule')
-    ).toMatchObject({
+    const finalizing = trace(
+      'accept',
+      'materialize_success',
+      'delete_configuration',
+      'finish',
+      'schedule'
+    );
+    expect(finalizing).toMatchObject({
+      delivery: 'finalizing',
+      deliveryClaimOwner: 'current',
+      activeTurn: 'none',
+      completionTurnWrites: 0,
+    });
+    expect(stepOrchestrationModel(finalizing, 'complete_finalization')).toMatchObject({
       delivery: 'consumed',
       activeTurn: 'none',
       completionTurnWrites: 1,
@@ -69,10 +80,12 @@ describe('Operation delivery executable model', () => {
       'schedule'
     );
     expect(exhausted).toMatchObject({
-      delivery: 'consumed',
+      delivery: 'finalizing',
+      deliveryClaimOwner: 'current',
       deliveryAttempts: 2,
       activeTurn: 'none',
     });
+    expect(stepOrchestrationModel(exhausted, 'complete_finalization').delivery).toBe('consumed');
   });
 
   it('keeps a crashed attempt fenced until a replacement Worker recovers the old boot', () => {
@@ -80,7 +93,7 @@ describe('Operation delivery executable model', () => {
     const afterExit = stepOrchestrationModel(firstAttempt, 'restart');
     expect(afterExit).toMatchObject({
       delivery: 'attempting',
-      deliveryAttemptOwner: 'previous',
+      deliveryClaimOwner: 'previous',
       activeTurn: 'none',
       deliveryAttempts: 1,
     });
@@ -90,9 +103,39 @@ describe('Operation delivery executable model', () => {
     const secondAttempt = stepOrchestrationModel(recovered, 'schedule');
     expect(secondAttempt).toMatchObject({
       delivery: 'attempting',
-      deliveryAttemptOwner: 'current',
+      deliveryClaimOwner: 'current',
       activeTurn: 'delivery',
       deliveryAttempts: 2,
+    });
+  });
+
+  it('keeps terminal history finalization fenced across Worker replacement', () => {
+    const finalizing = trace(
+      'accept',
+      'materialize_success',
+      'delete_configuration',
+      'finish',
+      'schedule'
+    );
+    const afterExit = stepOrchestrationModel(finalizing, 'restart');
+    expect(afterExit).toMatchObject({
+      delivery: 'finalizing',
+      deliveryClaimOwner: 'previous',
+      completionTurnWrites: 0,
+    });
+    expect(stepOrchestrationModel(afterExit, 'schedule')).toEqual(afterExit);
+
+    const recovered = stepOrchestrationModel(afterExit, 'recover_orphans');
+    const reclaimed = stepOrchestrationModel(recovered, 'schedule');
+    expect(reclaimed).toMatchObject({
+      delivery: 'finalizing',
+      deliveryClaimOwner: 'current',
+      completionTurnWrites: 0,
+    });
+    expect(stepOrchestrationModel(reclaimed, 'complete_finalization')).toMatchObject({
+      delivery: 'consumed',
+      deliveryClaimOwner: 'none',
+      completionTurnWrites: 1,
     });
   });
 
@@ -146,8 +189,8 @@ describe('Operation delivery executable model', () => {
     expect(() =>
       assertOrchestrationModelSafety({
         ...initialOrchestrationModelState(),
-        deliveryAttemptOwner: 'current',
+        deliveryClaimOwner: 'current',
       })
-    ).toThrow(/fenced owner/);
+    ).toThrow(/claim state/);
   });
 });

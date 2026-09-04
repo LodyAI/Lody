@@ -1208,6 +1208,96 @@ describe('LodyOperationCoordinator', () => {
     ]);
   });
 
+  it('does not write configuration failure when another Worker claims during config sync', async () => {
+    let markSyncStarted!: () => void;
+    let resolveSync!: (value: boolean) => void;
+    const syncStarted = new Promise<void>((resolve) => {
+      markSyncStarted = resolve;
+    });
+    const syncResult = new Promise<boolean>((resolve) => {
+      resolveSync = resolve;
+    });
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      agentConfigId: 'removed-agent-config',
+      workerBootId: 'worker-a',
+      configurationSync: async () => {
+        markSyncStarted();
+        return await syncResult;
+      },
+    });
+
+    harness.coordinator.start();
+    await syncStarted;
+    const competitorStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(
+        competitorStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
+          attemptId: 'attempt-b',
+          ownerId: 'worker-b',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+    } finally {
+      competitorStore.close();
+    }
+    resolveSync(true);
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'pending',
+        activeAttemptId: 'attempt-b',
+        activeAttemptOwnerId: 'worker-b',
+      });
+    } finally {
+      finalStore.close();
+    }
+  });
+
+  it('clears a stale non-started marker when recovered execution begins', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    harness.histories.set(harness.requesterSessionId, [
+      {
+        id: 'operation-completion:requester-1:review-round-1',
+        role: 'system',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [
+          {
+            type: 'operation_completion',
+            deliveryId: 'operation:requester-1:review-round-1:completion',
+            operationId: 'review-round-1',
+            operationKind: 'session_chat',
+            completion: { type: 'cancelled' },
+            continuation: {
+              status: 'not_started',
+              reason: {
+                code: 'CONFIGURATION_UNAVAILABLE',
+                message: 'The frozen continuation agent configuration is no longer available.',
+              },
+            },
+          },
+        ],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const completion = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.role === 'system')
+      ?.items?.find((item) => item.type === 'operation_completion');
+    expect(completion).not.toHaveProperty('continuation');
+  });
+
   it('retries after graceful teardown terminalizes the Assistant without a Delivery ack', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
@@ -1223,7 +1313,7 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed' });
       expect(
-        shutdownStore.interruptDeliveryAttempt(
+        shutdownStore.releaseDeliveryClaim(
           harness.requesterSessionId,
           'review-round-1',
           'daemon-before-restart',
@@ -1507,7 +1597,7 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       expect(
-        crashedStore.recoverOrphanedDeliveryAttempts('workspace-1' as WorkspaceId, 'worker-b')
+        crashedStore.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')
       ).toBe(1);
       expect(
         crashedStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {

@@ -6,8 +6,8 @@
 export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'attempting' | 'consumed';
-  deliveryAttemptOwner: 'none' | 'current' | 'previous';
+  delivery: 'absent' | 'pending' | 'attempting' | 'finalizing' | 'consumed';
+  deliveryClaimOwner: 'none' | 'current' | 'previous';
   deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
@@ -29,6 +29,7 @@ export type OrchestrationModelAction =
   | 'complete_turn'
   | 'fail_turn'
   | 'interrupt_turn'
+  | 'complete_finalization'
   | 'restart'
   | 'recover_orphans'
   | 'archive'
@@ -39,7 +40,7 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   operation: 'absent',
   targetInput: 'absent',
   delivery: 'absent',
-  deliveryAttemptOwner: 'none',
+  deliveryClaimOwner: 'none',
   deliveryAttempts: 0,
   activeTurn: 'none',
   queuedUsers: 0,
@@ -102,12 +103,12 @@ export const stepOrchestrationModel = (
         next.activeTurn = 'user';
       } else if (next.delivery === 'pending') {
         if (!next.configurationAvailable || next.deliveryAttempts >= 2) {
-          next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-          next.delivery = 'consumed';
+          next.delivery = 'finalizing';
+          next.deliveryClaimOwner = 'current';
         } else {
           next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
           next.delivery = 'attempting';
-          next.deliveryAttemptOwner = 'current';
+          next.deliveryClaimOwner = 'current';
           if (next.deliveryAttempts === 0) {
             next.chainDepth += 1;
           }
@@ -119,34 +120,47 @@ export const stepOrchestrationModel = (
     case 'complete_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'consumed';
-        next.deliveryAttemptOwner = 'none';
+        next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'fail_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'consumed';
-        next.deliveryAttemptOwner = 'none';
+        next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'interrupt_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'pending';
-        next.deliveryAttemptOwner = 'none';
+        next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
+    case 'complete_finalization':
+      if (next.delivery === 'finalizing' && next.deliveryClaimOwner === 'current') {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
+      break;
     case 'restart':
-      if (next.delivery === 'attempting' && next.deliveryAttemptOwner === 'current') {
-        next.deliveryAttemptOwner = 'previous';
+      if (
+        (next.delivery === 'attempting' || next.delivery === 'finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.deliveryClaimOwner = 'previous';
       }
       next.activeTurn = 'none';
       break;
     case 'recover_orphans':
-      if (next.delivery === 'attempting' && next.deliveryAttemptOwner === 'previous') {
+      if (
+        (next.delivery === 'attempting' || next.delivery === 'finalizing') &&
+        next.deliveryClaimOwner === 'previous'
+      ) {
         next.delivery = 'pending';
-        next.deliveryAttemptOwner = 'none';
+        next.deliveryClaimOwner = 'none';
       }
       break;
     case 'archive':
@@ -178,10 +192,13 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.activeTurn === 'delivery' && state.delivery !== 'attempting') {
     throw new Error('a Delivery continuation is active without a durable attempt claim');
   }
-  if ((state.delivery === 'attempting') !== (state.deliveryAttemptOwner !== 'none')) {
-    throw new Error('Delivery attempt state and its fenced owner disagree');
+  if (
+    (state.delivery === 'attempting' || state.delivery === 'finalizing') !==
+    (state.deliveryClaimOwner !== 'none')
+  ) {
+    throw new Error('Delivery claim state and its fenced owner disagree');
   }
-  if (state.activeTurn === 'delivery' && state.deliveryAttemptOwner !== 'current') {
+  if (state.activeTurn === 'delivery' && state.deliveryClaimOwner !== 'current') {
     throw new Error('a Delivery turn is active under a non-current Worker boot');
   }
   if (state.deliveryAttempts > 2) {
@@ -205,6 +222,7 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'complete_turn',
     'fail_turn',
     'interrupt_turn',
+    'complete_finalization',
     'restart',
     'recover_orphans',
     'archive',
