@@ -343,9 +343,11 @@ type SessionDispatchOptions = {
   /**
    * Runs only after this process has synchronously claimed the per-Session
    * visible-turn owner. Delivery uses this to append its system cause without
-   * racing a user dispatch between the idle check and the history write.
+   * racing a user dispatch between the idle check and the history write. False
+   * means an external durable claim lost contention; the turn is released
+   * without history, ACP, failure, or settlement side effects.
    */
-  onTurnClaimed?: () => Promise<void>;
+  onTurnClaimed?: () => Promise<boolean>;
   /**
    * Delivery acknowledgement hook. It runs after terminal history bookkeeping,
    * and distinguishes retryable interruption from a durably handled outcome.
@@ -388,6 +390,11 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   reason: ChatFailedReason;
 }> {}
 
+class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
+  sessionId: SessionId;
+  turnId: string;
+}> {}
+
 const isSessionTurnCancelled = (error: unknown): error is SessionTurnCancelled => {
   return (
     typeof error === 'object' &&
@@ -403,6 +410,15 @@ const isSessionTurnHalted = (error: unknown): error is SessionTurnHalted => {
     error !== null &&
     '_tag' in error &&
     error._tag === 'SessionTurnHalted'
+  );
+};
+
+const isSessionTurnClaimContended = (error: unknown): error is SessionTurnClaimContended => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'SessionTurnClaimContended'
   );
 };
 
@@ -2842,7 +2858,9 @@ export class SessionExecutionService {
         outcome: runtime.handledOutcome ?? 'completed',
       };
     } catch (error) {
-      if (isSessionTurnHalted(error)) {
+      if (isSessionTurnClaimContended(error)) {
+        outcome = 'claim-contended';
+      } else if (isSessionTurnHalted(error)) {
         outcome = `halted-${error.reason}`;
         await this.finalizeHaltedTurn({
           sessionId,
@@ -3306,7 +3324,18 @@ export class SessionExecutionService {
     }
     const body = dispatchOptions?.onTurnClaimed
       ? (ctx: VisibleSessionTurnContext) =>
-          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(Effect.flatMap(() => turn.body(ctx)))
+          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(
+            Effect.flatMap((claimed) =>
+              claimed
+                ? turn.body(ctx)
+                : Effect.fail(
+                    new SessionTurnClaimContended({
+                      sessionId: message.sessionId,
+                      turnId: ctx.turnId,
+                    })
+                  )
+            )
+          )
       : turn.body;
     await this.runVisibleSessionTurn(turn.options, body);
   }

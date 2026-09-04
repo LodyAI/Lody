@@ -237,6 +237,7 @@ describe('LodyOperationStore', () => {
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       expect(
         store.acknowledgeDelivery('requester-1' as SessionId, 'review-round-1', {
+          workerBootId: 'daemon-1',
           attemptId: 'stale-attempt',
           assistantTurnId: 'assistant:operation-completion:requester-1:review-round-1',
           outcome: 'completed',
@@ -245,6 +246,7 @@ describe('LodyOperationStore', () => {
 
       expect(
         store.acknowledgeDelivery('requester-1' as SessionId, 'review-round-1', {
+          workerBootId: 'daemon-1',
           attemptId: 'attempt-1',
           assistantTurnId: 'assistant:operation-completion:requester-1:review-round-1',
           outcome: 'completed',
@@ -276,7 +278,12 @@ describe('LodyOperationStore', () => {
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       expect(
-        store.interruptDeliveryAttempt('requester-1' as SessionId, 'review-round-1', 'attempt-1')
+        store.interruptDeliveryAttempt(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
       ).toBe(true);
       expect(
         store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
@@ -285,7 +292,12 @@ describe('LodyOperationStore', () => {
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
       expect(
-        store.interruptDeliveryAttempt('requester-1' as SessionId, 'review-round-1', 'attempt-2')
+        store.interruptDeliveryAttempt(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-2'
+        )
       ).toBe(true);
       expect(
         store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
@@ -293,6 +305,75 @@ describe('LodyOperationStore', () => {
           ownerId: 'daemon-1',
         })
       ).toMatchObject({ status: 'exhausted', delivery: { attemptCount: 2, state: 'pending' } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('fences concurrent Workers and recovers only attempts from an older boot', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-a',
+          ownerId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-b-before-barrier',
+          ownerId: 'worker-b',
+        })
+      ).toMatchObject({
+        status: 'in_flight',
+        delivery: {
+          attemptCount: 1,
+          activeAttemptId: 'attempt-a',
+          activeAttemptOwnerId: 'worker-a',
+        },
+      });
+      expect(store.recoverOrphanedDeliveryAttempts('workspace-1' as WorkspaceId, 'worker-a')).toBe(
+        0
+      );
+      expect(store.recoverOrphanedDeliveryAttempts('workspace-1' as WorkspaceId, 'worker-b')).toBe(
+        1
+      );
+      expect(
+        store.claimDeliveryAttempt('requester-1' as SessionId, 'review-round-1', {
+          attemptId: 'attempt-b',
+          ownerId: 'worker-b',
+        })
+      ).toMatchObject({
+        status: 'claimed',
+        delivery: { attemptCount: 2, activeAttemptOwnerId: 'worker-b' },
+      });
+
+      expect(
+        store.interruptDeliveryAttempt(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toBe(false);
+      expect(
+        store.acknowledgeDelivery('requester-1' as SessionId, 'review-round-1', {
+          workerBootId: 'worker-a',
+          attemptId: 'attempt-a',
+          assistantTurnId: 'assistant:operation-completion:requester-1:review-round-1',
+          outcome: 'completed',
+        })
+      ).toMatchObject({
+        acknowledged: false,
+        delivery: { state: 'pending', activeAttemptId: 'attempt-b' },
+      });
+      expect(
+        store.failExhaustedDelivery('requester-1' as SessionId, 'review-round-1')
+      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
+      expect(store.consumeDelivery('requester-1' as SessionId, 'review-round-1')).toBe(false);
     } finally {
       store.close();
     }

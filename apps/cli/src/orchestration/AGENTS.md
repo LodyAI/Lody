@@ -55,12 +55,18 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
   dispatch ownership, and remains the settlement identity when steer advances the
   visible Assistant tail. Assistant `finished`/`endedAt` is never Delivery completion
-  evidence: teardown writes the same terminal footprint. The machine-local Delivery
-  row owns a fenced attempt token; only the execution service's durable handled
-  callback may atomically acknowledge and consume it. Cancellation/interruption
-  releases the attempt without acknowledging it. At most one recovery attempt is
-  allowed; a second interruption records `DELIVERY_ATTEMPTS_EXHAUSTED` and consumes
-  the Delivery without invoking ACP again.
+  evidence: teardown writes the same terminal footprint. Delivery execution has three
+  fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one
+  boot id and starts only after the daemon supervisor confirms the previous child exited
+  (foreground startup crosses the Host-lease barrier); and each attempt owns a fresh token.
+  Normal claims require no active token and never take over another owner. Once per Worker
+  startup, the coordinator clears tokens owned by older boot ids without resetting the
+  attempt count. Acknowledgement and interruption must match both the boot id and attempt
+  token. Claim contention exits before Assistant creation or ACP startup and records no
+  failure. Only the execution service's durable handled callback may acknowledge and
+  consume an attempt. Cancellation/interruption releases it without acknowledgement. At
+  most one recovery attempt is allowed; after two unsettled attempts and no active token,
+  `DELIVERY_ATTEMPTS_EXHAUSTED` consumes the Delivery without invoking ACP again.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.
