@@ -929,6 +929,8 @@ const mergeToolCallMessage = (
       incoming.schedulingTimeZone !== undefined
         ? incoming.schedulingTimeZone
         : prev.schedulingTimeZone,
+    // The first-persisted stamp wins; a replayed/retried update must not move it.
+    recordedAtMs: prev.recordedAtMs ?? incoming.recordedAtMs,
     toolName: incoming.toolName ?? prev.toolName,
     activityKind: incoming.activityKind !== undefined ? incoming.activityKind : prev.activityKind,
   };
@@ -1567,7 +1569,7 @@ class NotificationOnHistoryApplier {
           return;
         }
         const entryIndex = this.ensureActiveAssistantEntry();
-        this.upsertToolCall(entryIndex, message);
+        this.upsertToolCall(entryIndex, this.stampSchedulingToolCall(message));
         this.toolCallEntryIndexById.set(message.toolCallId, entryIndex);
         return;
       }
@@ -1588,6 +1590,25 @@ class NotificationOnHistoryApplier {
         return;
       }
     }
+  }
+
+  /**
+   * Stamp a scheduling tool call with its first-persisted wall-clock sighting. The
+   * scheduled-tasks deriver anchors a one-shot cron's fire time at its creation moment,
+   * and the turn entry's `endedAt` is NOT that moment: cron-fire follow-up turns are
+   * runtime-internal steers that keep extending the same history entry, so `endedAt`
+   * can land past the one-shot's fire minute and roll the resolved fire time a year
+   * forward. Replay imports stamp their own import time — no worse than the turn anchor
+   * they replace, and the output's `nextFireAt` still wins for one-shots there.
+   */
+  private stampSchedulingToolCall(message: ToolCallMessage): ToolCallMessage {
+    if (message.recordedAtMs !== undefined) return message;
+    if (message.toolName === undefined || !SCHEDULING_TOOL_NAMES.has(message.toolName)) {
+      return message;
+    }
+    const recordedAtMs = Date.parse(this.now());
+    if (!Number.isFinite(recordedAtMs)) return message;
+    return { ...message, recordedAtMs };
   }
 
   /**
