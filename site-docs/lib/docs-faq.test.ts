@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { extractFaqFromMdx, faqJsonLd, faqPlainText } from './docs-faq.ts';
+import { extractFaqFromMdx, faqPlainText } from '../scripts/extract-docs-faq.mjs';
+import { docsFaqByPath } from './docs-faq.generated.ts';
+import { faqJsonLd } from './json-ld.ts';
 import { pageHead } from './metadata.ts';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,8 +52,10 @@ await test('extractFaqFromMdx ignores pages without an FAQ section', () => {
 });
 
 await test('session-handoff English FAQ matches the page and emits FAQPage JSON-LD', () => {
-  const items = extractFaqFromMdx(readDoc('content/docs/en/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(features)/session-handoff.mdx'));
+  const items = docsFaqByPath['/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
+  assert.deepEqual(items, fromMdx);
   assert.equal(items[0]?.question, 'Can I share a Claude Code session so a teammate continues it?');
   assert.match(items[0]?.answer ?? '', /Lody workspace/u);
   assert.match(items[1]?.answer ?? '', /viewable record/u);
@@ -77,8 +81,10 @@ await test('session-handoff English FAQ matches the page and emits FAQPage JSON-
 });
 
 await test('session-handoff Chinese FAQ matches the page', () => {
-  const items = extractFaqFromMdx(readDoc('content/docs/zh/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/zh/(features)/session-handoff.mdx'));
+  const items = docsFaqByPath['/zh/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
+  assert.deepEqual(items, fromMdx);
   assert.equal(items[0]?.question, '能不能把 Claude Code 会话交给同事接着做？');
   assert.match(items[0]?.answer ?? '', /Lody 工作空间/u);
   assert.match(items[4]?.answer ?? '', /Copy as Markdown/u);

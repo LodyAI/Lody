@@ -2,7 +2,8 @@ import { DocsTocLanguageSelect } from '@site/components/docs-toc-language-select
 import { DocsSidebarFooter } from '@site/components/docs-sidebar-footer';
 import { getMDXComponents } from '@site/components/mdx';
 import { baseOptions } from '@site/lib/layout.shared';
-import { faqJsonLd } from '@site/lib/docs-faq';
+import { docsFaqForPath } from '@site/lib/docs-faq';
+import { faqJsonLd } from '@site/lib/json-ld';
 import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
 import browserCollections from '@site/.source/browser';
@@ -40,7 +41,7 @@ export function docsHead(locale: SiteLocale, data: DocsRouteData): SiteHead {
       { lang: 'en-US', path: enPath },
       { lang: 'zh-CN', path: zhPath },
     ],
-    jsonLd: faqJsonLd(data.faq ?? []),
+    jsonLd: faqJsonLd(docsFaqForPath(data.path)),
   });
 }
 
