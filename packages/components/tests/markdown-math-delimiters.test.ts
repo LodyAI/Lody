@@ -41,6 +41,16 @@ describe('normalizeTexMathDelimiters', () => {
     );
   });
 
+  it('leaves delimiters inside four-column indented code unchanged', () => {
+    const markdown = ['    \\(space_indented\\)', '\t\\[tab_indented\\]', '', '\\(outside\\)'].join(
+      '\n'
+    );
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['    \\(space_indented\\)', '\t\\[tab_indented\\]', '', '$$outside$$'].join('\n')
+    );
+  });
+
   it('leaves delimiters inside container-nested fenced code unchanged', () => {
     const markdown = [
       '> ```tex',

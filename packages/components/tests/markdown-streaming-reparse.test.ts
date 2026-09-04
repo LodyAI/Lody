@@ -419,6 +419,13 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.textContent).toContain('\\[fenced_code\\]');
   });
 
+  it('keeps LaTeX delimiters literal in indented code blocks', async () => {
+    await renderMarkdown(['    \\(literal\\)', '', 'Outside \\(x_i\\) renders.'].join('\n'));
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelector('pre code')?.textContent).toContain('\\(literal\\)');
+  });
+
   it('keeps LaTeX delimiters literal in container-nested fenced code', async () => {
     await renderMarkdown(
       [

@@ -44,6 +44,27 @@ const lineContentEnd = (value: string, lineStart: number): number => {
   return end > lineStart && value[end - 1] === '\r' ? end - 1 : end;
 };
 
+const indentedCodeLineEnd = (value: string, lineStart: number): number | null => {
+  const contentEnd = lineContentEnd(value, lineStart);
+  let column = 0;
+  let cursor = lineStart;
+
+  while (cursor < contentEnd) {
+    if (value[cursor] === ' ') {
+      column += 1;
+    } else if (value[cursor] === '\t') {
+      column += 4 - (column % 4);
+    } else {
+      return null;
+    }
+
+    cursor += 1;
+    if (column >= 4) return lineEndAfter(value, lineStart);
+  }
+
+  return null;
+};
+
 const spacesEnd = (value: string, start: number, end: number, maximum: number): number => {
   let cursor = start;
   while (cursor < end && cursor - start < maximum && value[cursor] === ' ') cursor += 1;
@@ -209,7 +230,7 @@ const slashRunLength = (value: string, start: number): number => {
  * Markdown into blocks: otherwise a display formula containing a line such as
  * `=` can already have been classified as a Markdown heading.
  *
- * Only complete, matching pairs outside code spans/fences are rewritten. Each
+ * Only complete, matching pairs outside code spans/blocks are rewritten. Each
  * delimiter remains two characters wide, so source offsets used by later
  * Markdown transforms stay valid.
  */
@@ -221,6 +242,13 @@ export const normalizeTexMathDelimiters = (value: string): string => {
 
   while (cursor < value.length) {
     if (cursor === lineStart) {
+      const codeLineEnd = opening == null ? indentedCodeLineEnd(value, lineStart) : null;
+      if (codeLineEnd != null) {
+        cursor = codeLineEnd;
+        lineStart = cursor;
+        continue;
+      }
+
       const fence = markdownFenceAt(value, lineStart);
       if (fence) {
         opening = null;
