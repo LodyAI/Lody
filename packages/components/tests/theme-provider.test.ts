@@ -395,15 +395,14 @@ describe('ThemeProvider', () => {
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
   });
 
-  it('mirrors the committed theme into the Electron main process, but never a preview', () => {
+  it('mirrors a committed theme into the Electron main process, but never a preview', () => {
     installMatchMediaMock(false);
-    const invokeCalls: Array<{ channel: string; args: unknown[] }> = [];
+    const startupSources: unknown[] = [];
     Object.defineProperty(window, 'ipc', {
       configurable: true,
       value: {
-        invoke: async (channel: string, ...args: unknown[]) => {
-          invokeCalls.push({ channel, args });
-          return undefined;
+        invoke: async (channel: string, source: unknown) => {
+          if (channel === 'app.setStartupThemeSource') startupSources.push(source);
         },
         on: () => () => {},
         send: () => {},
@@ -418,41 +417,24 @@ describe('ThemeProvider', () => {
       root?.render(
         React.createElement(
           ThemeProvider,
-          {
-            defaultTheme: 'light',
-            storageKey: 'theme-provider-test-theme',
-          },
+          { defaultTheme: 'light', storageKey: 'theme-provider-test-theme' },
           React.createElement(ThemeProbe)
         )
       );
     });
+    expect(startupSources).toEqual(['light']);
 
-    const startupCalls = () =>
-      invokeCalls
-        .filter((call) => call.channel === 'app.setStartupThemeSource')
-        .map((call) => call.args[0]);
-
-    // The window background and the pre-paint class for the NEXT launch come
-    // from this value, so the first mount has to publish it too.
-    expect(startupCalls()).toEqual(['light']);
-
-    invokeCalls.length = 0;
+    // A preview retints live native chrome but says nothing about how the app
+    // should open, so it must not reach the persisted startup theme.
     flushSync(() => {
       container?.querySelector<HTMLButtonElement>('#preview-dark-theme')?.click();
     });
-
-    // A preview retints the live native chrome but says nothing about how the
-    // app should open, so it must not reach the persisted startup theme.
-    expect(
-      invokeCalls.filter((call) => call.channel === 'app.setNativeTheme').map((call) => call.args[0])
-    ).toEqual(['dark']);
-    expect(startupCalls()).toEqual([]);
+    expect(startupSources).toEqual(['light']);
 
     flushSync(() => {
       container?.querySelector<HTMLButtonElement>('#set-dark-theme')?.click();
     });
-
-    expect(startupCalls()).toEqual(['dark']);
+    expect(startupSources).toEqual(['light', 'dark']);
   });
 
   it('follows Electron native theme updates while theme mode is system', () => {

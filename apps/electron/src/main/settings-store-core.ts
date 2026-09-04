@@ -29,24 +29,19 @@ function createInMemorySettingsStore<Schema extends Record<string, unknown>>(
 /**
  * Builds a store, or a defaults-only stand-in when the file cannot be opened.
  *
- * `conf` reads and validates the config file inside its CONSTRUCTOR, and with
- * `clearInvalidConfig` left at its default `false` (verified on conf 15.1.0) it
- * rethrows what it finds: `SyntaxError` for a truncated file, `Config schema
- * violation:` for a value outside the schema's enum, plus whatever the
- * filesystem raises for an unreadable path. Every main-process store is
- * constructed at module scope, so an unguarded throw happens during import and
- * takes down the whole main process — the app stops launching because a
- * preference file is malformed.
+ * `conf` reads and validates inside its CONSTRUCTOR and, with
+ * `clearInvalidConfig` at its default `false` (checked on conf 15.1.0),
+ * rethrows — `SyntaxError` for a truncated file, `Config schema violation:` for
+ * a value outside the enum, plus whatever the filesystem raises. Every store
+ * here is built at module scope, so an unguarded throw lands during import and
+ * the app stops launching because a preference file is malformed.
  *
- * The fallback is deliberately in-memory rather than `clearInvalidConfig: true`:
- * this launch simply proceeds as though nothing had been persisted, and the
- * unreadable file is left on disk to be inspected or recovered instead of being
- * silently emptied. Callers get the schema defaults, which is exactly the
- * behavior they had before they persisted anything.
+ * In-memory rather than `clearInvalidConfig: true`, so the launch proceeds as
+ * though nothing had been persisted and the unreadable file stays on disk to be
+ * recovered instead of being silently emptied.
  *
- * Reads and writes on a healthy store are NOT wrapped here. `conf` re-reads the
- * file on every `get`, so a file that is damaged later still throws; whether
- * that is worth surviving is per-store, and each store decides for itself.
+ * `get`/`set` are NOT wrapped: `conf` re-reads on every `get`, so a file damaged
+ * later still throws, and whether that is worth surviving is per-store.
  */
 export function createSettingsStoreWithFallback<Schema extends Record<string, unknown>>(
   construct: () => MainSettingsStore<Schema>,

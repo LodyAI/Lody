@@ -5,19 +5,15 @@ export type InitialWindowTheme = 'light' | 'dark'
 /**
  * Carries the theme main already resolved for this window into preload.
  *
- * Preload is the only renderer-side code that runs before the document is
- * parsed, and the CSP (`script-src 'self'`) rules out the inline blocking
- * script `next-themes` would otherwise use — so preload is where `.dark` has
- * to land if the first painted frame is to be the right color. It cannot ask
- * main over IPC for it, because that answer arrives asynchronously, after the
+ * Preload is where `.dark` has to land for the first frame to be the right
+ * color, and it cannot ask main over IPC because that answer arrives after the
  * frame it was needed for. A launch argument is already resolved by the time
  * preload's first line runs.
  *
- * It is fixed for the window's lifetime, so a RELOAD that follows an in-session
- * theme change replays the theme the window opened on for one frame before the
- * renderer corrects it. That is strictly better than the previous behavior (the
- * OS appearance, on every load), and keeping it an argument avoids a
- * synchronous main-process round trip on the renderer's very first line.
+ * It is fixed for the window's lifetime, so a RELOAD after an in-session theme
+ * change replays the opening theme for one frame. Still better than the old
+ * behavior (the OS appearance, every load), and it avoids a synchronous
+ * main-process round trip on the renderer's very first line.
  */
 export function serializeInitialWindowThemeArgument(theme: InitialWindowTheme): string {
   return `${INITIAL_WINDOW_THEME_ARGUMENT_PREFIX}${theme}`

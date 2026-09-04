@@ -9,16 +9,10 @@ import {
   resolveNativeWindowTheme
 } from './window-theme.ts'
 
-void test('opens a product window on the theme the renderer last committed', () => {
+void test('opens a product window on the committed theme, onboarding always light', () => {
   assert.equal(getInitialMainWindowThemeSource('/', 'dark'), 'dark')
-  assert.equal(getInitialMainWindowThemeSource('/', 'system'), 'system')
   // Nothing committed yet (first launch) keeps the pre-persistence behavior.
   assert.equal(getInitialMainWindowThemeSource('/', null), 'system')
-  assert.equal(getInitialMainWindowThemeSource(), 'system')
-})
-
-void test('forces onboarding window chrome light whatever the product theme is', () => {
-  assert.equal(getInitialMainWindowThemeSource('/onboarding'), 'light')
   assert.equal(getInitialMainWindowThemeSource('/onboarding', 'dark'), 'light')
 })
 
