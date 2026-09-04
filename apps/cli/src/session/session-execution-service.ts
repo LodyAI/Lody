@@ -1528,14 +1528,15 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument;
     userTurnId: string;
   }): Promise<void> {
+    let marked = false;
     try {
-      if (!(await this.markUncertainSteerHistoryEntry(options))) {
-        this.deferUncertainSteerHistoryMarker(options);
-      }
+      marked = await this.markUncertainSteerHistoryEntry(options);
     } catch (error) {
       this.deps.logger.error(
         `[${options.sessionId}] Failed to mark uncertain steer ${options.userTurnId}: ${formatErrorMessage(error)}`
       );
+    }
+    if (!marked) {
       this.deferUncertainSteerHistoryMarker(options);
     }
 

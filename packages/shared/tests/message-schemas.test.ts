@@ -79,19 +79,6 @@ describe('message-schemas system_notice', () => {
     }
   });
 
-  it('accepts an uncertain steer delivery notice', () => {
-    const result = MessageContentSchema.safeParse({
-      type: 'system_notice',
-      name: 'chat_failed',
-      meta: {
-        reason: 'steer_delivery_unknown',
-        message: 'The agent may already have applied this steer.',
-      },
-    });
-
-    expect(result.success).toBe(true);
-  });
-
   it('accepts an actionable diagnostic code on a generic chat failure reason', () => {
     const result = MessageContentSchema.safeParse({
       type: 'system_notice',

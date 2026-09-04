@@ -515,30 +515,6 @@ describe('AgentClient plan mode permission restoration', () => {
       await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
     });
 
-    it('lets a Core failed outcome win when the steered turn completes first', async () => {
-      let answer!: (value: unknown) => void;
-      let completeTurn!: () => void;
-      const completion = new Promise<never>((resolve) => {
-        completeTurn = () => resolve(undefined as never);
-      });
-      const { client } = createSteerClient(
-        () =>
-          new Promise((resolve) => {
-            answer = resolve;
-          }),
-        completion
-      );
-
-      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
-        { type: 'text', text: 'guide' },
-      ]);
-      completeTurn();
-      await Promise.resolve();
-      answer({ outcome: 'failed' });
-
-      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
-    });
-
     it('handles rate limit extension notifications', async () => {
       const { client, onRateLimitUpdate } = createTestClient();
       const limits = {

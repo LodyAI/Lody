@@ -2727,6 +2727,9 @@ const UserMessageRowView = ({
   const isDeliveryUnknown =
     message.status === 'failed' && message.sendStatus === 'delivery_unknown';
   const isFailed = message.status === 'failed';
+  const deliveryFailureLabel = isDeliveryUnknown
+    ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
+    : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const pinCtx = useSessionPin();
   const showSendingSpinner =
     useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
@@ -2828,20 +2831,12 @@ const UserMessageRowView = ({
                 onClick={() => setResendDialogOpen(true)}
               >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile
-                  ? isDeliveryUnknown
-                    ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
-                    : t('sessions.messageStatus.notDelivered', 'Not delivered')
-                  : null}
+                {!isMobile ? deliveryFailureLabel : null}
               </button>
             ) : (
               <span className="inline-flex items-center gap-1 text-destructive">
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile
-                  ? isDeliveryUnknown
-                    ? t('sessions.messageStatus.deliveryUnknown', 'Delivery uncertain')
-                    : t('sessions.messageStatus.notDelivered', 'Not delivered')
-                  : null}
+                {!isMobile ? deliveryFailureLabel : null}
               </span>
             )
           ) : isPendingApply ? (
