@@ -4840,6 +4840,7 @@ export class SessionExecutionService {
           agentType: config.agentType,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
+          env: config.env,
         });
       const existing = await this.deps.workspaceDocument.getAcpCapabilities(
         this.deps.machineId,
@@ -5208,6 +5209,7 @@ export class SessionExecutionService {
             agentType: message.agentType,
             customAcp: message.customAcp,
             runtimeOverrides: message.runtimeOverrides,
+            env: message.env,
           }),
         modelReasoningEfforts,
         acknowledgedSteer,

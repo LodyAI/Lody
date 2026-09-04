@@ -373,7 +373,7 @@ describe('AgentConfigDialog', () => {
 
     const envTextArea = await openAdditionalEnvSection();
     expect(document.body.textContent).toContain(
-      'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
+      'DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, and ACP_EXTENSION_DSH_MODELS are set above and cannot be overridden here.'
     );
     expect(envTextArea.value).not.toContain('DEEPSEEK_API_KEY');
     expect(envTextArea.value).not.toContain('DEEPSEEK_BASE_URL');
@@ -413,6 +413,8 @@ describe('AgentConfigDialog', () => {
 
     const endpointInput = getVisibleDeepSeekEndpointInput();
     expect(endpointInput).not.toBeNull();
+    const modelsInput = document.body.querySelector<HTMLTextAreaElement>('#deepseek-models');
+    expect(modelsInput).not.toBeNull();
     await act(async () => {
       setNativeInputValue(endpointInput!, 'not-a-url');
     });
@@ -425,6 +427,7 @@ describe('AgentConfigDialog', () => {
 
     await act(async () => {
       setNativeInputValue(endpointInput!, '  https://llm.example.com/open/v1  ');
+      setNativeTextAreaValue(modelsInput!, ' gateway-model \nreasoning-model\ngateway-model');
     });
     expect(createButton.disabled).toBe(false);
 
@@ -432,16 +435,19 @@ describe('AgentConfigDialog', () => {
       createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'deepseek',
-        env: {
-          DEEPSEEK_API_KEY: 'sk-deepseek-test',
-          DEEPSEEK_BASE_URL: 'https://llm.example.com/open/v1',
-        },
-      })
-    );
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env: {
+            DEEPSEEK_API_KEY: 'sk-deepseek-test',
+            DEEPSEEK_BASE_URL: 'https://llm.example.com/open/v1',
+            ACP_EXTENSION_DSH_MODELS: '["gateway-model","reasoning-model"]',
+          },
+        })
+      );
+    });
   });
 
   it.each([
@@ -476,12 +482,16 @@ describe('AgentConfigDialog', () => {
     await renderDeepSeekEdit({
       DEEPSEEK_API_KEY: 'sk-old',
       DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+      ACP_EXTENSION_DSH_MODELS: '["gateway-model","reasoning-model"]',
     });
 
     expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
     expect(getVisibleDeepSeekEndpointInput()?.value).toBe('https://llm.example.com/open');
     expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
       'sk-old'
+    );
+    expect(document.body.querySelector<HTMLTextAreaElement>('#deepseek-models')?.value).toBe(
+      'gateway-model\nreasoning-model'
     );
   });
 
@@ -547,6 +557,7 @@ describe('AgentConfigDialog', () => {
         [
           'DEEPSEEK_API_KEY=sk-from-textarea',
           'DEEPSEEK_BASE_URL=https://evil.example.com',
+          'ACP_EXTENSION_DSH_MODELS=["evil-model"]',
           'EXTRA_FLAG=1',
         ].join('\n')
       );
@@ -554,6 +565,7 @@ describe('AgentConfigDialog', () => {
     expect(envTextArea.value).toContain('EXTRA_FLAG=1');
     expect(envTextArea.value).not.toContain('DEEPSEEK_API_KEY');
     expect(envTextArea.value).not.toContain('DEEPSEEK_BASE_URL');
+    expect(envTextArea.value).not.toContain('ACP_EXTENSION_DSH_MODELS');
 
     await act(async () => {
       getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));

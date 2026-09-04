@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
   computeTitleGenerationDefaults,
+  ACP_EXTENSION_DSH_MODELS_ENV,
   formatCustomAcpCommandLine,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
@@ -570,6 +571,8 @@ export type AgentConfigFormData = {
   deepseekEndpointMode?: DeepSeekEndpointMode;
   /** Draft custom DEEPSEEK_BASE_URL while the official tab is selected. */
   deepseekCustomBaseUrl?: string;
+  /** One custom-endpoint model id per line; serialized into the generated DSH catalog env. */
+  deepseekCustomModels?: string;
 };
 
 export type AgentConfigSubmitPayload = {
@@ -764,19 +767,47 @@ function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, s
   const additionalEnv = { ...env };
   delete additionalEnv[DEEPSEEK_API_KEY_ENV];
   delete additionalEnv[DEEPSEEK_BASE_URL_ENV];
+  delete additionalEnv[ACP_EXTENSION_DSH_MODELS_ENV];
   return additionalEnv;
+}
+
+function parseDeepSeekModelIds(value: string | undefined): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const line of value?.split(/\r?\n/u) ?? []) {
+    const id = line.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function hydrateDeepSeekModelIds(value: string | undefined): string {
+  if (!value) return '';
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || !parsed.every((id) => typeof id === 'string')) return '';
+    return parseDeepSeekModelIds(parsed.join('\n')).join('\n');
+  } catch {
+    return '';
+  }
 }
 
 function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigFormData {
   if (!isDeepSeekBuiltinForm(form)) return form;
   const env = { ...form.env };
   const resolved = resolveDeepSeekEndpointForm(env, form);
+  const deepseekCustomModels =
+    form.deepseekCustomModels ?? hydrateDeepSeekModelIds(env[ACP_EXTENSION_DSH_MODELS_ENV]);
   delete env[DEEPSEEK_BASE_URL_ENV];
+  delete env[ACP_EXTENSION_DSH_MODELS_ENV];
   return {
     ...form,
     env,
     deepseekEndpointMode: resolved.deepseekEndpointMode,
     deepseekCustomBaseUrl: resolved.deepseekCustomBaseUrl,
+    deepseekCustomModels,
   };
 }
 
@@ -792,6 +823,12 @@ function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, s
     getDeepSeekEndpointMode(formData) === 'custom'
       ? (formData.deepseekCustomBaseUrl ?? '').trim()
       : DEEPSEEK_OFFICIAL_BASE_URL;
+  const modelIds = parseDeepSeekModelIds(formData.deepseekCustomModels);
+  if (getDeepSeekEndpointMode(formData) === 'custom' && modelIds.length > 0) {
+    env[ACP_EXTENSION_DSH_MODELS_ENV] = JSON.stringify(modelIds);
+  } else {
+    delete env[ACP_EXTENSION_DSH_MODELS_ENV];
+  }
   return env;
 }
 
@@ -1027,9 +1064,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
+  const hasExplicitDeepSeekModels =
+    isDeepSeekBuiltin &&
+    deepseekEndpointMode === 'custom' &&
+    parseDeepSeekModelIds(formData.deepseekCustomModels).length > 0;
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && isManagedBuiltin;
+    mode.kind === 'create' && !isPreset && (isManagedBuiltin || hasExplicitDeepSeekModels);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1508,7 +1549,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekProtectedEnv(formData.env) : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
-  const updateEnvironment = (env: Record<string, string>) => {
+  const invalidateBuiltinVerification = () => {
     setManuallyTested(false);
     setAuthRequired(false);
     setProbeError(null);
@@ -1516,6 +1557,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setBuiltinVerificationRevision((revision) => revision + 1);
     setVerifiedBuiltinContext(null);
     setPendingCreateBuiltinContext(null);
+  };
+
+  const updateEnvironment = (env: Record<string, string>) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, env }));
   };
 
@@ -1529,11 +1574,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   const updateDeepSeekEndpointMode = (endpointMode: DeepSeekEndpointMode) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, deepseekEndpointMode: endpointMode }));
   };
 
   const updateDeepSeekCustomBaseUrl = (value: string) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, deepseekCustomBaseUrl: value }));
+  };
+
+  const updateDeepSeekCustomModels = (value: string) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, deepseekCustomModels: value }));
   };
 
   const selectOption = (opt: AgentTypeOption) => {
@@ -2054,6 +2106,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               onApiKeyChange={updateDeepSeekApiKey}
               customBaseUrl={formData.deepseekCustomBaseUrl ?? ''}
               onCustomBaseUrlChange={updateDeepSeekCustomBaseUrl}
+              customModels={formData.deepseekCustomModels ?? ''}
+              onCustomModelsChange={updateDeepSeekCustomModels}
             />
           ) : null}
 
@@ -2397,7 +2451,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               <p className="mb-2 text-xs text-muted-foreground">
                 {t(
                   'settings.agent.dialog.deepseek.envHint',
-                  'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
+                  'DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, and ACP_EXTENSION_DSH_MODELS are set above and cannot be overridden here.'
                 )}
               </p>
             ) : null}
@@ -2806,6 +2860,8 @@ function DeepSeekHarnessPanel({
   onApiKeyChange,
   customBaseUrl,
   onCustomBaseUrlChange,
+  customModels,
+  onCustomModelsChange,
 }: {
   endpointMode: DeepSeekEndpointMode;
   onEndpointModeChange: (value: DeepSeekEndpointMode) => void;
@@ -2813,6 +2869,8 @@ function DeepSeekHarnessPanel({
   onApiKeyChange: (value: string) => void;
   customBaseUrl: string;
   onCustomBaseUrlChange: (value: string) => void;
+  customModels: string;
+  onCustomModelsChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -2857,6 +2915,24 @@ function DeepSeekHarnessPanel({
                 'https://example.com'
               )}
               className="h-9 font-mono"
+            />
+          </Field>
+          <Field
+            htmlFor="deepseek-models"
+            label={t('settings.agent.dialog.deepseek.modelsLabel', 'Model IDs')}
+            hint={t(
+              'settings.agent.dialog.deepseek.modelsHelp',
+              'Optional, one model ID per line. These replace the built-in DeepSeek catalog; the first model is selected by default.'
+            )}
+          >
+            <Textarea
+              id="deepseek-models"
+              value={customModels}
+              onChange={(event) => onCustomModelsChange(event.target.value)}
+              placeholder={'gateway-model\nreasoning-model'}
+              rows={3}
+              spellCheck={false}
+              className="font-mono"
             />
           </Field>
           <DeepSeekApiKeyField

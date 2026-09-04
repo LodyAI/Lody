@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   type AgentConfigCliType,
+  ACP_EXTENSION_DSH_MODELS_ENV,
   type BuiltinRuntimeOverrides,
   type CliType,
   type CustomAcpLaunchSpec,
@@ -64,6 +66,8 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  /** Environment values that can alter an agent's advertised capabilities. */
+  env?: NodeJS.ProcessEnv;
 };
 
 export type ResolvedACPSetting = {
@@ -218,7 +222,10 @@ export function getAcpCapabilitySourceVersion(
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'deepseek') {
-        return DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+        const models = input.env?.[ACP_EXTENSION_DSH_MODELS_ENV]?.trim();
+        return models
+          ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+models:${createHash('sha256').update(models).digest('hex').slice(0, 12)}`
+          : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
     }
     return `builtin:${input.agentType}:unknown`;
