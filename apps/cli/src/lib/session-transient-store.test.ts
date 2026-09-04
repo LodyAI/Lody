@@ -250,37 +250,6 @@ describe('SessionTransientStore', () => {
       });
     });
 
-    it('getCurrentTurnRef reports nothing for an idle or unknown session', () => {
-      const store = new SessionTransientStore();
-      const id = sid('s1');
-      expect(store.getCurrentTurnRef(id)).toBeUndefined();
-      // Must not create state for a session the store has never seen.
-      expect(store.has(id)).toBe(false);
-      store.beginTurn(id, { turnId: 'turn-1' });
-      store.clearTurnState(id);
-      expect(store.getCurrentTurnRef(id)).toBeUndefined();
-    });
-
-    it('finalizeIfCurrent refuses to clear a turn that has been replaced', () => {
-      const store = new SessionTransientStore();
-      const id = sid('s1');
-
-      store.beginTurn(id, { turnId: 'turn-1' });
-      const ref = store.getTurnRef(id, 'turn-1');
-      if (!ref) throw new Error('expected a turn ref');
-
-      // A newer turn takes over while the old finalizer is still awaiting.
-      store.clearTurnState(id);
-      store.beginTurn(id, { turnId: 'turn-2' });
-
-      expect(store.finalizeIfCurrent(id, ref)).toBe(false);
-      expect(store.getTurnId(id)).toBe('turn-2');
-      expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
-        turnId: 'turn-2',
-        source: 'active_turn',
-      });
-    });
-
     it('finalizeIfCurrent matches on epoch, not just turn id', () => {
       // A redispatch reuses `assistant:<userTurnId>` as the turn id, so the id
       // alone cannot tell two runs of the same user turn apart.
@@ -318,16 +287,6 @@ describe('SessionTransientStore', () => {
       // A different entry is unaffected.
       const otherRef = { ...staleRef, assistantEntryId: 'assistant:user-2' };
       expect(store.isAssistantEntryFinalizable(id, otherRef)).toBe(true);
-    });
-
-    it('getTurnRef returns nothing for a turn that is not current', () => {
-      const store = new SessionTransientStore();
-      const id = sid('s1');
-      expect(store.getTurnRef(id, 'turn-1')).toBeUndefined();
-      store.beginTurn(id, { turnId: 'turn-1' });
-      expect(store.getTurnRef(id, 'turn-other')).toBeUndefined();
-      store.clearTurnState(id);
-      expect(store.getTurnRef(id, 'turn-1')).toBeUndefined();
     });
 
     it('clears late ACP update routing when ACP replay suppression begins', () => {

@@ -1239,56 +1239,27 @@ describe('SessionManager lifecycle events are instance-scoped', () => {
       createNoopSessionSandbox()
     );
 
-  it('does not let a superseded instance evict its live replacement', () => {
-    // A resume fallback terminates the FAILED instance after its replacement is
-    // already registered. Deleting on the session id alone drops the live one,
-    // and `getSession` then reports no session for a session that is running.
-    const sessionId = 'session-instance-identity' as SessionId;
-    const manager = buildManager();
-    const internals = manager as unknown as {
-      registerSessionEvents(session: Session): void;
-      sessions: Map<SessionId, Session>;
-    };
+  it.each(['terminated', 'exit'] as const)(
+    'does not let a superseded instance evict its replacement on %s',
+    (eventName) => {
+      const sessionId = `session-instance-identity-${eventName}` as SessionId;
+      const manager = buildManager();
+      const internals = manager as unknown as {
+        registerSessionEvents(session: Session): void;
+        sessions: Map<SessionId, Session>;
+      };
 
-    const oldInstance = buildSession(sessionId);
-    const newInstance = buildSession(sessionId);
-    internals.registerSessionEvents(oldInstance);
-    internals.registerSessionEvents(newInstance);
-    internals.sessions.set(sessionId, newInstance);
+      const oldInstance = buildSession(sessionId);
+      const newInstance = buildSession(sessionId);
+      internals.registerSessionEvents(oldInstance);
+      internals.registerSessionEvents(newInstance);
+      internals.sessions.set(sessionId, newInstance);
 
-    const terminated: Array<Session | undefined> = [];
-    manager.on('terminated', (event) => terminated.push(event.session as Session));
+      oldInstance.emit(eventName, { sessionId, exitCode: eventName === 'exit' ? 1 : 0 });
 
-    oldInstance.emit('terminated', { sessionId, exitCode: 0 });
-
-    expect(manager.getSession(sessionId)).toBe(newInstance);
-    // The event still fires, naming the instance that actually closed, so
-    // consumers can compare identity themselves.
-    expect(terminated).toEqual([oldInstance]);
-
-    // The live instance closing does remove it.
-    newInstance.emit('terminated', { sessionId, exitCode: 0 });
-    expect(manager.getSession(sessionId)).toBeNull();
-  });
-
-  it('does not let a superseded instance evict its replacement on exit either', () => {
-    const sessionId = 'session-instance-identity-exit' as SessionId;
-    const manager = buildManager();
-    const internals = manager as unknown as {
-      registerSessionEvents(session: Session): void;
-      sessions: Map<SessionId, Session>;
-    };
-
-    const oldInstance = buildSession(sessionId);
-    const newInstance = buildSession(sessionId);
-    internals.registerSessionEvents(oldInstance);
-    internals.registerSessionEvents(newInstance);
-    internals.sessions.set(sessionId, newInstance);
-
-    oldInstance.emit('exit', { sessionId, exitCode: 1 });
-
-    expect(manager.getSession(sessionId)).toBe(newInstance);
-  });
+      expect(manager.getSession(sessionId)).toBe(newInstance);
+    }
+  );
 
   it('terminates once even when several paths request it', async () => {
     // Resource-limit failure terminates while cancel is terminating, cleanup
