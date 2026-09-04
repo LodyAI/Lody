@@ -393,7 +393,6 @@ type PlaceholderChatVirtualRow = {
 type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
 
 /** One row per placeholder item, identity-stable while the item is. */
-const placeholderRowCache = new WeakMap<PlaceholderSessionItem, PlaceholderChatVirtualRow>();
 
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
@@ -887,12 +886,10 @@ export const buildChatVirtualRows = ({
     const item = items[position];
     if (!item) continue;
     if (item.type === 'placeholder') {
-      let row = placeholderRowCache.get(item);
-      if (!row) {
-        row = { type: 'placeholder', key: item.row.id, messageIndex: item.turnIndex, item };
-        placeholderRowCache.set(item, row);
-      }
-      rows.push(row);
+      // No per-row cache: `TurnPlaceholderRow` is memoized on `item.row`, which
+      // `buildChatStreamItems` already keeps stable, so the row object is never
+      // compared by identity (unlike an assistant row, which is passed whole).
+      rows.push({ type: 'placeholder', key: item.row.id, messageIndex: item.turnIndex, item });
       continue;
     }
     // Rows speak in absolute turn indexes so outline anchors and scroll

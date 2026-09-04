@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionHistory } from '@lody/shared';
-import type { ConversationView } from '@/lib/conversation-view';
+import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
 import { extractSearchBlocksForMessage, type SessionSearchBlock } from '@/lib/session-chat-search';
 
 const EMPTY_BLOCKS: SessionSearchBlock[] = [];
@@ -31,11 +31,9 @@ export function useIncrementalSearchBlocks(
       return undefined;
     }
     let cancelled = false;
-    let frame: number | null = null;
     const pinned: [number, number][] = [];
 
     const rebuild = () => {
-      frame = null;
       if (cancelled) return;
       const cache = cacheRef.current;
       const next: SessionSearchBlock[] = [];
@@ -51,26 +49,22 @@ export function useIncrementalSearchBlocks(
       }
       setBlocks(next);
     };
-    const scheduleRebuild = () => {
-      if (frame !== null) return;
-      frame = requestAnimationFrame(rebuild);
-    };
-
-    const unsubscribe = view.subscribe(scheduleRebuild);
+    // Streaming changes coalesce to one rebuild per frame; the hydration loop
+    // below already yields between chunks, so it rebuilds directly.
+    const unsubscribe = subscribeOnFrame((listener) => view.subscribe(listener), rebuild);
     void (async () => {
       for (let from = 0; from < view.turnCount; from += HYDRATE_CHUNK) {
         if (cancelled) break;
         const to = Math.min(view.turnCount, from + HYDRATE_CHUNK);
         pinned.push([from, to]);
         await view.ensureRange(from, to);
-        scheduleRebuild();
+        rebuild();
       }
     })();
 
     return () => {
       cancelled = true;
       unsubscribe();
-      if (frame !== null) cancelAnimationFrame(frame);
       for (const [from, to] of pinned) view.release(from, to);
     };
   }, [isSearchOpen, view]);

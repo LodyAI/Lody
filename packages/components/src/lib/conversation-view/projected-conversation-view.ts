@@ -45,7 +45,9 @@ export function createProjectedConversationView(
         list.push(slot);
         continue;
       }
-      const anchor = list.findIndex((candidate) => idOfSlot(candidate) === projection.afterHistoryId);
+      const anchor = list.findIndex(
+        (candidate) => idOfSlot(candidate) === projection.afterHistoryId
+      );
       if (anchor < 0) list.push(slot);
       else list.splice(anchor + 1, 0, slot);
     }

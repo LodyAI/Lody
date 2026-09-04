@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LoroDoc, LoroList, LoroMap, LoroText, type LoroEventBatch } from 'loro-crdt';
-import { applyEventToTurn } from '../src/lib/conversation-view';
+import { applyEventToTurn } from '../src/lib/conversation-view/apply-turn-event';
 
 /** xorshift32 so the op sequence is byte-identical on every run. */
 const createRandom = (seed: number) => {

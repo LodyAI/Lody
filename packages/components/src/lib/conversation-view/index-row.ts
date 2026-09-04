@@ -1,30 +1,11 @@
 import type { Role, SessionHistory } from '@lody/shared';
 import { summarizeTurn } from './turn-summary';
+import { isPlainRecord } from './is-plain-record';
 import type { TurnIndexInputConfig, TurnIndexRow } from './types';
-
-/** Turn-map scalars mirrored into the index row, in `TurnIndexRow` order. */
-export const INDEX_SCALAR_KEYS = [
-  'id',
-  'role',
-  'timestamp',
-  'status',
-  'finished',
-  'endedAt',
-  'sendStatus',
-  'userTurnId',
-  'acpTurnId',
-  'startedAt',
-  'permissionWaitMs',
-] as const;
-
-export type IndexScalarKey = (typeof INDEX_SCALAR_KEYS)[number];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** The shallow role-selection subset of a user turn's `inputConfig`. */
 export function pickIndexInputConfig(value: unknown): TurnIndexInputConfig | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isPlainRecord(value)) return undefined;
   const out: TurnIndexInputConfig = {};
   if (typeof value.agentRoleId === 'string' || value.agentRoleId === null) {
     out.agentRoleId = value.agentRoleId as TurnIndexInputConfig['agentRoleId'];

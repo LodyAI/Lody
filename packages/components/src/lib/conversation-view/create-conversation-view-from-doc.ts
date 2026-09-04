@@ -10,19 +10,17 @@ import {
   type LoroMap,
 } from 'loro-crdt';
 import { applyEventToTurn } from './apply-turn-event';
-import {
-  INDEX_SCALAR_KEYS,
-  pickIndexInputConfig,
-  pickIndexScalars,
-  type IndexScalarKey,
-} from './index-row';
+import { isPlainRecord } from './is-plain-record';
+import { pickIndexInputConfig, pickIndexScalars } from './index-row';
 import { summarizeTurn, summarizeTurnShallow } from './turn-summary';
 import {
   conversationTailStart,
   DEFAULT_MAX_HYDRATED,
   DEFAULT_TAIL_KEEP,
+  INDEX_SCALAR_KEYS,
   type ConversationView,
   type ConversationViewChange,
+  type IndexScalarKey,
   type ConversationViewListener,
   type TurnIndexRow,
 } from './types';
@@ -52,11 +50,11 @@ export type CreateConversationViewFromDocOptions = {
    * items with the rest of the tail following in the first idle chunk.
    */
   hydrateItemBudget?: number;
-  /** Turns summarized per background chunk. */
-  idleChunkSize?: number;
-  /** Message items summarized per background chunk. */
-  idleItemBudget?: number;
 };
+
+/** Turns summarized per background chunk, and the item budget that caps it. */
+const IDLE_CHUNK_TURNS = 80;
+const IDLE_CHUNK_ITEMS = 1_200;
 
 const defaultScheduleIdle: IdleScheduler = (task) => {
   if (typeof requestIdleCallback === 'function') {
@@ -69,9 +67,6 @@ const defaultScheduleIdle: IdleScheduler = (task) => {
 
 const defaultYield = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /**
  * A turn map's `toJSON()` is exactly the object loro-mirror materializes for
  * it (texts as strings, nested containers as plain values, no decode
@@ -79,7 +74,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * corrupt slot cannot be handed out as a turn.
  */
 export function normalizeHydratedTurn(value: unknown): SessionHistory | undefined {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.role !== 'string') {
+  if (!isPlainRecord(value) || typeof value.id !== 'string' || typeof value.role !== 'string') {
     return undefined;
   }
   return value as unknown as SessionHistory;
@@ -136,8 +131,6 @@ export function createConversationViewFromDoc(
   // per 100-item turn); on a typical session (5–10 items per turn) this covers
   // far more than the tail, so the budget only bites where it matters.
   const hydrateItemBudget = options.hydrateItemBudget ?? 320;
-  const idleChunkSize = options.idleChunkSize ?? 80;
-  const idleItemBudget = options.idleItemBudget ?? 1_200;
 
   const historyList = doc.getList(HISTORY_ROOT_KEY);
   const listId = historyList.id;
@@ -150,7 +143,6 @@ export function createConversationViewFromDoc(
   /** Insertion order is LRU order: `touch` moves a turn to the end. */
   const hydrated = new Map<ContainerID, SessionHistory>();
   const pins = new Map<ContainerID, number>();
-  const turnCidByDescendant = new Map<ContainerID, ContainerID>();
   const listeners = new Set<ConversationViewListener>();
   let version = 0;
   let disposed = false;
@@ -204,13 +196,20 @@ export function createConversationViewFromDoc(
   };
 
   /** Ids map to their FIRST position, matching the renderer's de-duplication. */
+  /**
+   * Re-key the lookups from `from` onwards after a list insert or delete.
+   * Ids map to their FIRST position, matching the renderer's de-duplication,
+   * so an id already known at a lower index keeps that index; everything at or
+   * after `from` is re-pointed. Appending to a 2,400-turn conversation touches
+   * one entry rather than rebuilding a 2,400-entry map.
+   */
   const rebuildLookups = (from: number) => {
+    for (const [id, index] of indexById) {
+      if (index >= from) indexById.delete(id);
+    }
     for (let i = from; i < cids.length; i += 1) {
       const cid = cids[i];
       if (cid) indexByCid.set(cid, i);
-    }
-    indexById.clear();
-    for (let i = 0; i < rows.length; i += 1) {
       const id = rows[i]?.id;
       if (id !== undefined && !indexById.has(id)) indexById.set(id, i);
     }
@@ -346,15 +345,7 @@ export function createConversationViewFromDoc(
     let complete = true;
     // The tail comes first: a turn the eager pass deferred is still part of
     // the always-hydrated window.
-    if (ensureTailHydrated(undefined, idleItemBudget)) complete = false;
-    for (let i = tailStart(); i < cids.length; i += 1) {
-      const cid = cids[i];
-      const row = rows[i];
-      if (cid && row && hydrated.has(cid) && row.summary === undefined) {
-        rows[i] = withHydratedFacts(row, hydrated.get(cid)!);
-        changed = true;
-      }
-    }
+    if (ensureTailHydrated(undefined, IDLE_CHUNK_ITEMS)) complete = false;
     for (let i = cids.length - 1; i >= 0 && complete; i -= 1) {
       const row = rows[i];
       const cid = cids[i];
@@ -363,31 +354,28 @@ export function createConversationViewFromDoc(
       const needsCounts = row.itemCount === undefined;
       const needsConfig = row.role === 'user' && !('inputConfig' in row);
       if (!needsSummary && !needsCounts && !needsConfig) continue;
-      if (processed >= idleChunkSize || items >= idleItemBudget || deadline.timeRemaining() <= 1) {
+      if (
+        processed >= IDLE_CHUNK_TURNS ||
+        items >= IDLE_CHUNK_ITEMS ||
+        deadline.timeRemaining() <= 1
+      ) {
         complete = false;
         break;
       }
       const turn = hydrated.get(cid);
-      const map = turn ? undefined : turnMapOf(cid);
-      if (!turn && !map) continue;
-      const next: TurnIndexRow = { ...row };
-      if (needsSummary) {
-        next.summary = turn ? summarizeTurn(turn) : summarizeTurnShallow(doc, map as LoroMap);
+      if (turn) {
+        // A hydrated turn already has one definition of its facts.
+        rows[i] = withHydratedFacts(row, turn);
+        processed += 1;
+        items += itemWeight(i);
+        changed = true;
+        continue;
       }
-      if (needsCounts) {
-        if (turn) {
-          Object.assign(next, countsOfTurn(turn));
-        } else {
-          const shallow = (map as LoroMap).getShallowValue();
-          next.itemCount = listLengthOf(doc, shallow.items);
-          next.planCount = listLengthOf(doc, shallow.plan);
-        }
-      }
-      if (needsConfig) {
-        next.inputConfig = turn
-          ? pickIndexInputConfig(turn.inputConfig)
-          : readIndexInputConfig(map as LoroMap);
-      }
+      const map = turnMapOf(cid);
+      if (!map) continue;
+      const next: TurnIndexRow = { ...(needsCounts ? (fillRowCounts(i) ?? row) : row) };
+      if (needsSummary) next.summary = summarizeTurnShallow(map);
+      if (needsConfig) next.inputConfig = readIndexInputConfig(map);
       rows[i] = next;
       processed += 1;
       items += itemWeight(i);
@@ -412,28 +400,33 @@ export function createConversationViewFromDoc(
 
   // ---- doc events ----------------------------------------------------------------
 
+  /**
+   * Walk up to the turn map that owns `target`. Only reached when a batch moved
+   * turns, so it is not worth a memo — the cache this replaced grew to 100k
+   * entries per session and was then cleared wholesale.
+   */
   const findOwningTurnCid = (target: ContainerID): ContainerID | undefined => {
-    const cached = turnCidByDescendant.get(target);
-    if (cached) return cached;
     let current: Container | undefined = doc.getContainerById(target);
     while (current) {
       const parent = current.parent();
       if (!parent) return undefined;
-      if (parent.id === listId) {
-        if (turnCidByDescendant.size > 100_000) turnCidByDescendant.clear();
-        turnCidByDescendant.set(target, current.id);
-        return current.id;
-      }
+      if (parent.id === listId) return current.id;
       current = parent;
     }
     return undefined;
   };
 
-  const resolveTurnIndex = (event: LoroEvent): number => {
+  /**
+   * `event.path[1]` is the turn's list position, and for a streamed token that
+   * is the whole answer — no parent walk, no cache. It is only unreliable when
+   * this same batch also inserted or deleted turns, because the paths were
+   * recorded against the pre-batch list; then the container ancestry decides.
+   */
+  const resolveTurnIndex = (event: LoroEvent, listMoved: boolean): number => {
     const position = event.path[1];
     const guess = typeof position === 'number' ? position : -1;
     const guessedCid = guess >= 0 ? cids[guess] : undefined;
-    if (guessedCid && event.target === guessedCid) return guess;
+    if (guessedCid && (!listMoved || event.target === guessedCid)) return guess;
     const owner = indexByCid.has(event.target) ? event.target : findOwningTurnCid(event.target);
     if (!owner) return guess;
     return indexByCid.get(owner) ?? -1;
@@ -556,7 +549,7 @@ export function createConversationViewFromDoc(
 
     for (const event of events) {
       if (event.target === listId) continue;
-      const index = resolveTurnIndex(event);
+      const index = resolveTurnIndex(event, structural);
       const cid = index >= 0 ? cids[index] : undefined;
       const row = index >= 0 ? rows[index] : undefined;
       if (!cid || !row) continue;
@@ -574,22 +567,15 @@ export function createConversationViewFromDoc(
           indexChanged = true;
         }
       } else if (relPath.length === 1 && event.diff.type === 'list') {
-        if (relPath[0] === 'items') {
+        // An unresolved count stays unresolved: a delta cannot tell us the
+        // length of a list we never measured.
+        const countKey =
+          relPath[0] === 'items' ? 'itemCount' : relPath[0] === 'plan' ? 'planCount' : undefined;
+        const current = countKey === undefined ? undefined : row[countKey];
+        if (countKey !== undefined && current !== undefined) {
           rows[index] = {
             ...rows[index]!,
-            itemCount:
-              row.itemCount === undefined
-                ? undefined
-                : countAfterListDelta(row.itemCount, event.diff.diff),
-          };
-          indexChanged = true;
-        } else if (relPath[0] === 'plan') {
-          rows[index] = {
-            ...rows[index]!,
-            planCount:
-              row.planCount === undefined
-                ? undefined
-                : countAfterListDelta(row.planCount, event.diff.diff),
+            [countKey]: countAfterListDelta(current, event.diff.diff),
           };
           indexChanged = true;
         }

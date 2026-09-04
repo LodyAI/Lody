@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { SessionHistory } from '@lody/shared';
 import {
   collectHydratedRange,
   createConversationDerivation,
   findLastIndex,
   resolveTailStart,
-  subscribeConversationViewOnFrame,
+  subscribeOnFrame,
   type ConversationDerivation,
   type ConversationView,
   type DeriveTurnFact,
   type TurnIndexRow,
 } from '@/lib/conversation-view';
-import { useSessionDoc, type UseSessionDocOptions } from './use-session-doc';
 
 /**
  * React bindings for `ConversationView`.
@@ -25,33 +24,15 @@ import { useSessionDoc, type UseSessionDocOptions } from './use-session-doc';
 const EMPTY_TURNS: readonly SessionHistory[] = [];
 const EMPTY_ROWS: readonly TurnIndexRow[] = [];
 
-const frameScheduler = {
-  request: (callback: () => void): number =>
-    typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame(() => callback())
-      : (setTimeout(callback, 0) as unknown as number),
-  cancel: (id: number): void => {
-    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);
-    else clearTimeout(id);
-  },
-};
-
 /** The view's version, updated at most once per frame. -1 without a view. */
 export function useConversationVersion(view: ConversationView | null | undefined): number {
   const subscribe = useCallback(
-    (onChange: () => void) => (view ? subscribeConversationViewOnFrame(view, onChange) : () => {}),
+    (onChange: () => void) =>
+      view ? subscribeOnFrame((listener) => view.subscribe(listener), onChange) : () => {},
     [view]
   );
   const read = useCallback(() => view?.version ?? -1, [view]);
   return useSyncExternalStore(subscribe, read, read);
-}
-
-/** The session's conversation view, with accepted projections overlaid. */
-export function useConversationView(
-  sessionId: SessionId,
-  options: UseSessionDocOptions = {}
-): ConversationView | null {
-  return useSessionDoc(sessionId, options).history;
 }
 
 /**
@@ -166,21 +147,10 @@ export function useConversationDerivation<F>(
     };
   }, [view, derive]);
   const subscribe = useCallback(
-    (onChange: () => void) => {
-      if (!derivation) return () => {};
-      let frame: number | null = null;
-      const unsubscribe = derivation.subscribe(() => {
-        if (frame !== null) return;
-        frame = frameScheduler.request(() => {
-          frame = null;
-          onChange();
-        });
-      });
-      return () => {
-        unsubscribe();
-        if (frame !== null) frameScheduler.cancel(frame);
-      };
-    },
+    (onChange: () => void) =>
+      derivation
+        ? subscribeOnFrame((listener) => derivation.subscribe(listener), onChange)
+        : () => {},
     [derivation]
   );
   const read = useCallback(() => derivation?.version ?? -1, [derivation]);

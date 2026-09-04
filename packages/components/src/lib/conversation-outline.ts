@@ -48,7 +48,7 @@ export const OUTLINE_PREVIEW_MAX_LENGTH = 240;
  * cost constant and independent of answer length. The window is generous
  * enough that markdown syntax removed by the cleanup cannot starve the result.
  */
-const SUMMARY_SOURCE_WINDOW = 960;
+export const SUMMARY_SOURCE_WINDOW = 960;
 
 /**
  * Buckets for the tick width. A round's visual weight tracks how much was said
@@ -118,7 +118,7 @@ const truncateToLength = (value: string, maxLength: number): string => {
 /** Collapse to one line so wrapping is left to the hover card's line clamps. */
 const collapseWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
-const firstTextOf = (items: readonly MessageContent[]): string | null => {
+export const firstTextOf = (items: readonly MessageContent[]): string | null => {
   for (const item of items) {
     if (item.type !== 'text') continue;
     const raw = item.text;
@@ -133,7 +133,7 @@ const firstTextOf = (items: readonly MessageContent[]): string | null => {
  * and terminal output would make every implementation turn max out, which
  * defeats the point of a weight signal.
  */
-const proseLengthOf = (message: SessionHistoryParsed): number => {
+export const proseLengthOf = (message: Pick<SessionHistoryParsed, 'items'>): number => {
   let total = 0;
   for (const item of message.items) {
     if (item.type === 'text' || item.type === 'thought') {

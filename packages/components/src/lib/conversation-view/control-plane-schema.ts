@@ -15,4 +15,12 @@ export const sessionControlPlaneSchema = schema({
   history: schema.Ignore() as unknown as ContainerSchemaType,
 });
 
-export const CONTROL_PLANE_IGNORED_ROOT_KEYS = ['history'] as const;
+/**
+ * The roots the schema marks `Ignore`, read back from the schema so the doc
+ * facade cannot drift from it. loro-mirror honours `Ignore` when it builds a
+ * state snapshot but not on its incremental event path, which is what
+ * `createControlPlaneDoc` fences.
+ */
+export const CONTROL_PLANE_IGNORED_ROOT_KEYS = Object.entries(sessionControlPlaneSchema.definition)
+  .filter(([, field]) => (field as { type?: string }).type === 'ignore')
+  .map(([key]) => key);

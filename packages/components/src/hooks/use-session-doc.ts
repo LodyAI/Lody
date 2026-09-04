@@ -24,7 +24,7 @@ import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
 import {
   createProjectedConversationView,
-  subscribeConversationViewOnFrame,
+  subscribeOnFrame,
   type ConversationView,
 } from '@/lib/conversation-view';
 
@@ -235,7 +235,9 @@ export function useSessionDoc(
   const projections = useAtomValue(acceptedSessionHistoryProjectionsAtom);
   const sessionProjections = useMemo(
     () =>
-      runtime ? getAcceptedSessionHistoryProjections(projections, runtime.workspaceId, sessionId) : [],
+      runtime
+        ? getAcceptedSessionHistoryProjections(projections, runtime.workspaceId, sessionId)
+        : [],
     [projections, runtime, sessionId]
   );
   const history = useMemo(
@@ -465,14 +467,17 @@ export function useSessionDocSyncState(
         setSyncState(store.getSyncState());
         setReady(true);
         releaseSync = store.acquireSync();
-        unsubscribeStore = subscribeConversationViewOnFrame(store.history, () => {
-          if (!cancelled) {
-            const nextHasLocalHistory = readHasLocalHistory();
-            setHasLocalHistory((prev) =>
-              prev === nextHasLocalHistory ? prev : nextHasLocalHistory
-            );
+        unsubscribeStore = subscribeOnFrame(
+          (listener) => store.history.subscribe(listener),
+          () => {
+            if (!cancelled) {
+              const nextHasLocalHistory = readHasLocalHistory();
+              setHasLocalHistory((prev) =>
+                prev === nextHasLocalHistory ? prev : nextHasLocalHistory
+              );
+            }
           }
-        });
+        );
         unsubscribeSyncState = store.subscribeSyncState((nextState) => {
           if (!cancelled) {
             setSyncState((prev) => (prev === nextState ? prev : nextState));

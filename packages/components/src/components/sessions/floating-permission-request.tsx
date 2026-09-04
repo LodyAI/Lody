@@ -31,6 +31,8 @@ type ToolCallContent = Extract<MessageContent, { type: 'tool_call' }>;
 export type PermissionOption = NonNullable<ToolCallContent['permissionRequest']>['options'][number];
 
 interface PendingPermission {
+  /** The turn the request lives on, so responding addresses it directly. */
+  turnId: string;
   toolCall: ToolCallContent;
   permission: NonNullable<ToolCallContent['permissionRequest']>;
   isAskUserQuestion: boolean;
@@ -55,6 +57,7 @@ function findPendingPermissions(history: SessionDoc['history'] | undefined): Pen
         const tc = item as ToolCallContent;
         const permission = tc.permissionRequest!;
         results.push({
+          turnId: entry.id,
           toolCall: tc,
           permission,
           isAskUserQuestion: isAskUserQuestionPermissionMeta(permission._meta),
@@ -319,16 +322,26 @@ function PermissionCard({
       if (isResolved || !isReady || pendingOptionId !== null) return;
       setPendingOptionId(optionId);
       try {
-        await respondToPermission(sessionId, permission.requestId, {
-          outcome: 'selected',
-          optionId,
-        });
+        await respondToPermission(
+          sessionId,
+          permission.requestId,
+          { outcome: 'selected', optionId },
+          { turnId: pending.turnId }
+        );
       } catch (error) {
         console.error('Failed to respond to permission request:', error);
         setPendingOptionId(null);
       }
     },
-    [isResolved, isReady, pendingOptionId, respondToPermission, sessionId, permission.requestId]
+    [
+      isResolved,
+      isReady,
+      pendingOptionId,
+      respondToPermission,
+      sessionId,
+      permission.requestId,
+      pending.turnId,
+    ]
   );
 
   const handleSubmitAnswers = useCallback(
@@ -344,7 +357,8 @@ function PermissionCard({
             answerOptionId,
             answers,
             askQuestionMeta ?? 'claude'
-          )
+          ),
+          { turnId: pending.turnId }
         );
       } catch (error) {
         console.error('Failed to respond to question request:', error);
@@ -355,6 +369,7 @@ function PermissionCard({
       isResolved,
       isReady,
       pendingOptionId,
+      pending.turnId,
       askQuestionMeta,
       answerOptionId,
       permission.requestId,
@@ -368,10 +383,12 @@ function PermissionCard({
     if (!cancelOptionId) return;
     setPendingOptionId(cancelOptionId);
     try {
-      await respondToPermission(sessionId, permission.requestId, {
-        outcome: 'selected',
-        optionId: cancelOptionId,
-      });
+      await respondToPermission(
+        sessionId,
+        permission.requestId,
+        { outcome: 'selected', optionId: cancelOptionId },
+        { turnId: pending.turnId }
+      );
     } catch (error) {
       console.error('Failed to cancel question request:', error);
       setPendingOptionId(null);
@@ -380,6 +397,7 @@ function PermissionCard({
     isResolved,
     isReady,
     pendingOptionId,
+    pending.turnId,
     cancelOptionId,
     permission.requestId,
     respondToPermission,

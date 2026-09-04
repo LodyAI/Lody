@@ -1,6 +1,11 @@
-import type { SessionHistory } from '@lody/shared';
+import { resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
 import { isEmptyAssistantIndexRow } from './index-row';
-import { conversationTailStart, DEFAULT_TAIL_KEEP, type ConversationView, type TurnIndexRow } from './types';
+import {
+  conversationTailStart,
+  DEFAULT_TAIL_KEEP,
+  type ConversationView,
+  type TurnIndexRow,
+} from './types';
 
 /**
  * Index-only answers to the "latest turn such that…" questions the session
@@ -25,17 +30,15 @@ export const lastUserTurnIndex = (view: Pick<ConversationView, 'turnCount' | 'in
   findLastIndex(view, (row) => row.role === 'user');
 
 /**
- * `resolveActiveAssistantTurnId` from `@lody/shared` over index rows: the last
- * assistant turn's id while it is neither finished nor ended.
+ * The shared `resolveActiveAssistantTurnId` rule applied to the index instead
+ * of a materialized array: find the last assistant row, then let the shared
+ * function decide whether it is still active, so "active" has one definition.
  */
 export function resolveActiveAssistantTurnIdFromIndex(
   view: Pick<ConversationView, 'turnCount' | 'index'>
 ): string | undefined {
   const index = findLastIndex(view, (row) => row.role === 'assistant');
-  if (index < 0) return undefined;
-  const row = view.index(index)!;
-  if (row.finished === true || typeof row.endedAt === 'number') return undefined;
-  return row.id;
+  return index < 0 ? undefined : resolveActiveAssistantTurnId([view.index(index)!]);
 }
 
 /**

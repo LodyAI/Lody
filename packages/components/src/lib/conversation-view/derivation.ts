@@ -55,33 +55,17 @@ export function createConversationDerivation<F>(
     for (const listener of listeners) listener();
   };
 
-  /** Derive every hydrated, not-yet-derived (or changed) turn in `[from, to)`. */
-  const deriveHydratedRange = (from: number, to: number): boolean => {
-    let changed = false;
-    for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
-      const turn = view.turn(i);
-      const row = view.index(i);
-      if (!turn || !row) continue;
-      if (derivedFrom.get(row.id) === turn) continue;
-      facts.set(row.id, derive(turn, row, i));
-      derivedFrom.set(row.id, turn);
-      changed = true;
-    }
-    return changed;
-  };
-
   /**
-   * Facts for a range the view reported as CHANGED.
+   * Derive every hydrated, not-yet-derived (or changed) turn in `[from, to)`.
    *
-   * A hydrated turn is re-derived. A turn that changed while nothing holds it
-   * hydrated cannot be re-derived here, and its cached fact is now stale — an
-   * older assistant turn gaining a file diff is the case that matters — so the
-   * fact is dropped and the background pass is asked to run again. Dropping is
-   * only ever driven by an explicit change event; the speculative tail window
-   * below must keep using {@link deriveHydratedRange}, or every index event
-   * would drop the facts of every turn past the hydrated tail.
+   * `dropStale` is passed only for a range the view reported as CHANGED. A turn
+   * that changed while nothing holds it hydrated cannot be re-derived here and
+   * its cached fact is now stale — an older assistant turn gaining a file diff
+   * is the case that matters — so the fact is dropped and the background pass
+   * is asked to run again. The speculative tail window must NOT drop, or every
+   * index event would discard the facts of every turn past the hydrated tail.
    */
-  const refreshRange = (from: number, to: number): boolean => {
+  const deriveRange = (from: number, to: number, dropStale = false): boolean => {
     let changed = false;
     for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
       const row = view.index(i);
@@ -92,7 +76,7 @@ export function createConversationDerivation<F>(
         facts.set(row.id, derive(turn, row, i));
         derivedFrom.set(row.id, turn);
         changed = true;
-      } else if (facts.delete(row.id)) {
+      } else if (dropStale && facts.delete(row.id)) {
         derivedFrom.delete(row.id);
         changed = true;
         requestPass();
@@ -119,9 +103,9 @@ export function createConversationDerivation<F>(
       if (view.turnCount < lastTurnCount) changed = pruneRemoved() || changed;
       lastTurnCount = view.turnCount;
       // Appended turns land in the hydrated tail; derive whatever is there.
-      changed = deriveHydratedRange(Math.max(0, view.turnCount - 64), view.turnCount) || changed;
+      changed = deriveRange(Math.max(0, view.turnCount - 64), view.turnCount) || changed;
     } else if (change.from !== undefined && change.to !== undefined) {
-      changed = refreshRange(change.from, change.to) || changed;
+      changed = deriveRange(change.from, change.to, true) || changed;
     }
     if (changed) notify();
   });
@@ -149,7 +133,7 @@ export function createConversationDerivation<F>(
       await view.ensureRange(lo, hi);
       try {
         if (disposed) return;
-        if (deriveHydratedRange(lo, hi)) notify();
+        if (deriveRange(lo, hi)) notify();
       } finally {
         view.release(lo, hi);
       }
@@ -187,7 +171,7 @@ export function createConversationDerivation<F>(
   }
 
   // Facts for what is already hydrated come for free before the pass starts.
-  deriveHydratedRange(0, view.turnCount);
+  deriveRange(0, view.turnCount);
   requestPass();
 
   return {

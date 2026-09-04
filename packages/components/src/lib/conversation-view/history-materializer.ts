@@ -80,7 +80,9 @@ export function getMapFieldSchema(
   return schema.catchallType;
 }
 
-export const containerTypeOfSchema = (schema: SchemaType | undefined): ContainerType | undefined => {
+export const containerTypeOfSchema = (
+  schema: SchemaType | undefined
+): ContainerType | undefined => {
   const type = schema?.getContainerType();
   return type === null ? undefined : type;
 };
@@ -99,7 +101,10 @@ export function applySchemaToInfer(
   return next;
 }
 
-export function inferContainerType(value: unknown, infer: MaterializeInfer): ContainerType | undefined {
+export function inferContainerType(
+  value: unknown,
+  infer: MaterializeInfer
+): ContainerType | undefined {
   if (isRecord(value)) return 'Map';
   if (Array.isArray(value)) return infer?.defaultMovableList ? 'MovableList' : 'List';
   if (typeof value === 'string') return infer?.defaultLoroText ? 'Text' : undefined;
@@ -185,7 +190,10 @@ export function insertContainerIntoList(
   infer: MaterializeInfer
 ): Container {
   const type = containerTypeForInsert(schema, value, infer);
-  const attached = list.insertContainer(index, createDetached(type) as never) as unknown as Container;
+  const attached = list.insertContainer(
+    index,
+    createDetached(type) as never
+  ) as unknown as Container;
   populateContainer(attached, schema, value, schema ? undefined : infer);
   return attached;
 }
@@ -289,7 +297,8 @@ export function writeListItem(
   const itemSchema = schema?.itemSchema;
   if (isAnySchema(itemSchema)) {
     const infer = applySchemaToInfer(itemSchema, baseInfer) ?? baseInfer;
-    if (inferContainerType(item, infer)) insertContainerIntoList(list, undefined, index, item, infer);
+    if (inferContainerType(item, infer))
+      insertContainerIntoList(list, undefined, index, item, infer);
     else list.insert(index, item as never);
     return;
   }
@@ -330,7 +339,13 @@ export function writeReplacedMapEntry(
     return;
   }
   const containerSchema = fieldSchema && isContainerSchema(fieldSchema) ? fieldSchema : undefined;
-  insertContainerIntoMap(map, containerSchema, key, value, containerSchema ? undefined : childInfer);
+  insertContainerIntoMap(
+    map,
+    containerSchema,
+    key,
+    value,
+    containerSchema ? undefined : childInfer
+  );
 }
 
 /** loro-mirror's `tryUpdateToContainer` for a list insert during a diff. */
@@ -351,7 +366,13 @@ export function writeDiffListInsert(
     return;
   }
   const containerSchema = itemSchema && isContainerSchema(itemSchema) ? itemSchema : undefined;
-  insertContainerIntoList(list, containerSchema, index, value, containerSchema ? undefined : effective);
+  insertContainerIntoList(
+    list,
+    containerSchema,
+    index,
+    value,
+    containerSchema ? undefined : effective
+  );
 }
 
 export { isContainer };

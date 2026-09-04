@@ -15,6 +15,7 @@ import {
   type LoroText,
 } from 'loro-crdt';
 import { normalizeHydratedTurn } from './create-conversation-view-from-doc';
+import { isPlainRecord } from './is-plain-record';
 import {
   applyEncode,
   applySchemaToInfer,
@@ -51,8 +52,8 @@ export interface HistoryWriter {
   replace(turnId: string, entry: SessionHistory): boolean;
   /**
    * Writes `outcome` onto the tool call carrying `permissionRequest.requestId`.
-   * `turnId` skips the search; without it the tail is searched first, then the
-   * rest of the history from newest to oldest. Returns false when not found.
+   * `turnId` addresses the turn directly; without it the history is scanned
+   * newest-to-oldest. Returns false when no such request exists.
    */
   respondPermission(
     requestId: string,
@@ -69,9 +70,6 @@ export interface HistoryWriter {
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 
 const CID_KEY = '$cid';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const assertValidEntry = (entry: unknown) => {
   const validation = validateSchema(sessionHistorySchema, entry, {
@@ -94,7 +92,7 @@ function diffContainer(
   const effective = applySchemaToInfer(schema, infer);
   const kind = container.kind();
   if (kind === 'Map') {
-    if (!isRecord(oldValue) || !isRecord(newValue)) {
+    if (!isPlainRecord(oldValue) || !isPlainRecord(newValue)) {
       throw new Error('Failed to diff container(map). Old and new state must be objects');
     }
     diffMap(
@@ -269,14 +267,12 @@ export function createHistoryWriter(doc: LoroDoc, view: ConversationView): Histo
       return true;
     },
     respondPermission: (requestId, outcome, options) => {
-      const candidates: number[] = [];
-      if (options?.turnId) {
-        const index = view.indexOf(options.turnId);
-        if (index >= 0) candidates.push(index);
-      } else {
-        for (let i = view.turnCount - 1; i >= 0; i -= 1) candidates.push(i);
-      }
-      for (const index of candidates) {
+      // With a turn id this is one lookup. Without one — a caller that does not
+      // know which turn a request came from — it is a newest-to-oldest scan.
+      const hinted = options?.turnId === undefined ? -1 : view.indexOf(options.turnId);
+      const from = hinted >= 0 ? hinted : view.turnCount - 1;
+      const to = hinted >= 0 ? hinted : 0;
+      for (let index = from; index >= to; index -= 1) {
         const row = view.index(index);
         // An unresolved count is not evidence of an empty turn; only skip a
         // turn known to have no items.
@@ -287,7 +283,7 @@ export function createHistoryWriter(doc: LoroDoc, view: ConversationView): Histo
         if (!turn || !Array.isArray(turn.items)) continue;
         const itemIndex = turn.items.findIndex(
           (item) =>
-            isRecord(item) &&
+            isPlainRecord(item) &&
             item.type === 'tool_call' &&
             (item as ToolCallMessage).permissionRequest?.requestId === requestId
         );

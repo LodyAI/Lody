@@ -61,7 +61,8 @@ export function createConversationViewFromHistory(
       lo = Math.min(lo, i);
       hi = Math.max(hi, i);
     }
-    if (hi >= 0) for (const listener of listeners) listener({ kind: 'range', from: lo, to: hi + 1 });
+    if (hi >= 0)
+      for (const listener of listeners) listener({ kind: 'range', from: lo, to: hi + 1 });
   });
 
   return {

@@ -1,5 +1,3 @@
-import type { ConversationView } from './types';
-
 type FrameScheduler = {
   request: (callback: () => void) => number;
   cancel: (id: number) => void;
@@ -16,24 +14,26 @@ const frameScheduler: FrameScheduler =
         cancel: (id) => clearTimeout(id),
       };
 
-/** One React update per frame no matter how many doc events arrived. */
-export function subscribeConversationViewOnFrame(
-  view: ConversationView,
-  onChange: () => void,
-  scheduler: FrameScheduler = frameScheduler
+/**
+ * One React update per frame no matter how many changes arrived. Takes any
+ * `subscribe(listener)` source — a `ConversationView`, a
+ * `ConversationDerivation` — because the change argument is never read.
+ */
+export function subscribeOnFrame(
+  subscribe: (listener: () => void) => () => void,
+  onChange: () => void
 ): () => void {
   let frame: number | null = null;
-  const unsubscribe = view.subscribe(() => {
+  const unsubscribe = subscribe(() => {
     if (frame !== null) return;
-    frame = scheduler.request(() => {
+    frame = frameScheduler.request(() => {
       frame = null;
       onChange();
     });
   });
   return () => {
     unsubscribe();
-    if (frame !== null) scheduler.cancel(frame);
+    if (frame !== null) frameScheduler.cancel(frame);
     frame = null;
   };
 }
-

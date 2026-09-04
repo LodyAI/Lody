@@ -17,8 +17,12 @@ export type TurnSummary = {
   thoughts: number;
 };
 
-/** How much raw prose a summary keeps; matches the outline's read window. */
-export const TURN_SUMMARY_HEAD_CHARS = 960;
+/**
+ * How much raw prose a summary keeps. This IS the outline's read window: a
+ * placeholder round and a hydrated round must produce the same title, so the
+ * two cannot be separate numbers.
+ */
+export { SUMMARY_SOURCE_WINDOW as TURN_SUMMARY_HEAD_CHARS } from '@/lib/conversation-outline';
 
 /**
  * Role-selection scalars of a user turn's `inputConfig`, read shallowly
@@ -35,20 +39,28 @@ export type TurnIndexInputConfig = Pick<
  * from the turn map's shallow value; the optional fields fill in as the
  * background pass reaches the turn.
  */
-export type TurnIndexRow = Pick<
-  SessionHistory,
-  | 'id'
-  | 'role'
-  | 'timestamp'
-  | 'status'
-  | 'finished'
-  | 'endedAt'
-  | 'sendStatus'
-  | 'userTurnId'
-  | 'acpTurnId'
-  | 'startedAt'
-  | 'permissionWaitMs'
-> & {
+/**
+ * Turn-map scalars mirrored into the index row. ONE list: `TurnIndexRow` is
+ * derived from it and the event path re-reads it, so a scalar cannot be added
+ * to the row without also being refreshed on change (or vice versa).
+ */
+export const INDEX_SCALAR_KEYS = [
+  'id',
+  'role',
+  'timestamp',
+  'status',
+  'finished',
+  'endedAt',
+  'sendStatus',
+  'userTurnId',
+  'acpTurnId',
+  'startedAt',
+  'permissionWaitMs',
+] as const;
+
+export type IndexScalarKey = (typeof INDEX_SCALAR_KEYS)[number];
+
+export type TurnIndexRow = Pick<SessionHistory, IndexScalarKey> & {
   summary?: TurnSummary;
   itemCount?: number;
   /** Plan entries attached to the turn; an assistant turn with a plan and no

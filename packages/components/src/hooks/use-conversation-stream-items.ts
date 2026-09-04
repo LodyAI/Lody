@@ -7,10 +7,11 @@ import {
 } from '@/components/ai-gui/build-chat-stream-items';
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
 import type { ConversationView } from '@/lib/conversation-view';
+import { LRUCache } from '@/lib/lru-cache';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
 
-const CHAT_STREAM_ITEMS_CACHE_LIMIT = 20;
-const chatStreamItemsCacheBySessionId = new Map<SessionId, BuildChatStreamItemsCache>();
+/** Per-turn render items survive a tab switch; 20 sessions is the working set. */
+const chatStreamItemsCacheBySessionId = new LRUCache<SessionId, BuildChatStreamItemsCache>(20);
 
 /** Turns hydrated before the viewport reports anything (the conversation opens at its end). */
 const INITIAL_WINDOW_TURNS = 40;
@@ -20,20 +21,6 @@ const MIN_SCREEN_TURNS = 8;
 const PREFETCH_SCREENS = 2;
 /** The viewport must move this many turns before the window is recomputed. */
 const VISIBLE_RANGE_HYSTERESIS_TURNS = 4;
-
-function getChatStreamItemsCache(sessionId: SessionId): BuildChatStreamItemsCache | undefined {
-  return chatStreamItemsCacheBySessionId.get(sessionId);
-}
-
-function setChatStreamItemsCache(sessionId: SessionId, cache: BuildChatStreamItemsCache): void {
-  chatStreamItemsCacheBySessionId.delete(sessionId);
-  chatStreamItemsCacheBySessionId.set(sessionId, cache);
-  while (chatStreamItemsCacheBySessionId.size > CHAT_STREAM_ITEMS_CACHE_LIMIT) {
-    const oldestSessionId = chatStreamItemsCacheBySessionId.keys().next().value;
-    if (oldestSessionId === undefined) break;
-    chatStreamItemsCacheBySessionId.delete(oldestSessionId);
-  }
-}
 
 /**
  * The hydrated window: the viewport plus `PREFETCH_SCREENS` screens on each
@@ -109,7 +96,7 @@ export function useConversationStreamItems(
 
   const cacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
   if (cacheRef.current === undefined) {
-    cacheRef.current = getChatStreamItemsCache(sessionId);
+    cacheRef.current = chatStreamItemsCacheBySessionId.get(sessionId);
   }
   const result = useMemo(
     () => buildChatStreamItems(view, sessionId, cacheRef.current),
@@ -119,7 +106,7 @@ export function useConversationStreamItems(
   );
   cacheRef.current = result.cache;
   useEffect(() => {
-    setChatStreamItemsCache(sessionId, result.cache);
+    chatStreamItemsCacheBySessionId.set(sessionId, result.cache);
   }, [result.cache, sessionId]);
 
   return useMemo(
