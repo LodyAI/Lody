@@ -48,12 +48,12 @@ const unattachedView = {
  * fixture builds faster but materializes in ~45 ms, which would leave the
  * bound with no usable margin.
  */
-const buildLargeDoc = (): LoroDoc => {
+const buildLargeDoc = (turnCount = 1_000): LoroDoc => {
   const doc = new LoroDoc();
   doc.setPeerId(3);
   doc.getMap('session').set('id', FIXTURE_SESSION_ID);
   const writer = createHistoryWriter(doc, unattachedView);
-  for (const entry of buildFixtureHistory(1000)) writer.append(entry);
+  for (const entry of buildFixtureHistory(turnCount)) writer.append(entry);
   const fresh = new LoroDoc();
   fresh.import(doc.export({ mode: 'snapshot' }));
   return fresh;
@@ -84,6 +84,58 @@ describe('control-plane Mirror (history: Ignore)', () => {
     expect(state.history).toBeUndefined();
     expect((state.session as { id?: string }).id).toBe(FIXTURE_SESSION_ID);
     mirror!.dispose();
+  });
+
+  it('leaves an untouched root from a newer peer intact when writing', () => {
+    // Forward compatibility (see providers/AGENTS.md): the facade answers root
+    // enumeration with nothing, so a root this build does not declare and that
+    // never changes during the session is invisible to Mirror state. What must
+    // still hold is the part that matters — a control-plane write never deletes
+    // or rewrites it.
+    const doc = new LoroDoc();
+    doc.getMap('session').set('id', FIXTURE_SESSION_ID);
+    doc.getMap('futureFeature').set('state', 'preparing');
+    doc.commit();
+    const before = JSON.stringify(doc.getMap('futureFeature').toJSON());
+
+    const mirror = controlPlaneMirror(doc);
+    expect((mirror.getState() as Record<string, unknown>).futureFeature).toBeUndefined();
+    mirror.setState((draft: { session: Record<string, unknown> }) => {
+      draft.session.title = 'renamed';
+    });
+
+    expect(JSON.stringify(doc.getMap('futureFeature').toJSON())).toBe(before);
+    expect(doc.getMap('session').get('title')).toBe('renamed');
+    mirror.dispose();
+  });
+
+  it('keeps a stray write to the history key out of the document', () => {
+    // Nothing should reach `setState` with a `history` key any more. If a path
+    // is ever missed, an ignored field is skipped on WRITE, so the durable list
+    // is untouched — the miss stays an in-memory phantom on that Mirror rather
+    // than a second, divergent copy of the conversation in the doc. Reading it
+    // back is what `SessionDocState` (which omits `history`) rules out.
+    const doc = buildLargeDoc(4);
+    const view = createConversationViewFromDoc(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      scheduleIdle: createManualIdle().scheduleIdle,
+    });
+    const mirror = controlPlaneMirror(doc);
+    const before = (doc.getList('history') as LoroList).length;
+
+    mirror.setState((draft: Record<string, unknown>) => {
+      draft.history = [{ id: 'bogus', role: 'user', timestamp: 't' }];
+    });
+
+    expect((doc.getList('history') as LoroList).length).toBe(before);
+    expect(view.turnCount).toBe(before);
+    expect(view.indexOf('bogus')).toBe(-1);
+    // Memory-only, as `schema.Ignore` defines: the phantom never reaches Loro.
+    expect((mirror.getState() as Record<string, unknown>).history).toEqual([
+      { id: 'bogus', role: 'user', timestamp: 't' },
+    ]);
+    mirror.dispose();
+    view.dispose();
   });
 
   it('does not see history events, but still sees other roots and unknown roots', () => {
