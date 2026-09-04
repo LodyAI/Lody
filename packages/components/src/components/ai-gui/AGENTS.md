@@ -33,10 +33,10 @@
 - Finished turns keep the answer/result tail visible and fold earlier work.
   Streaming turns stay expanded. Details remain sibling rows; search opens both
   the worked region and activity group.
-- The final answer is the last text before trailing never-collapsed items, not
-  necessarily the last item. Generated `image_group`s and the `switch_mode`
-  "Exited Plan Mode" card may follow it; use
-  `getTextIndexBeforeTrailingNeverCollapsedItems`.
+- The final answer is the final contiguous run of text before trailing
+  never-collapsed items, not necessarily the last item. Keep walking backward
+  through adjacent text blocks until a non-text boundary. Generated
+  `image_group`s and the `switch_mode` "Exited Plan Mode" card may follow it.
 - One turn may contain several `AssistantTurnRenderSegment`s. A plan approval
   inside a running turn cuts a segment so implementation stays under the plan.
   Match ACP kind `switch_mode`, never a title; carrier varies
