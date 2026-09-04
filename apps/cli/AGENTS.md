@@ -384,10 +384,11 @@ the `packages/acp-extension-dsh` submodule, launches it through Lody's isolated 
 and loads the bundled `deepseek-acp.js` adapter. The extension owns the ACP model,
 reasoning-effort, and permission selectors while Harness
 continues to own model execution, sandbox enforcement, and one-shot approvals.
-`ACP_EXTENSION_DSH_MODELS` is a capability-bearing launch input: include a digest of
-its exact value in the DeepSeek capability source version and thread the Agent config
-environment through every probe/session source-version derivation, so two custom
-endpoint catalogs never share an authoritative cache identity. See
+`DEEPSEEK_BASE_URL` is a capability-bearing launch input: include a digest of its
+exact value in the DeepSeek capability source version and thread the Agent config
+environment through every probe/session source-version derivation, so two discovered
+endpoint catalogs never share an authoritative cache identity. Never put the API key
+or a derivative of it in that public cache key. See
 managed runtime context and the
 builtin extension checklist.
 

@@ -74,28 +74,28 @@ describe('resolveBuiltinACPSetting', () => {
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'deepseek' })).toBe(
       DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION
     );
-    const customDeepSeekModelsVersion = getAcpCapabilitySourceVersion({
+    const customDeepSeekEndpointVersion = getAcpCapabilitySourceVersion({
       cliType: 'builtin',
       agentType: 'deepseek',
-      env: { ACP_EXTENSION_DSH_MODELS: '["gateway-model"]' },
+      env: { DEEPSEEK_BASE_URL: 'https://gateway.example/v1' },
     });
-    expect(customDeepSeekModelsVersion).toMatch(
+    expect(customDeepSeekEndpointVersion).toMatch(
       new RegExp(
-        `^${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION.replaceAll('.', '\\.')}\\+models:[a-f0-9]{12}$`
+        `^${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION.replaceAll('.', '\\.')}\\+endpoint:[a-f0-9]{12}$`
       )
     );
-    expect(customDeepSeekModelsVersion).not.toBe(
+    expect(customDeepSeekEndpointVersion).not.toBe(
       getAcpCapabilitySourceVersion({
         cliType: 'builtin',
         agentType: 'deepseek',
-        env: { ACP_EXTENSION_DSH_MODELS: '["other-model"]' },
+        env: { DEEPSEEK_BASE_URL: 'https://other.example/v1' },
       })
     );
-    expect(customDeepSeekModelsVersion).not.toBe(
+    expect(customDeepSeekEndpointVersion).not.toBe(
       getAcpCapabilitySourceVersion({
         cliType: 'builtin',
         agentType: 'deepseek',
-        env: { ACP_EXTENSION_DSH_MODELS: ' ["gateway-model"]' },
+        env: { DEEPSEEK_BASE_URL: ' https://gateway.example/v1' },
       })
     );
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' }, '0.36.0')).toBe(

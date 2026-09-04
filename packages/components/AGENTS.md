@@ -277,11 +277,10 @@ mobile surfaces.
   `settings/env-vars-textarea.tsx`. DeepSeek Harness official vs custom
   endpoint is dialog form state only: persist `DEEPSEEK_API_KEY` /
   `DEEPSEEK_BASE_URL` (official always writes `https://api.deepseek.com`)
-  and never a new AgentConfigMeta field. A custom endpoint's optional model-id
-  list is a JSON string array in `ACP_EXTENSION_DSH_MODELS`; it replaces DSH's
-  advisory catalog and selects its first entry by default. Additional env
-  cannot override any of those keys. Changing endpoint, credential, or model
-  catalog invalidates the dialog's prior live verification.
+  and never a new AgentConfigMeta field. Model ids come from the endpoint's
+  OpenAI-compatible discovery response during live verification; do not add a
+  parallel manual catalog field. Additional env cannot override either connection
+  key. Changing endpoint or credential invalidates the dialog's prior live verification.
 - Codex reset forecast: `components/codex-reset/` + `lib/codex-reset-forecast*.ts`.
   A public unauthenticated GET to the third-party `codex-resets.com`, cached in ONE
   module-level store (`lib/codex-reset-forecast-store.ts`) that every surface shares.
