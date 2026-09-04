@@ -1130,6 +1130,7 @@ describe('SessionExecutionService', () => {
     sessionId: string;
     hasPromptOutputForTurn: boolean;
     dispatchSource?: 'delivery';
+    onTurnClaimed?: () => Promise<boolean>;
   }) => {
     let history: Array<Record<string, unknown>> = [
       {
@@ -1212,7 +1213,13 @@ describe('SessionExecutionService', () => {
         userName: 'User',
         userEmail: 'user@example.com',
       },
-      options.dispatchSource ? { dispatchSource: options.dispatchSource, onTurnSettled } : undefined
+      options.dispatchSource
+        ? {
+            dispatchSource: options.dispatchSource,
+            onTurnSettled,
+            ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
+          }
+        : undefined
     );
 
     return {
@@ -1314,6 +1321,27 @@ describe('SessionExecutionService', () => {
       turnId: 'assistant:turn-user-1',
       outcome: 'failed',
     });
+  });
+
+  it('silently releases a Delivery turn when its durable attempt claim loses contention', async () => {
+    const onTurnClaimed = vi.fn(async () => false);
+    const { deps, agentClient, onTurnSettled, getHistory } = await runSilentPromptTurn({
+      sessionId: 'session-contended-delivery-turn',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+      onTurnClaimed,
+    });
+
+    expect(onTurnClaimed).toHaveBeenCalledOnce();
+    expect(agentClient.prompt).not.toHaveBeenCalled();
+    expect(deps.createAssistantEntryForTurn).not.toHaveBeenCalled();
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(onTurnSettled).not.toHaveBeenCalled();
+    expect(deps.clearConversationTurn).toHaveBeenCalledWith(
+      'session-contended-delivery-turn',
+      'assistant:turn-user-1'
+    );
+    expect(getHistory()[0]?.status).toBe('pending');
   });
 
   it('rejects a chat turn before prompt when memory pressure persists', async () => {

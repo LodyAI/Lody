@@ -54,6 +54,11 @@ const MATERIALIZATION_RETRY_MAX_MS = 30_000;
 // default Operation deadline is 24h, so a legitimately finished completion
 // always has at least this window to reach the requester's idle boundary.
 const DELIVERY_EXPIRY_GRACE_MS = 8 * 60 * 60 * 1_000;
+// This module is loaded once by each CLI Worker process. All workspace
+// coordinators in that Worker share one boot identity, while a replacement
+// Worker necessarily receives a fresh identity after the supervisor's child
+// exit barrier (or the foreground Host-lease acquisition barrier).
+const WORKER_BOOT_ID = randomUUID();
 
 const truncateTargetOutput = (
   text: string
@@ -124,7 +129,7 @@ export type LodyOperationCoordinatorOptions = {
     directory: string,
     onChange: (filename: string | Buffer | null) => void
   ) => Pick<FSWatcher, 'close'>;
-  deliveryAttemptOwnerId?: string;
+  workerBootId?: string;
   materializeTarget: (
     operation: StoredLodyOperation,
     item: Extract<LodyOperationItemResult, { status: 'active' }>,
@@ -168,13 +173,13 @@ export class LodyOperationCoordinator {
   private storeWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private readonly materializationClaimToken = randomUUID();
-  private readonly deliveryAttemptOwnerId: string;
+  private readonly workerBootId: string;
 
   constructor(private readonly options: LodyOperationCoordinatorOptions) {
     const storePath = options.storePath ?? getLodyOperationStorePath(options.machineId);
     this.storeFactory = options.storeFactory ?? (() => new LodyOperationStore(storePath));
     this.now = options.now ?? getServerNow;
-    this.deliveryAttemptOwnerId = options.deliveryAttemptOwnerId ?? randomUUID();
+    this.workerBootId = options.workerBootId ?? WORKER_BOOT_ID;
   }
 
   start(): void {
@@ -198,6 +203,15 @@ export class LodyOperationCoordinator {
     // event loop (multiple workspace coordinators watching the shared
     // machine-level store amplify it).
     this.store = this.storeFactory();
+    const recoveredAttempts = this.store.recoverOrphanedDeliveryAttempts(
+      this.options.workspaceId,
+      this.workerBootId
+    );
+    if (recoveredAttempts > 0) {
+      this.options.logger.warn(
+        `[orchestration] Recovered ${recoveredAttempts} orphaned Delivery attempt(s) from an exited Worker`
+      );
+    }
     const storePath = this.options.storePath ?? getLodyOperationStorePath(this.options.machineId);
     const storeBasename = path.basename(storePath);
     const watchOperationStore =
@@ -791,6 +805,9 @@ export class LodyOperationCoordinator {
       store.getDelivery(delivery.requesterSessionId, delivery.operationId)
     );
     if (delivery.state === 'consumed') return;
+    // An attempt token is exclusive regardless of owner. Foreign-boot tokens
+    // are removed only once during Worker startup, after the lifecycle barrier.
+    if (delivery.activeAttemptId || delivery.activeAttemptOwnerId) return;
     const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
       getSessionRoomId(delivery.requesterSessionId)
     );
@@ -814,7 +831,6 @@ export class LodyOperationCoordinator {
     }
     if (execution.hasActiveTurn) return;
     if (this.options.dispatchWatcher.hasPendingDispatch(delivery.requesterSessionId)) return;
-    if (delivery.activeAttemptOwnerId === this.deliveryAttemptOwnerId) return;
     if (delivery.attemptCount >= DELIVERY_MAX_ATTEMPTS) {
       await this.failExhaustedDelivery(sessionDoc, operation, delivery, reason);
       return;
@@ -866,13 +882,14 @@ export class LodyOperationCoordinator {
           const claim = this.withStore((store) =>
             store.claimDeliveryAttempt(delivery.requesterSessionId, delivery.operationId, {
               attemptId,
-              ownerId: this.deliveryAttemptOwnerId,
+              ownerId: this.workerBootId,
             })
           );
           if (claim.status !== 'claimed') {
-            throw new Error(
-              `Delivery ${delivery.deliveryId} attempt could not be claimed (${claim.status}).`
+            this.options.logger.debug(
+              `[orchestration] Delivery ${delivery.deliveryId} claim lost status=${claim.status}`
             );
+            return false;
           }
           try {
             await this.writeCompletionTurn(sessionDoc, operation, delivery);
@@ -881,11 +898,13 @@ export class LodyOperationCoordinator {
               store.interruptDeliveryAttempt(
                 delivery.requesterSessionId,
                 delivery.operationId,
+                this.workerBootId,
                 attemptId
               )
             );
             throw error;
           }
+          return true;
         },
         onTurnSettled: async (settlement) => {
           const outcome = settlement.outcome;
@@ -894,6 +913,7 @@ export class LodyOperationCoordinator {
               store.interruptDeliveryAttempt(
                 delivery.requesterSessionId,
                 delivery.operationId,
+                this.workerBootId,
                 attemptId
               )
             );
@@ -901,6 +921,7 @@ export class LodyOperationCoordinator {
           }
           const result = this.withStore((store) =>
             store.acknowledgeDelivery(delivery.requesterSessionId, delivery.operationId, {
+              workerBootId: this.workerBootId,
               attemptId,
               assistantTurnId: settlement.turnId,
               outcome,
@@ -921,6 +942,7 @@ export class LodyOperationCoordinator {
         store.interruptDeliveryAttempt(
           delivery.requesterSessionId,
           delivery.operationId,
+          this.workerBootId,
           attemptId
         );
         return store.getDelivery(delivery.requesterSessionId, delivery.operationId);

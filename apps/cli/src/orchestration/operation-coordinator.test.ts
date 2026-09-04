@@ -26,7 +26,7 @@ const roots = new Set<string>();
 const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 type DeliveryDispatchOptions = {
-  onTurnClaimed?: () => Promise<void>;
+  onTurnClaimed?: () => Promise<boolean>;
   onTurnSettled?: (settlement: {
     turnId: string;
     outcome: 'completed' | 'failed' | 'interrupted';
@@ -57,7 +57,7 @@ const makeHarness = async (options?: {
     history?: SessionHistoryInput[];
     meta?: SessionMeta;
   } | void>;
-  deliveryAttemptOwnerId?: string;
+  workerBootId?: string;
 }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-coordinator-'));
   roots.add(root);
@@ -166,7 +166,7 @@ const makeHarness = async (options?: {
   const continueSession = vi.fn(async (message: unknown, dispatchOptions: unknown) => {
     const typedMessage = message as { sessionId: SessionId; userTurnId: string };
     const typedOptions = dispatchOptions as DeliveryDispatchOptions;
-    await typedOptions.onTurnClaimed?.();
+    if ((await typedOptions.onTurnClaimed?.()) === false) return;
     const assistantTurnId = `assistant:${typedMessage.userTurnId}`;
     histories.set(typedMessage.sessionId, [
       ...(histories.get(typedMessage.sessionId) ?? []),
@@ -271,9 +271,7 @@ const makeHarness = async (options?: {
     storeFactory,
     storePath,
     now: options?.now ?? (() => TEST_NOW_MS),
-    ...(options?.deliveryAttemptOwnerId
-      ? { deliveryAttemptOwnerId: options.deliveryAttemptOwnerId }
-      : {}),
+    ...(options?.workerBootId ? { workerBootId: options.workerBootId } : {}),
     operationStoreWatchFactory: (_directory, onChange) => {
       operationStoreWake = onChange;
       return { close: vi.fn() };
@@ -1213,7 +1211,7 @@ describe('LodyOperationCoordinator', () => {
   it('retries after graceful teardown terminalizes the Assistant without a Delivery ack', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
-      deliveryAttemptOwnerId: 'daemon-after-restart',
+      workerBootId: 'daemon-after-restart',
     });
     const shutdownStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
@@ -1228,6 +1226,7 @@ describe('LodyOperationCoordinator', () => {
         shutdownStore.interruptDeliveryAttempt(
           harness.requesterSessionId,
           'review-round-1',
+          'daemon-before-restart',
           'attempt-before-graceful-shutdown'
         )
       ).toBe(true);
@@ -1458,10 +1457,10 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
-  it('recovers one crashed Delivery attempt under a new coordinator owner', async () => {
+  it('recovers one crashed Delivery attempt after a replacement Worker starts', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
-      deliveryAttemptOwnerId: 'daemon-new',
+      workerBootId: 'daemon-new',
     });
     const oldStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
@@ -1487,6 +1486,103 @@ describe('LodyOperationCoordinator', () => {
         state: 'consumed',
         attemptCount: 2,
         continuationOutcome: 'completed',
+      });
+    } finally {
+      finalStore.close();
+    }
+  });
+
+  it('consumes two orphaned attempts without starting ACP a third time', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      workerBootId: 'worker-c',
+    });
+    const crashedStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      crashedStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
+      expect(
+        crashedStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
+          attemptId: 'attempt-a',
+          ownerId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        crashedStore.recoverOrphanedDeliveryAttempts('workspace-1' as WorkspaceId, 'worker-b')
+      ).toBe(1);
+      expect(
+        crashedStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
+          attemptId: 'attempt-b',
+          ownerId: 'worker-b',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
+    } finally {
+      crashedStore.close();
+    }
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'consumed',
+        attemptCount: 2,
+      });
+    } finally {
+      finalStore.close();
+    }
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        items: [
+          expect.objectContaining({
+            type: 'operation_completion',
+            continuation: {
+              status: 'not_started',
+              reason: expect.objectContaining({ code: 'DELIVERY_ATTEMPTS_EXHAUSTED' }),
+            },
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('silently loses a Delivery claim when another Worker wins after the idle check', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      workerBootId: 'worker-a',
+    });
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
+      const competitorStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(
+          competitorStore.claimDeliveryAttempt(harness.requesterSessionId, 'review-round-1', {
+            attemptId: 'attempt-b',
+            ownerId: 'worker-b',
+          })
+        ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      } finally {
+        competitorStore.close();
+      }
+      const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+      expect(await typedOptions.onTurnClaimed?.()).toBe(false);
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'pending',
+        attemptCount: 1,
+        activeAttemptId: 'attempt-b',
+        activeAttemptOwnerId: 'worker-b',
       });
     } finally {
       finalStore.close();
@@ -1592,7 +1688,7 @@ describe('LodyOperationCoordinator', () => {
   it('stops after one interrupted Delivery recovery instead of waking ACP forever', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
-      deliveryAttemptOwnerId: 'daemon-1',
+      workerBootId: 'daemon-1',
     });
     harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
       const typedOptions = dispatchOptions as DeliveryDispatchOptions;

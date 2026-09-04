@@ -7,6 +7,7 @@ export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
   delivery: 'absent' | 'pending' | 'attempting' | 'consumed';
+  deliveryAttemptOwner: 'none' | 'current' | 'previous';
   deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
@@ -29,6 +30,7 @@ export type OrchestrationModelAction =
   | 'fail_turn'
   | 'interrupt_turn'
   | 'restart'
+  | 'recover_orphans'
   | 'archive'
   | 'restore'
   | 'delete_configuration';
@@ -37,6 +39,7 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   operation: 'absent',
   targetInput: 'absent',
   delivery: 'absent',
+  deliveryAttemptOwner: 'none',
   deliveryAttempts: 0,
   activeTurn: 'none',
   queuedUsers: 0,
@@ -104,6 +107,7 @@ export const stepOrchestrationModel = (
         } else {
           next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
           next.delivery = 'attempting';
+          next.deliveryAttemptOwner = 'current';
           if (next.deliveryAttempts === 0) {
             next.chainDepth += 1;
           }
@@ -115,26 +119,35 @@ export const stepOrchestrationModel = (
     case 'complete_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'consumed';
+        next.deliveryAttemptOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'fail_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'consumed';
+        next.deliveryAttemptOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'interrupt_turn':
       if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
         next.delivery = 'pending';
+        next.deliveryAttemptOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'restart':
-      if (next.delivery === 'attempting') {
-        next.delivery = 'pending';
+      if (next.delivery === 'attempting' && next.deliveryAttemptOwner === 'current') {
+        next.deliveryAttemptOwner = 'previous';
       }
       next.activeTurn = 'none';
+      break;
+    case 'recover_orphans':
+      if (next.delivery === 'attempting' && next.deliveryAttemptOwner === 'previous') {
+        next.delivery = 'pending';
+        next.deliveryAttemptOwner = 'none';
+      }
       break;
     case 'archive':
       next.archived = true;
@@ -165,6 +178,12 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.activeTurn === 'delivery' && state.delivery !== 'attempting') {
     throw new Error('a Delivery continuation is active without a durable attempt claim');
   }
+  if ((state.delivery === 'attempting') !== (state.deliveryAttemptOwner !== 'none')) {
+    throw new Error('Delivery attempt state and its fenced owner disagree');
+  }
+  if (state.activeTurn === 'delivery' && state.deliveryAttemptOwner !== 'current') {
+    throw new Error('a Delivery turn is active under a non-current Worker boot');
+  }
   if (state.deliveryAttempts > 2) {
     throw new Error('a Delivery exceeded its bounded attempt count');
   }
@@ -187,6 +206,7 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'fail_turn',
     'interrupt_turn',
     'restart',
+    'recover_orphans',
     'archive',
     'restore',
     'delete_configuration',

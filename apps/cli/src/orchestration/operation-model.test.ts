@@ -75,6 +75,27 @@ describe('Operation delivery executable model', () => {
     });
   });
 
+  it('keeps a crashed attempt fenced until a replacement Worker recovers the old boot', () => {
+    const firstAttempt = trace('accept', 'materialize_success', 'finish', 'schedule');
+    const afterExit = stepOrchestrationModel(firstAttempt, 'restart');
+    expect(afterExit).toMatchObject({
+      delivery: 'attempting',
+      deliveryAttemptOwner: 'previous',
+      activeTurn: 'none',
+      deliveryAttempts: 1,
+    });
+    expect(stepOrchestrationModel(afterExit, 'schedule')).toEqual(afterExit);
+
+    const recovered = stepOrchestrationModel(afterExit, 'recover_orphans');
+    const secondAttempt = stepOrchestrationModel(recovered, 'schedule');
+    expect(secondAttempt).toMatchObject({
+      delivery: 'attempting',
+      deliveryAttemptOwner: 'current',
+      activeTurn: 'delivery',
+      deliveryAttempts: 2,
+    });
+  });
+
   it('keeps a failed materialization pending until its owned retry fires', () => {
     const failed = trace('accept', 'materialize_fail', 'finish');
     expect(failed).toMatchObject({
@@ -122,5 +143,11 @@ describe('Operation delivery executable model', () => {
         deliveryAttempts: 3,
       })
     ).toThrow(/bounded attempt count/);
+    expect(() =>
+      assertOrchestrationModelSafety({
+        ...initialOrchestrationModelState(),
+        deliveryAttemptOwner: 'current',
+      })
+    ).toThrow(/fenced owner/);
   });
 });
