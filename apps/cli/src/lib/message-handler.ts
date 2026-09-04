@@ -281,8 +281,11 @@ import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
   SessionTransientStore,
   type ACPUpdateTarget,
+  type BindTurnForPromptResult,
   type BufferedACPUpdate,
+  type TurnRef,
 } from '@/lib/session-transient-store';
+import { PromptActivityRecorder } from '@/session/prompt-activity-recorder';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
@@ -670,6 +673,7 @@ export type MessageDispatchContext = {
 };
 
 type ControlMessage = LocalSessionControlRequestValidated;
+
 type ConversationTurnGateContext = {
   dispatchSource?: SessionDispatchSource;
   sessionDoc: SessionDocument;
@@ -3037,13 +3041,15 @@ export class MessageHandler {
     );
     this.autoPromptRunner = new AutoPromptRunner({
       workspaceId: this.workspaceId,
+      // Auto-prompt turns are not deferred, so they own ACP routing from
+      // `beginTurn` and never bind; the runner only needs the id.
       beginConversationTurn: (sessionId, userTurnId) =>
-        this.beginConversationTurn(sessionId, userTurnId),
+        this.beginConversationTurn(sessionId, userTurnId).turnId,
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
         await this.createAssistantEntryForTurn(sessionId, sessionDoc, turnId, modelInfo),
-      finalizeACPState: async (sessionId) => await this.finalizeACPState(sessionId),
+      finalizeACPState: async (sessionId, turnId) => await this.finalizeACPState(sessionId, turnId),
       flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
     });
     this.turnPostProcessingService = new TurnPostProcessingService({
@@ -3072,13 +3078,15 @@ export class MessageHandler {
       endACPReplaySuppression: (sessionId) => this.endACPReplaySuppression(sessionId),
       beginConversationTurn: (sessionId, userTurnId, gateContext) =>
         this.beginConversationTurn(sessionId, userTurnId, gateContext),
-      activateConversationTurnForACPUpdates: (sessionId, turnId) =>
-        this.activateConversationTurnForACPUpdates(sessionId, turnId),
-      clearConversationTurn: (sessionId, turnId) =>
-        this.clearConversationTurnIfMatches(sessionId, turnId),
+      bindConversationTurnForPrompt: (sessionId, turnRef, recorder) =>
+        this.bindConversationTurnForPrompt(sessionId, turnRef, recorder),
+      observePromptActivityForTurn: (sessionId, turnId) =>
+        this.store.observePromptActivityForTurn(sessionId, turnId),
+      clearConversationTurn: (sessionId, turnRef) =>
+        this.clearConversationTurnIfMatches(sessionId, turnRef),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
-      clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
+      clearActiveTurnId: (sessionId, turnId, turnRef) =>
+        this.clearActiveTurnIdIfMatches(sessionId, turnId, turnRef),
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
@@ -3101,8 +3109,8 @@ export class MessageHandler {
           userTurnId
         ),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId) =>
-          await this.finalizeACPState(sessionId, turnId),
+        finalizeACPState: async (sessionId, turnId, expectedTurnRef) =>
+          await this.finalizeACPState(sessionId, turnId, expectedTurnRef),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -3112,6 +3120,8 @@ export class MessageHandler {
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId) =>
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
+        releaseWorkspaceWatch: (sessionId) =>
+          this.codeCollabV2Service.releaseWorkspaceWatchForOwner(sessionId),
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
         autoCommitAndPushForPR: async (ctx) =>
@@ -3662,6 +3672,7 @@ export class MessageHandler {
     });
 
     this.sessionManager.on('onWriteTextFile', (sessionId, event) => {
+      this.recordPromptSideEffect(sessionId);
       this.trackCodeCollabEvidenceWrite(
         sessionId,
         this.collectCodeCollabWriteTextFileEvidence(sessionId, event)
@@ -3718,11 +3729,36 @@ export class MessageHandler {
       this.handleImageGenerationEnd(sessionId, event);
     });
 
-    // Session error: flush ACP updates first, then set to idle (error is turn-level, recorded in history).
+    // INVARIANT: a process lifecycle event must never end a turn the
+    // `SessionExecutionService` still owns. Turn state, session presence, the
+    // idle status write, and the Code Collab workspace watch all belong to the
+    // turn owner; a listener that takes them anyway kills the routing target of
+    // a live turn (a resume fallback terminates the FAILED Session instance
+    // while the turn continues on a new one). All a listener may do while a turn
+    // is running is `drainACPBuffers` plus telling the execution service which
+    // exact instance closed, so the owning fiber can end its own turn.
     this.sessionManager.on('error', (event) => {
       void (async () => {
-        this.logger.error(`[${event.sessionId}] Session error event received:`, event);
+        this.logger.error(
+          `[${event.sessionId}] Session error event received: ${formatErrorMessage(event.error)}`
+        );
         const sessionId = event.sessionId;
+        const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+        this.executionService.onSessionInstanceClosed(sessionId, event.session, 'error');
+        if (!event.wasCurrent) {
+          this.logger.debug(`[${sessionId}] Ignoring error event from superseded session instance`);
+          return;
+        }
+        // Symmetric with exit/terminated: a late event for a GC-cleaned session
+        // must not rebuild its transient state.
+        if (!this.store.has(sessionId)) {
+          this.logger.debug(`[${sessionId}] Ignoring error event for GC-cleaned session`);
+          return;
+        }
+        if (turnWasActive) {
+          await this.drainACPBuffers(sessionId);
+          return;
+        }
         this.clearSessionActivePresence(sessionId);
         await this.finalizeACPState(sessionId);
         await this.flushSessionUsage(sessionId);
@@ -3732,13 +3768,22 @@ export class MessageHandler {
       })();
     });
 
-    // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
+        const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+        this.executionService.onSessionInstanceClosed(sessionId, exit.session, 'exit');
+        if (!exit.wasCurrent) {
+          this.logger.debug(`[${sessionId}] Ignoring exit event from superseded session instance`);
+          return;
+        }
         if (!this.store.has(sessionId)) {
           this.logger.debug(`[${sessionId}] Ignoring exit event for GC-cleaned session`);
+          return;
+        }
+        if (turnWasActive) {
+          await this.drainACPBuffers(sessionId);
           return;
         }
         this.clearSessionActivePresence(sessionId);
@@ -3750,17 +3795,36 @@ export class MessageHandler {
       })();
     });
 
-    // Session termination can race with exit/error; always flush ACP updates first.
-    // Skip if session was already cleaned by GC to avoid re-creating transient state.
+    // Session termination can race with exit/error, so everything below has to
+    // tolerate running twice (resource-limit violations emit `error` and then
+    // `terminated`).
     this.sessionManager.on('terminated', (event) => {
-      this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
+      const sessionId = event.sessionId;
+      const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
+      this.executionService.onSessionInstanceClosed(sessionId, event.session, 'terminated');
+      if (!event.wasCurrent) {
+        this.logger.debug(
+          `[${sessionId}] Ignoring terminated event from superseded session instance`
+        );
+        return;
+      }
+      if (!turnWasActive) {
+        // Releasing the watch cuts Code Collab off from the workspace. That is
+        // correct once nothing is running, but during a resume fallback this
+        // event names a dead instance while the turn keeps editing files through
+        // its replacement. The watch's own idle timer reclaims it either way.
+        this.codeCollabV2Service.releaseWorkspaceWatchForOwner(sessionId);
+      }
       void (async () => {
-        const sessionId = event.sessionId;
         if (!this.store.has(sessionId)) {
           this.logger.debug(`[${sessionId}] Ignoring terminated event for GC-cleaned session`);
           return;
         }
         try {
+          if (turnWasActive) {
+            await this.drainACPBuffers(sessionId);
+            return;
+          }
           this.clearSessionActivePresence(sessionId);
           await this.finalizeACPState(sessionId);
           await this.flushSessionUsage(sessionId);
@@ -4669,6 +4733,10 @@ export class MessageHandler {
     }
   }
 
+  private recordPromptSideEffect(sessionId: SessionId): void {
+    this.store.getBoundPromptActivityRecorder(sessionId)?.recordSideEffect();
+  }
+
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
     // Note: ACP notifications are internal agent events, NOT user activity.
     // We intentionally do NOT call touchSession() here to avoid keeping sessions
@@ -4702,6 +4770,7 @@ export class MessageHandler {
         }
       );
     }
+    this.store.getBoundPromptActivityRecorder(sessionId)?.recordRouted();
     this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
     this.scheduleFlushACPUpdates(sessionId);
   }
@@ -5781,18 +5850,50 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+  /**
+   * Write out what is already buffered, and nothing else.
+   *
+   * This is what a process lifecycle listener is allowed to do while the
+   * `SessionExecutionService` still owns a turn. It deliberately does NOT reuse
+   * `finalizeACPState`: that one snapshots the routing target across a long
+   * await chain, stamps `finished=true` on the assistant entry, and its `finally`
+   * unconditionally clears the turn — for a live turn that destroys the routing
+   * key its remaining output needs, which is exactly how a 505-second turn's
+   * 82 message chunks were dropped and then reported as `agent_no_output`.
+   *
+   * Must stay idempotent: a resource-limit violation fires `error` and then
+   * `terminated`, so this runs twice for one failure.
+   */
+  private async drainACPBuffers(sessionId: SessionId): Promise<void> {
+    try {
+      await this.flushACPUpdatesNow(sessionId);
+      // Also drains buffered context-window usage.
+      await this.flushSessionUsage(sessionId);
+    } catch (error) {
+      this.logger.error(
+        `[${sessionId}] Failed to drain ACP buffers for a session whose turn is still active: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
+  private async finalizeACPState(
+    sessionId: SessionId,
+    turnId?: string,
+    expectedTurnRef?: TurnRef
+  ): Promise<void> {
+    // Capture the identity token before the first await. A same-id redispatch can
+    // replace the turn while the history gate is opening.
+    const turnRef =
+      expectedTurnRef ??
+      (turnId ? this.store.getTurnRef(sessionId, turnId) : this.store.getCurrentTurnRef(sessionId));
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
     if (!turnId || this.store.getTurnId(sessionId) === turnId) {
       await this.awaitTurnHistoryGate(sessionId);
     }
-    // Capture timing data and turnId before clearing state
     const endedAt = Date.now();
     const state = this.store.get(sessionId);
-    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
-    const finalizedTarget = !turnId || currentTarget?.turnId === turnId ? currentTarget : undefined;
     const permissionWaitMs = state.permissionWaitMs || undefined;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
@@ -5805,12 +5906,32 @@ export class MessageHandler {
         await sessionDoc.setLastMessageAt();
       }
 
-      // Mark the owning assistant entry as finished and record timing.
+      // Mark the owning assistant entry as finished and record timing. The stamp
+      // is bound to `assistantEntryId + turnEpoch`: a redispatch reuses
+      // `assistant:<userTurnId>`, so a late finalizer must not close an entry a
+      // NEWER turn is streaming into. Checked here rather than before the awaits,
+      // because the takeover can happen during them.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      let stamped = true;
       await sessionDoc.updateHistory((history) => {
+        // Checked INSIDE the synchronous mutation callback on purpose: a takeover
+        // that lands between an earlier check and this write would slip through.
+        if (turnRef && !this.store.isAssistantEntryFinalizable(sessionId, turnRef)) {
+          stamped = false;
+          return history;
+        }
+        if (!turnRef && !turnId && this.store.getCurrentTurnRef(sessionId)) {
+          stamped = false;
+          return history;
+        }
+        const assistantEntryId = turnRef?.assistantEntryId ?? turnId;
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+          if (
+            entry &&
+            entry.role === 'assistant' &&
+            (!assistantEntryId || entry.id === assistantEntryId)
+          ) {
             entry.finished = true;
             entry.endedAt = endedAt;
             if (permissionWaitMs !== undefined) {
@@ -5821,17 +5942,25 @@ export class MessageHandler {
         }
         return history;
       });
-      await sessionDoc.waitUntilSynced();
+      if (stamped) {
+        await sessionDoc.waitUntilSynced();
+      } else {
+        this.logger.debug(
+          `[${sessionId}] Skipped finished stamp for ${turnRef?.assistantEntryId}: a newer turn owns it (epoch ${turnRef?.turnEpoch} superseded)`
+        );
+      }
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
     } finally {
-      if (finalizedTarget) {
-        this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
-      }
-      if (turnId) {
-        this.clearConversationTurnIfMatches(sessionId, turnId);
-      } else {
-        this.clearACPState(sessionId);
+      if (turnRef) {
+        // One synchronous compare-and-set: remember the late-update target and
+        // clear the turn, or do neither because this turn is no longer current.
+        this.store.finalizeIfCurrent(sessionId, turnRef);
+      } else if (!turnId) {
+        // Do not clear a turn that appeared while an idle teardown was awaiting.
+        if (!this.store.getCurrentTurnRef(sessionId)) {
+          this.clearACPState(sessionId);
+        }
       }
       // Updates buffered during the finalization tail survive the turn clear
       // (each carries its enqueue-time target); make sure something drains them.
@@ -5845,11 +5974,8 @@ export class MessageHandler {
     this.store.clearTurnState(sessionId);
   }
 
-  private clearConversationTurnIfMatches(sessionId: SessionId, turnId: string): void {
-    if (this.store.getTurnId(sessionId) !== turnId) {
-      return;
-    }
-    this.clearACPState(sessionId);
+  private clearConversationTurnIfMatches(sessionId: SessionId, turnRef: TurnRef): void {
+    this.store.clearTurnStateIfCurrent(sessionId, turnRef);
   }
 
   private beginACPReplaySuppression(sessionId: SessionId): void {
@@ -5865,7 +5991,17 @@ export class MessageHandler {
     }
   }
 
-  private clearActiveTurnIdIfMatches(sessionId: SessionId, turnId: string): void {
+  private clearActiveTurnIdIfMatches(
+    sessionId: SessionId,
+    turnId: string,
+    expectedTurnRef?: TurnRef
+  ): void {
+    if (expectedTurnRef) {
+      const current = this.store.getTurnRef(sessionId, turnId);
+      if (!current || current.turnEpoch !== expectedTurnRef.turnEpoch) {
+        return;
+      }
+    }
     this.store.markPromptReturned(sessionId, turnId);
   }
 
@@ -5908,20 +6044,26 @@ export class MessageHandler {
     return `assistant:${userTurnId}`;
   }
 
+  /**
+   * Returns the whole `TurnRef`, not just the id: the caller is the fiber that
+   * will bind this turn for its prompt, and `bindTurnForPrompt` is an
+   * authoritative write that needs the epoch to be sure it is writing to the turn
+   * it just created rather than to a redispatch that replaced it.
+   */
   private beginConversationTurn(
     sessionId: SessionId,
     userTurnId?: string,
     gateContext?: ConversationTurnGateContext
-  ): string {
+  ): TurnRef {
     const turnId = userTurnId ? this.getAssistantEntryIdForUserTurn(userTurnId) : uuidV4();
-    this.store.beginTurn(sessionId, {
+    const turnEpoch = this.store.beginTurn(sessionId, {
       turnId,
       assistantEntryId: turnId,
       ownsACPUpdates: !gateContext?.deferACPUpdateTarget,
       ...(userTurnId ? { userTurnId } : {}),
     });
     this.setTurnHistoryGate(sessionId, turnId, userTurnId, gateContext);
-    return turnId;
+    return { turnId, turnEpoch, assistantEntryId: turnId };
   }
 
   private async recordOwnerAccessAllowedSnapshot(): Promise<void> {
@@ -5947,8 +6089,18 @@ export class MessageHandler {
     );
   }
 
-  private activateConversationTurnForACPUpdates(sessionId: SessionId, turnId: string): void {
-    this.store.activateTurnACPUpdateTarget(sessionId, turnId);
+  private bindConversationTurnForPrompt(
+    sessionId: SessionId,
+    turnRef: TurnRef,
+    recorder?: PromptActivityRecorder
+  ): BindTurnForPromptResult {
+    const result = this.store.bindTurnForPrompt(sessionId, turnRef, recorder);
+    if (result !== 'bound') {
+      this.logger.error(
+        `[${sessionId}] Refusing to prompt turn ${turnRef.turnId} (epoch ${turnRef.turnEpoch}): ACP routing could not be bound (${result})`
+      );
+    }
+    return result;
   }
 
   /**
@@ -8433,6 +8585,8 @@ export class MessageHandler {
     request: RequestPermissionRequest,
     model?: ModelInfo
   ): Promise<RequestPermissionResponse> {
+    // Record on arrival: approval may already have caused work before recovery.
+    this.recordPromptSideEffect(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
       ? parseAskUserQuestionPermissionMeta(request._meta)
@@ -9869,34 +10023,12 @@ export class MessageHandler {
     return this.store.has(sessionId) && this.store.get(sessionId).acpUpdateBuffer.length > 0;
   }
 
-  /**
-   * Conservative guard for prompt replay: any buffered or already-flushed ACP
-   * update means the adapter may have acted on the user prompt, so execution
-   * recovery must stop and surface the failure instead of retrying.
-   */
-  private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
-    if (!this.store.has(sessionId)) {
-      return false;
-    }
-    const state = this.store.get(sessionId);
-    const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-    const hasFlushedOutput =
-      state.acpFlushCountInTurn > 0 && this.store.getTurnId(sessionId) === turnId;
-    return hasBufferedOutput || hasFlushedOutput;
-  }
-
-  /**
-   * Same observation as `hasPromptOutputForTurn`, but it distinguishes "this turn
-   * emitted nothing" from "we cannot tell". The two callers need opposite
-   * conservative answers on a missing session: prompt replay must refuse to
-   * retry, while the no-output guard must not accuse a turn it could not observe.
-   * `undefined` means unobservable — the transient state is gone.
-   */
+  /** `undefined` keeps the no-output guard open when the turn is unobservable. */
   observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
     if (!this.store.has(sessionId)) {
       return undefined;
     }
-    return this.hasPromptOutputForTurn(sessionId, turnId);
+    return this.store.hasVisiblePromptOutputForTurn(sessionId, turnId);
   }
 
   /**

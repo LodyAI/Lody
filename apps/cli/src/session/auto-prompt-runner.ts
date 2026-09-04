@@ -41,7 +41,7 @@ export type AutoPromptRunnerDeps = {
     turnId: string,
     modelInfo: ModelInfo | undefined
   ) => Promise<void>;
-  finalizeACPState: (sessionId: SessionId) => Promise<void>;
+  finalizeACPState: (sessionId: SessionId, turnId: string) => Promise<void>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
 };
 
@@ -97,7 +97,7 @@ export class AutoPromptRunner {
       }
     } finally {
       this.deps.clearActiveTurnId(sessionId, turnId);
-      await this.deps.finalizeACPState(sessionId);
+      await this.deps.finalizeACPState(sessionId, turnId);
       await this.deps.flushSessionUsage(sessionId);
     }
 

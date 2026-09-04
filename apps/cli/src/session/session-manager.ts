@@ -410,7 +410,27 @@ export type AgentStartConfig = {
   deferAcpSessionIdPersistence?: boolean;
 };
 
-export type SessionTerminatedEvent = {
+/**
+ * A `Session` INSTANCE is not the same thing as a `sessionId`. One Lody session
+ * is served by several instances over its life (idle restore, resume fallback
+ * after `loadSession` fails, the one stale-ACP prompt retry), and a failed
+ * `createAgent` terminates a brand new instance that never ran anything.
+ *
+ * Lifecycle events therefore carry the exact instance that produced them, so a
+ * consumer asking "did the agent MY turn is running on die?" compares instances
+ * instead of matching on the id and finalizing a live turn owned by a different
+ * instance.
+ */
+export type SessionInstanceEvent = {
+  session: ISession;
+  /** Whether this instance was still registered when it emitted the event. */
+  wasCurrent: boolean;
+};
+
+export type SessionManagerErrorEvent = SessionErrorEvent & SessionInstanceEvent;
+export type SessionManagerExitEvent = SessionExitEvent & SessionInstanceEvent;
+
+export type SessionTerminatedEvent = SessionInstanceEvent & {
   sessionId: SessionId;
   exitCode?: number;
   [key: string]: unknown;
@@ -419,8 +439,8 @@ export type SessionTerminatedEvent = {
 interface SessionManagerEvents {
   create: (sessionId: SessionId, exec: ISession) => void;
   output: (output: SessionOutputEvent) => void;
-  error: (error: SessionErrorEvent) => void;
-  exit: (exit: SessionExitEvent) => void;
+  error: (error: SessionManagerErrorEvent) => void;
+  exit: (exit: SessionManagerExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
   onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
   onUsageUpdate: (event: {
@@ -2246,21 +2266,39 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     });
 
     session.on('error', (event: SessionErrorEvent) => {
-      this.emit('error', event);
+      this.emit('error', {
+        ...event,
+        session,
+        wasCurrent: this.sessions.get(event.sessionId) === session,
+      });
     });
 
-    session.on('exit', (event: SessionExitEvent) => {
-      this.sessions.delete(event.sessionId);
+    // Only the instance currently registered under this id may remove itself.
+    // A restore fallback, a stale-ACP retry, or any resume replaces the map entry
+    // while the OLD instance is still being torn down; deleting on the id alone
+    // evicts the live replacement, after which `getSession` reports no session
+    // for a session that is running.
+    const forgetIfCurrent = (sessionId: SessionId): boolean => {
+      if (this.sessions.get(sessionId) !== session) {
+        return false;
+      }
+      this.sessions.delete(sessionId);
       void this.rebalanceSessionSandboxes();
-      this.emit('exit', event);
+      return true;
+    };
+
+    session.on('exit', (event: SessionExitEvent) => {
+      const wasCurrent = forgetIfCurrent(event.sessionId);
+      this.emit('exit', { ...event, session, wasCurrent });
     });
 
     session.on('terminated', (event: SessionExitEvent) => {
-      this.sessions.delete(event.sessionId);
-      void this.rebalanceSessionSandboxes();
+      const wasCurrent = forgetIfCurrent(event.sessionId);
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,
+        session,
+        wasCurrent,
       };
       this.emit('terminated', terminatedEvent);
     });

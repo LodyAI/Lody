@@ -52,13 +52,19 @@ const at = (seconds: number) => new Date(baseTime + seconds * 1000).toISOString(
 const userMessage = (
   id: string,
   text: string,
-  options?: { read?: boolean; status?: string; seconds?: number }
+  options?: {
+    read?: boolean;
+    status?: SessionHistoryParsed['status'];
+    sendStatus?: SessionHistoryParsed['sendStatus'];
+    seconds?: number;
+  }
 ): SessionHistoryParsed => ({
   id,
   role: 'user',
   timestamp: at(options?.seconds ?? 0),
   read: options?.read ?? false,
-  status: options?.status as SessionHistoryParsed['status'],
+  status: options?.status,
+  sendStatus: options?.sendStatus,
   userId: 'user-1',
   items: [{ type: 'text', text }],
 });
@@ -129,6 +135,36 @@ export const PendingApplication: Story = {
       }),
     ]),
     renderMessageRow,
+  },
+  render: (args) => (
+    <div className="h-[300px] w-full max-w-2xl mx-auto">
+      <SessionChatStreamView {...args} />
+    </div>
+  ),
+};
+
+/**
+ * The steer was submitted, but neither application nor refusal could be
+ * proven. The destructive label opens a warning before a manual resend.
+ */
+export const DeliveryUnknown: Story = {
+  args: {
+    sessionId,
+    items: buildItems([
+      userMessage('msg-delivery-unknown', 'Focus on the error handling first.', {
+        read: true,
+        status: 'failed',
+        sendStatus: 'delivery_unknown',
+      }),
+    ]),
+    renderMessageRow: ({ message, sessionId: sid }) => (
+      <MessageRowView
+        message={message}
+        sessionId={sid}
+        user={message.userId ? user : undefined}
+        onResendUndelivered={async () => true}
+      />
+    ),
   },
   render: (args) => (
     <div className="h-[300px] w-full max-w-2xl mx-auto">

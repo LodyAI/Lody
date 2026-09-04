@@ -111,7 +111,11 @@ delegation proofs or a shared-machine gate without a new product and security de
   quiescent. Use live execution/presence for current-work signals; goal activity may
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
-  `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
+  `TurnRuntimeState` is registered.
+  Runtime and store ownership may differ during auto-prompts. Carry the full `TurnRef`
+  through bind/finalize/cleanup so a same-id newer epoch cannot be changed. Bind refusal
+  is terminal; an applied steer is cancelled and never falls back to its predecessor.
+  User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
   the same history entry.
   INVARIANT: a steer (guide) the agent never accepted must not stay parked in
@@ -127,6 +131,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   qualify: after submission the provider may already have committed the steer, and
   re-sending would duplicate it. An entry that is already active, terminal, or past
   `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
+  An ambiguous post-submission failure marks only the guide as failed with
+  `sendStatus: delivery_unknown`; it never advances dispatch pointers. If its
+  renderer-authored row is not visible yet, defer both marker and notice through
+  the document mirror. Only an explicit user resend may create another turn.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
   sends, edit-and-resend, refused-steer requeue, accepted steer ownership
   transfer, and message-queue promotion) may publish it, and every one of them
@@ -155,6 +163,11 @@ delegation proofs or a shared-machine gate without a new product and security de
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for
   turn A can overwrite the activation for turn B that arrived during an awaited
   history mutation, leaving B pending and permanently unwatched.
+  Turn-scoped finalizers pass `turnId` and `TurnRef`; no-turn-id teardown captures the
+  current ref before awaiting. Lifecycle listeners never finalize an owned turn and only
+  the registered Session instance may perform session-wide cleanup. `Session.terminate`
+  is idempotent: only the first forced request escalates a graceful run, and concurrent
+  forced callers share one resource teardown.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
@@ -173,7 +186,9 @@ delegation proofs or a shared-machine gate without a new product and security de
   `acp_internal_error`. Continue-session prompt recovery may terminate and restore
   the ACP session once before retrying the same prompt, but only when no ACP output
   has buffered/flushed for that assistant turn; after visible output, never replay
-  the user prompt automatically.
+  the user prompt automatically. `prompt-activity-recorder.ts` permits replay only for
+  `none`; it credits handoff-window permission/file writes to both adjacent runs.
+  `AgentSessionClosedError` is never replayed.
   DeepSeek Harness persistence compression mismatches are a distinct
   `acp_session_storage_incompatible` failure, not a generic internal error; keep
   matching narrow to the backend's artifact/compression diagnostic.
@@ -188,7 +203,8 @@ delegation proofs or a shared-machine gate without a new product and security de
   and skips the completion notification. It still runs the full finalization
   (diff stats, PR detection, auto-commit) and still ADVANCES the dispatch pointer:
   the prompt was delivered, so re-dispatching would spin the same silent failure.
-  A missing `hasPromptOutputForTurn` dep fails open — never accuse a turn on a guess.
+  A missing visible-output observer fails open. Snapshot activity beside visible output
+  before finalization; auto-prompts must not change the completed turn's diagnosis.
   Code Collab v1 turn markers and history fileDiff capture were removed. v2 may
   persist exact per-turn path/add/del caches derived from the CLI-local ACP evidence
   store after ACP finalization; diff content still comes only from the CLI store.

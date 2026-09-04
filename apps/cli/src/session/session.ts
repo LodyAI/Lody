@@ -107,6 +107,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly logger: Logger;
   private fixedWorkdir?: string;
   private status: SessionStatus['status'] = 'created';
+  /** Memoizes `terminate()` so one instance emits `terminated` exactly once. */
+  private terminationPromise: Promise<void> | null = null;
+  private forceTerminationRequested = false;
+  private forceTerminationPromise: Promise<void> | null = null;
+  private readonly forceTerminationWaiters = new Set<() => void>();
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
@@ -237,7 +242,44 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
+  /**
+   * Idempotent. Termination is reached from several directions at once — a
+   * resource-limit failure terminates while cancel is terminating, cleanup runs
+   * over every session, an error path terminates after the turn already did — and
+   * running the body twice emits a second `terminated` event for one instance.
+   * Concurrent and later callers await the first run instead.
+   *
+   * A FAILED teardown releases the memo so a later attempt can retry; a
+   * successful one keeps it, because `terminated` is a terminal state.
+   */
   async terminate(force: boolean = false): Promise<void> {
+    const shouldEscalate = force && !this.forceTerminationRequested;
+    if (shouldEscalate) {
+      this.forceTerminationRequested = true;
+      for (const resolve of this.forceTerminationWaiters) resolve();
+      this.forceTerminationWaiters.clear();
+    }
+    const inFlight = this.terminationPromise;
+    if (inFlight) {
+      this.logger.debug(`[${this.sessionId}] Terminate already in progress; awaiting it`);
+      if (shouldEscalate) {
+        await this.forceTerminateResources();
+      }
+      return await inFlight;
+    }
+    const run = this.terminateOnce(force);
+    this.terminationPromise = run;
+    try {
+      await run;
+    } catch (error) {
+      this.terminationPromise = null;
+      this.forceTerminationPromise = null;
+      this.forceTerminationRequested = false;
+      throw error;
+    }
+  }
+
+  private async terminateOnce(force: boolean): Promise<void> {
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
 
@@ -254,35 +296,29 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     }
 
     if (!force && this.acpSessionId && this.agentClient?.isCreated()) {
-      try {
-        await this.agentClient.closeSession(this.acpSessionId);
-      } catch (error) {
+      const forceRequest = this.waitForForceTermination();
+      const closeResult = this.agentClient.closeSession(this.acpSessionId).then(
+        () => ({ type: 'closed' as const }),
+        (error: unknown) => ({ type: 'error' as const, error })
+      );
+      const result = await Promise.race([
+        closeResult,
+        forceRequest.promise.then(() => ({ type: 'forced' as const })),
+      ]);
+      forceRequest.dispose();
+      if (result.type === 'error') {
         this.logger.debug(
           `[${this.sessionId}] Failed to close ACP session during terminate: ${formatErrorMessage(
-            error
+            result.error
           )}`
         );
       }
     }
 
-    // Capture references before any async work, since onExit handlers may null them out
-    const activeProcess = this.activeProcess;
-    const agentProcess = this.agentProcess;
-
-    // Kill both processes and wait for them to actually exit before proceeding.
-    // This prevents OS-level process leaks where SIGTERM is sent but the process
-    // outlives this function (and all tracking of it).
-    await Promise.all([
-      this.killAndWait(activeProcess, force),
-      this.killAndWait(agentProcess, force),
-    ]);
-
-    try {
-      await this.sandbox.terminate(force);
-    } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
-      );
+    if (this.forceTerminationPromise) {
+      await this.forceTerminationPromise;
+    } else {
+      await this.terminateResources(force || this.forceTerminationRequested);
     }
 
     try {
@@ -293,6 +329,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
     }
 
+    const exitCode = this.activeProcess?.child.exitCode ?? 0;
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
@@ -303,9 +340,45 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
-      exitCode: activeProcess?.child.exitCode ?? 0,
+      exitCode,
     };
     this.emit('terminated', event);
+  }
+
+  private async forceTerminateResources(): Promise<void> {
+    this.forceTerminationPromise ??= this.terminateResources(true);
+    await this.forceTerminationPromise;
+  }
+
+  private waitForForceTermination(): { promise: Promise<void>; dispose: () => void } {
+    if (this.forceTerminationRequested) {
+      return { promise: Promise.resolve(), dispose: () => undefined };
+    }
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    this.forceTerminationWaiters.add(resolve);
+    return {
+      promise,
+      dispose: () => this.forceTerminationWaiters.delete(resolve),
+    };
+  }
+
+  private async terminateResources(force: boolean): Promise<void> {
+    const activeProcess = this.activeProcess;
+    const agentProcess = this.agentProcess;
+    await Promise.all([
+      this.killAndWait(activeProcess, force),
+      this.killAndWait(agentProcess, force),
+    ]);
+    try {
+      await this.sandbox.terminate(force);
+    } catch (error) {
+      this.logger.debug(
+        `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   /**

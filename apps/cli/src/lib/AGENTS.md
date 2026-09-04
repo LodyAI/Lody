@@ -282,7 +282,15 @@ control-plane path is DEPRECATED; do not add functionality to it.
   (`session-transient-store.ts`): agent sessions stay alive and emit events long after
   `stopReason` (cron, `ScheduleWakeup`, deferred work), and those must still reach the
   Loro doc. The target is cleared only when a new turn owns ACP updates (normally
-  `beginTurn()`, but visible dispatch defers until prompt start) or replay suppression.
+  `beginTurn()`, but visible dispatch defers until prompt start via
+  `bindTurnForPrompt`) or replay suppression.
+  `bindTurnForPrompt` is an authoritative `TurnRef` write after replay suppression and
+  before prompt submission; either refusal stops the prompt (or cancels an already-applied
+  steer) without routing output back to its predecessor.
+  Lifecycle events carry the emitting Session instance. Superseded-instance events do no
+  session-wide cleanup; current-instance events only drain buffers while a turn owner exists.
+  Finalizers capture `TurnRef` before their first await, stamp its exact assistant entry,
+  and clear through epoch-aware CAS. Turn cleanup preserves late updates and activity evidence.
   This is what lets the web derive the "session will continue" panel from the Cron/ScheduleWakeup
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in
   `SessionMeta`, not a new history item); see `@lody/shared`

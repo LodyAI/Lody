@@ -192,6 +192,33 @@ describe('findNextDispatchableUserTurn steer intent', () => {
       })
     ).toBeNull();
   });
+
+  it('drains consecutive refused steers in history order when latest points at the second', () => {
+    const first = {
+      ...guide,
+      id: 'guide-first',
+      status: 'pending' as const,
+      timestamp: '2026-08-03T00:00:01.000Z',
+    };
+    const second = {
+      ...guide,
+      id: 'guide-second',
+      status: 'pending' as const,
+      timestamp: '2026-08-03T00:00:02.000Z',
+    };
+    const bothQueued = {
+      ...baseMeta,
+      latestUserMsgId: second.id,
+    };
+
+    expect(findNextDispatchableUserTurn([first, second], bothQueued)).toEqual(first);
+    expect(
+      findNextDispatchableUserTurn([{ ...first, status: 'handled' as const }, second], {
+        ...bothQueued,
+        lastHandledUserMsgId: first.id,
+      })
+    ).toEqual(second);
+  });
 });
 
 describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {

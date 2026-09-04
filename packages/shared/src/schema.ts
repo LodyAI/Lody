@@ -420,7 +420,7 @@ export const sessionPlanEntrySchema = schema.LoroMap({
   priority: schema.String<SessionPlanEntry['priority']>(),
 });
 
-export type SessionHistorySendStatus = 'timeout';
+export type SessionHistorySendStatus = 'timeout' | 'delivery_unknown';
 export type SessionHistoryStatus =
   | 'pending'
   | 'pending_apply'
@@ -568,8 +568,8 @@ export const sessionHistorySchema = schema.LoroMap({
   // For assistant turns: set to true when agent completes response
   // For user turns: always true (user messages are complete when created)
   finished: schema.Boolean({ required: false }),
-  // Send status for user messages - only set when message delivery failed (e.g., timeout)
-  // Cleared when message is successfully retried
+  // Send status for user messages. `delivery_unknown` means the agent may have
+  // applied a steer, so only a person may decide whether to resend it.
   sendStatus: schema.String<SessionHistorySendStatus>({ required: false }),
 });
 

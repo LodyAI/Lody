@@ -171,7 +171,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       };
 
@@ -220,7 +224,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       };
 
@@ -267,7 +275,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         finalizeACPState(sessionId: SessionId): Promise<void>;
       };
@@ -316,7 +328,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         finalizeACPState(sessionId: SessionId): Promise<void>;
       };
@@ -368,7 +384,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       };
 
@@ -451,7 +471,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
       };
@@ -502,7 +526,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       };
       host.beginConversationTurn(sessionId);
@@ -563,7 +591,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
       };
@@ -631,7 +663,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
         store: { get(sessionId: SessionId): { pendingUnread: boolean } };
@@ -692,12 +728,16 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
         finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
       };
-      const oldTurnId = host.beginConversationTurn(sessionId);
+      const { turnId: oldTurnId } = host.beginConversationTurn(sessionId);
       await host.finalizeACPState(sessionId, oldTurnId);
       const persistDiffsSpy = vi
         .spyOn(
@@ -716,7 +756,7 @@ describe('MessageHandler ACP batching', () => {
           content: [{ type: 'diff', path: '/tmp/a.txt', oldText: 'old', newText: 'new' }],
         },
       });
-      const newTurnId = host.beginConversationTurn(sessionId);
+      const { turnId: newTurnId } = host.beginConversationTurn(sessionId);
       expect(newTurnId).not.toBe(oldTurnId);
 
       await host.flushACPUpdatesNow(sessionId);
@@ -735,7 +775,11 @@ describe('MessageHandler ACP batching', () => {
     const sessionId = 's-1' as SessionId;
     const { repo, handler, sessionManager } = await createHandlerHarness([sessionId]);
     const internals = handler as unknown as {
-      beginConversationTurn(sessionId: SessionId): string;
+      beginConversationTurn(sessionId: SessionId): {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      };
       flushCodeCollabEvidenceWrites(sessionId: SessionId): Promise<void>;
       codeCollabV2TurnDiffs: Map<string, unknown[]>;
       resolveCodeCollabV2Workspace(sessionId: SessionId): Promise<unknown>;
@@ -751,7 +795,7 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       expect(onWriteTextFile).toBeTypeOf('function');
-      const turnId = internals.beginConversationTurn(sessionId);
+      const { turnId } = internals.beginConversationTurn(sessionId);
       const resolveWorkspaceSpy = vi.spyOn(internals, 'resolveCodeCollabV2Workspace');
 
       onWriteTextFile?.(sessionId, {
@@ -829,7 +873,11 @@ describe('MessageHandler ACP batching', () => {
     const sessionId = 's-1' as SessionId;
     const { repo, handler } = await createHandlerHarness([sessionId]);
     const host = handler as unknown as {
-      beginConversationTurn(sessionId: SessionId): string;
+      beginConversationTurn(sessionId: SessionId): {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      };
       enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
       finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
@@ -842,7 +890,7 @@ describe('MessageHandler ACP batching', () => {
     };
 
     try {
-      const turnId = host.beginConversationTurn(sessionId);
+      const { turnId } = host.beginConversationTurn(sessionId);
       await host.finalizeACPState(sessionId, turnId);
       vi.spyOn(host, 'collectCodeCollabStandardDiffs').mockResolvedValue();
       const persistSpy = vi
@@ -917,7 +965,11 @@ describe('MessageHandler ACP batching', () => {
     const sessionId = 's-1' as SessionId;
     const { repo, handler, sessionManager } = await createHandlerHarness([sessionId]);
     const host = handler as unknown as {
-      beginConversationTurn(sessionId: SessionId): string;
+      beginConversationTurn(sessionId: SessionId): {
+        turnId: string;
+        turnEpoch: number;
+        assistantEntryId: string;
+      };
       enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
       codeCollabV2DiffStore: { close(): void };
@@ -925,7 +977,7 @@ describe('MessageHandler ACP batching', () => {
     };
 
     try {
-      const turnId = host.beginConversationTurn(sessionId);
+      const { turnId } = host.beginConversationTurn(sessionId);
       await host.finalizeACPState(sessionId, turnId);
       const resolveWorkspaceSpy = vi
         .spyOn(host, 'resolveCodeCollabV2Workspace')
@@ -1061,7 +1113,11 @@ describe('MessageHandler ACP batching', () => {
 
     try {
       const host = handler as unknown as {
-        beginConversationTurn(sessionId: SessionId): string;
+        beginConversationTurn(sessionId: SessionId): {
+          turnId: string;
+          turnEpoch: number;
+          assistantEntryId: string;
+        };
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
       };

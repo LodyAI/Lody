@@ -9,6 +9,7 @@ import {
   buildSessionLaunchConfig,
   normalizeSessionPreparationRunConfigForDedup,
   type AgentConfigId,
+  type ACPSessionId,
   type LocalProjectId,
   type MachineId,
   type SessionId,
@@ -19,7 +20,7 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
@@ -1214,5 +1215,113 @@ describe('SessionManager preparation resource accounting', () => {
 
     expect(durableApplyLimits).toHaveBeenCalledTimes(1);
     expect(preparationApplyLimits).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionManager lifecycle events are instance-scoped', () => {
+  const buildManager = () =>
+    new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+  const buildSession = (sessionId: SessionId) =>
+    new Session(
+      createSessionConfig({ sessionId }),
+      createLogger(),
+      mkdtempSync(path.join(os.tmpdir(), 'lody-session-instance-')),
+      createNoopSessionSandbox()
+    );
+
+  it.each(['terminated', 'exit'] as const)(
+    'does not let a superseded instance evict its replacement on %s',
+    (eventName) => {
+      const sessionId = `session-instance-identity-${eventName}` as SessionId;
+      const manager = buildManager();
+      const internals = manager as unknown as {
+        registerSessionEvents(session: Session): void;
+        sessions: Map<SessionId, Session>;
+      };
+
+      const oldInstance = buildSession(sessionId);
+      const newInstance = buildSession(sessionId);
+      let wasCurrent: boolean | undefined;
+      manager.once(eventName, (event) => {
+        wasCurrent = event.wasCurrent;
+      });
+      internals.registerSessionEvents(oldInstance);
+      internals.registerSessionEvents(newInstance);
+      internals.sessions.set(sessionId, newInstance);
+
+      oldInstance.emit(eventName, { sessionId, exitCode: eventName === 'exit' ? 1 : 0 });
+
+      expect(manager.getSession(sessionId)).toBe(newInstance);
+      expect(wasCurrent).toBe(false);
+    }
+  );
+
+  it('terminates once even when several paths request it', async () => {
+    // Resource-limit failure terminates while cancel is terminating, cleanup
+    // runs over every session, an error path terminates after the turn already
+    // did. Two runs of the body emit `terminated` twice for one instance, and
+    // the second emit used to delete a live map entry.
+    const sessionId = 'session-terminate-idempotent' as SessionId;
+    const session = buildSession(sessionId);
+    const emitted: number[] = [];
+    session.on('terminated', () => emitted.push(1));
+
+    await Promise.all([session.terminate(true), session.terminate(true)]);
+    await session.terminate(true);
+
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('escalates an in-flight graceful termination when force is requested', async () => {
+    const sessionId = 'session-terminate-escalation' as SessionId;
+    const sandbox = createNoopSessionSandbox();
+    let signalForced!: () => void;
+    const forced = new Promise<void>((resolve) => {
+      signalForced = resolve;
+    });
+    const terminateSandbox = vi.spyOn(sandbox, 'terminate').mockImplementation(async (force) => {
+      if (force) signalForced();
+    });
+    const session = new Session(
+      createSessionConfig({ sessionId }),
+      createLogger(),
+      mkdtempSync(path.join(os.tmpdir(), 'lody-session-instance-')),
+      sandbox
+    );
+    let signalCloseStarted!: () => void;
+    let releaseClose!: () => void;
+    const closeStarted = new Promise<void>((resolve) => {
+      signalCloseStarted = resolve;
+    });
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    session.acpSessionId = 'acp-1' as ACPSessionId;
+    session.agentClient = {
+      isCreated: () => true,
+      closeSession: async () => {
+        signalCloseStarted();
+        await closeGate;
+      },
+    } as unknown as NonNullable<Session['agentClient']>;
+
+    const graceful = session.terminate(false);
+    await closeStarted;
+    const force = session.terminate(true);
+    await forced;
+    expect(terminateSandbox).toHaveBeenCalledWith(true);
+    await Promise.all([graceful, force]);
+    releaseClose();
   });
 });

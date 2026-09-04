@@ -14,8 +14,8 @@
  * - `clearTurnState(id)` — after a conversation turn completes
  * - `deleteSession(id)` — when the session is evicted (idle shutdown or GC)
  *
- * It is impossible to "forget" a field because adding a new field to `SessionState`
- * automatically includes it in both cleanup paths.
+ * Cleanup is hand-written. Check both paths when adding state; buffers, late
+ * routing, and prompt activity deliberately survive `clearTurnState`.
  *
  * ## Turn State Model
  *
@@ -46,6 +46,10 @@ import {
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import type { TurnHistoryGate } from '@/session/turn-history-gate';
+import type {
+  PromptActivityObservation,
+  PromptActivityRecorder,
+} from '@/session/prompt-activity-recorder';
 
 type AssistantTurnACPUpdateTargetSource = 'active_turn' | 'finalized_turn';
 
@@ -60,6 +64,23 @@ export type AssistantTurnACPUpdateTarget = {
 };
 
 export type ACPUpdateTarget = AssistantTurnACPUpdateTarget;
+
+/**
+ * Identity of one turn. Carried by finalizers as a compare-and-set token so a
+ * commit can be refused when the turn it names is no longer the current one.
+ */
+export type TurnRef = {
+  turnId: string;
+  turnEpoch: number;
+  assistantEntryId: string;
+};
+
+/**
+ * `bound` is the only outcome that permits a prompt. Both refusals are terminal
+ * for the turn: there is no correct way to send a prompt whose output cannot be
+ * routed anywhere.
+ */
+export type BindTurnForPromptResult = 'bound' | 'session_state_missing' | 'turn_superseded';
 
 export type BufferedACPUpdate = {
   notification: AcpSessionNotification;
@@ -110,6 +131,8 @@ export interface SessionState {
   turnHistoryGate: TurnHistoryGate | null;
   nextTurnEpoch: number;
   lateACPUpdateTarget: AssistantTurnACPUpdateTarget | undefined;
+  /** Replay evidence retained until the next bind or session deletion. */
+  promptActivity: { ref: TurnRef; recorder: PromptActivityRecorder } | undefined;
   suppressAcpReplayUntilTurnStart: boolean;
   suppressedAcpReplayCount: number;
 
@@ -164,6 +187,7 @@ function createSessionState(): SessionState {
     turnHistoryGate: null,
     nextTurnEpoch: 1,
     lateACPUpdateTarget: undefined,
+    promptActivity: undefined,
     suppressAcpReplayUntilTurnStart: false,
     suppressedAcpReplayCount: 0,
     acpUpdateBuffer: [],
@@ -249,15 +273,87 @@ export class SessionTransientStore {
     return turnEpoch;
   }
 
-  activateTurnACPUpdateTarget(sessionId: SessionId, turnId: string): void {
+  /**
+   * Bind ACP update routing to the turn that is about to prompt.
+   *
+   * This is an AUTHORITATIVE write by the fiber holding the turn lease, not a
+   * conditional claim. The caller just came out of `beginTurn` and holds the
+   * whole `TurnRef`, so there is nothing to negotiate — which is the point. The
+   * predecessor (`activateTurnACPUpdateTarget`) returned void and silently
+   * no-opped whenever the turn had been cleared underneath it, and that silence
+   * is how a resume fallback prompted for 505 seconds into a routing target that
+   * did not exist.
+   *
+   * Two outcomes are refusals, and BOTH must stop the prompt:
+   *
+   * - `session_state_missing` — the session was deleted or GC'd. Deliberately
+   *   does not go through `get()`: recreating state here revives a dead session
+   *   and hands a live prompt to a target nothing will ever read.
+   * - `turn_superseded` — state exists but a different turn owns it. The
+   *   per-session execution mutex should make this unreachable, so it means the
+   *   lease was violated; overwriting would clobber the live turn's routing.
+   *
+   * INVARIANT: bind must happen AFTER `acpReplaySuppression.release` and BEFORE
+   * the prompt is sent. Earlier than the release and `loadSession` replay lands
+   * in the new turn's assistant entry; later than the prompt and the turn's own
+   * output has nowhere to go. The old conditional claim absorbed an early bind
+   * as a silent no-op; an authoritative write does not, so ordering is now load
+   * bearing and is pinned by regression tests.
+   */
+  bindTurnForPrompt(
+    sessionId: SessionId,
+    ref: TurnRef,
+    recorder?: PromptActivityRecorder
+  ): BindTurnForPromptResult {
     const state = this.sessions.get(sessionId);
-    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
-      return;
+    if (!state) {
+      return 'session_state_missing';
+    }
+    if (
+      state.turn.phase === 'idle' ||
+      state.turn.turnId !== ref.turnId ||
+      state.turn.turnEpoch !== ref.turnEpoch
+    ) {
+      return 'turn_superseded';
     }
     if (!state.turn.ownsACPUpdates) {
       state.turn = { ...state.turn, ownsACPUpdates: true };
     }
     state.lateACPUpdateTarget = undefined;
+    if (recorder) {
+      state.promptActivity = { ref, recorder };
+    }
+    return 'bound';
+  }
+
+  /** `unknown` means the turn cannot be observed and replay must fail closed. */
+  observePromptActivityForTurn(sessionId: SessionId, turnId: string): PromptActivityObservation {
+    const activity = this.sessions.get(sessionId)?.promptActivity;
+    if (!activity || activity.ref.turnId !== turnId) {
+      return 'unknown';
+    }
+    return activity.recorder.observe();
+  }
+
+  getBoundPromptActivityRecorder(sessionId: SessionId): PromptActivityRecorder | undefined {
+    return this.sessions.get(sessionId)?.promptActivity?.recorder;
+  }
+
+  /** Visible transcript output, distinct from side-effect evidence. */
+  hasVisiblePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state) {
+      return false;
+    }
+    if (state.promptActivity?.ref.turnId === turnId) {
+      if (state.promptActivity.recorder.observe() === 'persisted_output') {
+        return true;
+      }
+    }
+    if (state.acpUpdateBuffer.some((item) => item.target.turnId === turnId)) {
+      return true;
+    }
+    return state.acpFlushCountInTurn > 0 && this.getTurnId(sessionId) === turnId;
   }
 
   /**
@@ -282,6 +378,112 @@ export class SessionTransientStore {
 
   getTurnPhase(sessionId: SessionId): TurnPhase['phase'] {
     return this.sessions.get(sessionId)?.turn.phase ?? 'idle';
+  }
+
+  /**
+   * Identity of the turn currently in flight, for use as a compare-and-set token.
+   * Returns undefined unless `turnId` names the current turn.
+   *
+   * This is the ONLY thing a finalizer may carry across its awaits. It is an
+   * EXPECTED value handed back to `finalizeIfCurrent`, never a routing decision:
+   * the target that actually gets remembered is read at commit time, inside the
+   * CAS, from live state.
+   */
+  getTurnRef(sessionId: SessionId, turnId: string): TurnRef | undefined {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
+      return undefined;
+    }
+    return {
+      turnId: state.turn.turnId,
+      turnEpoch: state.turn.turnEpoch,
+      assistantEntryId: state.turn.assistantEntryId,
+    };
+  }
+
+  /**
+   * Identity of whatever turn is current, for a finalizer that has no turn id of
+   * its own (teardown paths: archive, delete, child cleanup, shutdown drain).
+   *
+   * Those paths must still commit through the CAS rather than clearing blindly,
+   * or the turn's routing target is lost and its late updates are dropped. Note
+   * that a store turn can exist with no registered execution runtime — an
+   * auto-prompt turn runs inside the visible turn's runtime under its own store
+   * turn id — so "no active turn runtime" is not "no turn to finalize".
+   */
+  getCurrentTurnRef(sessionId: SessionId): TurnRef | undefined {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle') {
+      return undefined;
+    }
+    return {
+      turnId: state.turn.turnId,
+      turnEpoch: state.turn.turnEpoch,
+      assistantEntryId: state.turn.assistantEntryId,
+    };
+  }
+
+  /**
+   * True unless a DIFFERENT turn currently owns this assistant entry.
+   *
+   * A redispatch reuses `assistant:<userTurnId>`, so a late finalizer for turn
+   * epoch N can otherwise stamp `finished=true` on the entry that epoch N+1 is
+   * still streaming into — the web renderer then folds a live turn into a
+   * "Worked for …" summary. An entry owned by nobody is finalizable: that is the
+   * ordinary path where the turn already released its state.
+   *
+   * Do not rely on `writeAssistantEntryForTurn`'s reopen branch to undo a wrong
+   * stamp. It only runs at genuine turn (re)start via `openAssistantEntry`, so
+   * it covers the restore fallback and nothing else.
+   */
+  isAssistantEntryFinalizable(sessionId: SessionId, ref: TurnRef): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.turn.phase === 'idle') {
+      return true;
+    }
+    if (state.turn.assistantEntryId !== ref.assistantEntryId) {
+      return true;
+    }
+    return state.turn.turnEpoch === ref.turnEpoch;
+  }
+
+  /**
+   * Compare-and-set finalization: if `ref` still names the current turn, remember
+   * its routing target for late updates and clear turn state, atomically.
+   *
+   * Lookup and commit are one synchronous operation on purpose. The previous
+   * shape read the routing target before a long await chain and committed that
+   * stale value in a `finally`, so a turn that claimed ACP routing during the
+   * await was finalized against `undefined` and every subsequent update was
+   * dropped for having no target. There is no way to express that bug through
+   * this API: callers hold an identity token, not a target.
+   *
+   * Returns whether the CAS matched.
+   */
+  finalizeIfCurrent(sessionId: SessionId, ref: TurnRef): boolean {
+    const state = this.sessions.get(sessionId);
+    if (
+      !state ||
+      state.turn.phase === 'idle' ||
+      state.turn.turnId !== ref.turnId ||
+      state.turn.turnEpoch !== ref.turnEpoch
+    ) {
+      return false;
+    }
+    if (state.turn.ownsACPUpdates) {
+      // Read at commit time, from live state — never from a caller's snapshot.
+      state.lateACPUpdateTarget = {
+        kind: 'assistant_entry',
+        assistantEntryId: state.turn.assistantEntryId,
+        turnId: state.turn.turnId,
+        turnEpoch: state.turn.turnEpoch,
+        source: 'finalized_turn',
+        finalizedAtMs: getServerNow(),
+        ...(state.turn.userTurnId ? { userTurnId: state.turn.userTurnId } : {}),
+      };
+    }
+    this.clearTurnState(sessionId);
+    return true;
   }
 
   /**
@@ -448,6 +650,15 @@ export class SessionTransientStore {
     state.imageGenerationActiveCallIds.clear();
     state.permissionWaitMs = 0;
     state.pendingUnread = false;
+  }
+
+  clearTurnStateIfCurrent(sessionId: SessionId, ref: TurnRef): boolean {
+    const current = this.getTurnRef(sessionId, ref.turnId);
+    if (!current || current.turnEpoch !== ref.turnEpoch) {
+      return false;
+    }
+    this.clearTurnState(sessionId);
+    return true;
   }
 
   /**

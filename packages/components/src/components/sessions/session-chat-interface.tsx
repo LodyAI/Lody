@@ -152,6 +152,7 @@ import SessionChatStream, {
   type GoalCommand,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type UserTurnResendReason,
 } from '../ai-gui';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -2884,6 +2885,7 @@ export const SessionChatInterface = memo(
       if (
         !userMessage ||
         userMessage.status === 'pending_apply' ||
+        userMessage.sendStatus === 'delivery_unknown' ||
         (userMessage.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind ===
           'steer'
       ) {
@@ -3988,12 +3990,15 @@ export const SessionChatInterface = memo(
         ),
     });
 
-    // Resend a user turn the missing-history recovery negatively acknowledged:
-    // the row's "Not delivered" label opens a confirmation dialog that calls
-    // this with the turn's exact content. It rides the ordinary send path as a
-    // NEW message — the old turn is never revived.
+    // Explicitly resend a failed delivery as a NEW message. A provably
+    // undelivered turn is superseded; an uncertain steer remains failed, but
+    // loses its one-click resend affordance after the replacement is accepted.
     const handleResendUndelivered = useCallback(
-      async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+      async (
+        userTurnId: string,
+        inputBlocks: SessionInputBlock[],
+        reason: UserTurnResendReason
+      ): Promise<boolean> => {
         // This is a new Turn with the old content, not a replay of the old run:
         // freeze the currently committed composer Role beside the current run
         // config. Copying only the original Role would pair it with unrelated
@@ -4011,11 +4016,18 @@ export const SessionChatInterface = memo(
           // resent content). 'canceled' is the truthful terminal state and also
           // hides the row's not-delivered label independent of the marker.
           try {
-            await updateHistoryEntry(userTurnId, (entry) => ({
-              ...entry,
-              status: 'canceled',
-              read: true,
-            }));
+            await updateHistoryEntry(userTurnId, (entry) =>
+              reason === 'delivery-unknown'
+                ? {
+                    ...entry,
+                    sendStatus: undefined,
+                  }
+                : {
+                    ...entry,
+                    status: 'canceled',
+                    read: true,
+                  }
+            );
           } catch (error) {
             console.warn('Failed to supersede the undelivered user turn', {
               userTurnId,

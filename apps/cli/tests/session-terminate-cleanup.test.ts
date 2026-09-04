@@ -149,4 +149,22 @@ describe('Session terminate cleanup', () => {
     // @ts-expect-error - exercising private process handle wiring
     expect(session.agentProcess).toBeNull();
   });
+
+  it('shares resource teardown between concurrent forced termination calls', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const terminateProcess = vi.fn(() => blocked);
+    const session = createSession();
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = createProcessHandle(terminateProcess);
+
+    const first = session.terminate(true);
+    const second = session.terminate(true);
+
+    expect(terminateProcess).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+  });
 });

@@ -105,7 +105,36 @@ export const isAcpSessionStorageIncompatibleError = (error: unknown): boolean =>
   );
 };
 
+export type AgentSessionCloseCause = 'error' | 'exit' | 'terminated';
+
+/**
+ * The exact `Session` instance a live prompt was running on was closed by
+ * something outside the owning turn (resource-limit failure, `exit`, an explicit
+ * `terminate`). The agent process is gone, so the JSON-RPC prompt promise may
+ * never settle — the turn owner fails with this instead of waiting forever.
+ *
+ * It classifies as `agent_disconnected`, but unlike a stale-connection rejection
+ * it must NEVER be auto-recovered: the prompt had already been handed to a live
+ * agent, and Lody cannot see every side effect that agent may have produced
+ * (approved permissions, `fs/write_text_file`), so replaying it can repeat work.
+ */
+export class AgentSessionClosedError extends Error {
+  /** Named `closeCause` rather than `cause`: `Error.cause` is a different contract. */
+  readonly closeCause: AgentSessionCloseCause;
+
+  constructor(sessionId: string, closeCause: AgentSessionCloseCause) {
+    super(
+      `ACP session instance for ${sessionId} closed (${closeCause}) while its prompt was in flight`
+    );
+    this.name = 'AgentSessionClosedError';
+    this.closeCause = closeCause;
+  }
+}
+
 export const isAgentDisconnectedError = (error: unknown): boolean => {
+  if (error instanceof AgentSessionClosedError) {
+    return true;
+  }
   const errorMessage = getACPDiagnosticText(error).toLowerCase();
   return (
     errorMessage.includes('connection is disposed') ||
@@ -201,4 +230,7 @@ export const shouldRecoverStaleACPConnectionPrompt = (args: {
 }): boolean =>
   !args.alreadyAttempted &&
   !args.hasPromptOutput &&
+  // A prompt the agent accepted before its process was closed is not a stale
+  // connection: replaying it can repeat side effects Lody never observed.
+  !(args.error instanceof AgentSessionClosedError) &&
   (isAgentDisconnectedError(args.error) || isAcpSessionNotFoundError(args.error));

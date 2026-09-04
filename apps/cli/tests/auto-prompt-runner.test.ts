@@ -50,7 +50,9 @@ describe('AutoPromptRunner', () => {
 
     expect(prompt).toHaveBeenCalledWith('acp-1', [{ type: 'text', text: 'commit' }]);
     expect(clearActiveTurnId).toHaveBeenCalledWith('session-1', 'auto-turn-1');
-    expect(finalizeACPState).toHaveBeenCalledWith('session-1');
+    // Named turn, not a bare session: a no-turnId finalize closes whichever
+    // assistant entry is last and clears turn state unconditionally.
+    expect(finalizeACPState).toHaveBeenCalledWith('session-1', 'auto-turn-1');
     expect(flushSessionUsage).toHaveBeenCalledWith('session-1');
   });
 
