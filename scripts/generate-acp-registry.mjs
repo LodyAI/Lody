@@ -9,12 +9,10 @@ const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
   'claude-acp',
   'claude-p',
   'codex-acp',
-  'factory-droid',
   'grok-build',
 ]);
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org/';
 const INTERACTIVE_CLAUDE_ACP_VERSION = '0.1.5';
-const FACTORY_DROID_ACP_VERSION = '0.211.0';
 const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
   id: 'claude-p',
   name: 'Interactive Claude',
@@ -41,21 +39,12 @@ const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
     },
   },
 };
-const FACTORY_DROID_REGISTRY_AGENT = {
-  id: 'factory-droid',
-  name: 'Factory Droid',
-  version: FACTORY_DROID_ACP_VERSION,
-  description: 'Factory Droid - AI coding agent powered by Factory AI',
-  icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/factory-droid.svg',
-  distribution: {
-    npx: {
-      package: `droid@${FACTORY_DROID_ACP_VERSION}`,
-      args: ['exec', '--output-format', 'acp'],
-      env: {
-        DROID_DISABLE_AUTO_UPDATE: 'true',
-        FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
-      },
-    },
+// Keep Factory Droid's version, package, and metadata sourced from the registry,
+// but avoid the daemon wrapper that breaks MCP forwarding to the child CLI.
+const REGISTRY_AGENT_ARGUMENT_REPLACEMENTS = {
+  'factory-droid': {
+    from: 'acp-daemon',
+    to: 'acp',
   },
 };
 const LOCAL_REGISTRY_AGENTS = {
@@ -208,6 +197,20 @@ function normalizeDistribution(value) {
     : null;
 }
 
+function replaceRegistryAgentArguments(id, distribution) {
+  const replacement = REGISTRY_AGENT_ARGUMENT_REPLACEMENTS[id];
+  const args = distribution.npx?.args;
+  if (!replacement || !args) return distribution;
+
+  return {
+    ...distribution,
+    npx: {
+      ...distribution.npx,
+      args: args.map((arg) => (arg === replacement.from ? replacement.to : arg)),
+    },
+  };
+}
+
 function normalizeRegistryAgent(agent) {
   if (!isRecord(agent)) return null;
   const id = typeof agent.id === 'string' ? agent.id.trim() : '';
@@ -235,7 +238,7 @@ function normalizeRegistryAgent(agent) {
     version,
     description: typeof agent.description === 'string' ? agent.description : undefined,
     icon: typeof agent.icon === 'string' ? agent.icon : undefined,
-    distribution,
+    distribution: replaceRegistryAgentArguments(id, distribution),
   };
 }
 
@@ -336,11 +339,10 @@ import type { RegistryAcpAgent } from '../ai';
 
 export const ACP_REGISTRY_SOURCE_URL = '${REGISTRY_URL}';
 export const ACP_REGISTRY_GENERATED_AT = '${generatedAt}';
-export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ['claude-acp', 'claude-p', 'codex-acp', 'factory-droid', 'grok-build'] as const;
+export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ['claude-acp', 'claude-p', 'codex-acp', 'grok-build'] as const;
 
 export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = ${toTsObjectLiteral([
     INTERACTIVE_CLAUDE_REGISTRY_AGENT,
-    FACTORY_DROID_REGISTRY_AGENT,
   ])};
 
 const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = ${toTsObjectLiteral(normalized)};

@@ -337,31 +337,26 @@ describe('resolveBuiltinACPSetting', () => {
     });
   });
 
-  it('uses the pinned direct ACP launch for Factory Droid', () => {
+  it('uses the direct ACP launch from the Factory Droid registry entry', () => {
     const agent = getRegistryAgent('factory-droid');
+    const npx = agent.distribution.npx;
+    if (!npx) {
+      throw new Error('Expected Factory Droid to have an npx distribution');
+    }
 
-    expect(agent.version).toBe('0.211.0');
-    expect(agent.distribution.npx).toEqual({
-      package: 'droid@0.211.0',
-      args: ['exec', '--output-format', 'acp'],
-      env: {
-        DROID_DISABLE_AUTO_UPDATE: 'true',
-        FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
-      },
-    });
+    expect(npx.package).toBe(`droid@${agent.version}`);
+    expect(npx.args).toEqual(expect.arrayContaining(['exec', '--output-format', 'acp']));
+    expect(npx.args).not.toContain('acp-daemon');
     expect(resolveACPSetting({ cliType: 'registry', agentType: 'factory-droid' })).toEqual({
-      status: { agent: 'Factory Droid@0.211.0', command: 'npx' },
+      status: { agent: `Factory Droid@${agent.version}`, command: 'npx' },
       exec: {
         command: 'npx',
-        args: ['--prefer-offline', '-y', 'droid@0.211.0', 'exec', '--output-format', 'acp'],
-        env: {
-          DROID_DISABLE_AUTO_UPDATE: 'true',
-          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
-        },
+        args: ['--prefer-offline', '-y', npx.package, ...(npx.args ?? [])],
+        env: npx.env,
       },
     });
     expect(getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'factory-droid' })).toBe(
-      'factory-droid@0.211.0'
+      `factory-droid@${agent.version}`
     );
   });
 
