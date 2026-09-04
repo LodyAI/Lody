@@ -337,6 +337,34 @@ describe('resolveBuiltinACPSetting', () => {
     });
   });
 
+  it('uses the pinned direct ACP launch for Factory Droid', () => {
+    const agent = getRegistryAgent('factory-droid');
+
+    expect(agent.version).toBe('0.211.0');
+    expect(agent.distribution.npx).toEqual({
+      package: 'droid@0.211.0',
+      args: ['exec', '--output-format', 'acp'],
+      env: {
+        DROID_DISABLE_AUTO_UPDATE: 'true',
+        FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
+      },
+    });
+    expect(resolveACPSetting({ cliType: 'registry', agentType: 'factory-droid' })).toEqual({
+      status: { agent: 'Factory Droid@0.211.0', command: 'npx' },
+      exec: {
+        command: 'npx',
+        args: ['--prefer-offline', '-y', 'droid@0.211.0', 'exec', '--output-format', 'acp'],
+        env: {
+          DROID_DISABLE_AUTO_UPDATE: 'true',
+          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
+        },
+      },
+    });
+    expect(getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'factory-droid' })).toBe(
+      'factory-droid@0.211.0'
+    );
+  });
+
   it('uses the hardcoded Interactive Claude registry provider with exact platform npx packages', () => {
     const agent = getRegistryAgent('claude-p');
     const npx = agent.distribution.npx;

@@ -7,7 +7,7 @@ import type { RegistryAcpAgent } from '../ai';
 
 export const ACP_REGISTRY_SOURCE_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
 export const ACP_REGISTRY_GENERATED_AT = '2026-08-31T14:29:21.079Z';
-export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ['claude-acp', 'claude-p', 'codex-acp', 'grok-build'] as const;
+export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ['claude-acp', 'claude-p', 'codex-acp', 'factory-droid', 'grok-build'] as const;
 
 export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
   {
@@ -32,6 +32,27 @@ export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
             arm64: 'acp-extension-claude-pty-win32-arm64@0.1.5',
             x64: 'acp-extension-claude-pty-win32-x64@0.1.5'
           }
+        }
+      }
+    }
+  },
+  {
+    id: 'factory-droid',
+    name: 'Factory Droid',
+    version: '0.211.0',
+    description: 'Factory Droid - AI coding agent powered by Factory AI',
+    icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/factory-droid.svg',
+    distribution: {
+      npx: {
+        package: 'droid@0.211.0',
+        args: [
+          'exec',
+          '--output-format',
+          'acp'
+        ],
+        env: {
+          DROID_DISABLE_AUTO_UPDATE: 'true',
+          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false'
         }
       }
     }
@@ -412,27 +433,6 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
         args: [
           '--acp'
         ]
-      }
-    }
-  },
-  {
-    id: 'factory-droid',
-    name: 'Factory Droid',
-    version: '0.208.2',
-    description: 'Factory Droid - AI coding agent powered by Factory AI',
-    icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/factory-droid.svg',
-    distribution: {
-      npx: {
-        package: 'droid@0.208.2',
-        args: [
-          'exec',
-          '--output-format',
-          'acp-daemon'
-        ],
-        env: {
-          DROID_DISABLE_AUTO_UPDATE: 'true',
-          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false'
-        }
       }
     }
   },
