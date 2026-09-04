@@ -30,10 +30,7 @@ void describe('scripted ACP fixture', () => {
     });
     children.add(child);
     const updates: acp.SessionNotification[] = [];
-    let resolveHeldPromptStarted!: () => void;
-    const heldPromptStarted = new Promise<void>((resolveStarted) => {
-      resolveHeldPromptStarted = resolveStarted;
-    });
+    let resolveHeldPromptStarted: (() => void) | undefined;
     const client = acp
       .client({ name: 'scripted-fixture-test' })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
@@ -43,7 +40,7 @@ void describe('scripted ACP fixture', () => {
           params.update.content.type === 'text' &&
           params.update.content.text === 'Synthetic response started.'
         ) {
-          resolveHeldPromptStarted();
+          resolveHeldPromptStarted?.();
         }
       })
       .connect(
@@ -86,11 +83,15 @@ void describe('scripted ACP fixture', () => {
     });
     assert.equal(title.stopReason, 'end_turn');
 
+    const heldPromptStarted = new Promise<void>((resolveStarted) => {
+      resolveHeldPromptStarted = resolveStarted;
+    });
     const held = client.agent.request(acp.methods.agent.session.prompt, {
       sessionId: session.sessionId,
       prompt: [{ type: 'text', text: '[SCOUT:HOLD]' }],
     });
     await heldPromptStarted;
+    resolveHeldPromptStarted = undefined;
     await client.agent.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId });
     assert.equal((await held).stopReason, 'cancelled');
 
