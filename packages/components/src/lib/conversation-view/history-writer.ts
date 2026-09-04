@@ -111,6 +111,10 @@ const newContainer = (kind: ContainerKind): Container => {
       return new LoroMovableList();
     case 'Text':
       return new LoroText();
+    default: {
+      const unreachable: never = kind;
+      throw new Error(`Unknown container kind: ${String(unreachable)}`);
+    }
   }
 };
 
