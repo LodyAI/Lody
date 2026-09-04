@@ -57,6 +57,9 @@ const LOCAL_PROJECT_SKILL_DIR_MAX_CHILDREN = 2_000;
 const HARD_LOCAL_PROJECT_READ_MAX_BYTES = 5 * 1024 * 1024;
 const GIT_COMMAND_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS = 5_000;
+// ripgrep walks multithreaded and is the primary lister, so it gets a wider
+// budget than git: falling through costs a whole second enumeration.
+const LOCAL_PROJECT_RIPGREP_TIMEOUT_MS = 10_000;
 const LOCAL_PROJECT_WALK_YIELD_EVERY_ENTRIES = 1_000;
 const execFileAsync = promisify(execFile);
 const LOCAL_REPO_ID_RE = /^local---[0-9a-f]{12}$/;
@@ -375,6 +378,105 @@ async function buildRegisteredProjectPathIndex(
   return index;
 }
 
+/**
+ * `@vscode/ripgrep` publishes its binary as a per-platform optionalDependency and
+ * THROWS from `require.resolve` when this platform's package is absent — an
+ * `--no-optional` install, or an architecture it does not publish. That is a
+ * supported degradation, not an error, so the failure is cached like a success
+ * and the caller falls through to git.
+ */
+let ripgrepPathPromise: Promise<string | null> | null = null;
+
+function resolveRipgrepPath(): Promise<string | null> {
+  ripgrepPathPromise ??= import('@vscode/ripgrep')
+    .then((mod) => {
+      const resolved = (mod as { rgPath?: unknown }).rgPath;
+      if (typeof resolved !== 'string' || !resolved) return null;
+      // A staged/packaged copy can lose the binary without losing the module.
+      return fs.existsSync(resolved) ? resolved : null;
+    })
+    .catch(() => null);
+  return ripgrepPathPromise;
+}
+
+/** Exported for tests: the exact argument list, so a flag cannot drift silently. */
+export const RIPGREP_LIST_FILES_ARGS = [
+  '--files',
+  // Dotfiles are real project files (`.env`, `.github/...`), and the CLI's own
+  // walk lists them too. `.git` is NOT excluded by this flag — measured: with
+  // `--hidden` alone ripgrep emits every object and hook under `.git` — so the
+  // glob below is load-bearing, not defensive. It matches at any depth, which
+  // also covers a nested repo under `vendor/`.
+  '--hidden',
+  '-g',
+  '!.git',
+  // THE reason to use ripgrep here: without it ripgrep applies .gitignore only
+  // inside a git repository, which is precisely the case the hand-rolled walk
+  // existed to cover. With it, one ignore semantics serves git and non-git roots
+  // alike, at every level, and ignored directories are pruned rather than walked.
+  '--no-require-git',
+  // Never let a user's RIPGREP_CONFIG_PATH change what the `@` menu can see.
+  '--no-config',
+  '--null',
+] as const;
+
+async function listLocalProjectFilesFromRipgrep(
+  rootPath: string,
+  maxFiles: number
+): Promise<LocalProjectFileListResult | null> {
+  const ripgrepPath = await resolveRipgrepPath();
+  if (!ripgrepPath) return null;
+
+  let stdout = '';
+  try {
+    const result = await execFileAsync(ripgrepPath, [...RIPGREP_LIST_FILES_ARGS], {
+      cwd: rootPath,
+      encoding: 'utf8',
+      maxBuffer: GIT_COMMAND_MAX_BUFFER_BYTES,
+      timeout: LOCAL_PROJECT_RIPGREP_TIMEOUT_MS,
+      killSignal: 'SIGTERM',
+      env: { ...process.env, RIPGREP_CONFIG_PATH: '' },
+    });
+    stdout = String(result.stdout ?? '');
+  } catch (error) {
+    // ripgrep exits 1 for "no matches", which for `--files` means an empty
+    // directory — a valid answer. Only 2 (and a killed process, whose code is
+    // null) is a real failure worth falling through for. Measured: an empty
+    // directory really does exit 1, so treating any non-zero code as failure
+    // would silently hand every empty project to the slower fallback.
+    const failure = error as { code?: number | string; stdout?: string } | undefined;
+    if (failure?.code !== 1) return null;
+    stdout = String(failure.stdout ?? '');
+  }
+
+  return collectListedFilePaths(stdout.split('\0'), maxFiles);
+}
+
+/** Shared by the ripgrep and git listers: both emit NUL-separated paths. */
+function collectListedFilePaths(
+  entries: readonly string[],
+  maxFiles: number
+): LocalProjectFileListResult {
+  const deduped = new Set<string>();
+  let truncated = false;
+
+  for (const entry of entries) {
+    const normalized = normalizeProjectRelativePath(entry);
+    if (!normalized) continue;
+    if (deduped.has(normalized)) continue;
+    if (deduped.size >= maxFiles) {
+      truncated = true;
+      break;
+    }
+    deduped.add(normalized);
+  }
+
+  return {
+    paths: Array.from(deduped).sort((a, b) => a.localeCompare(b)),
+    truncated,
+  };
+}
+
 async function listLocalProjectFilesFromGit(
   rootPath: string,
   maxFiles: number
@@ -395,24 +497,7 @@ async function listLocalProjectFilesFromGit(
   ]);
   if (listed.status !== 0) return null;
 
-  const deduped = new Set<string>();
-  let truncated = false;
-
-  for (const entry of listed.stdout.split('\0')) {
-    const normalized = normalizeProjectRelativePath(entry);
-    if (!normalized) continue;
-    if (deduped.has(normalized)) continue;
-    if (deduped.size >= maxFiles) {
-      truncated = true;
-      break;
-    }
-    deduped.add(normalized);
-  }
-
-  return {
-    paths: Array.from(deduped).sort((a, b) => a.localeCompare(b)),
-    truncated,
-  };
+  return collectListedFilePaths(listed.stdout.split('\0'), maxFiles);
 }
 
 function escapeForRegex(value: string): string {
@@ -560,7 +645,12 @@ function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boo
   return createGitignoreMatcher(parseGitignoreRules(content, ''));
 }
 
-async function listLocalProjectFilesByWalk(
+/**
+ * Exported for tests only. ripgrep now answers the default path, so a test that
+ * goes through `listProjectFiles` no longer reaches this fallback — and the
+ * fallback still has to be correct on a machine with no ripgrep binary.
+ */
+export async function listLocalProjectFilesByWalk(
   rootPath: string,
   maxFiles: number
 ): Promise<LocalProjectFileListResult> {
@@ -650,7 +740,13 @@ async function listFilesAtRootPath(
   maxFiles: number
 ): Promise<LocalProjectFileListResult> {
   const normalizedRootPath = normalizeRootPath(rootPath);
+  // ripgrep first: it is the only one of the three that applies .gitignore the
+  // same way for a git repo and a plain directory. git is the fallback for a
+  // machine whose platform has no ripgrep binary, and the walk for one with
+  // neither — kept because "no lister at all" is a worse answer than an
+  // approximate one.
   return (
+    (await listLocalProjectFilesFromRipgrep(normalizedRootPath, maxFiles)) ??
     (await listLocalProjectFilesFromGit(normalizedRootPath, maxFiles)) ??
     (await listLocalProjectFilesByWalk(normalizedRootPath, maxFiles))
   );

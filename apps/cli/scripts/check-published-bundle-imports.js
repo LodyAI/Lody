@@ -29,6 +29,9 @@ const requiredPublishedRuntimeDependencies = [
   // Kept external from the bundle (resolves its own entry/worker.js relative to its
   // package dir); the diff line-count worker pool requires it at runtime.
   'tinypool',
+  // Kept external because it `require.resolve`s its binary from a sibling
+  // per-platform package; the local-project file listing spawns that binary.
+  '@vscode/ripgrep',
 ];
 // @lydell/node-pty pins its per-platform binary packages to its own exact version, and
 // the Electron staging in apps/electron/scripts/cli-native-deps.mjs mirrors that package

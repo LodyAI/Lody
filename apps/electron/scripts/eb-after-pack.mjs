@@ -6,6 +6,7 @@ import {
   stagedNodePtyBindingPath,
   stagedNodePtySpawnHelperPath,
   stagedNodeModulesDir,
+  stagedRipgrepBinaryPath,
   stagedSqliteBindingPath
 } from './cli-native-deps.mjs'
 
@@ -101,6 +102,21 @@ export default async function afterPack(context) {
     if (!fs.existsSync(packedSpawnHelperPath)) {
       throw new Error(
         `[embedded-cli] node-pty spawn-helper missing after copy: ${packedSpawnHelperPath}`
+      )
+    }
+  }
+  const packedRipgrepPath = packedFromStaged(stagedRipgrepBinaryPath(nativeTarget))
+  if (!fs.existsSync(packedRipgrepPath)) {
+    throw new Error(`[embedded-cli] ripgrep binary missing after copy: ${packedRipgrepPath}`)
+  }
+  if (platform !== 'win32') {
+    // fs.cpSync preserves the mode, but the staged copy is the only thing that
+    // ever set it. A non-executable rg surfaces as an empty `@` menu at runtime,
+    // long after packaging, so assert rather than hope.
+    const mode = fs.statSync(packedRipgrepPath).mode
+    if (!(mode & 0o111)) {
+      throw new Error(
+        `[embedded-cli] ripgrep binary is not executable after copy: ${packedRipgrepPath}`
       )
     }
   }

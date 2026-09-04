@@ -3,7 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { LocalProjectControlService } from '../src/lib/local-project-control-service';
+import {
+  LocalProjectControlService,
+  listLocalProjectFilesByWalk,
+} from '../src/lib/local-project-control-service';
 import type { LocalProjectId } from '@lody/shared';
 import type { Logger } from '../src/utils/logger';
 
@@ -133,15 +136,14 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
   });
 });
 
-describe('LocalProjectControlService.listProjectFiles without a git repository', () => {
+describe('listLocalProjectFilesByWalk', () => {
   let rootPath: string;
-  let service: LocalProjectControlService;
 
   beforeEach(async () => {
-    // An empty `.git` directory is not a repository, so `git ls-files` fails and
-    // the service falls back to its own walk — the path under test here.
+    // Called DIRECTLY: ripgrep answers the default path now, so going through
+    // `listProjectFiles` would no longer reach this fallback at all. It still
+    // has to be correct for a machine that has no ripgrep binary.
     rootPath = await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-walk-'));
-    service = new LocalProjectControlService(noopLogger);
     await mkdir(path.join(rootPath, '.git'));
   });
 
@@ -149,7 +151,8 @@ describe('LocalProjectControlService.listProjectFiles without a git repository',
     await rm(rootPath, { recursive: true, force: true });
   });
 
-  const listPaths = async (): Promise<string[]> => (await service.listProjectFiles(rootPath)).paths;
+  const listPaths = async (): Promise<string[]> =>
+    (await listLocalProjectFilesByWalk(rootPath, 80_000)).paths;
 
   it('applies a nested .gitignore to its own subtree only', async () => {
     await mkdir(path.join(rootPath, 'app', 'build'), { recursive: true });
@@ -204,5 +207,79 @@ describe('LocalProjectControlService.listProjectFiles without a git repository',
     await writeFile(path.join(rootPath, 'a.ts'), '\n');
 
     expect(await listPaths()).toEqual(['a.ts']);
+  });
+});
+
+describe('LocalProjectControlService.listProjectFiles via ripgrep', () => {
+  let rootPath: string;
+  let service: LocalProjectControlService;
+
+  beforeEach(async () => {
+    rootPath = await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-rg-'));
+    service = new LocalProjectControlService(noopLogger);
+  });
+
+  afterEach(async () => {
+    await rm(rootPath, { recursive: true, force: true });
+  });
+
+  const listPaths = async (): Promise<string[]> => (await service.listProjectFiles(rootPath)).paths;
+
+  it('answers an empty directory instead of falling through', async () => {
+    // ripgrep exits 1 for "no matches", which for `--files` is an empty
+    // directory. Measured, not assumed: treating that as failure would hand
+    // every empty project to the slower fallback.
+    const result = await service.listProjectFiles(rootPath);
+
+    expect(result).toEqual({ paths: [], truncated: false });
+  });
+
+  it('never lists .git, at the root or nested', async () => {
+    await mkdir(path.join(rootPath, '.git'), { recursive: true });
+    await mkdir(path.join(rootPath, 'vendor', 'inner', '.git'), { recursive: true });
+    await writeFile(path.join(rootPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(path.join(rootPath, 'vendor', 'inner', '.git', 'HEAD'), 'ref: x\n');
+    await writeFile(path.join(rootPath, 'vendor', 'inner', 'kept.ts'), '\n');
+
+    expect(await listPaths()).toEqual(['vendor/inner/kept.ts']);
+  });
+
+  it('applies a root and a nested .gitignore in a directory that is not a repository', async () => {
+    // This is what `--no-require-git` buys: without it ripgrep applies
+    // .gitignore only inside a git repository.
+    await mkdir(path.join(rootPath, 'app', 'build'), { recursive: true });
+    await mkdir(path.join(rootPath, 'lib'), { recursive: true });
+    await writeFile(path.join(rootPath, '.gitignore'), '*.log\n');
+    await writeFile(path.join(rootPath, 'app', '.gitignore'), 'build/\n');
+    await writeFile(path.join(rootPath, 'app', 'main.ts'), '\n');
+    await writeFile(path.join(rootPath, 'app', 'build', 'out.js'), '\n');
+    await writeFile(path.join(rootPath, 'lib', 'keep.ts'), '\n');
+    await writeFile(path.join(rootPath, 'root.log'), '\n');
+
+    expect(await listPaths()).toEqual([
+      '.gitignore',
+      'app/.gitignore',
+      'app/main.ts',
+      'lib/keep.ts',
+    ]);
+  });
+
+  it('lists dotfiles, which are ordinary project files', async () => {
+    await mkdir(path.join(rootPath, '.github'), { recursive: true });
+    await writeFile(path.join(rootPath, '.env'), '\n');
+    await writeFile(path.join(rootPath, '.github', 'ci.yml'), '\n');
+
+    expect(await listPaths()).toEqual(['.env', '.github/ci.yml']);
+  });
+
+  it('reports truncation at maxFiles', async () => {
+    for (const name of ['a.ts', 'b.ts', 'c.ts']) {
+      await writeFile(path.join(rootPath, name), '\n');
+    }
+
+    const result = await service.listProjectFiles(rootPath, { maxFiles: 2 });
+
+    expect(result.paths).toHaveLength(2);
+    expect(result.truncated).toBe(true);
   });
 });
