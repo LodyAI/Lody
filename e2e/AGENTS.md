@@ -29,12 +29,13 @@ also applies.
   its runtime, fixture, ordered actions, checkpoints, and cleanup. Keep blocked
   gaps in the registry with an actionable `blockedReason`; selection skips them
   instead of blocking the rest of the queue.
-- Automated authoring claims at most one backlog row per run. The author has no
-  repository write credential and cannot edit product code, harness policy, the
-  registry, or generated coverage. A separate no-secret macOS lane promotes the
-  claimed row in its candidate bundle, proves one assertion ablation fails,
-  restores exact file hashes, runs three fresh focused rounds plus the full suite,
-  and only then permits a trusted publisher to open a Draft PR. It never merges.
+- Local authoring claims at most one backlog row per run. Codex works in an
+  ephemeral detached worktree and cannot edit product code, harness policy, the
+  registry, or generated coverage. It packages a candidate without executing
+  generated code. After explicit human review, a second ephemeral worktree
+  promotes the row, proves one assertion ablation fails, restores exact file
+  hashes, and runs three fresh focused rounds plus the full suite. Only a passed
+  candidate is applied to the maintainer checkout. Neither command publishes it.
 - Every scenario has `@lody`, `@essence`, exactly one of `@P0` or `@P1`,
   exactly one `@runtime-*` owner, and one stable `@LODY-AREA-NNN` id.
 - `@P0` is a short merge-blocking journey. `@P1` is a deeper scheduled or

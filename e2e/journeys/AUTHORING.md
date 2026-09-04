@@ -1,8 +1,9 @@
 # Restricted journey authoring
 
-This contract governs an automated author that proposes one deterministic
-desktop journey at a time. The author prepares a reviewable candidate; it does
-not own the active coverage matrix, the harness, CI, or product code.
+This contract governs a maintainer-started local author that proposes one
+deterministic desktop journey at a time. The author prepares a reviewable
+candidate; it does not own the active coverage matrix, the harness, CI, product
+code, or publication.
 
 ## One-run contract
 
@@ -69,12 +70,28 @@ an existing assertion.
   executables. Reuse only reviewed harness and fixture APIs already in the suite.
 - Do not use real sleeps, wall-clock races, live model calls, external downloads,
   generated CSS selectors, or machine-load thresholds.
-- Do not push, merge, approve, label, close, or open an Issue. A separate trusted
-  workflow may publish the validated patch as a reviewable pull request.
+- Do not commit, push, merge, approve, label, close, open an Issue, or open a PR.
+  The maintainer reviews and publishes a validated patch through the ordinary
+  contribution flow.
 
-The automated author runs in a Linux workspace with no repository write token.
-It may use read-only inspection commands, but it does not execute generated test
-code. A separate no-secret macOS job owns these verification commands:
+The coordinator starts only from a clean maintainer checkout. It verifies an
+existing Codex login without reading or printing the credential, then creates
+an ephemeral detached Git worktree at the exact base commit. Codex runs there
+with an allowlisted process environment, ignored user configuration, an
+ephemeral session, and the `workspace-write` sandbox. GitHub never receives the
+maintainer's ChatGPT login, API key, or Codex home. Only a patch the maintainer
+has reviewed enters GitHub through a normal PR.
+
+The author may inspect repository files and edit only the allowlist above. It
+does not execute generated test code. Trusted coordinator code packages the
+candidate, checks its task digest, changed paths, file sizes, hashes, scenario
+count, stable id, and counterfactual declaration, then stops. It writes a patch
+and a readable candidate tree for the maintainer to inspect.
+
+Validation requires the maintainer's explicit `--approve-reviewed`
+acknowledgement. The validator creates a second detached worktree with a
+temporary home and a scrubbed process environment. It applies and promotes the
+candidate there before it owns these commands:
 
 ```bash
 pnpm e2e:build
@@ -88,7 +105,10 @@ git status --short
 
 The stable-id placeholder in the targeted command is replaced with the single
 candidate id. No pipes, redirects, command substitution, background processes,
-extra Cucumber flags, or shell operators may be appended.
+extra Cucumber flags, or shell operators may be appended. A failed validation
+removes the detached worktree and leaves the maintainer checkout unchanged. A
+passed validation freezes the exact checksummed patch and applies it only when
+the maintainer checkout is still clean and at the task's base commit.
 
 ## Required implementation shape
 
@@ -124,7 +144,7 @@ that independently as `product-defect`.
 
 ## Validation gate
 
-A candidate is published as a Draft PR only after the independent validator
+A reviewed candidate is eligible to be committed only after the local validator
 records all of the following on the same candidate and built desktop:
 
 1. `pnpm e2e:check`.
@@ -147,13 +167,12 @@ Classify a failed candidate as exactly one of:
   cannot prove the outcome deterministically, including a passing ablation;
 - `infra`: build, launch, runner, operating-system, or owned service failure.
 
-Only `ready` with `failureClass: none` may be published. Every blocked candidate
-retains its failure class and evidence without weakening the suite. A later run
-may advance to another eligible registry row; one blocked row never stops the
-whole queue.
+Only `ready` with `failureClass: none` and a passed local attestation may be
+published by a maintainer. Every blocked candidate retains its failure class and
+evidence without weakening the suite. A later run may advance to another
+eligible registry row; one blocked row never stops the whole queue.
 
-The trusted publisher accepts only the checksummed author task, final candidate,
-and validation attestation produced by the expected default-branch workflow run.
-It never checks out or executes candidate code. Before creating a Draft PR it
-revalidates provenance, base SHA, file paths, sizes, hashes, scenario id, and the
-complete validation result. It never merges or promotes a candidate to P0.
+No repository workflow authors or publishes candidates. The maintainer reviews
+the local diff and evidence, commits it, and opens a normal PR. Existing PR CI
+repeats the repository checks without access to Codex authentication. Neither
+the local coordinator nor CI merges or promotes a candidate to P0.

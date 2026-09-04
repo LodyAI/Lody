@@ -121,7 +121,7 @@ export function createJourneyAuthorTask(input) {
       'Do not edit the registry or generated coverage; trusted packaging owns that transition.',
       'Do not commit, push, create a PR, use network services, or read credentials.',
       `For a ready result, name one unique quoted expectation to replace with ${JSON.stringify(`__LODY_COUNTERFACTUAL_${selected.id.replaceAll('-', '_')}__`)} during independent validation.`,
-      'Do not run generated test code. The separate no-secret macOS lane owns build, counterfactual, focused, and full validation.',
+      'Do not run generated test code. After human review, the local maintainer validator owns build, counterfactual, focused, and full validation.',
       'If the boundary cannot be deterministic inside the lease, return a blocked classification; never use sleeps, retries, or live services.',
     ],
   };

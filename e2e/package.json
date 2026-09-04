@@ -7,8 +7,10 @@
     "check": "node scripts/check-suite.mjs && tsc --noEmit && node --test scripts/*.test.mjs ../.github/scripts/journey-author-*.test.mjs && node --import tsx --test src/support/*.test.ts src/support/fixtures/*.test.ts src/scout/*.test.ts fixtures/*.test.ts",
     "full": "cucumber-js --config cucumber.mjs --tags '@P0 or @P1'",
     "scout": "tsx src/scout/scout-runner.ts",
+    "journey:author": "node scripts/run-journey-author.mjs",
     "journey:candidate": "node scripts/select-journey-candidate.mjs",
     "journey:coverage": "node scripts/generate-coverage.mjs --write",
+    "journey:validate": "node scripts/validate-journey-candidate.mjs",
     "scout:ablation": "tsx src/scout/scout-runner.ts --ablation --journey session",
     "smoke": "cucumber-js --config cucumber.mjs --tags '@P0'"
   },
