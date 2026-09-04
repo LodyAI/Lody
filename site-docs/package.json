@@ -10,11 +10,11 @@
     "predev": "corepack pnpm run generate",
     "dev": "vite dev --host 127.0.0.1 --port 3002",
     "prebuild": "corepack pnpm run clean:out && corepack pnpm run generate && corepack pnpm run generate:routes",
-    "build": "vite build",
+    "build": "vite build && node scripts/finalize-404-html.mjs",
     "preview:static": "node scripts/serve-static.mjs",
     "pretypecheck": "corepack pnpm run generate && corepack pnpm run generate:routes",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts"
+    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs scripts/finalize-404-html.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts"
   },
   "dependencies": {
     "@lody/components": "workspace:*",
