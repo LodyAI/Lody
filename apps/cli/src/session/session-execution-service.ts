@@ -214,8 +214,6 @@ type PromptHandoffRun = {
 
 type TurnRuntimeState = {
   sessionId: SessionId;
-  /** Immutable Assistant identity reported when the owning dispatch settles. */
-  readonly settlementTurnId: string;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
   userTurnId?: string;
@@ -231,7 +229,6 @@ type TurnRuntimeState = {
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
   prePromptFailureRecorded: boolean;
-  handledOutcome?: 'completed' | 'failed';
   cancelRequested: boolean;
   cancelFinalized: boolean;
   interruptRequested: boolean;
@@ -349,16 +346,13 @@ type SessionDispatchOptions = {
    */
   onTurnClaimed?: () => Promise<boolean>;
   /**
-   * Delivery acknowledgement hook. It runs after terminal history bookkeeping,
-   * and distinguishes retryable interruption from a durably handled outcome.
+   * Runs after terminal history bookkeeping and distinguishes retryable
+   * interruption from a durably handled outcome.
    */
   onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
 };
 
-export type SessionTurnSettlement = {
-  turnId: string;
-  outcome: 'completed' | 'failed' | 'interrupted';
-};
+type SessionTurnSettlement = 'handled' | 'interrupted';
 
 export type PreparedSessionDispatchRequest =
   | { mode: 'create'; request: SessionCreateRequestValidated }
@@ -1572,7 +1566,6 @@ export class SessionExecutionService {
   ): TurnRuntimeState {
     return {
       sessionId,
-      settlementTurnId: turnId,
       turnId,
       userTurnId,
       session,
@@ -2853,10 +2846,7 @@ export class SessionExecutionService {
       if (outcome === 'unknown') {
         outcome = 'completed';
       }
-      settlement = {
-        turnId: runtime.settlementTurnId,
-        outcome: runtime.handledOutcome ?? 'completed',
-      };
+      settlement = 'handled';
     } catch (error) {
       if (isSessionTurnClaimContended(error)) {
         outcome = 'claim-contended';
@@ -2868,7 +2858,7 @@ export class SessionExecutionService {
           turnId: runtime.turnId,
           reason: error.reason,
         });
-        settlement = { turnId: runtime.settlementTurnId, outcome: 'failed' };
+        settlement = 'handled';
       } else if (
         isSessionTurnCancelled(error) ||
         runtime.cancelFinalized ||
@@ -2877,7 +2867,7 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
-        settlement = { turnId: runtime.settlementTurnId, outcome: 'interrupted' };
+        settlement = 'interrupted';
       } else {
         await this.handleVisibleTurnUnhandledError({
           sessionId,
@@ -2890,7 +2880,7 @@ export class SessionExecutionService {
           onUnhandledError: effectiveErrorContext.onUnhandledError,
         });
         outcome = 'unhandled-error-recorded';
-        settlement = { turnId: runtime.settlementTurnId, outcome: 'failed' };
+        settlement = 'handled';
       }
     } finally {
       if (!runtime.promptStarted) {
@@ -4015,7 +4005,6 @@ export class SessionExecutionService {
                 })
             )
           );
-          runtime.handledOutcome = 'failed';
         } else if (completedUserTurnId) {
           yield* self.tryPromise(() =>
             traceAsync(
@@ -4029,9 +4018,6 @@ export class SessionExecutionService {
               async () => await self.setDispatchHandled(sessionId, sessionDoc, completedUserTurnId)
             )
           );
-          runtime.handledOutcome = 'completed';
-        } else {
-          runtime.handledOutcome = 'completed';
         }
 
         yield* abortIfCancelled();

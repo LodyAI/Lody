@@ -165,12 +165,8 @@ export type StoredLodyDelivery = {
   systemTurnId: string;
   state: 'pending' | 'consumed';
   attemptCount: number;
-  activeAttemptId?: string;
-  activeAttemptOwnerId?: string;
-  lastAttemptAt?: string;
-  continuationTurnId?: string;
-  continuationOutcome?: 'completed' | 'failed';
-  acknowledgedAt?: string;
+  activeClaimId?: string;
+  activeClaimWorkerBootId?: string;
   initiatorChainDepth: number;
   completion: LodyOperationCompletion;
   consumedAt?: string;
