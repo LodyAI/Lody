@@ -164,7 +164,11 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     localProjectId: 'lp_1',
   };
 
-  it('revalidates a local file list once per @ menu cycle', async () => {
+  // Split in two on purpose: each `typeInto` is a full render plus a menu
+  // re-resolution, and one test carrying every step was the heaviest in this
+  // file by a wide margin — enough to blow the 5s budget on a loaded machine
+  // without asserting anything the two halves do not.
+  it('does not query the machine for a bare @, then queries once per menu cycle', async () => {
     await render({ value: '', mentionSource: localMentionSource });
 
     // A bare `@` shows the category index and queries nothing, so nothing loads.
@@ -175,6 +179,13 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     // same open menu must not re-spawn `git ls-files`.
     await typeInto('@ap');
     await typeInto('@app');
+    expect(fileRefreshCalls).toHaveLength(1);
+  });
+
+  it('queries again when the @ menu is reopened', async () => {
+    await render({ value: '', mentionSource: localMentionSource });
+
+    await typeInto('@ap');
     expect(fileRefreshCalls).toHaveLength(1);
 
     // Closing and reopening is a new cycle: the working tree may have moved.
