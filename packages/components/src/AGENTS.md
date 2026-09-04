@@ -43,6 +43,13 @@ Parent `AGENTS.md` files also apply.
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
 
+## Billing data
+
+- When authenticated user and workspace resolution completes, preload the billing
+  overview into the existing session-scoped billing-page cache. The preload is only
+  a latency optimization: billing permissions, quota checks, destructive-operation
+  guards, and Stripe invoice history keep their existing live/on-demand data paths.
+
 ## ACP authentication
 
 - Custom and Registry Provider authentication renders supported agent-driven method choices and

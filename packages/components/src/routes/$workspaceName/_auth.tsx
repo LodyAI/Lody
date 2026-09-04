@@ -38,6 +38,7 @@ import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lo
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
+import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
 
@@ -338,6 +339,7 @@ function AuthedLayoutContent({
   } = useOrganization({ targetSlug: workspaceName });
   const user = useAtomValue(userAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
+  useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
 
