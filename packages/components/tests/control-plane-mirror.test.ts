@@ -8,6 +8,7 @@ import {
   createHistoryWriter,
   CONTROL_PLANE_IGNORED_ROOT_KEYS,
   sessionControlPlaneSchema,
+  type ConversationView,
 } from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
@@ -23,19 +24,36 @@ const controlPlaneMirror = (doc: LoroDoc) =>
     initialState: { session: { id: FIXTURE_SESSION_ID } },
   });
 
-/** 2,000 turns written through the writer (equivalent to Mirror writes, and fast). */
+/**
+ * `HistoryWriter.append` never consults the view (it inserts at the tail), so a
+ * bulk fixture build can skip creating one. Attaching a live view here ran a
+ * full event pass — tail hydrate, LRU, summaries — per appended turn: ~900 ms
+ * of test-only work that pushed this file's setup past the 5 s budget on a
+ * two-worker CI runner.
+ */
+const unattachedView = {
+  turnCount: 0,
+  index: () => undefined,
+  indexOf: () => -1,
+  turn: () => undefined,
+} as unknown as ConversationView;
+
+/**
+ * 2,000 turns written through the production writer, so the container shape is
+ * exactly what a Mirror write produces (~30k containers).
+ *
+ * Kept deliberately rich: a full Mirror over this doc costs ~272 ms locally
+ * against the 30 ms bound below, so the assertion still fails loudly if the
+ * control-plane Mirror ever starts walking `history`. A plain one-text-item
+ * fixture builds faster but materializes in ~45 ms, which would leave the
+ * bound with no usable margin.
+ */
 const buildLargeDoc = (): LoroDoc => {
   const doc = new LoroDoc();
   doc.setPeerId(3);
   doc.getMap('session').set('id', FIXTURE_SESSION_ID);
-  const idle = createManualIdle();
-  const view = createConversationViewFromDoc(doc, {
-    sessionId: FIXTURE_SESSION_ID,
-    scheduleIdle: idle.scheduleIdle,
-  });
-  const writer = createHistoryWriter(doc, view);
+  const writer = createHistoryWriter(doc, unattachedView);
   for (const entry of buildFixtureHistory(1000)) writer.append(entry);
-  view.dispose();
   const fresh = new LoroDoc();
   fresh.import(doc.export({ mode: 'snapshot' }));
   return fresh;
@@ -58,8 +76,9 @@ describe('control-plane Mirror (history: Ignore)', () => {
       samples.push(performance.now() - started);
     }
     samples.sort((a, b) => a - b);
-    // Deliberate wall-clock assertion (task requirement): the old path costs
-    // seconds here, so the bound is far from the measured ~1 ms median.
+    // Deliberate wall-clock assertion (task requirement). The measured median is
+    // ~1 ms and a Mirror that DID materialize this history costs ~272 ms, so the
+    // bound sits between two values an order of magnitude apart on either side.
     expect(samples[1]).toBeLessThan(30);
     const state = mirror!.getState() as { history?: unknown; session?: unknown };
     expect(state.history).toBeUndefined();
