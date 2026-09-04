@@ -84,7 +84,14 @@ this file; edit `AGENTS.md` only.
   queue minutes of React work behind a long active turn and retain every obsolete
   history tree. Control state (`session`, message queue, fork, preview, external
   cursor) stays synchronous; do not delay it behind transcript rendering or
-  restore a direct `setState` for history-only mirror events.
+  restore a direct `setState` for history-only mirror events. It also returns
+  `conversationView` (the store's windowed history reader, `null` on the
+  full-Mirror rollback path). Prefer it over `doc.history`: on the view path
+  that property is a lazy bridge whose first read hydrates the whole
+  transcript. `use-conversation-view-selector.ts` derives values from the
+  view per version and takes the doc-state fallback from `useViewFallback`,
+  which only evaluates while there is no view; `use-session-turn-selectors.ts`
+  hosts the shared ones (active assistant turn, system notices).
 - Code Collab file-index hooks borrow owner-session resources from the
   workspace-owned Effect `ScopedCache`; do not open, scan, subscribe, or join
   the same Flock once per React mount. The resource subscribes before its cold

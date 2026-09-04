@@ -16,8 +16,11 @@ import {
   type SessionDocStore,
 } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
+import type { ConversationView } from '@/lib/conversation-view';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
+import { readSessionHistoryEntry, readSessionHistoryLength } from '@/lib/session-store-history';
+import { readSessionDocHistoryRevision } from '../providers/session-doc-state-source';
 
 declare global {
   interface Window {
@@ -39,6 +42,13 @@ export type PushMessageQueueInput = Omit<
 
 export type UseSessionDocResult = {
   doc: SessionDocState;
+  /**
+   * Windowed history reader for this session, once the store is loaded and
+   * the store runs on the control-plane Mirror; `null` on the full-Mirror
+   * rollback path. Prefer it over `doc.history`, which on the view path is a
+   * lazy bridge that materializes the whole transcript on first access.
+   */
+  conversationView: ConversationView | null;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: { dispatch?: boolean }
@@ -88,12 +98,14 @@ export function sessionMetaSuggestsHistory(session: SessionHistoryHint | null | 
   );
 }
 
+// Compared through the revision marker, never `history` itself: on the view
+// path that property is a getter whose first read hydrates the transcript.
 const updateOnlyChangesHistory = (
   previous: SessionDocState | undefined,
   next: SessionDocState
 ): boolean =>
   previous !== undefined &&
-  previous.history !== next.history &&
+  readSessionDocHistoryRevision(previous) !== readSessionDocHistoryRevision(next) &&
   previous.session === next.session &&
   previous.mq === next.mq &&
   previous.forkOperation === next.forkOperation &&
@@ -371,14 +383,11 @@ export function useSessionDoc(
       // The updater is a function that can't cross the intent wire; resolve it to
       // the concrete replacement entry against the current snapshot and send that
       // through the writer seam. Preserve the "not found → no-op" short-circuit.
-      const history = await withStore(
-        (store) => (store.getState().history ?? []) as SessionHistoryInput[]
-      );
-      const index = history.findIndex((entry) => entry.id === historyId);
-      if (index < 0) {
+      const current = await withStore((store) => readSessionHistoryEntry(store, historyId));
+      if (!current) {
         return;
       }
-      const nextEntry = updater(history[index] as SessionHistoryInput);
+      const nextEntry = updater(current as SessionHistoryInput);
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
@@ -397,6 +406,7 @@ export function useSessionDoc(
 
   return {
     doc: state,
+    conversationView: loadedStore?.conversationView ?? null,
     addHistory,
     pushMessageQueue,
     removeMessageQueueItem,
@@ -447,14 +457,14 @@ export function useSessionDocSyncState(
           return;
         }
 
-        const readHasLocalHistory = (state: SessionDocState) => (state.history?.length ?? 0) > 0;
-        setHasLocalHistory(readHasLocalHistory(store.getState()));
+        const readHasLocalHistory = () => readSessionHistoryLength(store) > 0;
+        setHasLocalHistory(readHasLocalHistory());
         setSyncState(store.getSyncState());
         setReady(true);
         releaseSync = store.acquireSync();
-        unsubscribeStore = store.subscribe((nextState) => {
+        unsubscribeStore = store.subscribe(() => {
           if (!cancelled) {
-            const nextHasLocalHistory = readHasLocalHistory(nextState);
+            const nextHasLocalHistory = readHasLocalHistory();
             setHasLocalHistory((prev) =>
               prev === nextHasLocalHistory ? prev : nextHasLocalHistory
             );

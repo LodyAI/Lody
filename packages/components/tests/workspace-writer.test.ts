@@ -6,7 +6,11 @@ import {
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
+import { LoroDoc } from 'loro-crdt';
+import { Mirror } from 'loro-mirror';
+import { sessionDocSchema, type SessionHistoryInput, type SessionId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { createSessionDocStateSource } from '../src/providers/session-doc-state-source';
 
 const anchor: MinimalVisualAnnotationAnchor = {
   version: 1,
@@ -107,6 +111,135 @@ describe('createDirectWorkspaceWriter', () => {
 
     await expect(writer.appendSessionTurn('session-1', { id: 'turn-1' })).rejects.toThrow(
       'store unavailable'
+    );
+  });
+});
+
+describe('createDirectWorkspaceWriter history writes with a ConversationView', () => {
+  const sessionId = 'session-writer-view' as SessionId;
+  const userTurn = (id: string): SessionHistoryInput => ({
+    id,
+    role: 'user',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    status: 'pending',
+    read: false,
+    finished: true,
+    fileDiff: [],
+    items: [{ type: 'text', text: `prompt ${id}` }] as never,
+    inputConfig: { prompt: `prompt ${id}`, cliType: 'builtin', agentType: 'claude' } as never,
+  });
+  const assistantTurn = (id: string, items: unknown[]): SessionHistoryInput => ({
+    id,
+    role: 'assistant',
+    timestamp: '2026-01-01T00:01:00.000Z',
+    finished: false,
+    fileDiff: [],
+    items: items as never,
+  });
+  const permissionItem = {
+    type: 'tool_call',
+    toolCallId: 'tc1',
+    title: 'Run',
+    kind: 'execute',
+    status: 'pending',
+    permissionRequest: { requestId: 'req-1', options: [] },
+  };
+
+  const viaMirror = (apply: (mirror: Mirror<typeof sessionDocSchema>) => void): unknown => {
+    const doc = new LoroDoc();
+    const mirror = new Mirror({
+      doc,
+      schema: sessionDocSchema,
+      ignoreUnknownProperties: true,
+      initialState: { session: { id: sessionId }, history: [] },
+    });
+    apply(mirror);
+    doc.commit();
+    return JSON.parse(JSON.stringify(mirror.getState().history));
+  };
+
+  const storeWithView = () => {
+    const doc = new LoroDoc();
+    const source = createSessionDocStateSource({ doc, sessionId, conversationViewEnabled: true });
+    const setState = vi.fn(source.setState);
+    const store = {
+      sessionId,
+      roomId: `session:${sessionId}`,
+      doc,
+      firstSynced: Promise.resolve(),
+      acquireSync: () => () => {},
+      getSyncState: () => 'synced' as const,
+      subscribeSyncState: () => () => {},
+      getState: source.getState,
+      setState,
+      subscribe: source.subscribe,
+      conversationView: source.conversationView,
+      dispose: source.dispose,
+      waitUntilSynced: async () => {},
+    };
+    const writer = createDirectWorkspaceWriter({
+      repo: { upsertDocMeta: vi.fn(async () => {}) } as never,
+      acquireSessionStore: vi.fn(async () => store),
+      releaseSessionStoreRef: vi.fn(),
+      acquirePreviewVisualCommentStore: vi.fn(async () => {
+        throw new Error('not used');
+      }),
+      releasePreviewVisualCommentStoreRef: vi.fn(),
+    });
+    return {
+      writer,
+      store,
+      setState,
+      history: () => JSON.parse(JSON.stringify(source.getState().history)) as unknown,
+    };
+  };
+
+  it('appends, replaces and answers permissions through the history writer, never setState', async () => {
+    const { writer, store, setState, history } = storeWithView();
+
+    await writer.startSession(
+      sessionId,
+      { title: 'x' } as never,
+      userTurn('u1') as never,
+      {} as never
+    );
+    await writer.appendSessionTurn(
+      sessionId,
+      assistantTurn('a1', [permissionItem]) as never,
+      {} as never
+    );
+    await writer.appendSessionHistory(sessionId, userTurn('u2') as never);
+    await writer.updateSessionHistory(sessionId, 'u2', {
+      ...userTurn('u2'),
+      status: 'seen',
+    } as never);
+    await writer.updateSessionHistory(sessionId, 'missing', userTurn('nope') as never);
+    await writer.respondSessionPermission(sessionId, 'req-1', { type: 'selected', optionId: 'allow' });
+
+    expect(setState).not.toHaveBeenCalled();
+    expect(store.conversationView?.turnCount).toBe(3);
+    expect(history()).toEqual(
+      viaMirror((mirror) => {
+        mirror.setState((prev) => ({ ...prev, history: [userTurn('u1')] as never }));
+        mirror.setState((prev) => ({
+          ...prev,
+          history: [...prev.history, assistantTurn('a1', [permissionItem])] as never,
+        }));
+        mirror.setState((prev) => ({ ...prev, history: [...prev.history, userTurn('u2')] as never }));
+        mirror.setState((draft) => {
+          const entry = draft.history.find((item) => item.id === 'u2');
+          if (entry) entry.status = 'seen';
+        });
+        mirror.setState((draft) => {
+          const entry = draft.history.find((item) => item.id === 'a1');
+          const item = entry?.items?.[0] as
+            | { permissionRequest?: { outcome?: unknown } }
+            | undefined;
+          if (item?.permissionRequest) {
+            item.permissionRequest.outcome = { type: 'selected', optionId: 'allow' };
+          }
+        });
+      })
     );
   });
 });

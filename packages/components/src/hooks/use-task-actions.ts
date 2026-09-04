@@ -29,6 +29,7 @@ import {
   type SessionId,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
+import { readSessionHistoryEntry } from '@/lib/session-store-history';
 import { activeWorkspaceRuntimeAtom, type TaskDocStore, type WorkspaceRuntime } from '@/atoms/runtime';
 import { taskIndexRowsAtom, taskListAtom } from '@/atoms/tasks';
 
@@ -448,7 +449,7 @@ export function useTaskActions() {
         return;
       }
       const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore.getState().history.find((item) => item.id === entryId)
+        readSessionHistoryEntry(sessionStore, entryId)
       );
       if (!entry) {
         return;

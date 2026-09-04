@@ -11,7 +11,6 @@ import { Loader2, Send, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
-  resolveActiveAssistantTurnId,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
 } from '@lody/shared';
@@ -55,6 +54,7 @@ import {
 } from '@/components/chat/visual-annotation-reference-state';
 import { usePreviewVisualCommentDoc } from '@/hooks/use-preview-visual-comment-doc';
 import { useSessionDoc } from '@/hooks/use-session-doc';
+import { useActiveAssistantTurnId } from '@/hooks/use-session-turn-selectors';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
@@ -349,8 +349,8 @@ export function ManagedPreviewSurface({
       )
       .map((comment) => comment.id);
   }, [comments, visualAnnotationReferenceKeys]);
-  const commentTurnId =
-    resolveActiveAssistantTurnId(sessionDoc.doc.history) ?? session.latestUserMsgId ?? session.id;
+  const activeAssistantTurnId = useActiveAssistantTurnId(sessionDoc);
+  const commentTurnId = activeAssistantTurnId ?? session.latestUserMsgId ?? session.id;
 
   const trackedAnchors = useMemo<TrackedVisualAnnotationAnchor[]>(() => {
     const next = comments.map((comment) => ({

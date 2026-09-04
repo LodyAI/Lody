@@ -110,7 +110,6 @@ import {
   resolveSessionConversationConfig,
   resolveSessionConversationSourceFence,
   resolveVisibleSessionGoal,
-  resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
@@ -187,6 +186,7 @@ import { Input } from '@/ui/input';
 import { Separator } from '@/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
+import { useActiveAssistantTurnId } from '@/hooks/use-session-turn-selectors';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
@@ -2052,6 +2052,7 @@ export const SessionChatInterface = memo(
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
       doc: sessionDoc,
+      conversationView,
       addHistory: addSessionHistory,
       pushMessageQueue,
       removeMessageQueueItem,
@@ -2753,9 +2754,10 @@ export const SessionChatInterface = memo(
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
 
-    const activeAssistantTurnId = useMemo(() => {
-      return resolveActiveAssistantTurnId(sessionHistory);
-    }, [sessionHistory]);
+    const activeAssistantTurnId = useActiveAssistantTurnId({
+      doc: sessionDoc,
+      conversationView,
+    });
     const messageQueue = useMemo(
       () => (sessionDoc?.mq ?? []) as MessageQueueItem[],
       [sessionDoc?.mq]
@@ -4246,13 +4248,16 @@ export const SessionChatInterface = memo(
 
     const handleScrollToMessage = useCallback(
       (historyId: string) => {
-        const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-        const index = history.findIndex((h) => h.id === historyId);
+        const index = conversationView
+          ? conversationView.indexOf(historyId)
+          : ((sessionDoc?.history as SessionHistory[] | undefined) ?? []).findIndex(
+              (h) => h.id === historyId
+            );
         if (index >= 0) {
           chatStreamRef.current?.scrollToIndex(index);
         }
       },
-      [sessionDoc?.history]
+      [conversationView, sessionDoc?.history]
     );
 
     const createPrPrompt = t('sessions.prompts.createPr', CREATE_PR_PROMPT);
@@ -5836,6 +5841,7 @@ export const SessionChatInterface = memo(
                           sessionId={session?.id}
                           workspaceId={workspaceId}
                           sessionDoc={sessionDoc}
+                          conversationView={conversationView}
                           sessionCreatedAt={session?.createdAt}
                           dividerLabel={sessionDividerLabel}
                           className="h-full"

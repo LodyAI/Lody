@@ -238,6 +238,7 @@ import {
 } from '@/lib/session-file-provider-open-result';
 import { canOpenHistoricalSessionDiffs } from '@/lib/session-file-provider';
 import { useSessionDoc, useSessionDocSyncState } from '@/hooks/use-session-doc';
+import { useSessionSystemNotice } from '@/hooks/use-session-turn-selectors';
 import { useDelayedFlag } from '@/hooks/use-delayed-flag';
 import { isSyncingRoomSyncState } from '@/lib/room-sync-state';
 import {
@@ -462,7 +463,11 @@ function PendingWorktreeForkObserver({
   onCompleted: () => void;
   onFailed: (message: string) => void;
 }) {
-  const { doc, ready } = useSessionDoc(targetSessionId, { syncEnabled: true });
+  const sessionDoc = useSessionDoc(targetSessionId, { syncEnabled: true });
+  const { doc, ready } = sessionDoc;
+  // The origin notice is the system turn the fork appends last, so this reads
+  // system turns only and never hydrates the copied transcript.
+  const completed = useSessionSystemNotice(sessionDoc, 'session_fork_origin');
   const terminalRef = useRef(false);
   useEffect(() => {
     if (!ready || terminalRef.current) return;
@@ -472,16 +477,11 @@ function PendingWorktreeForkObserver({
       onFailed(operation.data.error?.message ?? 'Unable to create the fork worktree');
       return;
     }
-    const completed = doc.history.some((entry) =>
-      (entry.items ?? []).some(
-        (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
-      )
-    );
     if (!operation.success && completed) {
       terminalRef.current = true;
       onCompleted();
     }
-  }, [doc.forkOperation, doc.history, onCompleted, onFailed, ready]);
+  }, [completed, doc.forkOperation, onCompleted, onFailed, ready]);
   return null;
 }
 
