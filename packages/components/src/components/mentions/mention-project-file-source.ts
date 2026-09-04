@@ -21,6 +21,7 @@ import {
 } from '@/components/mentions/mention-analytics';
 import {
   areStringArraysEqual,
+  isLocalPlaneFilePathsSource,
   useLocalProjectFilePaths,
   type LocalProjectFilePathsSource,
   type LocalProjectFilePathsEntry,
@@ -243,12 +244,21 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     useLocalWorktreeSource,
   ]);
 
-  // A local list is a `git ls-files` on the machine, not a billed network call,
-  // and the working tree moves under the user between two `@`s — they drop a
-  // folder into the project and reach for it immediately. So the local source is
-  // the one source that REVALIDATES on activation instead of only ensuring it is
-  // loaded; `null` until the first activation keeps a composer mount (one per
-  // open tab and side chat) on the cached read.
+  // A local-PLANE list is a process spawn on this machine over the renderer ->
+  // main IPC RPC, not a network call, and the working tree moves under the user
+  // between two `@`s — they drop a folder into the project and reach for it
+  // immediately. So that source is the one source that REVALIDATES on activation
+  // instead of only ensuring it is loaded; `null` until the first activation
+  // keeps a composer mount (one per open tab and side chat) on the cached read.
+  //
+  // The gate is the PLANE, not the source kind. Chat Landing builds a `local`
+  // source for whichever machine holds the project, including a remote one,
+  // where the same revalidation is a full project listing across Machine RPC on
+  // every menu open. Those keep the TTL.
+  const isLocalPlaneSource = isLocalPlaneFilePathsSource(localSource, {
+    localMachineId: localDaemonMachineId,
+    hasLocalIpc: Boolean(getIpcServices()),
+  });
   const [localRefreshNonce, setLocalRefreshNonce] = React.useState<number | null>(null);
   const refreshLocalFiles = React.useCallback(() => {
     setLocalRefreshNonce((nonce) => (nonce ?? 0) + 1);
@@ -492,11 +502,13 @@ export function useMentionProjectFiles(source?: MentionProjectSource) {
     getKnownFileTokens,
     readLocalProjectFile,
     /**
-     * Undefined unless the files come from a local transport. A GitHub tree is a
-     * billed request against a rate limit and the Code Collab provider already
-     * pushes its own updates, so neither may be refetched per menu open.
+     * Undefined unless the files come from the local IPC transport. A GitHub
+     * tree is a billed request against a rate limit, the Code Collab provider
+     * already pushes its own updates, and a remote machine's project would pay a
+     * full listing over Machine RPC — none of the three may be refetched per
+     * menu open.
      */
-    refreshFiles: localSource ? refreshLocalFiles : undefined,
+    refreshFiles: isLocalPlaneSource ? refreshLocalFiles : undefined,
   };
 }
 

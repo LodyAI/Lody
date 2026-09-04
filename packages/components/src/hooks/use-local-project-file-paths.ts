@@ -98,6 +98,26 @@ export type LocalProjectFilePathsSource =
 
 type LocalProjectFilePathsInput = LocalProjectFilePathsSource | string | undefined;
 
+/**
+ * True when this source is answered over the renderer -> main IPC RPC, false
+ * when the same listing has to cross the network as Machine RPC.
+ *
+ * Exported because callers gate NETWORK COST on it — the mention menu
+ * revalidates its list on every `@`, which is a process spawn on this machine
+ * and a full project listing over the wire on any other. One binding, so the
+ * transport the effect below picks and the cost a caller assumes cannot drift
+ * apart. A Session worktree is only ever reachable through the local IPC
+ * service, so it has no machine to compare.
+ */
+export function isLocalPlaneFilePathsSource(
+  source: LocalProjectFilePathsSource | null | undefined,
+  options: { localMachineId: string | null; hasLocalIpc: boolean }
+): boolean {
+  if (!source || !options.hasLocalIpc) return false;
+  if (source.kind === 'worktree') return true;
+  return !source.machineId || source.machineId === options.localMachineId;
+}
+
 export type UseLocalProjectFilePathsOptions = {
   /**
    * Forces a fresh file-list request when the token changes. This is used by live
@@ -181,8 +201,18 @@ export function useLocalProjectFilePaths(
         setState({ entry: null, status: 'idle' });
         return undefined;
       }
-      const canUseLocalProjectIpc =
-        Boolean(listLocalProjectFiles) && (!sourceMachineId || sourceMachineId === localMachineId);
+      // Rebuilt from the scalars rather than closing over `source`: that object
+      // is new on every render, and exhaustive-deps would turn it into a refetch
+      // loop.
+      const canUseLocalProjectIpc = isLocalPlaneFilePathsSource(
+        {
+          kind: 'project',
+          workspaceId: sourceWorkspaceId,
+          ...(sourceMachineId ? { machineId: sourceMachineId } : {}),
+          localProjectId: sourceLocalProjectId,
+        },
+        { localMachineId, hasLocalIpc: Boolean(listLocalProjectFiles) }
+      );
       // Timing guard: the local desktop CLI advertises its machineId (which flips
       // `canUseLocalProjectIpc`) before its workspace runtimes finish booting.
       // Sending file-list requests in that window throws "Local workspace runtime

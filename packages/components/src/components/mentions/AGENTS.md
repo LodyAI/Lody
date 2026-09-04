@@ -93,10 +93,18 @@ Product-level mention sources built on `src/ui/mention`.
   reason for the rule does not hold: it is a `git ls-files` on the machine, not a
   billed request, and the working tree moves between two `@`s — the user drops a
   folder into the project and reaches for it immediately, so a cached list is
-  read as a bug. `useMentionProjectFiles` hands out `refreshFiles` only for a
-  local transport (never GitHub, never the Code Collab provider, which pushes its
+  read as a bug. `useMentionProjectFiles` hands out `refreshFiles` only for the
+  local PLANE (never GitHub, never the Code Collab provider, which pushes its
   own updates) and the composer passes it as the file source's `onActivate`, so
   the menu's own once-per-open latch is what bounds it to one refresh per `@`.
+  The gate is the plane, not the source KIND, and the distinction is not
+  cosmetic: Chat Landing builds a `local` source for whichever machine holds the
+  project, including a remote one, where the identical revalidation is a full
+  project listing across Machine RPC on every menu open. `isLocalPlaneFilePathsSource`
+  (`hooks/use-local-project-file-paths.ts`) answers that question and is the same
+  binding the hook uses to CHOOSE its transport, so the cost a caller assumes and
+  the transport actually taken cannot drift apart. A remote machine keeps the TTL.
+  Coverage: `tests/local-project-file-paths-plane.test.ts`.
   It stays stale-while-revalidate — the cached list paints immediately and is
   replaced when the machine answers — and the nonce starts `null` so a composer
   MOUNT still reads the cache: one mounts per open tab and side chat.
