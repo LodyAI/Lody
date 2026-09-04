@@ -279,7 +279,41 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
+
+/** What an agent says one model can do, for controls it rebuilds per model. */
+export type DeclaredModelCapability = {
+  /** Reasoning-effort values this model accepts. */
+  effortValues?: string[];
+  /** Whether this model offers the fast toggle at all. */
+  fastMode?: boolean;
+};
+
+/**
+ * An agent's own statement about its models, from the Lody `_meta` extension on
+ * `session/new`.
+ *
+ * This is the only evidence that can say a model does NOT have a control. A
+ * capability snapshot cannot: it describes whichever model was current when it
+ * was captured, so an option missing from it means nothing for another model.
+ * Both builtin agents already hold this data when they build that snapshot —
+ * Codex reads `additionalSpeedTiers` and `supportedReasoningEfforts` off its
+ * model catalog, Claude off `ModelInfo` — and until now dropped it.
+ *
+ * SELF-declared, deliberately: it is the agent describing itself, not Lody
+ * vouching for it. It may shape menus and offline answers; it may never grant
+ * permission, and a live disagreement still wins.
+ */
+export type DeclaredModelCapabilities = {
+  version: 1;
+  models: Record<string, DeclaredModelCapability>;
+  /** When Lody received it. A statement about a catalog is not timeless. */
+  receivedAt: number;
+  /** Adapter/runtime identity it was received under. */
+  sourceVersion?: string;
+  /** Producer's own catalog revision, for transport throttling. */
+  producerRevision?: string;
+};
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -307,6 +341,16 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * The model `configOptions` was captured under.
+   *
+   * Stored rather than recovered from the model option's `currentValue`: every
+   * reader needs it to know what the snapshot is a snapshot OF, and inferring
+   * it at each call site is how a snapshot comes to be read as a catalog.
+   */
+  measuredForModelId?: string;
+  /** The agent's own per-model statement, when it publishes one. */
+  declaredModelCapabilities?: DeclaredModelCapabilities;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */

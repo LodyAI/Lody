@@ -89,6 +89,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import type { DeclaredModelCapabilities } from '@lody/shared';
 import { AcpPermissionNotAppliedError } from '@/session/acp-session-config-applier';
 import {
   AcpAuthenticationManager,
@@ -508,6 +509,8 @@ export type SessionExecutionServiceDeps = {
     sessionFork: boolean;
     acknowledgedSteer: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
+    measuredForModelId?: string;
+    declaredModelCapabilities?: DeclaredModelCapabilities;
     capabilitySourceVersion?: string;
   }>;
   /** Evict idle sessions if system memory is under pressure */
@@ -4879,7 +4882,15 @@ export class SessionExecutionService {
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
-        capabilities.acknowledgedSteer
+        capabilities.acknowledgedSteer,
+        {
+          ...(capabilities.measuredForModelId
+            ? { measuredForModelId: capabilities.measuredForModelId }
+            : {}),
+          ...(capabilities.declaredModelCapabilities
+            ? { declaredModelCapabilities: capabilities.declaredModelCapabilities }
+            : {}),
+        }
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -5189,6 +5200,8 @@ export class SessionExecutionService {
         sessionFork,
         acknowledgedSteer,
         modelReasoningEfforts,
+        measuredForModelId,
+        declaredModelCapabilities,
         capabilitySourceVersion,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
@@ -5227,7 +5240,11 @@ export class SessionExecutionService {
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
-        { signal: options.signal }
+        {
+          signal: options.signal,
+          ...(measuredForModelId ? { measuredForModelId } : {}),
+          ...(declaredModelCapabilities ? { declaredModelCapabilities } : {}),
+        }
       );
 
       return {

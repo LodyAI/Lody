@@ -13,6 +13,7 @@
 import type {
   AcceptedWiderPermission,
   AcpCapabilityCacheEntry,
+  DeclaredModelCapability,
   AcpConfigOptionSummary,
   AcpConfigOptionValue,
 } from './ai';
@@ -147,7 +148,12 @@ type RunConfigCapabilitySource = Pick<
   AcpCapabilityCacheEntry,
   'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts'
 > &
-  Partial<Pick<AcpCapabilityCacheEntry, 'agentType'>>;
+  Partial<
+    Pick<
+      AcpCapabilityCacheEntry,
+      'agentType' | 'sourceVersion' | 'measuredForModelId' | 'declaredModelCapabilities'
+    >
+  >;
 
 /**
  * Recovers the per-model effort breakdown from a legacy `model[effort]` model
@@ -258,6 +264,49 @@ const findAgentPerModelBinding = (capability: RunConfigCapabilitySource | undefi
  * on the way in agree by construction; two copies of this key would drift, and
  * the bound the schema enforces is counted in these entries.
  */
+/**
+ * How long an agent's self-declaration keeps speaking for the account it was
+ * heard under.
+ *
+ * The underlying catalogs are fetched per account and change without telling us
+ * — Codex re-fetches its model list on a 300s TTL, Claude asks per model — so a
+ * declaration is a statement about a moment, not a fact. A day is long enough
+ * that a normal session never re-probes for this and short enough that a plan
+ * change is not still being quoted a week later.
+ */
+export const DECLARED_MODEL_CAPABILITIES_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The agent's own statement, if it is still allowed to speak.
+ *
+ * Returns nothing — meaning "we do not know", never "not supported" — when the
+ * declaration is stale or was heard under a different adapter/runtime identity.
+ * This is the ONLY reader; everywhere else takes the result, so a caller cannot
+ * skip the freshness question by reaching for the stored field.
+ *
+ * Not covered yet: the account itself changing under a stable `sourceVersion`
+ * (a re-login, a plan change). The TTL is what bounds that today.
+ */
+export const readDeclaredModelCapabilities = (
+  capability: RunConfigCapabilitySource | undefined,
+  now: number
+): Record<string, DeclaredModelCapability> | undefined => {
+  const declared = capability?.declaredModelCapabilities;
+  if (!declared || declared.version !== 1) {
+    return undefined;
+  }
+  if (
+    declared.sourceVersion !== undefined &&
+    declared.sourceVersion !== capability?.sourceVersion
+  ) {
+    return undefined;
+  }
+  if (now - declared.receivedAt > DECLARED_MODEL_CAPABILITIES_TTL_MS) {
+    return undefined;
+  }
+  return declared.models;
+};
+
 export const dedupeAcceptedWiderPermissions = (
   entries: readonly AcceptedWiderPermission[]
 ): AcceptedWiderPermission[] => {
@@ -347,24 +396,65 @@ const listModels = (
  * of guessing option ids.
  */
 export const summarizeAgentRunConfigCapabilities = (
-  capability: RunConfigCapabilitySource | undefined
+  capability: RunConfigCapabilitySource | undefined,
+  now: number = Date.now()
 ): AgentRunConfigCapabilities => {
+  /* Three sources, in descending order of what they actually know:
+     the agent's own per-model statement, the per-model effort breakdown
+     recovered from its legacy `model[effort]` list, and the snapshot — which
+     describes ONE model and is reported as such via `measuredForModelId`. */
+  const declared = readDeclaredModelCapabilities(capability, now);
   const perModelEfforts = capability?.modelReasoningEfforts;
-  const measuredForModelId = findCurrentModelId(capability);
+  const measuredForModelId = capability?.measuredForModelId ?? findCurrentModelId(capability);
   return {
     models: listModels(capability).map((model) => {
-      const efforts = perModelEfforts?.[model.id];
+      const efforts = declared?.[model.id]?.effortValues ?? perModelEfforts?.[model.id];
       return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };
     }),
     reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(
       (value) => value.value
     ),
     ...(measuredForModelId ? { measuredForModelId } : {}),
-    fastMode: findFastModeOption(capability) !== undefined,
+    // The declaration answers for every model it names, so a snapshot captured
+    // under a model without the toggle stops being the whole story.
+    fastMode: declared
+      ? Object.values(declared).some((model) => model.fastMode === true)
+      : findFastModeOption(capability) !== undefined,
     planMode:
       findPlanModeOption(capability) !== undefined ||
       findPlanPermissionModeId(capability) !== undefined,
   };
+};
+
+/**
+ * Whether a model offers fast mode, when the agent has said so.
+ *
+ * `undefined` means unknown, never "no": only a fresh declaration can answer,
+ * and a snapshot that omits the toggle is not an answer about another model.
+ */
+export const findDeclaredFastModeSupport = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined,
+  now: number = Date.now()
+): boolean | undefined => {
+  if (!modelId) return undefined;
+  return readDeclaredModelCapabilities(capability, now)?.[modelId]?.fastMode;
+};
+
+/**
+ * Effort values a model accepts, when the agent has said so, else the legacy
+ * breakdown, else nothing.
+ */
+export const findDeclaredEffortValues = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined,
+  now: number = Date.now()
+): string[] | undefined => {
+  if (!modelId) return undefined;
+  return (
+    readDeclaredModelCapabilities(capability, now)?.[modelId]?.effortValues ??
+    capability?.modelReasoningEfforts?.[modelId]
+  );
 };
 
 /**

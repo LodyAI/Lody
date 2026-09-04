@@ -289,9 +289,25 @@ Two things the dev build does deliberately, both load-bearing:
   request to send and an invented id would be a silent no-op. That is a different
   statement from "unsupported" and must be worded as such.
   `acp-capability-normalization.ts` still recovers `modelReasoningEfforts` from the
-  legacy `model[effort]` list (Codex): a published per-model breakdown CONFIRMS a
-  value for the selected model, which is the only thing that keeps it out of
-  `unverifiedSelections`. It never rejects one.
+  legacy `model[effort]` list (Codex): a published per-model breakdown describes
+  models the snapshot itself does not. It never rejects one.
+  A DECLARED catalog is the same kind of evidence, said explicitly. An adapter may
+  attach `_meta.lody.modelCapabilities` (`{ version: 1, models: { <modelId>:
+  { effortValues?, fastMode? } } }`) to its `session/new` response, which is what
+  lets a surface answer "does Luna support Fast?" while the probe ran on a model
+  that has no fast tier — `measuredForModelId` records which model the snapshot is
+  actually about. It is advisory in one direction only: it may report a control a
+  snapshot never carried, and it never grants permission, never authorizes a value,
+  and never rejects one. A model it does not name is UNKNOWN, not unsupported, so
+  the declaration is read whole or ignored whole (`readDeclaredModelCapabilities`):
+  half a catalog past the 64-model bound would answer "no fast mode" for models the
+  agent simply could not fit. It is freshness-gated — a TTL plus a `sourceVersion`
+  that must equal the entry's own, because a declaration heard from one adapter
+  build says nothing about the next one. Storage has two rules that are easy to
+  undo: a later probe that heard no declaration must NOT clear one already stored
+  for the same `sourceVersion` (an ordinary refresh does not re-elicit `_meta`), and
+  the write-dedup key must include the declared content, or the first declaration to
+  arrive alongside an otherwise unchanged snapshot is silently dropped.
   Client side: a Role may be seeded only from `authoritative` capabilities —
   `provisional` means the built-in static tables, and seeding from those persists a
   guess as a durable promise. Nor may it be SAVED without one: a Role is its run

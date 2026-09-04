@@ -80,6 +80,72 @@ describe('MachineDocument ACP capabilities', () => {
     expect([...flock.rows.values()][0]?.value).toMatchObject({ acknowledgedSteer: true });
   });
 
+  it('keeps a declaration a later probe did not hear, and replaces one it did', async () => {
+    const flock = new FakeMachineFlock();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      vi.fn()
+    );
+    const write = (options: Parameters<typeof document.updateAcpCapabilities>[11]) =>
+      document.updateAcpCapabilities(
+        'config-1' as AgentConfigId,
+        'builtin',
+        'codex',
+        [{ id: 'agent', name: 'Agent' }],
+        [{ modelId: 'gpt-5', name: 'GPT-5' }],
+        undefined,
+        undefined,
+        false,
+        'builtin:codex:test',
+        undefined,
+        false,
+        options
+      );
+    const stored = () =>
+      [...flock.rows.values()][0]?.value as {
+        declaredModelCapabilities?: { models: Record<string, { fastMode?: boolean }> };
+      };
+
+    await write({
+      declaredModelCapabilities: {
+        version: 1,
+        models: { 'gpt-5.6-luna': { fastMode: true } },
+        receivedAt: 1,
+      },
+    });
+    expect(stored()?.declaredModelCapabilities?.models).toEqual({
+      'gpt-5.6-luna': { fastMode: true },
+    });
+
+    // A probe against an older adapter, or one whose catalog fetch failed, hears
+    // no declaration. That is not the agent retracting it.
+    await write({});
+    expect(stored()?.declaredModelCapabilities?.models).toEqual({
+      'gpt-5.6-luna': { fastMode: true },
+    });
+
+    // A new declaration is the agent speaking again, and replaces it whole —
+    // even when NOTHING else about the capabilities changed, which is the case
+    // the de-duplication key has to notice on its own.
+    await write({
+      declaredModelCapabilities: {
+        version: 1,
+        models: { 'gpt-5.6-luna': { fastMode: true }, 'gpt-5.2': { fastMode: false } },
+        receivedAt: 2,
+      },
+    });
+    expect(stored()?.declaredModelCapabilities?.models).toEqual({
+      'gpt-5.6-luna': { fastMode: true },
+      'gpt-5.2': { fastMode: false },
+    });
+  });
+
   it('does not write capabilities when cancelled while opening the Machine Flock', async () => {
     const flock = new FakeMachineFlock();
     let markOpenStarted!: () => void;
