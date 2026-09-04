@@ -54,6 +54,10 @@ also applies.
 - Regression E2E is deterministic and blocking. On failure, retain the
   screenshot, Playwright trace, renderer/main logs, CLI backlog, process and
   memory snapshot, and machine-readable failure index.
+- Daily regression records each scenario independently, deletes passing videos,
+  and retains one `failure.webm` per failed scenario. The read-only runner only
+  uploads evidence; a trusted default-branch reconciler validates and attaches
+  every bounded WebM to an independently retryable Daily failure Issue comment.
 - Acceptance is a separate immutable round. It captures successful user-visible
   checkpoints and metrics for human review; a later repair creates a new round.
 - Scout is a separate non-blocking soak lane. It may reuse this harness and Page

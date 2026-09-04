@@ -115,6 +115,12 @@ Evidence capture failures are appended to the scenario log and do not replace
 the original product failure. Teardown failures do fail the scenario because a
 surviving CLI or occupied endpoint invalidates the next result.
 
+Daily regression additionally records each scenario and retains only failed
+WebMs. Its read-only runner uploads the complete artifact; a trusted
+default-branch reconciler creates or reopens one Daily failure Issue and appends
+every validated recording as its own independently retryable inline player. A
+later successful Daily closes the Issue with the recovery run link.
+
 The current active coverage is tracked in [the coverage matrix](./COVERAGE.md).
 The suite checker parses Gherkin and enforces IDs, priorities, runtime ownership,
 documentation indexes, and P0 matrix entries before any application build.

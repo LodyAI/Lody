@@ -64,7 +64,8 @@ jobs:
               'pnpm-lock.yaml',
               'pnpm-workspace.yaml',
               '.github/workflows/e2e-smoke.yml',
-              '.github/workflows/e2e-daily.yml'
+              '.github/workflows/e2e-daily.yml',
+              '.github/workflows/e2e-daily-reconcile.yml'
             ])
             const critical = files.some(({ filename }) =>
               criticalFiles.has(filename) || criticalPrefixes.some((prefix) => filename.startsWith(prefix))

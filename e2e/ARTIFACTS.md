@@ -6,10 +6,21 @@ Runtime output is written below ignored `e2e/artifacts/` directories.
 | -------------------- | --------------------------------------------------------------- |
 | `failure.png`        | Full-window state at the failing step                           |
 | `trace.zip`          | Playwright actions, DOM snapshots, network, and screenshots     |
+| `failure.webm`       | Daily-only recording retained for a failed scenario             |
 | `runtime.json`       | Electron, renderer, process, DOM, and memory snapshot           |
 | `console.log`        | Timestamped renderer, Electron main, page, and request failures |
 | `cli-backlog.json`   | Bundled CLI output exposed through the production IPC service   |
 | `failure-index.json` | Stable scenario id to artifact-directory mapping                |
+
+Daily regression sets `LODY_E2E_RECORD_VIDEO=1`. Playwright records each
+scenario independently at 640x360, deletes the recording after a clean pass,
+and retains `failure.webm` after an assertion or teardown failure. The
+read-only Daily job uploads all evidence as one Actions artifact. A separate
+trusted reconciler validates the failure index and each video, then attaches up
+to one independently retryable comment per failed scenario on the durable Daily
+failure Issue. Oversized, missing, symbolic-link, and unexpected-path files are
+never attached; the workflow run remains linked for complete trace and log
+retrieval.
 
 Acceptance rounds additionally contain `result.json`, `manifest.json`, and a
 successful `checkpoint.png` for every selected scenario. Supplied before/after

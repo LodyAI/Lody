@@ -91,6 +91,19 @@ After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
   } catch (error) {
     evidenceErrors.push(`fixture cleanup: ${String(error)}`);
   }
+  try {
+    await harness.finalizeVideo(failed || evidenceErrors.length > 0);
+  } catch (error) {
+    evidenceErrors.push(`video evidence: ${String(error)}`);
+  }
+
+  if (artifactDirectoryReady && !failed && evidenceErrors.length > 0) {
+    try {
+      appendFailureIndex(artifacts);
+    } catch (error) {
+      evidenceErrors.push(`failure index: ${String(error)}`);
+    }
+  }
 
   if (evidenceErrors.length > 0) {
     if (artifactDirectoryReady) {

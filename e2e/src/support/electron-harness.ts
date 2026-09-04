@@ -15,7 +15,13 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { _electron, type CDPSession, type ElectronApplication, type Page } from '@playwright/test';
+import {
+  _electron,
+  type CDPSession,
+  type ElectronApplication,
+  type Page,
+  type Video,
+} from '@playwright/test';
 import {
   assertNamedPipeReleased,
   assertTcpPortReleased,
@@ -87,6 +93,7 @@ export class ElectronHarness {
   private traceStarted = false;
   private performanceSession: CDPSession | null = null;
   private rendererPaintCount = 0;
+  private closedVideo: Video | null = null;
 
   constructor(readonly artifacts: ScenarioArtifacts) {}
 
@@ -101,8 +108,14 @@ export class ElectronHarness {
     this.tempRoot = mkdtempSync(join(tempBase, 'lody-e2e-'));
     const electronUserDataDir = join(this.tempRoot, 'electron-user-data');
     const lodyDataDir = join(this.tempRoot, 'lody-data');
+    const videoDirectory = join(this.artifacts.scenarioDir, '.video');
+    const recordVideo = process.env.LODY_E2E_RECORD_VIDEO === '1';
     mkdirSync(electronUserDataDir, { recursive: true });
     mkdirSync(lodyDataDir, { recursive: true });
+    if (recordVideo) {
+      rmSync(join(this.artifacts.scenarioDir, 'failure.webm'), { force: true });
+      mkdirSync(videoDirectory, { recursive: true });
+    }
     if (process.platform === 'win32') {
       this.hostPipe = `\\\\.\\pipe\\lody-e2e-${randomUUID()}`;
     } else {
@@ -132,6 +145,9 @@ export class ElectronHarness {
       cwd: ELECTRON_DIR,
       env,
       executablePath: resolveElectronExecutable(),
+      ...(recordVideo
+        ? { recordVideo: { dir: videoDirectory, size: { width: 640, height: 360 } } }
+        : {}),
       timeout: 60_000,
     });
     const childProcess = this.app.process();
@@ -282,6 +298,11 @@ export class ElectronHarness {
   async close(): Promise<void> {
     let closeError: unknown;
     try {
+      this.closedVideo = this.page?.video() ?? null;
+    } catch (error) {
+      closeError = error;
+    }
+    try {
       await this.stopTrace();
     } catch (error) {
       closeError = error;
@@ -304,14 +325,41 @@ export class ElectronHarness {
     try {
       if (this.hostPort !== null) await assertTcpPortReleased(this.hostPort);
       if (this.hostPipe !== null) await assertNamedPipeReleased(this.hostPipe);
-    } finally {
-      if (this.tempRoot) rmSync(this.tempRoot, { recursive: true, force: true });
-      this.tempRoot = null;
-      this.hostPort = null;
-      this.hostPipe = null;
-      this.rendererPaintCount = 0;
+    } catch (error) {
+      closeError ??= error;
     }
+    try {
+      if (this.tempRoot) rmSync(this.tempRoot, { recursive: true, force: true });
+    } catch (error) {
+      closeError ??= error;
+    }
+    this.tempRoot = null;
+    this.hostPort = null;
+    this.hostPipe = null;
+    this.rendererPaintCount = 0;
     if (closeError) throw closeError;
+  }
+
+  async finalizeVideo(retainVideo: boolean): Promise<void> {
+    let videoError: unknown;
+    try {
+      if (this.closedVideo) {
+        if (retainVideo) {
+          await this.closedVideo.saveAs(join(this.artifacts.scenarioDir, 'failure.webm'));
+        }
+        await this.closedVideo.delete();
+      }
+    } catch (error) {
+      videoError = error;
+    } finally {
+      this.closedVideo = null;
+      try {
+        rmSync(join(this.artifacts.scenarioDir, '.video'), { recursive: true, force: true });
+      } catch (error) {
+        videoError ??= error;
+      }
+    }
+    if (videoError) throw videoError;
   }
 
   writeDiagnostics(): void {
