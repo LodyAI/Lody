@@ -1890,6 +1890,7 @@
   "sessions.browser.emptyNoCandidate": "No preview address reported yet. Enter a URL above, or ask the agent to report its dev server.",
   "sessions.browser.emptyWithCandidate": "Press Enter to open {{url}}",
   "sessions.browser.errors.annotationRuntimeMissing": "The page loaded, but the annotation runtime did not become ready.",
+  "sessions.browser.errors.pagePrivateNetworkBlocked": "The page asked to open a private network address. Only you can enter one, from the address bar.",
   "sessions.browser.errors.desktopOnly": "Only the desktop app can browse arbitrary URLs.",
   "sessions.browser.errors.invalidRuntimePageUrl": "The managed preview runtime reported an invalid page URL.",
   "sessions.browser.errors.desktopEngineMissing": "The desktop public browser engine is unavailable in this app build.",

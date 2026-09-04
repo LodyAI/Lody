@@ -65,7 +65,10 @@ Two things the dev build does deliberately, both load-bearing:
   whatever it connects to, so a LAN target would turn it into a pivot into its
   own network for a remote workspace member or an agent that talked them into a
   click; the approver cannot see what a LAN address here even is. Clients never
-  send one, but this check must hold for any client. Still require a fresh
+  send one, but this check must hold for any client. Loopback means a literal
+  address or the exact name `localhost`: `classifyBrowserHostname` reads the
+  hostname text, so any `*.localhost` name passes it while a search domain or
+  rebinding record can point that name at a LAN host. Still require a fresh
   approval from the session initiator and validate path-relative targets here.
 - The local preview proxy must never forward an OBSERVED WebSocket close code into a
   Close frame. RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a

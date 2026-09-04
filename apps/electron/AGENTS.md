@@ -101,8 +101,18 @@ Root `AGENTS.md` also applies.
   or agent-facing tool; the only reader of what it renders is the person looking
   at it, so it is strictly less capable than the user's own Chrome and a guard
   protects nothing. The one it used to have blocked every fake-IP proxy user.
-  Adding any non-human reader to this view — agent DOM access, screenshots, a
-  preload bridge — must bring a guard back, on that agent-driven path.
+  Engine routing is a check on the hostname TEXT: a public name that RESOLVES to
+  loopback (`localtest.me`) still renders here, showing this machine's loopback
+  rather than the agent's. Do not describe the split as resolution-accurate — it
+  is a routing miss, not an exposure, and closing it means resolving every
+  hostname again.
+  Two triggers require bringing a guard back, and both are about who is on the
+  other end, not about the address. A non-human READER — agent DOM access,
+  screenshots, a preload bridge — makes rendered content exfiltratable. A
+  non-human NAVIGATOR already exists: a Managed Preview page is agent-authored
+  and can post navigation requests to the panel, so `session-browser-panel.tsx`
+  refuses private-LAN destinations from page content. Keep that refusal on the
+  panel side; this process cannot tell the two sources apart.
   The engine-routing check runs on `will-navigate` AND `will-redirect`, like
   `installNavigationGuard` in `window.ts`: `will-navigate` does not fire for a
   server-side 3xx, so a public page redirecting to loopback would otherwise

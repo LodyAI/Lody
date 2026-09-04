@@ -271,8 +271,17 @@ Session conversation page chain:
   the only reader of what it renders is the person looking at it, and it is strictly less
   capable than the user's own Chrome. The DNS guard it once had broke every fake-IP proxy user
   (Clash, Surge, sing-box, Shadowrocket — all their answers land in `198.18.0.0/15`) while
-  protecting nothing. If the view ever gains a non-human reader, a guard must return, attached
-  to that agent-driven path, not to human navigation.
+  protecting nothing. The engine split is therefore by hostname TEXT: a public name that
+  RESOLVES to loopback still opens in the public engine. Do not document it as
+  resolution-accurate.
+  A guard must return if the view gains a non-human READER, attached to that path rather than
+  to human navigation. A non-human NAVIGATOR already exists and is handled here, not in
+  Electron: a Managed Preview page is served by the agent machine, so the navigation requests
+  its injected script posts up (`handleManagedNavigationRequest`) are agent-authored. Those
+  carry `fromPageContent`, and `openAddress` refuses a private-LAN destination for them —
+  public is an ordinary external link and loopback still needs its own approval in the managed
+  branch, but a LAN address would open silently on the USER's network at a page's request.
+  Only the address bar may reach one.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel

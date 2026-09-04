@@ -1890,6 +1890,7 @@
   "sessions.browser.emptyNoCandidate": "还没有上报预览地址。可以在上面直接输入 URL，或让 agent 上报正在运行的开发服务器。",
   "sessions.browser.emptyWithCandidate": "按回车打开 {{url}}",
   "sessions.browser.errors.annotationRuntimeMissing": "页面已加载，但标注运行时未就绪。",
+  "sessions.browser.errors.pagePrivateNetworkBlocked": "页面请求打开一个局域网地址。此类地址只能由你在地址栏中手动输入。",
   "sessions.browser.errors.desktopOnly": "仅桌面端允许浏览任意网址。",
   "sessions.browser.errors.invalidRuntimePageUrl": "托管预览运行时上报了无效的页面 URL。",
   "sessions.browser.errors.desktopEngineMissing": "当前桌面客户端未包含公网浏览器引擎。",

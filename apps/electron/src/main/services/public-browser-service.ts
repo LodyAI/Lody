@@ -41,7 +41,13 @@ const toState = (
 
 /**
  * The only check on a public-browser navigation is engine routing: the address must parse as
- * public-web, so loopback goes to Managed Preview instead of being shown from this machine.
+ * public-web, so a loopback address goes to Managed Preview instead of being shown from this
+ * machine. That is a check on the hostname TEXT, not on where it resolves — a public name
+ * with a loopback `A` record (`localtest.me`, `127.0.0.1.nip.io`) still renders here, showing
+ * this machine's own loopback rather than the agent's. That is a routing miss, not an
+ * exposure: it is the user's own machine, reachable from their own Chrome. Resolving every
+ * hostname to close it is exactly the guard removed below, and it cost every fake-IP proxy
+ * user their browser.
  *
  * There is deliberately NO network guard here — no resolver check, no per-request hostname
  * policy. This view is a plain sandboxed `WebContentsView` with no preload, no script

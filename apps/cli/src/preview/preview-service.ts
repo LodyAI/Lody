@@ -151,6 +151,21 @@ const normalizeTarget = (target: PreviewTarget): PreviewTarget | ValidationFailu
       retryable: false,
     };
   }
+  // `classifyBrowserHostname` reads the hostname TEXT, so it calls any `*.localhost`
+  // name loopback. RFC 6761 says a resolver should answer those from 127.0.0.0/8, but
+  // nothing makes it — a search domain or a rebinding record can point `foo.localhost`
+  // at a LAN host, and `probeHosts` only substitutes literals for the exact string
+  // `localhost`, so the probe and the forwarded request resolve separately. Requiring a
+  // literal or that exact name is what makes the invariant above true of the ADDRESS
+  // rather than of the spelling. Agents report `127.0.0.1` or `localhost`
+  // (`lody_report_preview_candidate`), so nothing legitimate is turned away.
+  if (host !== 'localhost' && net.isIP(host) === 0) {
+    return {
+      code: 'host_not_loopback',
+      message: `Preview target host must be a loopback address or "localhost", got ${target.host}.`,
+      retryable: false,
+    };
+  }
 
   const normalizedPath = normalizePath(target.path);
   if (target.path !== undefined && !normalizedPath) {
