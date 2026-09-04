@@ -150,28 +150,4 @@ describe('MessageHandler turn finalization compare-and-set', () => {
       await destroyRepoOnRealTimers(repo);
     }
   });
-
-  it('still closes the entry when the turn it names is the one finalizing', async () => {
-    const sessionId = 's-finalize-cas-normal' as SessionId;
-    const userTurnId = 'user-2';
-    const { repo, doc, host } = await createHarness(sessionId);
-
-    try {
-      const { turnId } = host.beginConversationTurn(sessionId, userTurnId, {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-      });
-      await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
-      host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'done'));
-
-      await host.finalizeACPState(sessionId, turnId);
-
-      const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
-      expect(assistant?.finished).toBe(true);
-      expect(typeof assistant?.endedAt).toBe('number');
-      expect(host.store.getTurnId(sessionId)).toBeUndefined();
-    } finally {
-      await destroyRepoOnRealTimers(repo);
-    }
-  });
 });

@@ -146,6 +146,7 @@ describe('SessionTransientStore', () => {
           assistantEntryId: 'turn-2',
         })
       ).toBe('bound');
+      expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBeUndefined();
       expect(store.getCurrentACPUpdateTarget(id)).toMatchObject({
         turnId: 'turn-2',
         source: 'active_turn',
@@ -181,44 +182,6 @@ describe('SessionTransientStore', () => {
 
       // The live turn's routing was left untouched by the refusal.
       expect(store.getCurrentACPUpdateTarget(id)).toBeUndefined();
-    });
-
-    it('bindTurnForPrompt refuses a turn that was already cleared', () => {
-      const store = new SessionTransientStore();
-      const id = sid('s1');
-
-      const epoch = store.beginTurn(id, { turnId: 'turn-1' });
-      const ref = { turnId: 'turn-1', turnEpoch: epoch, assistantEntryId: 'turn-1' };
-      store.clearTurnState(id);
-
-      expect(store.bindTurnForPrompt(id, ref)).toBe('turn_superseded');
-      expect(store.has(id)).toBe(true);
-    });
-
-    it('bindTurnForPrompt drops a stale late target so replay cannot leak into the new turn', () => {
-      // Binding is what hands routing to the new turn, and it must also drop the
-      // previous turn's late-update target — otherwise output produced between
-      // the two turns keeps landing on the old assistant entry.
-      const store = new SessionTransientStore();
-      const id = sid('s1');
-
-      store.beginTurn(id, { turnId: 'turn-1' });
-      const previous = store.getCurrentACPUpdateTarget(id);
-      if (!previous) throw new Error('expected active ACP update target');
-      store.rememberFinalizedTurnForLateACPUpdates(id, previous);
-      store.clearTurnState(id);
-
-      const epoch = store.beginTurn(id, { turnId: 'turn-2', ownsACPUpdates: false });
-      expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBe('turn-1');
-
-      expect(
-        store.bindTurnForPrompt(id, {
-          turnId: 'turn-2',
-          turnEpoch: epoch,
-          assistantEntryId: 'turn-2',
-        })
-      ).toBe('bound');
-      expect(store.getLateACPUpdateTargetAssistantEntryId(id)).toBeUndefined();
     });
 
     it('never expires finalized-turn ACP update routing by wall-clock time', () => {

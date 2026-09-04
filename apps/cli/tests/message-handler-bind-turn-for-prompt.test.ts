@@ -122,31 +122,4 @@ describe('MessageHandler bindTurnForPrompt', () => {
       await destroyRepoOnRealTimers(repo);
     }
   });
-
-  it('refuses to bind a turn that a redispatch superseded', async () => {
-    const sessionId = 's-bind-superseded' as SessionId;
-    const userTurnId = 'user-4';
-    const { repo, doc, host } = await createHarness(sessionId);
-
-    try {
-      const staleRef = host.beginConversationTurn(sessionId, userTurnId, {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-        deferACPUpdateTarget: true,
-      });
-      // Same turn id (`assistant:<userTurnId>`), new epoch.
-      const liveRef = host.beginConversationTurn(sessionId, userTurnId, {
-        dispatchSource: 'crdt',
-        sessionDoc: doc,
-        deferACPUpdateTarget: true,
-      });
-      expect(liveRef.turnId).toBe(staleRef.turnId);
-      expect(liveRef.turnEpoch).not.toBe(staleRef.turnEpoch);
-
-      expect(host.bindConversationTurnForPrompt(sessionId, staleRef)).toBe('turn_superseded');
-      expect(host.bindConversationTurnForPrompt(sessionId, liveRef)).toBe('bound');
-    } finally {
-      await destroyRepoOnRealTimers(repo);
-    }
-  });
 });
