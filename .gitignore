@@ -120,6 +120,7 @@ dist
 *~
 logs/
 .lody-e2e/
+/e2e/artifacts/
 
 # OS
 .DS_Store
