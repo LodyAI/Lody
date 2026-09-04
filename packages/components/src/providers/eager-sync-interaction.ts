@@ -83,14 +83,25 @@ export function createEagerSyncInteractionSignal(
         listener();
       }
     }
-    clearQuietTimer();
-    if (next && lastMarkAt !== null) {
-      // One timer per quiet period, re-armed on the next mark rather than per event.
-      quietTimer = scheduler.setTimeout(() => {
+    if (!next) {
+      clearQuietTimer();
+      return;
+    }
+    if (quietTimer !== null) {
+      // A gesture is already being waited on. Let that timer re-evaluate and
+      // extend itself when it fires, rather than clearing and re-arming here:
+      // `mark()` runs per input event, and wheel/touchmove reach 60-120Hz, so
+      // re-arming would put a pair of timer calls on every frame of exactly the
+      // gesture this signal exists to keep clear.
+      return;
+    }
+    quietTimer = scheduler.setTimeout(
+      () => {
         quietTimer = null;
         sync();
-      }, Math.max(0, lastMarkAt + quietMs - clock.now()));
-    }
+      },
+      Math.max(0, (lastMarkAt ?? 0) + quietMs - clock.now())
+    );
   };
 
   return {

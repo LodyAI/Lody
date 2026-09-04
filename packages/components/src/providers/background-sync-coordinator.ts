@@ -123,6 +123,14 @@ export interface EagerSyncPolicy {
   /** Abort a prefetch that has not settled within this window. */
   prefetchTimeoutMs: number;
   /**
+   * Yield to the user: start no new prefetch while `deps.interaction` reports
+   * that input is in flight. Worth it only where the main thread is the
+   * bottleneck — deferring costs prefetch throughput, and slower session opens
+   * are the thing eager-sync exists to prevent, so a machine with headroom
+   * should pay nothing for this.
+   */
+  deferWhileInteracting: boolean;
+  /**
    * Optional narrower window used until the coordinator has warmed up. Absent
    * means `candidateWindow` applies from the start, which is the historical
    * behavior. Candidates are always drained highest-priority first, so this is
@@ -149,6 +157,14 @@ export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 20,
   candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
+  // Web is the one surface that may be either a phone browser or a workstation,
+  // and nothing here can tell them apart. It defers, because the two mistakes
+  // are not symmetric: on a phone browser, not deferring reproduces exactly the
+  // stall this policy exists to prevent, while on a workstation the cost is
+  // small and bounded BECAUSE web's scope is — 20 candidates, 20 resident, and
+  // persisted high-water marks mean steady state is nearly free. Only the cold
+  // warm-up can be delayed, and only until a second after the user pauses.
+  deferWhileInteracting: true,
 };
 
 export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
@@ -159,6 +175,11 @@ export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 96,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
+  // Electron is a desktop-class machine with an unbounded warm scope: the main
+  // thread is not the bottleneck, so deferring would trade real prefetch
+  // throughput — every keystroke of a long prompt pushing the quiet window out
+  // — for a smoothness it already has.
+  deferWhileInteracting: false,
 };
 
 /**
@@ -182,6 +203,9 @@ export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 12,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
+  // The whole point on a phone: a prefetch deserializes a doc on the one thread
+  // that is also drawing the frame under the user's finger.
+  deferWhileInteracting: true,
   // Roughly a screenful of the highest-priority sessions — pinned, on screen,
   // running — then five idle seconds before the rest comes into scope.
   warmupCandidateWindow: 6,
@@ -307,23 +331,48 @@ export function createBackgroundSyncCoordinator(
 
   const isInteracting = (): boolean => interaction?.isInteracting() === true;
 
-  const comparePrefetchPriority = (
-    left: SessionActivitySnapshot,
-    right: SessionActivitySnapshot
-  ): number => {
-    const priorityDelta = priorityOf(right) - priorityOf(left);
+  /**
+   * A candidate with its priority already computed. Sorting recomputes the
+   * comparator's inputs O(n log n) times, and a bounded candidate window
+   * re-sorts on every activity event, so the seed path pays for `priorityOf`
+   * once per candidate instead.
+   */
+  type RankedCandidate = { snap: SessionActivitySnapshot; priority: number };
+
+  const rankCandidate = (snap: SessionActivitySnapshot): RankedCandidate => ({
+    snap,
+    priority: priorityOf(snap),
+  });
+
+  const compareRankedCandidates = (left: RankedCandidate, right: RankedCandidate): number => {
+    const priorityDelta = right.priority - left.priority;
     if (priorityDelta !== 0) {
       return priorityDelta;
     }
-    const activityDelta = (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0);
+    const activityDelta = (right.snap.lastMessageAt ?? 0) - (left.snap.lastMessageAt ?? 0);
     if (activityDelta !== 0) {
       return activityDelta;
     }
-    return String(left.sessionId).localeCompare(String(right.sessionId));
+    return String(left.snap.sessionId).localeCompare(String(right.snap.sessionId));
   };
+
+  // The queue is bounded by the candidate window, so ranking on the fly here is
+  // cheap; keeping one comparator body is what keeps the drain order and the
+  // window's contents from ever disagreeing.
+  const comparePrefetchPriority = (
+    left: SessionActivitySnapshot,
+    right: SessionActivitySnapshot
+  ): number => compareRankedCandidates(rankCandidate(left), rankCandidate(right));
 
   const getBatchSize = (): number => Math.max(1, Math.floor(policy.batchSize));
 
+  /**
+   * NOTE: a finite limit is not free. It makes `handleActivity` re-seed — a full
+   * re-rank of every candidate — per activity event, where an unbounded scope
+   * evaluates one session. During warm-up that lands on the cold-start sync
+   * burst, which is the very path being protected, and it is why the warm-up
+   * scope is a short warm-up and not a permanently narrow window.
+   */
   const getCandidateLimit = (): number | null => {
     const window =
       warmingUp && policy.warmupCandidateWindow != null
@@ -343,11 +392,17 @@ export function createBackgroundSyncCoordinator(
     for (const snap of latest.values()) {
       snapshots.set(snap.sessionId, snap);
     }
-    const candidates = Array.from(snapshots.values())
-      .filter((snap) => !snap.isArchived && snap.lastMessageAt != null)
-      .sort(comparePrefetchPriority);
+    const ranked: RankedCandidate[] = [];
+    for (const snap of snapshots.values()) {
+      if (snap.isArchived || snap.lastMessageAt == null) {
+        continue;
+      }
+      ranked.push(rankCandidate(snap));
+    }
+    ranked.sort(compareRankedCandidates);
     const limit = getCandidateLimit();
-    return limit == null ? candidates : candidates.slice(0, limit);
+    const capped = limit == null ? ranked : ranked.slice(0, limit);
+    return capped.map((entry) => entry.snap);
   };
 
   const clearWarmupExit = () => {
@@ -577,6 +632,13 @@ export function createBackgroundSyncCoordinator(
       // one under the user's finger is exactly the stall this coordinator
       // exists to avoid. In-flight work is deliberately left running: aborting
       // it only buys a fresh room join later, not a quieter frame now.
+      //
+      // Sustained input therefore stalls eager-sync entirely, and the warm-up
+      // cannot widen either. That is the trade this makes: instant session
+      // opens are given up exactly while the user is busy doing something else.
+      // There is deliberately no ceiling on the deferral — the quiet window is
+      // ~1s, so any pause resumes it, and a ceiling would only reintroduce the
+      // jank mid-gesture.
       return;
     }
     if (batchCooldownHandle !== null) {

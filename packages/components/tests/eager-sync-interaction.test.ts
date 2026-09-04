@@ -9,11 +9,13 @@ import {
 function createFakeTime() {
   let now = 0;
   let nextId = 1;
+  let scheduled = 0;
   const timers = new Map<number, { fire: () => void; due: number }>();
   return {
     clock: { now: () => now },
     scheduler: {
       setTimeout: (handler: () => void, ms: number) => {
+        scheduled += 1;
         const id = nextId++;
         timers.set(id, { fire: handler, due: now + ms });
         return id;
@@ -23,6 +25,7 @@ function createFakeTime() {
       },
     },
     pending: () => timers.size,
+    scheduled: () => scheduled,
     advance: (ms: number) => {
       now += ms;
       for (const [id, timer] of Array.from(timers)) {
@@ -80,6 +83,9 @@ describe('createEagerSyncInteractionSignal', () => {
       expect(time.pending()).toBe(1);
     }
     expect(flips).toEqual([true]);
+    // Timer work must be per gesture, not per input event: 21 marks here, and a
+    // real flick fires them at 60-120Hz.
+    expect(time.scheduled()).toBeLessThan(5);
 
     time.advance(EAGER_SYNC_INTERACTION_QUIET_MS);
     expect(signal.isInteracting()).toBe(false);

@@ -58,3 +58,12 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
   fed by direct-manipulation events only and deliberately ignores `scroll`, because
   the conversation view auto-scrolls itself while an agent streams and would
   otherwise starve background sync for as long as any session runs.
+- That gate is in `drain()` and so is POLICY-INDEPENDENT: any surface handed an
+  `interaction` port defers, warm-up or not. Which surfaces want it is
+  `policy.deferWhileInteracting`, beside concurrency and the batch cooldown, and the
+  runtime must not create or bind the signal when a policy does not ask for it.
+  Deferring costs prefetch throughput, and a slower session open is the thing
+  eager-sync exists to prevent, so it is only worth paying where the main thread is
+  the bottleneck: mobile and web yes, Electron no. Web defers because it may be a
+  phone browser and nothing can tell — its already-bounded scope is what keeps that
+  cheap on a workstation.

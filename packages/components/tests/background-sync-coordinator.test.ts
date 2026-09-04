@@ -243,6 +243,7 @@ function setup(
     maxWarmDocs: 24,
     candidateWindow: 50,
     prefetchTimeoutMs: 20_000,
+    deferWhileInteracting: true,
     ...options.policy,
   };
   const deps: BackgroundSyncCoordinatorDeps = {
@@ -278,6 +279,18 @@ describe('createBackgroundSyncCoordinator', () => {
       maxWarmDocs: 96,
     });
     expect(resolveEagerSyncPolicy('desktop').warmupCandidateWindow).toBeUndefined();
+  });
+
+  it('only defers to interaction where the main thread is the bottleneck', () => {
+    // The gate in drain() is policy-independent, so a surface that does not ask
+    // for this must not get an interaction port at all — otherwise typing a long
+    // prompt on a desktop keeps pushing the quiet window out and eager-sync,
+    // which exists to make opening a session instant, never runs.
+    expect(resolveEagerSyncPolicy('desktop').deferWhileInteracting).toBe(false);
+    expect(resolveEagerSyncPolicy('mobile').deferWhileInteracting).toBe(true);
+    // Web may be a phone browser and nothing here can tell; it defers, and its
+    // already-bounded scope is what keeps that cheap on a workstation.
+    expect(resolveEagerSyncPolicy('web').deferWhileInteracting).toBe(true);
   });
 
   it('paces mobile more gently than desktop and warms up before widening', () => {

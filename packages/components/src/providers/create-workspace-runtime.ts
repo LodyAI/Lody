@@ -4191,12 +4191,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         return;
       }
       backgroundSyncHighWaterStore = highWaterStore;
-      const interactionSignal = createEagerSyncInteractionSignal();
+
+      // Which surfaces yield to input is a policy decision, so it stays beside
+      // concurrency and the batch cooldown in `resolveEagerSyncPolicy` rather
+      // than being re-derived here. A policy that does not ask for it gets no
+      // signal and no input listeners at all.
+      const eagerSyncPolicy = resolveEagerSyncPolicy(deps.eagerSyncSurface ?? 'web');
+      const interactionSignal =
+        eagerSyncPolicy.deferWhileInteracting && typeof window !== 'undefined'
+          ? createEagerSyncInteractionSignal()
+          : null;
       backgroundSyncInteraction = interactionSignal;
-      unbindBackgroundSyncInteraction =
-        typeof window === 'undefined'
-          ? null
-          : bindEagerSyncInteractionSignalToDom(interactionSignal, window);
+      unbindBackgroundSyncInteraction = interactionSignal
+        ? bindEagerSyncInteractionSignalToDom(interactionSignal, window)
+        : null;
 
       backgroundSyncCoordinator = createBackgroundSyncCoordinator({
         activitySource: {
@@ -4279,13 +4287,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
         // Prefetching deserializes a doc on the main thread, so it waits its
         // turn behind whatever the user is doing with their hands.
-        interaction: interactionSignal,
+        interaction: interactionSignal ?? undefined,
         clock: { now: () => Date.now() },
         scheduler: {
           setTimeout: (handler, ms) => setTimeout(handler, ms),
           clearTimeout: (handle) => clearTimeout(handle as Parameters<typeof clearTimeout>[0]),
         },
-        policy: resolveEagerSyncPolicy(deps.eagerSyncSurface ?? 'web'),
+        policy: eagerSyncPolicy,
         highWaterStore,
       });
 
