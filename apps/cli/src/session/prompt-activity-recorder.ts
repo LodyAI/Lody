@@ -8,8 +8,15 @@ export type PromptActivityObservation =
 export class PromptActivityRecorder {
   private routed = false;
   private sideEffects = false;
+  private successor?: PromptActivityRecorder;
 
-  constructor(private readonly previous?: PromptActivityRecorder) {}
+  constructor(private readonly previous?: PromptActivityRecorder) {
+    previous?.attachSuccessor(this);
+  }
+
+  private attachSuccessor(successor: PromptActivityRecorder): void {
+    this.successor = successor;
+  }
 
   recordRouted(): void {
     this.routed = true;
@@ -17,11 +24,18 @@ export class PromptActivityRecorder {
 
   recordSideEffect(): void {
     this.sideEffects = true;
+    // A predecessor-side request can arrive after the steer was accepted but
+    // before the successor is bound.
+    this.successor?.recordInheritedSideEffect();
     // Permission/file requests can cross a steer handoff. Until this run emits
     // output, conservatively credit the predecessor too.
     if (!this.routed) {
       this.previous?.recordSideEffect();
     }
+  }
+
+  private recordInheritedSideEffect(): void {
+    this.sideEffects = true;
   }
 
   observe(): Exclude<PromptActivityObservation, 'unknown'> {

@@ -9,6 +9,7 @@ import {
   buildSessionLaunchConfig,
   normalizeSessionPreparationRunConfigForDedup,
   type AgentConfigId,
+  type ACPSessionId,
   type LocalProjectId,
   type MachineId,
   type SessionId,
@@ -1251,6 +1252,10 @@ describe('SessionManager lifecycle events are instance-scoped', () => {
 
       const oldInstance = buildSession(sessionId);
       const newInstance = buildSession(sessionId);
+      let wasCurrent: boolean | undefined;
+      manager.once(eventName, (event) => {
+        wasCurrent = event.wasCurrent;
+      });
       internals.registerSessionEvents(oldInstance);
       internals.registerSessionEvents(newInstance);
       internals.sessions.set(sessionId, newInstance);
@@ -1258,6 +1263,7 @@ describe('SessionManager lifecycle events are instance-scoped', () => {
       oldInstance.emit(eventName, { sessionId, exitCode: eventName === 'exit' ? 1 : 0 });
 
       expect(manager.getSession(sessionId)).toBe(newInstance);
+      expect(wasCurrent).toBe(false);
     }
   );
 
@@ -1275,5 +1281,47 @@ describe('SessionManager lifecycle events are instance-scoped', () => {
     await session.terminate(true);
 
     expect(emitted).toHaveLength(1);
+  });
+
+  it('escalates an in-flight graceful termination when force is requested', async () => {
+    const sessionId = 'session-terminate-escalation' as SessionId;
+    const sandbox = createNoopSessionSandbox();
+    let signalForced!: () => void;
+    const forced = new Promise<void>((resolve) => {
+      signalForced = resolve;
+    });
+    const terminateSandbox = vi.spyOn(sandbox, 'terminate').mockImplementation(async (force) => {
+      if (force) signalForced();
+    });
+    const session = new Session(
+      createSessionConfig({ sessionId }),
+      createLogger(),
+      mkdtempSync(path.join(os.tmpdir(), 'lody-session-instance-')),
+      sandbox
+    );
+    let signalCloseStarted!: () => void;
+    let releaseClose!: () => void;
+    const closeStarted = new Promise<void>((resolve) => {
+      signalCloseStarted = resolve;
+    });
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    session.acpSessionId = 'acp-1' as ACPSessionId;
+    session.agentClient = {
+      isCreated: () => true,
+      closeSession: async () => {
+        signalCloseStarted();
+        await closeGate;
+      },
+    } as unknown as NonNullable<Session['agentClient']>;
+
+    const graceful = session.terminate(false);
+    await closeStarted;
+    const force = session.terminate(true);
+    await forced;
+    expect(terminateSandbox).toHaveBeenCalledWith(true);
+    await Promise.all([graceful, force]);
+    releaseClose();
   });
 });

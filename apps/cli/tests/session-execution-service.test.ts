@@ -312,6 +312,10 @@ describe('SessionExecutionService', () => {
       dispatchSource: 'rpc',
       sessionDoc,
     });
+    expect(vi.mocked(deps.bindConversationTurnForPrompt).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.createAssistantEntryForTurn).mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY
+    );
     expect(steerPrompt).toHaveBeenCalledWith('acp-steer', [{ type: 'text', text: 'hello' }]);
     expect(deps.applyAcpModeAndModel).toHaveBeenCalledOnce();
     expect(steerPrompt.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1135,7 +1139,9 @@ describe('SessionExecutionService', () => {
     sessionId: string;
     visibleOutput: boolean;
     promptActivity?: PromptActivityObservation;
+    changeActivityDuringFinalization?: boolean;
   }) => {
+    let finalizationStarted = false;
     let history: Array<Record<string, unknown>> = [
       {
         id: 'turn-user-1',
@@ -1195,11 +1201,16 @@ describe('SessionExecutionService', () => {
       turnFinalization: {
         ...createBaseDeps({}).turnFinalization,
         notifySessionCompleted,
+        refreshCodeCollabSharedState: vi.fn(async () => {
+          finalizationStarted = true;
+        }),
       },
       observePromptOutputForTurn: vi.fn(() => options.visibleOutput),
-      ...(options.promptActivity
-        ? { observePromptActivityForTurn: vi.fn(() => options.promptActivity!) }
-        : {}),
+      observePromptActivityForTurn: vi.fn(() =>
+        options.changeActivityDuringFinalization && finalizationStarted
+          ? 'dropped_prompt_activity'
+          : (options.promptActivity ?? 'none')
+      ),
     });
 
     const service = new SessionExecutionService(deps);
@@ -1231,6 +1242,7 @@ describe('SessionExecutionService', () => {
       await runSilentPromptTurn({
         sessionId: 'session-silent-turn',
         visibleOutput: false,
+        changeActivityDuringFinalization: true,
       });
 
     expect(agentClient.prompt).toHaveBeenCalled();
@@ -1516,7 +1528,11 @@ describe('SessionExecutionService', () => {
     expect(onAccessDenied).not.toHaveBeenCalled();
     expect(onAccessIndeterminate).not.toHaveBeenCalled();
     expect(deps.clearSessionActivePresence).toHaveBeenCalledWith(sessionId);
-    expect(deps.clearConversationTurn).toHaveBeenCalledWith(sessionId, turnId);
+    expect(deps.clearConversationTurn).toHaveBeenCalledWith(sessionId, {
+      turnId,
+      turnEpoch: 1,
+      assistantEntryId: turnId,
+    });
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({
@@ -4958,7 +4974,12 @@ describe('SessionExecutionService', () => {
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel');
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(
       'session-prompt-cancel',
-      'assistant-prompt-cancel'
+      'assistant-prompt-cancel',
+      {
+        turnId: 'assistant-prompt-cancel',
+        turnEpoch: 1,
+        assistantEntryId: 'assistant-prompt-cancel',
+      }
     );
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());

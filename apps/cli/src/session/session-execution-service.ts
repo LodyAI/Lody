@@ -172,7 +172,11 @@ const DROPPED_ACTIVITY_TURN_FAILURE_MESSAGE =
   'what to do, and do not simply retry, because that can repeat work the agent already did.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
+  finalizeACPState: (
+    sessionId: SessionId,
+    turnId?: string,
+    expectedTurnRef?: TurnRef
+  ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -294,6 +298,7 @@ type TurnCancellationFinalizerOptions = {
   sessionId: SessionId;
   sessionDoc: SessionDocument;
   turnId: string;
+  turnRef?: TurnRef;
   userTurnId?: string;
   session?: ISession | null;
   pendingSession?: Promise<ISession>;
@@ -461,9 +466,9 @@ export type SessionExecutionServiceDeps = {
     recorder?: PromptActivityRecorder
   ) => BindTurnForPromptResult;
   observePromptActivityForTurn: (sessionId: SessionId, turnId: string) => PromptActivityObservation;
-  clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
+  clearConversationTurn: (sessionId: SessionId, turnRef: TurnRef) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
-  clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
+  clearActiveTurnId: (sessionId: SessionId, turnId: string, turnRef?: TurnRef) => void;
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
@@ -1368,6 +1373,9 @@ export class SessionExecutionService {
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       submittedToAgent = true;
       const application = await steerRun.applied;
+      // Link activity as soon as application is known. Permission/file requests
+      // can arrive while history ownership is being handed over below.
+      const nextActivity = new PromptActivityRecorder(ownedPromptRun.activity);
       try {
         if (
           this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
@@ -1402,19 +1410,6 @@ export class SessionExecutionService {
           sessionDoc,
         });
         const nextTurnId = nextTurnRef.turnId;
-        try {
-          await this.deps.createAssistantEntryForTurn(
-            options.sessionId,
-            sessionDoc,
-            nextTurnId,
-            agentClient.currentModel,
-            options.userTurnId
-          );
-        } catch (error) {
-          this.deps.logger.error(
-            `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
-          );
-        }
         // The steer reuses the same physical prompt, so there is no prompt left to
         // withhold — `steerRun.applied` already returned and the agent has taken
         // the steer. A bind refusal therefore cancels the turn instead, and the
@@ -1426,7 +1421,6 @@ export class SessionExecutionService {
         // `session/update`, so a permission request or `fs/write_text_file` the
         // PREVIOUS turn caused can still arrive after this bind. Those are
         // credited to the predecessor as well until this run sees its own output.
-        const nextActivity = new PromptActivityRecorder(ownedPromptRun.activity);
         const nextBindResult = this.deps.bindConversationTurnForPrompt(
           options.sessionId,
           nextTurnRef,
@@ -1436,7 +1430,6 @@ export class SessionExecutionService {
           this.deps.logger.error(
             `[${options.sessionId}] Cancelling steered turn ${nextTurnId}: ACP update routing could not be bound (${nextBindResult})`
           );
-          this.markTurnCancelled(options.sessionId, nextTurnId);
           runtime.cancelRequested = true;
           runtime.turnId = nextTurnId;
           runtime.turnRef = nextTurnRef;
@@ -1448,6 +1441,19 @@ export class SessionExecutionService {
           return reject(
             'error',
             `Steer applied but ACP update routing could not be bound (${nextBindResult}); the turn was cancelled`
+          );
+        }
+        try {
+          await this.deps.createAssistantEntryForTurn(
+            options.sessionId,
+            sessionDoc,
+            nextTurnId,
+            agentClient.currentModel,
+            options.userTurnId
+          );
+        } catch (error) {
+          this.deps.logger.error(
+            `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
           );
         }
         const nextPromptRun = this.createPromptHandoffRun({
@@ -1934,7 +1940,7 @@ export class SessionExecutionService {
         runtime.cancelFinalized = true;
         runtime.cancelRequested = true;
       }
-      self.deps.clearActiveTurnId(options.sessionId, options.turnId);
+      self.deps.clearActiveTurnId(options.sessionId, options.turnId, options.turnRef);
 
       const sessionToTerminate = options.session ?? null;
       if (options.terminateSession && !sessionToTerminate && options.pendingSession) {
@@ -1975,7 +1981,8 @@ export class SessionExecutionService {
               options.sessionId,
               options.sessionDoc,
               new Error('cancelled'),
-              options.turnId
+              options.turnId,
+              options.turnRef
             )
           )
         );
@@ -2218,7 +2225,8 @@ export class SessionExecutionService {
       options.sessionId,
       options.sessionDoc,
       options.error,
-      options.runtime.turnId
+      options.runtime.turnId,
+      options.runtime.turnRef
     );
     await options.onUnhandledError?.(options.error);
   }
@@ -2227,10 +2235,17 @@ export class SessionExecutionService {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
     turnId: string;
+    turnRef: TurnRef;
     reason: ChatFailedReason;
   }): Promise<void> {
     try {
-      await this.handleTurnError(options.sessionId, options.sessionDoc, undefined, options.turnId);
+      await this.handleTurnError(
+        options.sessionId,
+        options.sessionDoc,
+        undefined,
+        options.turnId,
+        options.turnRef
+      );
     } catch (error) {
       this.deps.logger.warn(
         `[${options.sessionId}] Failed to finalize halted turn ${options.turnId} (${options.reason}): ${formatErrorMessage(error)}`
@@ -2331,9 +2346,10 @@ export class SessionExecutionService {
     sessionId: SessionId,
     sessionDoc: SessionDocument,
     error: unknown,
-    turnId: string
+    turnId: string,
+    turnRef?: TurnRef
   ): Promise<void> {
-    await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
+    await this.deps.turnFinalization.finalizeACPState(sessionId, turnId, turnRef);
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, turnId);
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
@@ -2766,6 +2782,7 @@ export class SessionExecutionService {
               sessionId,
               sessionDoc,
               turnId: turnRuntime.turnId,
+              turnRef: turnRuntime.turnRef,
               userTurnId: turnRuntime.userTurnId,
               session: turnRuntime.session,
               pendingSession: turnRuntime.pendingSession,
@@ -2836,6 +2853,7 @@ export class SessionExecutionService {
                   sessionId,
                   sessionDoc,
                   turnId: runtime.turnId,
+                  turnRef: runtime.turnRef,
                   userTurnId: runtime.userTurnId,
                   session: runtime.session,
                   pendingSession: runtime.pendingSession,
@@ -2995,7 +3013,7 @@ export class SessionExecutionService {
                       runtime.activePromptRun = undefined;
                     })
                 );
-                self.deps.clearActiveTurnId(sessionId, runtime.turnId);
+                self.deps.clearActiveTurnId(sessionId, runtime.turnId, runtime.turnRef);
                 return undefined;
               });
 
@@ -3028,6 +3046,7 @@ export class SessionExecutionService {
           sessionId,
           sessionDoc,
           turnId: runtime.turnId,
+          turnRef: runtime.turnRef,
           reason: error.reason,
         });
         return outcome;
@@ -3057,7 +3076,7 @@ export class SessionExecutionService {
       outcome = 'unhandled-error-recorded';
     } finally {
       if (!runtime.promptStarted) {
-        this.deps.clearConversationTurn(sessionId, runtime.turnId);
+        this.deps.clearConversationTurn(sessionId, runtime.turnRef);
       }
       span.end({ outcome, turnId });
     }
@@ -3362,16 +3381,16 @@ export class SessionExecutionService {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
     turnId: string;
+    activity: PromptActivityObservation;
     userTurnId?: string;
   }): Promise<void> {
-    const activity = this.deps.observePromptActivityForTurn(options.sessionId, options.turnId);
     // Only an upstream-looking silence gets the upstream-cause guess. A turn that
     // demonstrably acted must not be explained as a context-length or rate-limit
     // rejection, and must not be presented as safe to retry.
-    const actedWithoutOutput = activity === 'dropped_prompt_activity';
+    const actedWithoutOutput = options.activity === 'dropped_prompt_activity';
     this.deps.logger.warn(
       `[${options.sessionId}] Turn ${options.turnId} completed without any agent output ` +
-        `(activity=${activity}); recording it as a failed turn instead of a silent completion`
+        `(activity=${options.activity}); recording it as a failed turn instead of a silent completion`
     );
     this.captureTurnFailed(options.sessionId, options.turnId, 'agent_no_output', false);
     await this.deps.recordChatFailure(
@@ -4095,6 +4114,7 @@ export class SessionExecutionService {
         const completedRequesterUserId = runtime.requesterUserId ?? userId;
         // Read before finalization clears the turn's ACP update state.
         const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
+        const promptActivity = self.deps.observePromptActivityForTurn(sessionId, completedTurnId);
 
         yield* self.tryPromise(() =>
           traceAsync(
@@ -4172,6 +4192,7 @@ export class SessionExecutionService {
                   sessionId,
                   sessionDoc,
                   turnId: completedTurnId,
+                  activity: promptActivity,
                   ...(completedUserTurnId ? { userTurnId: completedUserTurnId } : {}),
                 })
             )
@@ -4767,6 +4788,7 @@ export class SessionExecutionService {
           const completedRequesterUserId = runtime.requesterUserId ?? sessionConfig.requesterUserId;
           // Read before finalization clears the turn's ACP update state.
           const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
+          const promptActivity = self.deps.observePromptActivityForTurn(sessionId, completedTurnId);
 
           yield* self.tryPromise(() =>
             traceAsync(
@@ -4844,6 +4866,7 @@ export class SessionExecutionService {
                     sessionId,
                     sessionDoc,
                     turnId: completedTurnId,
+                    activity: promptActivity,
                     ...(completedUserTurnId ? { userTurnId: completedUserTurnId } : {}),
                   })
               )

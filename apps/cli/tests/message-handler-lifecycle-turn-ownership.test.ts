@@ -141,7 +141,12 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
       await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
 
       // The failed restore terminates its own Session instance.
-      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
+      listeners.terminated?.({
+        sessionId,
+        exitCode: 0,
+        session: deadSession(sessionId),
+        wasCurrent: true,
+      });
       await vi.advanceTimersByTimeAsync(50);
 
       // The fallback's new ACP session starts prompting and claims routing.
@@ -173,17 +178,23 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
           sessionId,
           error: new Error('resource limit'),
           session: deadSession(sessionId),
+          wasCurrent: true,
         }),
     ],
     [
       'exit',
       (l: typeof listenersShape, sessionId: SessionId) =>
-        l.exit?.({ sessionId, exitCode: 1, session: deadSession(sessionId) }),
+        l.exit?.({ sessionId, exitCode: 1, session: deadSession(sessionId), wasCurrent: true }),
     ],
     [
       'terminated',
       (l: typeof listenersShape, sessionId: SessionId) =>
-        l.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) }),
+        l.terminated?.({
+          sessionId,
+          exitCode: 0,
+          session: deadSession(sessionId),
+          wasCurrent: true,
+        }),
     ],
   ])('drains buffered output on `%s` without ending an owned turn', async (kind, fire) => {
     // All three listeners, not just `terminated`: a resource-limit violation
@@ -234,7 +245,12 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
       await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, 'user-turn-3');
       host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'partial'));
 
-      listeners.exit?.({ sessionId, exitCode: 1, session: deadSession(sessionId) });
+      listeners.exit?.({
+        sessionId,
+        exitCode: 1,
+        session: deadSession(sessionId),
+        wasCurrent: true,
+      });
       await vi.advanceTimersByTimeAsync(50);
 
       expect(clearPresence).toHaveBeenCalledWith(sessionId);
@@ -254,8 +270,36 @@ describe('MessageHandler session lifecycle events vs. an owned turn', () => {
 
     try {
       setActiveTurn(false);
-      listeners.terminated?.({ sessionId, exitCode: 0, session: deadSession(sessionId) });
+      listeners.terminated?.({
+        sessionId,
+        exitCode: 0,
+        session: deadSession(sessionId),
+        wasCurrent: true,
+      });
       expect(releaseWatch).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('ignores termination from a superseded session instance', async () => {
+    const sessionId = 's-lifecycle-stale' as SessionId;
+    const { repo, listeners, setActiveTurn, releaseWatch, clearPresence, setStatus } =
+      await createHarness(sessionId);
+
+    try {
+      setActiveTurn(false);
+      listeners.terminated?.({
+        sessionId,
+        exitCode: 0,
+        session: deadSession(sessionId),
+        wasCurrent: false,
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(releaseWatch).not.toHaveBeenCalled();
+      expect(clearPresence).not.toHaveBeenCalled();
+      expect(setStatus).not.toHaveBeenCalled();
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

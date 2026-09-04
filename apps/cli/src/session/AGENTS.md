@@ -112,19 +112,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
   `TurnRuntimeState` is registered.
-  INVARIANT: store-turn and runtime ownership can differ while an auto-prompt runs.
-  A no-turn-id finalizer must read `getCurrentTurnRef`; absence of an active runtime
-  does not prove the store has no turn. `beginConversationTurn` returns the whole `TurnRef`
-  (`turnId` + `turnEpoch` + `assistantEntryId`) and the runtime carries it, because
-  `bindConversationTurnForPrompt` is an authoritative write that must name the exact
-  epoch it created rather than whatever turn happens to be current. A bind refusal is
-  terminal for the turn: the initial prompt path fails closed before sending anything
-  (recorded as `turn_pre_prompt_failed`), and the steer path cancels the steered turn
-  and reports `disposition: 'error'` — it cannot withhold a prompt, because the steer
-  reuses the same physical prompt and the agent has already taken it. Output must never
-  fall back to the previous assistant entry there: `transitionDispatchOwnership` has
-  already moved dispatch ownership to the new user turn, so a fallback renders the new
-  user message as unanswered. User-dispatch turns derive assistant entry ids
+  Runtime and store ownership may differ during auto-prompts. Carry the full `TurnRef`
+  through bind/finalize/cleanup so a same-id newer epoch cannot be changed. Bind refusal
+  is terminal; an applied steer is cancelled and never falls back to its predecessor.
+  User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
   the same history entry.
   INVARIANT: a steer (guide) the agent never accepted must not stay parked in
@@ -168,23 +159,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for
   turn A can overwrite the activation for turn B that arrived during an awaited
   history mutation, leaving B pending and permanently unwatched.
-  INVARIANT: the no-turnId `finalizeACPState` overload stamps `finished=true` on
-  whichever assistant entry is last and then unconditionally clears turn state, so only
-  the turn's OWNER may call it, and only when it genuinely has no turn to name
-  (archive, delete, child cleanup, shutdown drain). Every turn-scoped caller passes its
-  turnId — `handleTurnError` and the auto-prompt runner included. Process lifecycle
-  listeners must not call it at all — see the lifecycle invariant in `../lib/AGENTS.md`;
-  they drain buffers and report the closed Session INSTANCE through
-  `onSessionInstanceClosed`, which acts only when `runtime.session === instance` so a
-  resume fallback terminating the failed instance cannot end the live turn running on
-  its replacement. Releasing the Code Collab workspace watch is the turn owner's job for
-  the same reason: `releaseTurnRuntime` releases it when the turn ends and no instance is
-  registered under that id, which is false for a live replacement.
-  INVARIANT: `Session.terminate` is idempotent and `SessionManager`'s exit/terminated
-  listeners delete from `sessions` only when `get(id) === session`. A session id is
-  served by several instances, and termination is reached from several directions at
-  once; without both, a superseded instance's event evicts its live replacement and
-  `getSession` reports no session for a session that is running.
+  Turn-scoped finalizers pass `turnId` and `TurnRef`; no-turn-id teardown captures the
+  current ref before awaiting. Lifecycle listeners never finalize an owned turn and only
+  the registered Session instance may perform session-wide cleanup. `Session.terminate`
+  is idempotent, and a concurrent forced request escalates graceful teardown.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
@@ -203,13 +181,9 @@ delegation proofs or a shared-machine gate without a new product and security de
   `acp_internal_error`. Continue-session prompt recovery may terminate and restore
   the ACP session once before retrying the same prompt, but only when no ACP output
   has buffered/flushed for that assistant turn; after visible output, never replay
-  the user prompt automatically. The gate uses `prompt-activity-recorder.ts`: only
-  `none` permits replay; output, side effects, and `unknown` fail closed. Create the
-  recorder at bind time and retain it after turn cleanup. Permission and file-write
-  requests bypass ACP updates, so record them explicitly. During a steer handoff,
-  credit these requests to both runs until the successor emits output.
-  `AgentSessionClosedError` is never replayed. If a silent turn recorded side effects,
-  use the uncertain-state `agent_no_output` notice and do not suggest retrying.
+  the user prompt automatically. `prompt-activity-recorder.ts` permits replay only for
+  `none`; it credits handoff-window permission/file writes to both adjacent runs.
+  `AgentSessionClosedError` is never replayed.
   DeepSeek Harness persistence compression mismatches are a distinct
   `acp_session_storage_incompatible` failure, not a generic internal error; keep
   matching narrow to the backend's artifact/compression diagnostic.
@@ -224,11 +198,8 @@ delegation proofs or a shared-machine gate without a new product and security de
   and skips the completion notification. It still runs the full finalization
   (diff stats, PR detection, auto-commit) and still ADVANCES the dispatch pointer:
   the prompt was delivered, so re-dispatching would spin the same silent failure.
-  A missing dep fails OPEN here and only here: `observePromptOutputForTurn` returns
-  `undefined` for an unobservable turn and the guard declines to accuse it.
-  Do not collapse the two observations: replay asks whether a turn may have acted;
-  the no-output guard asks whether visible output arrived. A side effect answers yes
-  only to the first question.
+  A missing visible-output observer fails open. Snapshot activity beside visible output
+  before finalization; auto-prompts must not change the completed turn's diagnosis.
   Code Collab v1 turn markers and history fileDiff capture were removed. v2 may
   persist exact per-turn path/add/del caches derived from the CLI-local ACP evidence
   store after ACP finalization; diff content still comes only from the CLI store.

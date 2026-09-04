@@ -284,49 +284,13 @@ control-plane path is DEPRECATED; do not add functionality to it.
   Loro doc. The target is cleared only when a new turn owns ACP updates (normally
   `beginTurn()`, but visible dispatch defers until prompt start via
   `bindTurnForPrompt`) or replay suppression.
-  INVARIANT: `bindTurnForPrompt(sessionId, turnRef)` is an AUTHORITATIVE synchronous
-  write by the fiber holding the turn lease — it just came out of `beginConversationTurn`
-  and holds the whole `TurnRef` — not a conditional claim. It must run AFTER
-  `acpReplaySuppression.release` and BEFORE the prompt: earlier and `loadSession` replay
-  lands in the new turn's assistant entry; later and the turn's own output is unroutable.
-  The predecessor returned void and silently no-opped on a cleared turn, which both hid
-  the 505-second failure AND enforced this ordering by accident; the accident is gone, so
-  the ordering is pinned by `tests/message-handler-bind-turn-for-prompt.test.ts` plus an
-  execution-service call-order test. Both refusals (`session_state_missing`,
-  `turn_superseded`) must stop the prompt — the initial path fails closed before sending
-  anything, the steer path cancels the turn, and neither may fall back to the previous
-  assistant entry because dispatch ownership has already moved. `session_state_missing`
-  deliberately does not go through `store.get()`: recreating state there revives a
-  deleted or GC'd session.
-  INVARIANT: a SessionManager lifecycle event (`error`/`exit`/`terminated`) must NEVER
-  end a turn the `SessionExecutionService` still owns
-  (`executionService.getExecutionSnapshot(id).hasActiveTurn`). While a turn is owned, a
-  listener may only call `drainACPBuffers` (flush ACP + usage, idempotent) and report the
-  closed instance; it must not clear session presence, write `status: idle`, release the
-  Code Collab workspace watch, or touch turn state. Never reach for `finalizeACPState`
-  there — its `finally` unconditionally clears the turn, destroying the routing key the
-  live turn's remaining output still needs. Combined with the deferred window that dropped
-  a 505-second turn's 82 message chunks and then recorded `agent_no_output`, because a
-  resume fallback terminates the FAILED Session instance while the turn continues on its
-  replacement. Ownership is INSTANCE identity, never the session id: lifecycle events
-  carry the exact `Session` that produced them, and
-  `SessionExecutionService.onSessionInstanceClosed` acts only when
-  `runtime.session === instance`.
-  INVARIANT: cleanup paths are hand-written. Buffers, late-update routing, and prompt
-  activity deliberately survive `clearTurnState`; the replay gate reads activity
-  after the turn ends.
-  INVARIANT: finalization commits through the store's synchronous compare-and-set
-  `finalizeIfCurrent(sessionId, turnRef)`, which remembers the late-update target and
-  clears turn state in one step, reading that target from LIVE state. The only thing a
-  finalizer may carry across its awaits is a `TurnRef` — an identity token used as the
-  expected value. Do not reintroduce a routing-target snapshot taken before those
-  awaits: a turn that claimed ACP routing during them was then finalized against the
-  `undefined` read before them, which is the whole bug. For the same reason the
-  `finished=true` stamp is bound to `assistantEntryId + turnEpoch` and is SKIPPED when a
-  newer turn owns that entry (a redispatch reuses `assistant:<userTurnId>`); do not rely
-  on `writeAssistantEntryForTurn`'s reopen branch to repair a wrong stamp, since it only
-  runs at genuine turn (re)start. Regression coverage:
-  `tests/message-handler-lifecycle-turn-ownership.test.ts`.
+  `bindTurnForPrompt` is an authoritative `TurnRef` write after replay suppression and
+  before prompt submission; either refusal stops the prompt (or cancels an already-applied
+  steer) without routing output back to its predecessor.
+  Lifecycle events carry the emitting Session instance. Superseded-instance events do no
+  session-wide cleanup; current-instance events only drain buffers while a turn owner exists.
+  Finalizers capture `TurnRef` before their first await, stamp its exact assistant entry,
+  and clear through epoch-aware CAS. Turn cleanup preserves late updates and activity evidence.
   This is what lets the web derive the "session will continue" panel from the Cron/ScheduleWakeup
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in
   `SessionMeta`, not a new history item); see `@lody/shared`

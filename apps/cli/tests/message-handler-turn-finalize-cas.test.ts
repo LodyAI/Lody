@@ -40,6 +40,7 @@ type MessageHandlerHost = {
   enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
   flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
   finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+  awaitTurnHistoryGate(sessionId: SessionId): Promise<void>;
   store: { getTurnId(sessionId: SessionId): string | undefined };
 };
 
@@ -83,25 +84,29 @@ describe('MessageHandler turn finalization compare-and-set', () => {
         sessionDoc: doc,
       });
       await host.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
-      // Marks the session unread, which is what gives us a deterministic await
-      // inside `finalizeACPState` — right before the `finished` stamp.
       host.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'first run'));
 
-      let redispatched = false;
-      vi.spyOn(doc, 'setLastMessageAt').mockImplementation(async () => {
-        if (redispatched) return;
-        redispatched = true;
-        // The turn is redispatched while epoch 1 is mid-finalization. Same turn
-        // id (`assistant:<userTurnId>`), new epoch.
-        host.beginConversationTurn(sessionId, userTurnId, {
-          dispatchSource: 'crdt',
-          sessionDoc: doc,
-        });
+      let releaseGate!: () => void;
+      let signalGateStarted!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      });
+      const gateStarted = new Promise<void>((resolve) => {
+        signalGateStarted = resolve;
+      });
+      vi.spyOn(host, 'awaitTurnHistoryGate').mockImplementation(async () => {
+        signalGateStarted();
+        await gate;
       });
 
-      await host.finalizeACPState(sessionId, turnId);
-
-      expect(redispatched).toBe(true);
+      const finalizing = host.finalizeACPState(sessionId, turnId);
+      await gateStarted;
+      host.beginConversationTurn(sessionId, userTurnId, {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+      });
+      releaseGate();
+      await finalizing;
 
       // The entry belongs to the live turn now: it must not be stamped finished.
       const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
@@ -146,6 +151,55 @@ describe('MessageHandler turn finalization compare-and-set', () => {
 
       const assistant = (await doc.getHistory()).find((entry) => entry.id === turnId);
       expect(readItems(assistant)).toEqual([{ type: 'text', text: 'before teardown and after' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('keeps a no-turn-id finalizer bound to the entry captured before its wait', async () => {
+    const sessionId = 's-finalize-no-turnid-takeover' as SessionId;
+    const { repo, doc, host } = await createHarness(sessionId);
+
+    try {
+      const first = host.beginConversationTurn(sessionId, 'user-first', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+      });
+      await host.createAssistantEntryForTurn(sessionId, doc, first.turnId, undefined, 'user-first');
+
+      let releaseGate!: () => void;
+      let signalGateStarted!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      });
+      const gateStarted = new Promise<void>((resolve) => {
+        signalGateStarted = resolve;
+      });
+      vi.spyOn(host, 'awaitTurnHistoryGate').mockImplementation(async () => {
+        signalGateStarted();
+        await gate;
+      });
+
+      const finalizing = host.finalizeACPState(sessionId);
+      await gateStarted;
+      const second = host.beginConversationTurn(sessionId, 'user-second', {
+        dispatchSource: 'crdt',
+        sessionDoc: doc,
+      });
+      await host.createAssistantEntryForTurn(
+        sessionId,
+        doc,
+        second.turnId,
+        undefined,
+        'user-second'
+      );
+      releaseGate();
+      await finalizing;
+
+      const history = await doc.getHistory();
+      expect(history.find((entry) => entry.id === first.turnId)?.finished).toBe(true);
+      expect(history.find((entry) => entry.id === second.turnId)?.finished).not.toBe(true);
+      expect(host.store.getTurnId(sessionId)).toBe(second.turnId);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

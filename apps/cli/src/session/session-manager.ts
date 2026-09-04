@@ -423,6 +423,8 @@ export type AgentStartConfig = {
  */
 export type SessionInstanceEvent = {
   session: ISession;
+  /** Whether this instance was still registered when it emitted the event. */
+  wasCurrent: boolean;
 };
 
 export type SessionManagerErrorEvent = SessionErrorEvent & SessionInstanceEvent;
@@ -2262,7 +2264,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     });
 
     session.on('error', (event: SessionErrorEvent) => {
-      this.emit('error', { ...event, session });
+      this.emit('error', {
+        ...event,
+        session,
+        wasCurrent: this.sessions.get(event.sessionId) === session,
+      });
     });
 
     // Only the instance currently registered under this id may remove itself.
@@ -2280,16 +2286,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     };
 
     session.on('exit', (event: SessionExitEvent) => {
-      forgetIfCurrent(event.sessionId);
-      this.emit('exit', { ...event, session });
+      const wasCurrent = forgetIfCurrent(event.sessionId);
+      this.emit('exit', { ...event, session, wasCurrent });
     });
 
     session.on('terminated', (event: SessionExitEvent) => {
-      forgetIfCurrent(event.sessionId);
+      const wasCurrent = forgetIfCurrent(event.sessionId);
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,
         session,
+        wasCurrent,
       };
       this.emit('terminated', terminatedEvent);
     });

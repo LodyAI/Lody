@@ -3082,10 +3082,11 @@ export class MessageHandler {
         this.bindConversationTurnForPrompt(sessionId, turnRef, recorder),
       observePromptActivityForTurn: (sessionId, turnId) =>
         this.store.observePromptActivityForTurn(sessionId, turnId),
-      clearConversationTurn: (sessionId, turnId) =>
-        this.clearConversationTurnIfMatches(sessionId, turnId),
+      clearConversationTurn: (sessionId, turnRef) =>
+        this.clearConversationTurnIfMatches(sessionId, turnRef),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
-      clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
+      clearActiveTurnId: (sessionId, turnId, turnRef) =>
+        this.clearActiveTurnIdIfMatches(sessionId, turnId, turnRef),
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
@@ -3108,8 +3109,8 @@ export class MessageHandler {
           userTurnId
         ),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId) =>
-          await this.finalizeACPState(sessionId, turnId),
+        finalizeACPState: async (sessionId, turnId, expectedTurnRef) =>
+          await this.finalizeACPState(sessionId, turnId, expectedTurnRef),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -3738,10 +3739,16 @@ export class MessageHandler {
     // exact instance closed, so the owning fiber can end its own turn.
     this.sessionManager.on('error', (event) => {
       void (async () => {
-        this.logger.error(`[${event.sessionId}] Session error event received:`, event);
+        this.logger.error(
+          `[${event.sessionId}] Session error event received: ${formatErrorMessage(event.error)}`
+        );
         const sessionId = event.sessionId;
         const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
         this.executionService.onSessionInstanceClosed(sessionId, event.session, 'error');
+        if (!event.wasCurrent) {
+          this.logger.debug(`[${sessionId}] Ignoring error event from superseded session instance`);
+          return;
+        }
         // Symmetric with exit/terminated: a late event for a GC-cleaned session
         // must not rebuild its transient state.
         if (!this.store.has(sessionId)) {
@@ -3767,6 +3774,10 @@ export class MessageHandler {
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
         const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
         this.executionService.onSessionInstanceClosed(sessionId, exit.session, 'exit');
+        if (!exit.wasCurrent) {
+          this.logger.debug(`[${sessionId}] Ignoring exit event from superseded session instance`);
+          return;
+        }
         if (!this.store.has(sessionId)) {
           this.logger.debug(`[${sessionId}] Ignoring exit event for GC-cleaned session`);
           return;
@@ -3791,6 +3802,12 @@ export class MessageHandler {
       const sessionId = event.sessionId;
       const turnWasActive = this.executionService.getExecutionSnapshot(sessionId).hasActiveTurn;
       this.executionService.onSessionInstanceClosed(sessionId, event.session, 'terminated');
+      if (!event.wasCurrent) {
+        this.logger.debug(
+          `[${sessionId}] Ignoring terminated event from superseded session instance`
+        );
+        return;
+      }
       if (!turnWasActive) {
         // Releasing the watch cuts Code Collab off from the workspace. That is
         // correct once nothing is running, but during a resume fallback this
@@ -5859,27 +5876,24 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+  private async finalizeACPState(
+    sessionId: SessionId,
+    turnId?: string,
+    expectedTurnRef?: TurnRef
+  ): Promise<void> {
+    // Capture the identity token before the first await. A same-id redispatch can
+    // replace the turn while the history gate is opening.
+    const turnRef =
+      expectedTurnRef ??
+      (turnId ? this.store.getTurnRef(sessionId, turnId) : this.store.getCurrentTurnRef(sessionId));
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
     if (!turnId || this.store.getTurnId(sessionId) === turnId) {
       await this.awaitTurnHistoryGate(sessionId);
     }
-    // Carry only the turn's IDENTITY across the awaits below. It is the expected
-    // value for the closing compare-and-set, not a routing decision: reading the
-    // ACP target here and committing it in the `finally` is exactly the bug that
-    // dropped a turn's whole output, because a turn that claimed routing during
-    // these awaits was finalized against the `undefined` read before them.
     const endedAt = Date.now();
     const state = this.store.get(sessionId);
-    // With a turnId this is a CAS token for that exact turn; without one (archive,
-    // delete, child cleanup, shutdown drain) it names whatever turn is current, so
-    // the teardown paths commit through the same CAS instead of clearing blindly
-    // and losing the turn's late-update routing target.
-    const turnRef = turnId
-      ? this.store.getTurnRef(sessionId, turnId)
-      : this.store.getCurrentTurnRef(sessionId);
     const permissionWaitMs = state.permissionWaitMs || undefined;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
@@ -5906,9 +5920,18 @@ export class MessageHandler {
           stamped = false;
           return history;
         }
+        if (!turnRef && !turnId && this.store.getCurrentTurnRef(sessionId)) {
+          stamped = false;
+          return history;
+        }
+        const assistantEntryId = turnRef?.assistantEntryId ?? turnId;
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+          if (
+            entry &&
+            entry.role === 'assistant' &&
+            (!assistantEntryId || entry.id === assistantEntryId)
+          ) {
             entry.finished = true;
             entry.endedAt = endedAt;
             if (permissionWaitMs !== undefined) {
@@ -5934,9 +5957,10 @@ export class MessageHandler {
         // clear the turn, or do neither because this turn is no longer current.
         this.store.finalizeIfCurrent(sessionId, turnRef);
       } else if (!turnId) {
-        // Owner-driven teardown with no turn to name (archive, delete, child
-        // cleanup, shutdown drain): clearing unconditionally is the intent.
-        this.clearACPState(sessionId);
+        // Do not clear a turn that appeared while an idle teardown was awaiting.
+        if (!this.store.getCurrentTurnRef(sessionId)) {
+          this.clearACPState(sessionId);
+        }
       }
       // Updates buffered during the finalization tail survive the turn clear
       // (each carries its enqueue-time target); make sure something drains them.
@@ -5950,11 +5974,8 @@ export class MessageHandler {
     this.store.clearTurnState(sessionId);
   }
 
-  private clearConversationTurnIfMatches(sessionId: SessionId, turnId: string): void {
-    if (this.store.getTurnId(sessionId) !== turnId) {
-      return;
-    }
-    this.clearACPState(sessionId);
+  private clearConversationTurnIfMatches(sessionId: SessionId, turnRef: TurnRef): void {
+    this.store.clearTurnStateIfCurrent(sessionId, turnRef);
   }
 
   private beginACPReplaySuppression(sessionId: SessionId): void {
@@ -5970,7 +5991,17 @@ export class MessageHandler {
     }
   }
 
-  private clearActiveTurnIdIfMatches(sessionId: SessionId, turnId: string): void {
+  private clearActiveTurnIdIfMatches(
+    sessionId: SessionId,
+    turnId: string,
+    expectedTurnRef?: TurnRef
+  ): void {
+    if (expectedTurnRef) {
+      const current = this.store.getTurnRef(sessionId, turnId);
+      if (!current || current.turnEpoch !== expectedTurnRef.turnEpoch) {
+        return;
+      }
+    }
     this.store.markPromptReturned(sessionId, turnId);
   }
 

@@ -20,6 +20,9 @@ describe('PromptActivityRecorder', () => {
   it('credits ambiguous side effects to the predecessor until successor output', () => {
     const predecessor = new PromptActivityRecorder();
     const successor = new PromptActivityRecorder(predecessor);
+    predecessor.recordSideEffect();
+    expect(successor.observe()).toBe('dropped_prompt_activity');
+
     successor.recordSideEffect();
     expect(predecessor.observe()).toBe('dropped_prompt_activity');
 

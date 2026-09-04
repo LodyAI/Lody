@@ -304,6 +304,7 @@ describe('SessionTransientStore', () => {
       expect(staleRef.turnEpoch).toBe(1);
       expect(store.getTurnRef(id, 'assistant:user-1')?.turnEpoch).toBe(2);
       expect(store.finalizeIfCurrent(id, staleRef)).toBe(false);
+      expect(store.clearTurnStateIfCurrent(id, staleRef)).toBe(false);
       expect(store.getTurnId(id)).toBe('assistant:user-1');
     });
 

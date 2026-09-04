@@ -652,6 +652,15 @@ export class SessionTransientStore {
     state.pendingUnread = false;
   }
 
+  clearTurnStateIfCurrent(sessionId: SessionId, ref: TurnRef): boolean {
+    const current = this.getTurnRef(sessionId, ref.turnId);
+    if (!current || current.turnEpoch !== ref.turnEpoch) {
+      return false;
+    }
+    this.clearTurnState(sessionId);
+    return true;
+  }
+
   /**
    * Remove all state for a session. Called when the session is fully evicted
    * (GC sweep or explicit cleanup).
