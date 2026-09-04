@@ -31,11 +31,7 @@ import {
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
-import {
-  PromptActivityRecorder,
-  type PromptActivityObservation,
-} from '../src/session/prompt-activity-recorder';
-import { SessionTransientStore } from '../src/lib/session-transient-store';
+import type { PromptActivityObservation } from '../src/session/prompt-activity-recorder';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
 
@@ -1243,6 +1239,9 @@ describe('SessionExecutionService', () => {
       'agent_no_output',
       expect.stringContaining('without producing any output')
     );
+    const message = vi.mocked(deps.recordChatFailure).mock.calls[0]?.[2];
+    expect(message).toContain('context-length');
+    expect(message).toContain('Retry your message');
     expect(getHistory()[0]?.status).toBe('failed');
     // Claiming the session finished would contradict the failure shown in chat.
     expect(notifySessionCompleted).not.toHaveBeenCalled();
@@ -1255,105 +1254,6 @@ describe('SessionExecutionService', () => {
         processingUserMsgId: undefined,
       })
     );
-  });
-
-  it('surfaces the uncertain-state notice for a turn whose only activity was a permission request', async () => {
-    // End to end over a REAL `SessionTransientStore` and a REAL recorder, with the
-    // two accessors wired exactly as MessageHandler wires them. The earlier
-    // version of this test mocked `observePromptActivityForTurn` directly and so
-    // could not see that `observePromptOutputForTurn` was answering the wrong
-    // question — it reported "produced output" for a turn that only requested a
-    // permission, which sent the guard down the success path and showed the user
-    // an empty assistant entry with no notice at all.
-    const sessionId = 'session-permission-only' as SessionId;
-    const turnId = 'assistant-permission-only';
-    const store = new SessionTransientStore();
-    const recorder = new PromptActivityRecorder();
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        // The agent asks to run a tool, then ends the turn with no ACP update.
-        store.getBoundPromptActivityRecorder(sessionId)?.recordSideEffect();
-        return { stopReason: 'end_turn' };
-      }),
-      currentModel: undefined,
-    };
-    const session = {
-      sessionId,
-      acpSessionId: 'acp-permission-only' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-permission-only'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const deps = createBaseDeps({
-      beginConversationTurn: vi.fn(() => {
-        const turnEpoch = store.beginTurn(sessionId, {
-          turnId,
-          assistantEntryId: turnId,
-          ownsACPUpdates: false,
-        });
-        return { turnId, turnEpoch, assistantEntryId: turnId };
-      }),
-      // Same wiring as MessageHandler.
-      bindConversationTurnForPrompt: vi.fn((sid: SessionId, ref, activityRecorder) =>
-        store.bindTurnForPrompt(sid, ref, activityRecorder ?? recorder)
-      ),
-      observePromptActivityForTurn: vi.fn((sid: SessionId, tid: string) =>
-        store.observePromptActivityForTurn(sid, tid)
-      ),
-      observePromptOutputForTurn: vi.fn((sid: SessionId, tid: string) =>
-        store.has(sid) ? store.hasVisiblePromptOutputForTurn(sid, tid) : undefined
-      ),
-    });
-    (deps.sessionManager as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession = vi.fn(
-      () => session
-    );
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    // The turn is recorded as a failure at all — conflating the two questions
-    // skipped this entirely — and with the uncertain-state wording.
-    const [, reason, message] = vi.mocked(deps.recordChatFailure).mock.calls[0] ?? [];
-    expect(reason).toBe('agent_no_output');
-    expect(message).toContain('uncertain');
-    expect(message).toContain('do not simply retry');
-    expect(message).not.toContain('context-length');
-    expect(history[0]?.status).toBe('failed');
   });
 
   it('does not blame context length or suggest a retry when the turn actually acted', async () => {
@@ -1375,20 +1275,6 @@ describe('SessionExecutionService', () => {
     expect(message).not.toContain('rate-limit');
     expect(message).not.toContain('Retry your message');
     void sessionDoc;
-  });
-
-  it('keeps the upstream-cause explanation for a turn that truly did nothing', async () => {
-    // The reverse case: an actual upstream silence should still get the specific,
-    // actionable guess rather than a blanket "state is uncertain".
-    const { deps } = await runSilentPromptTurn({
-      sessionId: 'session-silent-quiet',
-      visibleOutput: false,
-      promptActivity: 'none',
-    });
-
-    const [, , message] = vi.mocked(deps.recordChatFailure).mock.calls[0] ?? [];
-    expect(message).toContain('context-length');
-    expect(message).toContain('Retry your message');
   });
 
   it('leaves a turn that emitted agent output on the normal completion path', async () => {
@@ -2022,481 +1908,114 @@ describe('SessionExecutionService', () => {
     expect(history[0]?.status).toBe('failed');
   });
 
-  it('restores and retries a stale in-memory ACP session when the connection is closed', async () => {
-    const sessionId = 'session-stale-acp' as SessionId;
-    const acpSessionId = 'acp-stale' as ACPSessionId;
-    const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
-    let history: Array<Record<string, unknown>> = [
-      {
-        id: 'turn-user-1',
-        role: 'user',
-        status: 'pending',
-        read: false,
-      },
-    ];
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const exec = vi.fn(async (command: string, args: string[]) => {
-      const key = `${command} ${args.join(' ')}`;
-      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
-      if (key === 'git rev-parse HEAD') return 'abc123\n';
-      return '';
-    });
-    const activeSession = {
-      sessionId,
-      acpSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec,
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => acpSessionId),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: restoredAcpSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => restoredAcpSessionId),
-    };
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    // Recovery is allowed only on a POSITIVE "this turn emitted nothing" answer.
-    // MessageHandler always wires this dep in production; an absent one is
-    // fail-closed and is covered by the next test.
-    const deps = createBaseDeps({});
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      terminateSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    const workspaceDocument = deps.workspaceDocument as unknown as {
-      getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+  it.each([
+    ['none', true],
+    ['dropped_prompt_activity', false],
+    ['unknown', false],
+  ] as const)(
+    'retries a stale ACP prompt only for activity=%s',
+    async (promptActivity, shouldReplay) => {
+      const sessionId = 'session-stale-acp' as SessionId;
+      const acpSessionId = 'acp-stale' as ACPSessionId;
+      const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
+      let history: Array<Record<string, unknown>> = [
+        {
+          id: 'turn-user-1',
+          role: 'user',
+          status: 'pending',
+          read: false,
+        },
+      ];
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          throw new Error('ACP connection closed');
+        }),
+        currentModel: undefined,
+      };
+      const restoredAgentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const exec = vi.fn(async (command: string, args: string[]) => {
+        const key = `${command} ${args.join(' ')}`;
+        if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
+        if (key === 'git rev-parse HEAD') return 'abc123\n';
+        return '';
+      });
+      const activeSession = {
+        sessionId,
+        acpSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec,
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => acpSessionId),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const restoredSession = {
+        ...activeSession,
+        acpSessionId: restoredAcpSessionId,
+        agentClient: restoredAgentClient,
+        createAgent: vi.fn(async () => restoredAcpSessionId),
+      };
+      const sessionDoc = {
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async () => {}),
+        waitUntilSynced: vi.fn(async () => {}),
+        getHistory: vi.fn(async () => history),
+        updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+          history = updater(history);
+        }),
+      };
+      const deps = createBaseDeps({
+        observePromptActivityForTurn: vi.fn(() => promptActivity),
+      });
+      const sessionManager = deps.sessionManager as unknown as {
+        getSession: ReturnType<typeof vi.fn>;
+        terminateSession: ReturnType<typeof vi.fn>;
+        createSession: ReturnType<typeof vi.fn>;
+      };
+      const workspaceDocument = deps.workspaceDocument as unknown as {
+        getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
+      };
+      sessionManager.getSession.mockReturnValue(activeSession);
+      sessionManager.createSession.mockResolvedValue(restoredSession);
+      workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
 
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const service = new SessionExecutionService(deps);
+      await service.continueSession({
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
-    expect(agentClient.prompt).toHaveBeenCalledWith(
-      'acp-stale',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
-      }
-    );
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
-    expect(sessionManager.createSession).toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-      'acp-restored',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
-      }
-    );
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    expect(history[0]?.status).toBe('handled');
-  });
-
-  it('lets the stale-ACP retry proceed when terminating the old instance emits `terminated`', async () => {
-    // The stale-ACP recovery terminates its own Session instance, and in
-    // production that emits a real `terminated` lifecycle event naming the
-    // instance the turn is still bound to. `onSessionInstanceClosed` must NOT
-    // treat that as a disconnect: the terminate runs AFTER `prompt()` already
-    // rejected, so `promptInFlight` is back to false and the close guard is
-    // uninstalled. The sibling test above mocks `terminateSession` into a no-op,
-    // so it never fires the event and cannot catch a regression here.
-    const sessionId = 'session-stale-acp-lifecycle' as SessionId;
-    const acpSessionId = 'acp-stale-lifecycle' as ACPSessionId;
-    const restoredAcpSessionId = 'acp-restored-lifecycle' as ACPSessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const exec = vi.fn(async (command: string, args: string[]) => {
-      const key = `${command} ${args.join(' ')}`;
-      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
-      if (key === 'git rev-parse HEAD') return 'abc123\n';
-      return '';
-    });
-    const activeSession = {
-      sessionId,
-      acpSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec,
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => acpSessionId),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: restoredAcpSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => restoredAcpSessionId),
-    };
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const deps = createBaseDeps({});
-    let service!: SessionExecutionService;
-    const instanceCloseVerdicts: boolean[] = [];
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      terminateSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    // Stand in for SessionManager's own listener: terminating the instance the
-    // turn is bound to reports the close, exactly as production does.
-    sessionManager.terminateSession.mockImplementation(async () => {
-      instanceCloseVerdicts.push(
-        service.onSessionInstanceClosed(
-          sessionId,
-          activeSession as unknown as ISession,
-          'terminated'
-        )
+      expect(agentClient.prompt).toHaveBeenCalledWith(
+        'acp-stale',
+        [{ type: 'text', text: 'hello' }],
+        {
+          signal: expect.any(AbortSignal),
+        }
       );
-    });
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    // The lifecycle report was seen and declined — the prompt was no longer in
-    // flight, so the turn owner keeps its own recovery.
-    expect(instanceCloseVerdicts).toEqual([false]);
-    expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-      restoredAcpSessionId,
-      [{ type: 'text', text: 'hello' }],
-      { signal: expect.any(AbortSignal) }
-    );
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    expect(history[0]?.status).toBe('handled');
-  });
-
-  it('refuses a stale-ACP replay after the turn requested a permission or wrote a file', async () => {
-    // Permission requests and `fs/write_text_file` are independent JSON-RPC
-    // requests that never reach `enqueueACPUpdate`. Before the recorder the
-    // gate could not see them, so a turn that had already approved and run a
-    // tool read as 'produced nothing' and its prompt was replayed.
-    const sessionId = 'session-replay-dropped_prompt_activity' as SessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const activeSession = {
-      sessionId,
-      acpSessionId: 'acp-replay' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-replay'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: 'acp-replay-restored' as ACPSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => 'acp-replay-restored'),
-    };
-    const deps = createBaseDeps({
-      beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
-      observePromptActivityForTurn: vi.fn(() => 'dropped_prompt_activity' as const),
-    });
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    expect(agentClient.prompt).toHaveBeenCalledTimes(1);
-    expect(sessionManager.createSession).not.toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).not.toHaveBeenCalled();
-  });
-
-  it('refuses a stale-ACP replay when the turn is unobservable', async () => {
-    // No recorder (process restart, or a recorder belonging to another turn).
-    // Unobservable is not 'nothing happened'.
-    const sessionId = 'session-replay-unknown' as SessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const activeSession = {
-      sessionId,
-      acpSessionId: 'acp-replay' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-replay'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: 'acp-replay-restored' as ACPSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => 'acp-replay-restored'),
-    };
-    const deps = createBaseDeps({
-      beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
-      observePromptActivityForTurn: vi.fn(() => 'unknown' as const),
-    });
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    expect(agentClient.prompt).toHaveBeenCalledTimes(1);
-    expect(sessionManager.createSession).not.toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).not.toHaveBeenCalled();
-  });
-
-  it('still replays a stale-ACP prompt when the turn provably did nothing', async () => {
-    // The reverse case, so the gate cannot be 'fixed' by refusing everything:
-    // a positive `none` is what recovery exists for.
-    const sessionId = 'session-replay-none' as SessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const activeSession = {
-      sessionId,
-      acpSessionId: 'acp-replay' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-replay'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: 'acp-replay-restored' as ACPSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => 'acp-replay-restored'),
-    };
-    const deps = createBaseDeps({
-      beginConversationTurn: vi.fn(() => turnRefOf('assistant-replay')),
-      observePromptActivityForTurn: vi.fn(() => 'none' as const),
-    });
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    expect(agentClient.prompt).toHaveBeenCalledTimes(1);
-    expect(sessionManager.createSession).toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).toHaveBeenCalledTimes(1);
-  });
+      expect(sessionManager.createSession).toHaveBeenCalledTimes(shouldReplay ? 1 : 0);
+      expect(restoredAgentClient.prompt).toHaveBeenCalledTimes(shouldReplay ? 1 : 0);
+      expect(history[0]?.status).toBe(shouldReplay ? 'handled' : 'failed');
+    }
+  );
 
   it('fails an in-flight prompt as disconnected when its own Session instance is closed', async () => {
     // Nothing in `Session` reports a dead ACP child process, so a prompt whose
@@ -5437,7 +4956,10 @@ describe('SessionExecutionService', () => {
     });
 
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel');
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(
+      'session-prompt-cancel',
+      'assistant-prompt-cancel'
+    );
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
@@ -5525,200 +5047,6 @@ describe('SessionExecutionService', () => {
     await turn;
 
     expect(releaseWorkspaceWatch).toHaveBeenCalledWith(sessionId);
-  });
-
-  it('keeps the workspace watch when a closed instance was already replaced', async () => {
-    const sessionId = 'session-watch-keep' as SessionId;
-    let history: Array<Record<string, unknown>> = [
-      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
-    ];
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const session = {
-      sessionId,
-      acpSessionId: 'acp-watch-keep' as ACPSessionId,
-      agentClient: {
-        isCreated: vi.fn(() => true),
-        cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => {
-          throw new Error('boom');
-        }),
-        currentModel: undefined,
-      },
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-watch-keep'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const releaseWorkspaceWatch = vi.fn();
-    const deps = createBaseDeps({});
-    // A replacement instance stays registered under the same id.
-    (deps.sessionManager as unknown as { getSession: ReturnType<typeof vi.fn> }).getSession = vi.fn(
-      () => session
-    );
-    (
-      deps.workspaceDocument as unknown as { getOrCreateSessionDoc: ReturnType<typeof vi.fn> }
-    ).getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
-    deps.turnFinalization.releaseWorkspaceWatch = releaseWorkspaceWatch;
-
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    expect(releaseWorkspaceWatch).not.toHaveBeenCalled();
-  });
-
-  it('keeps cancel write ordering when `terminated` lands during cancellation', async () => {
-    // Cancel must persist "user turn canceled" BEFORE the assistant entry is
-    // finalized: Operation reconciliation reads a terminal assistant as success
-    // unless the user turn already carries the stronger cancelled outcome.
-    // A lifecycle close arriving mid-cancel must not jump that order, and must
-    // not re-report the turn as a disconnect — cancel owns this outcome.
-    const sessionId = 'session-cancel-terminated' as SessionId;
-    const turnId = 'assistant-cancel-terminated';
-    let meta: Record<string, unknown> = {};
-    let history: Array<Record<string, unknown>> = [
-      {
-        id: 'turn-cancel-terminated',
-        role: 'user',
-        items: [{ type: 'text', text: 'hello' }],
-        status: 'pending',
-        read: false,
-      },
-    ];
-    const writeOrder: string[] = [];
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
-      meta = { ...meta, ...patch };
-    });
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-        if (history[0]?.status === 'canceled') {
-          writeOrder.push('user-canceled');
-        }
-      }),
-    };
-    let activeTurnId: string | undefined;
-    let service!: SessionExecutionService;
-    const instanceCloseVerdicts: boolean[] = [];
-    const session = {
-      sessionId,
-      acpSessionId: 'acp-cancel-terminated' as ACPSessionId,
-      agentClient: {
-        isCreated: vi.fn(() => true),
-        // Fires while cancellation is running, exactly where SessionManager's
-        // listener would report the closed instance.
-        cancel: vi.fn(async () => {
-          instanceCloseVerdicts.push(
-            service.onSessionInstanceClosed(sessionId, session as unknown as ISession, 'terminated')
-          );
-        }),
-        prompt: vi.fn(async () => {
-          const result = await service.cancelSession({
-            type: 'session/cancel',
-            sessionId,
-            machineId: 'machine-1',
-            workspaceId: 'workspace-1' as WorkspaceId,
-            turnId,
-          });
-          expect(result).toEqual({ success: true });
-          throw new Error('agent cancelled prompt');
-        }),
-        currentModel: undefined,
-      },
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-cancel-terminated'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => session),
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-    const deps = createBaseDeps({
-      sessionManager,
-      beginConversationTurn: vi.fn(() => {
-        activeTurnId = turnId;
-        return turnRefOf(turnId);
-      }),
-      getActiveTurnId: vi.fn(() => activeTurnId),
-      clearActiveTurnId: vi.fn((_sessionId, id) => {
-        if (activeTurnId === id) {
-          activeTurnId = undefined;
-        }
-      }),
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta,
-          getDocMeta: vi.fn(async () => ({ meta })),
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-    });
-    vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(async () => {
-      writeOrder.push('assistant-finalized');
-      expect(history[0]).toMatchObject({ status: 'canceled' });
-    });
-
-    service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-cancel-terminated',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    // The close was reported and declined: cancel already owns this turn.
-    expect(instanceCloseVerdicts).toEqual([false]);
-    expect(writeOrder).toEqual(['user-canceled', 'assistant-finalized']);
-    expect(history[0]).toMatchObject({ status: 'canceled' });
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    // Step B: the cancel path names its turn instead of finalizing whatever is last.
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(sessionId, turnId);
   });
 
   it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {

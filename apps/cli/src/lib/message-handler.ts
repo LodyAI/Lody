@@ -3671,9 +3671,6 @@ export class MessageHandler {
     });
 
     this.sessionManager.on('onWriteTextFile', (sessionId, event) => {
-      // `fs/write_text_file` is an independent JSON-RPC request that never passes
-      // through `enqueueACPUpdate`, so the replay gate is blind to it unless the
-      // recorder is told here: the agent has already written to disk.
       this.recordPromptSideEffect(sessionId);
       this.trackCodeCollabEvidenceWrite(
         sessionId,
@@ -4719,11 +4716,6 @@ export class MessageHandler {
     }
   }
 
-  /**
-   * Note a permission request or an `fs/write_text_file` against whichever prompt
-   * run is currently bound. Both are independent JSON-RPC requests that bypass
-   * `enqueueACPUpdate`, which is exactly why the replay gate could not see them.
-   */
   private recordPromptSideEffect(sessionId: SessionId): void {
     this.store.getBoundPromptActivityRecorder(sessionId)?.recordSideEffect();
   }
@@ -4740,8 +4732,6 @@ export class MessageHandler {
       return;
     }
     if (this.store.recordSuppressedAcpReplay(sessionId)) {
-      // Suppressed `loadSession` replay is previously persisted history, not this
-      // turn acting, so it is NOT recorded as prompt activity.
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
@@ -8561,9 +8551,7 @@ export class MessageHandler {
     request: RequestPermissionRequest,
     model?: ModelInfo
   ): Promise<RequestPermissionResponse> {
-    // Also an independent JSON-RPC request. Recorded on ARRIVAL rather than on
-    // approval: an agent that asked for permission has already decided to run the
-    // tool, and a replay would ask again for work that may have been approved.
+    // Record on arrival: approval may already have caused work before recovery.
     this.recordPromptSideEffect(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
@@ -10001,18 +9989,7 @@ export class MessageHandler {
     return this.store.has(sessionId) && this.store.get(sessionId).acpUpdateBuffer.length > 0;
   }
 
-  /**
-   * Did this turn put anything VISIBLE in the transcript?
-   *
-   * A DIFFERENT question from the replay gate's `observePromptActivityForTurn`,
-   * which asks whether the turn may have ACTED. Answering this one with that was
-   * a bug: a turn that only requested a permission or wrote a file counts as
-   * "may have acted" but shows the user nothing, so the no-output guard took the
-   * success path and the user got an empty assistant entry with no explanation.
-   *
-   * `undefined` means unobservable — the transient state is gone — and keeps the
-   * guard failing OPEN, because it must never accuse a turn it could not observe.
-   */
+  /** `undefined` keeps the no-output guard open when the turn is unobservable. */
   observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
     if (!this.store.has(sessionId)) {
       return undefined;

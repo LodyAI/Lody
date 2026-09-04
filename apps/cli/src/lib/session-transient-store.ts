@@ -14,20 +14,8 @@
  * - `clearTurnState(id)` — after a conversation turn completes
  * - `deleteSession(id)` — when the session is evicted (idle shutdown or GC)
  *
- * Both cleanup paths are HAND-WRITTEN enumerations (`clearTurnState` and
- * `deleteSession`), not automatic. Adding a field to `SessionState` does not add
- * it to either one — check both when you add a field.
- *
- * Some fields survive `clearTurnState` on purpose, and reflexively "cleaning them
- * up" reintroduces real bugs:
- *
- * - `acpUpdateBuffer` / `acpFlushInFlight` — entries carry their own enqueue-time
- *   target and must still flush after the turn clears.
- * - `lateACPUpdateTarget` — the routing target for updates that arrive after
- *   finalization; clearing it here is what drops post-`stopReason` output.
- * - `promptActivity` — the replay gate's evidence. It is consulted precisely when
- *   a turn has ended, so a turn-scoped clear would erase it exactly when it is
- *   needed. This is the mistake `acpFlushCountInTurn` already made once.
+ * Cleanup is hand-written. Check both paths when adding state; buffers, late
+ * routing, and prompt activity deliberately survive `clearTurnState`.
  *
  * ## Turn State Model
  *
@@ -143,11 +131,7 @@ export interface SessionState {
   turnHistoryGate: TurnHistoryGate | null;
   nextTurnEpoch: number;
   lateACPUpdateTarget: AssistantTurnACPUpdateTarget | undefined;
-  /**
-   * Replay-gate evidence for the turn that last bound for a prompt. Deliberately
-   * NOT cleared by `clearTurnState`: the gate reads it after the turn ends.
-   * Replaced by the next bind, dropped by `deleteSession`.
-   */
+  /** Replay evidence retained until the next bind or session deletion. */
   promptActivity: { ref: TurnRef; recorder: PromptActivityRecorder } | undefined;
   suppressAcpReplayUntilTurnStart: boolean;
   suppressedAcpReplayCount: number;
@@ -337,18 +321,12 @@ export class SessionTransientStore {
     }
     state.lateACPUpdateTarget = undefined;
     if (recorder) {
-      // Replaces the previous binding's recorder, which releases the only
-      // reference this module holds to it. The old run keeps its own.
       state.promptActivity = { ref, recorder };
     }
     return 'bound';
   }
 
-  /**
-   * Evidence for "did this turn possibly act?". `unknown` whenever the turn
-   * cannot be observed — no session state, no recorder, or a recorder belonging
-   * to a different turn — and every caller must treat that as fail-closed.
-   */
+  /** `unknown` means the turn cannot be observed and replay must fail closed. */
   observePromptActivityForTurn(sessionId: SessionId, turnId: string): PromptActivityObservation {
     const activity = this.sessions.get(sessionId)?.promptActivity;
     if (!activity || activity.ref.turnId !== turnId) {
@@ -357,26 +335,11 @@ export class SessionTransientStore {
     return activity.recorder.observe();
   }
 
-  /** The recorder currently bound for this session, for producers to write into. */
   getBoundPromptActivityRecorder(sessionId: SessionId): PromptActivityRecorder | undefined {
     return this.sessions.get(sessionId)?.promptActivity?.recorder;
   }
 
-  /**
-   * Did VISIBLE output arrive for this turn — anything the user can actually see
-   * in the transcript?
-   *
-   * Deliberately NOT the same question as `observePromptActivityForTurn`, which
-   * asks whether the turn may have ACTED. A turn that only requested a permission
-   * or wrote a file acted without producing anything visible, so conflating the
-   * two makes the no-output guard treat an empty assistant entry as a success and
-   * skip the failure notice entirely — leaving the user with a blank reply and no
-   * explanation.
-   *
-   * `acpFlushCountInTurn` is still consulted for turns that never bound a recorder
-   * (an auto-prompt turn owns routing from `beginTurn` and never binds); it is
-   * valid here because the no-output guard runs before `finalizeTurn` clears it.
-   */
+  /** Visible transcript output, distinct from side-effect evidence. */
   hasVisiblePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
     const state = this.sessions.get(sessionId);
     if (!state) {

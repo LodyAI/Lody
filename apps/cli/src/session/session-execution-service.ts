@@ -165,18 +165,6 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'reported it as a normal completion instead of an error. Retry your message, or start a ' +
   'new session if this conversation has grown too long.';
 
-/**
- * Used instead of `SILENT_TURN_FAILURE_MESSAGE` when the recorder saw the turn do
- * something — an approved permission, an `fs/write_text_file`, or a dropped
- * update — even though nothing reached the transcript.
- *
- * The message above guesses at an upstream cause and tells the user to retry.
- * Both halves are wrong here: the failure is local, and the agent may have edited
- * files or run commands, so retrying can repeat that work. Deliberately reuses
- * the `agent_no_output` reason code — a dedicated `agent_output_dropped` code
- * changes `ChatFailedReasonSchema`, which is persisted and shared with every
- * client, so it is its own high-risk change.
- */
 const DROPPED_ACTIVITY_TURN_FAILURE_MESSAGE =
   'The agent ended the turn without anything reaching this conversation, but it did act — ' +
   'it requested permissions or wrote files during the turn. Its execution state for this ' +
@@ -239,11 +227,6 @@ type ApplyModeAndModelConfig = SessionTurnInputConfig & {
 
 type PromptHandoffRun = {
   turnId: string;
-  /**
-   * This run's replay-gate evidence. Lives here rather than in a map: the object
-   * is already per-prompt, fiber-held, carried along the successor chain by a
-   * steer, and dies with the turn — so boundedness is constructional.
-   */
   activity: PromptActivityRecorder;
   promptOutcome: Promise<{ status: 'fulfilled' } | { status: 'rejected'; error: unknown }>;
   successor?: PromptHandoffRun;
@@ -477,11 +460,6 @@ export type SessionExecutionServiceDeps = {
     turnRef: TurnRef,
     recorder?: PromptActivityRecorder
   ) => BindTurnForPromptResult;
-  /**
-   * Replay-gate evidence for a turn. Required, not optional: a missing dep would
-   * need a fallback default, and the fallback is exactly the "may have acted"
-   * question answered by a different, blinder signal.
-   */
   observePromptActivityForTurn: (sessionId: SessionId, turnId: string) => PromptActivityObservation;
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
@@ -3386,8 +3364,7 @@ export class SessionExecutionService {
     turnId: string;
     userTurnId?: string;
   }): Promise<void> {
-    const activity =
-      this.deps.observePromptActivityForTurn?.(options.sessionId, options.turnId) ?? 'unknown';
+    const activity = this.deps.observePromptActivityForTurn(options.sessionId, options.turnId);
     // Only an upstream-looking silence gets the upstream-cause guess. A turn that
     // demonstrably acted must not be explained as a context-length or rate-limit
     // rejection, and must not be presented as safe to retry.

@@ -112,14 +112,9 @@ delegation proofs or a shared-machine gate without a new product and security de
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
   `TurnRuntimeState` is registered.
-  INVARIANT: a store turn is NOT the same thing as a registered turn runtime. The
-  auto-prompt runner calls `beginConversationTurn` for its own store turn id while
-  running INSIDE the visible turn's runtime (`runtime.autoPromptInFlight`), so
-  `SessionTransientStore` can hold a turn whose id differs from `runtime.turnId`, and it
-  can hold an owning turn while `getExecutionSnapshot().hasActiveTurn` describes a
-  different one. Never use "no active turn runtime" as a stand-in for "no turn state to
-  finalize" — that is why the no-turnId `finalizeACPState` reads `getCurrentTurnRef`
-  instead of clearing blindly. `beginConversationTurn` returns the whole `TurnRef`
+  INVARIANT: store-turn and runtime ownership can differ while an auto-prompt runs.
+  A no-turn-id finalizer must read `getCurrentTurnRef`; absence of an active runtime
+  does not prove the store has no turn. `beginConversationTurn` returns the whole `TurnRef`
   (`turnId` + `turnEpoch` + `assistantEntryId`) and the runtime carries it, because
   `bindConversationTurnForPrompt` is an authoritative write that must name the exact
   epoch it created rather than whatever turn happens to be current. A bind refusal is
@@ -208,34 +203,13 @@ delegation proofs or a shared-machine gate without a new product and security de
   `acp_internal_error`. Continue-session prompt recovery may terminate and restore
   the ACP session once before retrying the same prompt, but only when no ACP output
   has buffered/flushed for that assistant turn; after visible output, never replay
-  the user prompt automatically. That gate fails CLOSED and reads
-  `prompt-activity-recorder.ts`, not turn state: `persisted_output` and
-  `dropped_prompt_activity` refuse a replay, `unknown` refuses it, and only a positive
-  `none` permits one — and that observation is the ONLY input, with no fallback to a
-  blinder signal. The recorder exists because the two older signals were both broken:
-  `acpFlushCountInTurn` is zeroed by `clearTurnState`, i.e. exactly when the gate runs,
-  and neither it nor the ACP buffer can see `session/request_permission` or
-  `fs/write_text_file`, which are independent JSON-RPC requests that never reach
-  `enqueueACPUpdate`. Its inputs are routed updates and those two side-effect
-  requests; in-turn drops are NOT an input, because Steps A–C made them structurally
-  impossible while a recorder is bound. One recorder belongs to one `PromptHandoffRun` (fiber-held,
-  carried along the steer successor chain, dies with the turn), so boundedness is
-  constructional: no keys, no eviction. It is created at BIND time, so the
-  `beginTurn → bind` window is deliberately excluded — what arrives there is a resume
-  fallback's pre-prompt startup output, not the user's turn. `AgentSessionClosedError`
-  is excluded from recovery outright: that prompt was accepted by a live agent whose
-  process then died.
-  `steerApplicationBarrier` guards ONLY `session/update` (one `await`, in
-  `agent-client.ts` `sessionUpdate`); `requestPermission` and `writeTextFile` are
-  unprotected, so a side effect the predecessor caused can arrive after the successor
-  binds. Those are credited to BOTH runs until the successor sees its own output —
-  over-refusing a replay is safe, losing the signal is not.
-  When a turn produced no visible output but the recorder says it acted, the failure
-  notice must NOT keep the `SILENT_TURN_FAILURE_MESSAGE` guess (context length / rate
-  limit) or tell the user to retry: the cause is local and a retry can repeat work.
-  Both messages reuse the `agent_no_output` reason code on purpose — a dedicated
-  `agent_output_dropped` code changes the persisted, client-shared
-  `ChatFailedReasonSchema` and is its own high-risk change.
+  the user prompt automatically. The gate uses `prompt-activity-recorder.ts`: only
+  `none` permits replay; output, side effects, and `unknown` fail closed. Create the
+  recorder at bind time and retain it after turn cleanup. Permission and file-write
+  requests bypass ACP updates, so record them explicitly. During a steer handoff,
+  credit these requests to both runs until the successor emits output.
+  `AgentSessionClosedError` is never replayed. If a silent turn recorded side effects,
+  use the uncertain-state `agent_no_output` notice and do not suggest retrying.
   DeepSeek Harness persistence compression mismatches are a distinct
   `acp_session_storage_incompatible` failure, not a generic internal error; keep
   matching narrow to the backend's artifact/compression diagnostic.
@@ -252,14 +226,9 @@ delegation proofs or a shared-machine gate without a new product and security de
   the prompt was delivered, so re-dispatching would spin the same silent failure.
   A missing dep fails OPEN here and only here: `observePromptOutputForTurn` returns
   `undefined` for an unobservable turn and the guard declines to accuse it.
-  INVARIANT: the two accessors answer DIFFERENT questions and must not be collapsed.
-  The replay gate asks "may this turn have ACTED?" (`observation !== 'none'`); the
-  no-output guard asks "did visible output ARRIVE?"
-  (`store.hasVisiblePromptOutputForTurn`: `persisted_output`, or a buffered/flushed
-  entry for the turn). Answering the second with the first makes a turn that only
-  requested a permission look like it produced output, so the guard takes the success
-  path and the user gets an empty assistant entry with no notice at all — worse than
-  the misleading notice it replaced.
+  Do not collapse the two observations: replay asks whether a turn may have acted;
+  the no-output guard asks whether visible output arrived. A side effect answers yes
+  only to the first question.
   Code Collab v1 turn markers and history fileDiff capture were removed. v2 may
   persist exact per-turn path/add/del caches derived from the CLI-local ACP evidence
   store after ACP finalization; diff content still comes only from the CLI store.
