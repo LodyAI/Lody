@@ -20,7 +20,7 @@ import type { ConversationView } from '@/lib/conversation-view';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
 import { readSessionHistoryEntry, readSessionHistoryLength } from '@/lib/session-store-history';
-import { readSessionDocHistoryRevision } from '@/providers/session-doc-state-source';
+import { readSessionDocHistoryRevision } from '../providers/session-doc-state-source';
 
 declare global {
   interface Window {
