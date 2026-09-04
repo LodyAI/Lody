@@ -7,6 +7,7 @@
     "claude-codex-capabilities",
     "mobile",
     "team",
+    "session-handoff",
     "agent-roles",
     "cli-runtimes",
     "device-resource-monitoring",
