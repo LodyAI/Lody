@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -281,5 +281,25 @@ describe('LocalProjectControlService.listProjectFiles via ripgrep', () => {
 
     expect(result.paths).toHaveLength(2);
     expect(result.truncated).toBe(true);
+  });
+
+  it('lists a symlinked file, which git and the walk both list', async () => {
+    // This repository tracks 36 of these (every `CLAUDE.md` is a symlink to its
+    // `AGENTS.md`), so a lister that drops them makes `@CLAUDE.md` find nothing.
+    await writeFile(path.join(rootPath, 'AGENTS.md'), '\n');
+    await symlink('AGENTS.md', path.join(rootPath, 'CLAUDE.md'));
+
+    expect(await listPaths()).toEqual(['AGENTS.md', 'CLAUDE.md']);
+  });
+
+  it('keeps the listing it produced when a symlink loop reports an error', async () => {
+    // `--follow` makes ripgrep exit 2 on a loop while still writing everything
+    // it reached. Falling through here would run a second full enumeration for
+    // a result already in hand.
+    await mkdir(path.join(rootPath, 'app'), { recursive: true });
+    await writeFile(path.join(rootPath, 'app', 'main.ts'), '\n');
+    await symlink(rootPath, path.join(rootPath, 'app', 'loop'));
+
+    expect(await listPaths()).toEqual(['app/main.ts']);
   });
 });

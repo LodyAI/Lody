@@ -167,11 +167,27 @@ control-plane path is DEPRECATED; do not add functionality to it.
   rather than walking them. Two flags are load-bearing and were both established
   by measurement, not by reading docs: `--hidden` does NOT imply excluding `.git`
   (ripgrep emits every object and hook under it), so `-g '!.git'` is required and
-  matches at any depth, covering a nested repo under `vendor/`; and ripgrep exits
-  **1** for "no matches", which for `--files` means an empty directory — a valid
-  answer. Treating any non-zero status as failure hands every empty project to the
-  slower fallback, so only a non-1 code falls through. `--no-config` keeps a
+  matches at any depth, covering a nested repo under `vendor/`; and `--follow` is
+  required because ripgrep otherwise emits NO symlink at all, while git and the
+  walk both list them — this repository tracks 36 (every `CLAUDE.md`), so without
+  it `@CLAUDE.md` finds nothing here. VS Code follows for the same reason.
+  `--follow` also descends into a symlinked directory, so an out-of-root realpath
+  can appear in a LISTING; that is not an escape, because `readLocalFileAtRoot`
+  resolves realpaths and refuses anything outside the root. `--no-config` keeps a
   user's `RIPGREP_CONFIG_PATH` from changing what the `@` menu can see.
+- **ripgrep's exit code describes matches, not whether the walk produced a usable
+  answer**, so neither non-zero code may be read as failure — both measured. It
+  exits **1** for "no matches", which for `--files` is an empty directory, a valid
+  answer; treating that as failure hands every empty project to the slower
+  fallback. It exits **2** when any error was REPORTED while still writing the
+  complete listing of everything it reached, and it does so for entirely routine
+  things: one unreadable directory anywhere in the tree, or a symlink loop that
+  `--follow` walks into. Discarding that listing runs a second full enumeration
+  for a result already in hand. A genuine failure (unknown flag, missing binary)
+  writes nothing, and empty stdout is what separates it from those two. A KILLED
+  process is different in kind and must still fall through: the timeout or
+  `maxBuffer` stopped it mid-walk, so its output is an arbitrary prefix of the
+  project, and listing a prefix silently is worse than falling through.
 - `listLocalProjectFilesFromGit` is the fallback for a machine with no ripgrep
   binary: ONE `git ls-files -z --cached --others --exclude-standard`, because
   `--cached` and `--others` compose and each spawn costs a process plus a full

@@ -417,6 +417,15 @@ export const RIPGREP_LIST_FILES_ARGS = [
   '--no-require-git',
   // Never let a user's RIPGREP_CONFIG_PATH change what the `@` menu can see.
   '--no-config',
+  // Without this ripgrep emits no symlink at all — measured, and it is not a
+  // corner case: this repository tracks 36 of them (every `CLAUDE.md`), which
+  // both other listers DO return, so omitting it means `@CLAUDE.md` finds
+  // nothing here. VS Code follows for the same reason (`search.followSymlinks`
+  // defaults to true). It also DESCENDS into a symlinked directory, so a link
+  // pointing outside the root can put an out-of-root realpath in the listing;
+  // that is a listing, not an escape — `readLocalFileAtRoot` resolves realpaths
+  // and refuses anything outside the root.
+  '--follow',
   '--null',
 ] as const;
 
@@ -439,14 +448,31 @@ async function listLocalProjectFilesFromRipgrep(
     });
     stdout = String(result.stdout ?? '');
   } catch (error) {
-    // ripgrep exits 1 for "no matches", which for `--files` means an empty
-    // directory — a valid answer. Only 2 (and a killed process, whose code is
-    // null) is a real failure worth falling through for. Measured: an empty
-    // directory really does exit 1, so treating any non-zero code as failure
-    // would silently hand every empty project to the slower fallback.
-    const failure = error as { code?: number | string; stdout?: string } | undefined;
-    if (failure?.code !== 1) return null;
-    stdout = String(failure.stdout ?? '');
+    const failure = error as
+      | { code?: number | string; killed?: boolean; signal?: string; stdout?: string }
+      | undefined;
+    // A killed process (the timeout above, or maxBuffer) stopped mid-walk, so
+    // whatever it wrote is an arbitrary PREFIX of the project. Listing a prefix
+    // silently is worse than falling through to a lister that finishes.
+    if (failure?.killed || failure?.signal) return null;
+
+    const partial = String(failure?.stdout ?? '');
+    // ripgrep's exit codes are about matches, not about whether the walk
+    // produced a usable answer, so neither non-zero code may be read as failure:
+    //
+    //   1 — no matches, which for `--files` is an empty directory. Measured; an
+    //       empty project would otherwise be handed to the slower fallback.
+    //   2 — at least one error was REPORTED. Also measured: `--files` still
+    //       writes the complete listing of everything it could reach, and it
+    //       exits 2 for entirely routine things — one unreadable directory
+    //       anywhere in the tree, or a symlink loop that `--follow` walks into.
+    //       Discarding that listing would run a second full enumeration for a
+    //       result we already hold.
+    //
+    // A genuine failure (an unknown flag, a missing binary) writes nothing, and
+    // empty stdout is what separates it from the two cases above.
+    if (failure?.code !== 1 && !partial) return null;
+    stdout = partial;
   }
 
   return collectListedFilePaths(stdout.split('\0'), maxFiles);
