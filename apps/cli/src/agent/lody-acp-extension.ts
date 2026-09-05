@@ -104,6 +104,7 @@ const LEGACY_METHODS = {
   proposedPlan: '_acp_ext:codex_proposed_plan',
   claudeTaskLifecycle: '_claude/taskLifecycle',
   kimiTaskLifecycle: '_kimi/taskLifecycle',
+  cursorCreatePlan: '_cursor/create_plan',
 } as const;
 
 export type LodyExtensionEvent =
@@ -117,6 +118,17 @@ export type LodyExtensionEvent =
       readonly type: 'legacyTaskLifecycle';
       readonly provider: 'claude' | 'kimi';
       readonly params: Record<string, unknown>;
+    }
+  | {
+      readonly type: 'cursorPlanApproval';
+      readonly sessionId: string;
+      readonly toolCallId: string;
+      readonly planId: string;
+      readonly plan: string;
+    }
+  | {
+      readonly type: 'cursorPlanApprovalInvalid';
+      readonly error: string;
     };
 
 export function parseLodyExtensionCapabilities(
@@ -197,5 +209,38 @@ export function parseLodyExtensionMessage(args: {
   if (method === LEGACY_METHODS.kimiTaskLifecycle) {
     return { type: 'legacyTaskLifecycle', provider: 'kimi', params: args.params };
   }
+
+  // Handle cursor-agent's plan delivery via _cursor/create_plan extension.
+  // cursor-agent sends this as a blocking extension that must be wired to an
+  // approval decision — the client renders the plan, asks the user to approve
+  // or reject, and returns the outcome so cursor-agent can continue.
+  // See issue #258.
+  if (method === LEGACY_METHODS.cursorCreatePlan) {
+    const CursorPlanSchema = z.object({
+      plan: z.string(),
+      sessionId: z.string().optional(),
+      toolCallId: z.string().optional(),
+    });
+    const parsed = CursorPlanSchema.safeParse(args.params);
+    if (parsed.success) {
+      const sessionId = parsed.data.sessionId ?? args.sessionId;
+      return {
+        type: 'cursorPlanApproval',
+        sessionId,
+        toolCallId: parsed.data.toolCallId ?? `cursor-plan:${sessionId}`,
+        // The displayed plan keys on a stable per-session id so a revised plan
+        // (fresh toolCallId after "No, keep planning") replaces the previous one
+        // instead of accumulating next to it; the approval tool-call keeps the
+        // unique cursor-supplied id.
+        planId: `cursor-plan:${sessionId}`,
+        plan: parsed.data.plan,
+      };
+    }
+    // The method is recognized but the payload is malformed: surface an explicit
+    // invalid event so the blocking caller can answer cursor-agent with a
+    // cancelled outcome instead of an empty response.
+    return { type: 'cursorPlanApprovalInvalid', error: parsed.error.message };
+  }
+
   return null;
 }

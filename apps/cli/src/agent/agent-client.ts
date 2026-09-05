@@ -1377,7 +1377,7 @@ export class AgentClient implements acp.Client {
     params: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     try {
-      await this.handleExtensionMessage(method, params);
+      return (await this.handleExtensionMessage(method, params)) ?? {};
     } catch (error) {
       this.logger.warn(`Error handling extension method ${method}: ${error}`);
     }
@@ -1395,7 +1395,7 @@ export class AgentClient implements acp.Client {
   private async handleExtensionMessage(
     method: string,
     params: Record<string, unknown>
-  ): Promise<void> {
+  ): Promise<Record<string, unknown> | void> {
     const logicalMethod = method.startsWith('_') ? method.slice(1) : method;
     if (logicalMethod === this.acknowledgedSteerCapability?.appliedNotificationMethod) {
       await this.handleSteerApplied(logicalMethod, params);
@@ -1450,6 +1450,61 @@ export class AgentClient implements acp.Client {
           this.tryHandleKimiTaskLifecycleExtension(logicalMethod, event.params);
         }
         return;
+      case 'cursorPlanApprovalInvalid':
+        this.logger.warn(
+          `[${this.options.sessionId}] Invalid cursor/create_plan params: ${event.error}`
+        );
+        return { outcome: { outcome: 'cancelled' } };
+      case 'cursorPlanApproval': {
+        // cursor/create_plan is a blocking extension: emit the plan for rendering,
+        // then request a switch_mode approval so the user can accept or reject.
+        this.ensureSessionMatch(event.sessionId as ACPSessionId);
+        // 1. Emit plan_update so the plan content renders in the session. The
+        // plan keys on the adapter's stable per-session planId, not the unique
+        // approval toolCallId, so a revised plan replaces the previous one.
+        this.options.onUpdateMessage(
+          parseSessionNotification({
+            sessionId: event.sessionId,
+            update: {
+              sessionUpdate: 'plan_update',
+              plan: {
+                type: 'markdown',
+                planId: event.planId,
+                content: event.plan,
+              },
+            },
+          })
+        );
+        // 2. Request permission via switch_mode so the approval card renders.
+        const requestId = randomUUID();
+        const syntheticRequest: acp.RequestPermissionRequest = {
+          sessionId: event.sessionId as ACPSessionId,
+          toolCall: {
+            toolCallId: event.toolCallId,
+            title: 'Ready to code?',
+            kind: 'switch_mode',
+            status: 'pending',
+            content: [{ type: 'content', content: { type: 'text', text: event.plan } }],
+            rawInput: { plan: event.plan },
+          },
+          options: [
+            { kind: 'allow_once', name: 'Yes, implement this plan', optionId: 'accept' },
+            { kind: 'reject_once', name: 'No, keep planning', optionId: 'reject' },
+          ],
+        };
+        const response = await this.options.onRequestPermission(requestId, syntheticRequest);
+        // Map the permission outcome to cursor's expected format.
+        // 'selected' with optionId 'accept' maps to 'accepted'.
+        // 'selected' with any other optionId or 'cancelled' maps to 'cancelled'.
+        if (
+          response.outcome.outcome === 'selected' &&
+          'optionId' in response.outcome &&
+          response.outcome.optionId === 'accept'
+        ) {
+          return { outcome: { outcome: 'accepted' } };
+        }
+        return { outcome: { outcome: 'cancelled' } };
+      }
     }
   }
 

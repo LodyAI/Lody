@@ -181,4 +181,80 @@ describe('plan-exit tool kind survives into the session document', () => {
       expect(JSON.stringify(stored?.content ?? [])).toContain('Do the thing');
     });
   });
+
+  it('falls back to permission request content when tool call has empty content', async () => {
+    // Regression test for issue #258: Claude's ExitPlanMode emits tool_call with
+    // content: [] during streaming. The plan text arrives later in the permission
+    // request. Without sanitizing empty arrays, [] (truthy) wins the ?? fallback
+    // and the plan is silently dropped.
+    await withDoc(async (doc, sessionId) => {
+      // Simulate the streaming phase: tool_call arrives with empty content.
+      const emptyContentNotification: AcpSessionNotification = {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: PLAN_EXIT_TOOL_CALL_ID,
+          title: 'Ready to code?',
+          kind: 'switch_mode',
+          status: 'pending',
+          content: [],
+        } as unknown as AcpSessionNotification['update'],
+      };
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [emptyContentNotification],
+        'assistant-1'
+      );
+
+      // Permission request arrives with the plan text in its content.
+      const permissionWithPlan = {
+        ...planExitPermission(sessionId),
+        toolCall: {
+          ...planExitPermission(sessionId).toolCall,
+          content: [{ type: 'text', text: '# Plan\n1. Do the thing' }],
+        },
+      } as unknown as RequestPermissionRequest;
+      await ensurePermissionRequestOnToolCall(doc, 'req-1', permissionWithPlan);
+
+      const stored = await readStoredPlanExit(doc);
+      expect(stored?.kind).toBe('switch_mode');
+      // The plan text from the permission request must be retained.
+      expect(JSON.stringify(stored?.content ?? [])).toContain('Do the thing');
+    });
+  });
+
+  it('falls back to permission request content when tool call has undefined content', async () => {
+    // Same regression path but content is absent entirely (undefined vs []).
+    await withDoc(async (doc, sessionId) => {
+      const noContentNotification: AcpSessionNotification = {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: PLAN_EXIT_TOOL_CALL_ID,
+          title: 'Ready to code?',
+          kind: 'switch_mode',
+          status: 'pending',
+          // content is intentionally omitted (undefined)
+        } as unknown as AcpSessionNotification['update'],
+      };
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [noContentNotification],
+        'assistant-1'
+      );
+
+      const permissionWithPlan = {
+        ...planExitPermission(sessionId),
+        toolCall: {
+          ...planExitPermission(sessionId).toolCall,
+          content: [{ type: 'text', text: '# Plan\n1. Do the thing' }],
+        },
+      } as unknown as RequestPermissionRequest;
+      await ensurePermissionRequestOnToolCall(doc, 'req-1', permissionWithPlan);
+
+      const stored = await readStoredPlanExit(doc);
+      expect(stored?.kind).toBe('switch_mode');
+      expect(JSON.stringify(stored?.content ?? [])).toContain('Do the thing');
+    });
+  });
 });
