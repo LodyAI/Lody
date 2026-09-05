@@ -5,6 +5,7 @@ import {
   canCloseDailyFailureIssue,
   findDailyEvidenceArtifact,
   findOwnedDailyFailureIssue,
+  findPrEvidenceArtifact,
   hasCompleteOwnedComment,
 } from './e2e-daily-policy.mjs';
 
@@ -105,4 +106,21 @@ void test('only a successful full Daily can close the shared failure Issue', () 
   assert.equal(canCloseDailyFailureIssue('success', 'smoke'), false);
   assert.equal(canCloseDailyFailureIssue('success', 'unknown'), false);
   assert.equal(canCloseDailyFailureIssue('failure', 'full'), false);
+});
+
+void test('identifies one exact PR evidence artifact and rejects ambiguity', () => {
+  assert.equal(
+    findPrEvidenceArtifact([{ id: 10, name: 'desktop-e2e-full-123', expired: false }], 123)?.suite,
+    'full'
+  );
+  assert.equal(
+    findPrEvidenceArtifact(
+      [
+        { id: 10, name: 'desktop-e2e-full-123', expired: false },
+        { id: 11, name: 'desktop-e2e-smoke-123', expired: false },
+      ],
+      123
+    ),
+    undefined
+  );
 });

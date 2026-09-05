@@ -183,3 +183,38 @@ void test('creates a report for infrastructure failures without a failure index'
     assert.match(body, /failure-index\.json is missing/u);
   });
 });
+
+void test('builds PR-specific markers and failure copy', async () => {
+  await withWorkspace(async (workspace) => {
+    const evidenceRoot = await writeFailures(workspace, ['LODY-REVIEW-001']);
+    const result = await prepareDailyFailureReport({
+      ...RUN,
+      evidenceRoot,
+      outputRoot: join(workspace, 'pr-report'),
+      workingDirectory: workspace,
+      channel: 'pr',
+      suite: 'full',
+    });
+    const body = await readFile(join(workspace, result.batches[0].bodyPath), 'utf8');
+    assert.match(body, /desktop-e2e-pr-failure-run:123456:video:LODY-REVIEW-001/u);
+    assert.match(body, /Desktop PR full regression failed/u);
+    assert.doesNotMatch(body, /Desktop Daily/u);
+  });
+});
+
+void test('still reports a PR infrastructure failure before its suite artifact exists', async () => {
+  await withWorkspace(async (workspace) => {
+    const result = await prepareDailyFailureReport({
+      ...RUN,
+      evidenceRoot: join(workspace, 'pr-evidence'),
+      outputRoot: join(workspace, 'pr-report'),
+      workingDirectory: workspace,
+      channel: 'pr',
+      suite: 'unknown',
+    });
+    const body = await readFile(join(workspace, result.batches[0].bodyPath), 'utf8');
+    assert.match(body, /Desktop PR regression failed/u);
+    assert.match(body, /failure-index\.json is missing/u);
+    assert.doesNotMatch(body, /Desktop PR unknown regression/u);
+  });
+});

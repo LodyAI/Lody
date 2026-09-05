@@ -98,6 +98,8 @@ export async function prepareDailyFailureReport({
   headSha,
   workingDirectory = process.cwd(),
   maxVideoBytes = MAX_VIDEO_BYTES,
+  channel = 'daily',
+  suite = 'full',
 }) {
   if (!/^\d+$/u.test(String(runId))) throw new Error('runId must be numeric');
   if (
@@ -106,6 +108,10 @@ export async function prepareDailyFailureReport({
     throw new Error('runUrl must be a GitHub Actions run URL');
   }
   if (!/^[0-9a-f]{40}$/u.test(headSha)) throw new Error('headSha must be a full commit SHA');
+  if (channel !== 'daily' && channel !== 'pr') throw new Error('channel must be daily or pr');
+  if (channel === 'pr' && suite !== 'smoke' && suite !== 'full' && suite !== 'unknown') {
+    throw new Error('PR suite must be smoke, full, or unknown');
+  }
 
   const workspace = resolve(workingDirectory);
   const root = resolve(evidenceRoot);
@@ -172,16 +178,23 @@ export async function prepareDailyFailureReport({
   }
 
   const groups = videos.length > 0 ? videos.map((video) => [video]) : [[]];
+  const markerScope = channel === 'pr' ? 'desktop-e2e-pr-failure' : 'desktop-e2e-daily-failure';
+  const subject =
+    channel === 'pr'
+      ? suite === 'unknown'
+        ? 'Desktop PR regression'
+        : `Desktop PR ${suite} regression`
+      : 'Desktop Daily regression';
   const batches = [];
   for (let index = 0; index < groups.length; index += 1) {
     const batchNumber = index + 1;
     const bodyPath = resolve(reports, `comment-${String(batchNumber).padStart(3, '0')}.md`);
     const marker = groups[index][0]
-      ? `<!-- desktop-e2e-daily-failure-run:${runId}:video:${groups[index][0].stableId} -->`
-      : `<!-- desktop-e2e-daily-failure-run:${runId}:summary -->`;
+      ? `<!-- ${markerScope}-run:${runId}:video:${groups[index][0].stableId} -->`
+      : `<!-- ${markerScope}-run:${runId}:summary -->`;
     const lines = [
       marker,
-      `Desktop Daily regression failed on commit \`${markdownText(headSha, 40)}\`.`,
+      `${subject} failed on commit \`${markdownText(headSha, 40)}\`.`,
       '',
       `- Workflow run: ${runUrl}`,
       `- Failed scenarios indexed: ${failures.length}`,
@@ -215,6 +228,8 @@ export async function prepareDailyFailureReport({
     runId: String(runId),
     runUrl,
     headSha,
+    channel,
+    suite,
     failures,
     videos,
     omitted,
@@ -233,6 +248,8 @@ async function main() {
     runId: options['run-id'],
     runUrl: options['run-url'],
     headSha: options['head-sha'],
+    channel: options.channel,
+    suite: options.suite,
   });
   process.stdout.write(`${report.manifestPath}\n`);
 }

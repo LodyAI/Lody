@@ -121,6 +121,9 @@ default-branch reconciler creates or reopens one Daily failure Issue and appends
 every validated recording as its own independently retryable inline player. A
 later successful full Daily closes the Issue with the recovery run link; a
 successful manually dispatched smoke run cannot clear full-suite failure state.
+Pull-request failures follow the same evidence validation in a trusted
+default-branch reconciler. It skips stale heads and appends each failed journey
+as an independently retryable inline video comment on the matching open PR.
 
 The current active coverage is tracked in [the coverage matrix](./COVERAGE.md).
 The suite checker parses Gherkin and enforces IDs, priorities, runtime ownership,

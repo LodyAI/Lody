@@ -48,6 +48,21 @@ export function findDailyEvidenceArtifact(artifacts, runId) {
   };
 }
 
+export function findPrEvidenceArtifact(artifacts, runId) {
+  const supported = new Map([
+    [`desktop-e2e-full-${runId}`, 'full'],
+    [`desktop-e2e-smoke-${runId}`, 'smoke'],
+  ]);
+  const matches = artifacts.filter(
+    (artifact) => !artifact.expired && supported.has(String(artifact.name ?? ''))
+  );
+  if (matches.length !== 1) return undefined;
+  return {
+    artifact: matches[0],
+    suite: supported.get(matches[0].name),
+  };
+}
+
 export function canCloseDailyFailureIssue(conclusion, suite) {
   return conclusion === 'success' && suite === 'full';
 }

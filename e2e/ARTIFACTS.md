@@ -12,7 +12,7 @@ Runtime output is written below ignored `e2e/artifacts/` directories.
 | `cli-backlog.json`   | Bundled CLI output exposed through the production IPC service   |
 | `failure-index.json` | Stable scenario id to artifact-directory mapping                |
 
-Daily regression sets `LODY_E2E_RECORD_VIDEO=1`. Playwright records each
+Daily and pull-request regression set `LODY_E2E_RECORD_VIDEO=1`. Playwright records each
 scenario independently at 640x360, deletes the recording after a clean pass,
 and retains `failure.webm` after an assertion or teardown failure. The
 read-only Daily job uploads all evidence as one suite-qualified Actions artifact.
@@ -22,6 +22,8 @@ durable Daily failure Issue. Only a successful `full` artifact can resolve that
 Issue; a successful `smoke` run does not cover prior P1 failures. Oversized,
 missing, symbolic-link, and unexpected-path files are never attached; the
 workflow run remains linked for complete trace and log retrieval.
+Pull-request failures use the same bounded video contract, but attach to the
+matching open PR only while its head still equals the failed workflow head.
 
 Acceptance rounds additionally contain `result.json`, `manifest.json`, and a
 successful `checkpoint.png` for every selected scenario. Supplied before/after

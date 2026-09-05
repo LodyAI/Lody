@@ -64,6 +64,7 @@ jobs:
               'pnpm-lock.yaml',
               'pnpm-workspace.yaml',
               '.github/workflows/e2e-smoke.yml',
+              '.github/workflows/e2e-pr-reconcile.yml',
               '.github/workflows/e2e-daily.yml',
               '.github/workflows/e2e-daily-reconcile.yml'
             ])
@@ -107,6 +108,8 @@ jobs:
 
       - name: Run selected desktop journeys
         shell: bash
+        env:
+          LODY_E2E_RECORD_VIDEO: '1'
         run: |
           set -o pipefail
           mkdir -p e2e/artifacts

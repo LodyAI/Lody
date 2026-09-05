@@ -175,7 +175,22 @@ export class ReviewPage {
     ).toBeVisible();
   }
 
+  async closeDiffViewer(): Promise<void> {
+    const readyDiffs = this.sidePanel.locator('[data-section-id="diff-viewer"]');
+    await expect(readyDiffs.first()).toBeVisible();
+
+    const activeTab = this.activeSidePanelTab();
+    await expect(activeTab).toContainText(/^(All Changes|全部变更)$/iu);
+    await activeTab
+      .getByRole('button', { name: /^(Close All Changes|关闭\s*全部变更)$/iu })
+      .click();
+
+    await expect(readyDiffs).toHaveCount(0);
+    await expect(this.allChangesTabs()).toHaveCount(1);
+  }
+
   async closeChangesPanel(): Promise<void> {
+    await expect(this.sidePanel.locator('[data-section-id="diff-viewer"]')).toHaveCount(0);
     const activeTab = this.activeSidePanelTab();
     await expect(activeTab).toContainText(/^(All Changes|全部变更)$/iu);
     await activeTab
