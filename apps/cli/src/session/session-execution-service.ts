@@ -4672,56 +4672,62 @@ export class SessionExecutionService {
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);
     const executionTurnId = this.currentTurnBySession.get(sessionId);
+    const runtimeTurnId = this.turnRuntimeBySession.get(sessionId)?.turnId;
     const isPrompting = activeTurnId === turnId;
-    const isCurrentExecutionTurn = executionTurnId === turnId;
-    const currentTurnId = activeTurnId ?? this.currentTurnBySession.get(sessionId);
+    const isCurrentExecutionTurn = executionTurnId === turnId || runtimeTurnId === turnId;
+    const currentTurnId = activeTurnId ?? executionTurnId ?? runtimeTurnId;
     // Cancel is exact-match only: a stale stop request must not interrupt a newer assistant turn.
     if (!isPrompting && !isCurrentExecutionTurn) {
-      const history = await sessionDoc.getHistory();
-      const hasUnfinishedRequestedTurn = history.some(
-        (entry) =>
-          entry.id === turnId &&
-          entry.role === 'assistant' &&
-          entry.finished !== true &&
-          typeof entry.endedAt !== 'number' &&
-          entry.items?.some(
-            (item) =>
-              item.type === 'tool_call' &&
-              item.activityKind === 'context_compaction' &&
-              (item.status === 'pending' || item.status === 'in_progress')
-          ) === true
-      );
-      if (currentTurnId == null && hasUnfinishedRequestedTurn) {
-        this.deps.logger.debug(
-          `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
-        );
-        this.deps.clearSessionActivePresence(sessionId);
-        await sessionDoc.updateHistory((nextHistory) => {
-          for (const entry of nextHistory) {
-            if (entry.id !== turnId) continue;
-            entry.finished = true;
-            entry.endedAt = getServerNow();
-            if (!entry.items) continue;
-            for (const item of entry.items) {
-              if (
+      // Only inspect and repair durable history when no live turn owns the session.
+      // A stale request that races with a newer turn must not touch that turn's
+      // session-wide presence or require history methods on lightweight test/docs.
+      if (currentTurnId == null) {
+        const history = await sessionDoc.getHistory();
+        const hasUnfinishedRequestedTurn = history.some(
+          (entry) =>
+            entry.id === turnId &&
+            entry.role === 'assistant' &&
+            entry.finished !== true &&
+            typeof entry.endedAt !== 'number' &&
+            entry.items?.some(
+              (item) =>
                 item.type === 'tool_call' &&
                 item.activityKind === 'context_compaction' &&
                 (item.status === 'pending' || item.status === 'in_progress')
-              ) {
-                item.status = 'failed';
+            ) === true
+        );
+        if (hasUnfinishedRequestedTurn) {
+          this.deps.logger.debug(
+            `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
+          );
+          this.deps.clearSessionActivePresence(sessionId);
+          await sessionDoc.updateHistory((nextHistory) => {
+            for (const entry of nextHistory) {
+              if (entry.id !== turnId) continue;
+              entry.finished = true;
+              entry.endedAt = getServerNow();
+              if (!entry.items) continue;
+              for (const item of entry.items) {
+                if (
+                  item.type === 'tool_call' &&
+                  item.activityKind === 'context_compaction' &&
+                  (item.status === 'pending' || item.status === 'in_progress')
+                ) {
+                  item.status = 'failed';
+                }
               }
             }
-          }
-          return nextHistory;
-        });
+            return nextHistory;
+          });
 
-        await this.finalizeCancelledTurn({
-          sessionId,
-          sessionDoc,
-          turnId,
-          reportTurnError: false,
-        });
-        return { success: true };
+          await this.finalizeCancelledTurn({
+            sessionId,
+            sessionDoc,
+            turnId,
+            reportTurnError: false,
+          });
+          return { success: true };
+        }
       }
       this.deps.logger.debug(
         `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
