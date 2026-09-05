@@ -39,6 +39,23 @@ const ELECTRON_DIR = join(ROOT, 'apps', 'electron');
 const MAIN_ENTRY = join(ELECTRON_DIR, 'out', 'main', 'index.js');
 const BUNDLED_CLI_ENTRY = join(ELECTRON_DIR, 'resources', 'cli', 'index.js');
 const requireFromElectron = createRequire(join(ELECTRON_DIR, 'package.json'));
+const TEARDOWN_OPERATION_TIMEOUT_MS = 20_000;
+
+async function boundedTeardown<T>(label: string, operation: Promise<T>): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error(`${label} exceeded ${TEARDOWN_OPERATION_TIMEOUT_MS}ms`)),
+      TEARDOWN_OPERATION_TIMEOUT_MS
+    );
+    timeout.unref();
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function resolveElectronExecutable(): string {
   const electronPackageDir = dirname(requireFromElectron.resolve('electron/package.json'));
@@ -297,6 +314,7 @@ export class ElectronHarness {
 
   async close(): Promise<void> {
     let closeError: unknown;
+    const appProcess = this.app?.process();
     try {
       this.closedVideo = this.page?.video() ?? null;
     } catch (error) {
@@ -312,10 +330,22 @@ export class ElectronHarness {
     } catch (error) {
       closeError ??= error;
     }
+    if (this.closedVideo && this.page && !this.page.isClosed()) {
+      try {
+        await boundedTeardown('Renderer close for video finalization', this.page.close());
+      } catch (error) {
+        closeError ??= error;
+      }
+    }
     try {
-      await this.app?.close();
+      if (this.app) await boundedTeardown('Electron application close', this.app.close());
     } catch (error) {
       closeError ??= error;
+      try {
+        appProcess?.kill('SIGKILL');
+      } catch (killError) {
+        closeError ??= killError;
+      }
     } finally {
       this.app = null;
       this.page = null;
@@ -345,9 +375,12 @@ export class ElectronHarness {
     try {
       if (this.closedVideo) {
         if (retainVideo) {
-          await this.closedVideo.saveAs(join(this.artifacts.scenarioDir, 'failure.webm'));
+          await boundedTeardown(
+            'Failure video save',
+            this.closedVideo.saveAs(join(this.artifacts.scenarioDir, 'failure.webm'))
+          );
         }
-        await this.closedVideo.delete();
+        await boundedTeardown('Recorded video cleanup', this.closedVideo.delete());
       }
     } catch (error) {
       videoError = error;

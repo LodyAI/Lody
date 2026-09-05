@@ -15,6 +15,7 @@ setDefaultTimeout(120_000);
 Before(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
   const tags = scenario.pickle.tags.map((tag) => tag.name);
   this.prepare(tags);
+  console.log(`[e2e] ${this.artifacts!.stableId}: launch`);
   await this.launch();
 });
 
@@ -23,6 +24,7 @@ After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
   const harness = this.harness;
   const artifacts = this.artifacts;
   if (!harness || !artifacts) return;
+  console.log(`[e2e] ${artifacts.stableId}: teardown (${scenario.result?.status ?? 'unknown'})`);
 
   const evidenceErrors: string[] = [];
   let artifactDirectoryReady = false;
@@ -119,4 +121,5 @@ After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
     }
     if (!failed) throw new Error(evidenceErrors.join('\n'));
   }
+  console.log(`[e2e] ${artifacts.stableId}: teardown complete`);
 });
