@@ -294,6 +294,10 @@ export function useChatLandingImageDraft(args: {
       if (isMobile) {
         return;
       }
+      const text = event.clipboardData.getData('text/plain');
+      if (text.length > 0) {
+        return;
+      }
       const fileItems = Array.from(event.clipboardData.items)
         .filter((item) => item.type.startsWith('image/'))
         .map((item) => item.getAsFile())
