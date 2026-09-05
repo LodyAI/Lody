@@ -65,6 +65,7 @@ describe('VirtualFileTree row mounting', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     await initI18n('en');
     viewportHeightPx = VIEWPORT_HEIGHT_PX;
     installLayoutStubs();
@@ -72,12 +73,17 @@ describe('VirtualFileTree row mounting', () => {
 
   afterEach(async () => {
     if (root) {
-      await act(async () => root?.unmount());
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+        root?.unmount();
+        vi.runOnlyPendingTimers();
+      });
     }
     root = null;
     container?.remove();
     container = null;
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   async function render(node: ReactNode): Promise<HTMLDivElement> {

@@ -17,7 +17,7 @@
     "format": "corepack pnpm -r --filter '!acp-extension-claude' --filter '!acp-extension-codex' run format",
     "format:check": "corepack pnpm -r --filter '!acp-extension-claude' --filter '!acp-extension-codex' run format:check",
     "typecheck": "corepack pnpm --filter lody prepare:acp-adapters && corepack pnpm -r --workspace-concurrency=1 --filter '!acp-extension-claude' --filter '!acp-extension-codex' run typecheck",
-    "test": "corepack pnpm -r --workspace-concurrency=1 run test",
+    "test": "cross-env NODE_ENV=test corepack pnpm --filter lody prepare:acp-adapters && cross-env NODE_ENV=test corepack pnpm -r --workspace-concurrency=1 run test",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:ci": "corepack pnpm test:scripts && corepack pnpm -r --workspace-concurrency=2 --filter \"!@lody/electron\" --filter \"!acp-extension-codex\" --filter \"!acp-extension-claude\" run test --maxWorkers=2 && corepack pnpm --filter @lody/electron run test",
     "test:watch": "corepack pnpm -r run test:watch",
@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@typescript/native-preview": "7.0.0-dev.20251217.1",
+    "cross-env": "^10.1.0",
     "oxlint": "^1.61.0",
     "oxlint-tsgolint": "^0.22.0",
     "prettier": "^3.6.2",
