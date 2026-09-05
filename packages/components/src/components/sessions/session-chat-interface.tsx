@@ -5345,6 +5345,25 @@ export const SessionChatInterface = memo(
       }
       return false;
     });
+    const canOpenHtmlAttachment = useStableCallback((file: SessionFilePayload): boolean => {
+      const action = resolveSessionHtmlAttachmentAction({
+        isLocalSession,
+        sourcePath: file.sourcePath,
+        connectionStatus: session.previewConnection?.status,
+        candidateStatus: session.previewCandidate?.status,
+      });
+      switch (action.kind) {
+        case 'open-local-file':
+          return !!onOpenHtmlFile;
+        case 'open-existing-browser':
+          return !!onOpenExistingBrowser;
+        case 'confirm-reported-port':
+          return !!onOpenBrowser;
+        case 'fallback':
+          return false;
+      }
+      return false;
+    });
     const openInIdeTarget = useMemo(
       () =>
         resolveSessionOpenInIdePathTarget({
@@ -5854,6 +5873,7 @@ export const SessionChatInterface = memo(
                           onFileDiffClick={onFileDiffClick}
                           onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                           onOpenHtmlFile={handleOpenHtmlAttachment}
+                          canOpenHtmlFile={canOpenHtmlAttachment}
                           messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                           assistantActions={assistantQuickActions}
                           assistantActionsMessageId={latestCompletedProposedPlan?.entryId}

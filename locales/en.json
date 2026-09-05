@@ -1970,6 +1970,7 @@
   "sessions.imageStoredAsLocalFile": "Image upload is offline; added as a pending file attachment.",
   "sessions.fileDownload": "Download",
   "sessions.fileDownloadFull": "Download full file",
+  "sessions.openLivePreview": "Open live preview",
   "sessions.filePreviewRendered": "Rendered",
   "sessions.filePreviewRaw": "Raw",
   "sessions.filePreviewTruncated": "Preview shows only the start of this file. Download the full file to see everything.",

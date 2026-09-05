@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Check, Copy, Download, FileWarning, Loader2, X } from 'lucide-react';
+import { Check, Copy, Download, ExternalLink, FileWarning, Loader2, X } from 'lucide-react';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog, DialogClose, DialogContentWithoutClose, DialogTitle } from '@/ui/dialog';
 import { Button } from '@/ui/button';
@@ -24,6 +24,7 @@ export type SessionFilePreviewPanelProps = {
   status: SessionFilePreviewStatus;
   onDownload: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
+  onOpenLivePreview?: (file: SessionFilePayload) => void;
 };
 
 /**
@@ -38,6 +39,7 @@ export function SessionFilePreviewPanel({
   status,
   onDownload,
   isDownloading = false,
+  onOpenLivePreview,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
   const markdown = isMarkdownFile(file.fileName);
@@ -123,7 +125,20 @@ export function SessionFilePreviewPanel({
               <Download className="size-4" />
             )}
           </Button>
-          {/* Divider separates content actions (copy/download) from the window
+          {onOpenLivePreview ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 text-muted-foreground hover:text-foreground"
+              onClick={() => onOpenLivePreview(file)}
+              aria-label={t('sessions.openLivePreview', 'Open live preview')}
+              title={t('sessions.openLivePreview', 'Open live preview')}
+            >
+              <ExternalLink className="size-4" />
+            </Button>
+          ) : null}
+          {/* Divider separates content actions (copy/download/live-preview) from the window
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
           <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
@@ -204,14 +219,27 @@ export type SessionFilePreviewDialogProps = SessionFilePreviewPanelProps & {
 export function SessionFilePreviewDialog({
   open,
   onOpenChange,
+  onOpenLivePreview,
   ...panelProps
 }: SessionFilePreviewDialogProps) {
   // Re-key the panel per file so the rendered/raw toggle resets between files.
   const panelKey = useMemo(() => panelProps.file.fileId, [panelProps.file.fileId]);
+  const handleOpenLivePreview = useMemo(() => {
+    if (!onOpenLivePreview) return undefined;
+    return (file: SessionFilePayload) => {
+      onOpenChange(false);
+      onOpenLivePreview(file);
+    };
+  }, [onOpenChange, onOpenLivePreview]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContentWithoutClose className="w-[calc(100vw-2rem)] max-w-3xl">
-        <SessionFilePreviewPanel key={panelKey} {...panelProps} />
+        <SessionFilePreviewPanel
+          key={panelKey}
+          {...panelProps}
+          onOpenLivePreview={handleOpenLivePreview}
+        />
       </DialogContentWithoutClose>
     </Dialog>
   );

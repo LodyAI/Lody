@@ -429,6 +429,8 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  /** Returns true when an HTML attachment can be routed to a richer surface. */
+  canOpenHtmlFile?: (file: SessionFilePayload) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -455,6 +457,7 @@ export interface SessionChatStreamViewProps {
 const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  canOpenHtmlFile?: (file: SessionFilePayload) => boolean;
 }>({});
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
@@ -1178,6 +1181,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      canOpenHtmlFile,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
@@ -1626,8 +1630,9 @@ export const SessionChatStreamView = forwardRef<
       () => ({
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
+        ...(canOpenHtmlFile ? { canOpenHtmlFile } : {}),
       }),
-      [onOpenHtmlFile, sendMessage]
+      [canOpenHtmlFile, onOpenHtmlFile, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -4789,7 +4794,7 @@ export const SessionFileGroup = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
-  const { openHtmlFile } = useContext(SessionChatActionContext);
+  const { openHtmlFile, canOpenHtmlFile } = useContext(SessionChatActionContext);
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
   const [previewStatus, setPreviewStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -4817,9 +4822,6 @@ export const SessionFileGroup = ({
 
   const handlePreview = useCallback(
     (file: SessionFilePayload) => {
-      if (isHtmlSessionFile(file) && openHtmlFile?.(file)) {
-        return;
-      }
       setPreviewFile(file);
       setPreviewStatus({ kind: 'loading' });
       if (!workspaceId || !authToken) {
@@ -4856,7 +4858,7 @@ export const SessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, sessionId, t, workspaceId]
+    [authToken, sessionId, t, workspaceId]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -4896,6 +4898,15 @@ export const SessionFileGroup = ({
           status={previewStatus}
           onDownload={handleDownload}
           isDownloading={downloadingId === previewFile.fileId}
+          onOpenLivePreview={
+            isHtmlSessionFile(previewFile) &&
+            openHtmlFile &&
+            (canOpenHtmlFile ? canOpenHtmlFile(previewFile) : true)
+              ? (file) => {
+                  openHtmlFile(file);
+                }
+              : undefined
+          }
         />
       ) : null}
     </>
