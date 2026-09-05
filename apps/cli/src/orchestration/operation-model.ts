@@ -43,6 +43,7 @@ export type OrchestrationModelAction =
   | 'interrupt_turn'
   | 'cancel_turn'
   | 'complete_finalization'
+  | 'finalization_consume_fail'
   | 'restart'
   | 'recover_orphans'
   | 'archive'
@@ -206,6 +207,14 @@ export const stepOrchestrationModel = (
       }
       next.activeTurn = 'none';
       break;
+    case 'finalization_consume_fail':
+      if (
+        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+      }
+      break;
     case 'complete_finalization':
       if (
         (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
@@ -318,6 +327,7 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'interrupt_turn',
     'cancel_turn',
     'complete_finalization',
+    'finalization_consume_fail',
     'restart',
     'recover_orphans',
     'archive',

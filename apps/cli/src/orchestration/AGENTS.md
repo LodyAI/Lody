@@ -64,8 +64,10 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   Normal claims require no active token and never take over another owner. Paths that write
   a terminal continuation failure or consume without execution must acquire the same
   exclusive token first; the history write and token-matched consume happen while it is
-  held. A failure in either terminal write releases the token so a later wake retries only
-  idempotent finalization, never ACP or an immediate retry loop. Once per Worker startup,
+  held. Failed finalization retains the token and unfinished steps for later wakes: retry
+  history before consume, never ACP or a cleanup write. Recheck ownership after history
+  awaits; do not rewrite durable history. Stop drops this memory; replacement Workers use
+  durable state. Once per Worker startup,
   the coordinator clears tokens owned by older boot ids
   without resetting the attempt count. A claim records `claimed`, becomes `prepared` only
   after the completion Turn is durable (which spends one bounded preparation attempt), and

@@ -54,6 +54,7 @@ const makeHarness = async (options?: {
   materializationWritesBeforeFailure?: boolean;
   materializationWritesDocBeforeFailure?: boolean;
   historyFailuresBeforeSuccess?: number;
+  beforeRequesterHistoryWrite?: () => Promise<void>;
   materializeTargetOverride?: () => Promise<void>;
   targetDocSync?: () => Promise<{
     history?: SessionHistoryInput[];
@@ -125,6 +126,7 @@ const makeHarness = async (options?: {
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       if (sessionId === requesterSessionId) {
+        await options?.beforeRequesterHistoryWrite?.();
         historyUpdateAttempt += 1;
         if (historyUpdateAttempt <= (options?.historyFailuresBeforeSuccess ?? 0)) {
           throw new Error('transient history write failure');
@@ -1260,8 +1262,8 @@ describe('LodyOperationCoordinator', () => {
       try {
         const delivery = afterFailure.getDelivery(harness.requesterSessionId, 'review-round-1');
         expect(delivery).toMatchObject({ state: 'pending', attemptCount: 0 });
-        expect(delivery.activeClaimId).toBeUndefined();
-        expect(delivery.activeClaimWorkerBootId).toBeUndefined();
+        expect(delivery.activeClaimId).toEqual(expect.any(String));
+        expect(delivery.activeClaimWorkerBootId).toEqual(expect.any(String));
       } finally {
         afterFailure.close();
       }
@@ -1301,6 +1303,132 @@ describe('LodyOperationCoordinator', () => {
       consume.mockRestore();
     }
   });
+
+  it.each([0, 2])(
+    'recovers terminal settlement during a write outage with %i failed history writes',
+    async (historyFailuresBeforeSuccess) => {
+      let rejectFurtherHistoryWrites = false;
+      const harness = await makeHarness({
+        deadlineAt: '2026-07-19T23:59:59.000Z',
+        agentConfigId: 'removed-agent-config',
+        configurationSyncSucceeds: true,
+        historyFailuresBeforeSuccess,
+        workerBootId: 'worker-a',
+        beforeRequesterHistoryWrite: async () => {
+          if (rejectFurtherHistoryWrites) throw new Error('history is unavailable again');
+        },
+      });
+      let writeOutage = true;
+      const originalConsume = LodyOperationStore.prototype.consumeClaimedDelivery;
+      const originalRelease = LodyOperationStore.prototype.releaseDeliveryClaim;
+      const consume = vi.spyOn(LodyOperationStore.prototype, 'consumeClaimedDelivery');
+      const release = vi.spyOn(LodyOperationStore.prototype, 'releaseDeliveryClaim');
+      consume.mockImplementation(function (this: LodyOperationStore, ...args) {
+        if (writeOutage) throw new Error('terminal database write outage');
+        return originalConsume.apply(this, args);
+      });
+      release.mockImplementation(function (this: LodyOperationStore, ...args) {
+        if (writeOutage) throw new Error('terminal database write outage');
+        return originalRelease.apply(this, args);
+      });
+      const inspect = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        harness.coordinator.start();
+        await harness.coordinator.idle();
+        const claimed = inspect.getDelivery(harness.requesterSessionId, 'review-round-1');
+        expect(claimed.activeClaimId).toEqual(expect.any(String));
+        if (historyFailuresBeforeSuccess > 0) {
+          expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+          await harness.coordinator.wake('history-still-unavailable');
+          await harness.coordinator.idle();
+          expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+          expect(inspect.getDelivery(harness.requesterSessionId, 'review-round-1').state).toBe(
+            'pending'
+          );
+        }
+        for (let wake = 0; wake < 3; wake += 1) {
+          await harness.coordinator.wake('terminal-database-still-unavailable');
+          await harness.coordinator.idle();
+        }
+        expect(inspect.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'pending',
+          attemptCount: 0,
+          activeClaimId: claimed.activeClaimId,
+        });
+        expect(harness.histories.get(harness.requesterSessionId)).toHaveLength(1);
+
+        rejectFurtherHistoryWrites = true;
+        writeOutage = false;
+        await harness.coordinator.wake('terminal-database-recovered');
+        await harness.coordinator.idle();
+        expect(inspect.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'consumed',
+          attemptCount: 0,
+        });
+        await harness.coordinator.wake('already-finalized');
+        await harness.coordinator.idle();
+        expect(harness.continueSession).not.toHaveBeenCalled();
+        expect(harness.histories.get(harness.requesterSessionId)).toHaveLength(1);
+      } finally {
+        consume.mockRestore();
+        release.mockRestore();
+        harness.coordinator.stop();
+        inspect.close();
+      }
+    }
+  );
+
+  it.each(['worker-a', 'worker-b'])(
+    'does not consume a replacement terminal claim owned by %s after history yields',
+    async (replacementBootId) => {
+      let historyStarted!: () => void;
+      let finishHistory!: () => void;
+      const started = new Promise<void>((resolve) => {
+        historyStarted = resolve;
+      });
+      const finish = new Promise<void>((resolve) => {
+        finishHistory = resolve;
+      });
+      const harness = await makeHarness({
+        deadlineAt: '2026-07-19T23:59:59.000Z',
+        agentConfigId: 'removed-agent-config',
+        configurationSyncSucceeds: true,
+        workerBootId: 'worker-a',
+        beforeRequesterHistoryWrite: async () => {
+          historyStarted();
+          await finish;
+        },
+      });
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        harness.coordinator.start();
+        await started;
+        store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-a');
+        expect(
+          store.claimDeliveryFinalization(harness.requesterSessionId, 'review-round-1', {
+            claimId: 'replacement-terminal-claim',
+            workerBootId: replacementBootId,
+          }).status
+        ).toBe('claimed');
+        finishHistory();
+        await harness.coordinator.idle();
+        await harness.coordinator.wake('stale-finalization');
+        await harness.coordinator.idle();
+        expect(store.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'pending',
+          activeClaimId: 'replacement-terminal-claim',
+          activeClaimWorkerBootId: replacementBootId,
+          attemptCount: 0,
+        });
+        expect(harness.continueSession).not.toHaveBeenCalled();
+      } finally {
+        finishHistory();
+        await harness.coordinator.idle();
+        harness.coordinator.stop();
+        store.close();
+      }
+    }
+  );
 
   it('does not write configuration failure when another Worker claims during config sync', async () => {
     let markSyncStarted!: () => void;

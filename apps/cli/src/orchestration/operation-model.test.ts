@@ -65,6 +65,35 @@ describe('Operation delivery executable model', () => {
     });
   });
 
+  it('retains terminal ownership through repeated history and consume failures', () => {
+    const failed = trace(
+      'accept',
+      'materialize_success',
+      'delete_configuration',
+      'finish',
+      'schedule',
+      'history_write_fail',
+      'schedule',
+      'history_write_fail',
+      'finalization_consume_fail',
+      'schedule',
+      'finalization_consume_fail'
+    );
+    expect(failed).toMatchObject({
+      delivery: 'finalizing',
+      deliveryClaimOwner: 'current',
+      completionTurnWrites: 1,
+      deliveryAttempts: 0,
+      activeTurn: 'none',
+    });
+    expect(stepOrchestrationModel(failed, 'complete_finalization')).toMatchObject({
+      delivery: 'consumed',
+      deliveryClaimOwner: 'none',
+      completionTurnWrites: 1,
+      deliveryAttempts: 0,
+    });
+  });
+
   it('uses deadline as a terminal backstop', () => {
     expect(trace('accept', 'deadline')).toMatchObject({
       operation: 'finished',
