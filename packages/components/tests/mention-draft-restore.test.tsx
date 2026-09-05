@@ -132,6 +132,7 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     value: string;
     persisted?: readonly PersistedMentionRange[];
     draftKey?: string;
+    resetOnEmpty?: boolean;
     onRanges?: (
       ranges: Array<{ start: number; end: number; value: string; kind?: string }>
     ) => void;
@@ -146,11 +147,27 @@ describe('mention ranges survive leaving and returning to a draft', () => {
           draftKey={props.draftKey}
           onMentionRangesChange={props.onRanges as never}
           getMentionChip={getComposerMentionChip}
-          resetOnEmpty={false}
+          resetOnEmpty={props.resetOnEmpty ?? false}
         />
       );
     });
   }
+
+  it('clears and rehydrates mention data without replacing or blurring the input', async () => {
+    knownFileTokens = new Set(['src/app.ts']);
+    const props = { resetOnEmpty: true };
+    await render({ ...props, value: 'look at @src/app.ts' });
+    const textarea = container.querySelector('textarea')!;
+    textarea.focus();
+    expect(kinds()).toContain('file');
+    await render({ ...props, value: '' });
+    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(document.activeElement).toBe(textarea);
+    expect(kinds()).toEqual([]);
+    await render({ ...props, value: 'look at @src/app.ts' });
+    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(kinds()).toContain('file');
+  });
 
   it('restores the range from the persisted draft when the file index is cold', async () => {
     const text = 'look at @src/app.ts thanks';

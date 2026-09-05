@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import type {
   AgentConfigId,
   MachineId,
@@ -21,6 +23,18 @@ const STORY_AGENT_CONFIG_ID = 'agent-storybook' as AgentConfigId;
 const STORY_SESSION_ID = 'session-storybook' as SessionId;
 const STORY_AUTH_TOKEN = 'storybook-token';
 
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'user-storybook', name: 'Storybook user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [{ id: STORY_WORKSPACE_ID, name: 'Storybook', slug: 'storybook', role: 'owner' }],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
+
 const storyMachineViewMeta: MachineViewMeta = {
   id: STORY_MACHINE_ID,
   name: 'Storybook Machine',
@@ -34,6 +48,7 @@ type StoryShellProps = {
   isAgentBusy: boolean;
   initialInputText?: string;
   showFreeTurnLimitNotice?: boolean;
+  onSendMessage?: () => Promise<boolean>;
 };
 
 function createStoryStore() {
@@ -50,6 +65,7 @@ function StoryShell({
   isAgentBusy,
   initialInputText = '',
   showFreeTurnLimitNotice = false,
+  onSendMessage = async () => true,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
   const session = useMemo<SessionMeta>(
@@ -77,43 +93,45 @@ function StoryShell({
   );
 
   return (
-    <Provider store={store}>
-      <div className="min-h-screen bg-background px-6 py-10">
-        <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-xs">
-          <div className="h-[20rem] bg-muted/20" />
-          <SessionChatInputArea
-            session={session}
-            sessionLocalProjectRootPath={null}
-            isMachineRemoved={false}
-            isAgentBusy={isAgentBusy}
-            canStopAgent={isAgentBusy}
-            isDark
-            isEmptyConversation={false}
-            selectedModeId={null}
-            selectedModelId={null}
-            modeOptions={[]}
-            modelOptions={[]}
-            availableCommands={[]}
-            freeTurnLimitNotice={
-              showFreeTurnLimitNotice
-                ? {
-                    current: 25,
-                    limit: 30,
-                    onUpgrade: () => {},
-                  }
-                : null
-            }
-            onModeChange={() => {}}
-            onModelChange={() => {}}
-            onSendMessage={async () => true}
-            onStop={() => {}}
-            onRemoveQueueItem={async () => {}}
-            initialInputText={initialInputText}
-            disableImageUpload
-          />
+    <PlatformContext.Provider value={storyPlatform}>
+      <Provider store={store}>
+        <div className="min-h-screen bg-background px-6 py-10">
+          <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-xs">
+            <div className="h-[20rem] bg-muted/20" />
+            <SessionChatInputArea
+              session={session}
+              sessionLocalProjectRootPath={null}
+              isMachineRemoved={false}
+              isAgentBusy={isAgentBusy}
+              canStopAgent={isAgentBusy}
+              isDark
+              isEmptyConversation={false}
+              selectedModeId={null}
+              selectedModelId={null}
+              modeOptions={[]}
+              modelOptions={[]}
+              availableCommands={[]}
+              freeTurnLimitNotice={
+                showFreeTurnLimitNotice
+                  ? {
+                      current: 25,
+                      limit: 30,
+                      onUpgrade: () => {},
+                    }
+                  : null
+              }
+              onModeChange={() => {}}
+              onModelChange={() => {}}
+              onSendMessage={onSendMessage}
+              onStop={() => {}}
+              onRemoveQueueItem={async () => {}}
+              initialInputText={initialInputText}
+              disableImageUpload
+            />
+          </div>
         </div>
-      </div>
-    </Provider>
+      </Provider>
+    </PlatformContext.Provider>
   );
 }
 
@@ -164,5 +182,22 @@ export const FreeTurnLimitNoticeDark: Story = {
   },
   globals: {
     theme: 'dark',
+  },
+};
+
+// Explicit acceptance signal lets browser tests exercise the real pending commit
+// without network, elapsed-time assumptions, or a fake composer.
+export const DeferredSubmission: Story = {
+  args: {
+    onSendMessage: () =>
+      new Promise<boolean>((resolve) => {
+        window.addEventListener(
+          'storybook:submission-result',
+          (event) => {
+            resolve((event as CustomEvent<boolean>).detail);
+          },
+          { once: true }
+        );
+      }),
   },
 };

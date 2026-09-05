@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, createRef, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRole, AgentRoleId, SessionMeta } from '@lody/shared';
+import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -30,35 +30,6 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   ...(await importOriginal<object>()),
   useAgentRoleMentionItems: () => [],
 }));
-
-vi.mock('../src/components/chat/chat-composer', async () => {
-  const React = await import('react');
-  return {
-    ChatComposer: (props: {
-      promptRef?: React.Ref<HTMLTextAreaElement>;
-      promptValue: string;
-      promptDisabled?: boolean;
-      onPromptChange: (value: string) => void;
-      onPromptKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
-      primaryAction?: React.ReactNode;
-      footerSelector?: React.ReactNode;
-    }) =>
-      React.createElement(
-        React.Fragment,
-        null,
-        React.createElement('textarea', {
-          ref: props.promptRef,
-          value: props.promptValue,
-          disabled: props.promptDisabled,
-          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
-            props.onPromptChange(event.target.value),
-          onKeyDown: props.onPromptKeyDown,
-        }),
-        props.primaryAction,
-        props.footerSelector
-      ),
-  };
-});
 
 vi.mock('../src/components/sessions/desktop-run-config-menu', async () => {
   const React = await import('react');
@@ -88,7 +59,11 @@ vi.mock('../src/hooks/use-code-collab-session-file-provider', () => ({
   }),
 }));
 
-import { SessionChatInputArea } from '../src/components/sessions/session-chat-input-area';
+import {
+  SessionChatInputArea,
+  setSessionChatInputTextDraft,
+  type SessionChatInputAreaHandle,
+} from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
 
 (
@@ -242,8 +217,12 @@ describe('SessionChatInputArea submission feedback', () => {
       );
     });
 
-    expect(container.querySelector('button')?.disabled).toBe(true);
-    await act(async () => container.querySelector('button')?.click());
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled).toBe(
+      true
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click()
+    );
     expect(onSendMessage).not.toHaveBeenCalled();
   });
 
@@ -296,7 +275,7 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(container.querySelector('textarea')?.value).toBe('preserved draft');
 
     await act(async () => {
-      container?.querySelector('button')?.click();
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
       await Promise.resolve();
     });
 
@@ -387,7 +366,7 @@ describe('SessionChatInputArea submission feedback', () => {
     acceptance = deferredBoolean();
 
     await act(async () => {
-      container?.querySelector('button')?.click();
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
       await Promise.resolve();
     });
 
@@ -496,7 +475,7 @@ describe('SessionChatInputArea submission feedback', () => {
     // Start the send — the textarea becomes disabled and the session id is
     // snapshotted inside sendMessage BEFORE the await.
     await act(async () => {
-      container?.querySelector('button')?.click();
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
       await Promise.resolve();
     });
 
@@ -519,5 +498,271 @@ describe('SessionChatInputArea submission feedback', () => {
     const textareaAfterSwitch = container.querySelector('textarea');
     // Focus must NOT have been restored to the new session's textarea.
     expect(document.activeElement).not.toBe(textareaAfterSwitch);
+  });
+  let nextSession = 0;
+  async function renderComposer({
+    sessionId = `focus-${++nextSession}`,
+    onSendMessage,
+    isArchived = false,
+    composerRef,
+  }: {
+    sessionId?: string;
+    onSendMessage: (blocks: SessionInputBlock[]) => Promise<boolean>;
+    isArchived?: boolean;
+    composerRef?: RefObject<SessionChatInputAreaHandle | null>;
+  }) {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    await act(async () => {
+      root!.render(
+        createElement(SessionChatInputArea, {
+          ref: composerRef,
+          session: {
+            id: sessionId,
+            userId: 'user-1',
+            machineId: 'machine-1',
+            cliType: 'builtin',
+            agentType: 'codex',
+            status: { type: 'idle' },
+            isArchived,
+            createdAt: '2026-09-05T00:00:00.000Z',
+          } as SessionMeta,
+          sessionLocalProjectRootPath: null,
+          isMachineRemoved: false,
+          isAgentBusy: false,
+          isDark: false,
+          isEmptyConversation: false,
+          selectedModeId: null,
+          selectedModelId: null,
+          modeOptions: [],
+          modelOptions: [],
+          onModeChange: () => undefined,
+          onModelChange: () => undefined,
+          onSendMessage,
+          onStop: () => undefined,
+          onRemoveQueueItem: async () => undefined,
+          initialInputText: 'focus regression draft',
+        })
+      );
+    });
+    return container!.querySelector('textarea')!;
+  }
+
+  async function submit(source: 'keyboard' | 'button') {
+    await act(async () => {
+      if (source === 'keyboard') {
+        container!
+          .querySelector('textarea')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+          );
+      } else {
+        container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
+      }
+    });
+  }
+
+  it.each([
+    ['keyboard', true],
+    ['keyboard', false],
+    ['button', true],
+    ['button', false],
+  ] as const)(
+    'restores desktop focus after deferred %s acceptance=%s using the real composer',
+    async (source, accepted) => {
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit(source);
+      expect(container!.querySelector('textarea')).toBe(textarea);
+      expect(textarea.disabled).toBe(true);
+      // jsdom leaves disabled controls focused; browsers blur them at this commit.
+      document.body.tabIndex = -1;
+      document.body.focus();
+      document.body.removeAttribute('tabindex');
+      await act(async () => acceptance.resolve(accepted));
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
+      expect(document.activeElement).toBe(textarea);
+    }
+  );
+
+  it.each([false, true])(
+    'handles immediately settled button sends on mobile=%s',
+    async (mobile) => {
+      if (mobile)
+        Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
+      const textarea = await renderComposer({ onSendMessage: async () => false });
+      textarea.focus();
+      await submit('button');
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.value).toBe('focus regression draft');
+      expect(document.activeElement).toBe(textarea);
+    }
+  );
+
+  it.each(['focus', 'focus-then-blur', 'pointer', 'window-blur'] as const)(
+    'respects focus relinquished via %s while sending',
+    async (gesture) => {
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit('keyboard');
+      document.body.tabIndex = -1;
+      document.body.focus();
+      document.body.removeAttribute('tabindex');
+      const other = document.createElement('button');
+      container!.appendChild(other);
+      if (gesture.startsWith('focus')) {
+        other.focus();
+        if (gesture === 'focus-then-blur') other.blur();
+      } else if (gesture === 'pointer') {
+        other.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      } else {
+        window.dispatchEvent(new Event('blur'));
+      }
+      await act(async () => acceptance.resolve(true));
+      expect(document.activeElement).not.toBe(textarea);
+    }
+  );
+
+  it.each([false, true])(
+    'ignores an old completion after a session switch (return=%s)',
+    async (returnToA) => {
+      const oldAcceptance = deferredBoolean();
+      const newAcceptance = deferredBoolean();
+      const sessionA = `switch-a-${++nextSession}`;
+      let textarea = await renderComposer({
+        sessionId: sessionA,
+        onSendMessage: () => oldAcceptance.promise,
+      });
+      textarea.focus();
+      await submit('keyboard');
+      textarea = await renderComposer({
+        sessionId: `switch-b-${nextSession}`,
+        onSendMessage: () => newAcceptance.promise,
+      });
+      if (returnToA)
+        textarea = await renderComposer({
+          sessionId: sessionA,
+          onSendMessage: () => newAcceptance.promise,
+        });
+      expect(textarea.disabled).toBe(false);
+      const newDraft = textarea.value;
+      await act(async () => oldAcceptance.resolve(true));
+      expect(textarea.value).toBe(newDraft);
+      textarea.focus();
+      await submit('keyboard');
+      expect(textarea.disabled).toBe(true);
+      document.body.tabIndex = -1;
+      document.body.focus();
+      document.body.removeAttribute('tabindex');
+      await act(async () => newAcceptance.resolve(false));
+      expect(textarea.disabled).toBe(false);
+      expect(textarea.value).toBe(newDraft);
+      expect(document.activeElement).toBe(textarea);
+    }
+  );
+
+  it('does not let an old completion enable another session pending submission', async () => {
+    const first = deferredBoolean();
+    const second = deferredBoolean();
+    await renderComposer({ onSendMessage: () => first.promise });
+    await submit('keyboard');
+    const textarea = await renderComposer({ onSendMessage: () => second.promise });
+    await submit('keyboard');
+    await act(async () => first.resolve(false));
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.value).toBe('');
+    await act(async () => second.resolve(false));
+    expect(textarea.disabled).toBe(false);
+    expect(textarea.value).toBe('focus regression draft');
+  });
+
+  it('does not focus an archived composer or replay focus after restoring it', async () => {
+    const acceptance = deferredBoolean();
+    const props = {
+      sessionId: `archived-${++nextSession}`,
+      onSendMessage: () => acceptance.promise,
+    };
+    const textarea = await renderComposer(props);
+    textarea.focus();
+    await submit('keyboard');
+    document.body.tabIndex = -1;
+    document.body.focus();
+    document.body.removeAttribute('tabindex');
+    await renderComposer({ ...props, isArchived: true });
+    await act(async () => acceptance.resolve(false));
+    expect(document.activeElement).not.toBe(textarea);
+    await renderComposer(props);
+    expect(document.activeElement).not.toBe(textarea);
+  });
+  it('accepts an attachment-only draft once when Enter repeats before React commits', async () => {
+    const acceptance = deferredBoolean();
+    const submitted: SessionInputBlock[][] = [];
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: (blocks) => {
+        submitted.push(blocks);
+        return acceptance.promise;
+      },
+    });
+    const comment = {
+      source: 'lody' as const,
+      path: 'src/example.ts',
+      lineNumber: 1,
+      side: 'additions' as const,
+      commentBody: 'Synthetic review comment',
+      authorName: 'Reviewer',
+    };
+    await act(async () => {
+      composerRef.current!.setInputText('');
+      composerRef.current!.addCommentReference(comment);
+    });
+    await act(async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      }
+    });
+    expect(submitted).toEqual([[{ type: 'comment_reference', ...comment }]]);
+    await act(async () => acceptance.resolve(false));
+    expect(container!.textContent).toContain('Synthetic review comment');
+  });
+
+  it('retires focus ownership when a pending composer unmounts', async () => {
+    const acceptance = deferredBoolean();
+    const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+    textarea.focus();
+    await submit('keyboard');
+    await act(async () => root!.unmount());
+    root = null;
+    const other = document.createElement('input');
+    container!.appendChild(other);
+    other.focus();
+    await act(async () => acceptance.resolve(true));
+    expect(document.activeElement).toBe(other);
+    expect(textarea.isConnected).toBe(false);
+  });
+  it('retains a newer cached draft when an old send completes after leaving again', async () => {
+    const acceptance = deferredBoolean();
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const sessionA = `draft-owner-${++nextSession}`;
+    setSessionChatInputTextDraft(sessionA as SessionMeta['id'], 'original draft');
+    const props = { sessionId: sessionA, composerRef, onSendMessage: () => acceptance.promise };
+    await renderComposer(props);
+    await submit('keyboard');
+    await renderComposer({ onSendMessage: async () => true });
+    await renderComposer(props);
+    await act(async () => composerRef.current!.setInputText('newer unsent draft'));
+    await renderComposer({ onSendMessage: async () => true });
+    await act(async () => acceptance.resolve(true));
+    const textarea = await renderComposer(props);
+    expect(textarea.value).toBe('newer unsent draft');
   });
 });
