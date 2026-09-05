@@ -31,6 +31,7 @@ import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-for
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
@@ -187,7 +188,11 @@ export function ProviderRow({
               {rateLimitWindows.map((window, index) => (
                 <RateLimitMeter
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
+                  label={formatAgentRateLimitWindowLabel(
+                    window,
+                    formatRateLimitWindowShortLabel(window.windowDurationSeconds),
+                    t
+                  )}
                   remainingPercent={window.remainingPercent}
                 />
               ))}

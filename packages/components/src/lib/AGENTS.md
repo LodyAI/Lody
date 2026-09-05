@@ -51,6 +51,11 @@ the href parser. It needs a third kind that strips roots without decoding.
 
 ## ACP dispatch
 
+Rate-limit window labels are provider-supplied scope names, displayed alongside
+localized durations through `formatAgentRateLimitWindowLabel`. Preserve every
+window even when durations, utilization, and resets match: a model weekly
+sub-cap and the shared weekly pool are concurrent constraints, not alternatives.
+
 Before creating a top-level or child session, call
 `filterAcpSessionConfigOptionValues()` so cached values outside the current
 selector schema are not dispatched or persisted again.

@@ -611,7 +611,7 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0(zod@4.3.6)
       '@openai/codex':
-        specifier: ^0.153.3
+        specifier: ^0.153.4
         version: 0.153.4
       acp-extension-core:
         specifier: workspace:*

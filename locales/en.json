@@ -846,6 +846,7 @@
   "machines.rateLimits.resetUnknown": "Reset time unknown",
   "machines.rateLimits.resetsAt": "Resets {{time}}",
   "machines.rateLimits.sevenDay": "7 days usage",
+  "machines.rateLimits.namedWindow": "{{duration}} · {{label}}",
   "machines.rateLimits.unlabeled": "Unlabeled limit",
   "machines.rateLimits.usedPercent": "{{percent}}% used",
   "machines.resourceStatus": "Resource Status",

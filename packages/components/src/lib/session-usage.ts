@@ -9,6 +9,7 @@ import {
   type SessionContextWindowUsage,
 } from '@lody/shared';
 import { clamp } from './clamp';
+import type { TFunction } from 'i18next';
 
 export const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 export const SEVEN_DAY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
@@ -32,6 +33,7 @@ export type ContextWindowUsageData = {
 };
 
 export type AgentRateLimitWindow = {
+  label?: string;
   usedPercent: number;
   remainingPercent: number;
   windowDurationSeconds: number | null;
@@ -56,6 +58,7 @@ export function getAgentRateLimitWindows(limits: MachineRateLimitUsage): AgentRa
     if (usedPercent === null) return [];
     return [
       {
+        ...(window.label?.trim() ? { label: window.label.trim() } : {}),
         usedPercent,
         remainingPercent: clampPercentage(100 - usedPercent),
         windowDurationSeconds:
@@ -77,6 +80,19 @@ export function formatRateLimitWindowShortLabel(windowDurationSeconds: number | 
     return `${windowDurationSeconds / (60 * 60)}h`;
   }
   return `${windowDurationSeconds / 60}m`;
+}
+
+export function formatAgentRateLimitWindowLabel(
+  window: AgentRateLimitWindow,
+  durationLabel: string,
+  t: TFunction
+): string {
+  return window.label
+    ? t('machines.rateLimits.namedWindow', '{{duration}} · {{label}}', {
+        duration: durationLabel,
+        label: window.label,
+      })
+    : durationLabel;
 }
 
 export function getContextWindowUsageData(
