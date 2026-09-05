@@ -1179,22 +1179,41 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   // observer is installed only for text that actually fences a diagram.
   useEffect(() => {
     const root = containerRef.current;
-    if (!root || !hasMermaidBlock) {
+    if (!root) {
+      return undefined;
+    }
+
+    const markedDiagrams = new Set<HTMLElement>();
+    const clearMarkedDiagrams = () => {
+      for (const diagram of markedDiagrams) {
+        diagram.removeAttribute('role');
+        diagram.removeAttribute('tabindex');
+        diagram.removeAttribute('aria-label');
+      }
+      markedDiagrams.clear();
+    };
+    if (!hasMermaidBlock) {
+      clearMarkedDiagrams();
       return undefined;
     }
 
     const markDiagramsOpenable = () => {
+      clearMarkedDiagrams();
       root.querySelectorAll<HTMLElement>(MERMAID_DIAGRAM_SELECTOR).forEach((diagram) => {
         diagram.setAttribute('role', 'button');
         diagram.setAttribute('tabindex', '0');
         diagram.setAttribute('aria-label', openDiagramLabel);
+        markedDiagrams.add(diagram);
       });
     };
 
     markDiagramsOpenable();
     const observer = new MutationObserver(markDiagramsOpenable);
     observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      clearMarkedDiagrams();
+    };
   }, [hasMermaidBlock, openDiagramLabel]);
   const components = useMemo(
     () =>

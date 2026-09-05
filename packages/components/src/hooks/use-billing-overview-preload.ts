@@ -20,7 +20,12 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
   );
 
   useEffect(() => {
-    if (!workspaceId || !authSessionId || overview === undefined) return;
+    if (!workspaceId) return;
+    if (!billingAvailable) {
+      clearBillingOverviewCache(workspaceId);
+      return;
+    }
+    if (!authSessionId || overview === undefined) return;
 
     const cached = readBillingOverviewCache(workspaceId, authSessionId);
     if (overview === null) {
@@ -28,5 +33,5 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
     } else if (!areBillingOverviewsEqual(cached, overview)) {
       writeBillingOverviewCache(workspaceId, authSessionId, overview);
     }
-  }, [authSessionId, overview, workspaceId]);
+  }, [authSessionId, billingAvailable, overview, workspaceId]);
 }
