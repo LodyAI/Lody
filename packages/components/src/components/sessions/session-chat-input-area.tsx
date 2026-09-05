@@ -1618,6 +1618,13 @@ export const SessionChatInputArea = memo(
           }
         }
 
+        // Prefer inserting plain text if available on the clipboard (for example,
+        // when copying text from Microsoft Word or other rich text editors that
+        // also put a rasterized preview image onto the clipboard).
+        if (text.length > 0) {
+          return;
+        }
+
         const pastedFiles = Array.from(event.clipboardData.items)
           .filter((item) => item.kind === 'file')
           .map((item) => item.getAsFile())
