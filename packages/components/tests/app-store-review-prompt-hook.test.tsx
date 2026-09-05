@@ -196,6 +196,59 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     expect(requestReview).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the idle timer when a later history update adds a recent hard failure', async () => {
+    const historical = eligibleHistoricalTurns();
+    const baseInput = {
+      sessionId,
+      sessionOwnerId: 'hard-failure-user',
+      currentUserId: 'hard-failure-user',
+      historyHydrated: true,
+      sessionCompleted: true,
+    } as const;
+
+    await render({
+      ...baseInput,
+      history: historical,
+      lastCompletedAssistantMessageId: 'historical-49',
+    });
+
+    const completedHistory = [
+      ...historical,
+      userTurn('eligible-user-turn', 'handled'),
+      assistantTurn('eligible-assistant-turn', nowMs, 'eligible-user-turn'),
+    ];
+    await render({
+      ...baseInput,
+      history: completedHistory,
+      lastCompletedAssistantMessageId: 'eligible-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    await render({
+      ...baseInput,
+      history: [
+        ...completedHistory,
+        userTurn('late-failure-user-turn', 'failed'),
+      ],
+      lastCompletedAssistantMessageId: 'eligible-assistant-turn',
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_499);
+    });
+    expect(requestReview).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(requestReview).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledWith(
+      'mobile/app_store_review_prompt_blocked',
+      expect.objectContaining({ block_reason: 'recent_hard_failure' })
+    );
+  });
+
   it('does not retry the same completed turn after real user interaction cancels its timer', async () => {
     const historical = eligibleHistoricalTurns();
     const completedHistory = [
