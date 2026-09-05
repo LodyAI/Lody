@@ -206,7 +206,9 @@ export class ElectronHarness {
     );
     await this.app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
     this.traceStarted = true;
-    await this.page.waitForLoadState('domcontentloaded');
+    await this.page.waitForFunction(() => document.readyState !== 'loading', undefined, {
+      timeout: 60_000,
+    });
     this.performanceSession = await this.page.context().newCDPSession(this.page);
     this.performanceSession.on('LayerTree.layerPainted', () => {
       this.rendererPaintCount += 1;

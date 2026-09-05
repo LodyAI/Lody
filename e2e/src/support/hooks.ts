@@ -16,7 +16,18 @@ Before(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
   const tags = scenario.pickle.tags.map((tag) => tag.name);
   this.prepare(tags);
   console.log(`[e2e] ${this.artifacts!.stableId}: launch`);
-  await this.launch();
+  try {
+    await this.launch();
+  } catch (error) {
+    console.error(`[e2e] ${this.artifacts!.stableId}: launch failed; cleaning up`);
+    await this.harness?.close().catch((cleanupError: unknown) => {
+      console.error(`[e2e] ${this.artifacts!.stableId}: launch cleanup failed`, cleanupError);
+    });
+    await this.harness?.finalizeVideo(true).catch((videoError: unknown) => {
+      console.error(`[e2e] ${this.artifacts!.stableId}: launch video failed`, videoError);
+    });
+    throw error;
+  }
 });
 
 After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
