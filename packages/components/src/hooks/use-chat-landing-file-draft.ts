@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   SESSION_FILE_MAX_COUNT,
   type MachineId,
@@ -7,9 +7,10 @@ import {
   type SessionInputBlock,
   type WorkspaceId,
 } from '@lody/shared';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { chatLandingPendingFilesAtomFamily, type PendingFile } from '@/atoms/chat-landing-draft';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import {
@@ -27,16 +28,6 @@ import {
   type SessionFileTransferPhase,
   type SessionFileUploadProgress,
 } from '@/lib/session-file-upload';
-
-type PendingFile = {
-  localId: string;
-  file: File;
-  status: SessionFileTransferPhase | 'uploaded' | 'failed';
-  progress: number;
-  error?: string;
-  uploaded?: SessionFilePayload;
-  abort?: AbortController;
-};
 
 export type ChatLandingFileDraftItem = {
   id: string;
@@ -81,6 +72,8 @@ const createLocalFileId = (): string => {
  * support for removal mid-flight.
  */
 export function useChatLandingFileDraft(args: {
+  /** Scope shared with the sibling image draft and the reserved session id. */
+  draftKey: string;
   workspaceId: WorkspaceId | null;
   authToken: string | null;
   /** Selected machine for the eventual session; enables the local fast path. */
@@ -90,9 +83,16 @@ export function useChatLandingFileDraft(args: {
   ensureSessionId: () => SessionId;
 }) {
   const { t } = useTranslation();
-  const { workspaceId, authToken, machineId, sessionId: draftSessionId, ensureSessionId } = args;
+  const {
+    draftKey,
+    workspaceId,
+    authToken,
+    machineId,
+    sessionId: draftSessionId,
+    ensureSessionId,
+  } = args;
   const localMachineId = useAtomValue(localMachineIdAtom);
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [pendingFiles, setPendingFiles] = useAtom(chatLandingPendingFilesAtomFamily(draftKey));
 
   // Desktop local-transport fast path: available only when the selected machine
   // is this machine's local CLI and the Electron preload bridge exposes the
@@ -116,18 +116,13 @@ export function useChatLandingFileDraft(args: {
       }
       return [];
     });
-  }, []);
+  }, [setPendingFiles]);
 
-  useEffect(() => {
-    return () => {
-      setPendingFiles((prev) => {
-        for (const entry of prev) {
-          entry.abort?.abort();
-        }
-        return [];
-      });
-    };
-  }, []);
+  // No unmount cleanup: the draft outlives the landing route (#242). An upload
+  // still in flight when the user switches tabs keeps running and settles into
+  // the atom, so returning shows the finished attachment rather than an entry
+  // aborted on the way out. Aborting stays tied to the user's own actions —
+  // removing one file, or clearing the draft (send accepted / draft reset).
 
   const updatePendingFile = useCallback(
     (localId: string, updater: (file: PendingFile) => PendingFile) => {
@@ -135,7 +130,7 @@ export function useChatLandingFileDraft(args: {
         prev.map((entry) => (entry.localId === localId ? updater(entry) : entry))
       );
     },
-    []
+    [setPendingFiles]
   );
 
   const startUpload = useCallback(
@@ -310,16 +305,19 @@ export function useChatLandingFileDraft(args: {
         void startUpload(entry.localId, entry.file, sessionId);
       }
     },
-    [ensureSessionId, pendingFiles.length, startUpload, t]
+    [ensureSessionId, pendingFiles.length, setPendingFiles, startUpload, t]
   );
 
-  const handleRemoveFile = useCallback((localId: string) => {
-    setPendingFiles((prev) => {
-      const target = prev.find((entry) => entry.localId === localId);
-      target?.abort?.abort();
-      return prev.filter((entry) => entry.localId !== localId);
-    });
-  }, []);
+  const handleRemoveFile = useCallback(
+    (localId: string) => {
+      setPendingFiles((prev) => {
+        const target = prev.find((entry) => entry.localId === localId);
+        target?.abort?.abort();
+        return prev.filter((entry) => entry.localId !== localId);
+      });
+    },
+    [setPendingFiles]
+  );
 
   const handleRetryFile = useCallback(
     (localId: string) => {
