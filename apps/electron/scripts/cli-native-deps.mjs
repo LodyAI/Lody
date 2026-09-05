@@ -38,7 +38,12 @@ const CLI_RUNTIME_PACKAGE_CHAIN = [
   { name: '@lydell/node-pty', from: 'cli' },
   // tinypool drives the diff line-count worker pool; it stays external because it
   // resolves its own entry/worker.js relative to its package dir. Pure JS, no deps.
-  { name: 'tinypool', from: 'cli' }
+  { name: 'tinypool', from: 'cli' },
+  // @vscode/ripgrep is a 4 KB shim whose lib/index.js `require.resolve`s the
+  // binary out of a sibling per-platform package. Only the shim is listed here;
+  // the binary is staged per packaging target by installEmbeddedRipgrepBinary,
+  // exactly like @lydell/node-pty above.
+  { name: '@vscode/ripgrep', from: 'cli' }
 ]
 
 // Top-level package dirs that are never needed at runtime (C++ sources, the
@@ -237,7 +242,17 @@ function resolveInstalledNodePtyBinaryDir(packageName) {
  * platform-agnostic. Installed into a throwaway prefix so the workspace tree is untouched.
  */
 function fetchNodePtyBinaryPackage(packageName, version) {
-  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-node-pty-'))
+  return fetchBinaryPackage(packageName, version, 'pty binding')
+}
+
+/**
+ * Downloads one per-platform binary package for a packaging target the build host
+ * is not. Shared by the pty binding and the ripgrep binary: both publish their
+ * binary as a sibling optionalDependency, so a cross-arch package job has to
+ * fetch the target's copy rather than reuse whatever this host installed.
+ */
+function fetchBinaryPackage(packageName, version, label) {
+  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-embedded-binary-'))
   const result = spawnSync(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
     [
@@ -258,7 +273,7 @@ function fetchNodePtyBinaryPackage(packageName, version) {
   if (result.status !== 0 || !fs.existsSync(path.join(packageDir, 'package.json'))) {
     fs.rmSync(downloadDir, { recursive: true, force: true })
     throw new Error(
-      `Failed to download ${packageName}@${version} for the embedded CLI pty binding. ` +
+      `Failed to download ${packageName}@${version} for the embedded CLI ${label}. ` +
         `It is fetched from the npm registry because the build host is ` +
         `${process.platform}-${process.arch}; set a registry mirror on restricted networks.`
     )
@@ -323,6 +338,117 @@ export function installEmbeddedNodePtyBinding({ platform, arch }) {
       `${installedDir ? '' : ', downloaded'})`
   )
   return bindingPath
+}
+
+export function ripgrepBinaryPackageName({ platform, arch }) {
+  return `@vscode/ripgrep-${platform}-${arch}`
+}
+
+export function ripgrepBinaryFileName({ platform }) {
+  return platform === 'win32' ? 'rg.exe' : 'rg'
+}
+
+export const stagedRipgrepDir = path.join(stagedNodeModulesDir, '@vscode', 'ripgrep')
+
+export function stagedRipgrepBinaryDir({ platform, arch }) {
+  return path.join(stagedNodeModulesDir, '@vscode', `ripgrep-${platform}-${arch}`)
+}
+
+export function stagedRipgrepBinaryPath({ platform, arch }) {
+  return path.join(
+    stagedRipgrepBinaryDir({ platform, arch }),
+    'bin',
+    ripgrepBinaryFileName({ platform })
+  )
+}
+
+/**
+ * @vscode/ripgrep pins each per-platform package to its own exact version, so the
+ * staged shim is the source of truth for which binary belongs to it. Reading the
+ * pin (rather than assuming the shim's own version) keeps a future shape change
+ * from silently staging a mismatched binary.
+ */
+function resolveRipgrepBinaryVersion(packageName) {
+  const manifestPath = path.join(stagedRipgrepDir, 'package.json')
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(
+      `Staged @vscode/ripgrep not found at ${stagedRipgrepDir}. Run \`pnpm run sync:cli\` first.`
+    )
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  const version = manifest.optionalDependencies?.[packageName]
+  if (typeof version !== 'string' || !version) {
+    throw new Error(
+      `@vscode/ripgrep does not publish ${packageName}; this platform/arch has no ripgrep binary.`
+    )
+  }
+  return version
+}
+
+/**
+ * pnpm's strict layout exposes a transitive dep only next to the package that
+ * DECLARES it, so `@vscode/ripgrep-<platform>-<arch>` is not resolvable from
+ * apps/cli — resolving from there downloads a copy of the host's own binary on
+ * every packaging run. Find it as a sibling of the wrapper inside the `@vscode`
+ * scope dir instead, which holds under both pnpm's store and npm's flat tree.
+ * Mirrors resolveInstalledNodePtyBinaryDir.
+ */
+function resolveInstalledRipgrepBinaryDir(packageName) {
+  const scopeDir = path.dirname(resolvePackageDir('@vscode/ripgrep', cliAppRoot))
+  const candidate = path.join(scopeDir, packageName.slice('@vscode/'.length))
+  return fs.existsSync(path.join(candidate, 'package.json')) ? candidate : undefined
+}
+
+function removeStagedRipgrepBinaryPackages() {
+  const scopeDir = path.join(stagedNodeModulesDir, '@vscode')
+  if (!fs.existsSync(scopeDir)) return
+  for (const entry of fs.readdirSync(scopeDir)) {
+    if (entry.startsWith('ripgrep-')) {
+      fs.rmSync(path.join(scopeDir, entry), { recursive: true, force: true })
+    }
+  }
+}
+
+/**
+ * Stages the packaging target's ripgrep binary next to the staged shim, which
+ * resolves it by plain `require.resolve`.
+ */
+export function installEmbeddedRipgrepBinary({ platform, arch }) {
+  const packageName = ripgrepBinaryPackageName({ platform, arch })
+  const version = resolveRipgrepBinaryVersion(packageName)
+
+  // One resources/ dir is reused across the arches of a `--arm64 --x64` run, so a
+  // stale binary must not survive into a target the afterPack probe would accept.
+  removeStagedRipgrepBinaryPackages()
+
+  const installedDir = resolveInstalledRipgrepBinaryDir(packageName)
+  const downloaded = installedDir
+    ? undefined
+    : fetchBinaryPackage(packageName, version, 'ripgrep binary')
+  const targetDir = stagedRipgrepBinaryDir({ platform, arch })
+  try {
+    // isTopLevel: false is load-bearing — EXCLUDED_PACKAGE_DIRS drops `bin/`, which
+    // in this package is the only thing worth copying.
+    copyPackageDir(installedDir ?? downloaded.packageDir, targetDir, { isTopLevel: false })
+  } finally {
+    downloaded?.cleanup()
+  }
+
+  const binaryPath = stagedRipgrepBinaryPath({ platform, arch })
+  if (!fs.existsSync(binaryPath)) {
+    throw new Error(`${packageName} staged without its ripgrep binary at ${binaryPath}.`)
+  }
+  // The binary is copied, not built, so the executable bit has to be re-asserted;
+  // a non-executable rg fails only when someone opens an `@` menu.
+  if (platform !== 'win32') {
+    fs.chmodSync(binaryPath, 0o755)
+  }
+
+  console.log(
+    `Staged embedded ripgrep ${packageName}@${version} (${platform}-${arch}` +
+      `${installedDir ? '' : ', downloaded'})`
+  )
+  return binaryPath
 }
 
 const SPAWN_HELPER_ASAR_REWRITES = [

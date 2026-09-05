@@ -14,12 +14,24 @@ const sessionItems: Array<{
   projectKey: 'chat' | `github:${string}` | `local:${string}:${string}`;
 }> = [];
 
+/** Counts the file source's activation-driven revalidations. */
+const fileRefreshCalls: number[] = [];
+let fileRefreshAvailable = true;
+
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useMentionProjectFiles: () => ({
+    // Deliberately empty: activation is driven by the resolved menu VIEW, not by
+    // the source having candidates, and giving every test in this file a real
+    // entry made each one build a Fuse index and render file rows.
     fileData: { entry: null, status: 'ready' as const },
     initializeLazyDirectory: async () => undefined,
     getKnownFileTokens: () => new Set<string>(),
+    refreshFiles: fileRefreshAvailable
+      ? () => {
+          fileRefreshCalls.push(1);
+        }
+      : undefined,
   }),
 }));
 
@@ -66,6 +78,8 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     skillScanEnabled.length = 0;
     sessionItems.length = 0;
+    fileRefreshCalls.length = 0;
+    fileRefreshAvailable = true;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -142,6 +156,52 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
+
+  const localMentionSource = {
+    kind: 'local',
+    machineId: 'machine-1',
+    workspaceId: 'lw_1',
+    localProjectId: 'lp_1',
+  };
+
+  // Split in two on purpose: each `typeInto` is a full render plus a menu
+  // re-resolution, and one test carrying every step was the heaviest in this
+  // file by a wide margin — enough to blow the 5s budget on a loaded machine
+  // without asserting anything the two halves do not.
+  it('does not query the machine for a bare @, then queries once per menu cycle', async () => {
+    await render({ value: '', mentionSource: localMentionSource });
+
+    // A bare `@` shows the category index and queries nothing, so nothing loads.
+    await typeInto('@');
+    expect(fileRefreshCalls).toHaveLength(0);
+
+    // The first real query is what asks the machine; further keystrokes in the
+    // same open menu must not re-spawn `git ls-files`.
+    await typeInto('@ap');
+    await typeInto('@app');
+    expect(fileRefreshCalls).toHaveLength(1);
+  });
+
+  it('queries again when the @ menu is reopened', async () => {
+    await render({ value: '', mentionSource: localMentionSource });
+
+    await typeInto('@ap');
+    expect(fileRefreshCalls).toHaveLength(1);
+
+    // Closing and reopening is a new cycle: the working tree may have moved.
+    await typeInto('');
+    await typeInto('@ap');
+    expect(fileRefreshCalls).toHaveLength(2);
+  });
+
+  it('does not revalidate a file source that provides no refresh', async () => {
+    fileRefreshAvailable = false;
+
+    await render({ value: '', mentionSource: localMentionSource });
+    await typeInto('@ap');
+
+    expect(fileRefreshCalls).toHaveLength(0);
+  });
 
   it('renders a plain textarea when no mention type is reachable', async () => {
     await render({ value: '' });

@@ -99,6 +99,7 @@ import {
   resolveSessionLocalFileSource,
   resolveSessionRepoFullName,
 } from '@/lib/session-local-file-source';
+import { resolveSessionMentionProjectSource } from '@/lib/session-mention-file-source';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from 'sonner';
@@ -2048,8 +2049,13 @@ export const SessionChatInputArea = memo(
     // Mirrors resolveSessionLocalFileSource and the session-detail file-tree
     // provider, which both key on the parent.
     const codeCollabSessionId = session.parentSessionId ?? session.id;
+    // A same-machine session searches its files over the local IPC RPC to the CLI
+    // daemon instead, so it must not open the Code Collab file index at all —
+    // joining that room is the exact detour the local transport avoids.
+    // `file-tree-view.tsx` gates its auto provider the same way.
+    const shouldPreferLocalMentionFiles = Boolean(sessionLocalFileSource);
     const shouldEnableCodeCollabMentionProvider =
-      Boolean(effectiveWorkspaceId) && userInput.includes('@');
+      Boolean(effectiveWorkspaceId) && userInput.includes('@') && !shouldPreferLocalMentionFiles;
     const codeCollabMentionFiles = useCodeCollabSessionFileProvider({
       workspaceId: effectiveWorkspaceId,
       sessionId: codeCollabSessionId,
@@ -2062,86 +2068,32 @@ export const SessionChatInputArea = memo(
     });
     const codeCollabMentionFilesPending =
       codeCollabMentionFiles.status === 'checking' || codeCollabMentionFiles.status === 'loading';
-    const mentionSource = useMemo<MentionProjectSource | undefined>(() => {
-      if (codeCollabMentionFiles.provider || codeCollabMentionFilesPending) {
-        return {
-          kind: 'provider',
-          provider: codeCollabMentionFiles.provider,
-          providerPending: codeCollabMentionFilesPending,
-          providerMessage: codeCollabMentionFiles.message,
-          localProject:
-            session.project?.kind === 'local'
-              ? {
-                  machineId: session.machineId,
-                  localProjectId: session.project.localProjectId,
-                }
-              : undefined,
-          githubRepoFullName: repoFullName || undefined,
-          isPublic: isRepoPublic,
-        };
-      }
-
-      const localProject =
-        session.project?.kind === 'local' && effectiveWorkspaceId
-          ? {
-              workspaceId: effectiveWorkspaceId,
-              localProjectId: session.project.localProjectId,
-            }
-          : null;
-
-      if (localProject && sessionLocalFileSource?.kind === 'session-worktree') {
-        return {
-          kind: 'local',
+    const mentionSource = useMemo<MentionProjectSource | undefined>(
+      () =>
+        resolveSessionMentionProjectSource({
+          localFileSource: sessionLocalFileSource,
+          localProjectId:
+            session.project?.kind === 'local' ? session.project.localProjectId : null,
           machineId: session.machineId,
-          workspaceId: localProject.workspaceId,
-          localProjectId: localProject.localProjectId,
-          githubRepoFullName: repoFullName || undefined,
-          localWorktree: {
-            machineId: session.machineId,
-            repoKey: sessionLocalFileSource.repoKey,
-            sessionId: sessionLocalFileSource.sessionId,
-          },
-        };
-      }
-
-      if (sessionLocalFileSource?.kind === 'local-project') {
-        return {
-          kind: 'local',
-          machineId: session.machineId,
-          workspaceId: sessionLocalFileSource.workspaceId,
-          localProjectId: sessionLocalFileSource.localProjectId,
-          githubRepoFullName: repoFullName || undefined,
-        };
-      }
-
-      if (repoFullName) {
-        return {
-          kind: 'github',
-          repoFullName,
-          isPublic: isRepoPublic,
-          localWorktree:
-            sessionLocalFileSource?.kind === 'session-worktree'
-              ? {
-                  machineId: session.machineId,
-                  repoKey: sessionLocalFileSource.repoKey,
-                  sessionId: sessionLocalFileSource.sessionId,
-                }
-              : undefined,
-        };
-      }
-
-      return undefined;
-    }, [
-      codeCollabMentionFiles.message,
-      codeCollabMentionFiles.provider,
-      codeCollabMentionFilesPending,
-      isRepoPublic,
-      repoFullName,
-      effectiveWorkspaceId,
-      session.machineId,
-      session.project,
-      sessionLocalFileSource,
-    ]);
+          workspaceId: effectiveWorkspaceId,
+          repoFullName: repoFullName || null,
+          isRepoPublic,
+          codeCollabProvider: codeCollabMentionFiles.provider,
+          codeCollabProviderPending: codeCollabMentionFilesPending,
+          codeCollabProviderMessage: codeCollabMentionFiles.message,
+        }),
+      [
+        codeCollabMentionFiles.message,
+        codeCollabMentionFiles.provider,
+        codeCollabMentionFilesPending,
+        isRepoPublic,
+        repoFullName,
+        effectiveWorkspaceId,
+        session.machineId,
+        session.project,
+        sessionLocalFileSource,
+      ]
+    );
     const skillAgent = useMemo(
       () =>
         !isArchived && session.cliType && session.agentType

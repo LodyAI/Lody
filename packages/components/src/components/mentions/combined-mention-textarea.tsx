@@ -83,6 +83,7 @@ function TwoLevelMentionMenu({
   fileData,
   fileSourceKind,
   enableFileMentions,
+  onFilesActivate,
   onLazyDirectoryOpen,
   enableIssueMentions,
   repoFullName,
@@ -105,6 +106,11 @@ function TwoLevelMentionMenu({
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
   enableFileMentions: boolean;
+  /**
+   * Revalidates the file list once per menu-open cycle. Only a local transport
+   * passes one — see `useMentionProjectFiles`.
+   */
+  onFilesActivate?: () => void;
   onLazyDirectoryOpen?: (directoryId: string) => void;
   enableIssueMentions: boolean;
   repoFullName?: string;
@@ -191,8 +197,9 @@ function TwoLevelMentionMenu({
             )
         : undefined,
       index: fileIndex,
+      onActivate: onFilesActivate,
     }),
-    [enableFileMentions, fileData, fileIndex, fileSourceKind, t]
+    [enableFileMentions, fileData, fileIndex, fileSourceKind, onFilesActivate, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -695,7 +702,7 @@ export const CombinedMentionTextarea = React.forwardRef<
     const skillsActive =
       enableSkillMentions && (skillsRequested || value.includes(SKILL_MENTION_TRIGGER));
 
-    const { fileData, initializeLazyDirectory, getKnownFileTokens } =
+    const { fileData, initializeLazyDirectory, getKnownFileTokens, refreshFiles } =
       useMentionProjectFiles(mentionSource);
     // `initializeLazyDirectory` is async, but the menu's `onLazyDirectoryOpen`
     // is fire-and-forget (`=> void`). Wrap once so the promise is explicitly
@@ -976,6 +983,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           fileData={fileData}
           fileSourceKind={fileSourceKind}
           enableFileMentions={enableFileMentions}
+          onFilesActivate={refreshFiles}
           onLazyDirectoryOpen={handleLazyDirectoryOpen}
           enableIssueMentions={enableIssueMentions}
           repoFullName={githubRepoFullName}

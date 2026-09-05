@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   installEmbeddedNodePtyBinding,
+  installEmbeddedRipgrepBinary,
   installEmbeddedSqliteBinding,
   stageCliRuntimePackages
 } from './cli-native-deps.mjs'
@@ -57,5 +58,6 @@ writeCliPackageMetadata()
 stageCliRuntimePackages()
 installEmbeddedSqliteBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedNodePtyBinding({ platform: process.platform, arch: process.arch })
+installEmbeddedRipgrepBinary({ platform: process.platform, arch: process.arch })
 
 console.log(`Synced CLI dist-dev to ${destDir}`)

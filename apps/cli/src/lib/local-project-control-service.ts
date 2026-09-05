@@ -57,6 +57,9 @@ const LOCAL_PROJECT_SKILL_DIR_MAX_CHILDREN = 2_000;
 const HARD_LOCAL_PROJECT_READ_MAX_BYTES = 5 * 1024 * 1024;
 const GIT_COMMAND_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS = 5_000;
+// ripgrep walks multithreaded and is the primary lister, so it gets a wider
+// budget than git: falling through costs a whole second enumeration.
+const LOCAL_PROJECT_RIPGREP_TIMEOUT_MS = 10_000;
 const LOCAL_PROJECT_WALK_YIELD_EVERY_ENTRIES = 1_000;
 const execFileAsync = promisify(execFile);
 const LOCAL_REPO_ID_RE = /^local---[0-9a-f]{12}$/;
@@ -402,26 +405,115 @@ async function buildRegisteredProjectPathIndex(
   return index;
 }
 
-async function listLocalProjectFilesFromGit(
+/**
+ * `@vscode/ripgrep` publishes its binary as a per-platform optionalDependency and
+ * THROWS from `require.resolve` when this platform's package is absent — an
+ * `--no-optional` install, or an architecture it does not publish. That is a
+ * supported degradation, not an error, so the failure is cached like a success
+ * and the caller falls through to git.
+ */
+let ripgrepPathPromise: Promise<string | null> | null = null;
+
+function resolveRipgrepPath(): Promise<string | null> {
+  ripgrepPathPromise ??= import('@vscode/ripgrep')
+    .then((mod) => {
+      const resolved = (mod as { rgPath?: unknown }).rgPath;
+      if (typeof resolved !== 'string' || !resolved) return null;
+      // A staged/packaged copy can lose the binary without losing the module.
+      return fs.existsSync(resolved) ? resolved : null;
+    })
+    .catch(() => null);
+  return ripgrepPathPromise;
+}
+
+/** Exported for tests: the exact argument list, so a flag cannot drift silently. */
+export const RIPGREP_LIST_FILES_ARGS = [
+  '--files',
+  // Dotfiles are real project files (`.env`, `.github/...`), and the CLI's own
+  // walk lists them too. `.git` is NOT excluded by this flag — measured: with
+  // `--hidden` alone ripgrep emits every object and hook under `.git` — so the
+  // glob below is load-bearing, not defensive. It matches at any depth, which
+  // also covers a nested repo under `vendor/`.
+  '--hidden',
+  '-g',
+  '!.git',
+  // THE reason to use ripgrep here: without it ripgrep applies .gitignore only
+  // inside a git repository, which is precisely the case the hand-rolled walk
+  // existed to cover. With it, one ignore semantics serves git and non-git roots
+  // alike, at every level, and ignored directories are pruned rather than walked.
+  '--no-require-git',
+  // Never let a user's RIPGREP_CONFIG_PATH change what the `@` menu can see.
+  '--no-config',
+  // Without this ripgrep emits no symlink at all — measured, and it is not a
+  // corner case: this repository tracks 36 of them (every `CLAUDE.md`), which
+  // both other listers DO return, so omitting it means `@CLAUDE.md` finds
+  // nothing here. VS Code follows for the same reason (`search.followSymlinks`
+  // defaults to true). It also DESCENDS into a symlinked directory, so a link
+  // pointing outside the root can put an out-of-root realpath in the listing;
+  // that is a listing, not an escape — `readLocalFileAtRoot` resolves realpaths
+  // and refuses anything outside the root.
+  '--follow',
+  '--null',
+] as const;
+
+async function listLocalProjectFilesFromRipgrep(
   rootPath: string,
   maxFiles: number
 ): Promise<LocalProjectFileListResult | null> {
-  const tracked = await runGitCommand(rootPath, ['ls-files', '-z']);
-  if (tracked.status !== 0) return null;
+  const ripgrepPath = await resolveRipgrepPath();
+  if (!ripgrepPath) return null;
 
-  const untracked = await runGitCommand(rootPath, [
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-    '-z',
-  ]);
-  if (untracked.status !== 0) return null;
+  let stdout = '';
+  try {
+    const result = await execFileAsync(ripgrepPath, [...RIPGREP_LIST_FILES_ARGS], {
+      cwd: rootPath,
+      encoding: 'utf8',
+      maxBuffer: GIT_COMMAND_MAX_BUFFER_BYTES,
+      timeout: LOCAL_PROJECT_RIPGREP_TIMEOUT_MS,
+      killSignal: 'SIGTERM',
+      env: { ...process.env, RIPGREP_CONFIG_PATH: '' },
+    });
+    stdout = String(result.stdout ?? '');
+  } catch (error) {
+    const failure = error as
+      | { code?: number | string; killed?: boolean; signal?: string; stdout?: string }
+      | undefined;
+    // A killed process (the timeout above, or maxBuffer) stopped mid-walk, so
+    // whatever it wrote is an arbitrary PREFIX of the project. Listing a prefix
+    // silently is worse than falling through to a lister that finishes.
+    if (failure?.killed || failure?.signal) return null;
 
-  const merged = `${tracked.stdout}${untracked.stdout}`;
+    const partial = String(failure?.stdout ?? '');
+    // ripgrep's exit codes are about matches, not about whether the walk
+    // produced a usable answer, so neither non-zero code may be read as failure:
+    //
+    //   1 — no matches, which for `--files` is an empty directory. Measured; an
+    //       empty project would otherwise be handed to the slower fallback.
+    //   2 — at least one error was REPORTED. Also measured: `--files` still
+    //       writes the complete listing of everything it could reach, and it
+    //       exits 2 for entirely routine things — one unreadable directory
+    //       anywhere in the tree, or a symlink loop that `--follow` walks into.
+    //       Discarding that listing would run a second full enumeration for a
+    //       result we already hold.
+    //
+    // A genuine failure (an unknown flag, a missing binary) writes nothing, and
+    // empty stdout is what separates it from the two cases above.
+    if (failure?.code !== 1 && !partial) return null;
+    stdout = partial;
+  }
+
+  return collectListedFilePaths(stdout.split('\0'), maxFiles);
+}
+
+/** Shared by the ripgrep and git listers: both emit NUL-separated paths. */
+function collectListedFilePaths(
+  entries: readonly string[],
+  maxFiles: number
+): LocalProjectFileListResult {
   const deduped = new Set<string>();
   let truncated = false;
 
-  for (const entry of merged.split('\0')) {
+  for (const entry of entries) {
     const normalized = normalizeProjectRelativePath(entry);
     if (!normalized) continue;
     if (deduped.has(normalized)) continue;
@@ -436,6 +528,29 @@ async function listLocalProjectFilesFromGit(
     paths: Array.from(deduped).sort((a, b) => a.localeCompare(b)),
     truncated,
   };
+}
+
+async function listLocalProjectFilesFromGit(
+  rootPath: string,
+  maxFiles: number
+): Promise<LocalProjectFileListResult | null> {
+  // ONE invocation, not two: `--cached` and `--others` compose, and each spawn
+  // costs a process plus a full index read — on a large repo that also doubles
+  // the chance of tripping LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS and falling back
+  // to the much slower walk. `--exclude-standard` is what applies .gitignore at
+  // EVERY level plus `.git/info/exclude` and the user's global excludes, and git
+  // prunes an ignored directory instead of descending into it, so a gitignored
+  // `node_modules` is never walked.
+  const listed = await runGitCommand(rootPath, [
+    'ls-files',
+    '-z',
+    '--cached',
+    '--others',
+    '--exclude-standard',
+  ]);
+  if (listed.status !== 0) return null;
+
+  return collectListedFilePaths(listed.stdout.split('\0'), maxFiles);
 }
 
 function escapeForRegex(value: string): string {
@@ -489,15 +604,20 @@ function globToRegexSource(pattern: string): string {
   return source;
 }
 
-function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boolean) | null {
-  let content = '';
-  try {
-    content = fs.readFileSync(path.join(rootPath, '.gitignore'), 'utf8');
-  } catch {
-    return null;
-  }
+type GitignoreRule = { negated: boolean; regex: RegExp };
 
-  const rules: Array<{ negated: boolean; regex: RegExp }> = [];
+/**
+ * Parse one `.gitignore` into rules matching ROOT-relative paths.
+ *
+ * `baseRelativePath` is the directory the file lives in, so a nested
+ * `.gitignore` constrains itself to its own subtree the way git does. An empty
+ * base is the project root.
+ */
+function parseGitignoreRules(content: string, baseRelativePath: string): GitignoreRule[] {
+  const base = normalizeProjectRelativePath(baseRelativePath);
+  const basePrefix = base ? `${escapeForRegex(base)}/` : '';
+
+  const rules: GitignoreRule[] = [];
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -525,11 +645,19 @@ function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boo
 
     const hasSlash = normalizedPattern.includes('/');
     const patternSource = globToRegexSource(normalizedPattern);
-    const prefix = anchored || hasSlash ? '^' : '(^|.*/)';
+    const prefix = anchored || hasSlash ? `^${basePrefix}` : `^${basePrefix}(.*/)?`;
     const suffix = directoryOnly ? '($|/.*)' : '$';
     rules.push({ negated, regex: new RegExp(`${prefix}${patternSource}${suffix}`) });
   }
 
+  return rules;
+}
+
+/** Later rules win, which is both git's last-match-wins rule and why a nested
+ * `.gitignore` must be appended AFTER its ancestors'. */
+function createGitignoreMatcher(
+  rules: readonly GitignoreRule[]
+): ((relativePath: string) => boolean) | null {
   if (rules.length === 0) {
     return null;
   }
@@ -545,15 +673,51 @@ function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boo
   };
 }
 
-async function listLocalProjectFilesByWalk(
+async function readGitignoreRules(
+  directoryAbsolutePath: string,
+  directoryRelativePath: string
+): Promise<GitignoreRule[]> {
+  try {
+    const content = await fs.promises.readFile(
+      path.join(directoryAbsolutePath, '.gitignore'),
+      'utf8'
+    );
+    return parseGitignoreRules(content, directoryRelativePath);
+  } catch {
+    return [];
+  }
+}
+
+function buildGitignoreMatcher(rootPath: string): ((relativePath: string) => boolean) | null {
+  let content = '';
+  try {
+    content = fs.readFileSync(path.join(rootPath, '.gitignore'), 'utf8');
+  } catch {
+    return null;
+  }
+  return createGitignoreMatcher(parseGitignoreRules(content, ''));
+}
+
+/**
+ * Exported for tests only. ripgrep now answers the default path, so a test that
+ * goes through `listProjectFiles` no longer reaches this fallback — and the
+ * fallback still has to be correct on a machine with no ripgrep binary.
+ */
+export async function listLocalProjectFilesByWalk(
   rootPath: string,
   maxFiles: number
 ): Promise<LocalProjectFileListResult> {
   const paths: string[] = [];
-  const stack: Array<{ absolutePath: string; relativePath: string }> = [
-    { absolutePath: rootPath, relativePath: '' },
-  ];
-  const shouldIgnorePath = buildGitignoreMatcher(rootPath);
+  // This fallback only runs when the root is not a git repository (or git is
+  // unavailable/timed out), so nothing applies .gitignore for us. Carry the
+  // accumulated rules down the tree instead of reading only the root file: a
+  // nested `.gitignore` is what keeps a subtree's build output out of the `@`
+  // menu, and an ignored directory is pruned here rather than descended into.
+  const stack: Array<{
+    absolutePath: string;
+    relativePath: string;
+    rules: readonly GitignoreRule[];
+  }> = [{ absolutePath: rootPath, relativePath: '', rules: [] }];
   let truncated = false;
   let entriesSinceYield = 0;
 
@@ -567,6 +731,16 @@ async function listLocalProjectFilesByWalk(
     } catch {
       continue;
     }
+
+    // Read the directory's own `.gitignore` only when the listing we already
+    // have says there is one, so the common directory costs no extra syscall.
+    const rules = entries.some((entry) => entry.name === '.gitignore' && !entry.isDirectory())
+      ? [
+          ...current.rules,
+          ...(await readGitignoreRules(current.absolutePath, current.relativePath)),
+        ]
+      : current.rules;
+    const shouldIgnorePath = createGitignoreMatcher(rules);
 
     for (const entry of entries) {
       entriesSinceYield += 1;
@@ -593,6 +767,7 @@ async function listLocalProjectFilesByWalk(
         stack.push({
           absolutePath: path.join(current.absolutePath, name),
           relativePath: normalizedRelativePath,
+          rules,
         });
         continue;
       }
@@ -618,7 +793,13 @@ async function listFilesAtRootPath(
   maxFiles: number
 ): Promise<LocalProjectFileListResult> {
   const normalizedRootPath = normalizeRootPath(rootPath);
+  // ripgrep first: it is the only one of the three that applies .gitignore the
+  // same way for a git repo and a plain directory. git is the fallback for a
+  // machine whose platform has no ripgrep binary, and the walk for one with
+  // neither — kept because "no lister at all" is a worse answer than an
+  // approximate one.
   return (
+    (await listLocalProjectFilesFromRipgrep(normalizedRootPath, maxFiles)) ??
     (await listLocalProjectFilesFromGit(normalizedRootPath, maxFiles)) ??
     (await listLocalProjectFilesByWalk(normalizedRootPath, maxFiles))
   );

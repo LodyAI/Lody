@@ -154,6 +154,62 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `loro/machine-flock-sync-coordinator.ts` owns the live room, dirty state, and
   exponential retry; request-scoped `syncOnce()` failures must not make local project
   add/update flows fail after the local write is durable.
+- `local-project/list-files` and `worktree/list-files` answer an `@` menu that
+  revalidates on every open, so they must stay a LIVE listing and stay cheap. Do
+  not reintroduce a cached or watcher-maintained index here: a file the user just
+  moved in must be mentionable on the next keystroke. `listFilesAtRootPath` is a
+  three-step chain, ripgrep → git → walk, and the order is the point.
+- **ripgrep is the primary lister** (`RIPGREP_LIST_FILES_ARGS`, exported so a flag
+  cannot drift silently). `--no-require-git` is the whole reason it leads: without
+  it ripgrep applies .gitignore only INSIDE a git repository, which is exactly the
+  case the hand-rolled walk existed to cover. With it, one ignore semantics serves
+  a repo and a plain directory alike, at every level, pruning ignored directories
+  rather than walking them. Two flags are load-bearing and were both established
+  by measurement, not by reading docs: `--hidden` does NOT imply excluding `.git`
+  (ripgrep emits every object and hook under it), so `-g '!.git'` is required and
+  matches at any depth, covering a nested repo under `vendor/`; and `--follow` is
+  required because ripgrep otherwise emits NO symlink at all, while git and the
+  walk both list them — this repository tracks 36 (every `CLAUDE.md`), so without
+  it `@CLAUDE.md` finds nothing here. VS Code follows for the same reason.
+  `--follow` also descends into a symlinked directory, so an out-of-root realpath
+  can appear in a LISTING; that is not an escape, because `readLocalFileAtRoot`
+  resolves realpaths and refuses anything outside the root. `--no-config` keeps a
+  user's `RIPGREP_CONFIG_PATH` from changing what the `@` menu can see.
+- **ripgrep's exit code describes matches, not whether the walk produced a usable
+  answer**, so neither non-zero code may be read as failure — both measured. It
+  exits **1** for "no matches", which for `--files` is an empty directory, a valid
+  answer; treating that as failure hands every empty project to the slower
+  fallback. It exits **2** when any error was REPORTED while still writing the
+  complete listing of everything it reached, and it does so for entirely routine
+  things: one unreadable directory anywhere in the tree, or a symlink loop that
+  `--follow` walks into. Discarding that listing runs a second full enumeration
+  for a result already in hand. A genuine failure (unknown flag, missing binary)
+  writes nothing, and empty stdout is what separates it from those two. A KILLED
+  process is different in kind and must still fall through: the timeout or
+  `maxBuffer` stopped it mid-walk, so its output is an arbitrary prefix of the
+  project, and listing a prefix silently is worse than falling through.
+- `listLocalProjectFilesFromGit` is the fallback for a machine with no ripgrep
+  binary: ONE `git ls-files -z --cached --others --exclude-standard`, because
+  `--cached` and `--others` compose and each spawn costs a process plus a full
+  index read. `listLocalProjectFilesByWalk` is the last resort for a machine with
+  neither, kept because "no lister at all" is worse than an approximate one; it is
+  no longer reached by a default `listProjectFiles`, so it is EXPORTED and tested
+  directly. It carries accumulated `GitignoreRule`s down the stack — a nested
+  `.gitignore` constrains its own subtree, appended AFTER its ancestors' because
+  last match wins. Known gaps in that last resort only: patterns are translated
+  approximately (`globToRegexSource` has no character classes) and there is no
+  default exclude set.
+- `@vscode/ripgrep` publishes its binary as a per-platform optionalDependency and
+  THROWS from `require.resolve` when this platform's package is absent, so
+  `resolveRipgrepPath` caches the failure like a success and the chain degrades to
+  git. It must stay EXTERNAL to the CLI bundle (`vite.config.ts`,
+  `check-published-bundle-imports.js`): inlining that `require.resolve` would
+  resolve it against the bundle, where no such package exists. Electron staging
+  mirrors `@lydell/node-pty` exactly — `installEmbeddedRipgrepBinary` stages the
+  packaging TARGET's binary (downloading it only for a cross-arch job), copies it
+  with `isTopLevel: false` because `EXCLUDED_PACKAGE_DIRS` drops `bin/`, and
+  re-asserts the executable bit; `eb-after-pack.mjs` then re-checks both presence
+  and that bit, since a non-executable `rg` surfaces only as an empty `@` menu.
 - Builtin Codex local-project history import is read-only: require
   `_meta.lody.sessionHistory` v1 and call the Core-defined history method; never fall back to
   `loadSession`, which resumes the thread and can contend with its active writer. Publish a new
