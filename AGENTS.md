@@ -39,6 +39,11 @@ and Web/mobile app sources.
   `MachineMeta.protocolCapabilities`; never infer support from the CLI release version. Missing
   capabilities mean legacy/unsupported. Advertised set and version checks share one binding in
   `packages/shared/src/machine-protocol-capabilities.ts` so a key never travels without its version.
+- The machine owns the deadline for an ACP startup round-trip and answers with its own
+  failure reason. A client timeout over the same request is a backstop for a daemon that
+  died without replying, so it derives from
+  `packages/shared/src/acp-startup-budget.ts` and stays strictly above the machine's worst
+  case; never set a second, smaller client deadline that expires work the machine is still doing.
 - Managed runtime downloads default to the public R2-backed channel owned by
   `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
   same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
