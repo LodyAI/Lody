@@ -3,6 +3,7 @@ import { getAgentRoleEmoji, type AgentConfigMeta, type AgentRole } from '@lody/s
 import type { RecentRunConfigItem } from '@/components/sessions/recent-run-config-menu-group';
 import {
   isConfigOptionValueValid,
+  isThoughtLevelSelector,
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
   resolvePlanModeSelectorEnabled,
@@ -295,16 +296,25 @@ export function buildRecentRunConfigItems({
  * The config-option values of a record that are still valid for the agent's
  * current selectors. An option the provider dropped (or whose value it no
  * longer offers) is skipped rather than forced back in.
+ *
+ * `switchesModel` says the record also moves the model. The selectors still
+ * describe the OUTGOING model, and reasoning effort is per model, so validating
+ * the recorded effort against them would drop a value the incoming model does
+ * offer (Grok 4.5's ladder has no `xhigh`, Grok 4.6's does). It is taken
+ * verbatim instead; the selection resolution re-validates it against the
+ * resolved model.
  */
 export function resolveApplicableConfigOptionValues(
   record: Pick<RecentRunConfigRecord, 'configOptionValues'>,
-  configOptionSelectors: ReadonlyArray<AcpConfigOptionSelector>
+  configOptionSelectors: ReadonlyArray<AcpConfigOptionSelector>,
+  options: { switchesModel?: boolean } = {}
 ): Array<{ configId: string; value: AcpConfigOptionValue }> {
   const applicable: Array<{ configId: string; value: AcpConfigOptionValue }> = [];
   for (const selector of configOptionSelectors) {
     const value = record.configOptionValues[selector.configId];
     if (value === undefined) continue;
-    if (!isConfigOptionValueValid(selector, value)) continue;
+    const modelDependent = options.switchesModel === true && isThoughtLevelSelector(selector);
+    if (!modelDependent && !isConfigOptionValueValid(selector, value)) continue;
     applicable.push({ configId: selector.configId, value });
   }
   return applicable;

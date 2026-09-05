@@ -21,7 +21,13 @@ arrive: context/message-flow.md "Upstream".
   contract that Lody's sandboxed terminal manager preserves for other agents.
   Config selected by the driving turn travels on every session establishment as
   `_meta.lody.sessionConfig`; provider-specific startup translation belongs in the
-  ACP adapter. `session/set_config_option` remains the live-session switch, and a
+  ACP adapter. Adapters may publish per-model reasoning-effort ladders on the
+  session response as `_meta.lody.modelReasoningEfforts`; capability
+  normalization merges that map into the cached `modelReasoningEfforts`,
+  together with the legacy `model[effort]` id derivation for builtin Codex
+  only — other agents use the same brackets for unrelated variants (Claude's
+  `opus[1m]` is a context window). Vendor model `_meta` never enters
+  the CLI. `session/set_config_option` remains the live-session switch, and a
   successful selection becomes the startup state of a later replacement. Session
   setup and `session/set_config_option` responses carry the agent-confirmed config
   state; runtime projections must consume them as well as autonomous

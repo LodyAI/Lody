@@ -120,6 +120,10 @@ export function AgentRoleEditorDialog({
           configId: selectedAgentConfig.id,
           cliType: selectedAgentConfig.cliType,
           agentType: selectedAgentConfig.agentType,
+          // A Role pins its model: the effort ladder must follow the model
+          // being edited, not the probe-time current one, so the picker and
+          // the compatibility check agree on the same ladder.
+          selectedModelId: editor?.value.modelId ?? null,
           runtimeOverrides: selectedAgentConfig.runtimeOverrides,
           machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
         }

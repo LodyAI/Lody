@@ -262,6 +262,7 @@ export const DraftSessionChatInterface = memo(
         machineFlockRows,
         modeOptions,
         modelOptions,
+        modelReasoningEfforts,
         sessionMachine,
       } = useSessionAcpSelectorContext({
         machineId: parentSession.machineId,
@@ -280,6 +281,7 @@ export const DraftSessionChatInterface = memo(
           defaultModelId,
           modeOptions,
           modelOptions,
+          modelReasoningEfforts,
         }),
         [
           capabilityAuthority,
@@ -288,16 +290,21 @@ export const DraftSessionChatInterface = memo(
           defaultModelId,
           modeOptions,
           modelOptions,
+          modelReasoningEfforts,
         ]
       );
-      const { selectedModeId, selectedModelId, configOptionValues } =
-        useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
-          cliType: draft.cliType,
-          agentType: draft.agentType,
-        });
+      const {
+        selectedModeId,
+        selectedModelId,
+        configOptionValues,
+        configOptionSelectors: resolvedConfigOptionSelectors,
+      } = useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+        cliType: draft.cliType,
+        agentType: draft.agentType,
+      });
       const dispatchConfigOptionValues = useMemo(
-        () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-        [configOptionSelectors, configOptionValues]
+        () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
+        [configOptionValues, resolvedConfigOptionSelectors]
       );
       const thinkEffortSelector = useMemo(
         () =>

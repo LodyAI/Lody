@@ -19,6 +19,7 @@ const selectorOptions: AcpSelectorOptions = {
   capabilityAuthority: 'authoritative',
   defaultModeId: 'default',
   defaultModelId: 'gpt-5.6-sol',
+  modelReasoningEfforts: undefined,
   modeOptions: [
     { value: 'default', label: 'Default' },
     { value: 'plan', label: 'Plan' },

@@ -189,6 +189,8 @@ export type AcpSelectorOptions = {
   defaultModelId: string | null;
   /** Dynamic config option selectors for agents with configOptions (e.g. thought_level). */
   configOptionSelectors: AcpConfigOptionSelector[];
+  /** Per-model reasoning-effort ladders when the capability source publishes them. */
+  modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
 export type AcpSelectorTarget = {
@@ -210,11 +212,12 @@ export type AcpSelectorTarget = {
 type ResolvedConfigOptions = {
   authority: AcpCapabilityAuthority;
   configOptions?: AcpConfigOptionSummary[];
+  modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
   if (!target?.cliType || !target.agentType) {
-    return { authority: 'unavailable' };
+    return { authority: 'unavailable', modelReasoningEfforts: undefined };
   }
 
   if (target.configId) {
@@ -222,8 +225,9 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     const capability = target.machine?.acpCapabilities?.[key];
     if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
+      const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions };
+        return { authority, configOptions: capability.configOptions, modelReasoningEfforts };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -257,6 +261,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       return {
         authority,
         configOptions: synthesized.length > 0 ? synthesized : undefined,
+        modelReasoningEfforts,
       };
     }
   }
@@ -267,8 +272,12 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     target.runtimeOverrides
   );
   return staticCapabilities
-    ? { authority: 'provisional', configOptions: staticCapabilities.configOptions }
-    : { authority: 'unavailable' };
+    ? {
+        authority: 'provisional',
+        configOptions: staticCapabilities.configOptions,
+        modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
+      }
+    : { authority: 'unavailable', modelReasoningEfforts: undefined };
 };
 
 export const stripRecommended = (text: string): string => text.replace(/\s*\(recommended\)/gi, '');
@@ -355,7 +364,7 @@ const resolveSelectedModelId = (
   return typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
 };
 
-export const normalizeCodexReasoningEffortSelectors = (
+const normalizeCodexReasoningEffortSelectors = (
   selectors: AcpConfigOptionSelector[],
   target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType' | 'selectedModelId'>
 ): AcpConfigOptionSelector[] => {
@@ -393,6 +402,72 @@ export const normalizeCodexReasoningEffortSelectors = (
       return selector;
     }
     return { ...selector, options, currentValue };
+  });
+};
+
+const reasoningEffortOptionLabel = (value: string): string =>
+  value === 'xhigh' ? 'X-High' : value.charAt(0).toUpperCase() + value.slice(1);
+
+/**
+ * Rebuilds a thought-level selector's options from the selected model's own
+ * effort ladder. The probed config option list describes only the model that
+ * was current at probe time; agents that publish a per-model map
+ * (`modelReasoningEfforts`) get a picker that follows the model instead of
+ * serving that stale list for every model (LodyAI/Lody#149). A model the
+ * map does not cover keeps the probe-time list — the adapter owns the wire
+ * and rejects unsupported efforts with a visible warning, so the UI does
+ * not duplicate that guard.
+ *
+ * The map is a FALLBACK, never an override: an agent that already adapts the
+ * ladder to the model itself owns that behavior. Codex hands off to its
+ * hand-maintained tiers above (its probed list omits the extended ones), and
+ * Claude's adapter rebuilds its effort option from the model's own
+ * `supportedEffortLevels` on every switch, so it publishes no map and this
+ * path stays inert for it. This is the one entry point; the per-agent split
+ * lives here rather than at every call site.
+ */
+export const normalizeReasoningEffortSelectors = (
+  selectors: AcpConfigOptionSelector[],
+  options: {
+    cliType?: AcpSelectorTarget['cliType'];
+    agentType?: AcpSelectorTarget['agentType'];
+    modelReasoningEfforts?: Record<string, string[]>;
+    selectedModelId?: string | null;
+  }
+): AcpConfigOptionSelector[] => {
+  if (options.cliType === 'builtin' && options.agentType?.toLowerCase() === 'codex') {
+    return normalizeCodexReasoningEffortSelectors(selectors, {
+      cliType: options.cliType,
+      agentType: options.agentType,
+      selectedModelId: options.selectedModelId ?? undefined,
+    });
+  }
+  const map = options.modelReasoningEfforts;
+  const selectedModelId = options.selectedModelId;
+  if (!map || !selectedModelId) {
+    return selectors;
+  }
+  const targetEfforts = map[selectedModelId];
+  if (!targetEfforts || targetEfforts.length === 0) {
+    return selectors;
+  }
+  return selectors.map((selector) => {
+    if (selector.type !== 'select' || !isThoughtLevelSelector(selector)) {
+      return selector;
+    }
+    return {
+      ...selector,
+      options: targetEfforts.map((value) => ({
+        value,
+        label: reasoningEffortOptionLabel(value),
+        description: undefined,
+      })),
+      currentValue: targetEfforts.includes(selector.currentValue)
+        ? selector.currentValue
+        : targetEfforts.includes('medium')
+          ? 'medium'
+          : (targetEfforts[0] ?? ''),
+    };
   });
 };
 
@@ -496,7 +571,8 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions } = resolveConfigOptions(target);
+  const { authority: capabilityAuthority, configOptions, modelReasoningEfforts } =
+    resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -516,15 +592,14 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     (option) => option.category === 'model' && option.type === 'select'
   );
 
-  const allSelectors = normalizeCodexReasoningEffortSelectors(
+  const allSelectors = normalizeReasoningEffortSelectors(
     buildConfigOptionSelectors(configOptions, target, capabilityAuthority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
+    {
+      cliType: target?.cliType,
+      agentType: target?.agentType,
+      modelReasoningEfforts,
+      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+    }
   );
   const configOptionSelectors = allSelectors.filter((selector) => {
     const category = selector.category ?? '';
@@ -545,6 +620,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     defaultModelId:
       typeof modelConfigOption?.currentValue === 'string' ? modelConfigOption.currentValue : null,
     configOptionSelectors,
+    modelReasoningEfforts,
   };
 };
 
@@ -555,15 +631,14 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
 export const buildAllConfigOptionSelectors = (
   target?: AcpSelectorTarget
 ): AcpConfigOptionSelector[] => {
-  const { authority, configOptions } = resolveConfigOptions(target);
-  return normalizeCodexReasoningEffortSelectors(
+  const { authority, configOptions, modelReasoningEfforts } = resolveConfigOptions(target);
+  return normalizeReasoningEffortSelectors(
     buildConfigOptionSelectors(configOptions, target, authority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
+    {
+      cliType: target?.cliType,
+      agentType: target?.agentType,
+      modelReasoningEfforts,
+      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+    }
   );
 };

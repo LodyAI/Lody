@@ -1670,14 +1670,18 @@ function WorkspaceChatLanding({
     machine: selectedMachine,
   });
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
-  const { selectedModeId, selectedModelId, configOptionValues } =
-    useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
-      cliType: selectedConfig?.cliType,
-      agentType: selectedConfig?.agentType,
-    });
+  const {
+    selectedModeId,
+    selectedModelId,
+    configOptionValues,
+    configOptionSelectors: resolvedConfigOptionSelectors,
+  } = useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+  });
   const dispatchConfigOptionValues = useMemo(
-    () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-    [configOptionSelectors, configOptionValues]
+    () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
+    [configOptionValues, resolvedConfigOptionSelectors]
   );
   const selectedRateLimits =
     selectedConfig &&
@@ -1779,15 +1783,20 @@ function WorkspaceChatLanding({
       return;
     }
     setPendingRecentRunConfig(null);
-    if (
+    const appliedModelId =
       pendingRecentRunConfig.modelId &&
       modelOptions.some((option) => option.value === pendingRecentRunConfig.modelId)
-    ) {
-      setSelectedModelName(pendingRecentRunConfig.modelId);
+        ? pendingRecentRunConfig.modelId
+        : undefined;
+    if (appliedModelId) {
+      setSelectedModelName(appliedModelId);
     }
     for (const { configId, value } of resolveApplicableConfigOptionValues(
       pendingRecentRunConfig,
-      configOptionSelectors
+      configOptionSelectors,
+      // The selectors still describe the model this entry replaces, so its
+      // effort must not be validated against the outgoing model's ladder.
+      { switchesModel: appliedModelId !== undefined && appliedModelId !== selectedModelId }
     )) {
       handleConfigOptionChange(configId, value);
     }
@@ -1798,6 +1807,7 @@ function WorkspaceChatLanding({
     modelOptions,
     pendingRecentRunConfig,
     selectedAgent,
+    selectedModelId,
     sessionConfigSelection.edits.model,
     setSelectedModelName,
   ]);
