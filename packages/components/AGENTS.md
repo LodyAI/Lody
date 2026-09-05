@@ -81,7 +81,28 @@ mobile surfaces.
   `vite-top-level-await-fixed.ts`. Do not bypass its audited-version assertion.
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
-  application, and the Electron native-theme bridge.
+  application, and the Electron native-theme bridge. It also mirrors the COMMITTED
+  theme (never a preview) to Electron main via `app.setStartupThemeSource`; that
+  is main's only record of it, and the next launch needs it to pick the window
+  color and the pre-paint `.dark` class. See `apps/electron/AGENTS.md`.
+- Pre-paint theme is a per-host contract, and shared code must not fake one. The
+  browser gets it from next-themes' inline script and Electron from preload plus
+  the persisted main-process theme. A native mobile shell has neither, so its
+  WebView background and splash color must be driven from the same committed
+  theme by the shell project, which lives outside this repository.
+- A `Suspense` fallback for a lazy route is never `null`. `RouteSuspense` paints
+  `bg-background` on the first frame; a `null` fallback left the window on the
+  bare `<body>` canvas for the whole chunk fetch, which is the white flash right
+  after signing in. Its `scope` must match where the boundary sits: `viewport`
+  where no shell is mounted, `content` inside a mounted layout. The two are
+  identical wherever the pane is the full viewport height, and diverge where it
+  is not — with the iPad shell's top safe-area inset a `100dvh` placeholder
+  measures one inset taller than its pane, so `overflow-hidden` clips it and the
+  spinner sits half an inset below the pane's centre. `LoadingPlaceholder`'s
+  `deferIndicator` holds the spinner and label back by CSS for 300ms, never by a
+  timer, so a chunk that arrives quickly shows only the canvas. Reserve it for
+  waits that are usually imperceptible; a known-real wait (signing in, loading
+  workspaces) should say so immediately.
 
 ## Crash surfaces
 

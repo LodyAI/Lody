@@ -36,6 +36,7 @@ describe('desktop onboarding theme lifecycle', () => {
   let root: Root;
   let container: HTMLDivElement;
   const setNativeTheme = vi.fn();
+  const setStartupThemeSource = vi.fn();
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,6 +61,10 @@ describe('desktop onboarding theme lifecycle', () => {
         invoke: async (channel: string, ...args: unknown[]) => {
           if (channel === 'app.setNativeTheme') {
             setNativeTheme(args[0]);
+            return;
+          }
+          if (channel === 'app.setStartupThemeSource') {
+            setStartupThemeSource(args[0]);
             return;
           }
           throw new Error(`unexpected invoke ${channel}`);
@@ -110,6 +115,9 @@ describe('desktop onboarding theme lifecycle', () => {
     expect(localStorage.getItem('vite-ui-theme')).toBe('system');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(setNativeTheme).toHaveBeenLastCalledWith('system');
+    // Onboarding really commits these, so the next launch must open on the
+    // restored System source rather than onboarding's forced Light.
+    expect(setStartupThemeSource).toHaveBeenLastCalledWith('system');
   });
 
   it('restores System when the onboarding route unmounts', async () => {

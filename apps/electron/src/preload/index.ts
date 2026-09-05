@@ -4,8 +4,17 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { setupRenderer } from '@better-auth/electron/preload'
 import os from 'node:os'
 import { readPreferredSystemLanguagesArgument } from '../system-language-argument'
+import { readInitialWindowThemeArgument } from '../initial-window-theme-argument'
+import { installInitialWindowThemeClass } from './initial-window-theme'
 
 setupRenderer()
+
+// Before anything else: paint the window in the user's theme. Everything below
+// runs long before the renderer bundle, but so does the first frame.
+const initialWindowTheme = readInitialWindowThemeArgument(process.argv)
+if (initialWindowTheme) {
+  installInitialWindowThemeClass(document, initialWindowTheme)
+}
 
 const platformInfo = {
   os: process.platform,

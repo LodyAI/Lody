@@ -32,6 +32,7 @@ import {
 } from '@/lib/app-location';
 import { isSafeAuthRedirect } from '@/lib/auth-redirect';
 import { openExternalUrl } from '@/lib/native-browser';
+import { scheduleIdleTask } from '@/lib/idle-task';
 import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -641,6 +642,22 @@ export function LoginPage({
   const appleLabel = getProviderLabel('apple');
   const discordLabel = getProviderLabel('discord');
   const emailEntryLabel = t('login.continueWithEmail', 'Continue with email');
+
+  // Warm the workspace layout chunk while this page waits on the user, so the
+  // post-sign-in route swap does not start by fetching it. Idle-scheduled so it
+  // never competes with this page's own paint, and swallowing the failure keeps
+  // a cache warm-up from being reported as a renderer error; the real import
+  // runs again and surfaces its own.
+  //
+  // The cost is explicit: on web and mobile this is a real network request that
+  // /login did not use to make, and a visitor who never signs in pays it too.
+  // It is deliberately NOT gated on a sign-in click — a social login navigates
+  // away immediately, so a fetch started at click time is usually discarded,
+  // and the whole point is to have the chunk before the redirect returns.
+  useEffect(
+    () => scheduleIdleTask(() => void import('@/components/main-layout').catch(() => {})),
+    []
+  );
 
   useEffect(() => {
     if (loginViewedRef.current) {

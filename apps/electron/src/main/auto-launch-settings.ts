@@ -1,5 +1,4 @@
 import { app } from 'electron'
-import Conf from 'conf'
 import {
   getAutoLaunchQueryOptions,
   getAutoLaunchRegistrationSettings,
@@ -7,24 +6,13 @@ import {
   resolveAutoLaunchInvocation,
   type AutoLaunchPlatform
 } from './auto-launch-policy'
+import { createMainSettingsStore } from './settings-store'
 
 type AutoLaunchSettingsSchema = {
   hideWindowOnAutoLaunch: boolean
 }
 
-const normalizedConfModule = Conf as typeof Conf | { default?: typeof Conf }
-const resolvedConf =
-  typeof normalizedConfModule === 'function' ? normalizedConfModule : normalizedConfModule.default
-
-if (typeof resolvedConf !== 'function') {
-  throw new TypeError(
-    'Unable to initialize auto-launch settings: invalid Conf module export shape.'
-  )
-}
-
-const ConfConstructor: typeof Conf = resolvedConf
-const autoLaunchSettingsStore = new ConfConstructor<AutoLaunchSettingsSchema>({
-  cwd: app.getPath('userData'),
+const autoLaunchSettingsStore = createMainSettingsStore<AutoLaunchSettingsSchema>({
   configName: 'auto-launch-settings',
   defaults: { hideWindowOnAutoLaunch: false },
   schema: {

@@ -22,7 +22,12 @@ import {
   persistRendererFatalError,
   requestRendererReload
 } from '../../renderer-recovery'
-import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
+import {
+  applyResolvedWindowTheme,
+  isNativeWindowThemeSource,
+  resolveNativeWindowTheme
+} from '../../window-theme'
+import { writeStartupThemeSource } from '../../theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
 import {
   applyAutoLaunchSettings,
@@ -362,9 +367,23 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async setNativeTheme(source: NativeThemeSource) {
-    if (source === 'dark' || source === 'light' || source === 'system') {
+    if (isNativeWindowThemeSource(source)) {
       nativeTheme.themeSource = source
       syncNativeThemeWindows()
+    }
+  }
+
+  /**
+   * Records the theme the next launch should open in.
+   *
+   * Deliberately separate from `setNativeTheme`, which also follows a preview
+   * (hovering a theme in Settings) so the native chrome tracks what the user is
+   * looking at. Only a committed choice belongs on disk.
+   */
+  @IpcMethod()
+  async setStartupThemeSource(source: NativeThemeSource) {
+    if (isNativeWindowThemeSource(source)) {
+      writeStartupThemeSource(source)
     }
   }
 

@@ -82,6 +82,20 @@ Root `AGENTS.md` also applies.
   notify the renderer (`app.nativeTheme`). On macOS also subscribe
   to `AppleInterfaceThemeChangedNotification`; Chromium `matchMedia` and
   `nativeTheme.updated` often miss Control Center switches.
+- A product window opens on the theme the renderer last COMMITTED, not on the OS
+  appearance. `theme-settings.ts` mirrors that choice into main (the renderer
+  keeps it in `localStorage`, which main cannot read) and
+  `getInitialMainWindowThemeSource` feeds it to `nativeTheme.themeSource` before
+  the `BrowserWindow` exists, so `backgroundColor` and the win32 caption overlay
+  are right on frame one. A PREVIEW retints live chrome via `app.setNativeTheme`
+  and must never reach that store; only `app.setStartupThemeSource` writes it.
+- The CSP rules out next-themes' inline pre-paint script, so preload — the only
+  renderer-side code running before the document is parsed — applies the
+  `.dark`/`.light` class from the `--lody-initial-window-theme` launch argument.
+  Without it the first frame paints the LIGHT canvas (`tailwind/index.css`
+  paints `body` from that class) inside a dark window. Do not defer it to
+  `DOMContentLoaded` — the app is a module script, so Chromium may paint the
+  parsed body first — and do not relax `script-src` to restore the inline script.
 - Frameless window drag is per-panel, not a root overlay: each column's top
   header (or a same-height `WindowDragStrip` when there is no header) is
   `-webkit-app-region: drag`. Interactive descendants use `app-region-no-drag`.
@@ -89,7 +103,7 @@ Root `AGENTS.md` also applies.
   regions in native fullscreen. Windows caption buttons stay an OS overlay
   (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`); right-edge headers pad `pr-[144px]`
   so toolbar controls do not sit under them.
-- The onboarding window must be native Light before its first renderer paint; normal product windows start from the System theme source.
+- The onboarding window must be native Light before its first renderer paint, whatever theme the product is on.
   An automatic login launch may suppress the initial product window, but onboarding and deep-link launches must remain visible.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the

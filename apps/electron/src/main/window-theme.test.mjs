@@ -5,13 +5,21 @@ import {
   getInitialMainWindowThemeSource,
   getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay,
+  isNativeWindowThemeSource,
   resolveNativeWindowTheme
 } from './window-theme.ts'
 
-void test('forces onboarding window chrome light until the product takes over', () => {
-  assert.equal(getInitialMainWindowThemeSource('/onboarding'), 'light')
-  assert.equal(getInitialMainWindowThemeSource('/'), 'system')
-  assert.equal(getInitialMainWindowThemeSource(), 'system')
+void test('opens a product window on the committed theme, onboarding always light', () => {
+  assert.equal(getInitialMainWindowThemeSource('/', 'dark'), 'dark')
+  // Nothing committed yet (first launch) keeps the pre-persistence behavior.
+  assert.equal(getInitialMainWindowThemeSource('/', null), 'system')
+  assert.equal(getInitialMainWindowThemeSource('/onboarding', 'dark'), 'light')
+})
+
+void test('rejects a theme source that did not come from the product', () => {
+  assert.equal(isNativeWindowThemeSource('dark'), true)
+  assert.equal(isNativeWindowThemeSource('Dark'), false)
+  assert.equal(isNativeWindowThemeSource(null), false)
 })
 
 void test('maps Electron shouldUseDarkColors onto the resolved window theme', () => {

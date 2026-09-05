@@ -13,7 +13,7 @@ export const Route = createFileRoute('/$workspaceName/_auth/archive')({
 
 function ArchiveRoute() {
   return (
-    <RouteSuspense>
+    <RouteSuspense scope="content">
       <LazyArchiveView />
     </RouteSuspense>
   );

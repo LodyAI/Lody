@@ -395,6 +395,48 @@ describe('ThemeProvider', () => {
     expect(window.localStorage.getItem(themeStorageKey)).toBe('light');
   });
 
+  it('mirrors a committed theme into the Electron main process, but never a preview', () => {
+    installMatchMediaMock(false);
+    const startupSources: unknown[] = [];
+    Object.defineProperty(window, 'ipc', {
+      configurable: true,
+      value: {
+        invoke: async (channel: string, source: unknown) => {
+          if (channel === 'app.setStartupThemeSource') startupSources.push(source);
+        },
+        on: () => () => {},
+        send: () => {},
+      },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(
+          ThemeProvider,
+          { defaultTheme: 'light', storageKey: 'theme-provider-test-theme' },
+          React.createElement(ThemeProbe)
+        )
+      );
+    });
+    expect(startupSources).toEqual(['light']);
+
+    // A preview retints live native chrome but says nothing about how the app
+    // should open, so it must not reach the persisted startup theme.
+    flushSync(() => {
+      container?.querySelector<HTMLButtonElement>('#preview-dark-theme')?.click();
+    });
+    expect(startupSources).toEqual(['light']);
+
+    flushSync(() => {
+      container?.querySelector<HTMLButtonElement>('#set-dark-theme')?.click();
+    });
+    expect(startupSources).toEqual(['light', 'dark']);
+  });
+
   it('follows Electron native theme updates while theme mode is system', () => {
     installMatchMediaMock(false);
     const nativeThemeHandlers = new Set<(resolved: 'light' | 'dark') => void>();
