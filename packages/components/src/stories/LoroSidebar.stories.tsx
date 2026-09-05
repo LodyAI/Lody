@@ -10,7 +10,10 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
+import {
+  buildChildSessionsByParent,
+  buildSidebarOpenerRowResolver,
+} from '@/components/sessions/session-list-rows';
 import { SessionList } from '@/components/session-list';
 import type { SessionListProps } from '@/components/session-list';
 import type {
@@ -35,6 +38,26 @@ import type {
 
 const NOW = Date.now();
 const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
+const DEMO_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-worktree', { type: 'running' }],
+]);
+const DEMO_PERMISSION_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-worktree', { type: 'requestPermission' }],
+]);
+const DEMO_INITIALIZING_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-worktree', { type: 'initializing', stage: 'managed-runtime' }],
+]);
+const DEMO_MIXED_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-worktree', { type: 'running' }],
+  ['local-sess-plain', { type: 'requestPermission' }],
+]);
+const DEMO_CHILD_PERMISSION_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['local-sess-child-tab', { type: 'requestPermission' }],
+]);
+const DEMO_REMOTE_SESSION_STATUSES = new Map<string, SessionStatus>([
+  ['remote-sess-running', { type: 'running' }],
+]);
+const DEMO_REMOTE_PROJECT_KEY = 'machine-remote:proj-lody';
 
 const codexHistoryProvider = {
   cliType: 'builtin',
@@ -239,6 +262,38 @@ const demoTaskListProps: SessionListProps = {
     },
   ],
 };
+
+function withCollapsedGitHubRepositoryActivity(
+  status: SessionListRow['activityStatus'],
+  unreadSessionId: string | null = null
+): SessionListProps {
+  return {
+    ...demoTaskListProps,
+    repos: demoTaskListProps.repos.map((repo) =>
+      repo.repoFullName === 'loro-dev/lody' ? { ...repo, collapsed: true } : repo
+    ),
+    sessions: demoTaskListProps.sessions.map((session) => ({
+      ...session,
+      activityStatus: session.sessionId === 'task-4' ? (status ?? null) : null,
+      isWorking: session.sessionId === 'task-4' && status != null,
+      isWaitingPermission: session.sessionId === 'task-4' && status === 'requestPermission',
+      hasUnreadMessages:
+        session.repoFullName === 'loro-dev/lody'
+          ? session.sessionId === unreadSessionId
+          : session.hasUnreadMessages,
+    })),
+  };
+}
+
+const collapsedGitHubRepositoryRunning = withCollapsedGitHubRepositoryActivity('running');
+const collapsedGitHubRepositoryRunningWithUnread = withCollapsedGitHubRepositoryActivity(
+  'running',
+  'task-5'
+);
+const collapsedGitHubRepositoryUnread = withCollapsedGitHubRepositoryActivity(null, 'task-5');
+const collapsedGitHubRepositoryInitializing = withCollapsedGitHubRepositoryActivity('initializing');
+const collapsedGitHubRepositoryPermissionRequired =
+  withCollapsedGitHubRepositoryActivity('requestPermission');
 
 const externalHistoryTaskListProps: SessionListProps = {
   ...demoTaskListProps,
@@ -830,8 +885,8 @@ const demoProjects: LocalProjectMeta[] = [
 
 // A couple of local-project sessions so the single-line local row is exercised:
 // one running inside a worktree (shows the FolderTree mode icon) and one plain
-// local session (no mode icon). Live status is empty in the story, so the leading
-// status slot stays empty here.
+// local session (no mode icon). The first session stays live so the collapsed
+// project row demonstrates its aggregate running indicator.
 const demoLocalSessions: SessionMeta[] = [
   {
     id: 'local-sess-worktree' as SessionId,
@@ -844,6 +899,7 @@ const demoLocalSessions: SessionMeta[] = [
     branchName: 'feat/persistence-refactor',
     isWorktree: true,
     lastMessageAt: NOW - 3 * 60 * 60 * 1000,
+    lastReadAt: NOW - 3 * 60 * 60 * 1000,
   },
   // Independent Session opened by an agent running inside a CHILD TAB of
   // `local-sess-worktree`. Its precise opener is the Tab (`demoChildTabSession`
@@ -859,6 +915,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Opened from a child tab',
     openedBySessionId: 'local-sess-child-tab' as SessionId,
     lastMessageAt: NOW - 25 * 60 * 1000,
+    lastReadAt: NOW - 25 * 60 * 1000,
   },
   // Independent Sessions the first one opened through the `lody_session_create`
   // MCP tool: they indent under it, but keep their own lifecycle and row.
@@ -873,6 +930,7 @@ const demoLocalSessions: SessionMeta[] = [
     openedBySessionId: 'local-sess-worktree' as SessionId,
     isWorktree: true,
     lastMessageAt: NOW - 2 * 60 * 60 * 1000,
+    lastReadAt: NOW - 2 * 60 * 60 * 1000,
   },
   {
     id: 'local-sess-opened-docs' as SessionId,
@@ -884,6 +942,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Update the persistence docs',
     openedBySessionId: 'local-sess-worktree' as SessionId,
     lastMessageAt: NOW - 90 * 60 * 1000,
+    lastReadAt: NOW - 90 * 60 * 1000,
   },
   {
     id: 'local-sess-plain' as SessionId,
@@ -895,8 +954,13 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Tidy up logging output',
     isWorktree: false,
     lastMessageAt: NOW - 26 * 60 * 60 * 1000,
+    lastReadAt: NOW - 26 * 60 * 60 * 1000,
   },
 ];
+
+const demoLocalSessionsWithUnread = demoLocalSessions.map((session) =>
+  session.id === ('local-sess-plain' as SessionId) ? { ...session, lastReadAt: 0 } : session
+);
 
 /**
  * A child Tab of `local-sess-worktree`. Child Tabs are deliberately absent from
@@ -914,7 +978,24 @@ const demoChildTabSession: SessionMeta = {
   title: 'Child tab: try the alternative fix',
   parentSessionId: 'local-sess-worktree' as SessionId,
   lastMessageAt: NOW - 40 * 60 * 1000,
+  lastReadAt: NOW - 40 * 60 * 1000,
 };
+
+const demoChildSessionsByParent = buildChildSessionsByParent([demoChildTabSession]);
+
+const demoRemoteSessions: SessionMeta[] = [
+  {
+    id: 'remote-sess-running' as SessionId,
+    machineId: 'machine-remote' as MachineId,
+    createdAt: new Date(NOW - 20 * 60 * 1000).toISOString(),
+    userId: 'user-demo',
+    cliType: 'builtin',
+    agentType: 'claude',
+    title: 'Run checks on the remote machine',
+    lastMessageAt: NOW - 20 * 60 * 1000,
+    lastReadAt: NOW - 20 * 60 * 1000,
+  },
+];
 
 /** Mirrors `allActiveSessions`: sidebar rows PLUS the child Tabs they hide. */
 const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
@@ -925,6 +1006,11 @@ const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
 function ProductionLikeTopContent({
   chatSessions,
   githubWorktreeCount,
+  localProjectLiveSessionStatuses,
+  localProjectChildSessionsByParent,
+  localProjectSessions,
+  remoteProjectSessions,
+  initiallyCollapseRemoteProject,
   selectedSessionId,
   onSelectSession,
   onArchiveSession,
@@ -934,6 +1020,11 @@ function ProductionLikeTopContent({
 }: {
   chatSessions: SessionListRow[];
   githubWorktreeCount: number;
+  localProjectLiveSessionStatuses: ReadonlyMap<string, SessionStatus>;
+  localProjectChildSessionsByParent: Map<string, SessionMeta[]>;
+  localProjectSessions: SessionMeta[];
+  remoteProjectSessions: SessionMeta[];
+  initiallyCollapseRemoteProject: boolean;
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
   onArchiveSession: (id: string) => void;
@@ -945,8 +1036,12 @@ function ProductionLikeTopContent({
   const [localProjectsCollapsed, setLocalProjectsCollapsed] = useState(false);
   const [githubCollapsed, setGithubCollapsed] = useState(false);
   const projectCollapseStates = useMemo(
-    () => Object.fromEntries(demoProjects.map((p) => [`${demoMachineId}:${p.id}`, true])),
-    []
+    () =>
+      Object.fromEntries([
+        ...demoProjects.map((p) => [`${demoMachineId}:${p.id}`, true]),
+        ...(initiallyCollapseRemoteProject ? [[DEMO_REMOTE_PROJECT_KEY, true]] : []),
+      ]),
+    [initiallyCollapseRemoteProject]
   );
   const [collapsedProjects, setCollapsedProjects] =
     useState<Record<string, boolean>>(projectCollapseStates);
@@ -1012,20 +1107,25 @@ function ProductionLikeTopContent({
                     collapsed={collapsed}
                     isSelected={false}
                     sessionsForProject={
-                      project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
+                      project.id === ('proj-lody' as LocalProjectId) ? localProjectSessions : []
                     }
-                    childSessionsByParent={new Map()}
-                    liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                    childSessionsByParent={localProjectChildSessionsByParent}
+                    liveSessionStatuses={localProjectLiveSessionStatuses}
                     formattedPath={project.rootPath}
                     defaultSessionTitle="Untitled"
                     selectedSessionId={null}
                     removeProjectLabel="Remove folder"
+                    newChatLabel="New chat in this project"
                     archiveTooltipLabel="Archive"
                     archiveActionLabel="Archive"
                     archiveConfirmLabel="Confirm"
                     isMobile={isMobile}
                     toggleLabel="Toggle"
                     onNavigateProject={() => {}}
+                    onNewChatInProject={() => {}}
+                    onOpenProjectSettings={() => {}}
+                    onRevealProject={() => {}}
+                    onArchiveProjectChats={() => {}}
                     onNavigateSession={() => {}}
                     onArchive={() => {}}
                     collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1066,19 +1166,23 @@ function ProductionLikeTopContent({
                   canNavigateProject
                   collapsed={collapsed}
                   isSelected={false}
-                  sessionsForProject={[] as SessionMeta[]}
-                  childSessionsByParent={new Map()}
-                  liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                  sessionsForProject={remoteProjectSessions}
+                  childSessionsByParent={localProjectChildSessionsByParent}
+                  liveSessionStatuses={localProjectLiveSessionStatuses}
                   formattedPath={project.rootPath}
                   defaultSessionTitle="Untitled"
                   selectedSessionId={null}
                   removeProjectLabel="Remove folder"
+                  newChatLabel="New chat in this project"
                   archiveTooltipLabel="Archive"
                   archiveActionLabel="Archive"
                   archiveConfirmLabel="Confirm"
                   isMobile={isMobile}
                   toggleLabel="Toggle"
                   onNavigateProject={() => {}}
+                  onNewChatInProject={() => {}}
+                  onOpenProjectSettings={() => {}}
+                  onArchiveProjectChats={() => {}}
                   onNavigateSession={() => {}}
                   onArchive={() => {}}
                   collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1107,7 +1211,20 @@ function ProductionLikeTopContent({
   );
 }
 
-function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
+function WithProjectsLayout({
+  localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
+  localProjectChildSessionsByParent = new Map(),
+  localProjectSessions = demoLocalSessions,
+  remoteProjectSessions = [],
+  initiallyCollapseRemoteProject = false,
+  ...args
+}: Parameters<typeof LoroSidebar>[0] & {
+  localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
+  localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
+  localProjectSessions?: SessionMeta[];
+  remoteProjectSessions?: SessionMeta[];
+  initiallyCollapseRemoteProject?: boolean;
+}) {
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
@@ -1170,6 +1287,11 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
         <ProductionLikeTopContent
           chatSessions={chatSessions}
           githubWorktreeCount={repos.length}
+          localProjectLiveSessionStatuses={localProjectLiveSessionStatuses}
+          localProjectChildSessionsByParent={localProjectChildSessionsByParent}
+          localProjectSessions={localProjectSessions}
+          remoteProjectSessions={remoteProjectSessions}
+          initiallyCollapseRemoteProject={initiallyCollapseRemoteProject}
           selectedSessionId={selectedSessionId}
           onSelectSession={setSelectedSessionId}
           onArchiveSession={archiveTask}
@@ -1269,6 +1391,150 @@ export const WithProjects: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {
     ...Default.args!,
+  },
+};
+
+export const CollapsedProjectRunning: Story = {
+  name: 'Collapsed project · running',
+  render: (args) => (
+    <WithProjectsLayout {...args} localProjectLiveSessionStatuses={DEMO_LIVE_SESSION_STATUSES} />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectRunningWithUnread: Story = {
+  name: 'Collapsed project · running + unread result',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_LIVE_SESSION_STATUSES}
+      localProjectSessions={demoLocalSessionsWithUnread}
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectUnreadResult: Story = {
+  name: 'Collapsed project · unread result',
+  render: (args) => (
+    <WithProjectsLayout {...args} localProjectSessions={demoLocalSessionsWithUnread} />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectPermissionRequired: Story = {
+  name: 'Collapsed project · permission required',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_PERMISSION_SESSION_STATUSES}
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectInitializing: Story = {
+  name: 'Collapsed project · initializing',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_INITIALIZING_SESSION_STATUSES}
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedRemoteProjectRunning: Story = {
+  name: 'Collapsed remote project · running',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_REMOTE_SESSION_STATUSES}
+      remoteProjectSessions={demoRemoteSessions}
+      initiallyCollapseRemoteProject
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectPermissionPrecedence: Story = {
+  name: 'Collapsed project · permission wins over running',
+  render: (args) => (
+    <WithProjectsLayout {...args} localProjectLiveSessionStatuses={DEMO_MIXED_SESSION_STATUSES} />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedProjectChildPermissionRequired: Story = {
+  name: 'Collapsed project · child tab permission required',
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjectLiveSessionStatuses={DEMO_CHILD_PERMISSION_SESSION_STATUSES}
+      localProjectChildSessionsByParent={demoChildSessionsByParent}
+    />
+  ),
+  args: {
+    ...Default.args!,
+  },
+};
+
+export const CollapsedGitHubRepositoryRunning: Story = {
+  name: 'Collapsed GitHub repository · running',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryRunning,
+  },
+};
+
+export const CollapsedGitHubRepositoryRunningWithUnread: Story = {
+  name: 'Collapsed GitHub repository · running + unread',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryRunningWithUnread,
+  },
+};
+
+export const CollapsedGitHubRepositoryUnreadResult: Story = {
+  name: 'Collapsed GitHub repository · unread result',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryUnread,
+  },
+};
+
+export const CollapsedGitHubRepositoryInitializing: Story = {
+  name: 'Collapsed GitHub repository · initializing',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryInitializing,
+  },
+};
+
+export const CollapsedGitHubRepositoryPermissionRequired: Story = {
+  name: 'Collapsed GitHub repository · permission required',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: collapsedGitHubRepositoryPermissionRequired,
   },
 };
 

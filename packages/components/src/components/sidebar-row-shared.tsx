@@ -120,14 +120,17 @@ function MaskedPrCiIcon({
  * unless it is working / unread — but the slot is always reserved so the ⋯ menu
  * button can reveal there on hover without shifting the row.
  */
-function SessionRowIndicator({
+export function SessionRowIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
+  showUnreadWithWorking,
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
+  /** Aggregate slots may show a completed unread result alongside live work. */
+  showUnreadWithWorking?: boolean;
 }) {
   let icon: ReactNode = null;
 
@@ -135,10 +138,18 @@ function SessionRowIndicator({
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
     icon = (
-      <Loader2
-        data-session-working-spinner=""
-        className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
-      />
+      <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+        <Loader2
+          data-session-working-spinner=""
+          className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
+        />
+        {showUnreadWithWorking && hasUnreadMessages ? (
+          <span
+            data-session-unread-overlay=""
+            className="absolute h-1 w-1 rounded-full bg-primary"
+          />
+        ) : null}
+      </span>
     );
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;

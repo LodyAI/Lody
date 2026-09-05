@@ -43,7 +43,7 @@ import {
 } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -58,6 +58,7 @@ import type {
   SessionId,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
+  SessionStatus,
 } from '@lody/shared';
 import {
   ONLY_CHATS_KEY,
@@ -87,6 +88,7 @@ import {
   SidebarRowEndSlot,
   SessionMergeablePill,
   SessionOpenedByTreeRow,
+  SessionRowIndicator,
   SessionRowOpenedByMenuItems,
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
@@ -142,6 +144,8 @@ export type SessionListRow = {
   addedLines: number;
   deletedLines: number;
   isWorking: boolean;
+  /** Exact live status for parent group aggregation; absent rows keep legacy boolean behavior. */
+  activityStatus?: Exclude<SessionStatus['type'], 'idle'> | null;
   hasUnreadMessages: boolean;
   isOffline: boolean;
   isWaitingPermission: boolean;
@@ -229,6 +233,26 @@ export type SessionRowGroup = {
 };
 
 export const MAX_VISIBLE_SESSIONS = 5;
+
+type ActiveSessionStatus = NonNullable<SessionListRow['activityStatus']>;
+
+export function getSessionGroupActivityStatus(
+  sessions: SessionListRow[]
+): ActiveSessionStatus | null {
+  let status: ActiveSessionStatus | null = null;
+
+  for (const session of sessions) {
+    const candidate =
+      session.activityStatus ??
+      (session.isWaitingPermission ? 'requestPermission' : session.isWorking ? 'running' : null);
+    if (candidate === 'requestPermission') return candidate;
+    if (candidate === 'running' || (candidate === 'initializing' && status == null)) {
+      status = candidate;
+    }
+  }
+
+  return status;
+}
 
 /** Tree accessors shared by the renderer and the keyboard navigation model. */
 export const SESSION_ROW_OPENED_BY_TREE_ACCESSORS = {
@@ -566,6 +590,27 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
   const showGroupHeaderIcon = group.kind === 'repo';
+  const groupActivityStatus =
+    group.kind === 'repo' && group.collapsed ? getSessionGroupActivityStatus(group.sessions) : null;
+  const groupHasUnreadMessages =
+    group.kind === 'repo' &&
+    group.collapsed &&
+    group.sessions.some((session) => session.hasUnreadMessages);
+  const groupActivityLabel =
+    groupActivityStatus === 'requestPermission'
+      ? t('sessions.status.requestPermission', 'Request Permission')
+      : groupActivityStatus === 'initializing'
+        ? t('sessions.status.initializing', 'Initializing')
+        : groupActivityStatus === 'running'
+          ? t('sessions.status.running', 'Running')
+          : groupHasUnreadMessages
+            ? t('sessions.unreadMessages', 'Unread messages')
+            : null;
+  const groupHasLiveActivity = groupActivityStatus != null;
+  const groupIndicatorLabel =
+    groupActivityStatus !== 'requestPermission' && groupHasLiveActivity && groupHasUnreadMessages
+      ? `${groupActivityLabel} · ${t('sessions.unreadMessages', 'Unread messages')}`
+      : groupActivityLabel;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
   const beginRename = useCallback((sessionId: string, currentTitle: string) => {
     setRenameTarget({ sessionId: sessionId as SessionId, initialTitle: currentTitle });
@@ -745,6 +790,25 @@ const SessionGroupSection = memo(function SessionGroupSection({
             />
           ) : null}
           <span className="flex-1" aria-hidden="true" />
+          {groupActivityStatus || groupHasUnreadMessages ? (
+            <Tooltip delayDuration={500}>
+              <TooltipTrigger asChild>
+                <span
+                  data-sidebar-repo-activity={groupActivityStatus ?? 'unread'}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center"
+                  aria-label={groupIndicatorLabel ?? undefined}
+                >
+                  <SessionRowIndicator
+                    isWaitingPermission={groupActivityStatus === 'requestPermission'}
+                    isWorking={groupHasLiveActivity}
+                    hasUnreadMessages={groupHasUnreadMessages}
+                    showUnreadWithWorking={groupActivityStatus !== 'requestPermission'}
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{groupIndicatorLabel}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
 
         {resolvedTrailingContent}

@@ -180,11 +180,26 @@ function sessionHasUnreadMessages(session: SessionMeta): boolean {
 }
 
 export type EffectiveSessionActivitySummary = {
+  status: Exclude<SessionStatus['type'], 'idle'> | null;
   isWorking: boolean;
   isWaitingPermission: boolean;
   hasUnreadMessages: boolean;
   latestMessageAt: number;
 };
+
+type ActiveSessionStatus = EffectiveSessionActivitySummary['status'];
+
+function mergeActiveSessionStatus(
+  current: ActiveSessionStatus,
+  candidate: SessionStatus | null | undefined
+): ActiveSessionStatus {
+  if (!candidate || candidate.type === 'idle') return current;
+  if (candidate.type === 'requestPermission' || current === 'requestPermission') {
+    return 'requestPermission';
+  }
+  if (candidate.type === 'running' || current === 'running') return 'running';
+  return 'initializing';
+}
 
 export function getEffectiveSessionActivitySummary(
   session: SessionMeta,
@@ -195,8 +210,8 @@ export function getEffectiveSessionActivitySummary(
   // Sidebar working state is live presence only. A goal may remain active while
   // quiescent, and meta dispatch pointers can be stale in this client — deriving
   // a spinner from either shows sessions as working long after the prompt finished.
+  let status = mergeActiveSessionStatus(null, liveStatus);
   let isWorking = liveStatus != null;
-  let isWaitingPermission = liveStatus?.type === 'requestPermission';
   let hasUnreadMessages = sessionHasUnreadMessages(session);
   let latestMessageAt =
     parseTimestamp(session.lastMessageAt) ?? parseTimestamp(session.createdAt) ?? 0;
@@ -205,12 +220,8 @@ export function getEffectiveSessionActivitySummary(
   if (children) {
     for (const child of children) {
       const childLiveStatus = liveSessionStatuses?.get(child.id);
-      if (!isWorking && childLiveStatus != null) {
-        isWorking = true;
-      }
-      if (!isWaitingPermission && childLiveStatus?.type === 'requestPermission') {
-        isWaitingPermission = true;
-      }
+      status = mergeActiveSessionStatus(status, childLiveStatus);
+      if (childLiveStatus != null) isWorking = true;
       if (!hasUnreadMessages && sessionHasUnreadMessages(child)) {
         hasUnreadMessages = true;
       }
@@ -222,11 +233,36 @@ export function getEffectiveSessionActivitySummary(
   }
 
   return {
+    status,
     isWorking,
-    isWaitingPermission,
+    isWaitingPermission: status === 'requestPermission',
     hasUnreadMessages,
     latestMessageAt,
   };
+}
+
+export type EffectiveProjectActivitySummary = {
+  status: ActiveSessionStatus;
+  hasUnreadMessages: boolean;
+};
+
+/** Aggregate live activity for a local-project sidebar row. */
+export function getEffectiveProjectActivitySummary(
+  sessions: SessionMeta[],
+  childSessionsByParent?: Map<string, SessionMeta[]>,
+  liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
+): EffectiveProjectActivitySummary {
+  let status: EffectiveProjectActivitySummary['status'] = null;
+  let hasUnreadMessages = false;
+
+  for (const session of sessions) {
+    for (const candidate of [session, ...(childSessionsByParent?.get(session.id) ?? [])]) {
+      status = mergeActiveSessionStatus(status, liveSessionStatuses?.get(candidate.id));
+      if (!hasUnreadMessages && sessionHasUnreadMessages(candidate)) hasUnreadMessages = true;
+    }
+  }
+
+  return { status, hasUnreadMessages };
 }
 
 type LatestPullRequestInfo = {
@@ -332,6 +368,7 @@ export function mapSessionMetaToSessionListRow(
     addedLines: lineChange.add,
     deletedLines: lineChange.del,
     isWorking: liveStatus != null,
+    activityStatus: mergeActiveSessionStatus(null, liveStatus),
     hasUnreadMessages,
     isOffline,
     isWaitingPermission: liveStatus?.type === 'requestPermission',
@@ -369,6 +406,7 @@ function aggregateChildStatus(
 
   if (
     activity.isWorking === task.isWorking &&
+    activity.status === task.activityStatus &&
     activity.isWaitingPermission === task.isWaitingPermission &&
     activity.hasUnreadMessages === task.hasUnreadMessages &&
     latestMessageAt === task.latestMessageAt
@@ -378,6 +416,7 @@ function aggregateChildStatus(
 
   return {
     ...task,
+    activityStatus: activity.status,
     isWorking: activity.isWorking,
     isWaitingPermission: activity.isWaitingPermission,
     hasUnreadMessages: activity.hasUnreadMessages,

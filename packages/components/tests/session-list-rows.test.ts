@@ -6,6 +6,7 @@ import {
   buildChildSessionsByParent,
   buildSessionListRows,
   getEffectiveLatestMessageAt,
+  getEffectiveProjectActivitySummary,
   getEffectiveSessionActivitySummary,
 } from '../src/components/sessions/session-list-rows';
 
@@ -155,6 +156,21 @@ describe('buildSessionListRows child-time aggregation', () => {
     );
 
     expect(tasks[0]?.isWorking).toBe(true);
+    expect(tasks[0]?.activityStatus).toBe('running');
+  });
+
+  test('preserves initializing presence for repository group aggregation', () => {
+    const session = makeSession({ id: 'session', title: 'Session' });
+    const tasks = buildSessionListRows([session], {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+      liveSessionStatuses: new Map([
+        [session.id, { type: 'initializing', stage: 'managed-runtime' }],
+      ]),
+    });
+
+    expect(tasks[0]?.activityStatus).toBe('initializing');
   });
 
   test('does not treat durable running status as working without live presence', () => {
@@ -172,6 +188,7 @@ describe('buildSessionListRows child-time aggregation', () => {
     });
 
     expect(tasks[0]?.isWorking).toBe(false);
+    expect(tasks[0]?.activityStatus).toBeNull();
   });
 });
 
@@ -207,6 +224,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const activity = getEffectiveSessionActivitySummary(parent, map, liveSessionStatuses);
 
     expect(activity).toMatchObject({
+      status: 'requestPermission',
       isWorking: true,
       isWaitingPermission: true,
       hasUnreadMessages: true,
@@ -272,10 +290,85 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const map = buildChildSessionsByParent([parent, archivedChild]);
 
     expect(getEffectiveSessionActivitySummary(parent, map)).toEqual({
+      status: null,
       isWorking: false,
       isWaitingPermission: false,
       hasUnreadMessages: false,
       latestMessageAt: parent.lastMessageAt,
+    });
+  });
+});
+
+describe('getEffectiveProjectActivitySummary', () => {
+  test('reports running when any project session has live activity', () => {
+    const initializingSession = makeSession({ id: 'initializing' });
+    const runningSession = makeSession({ id: 'running' });
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [initializingSession.id, { type: 'initializing' }],
+      [runningSession.id, { type: 'running' }],
+    ]);
+
+    expect(
+      getEffectiveProjectActivitySummary(
+        [initializingSession, runningSession],
+        new Map(),
+        liveSessionStatuses
+      )
+    ).toEqual({ status: 'running', hasUnreadMessages: false });
+  });
+
+  test('reports initializing when there is no running project session', () => {
+    const session = makeSession({ id: 'initializing' });
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [session.id, { type: 'initializing', stage: 'managed-runtime' }],
+    ]);
+
+    expect(getEffectiveProjectActivitySummary([session], new Map(), liveSessionStatuses)).toEqual({
+      status: 'initializing',
+      hasUnreadMessages: false,
+    });
+  });
+
+  test('gives child-tab permission activity precedence over running', () => {
+    const runningSession = makeSession({ id: 'running' });
+    const child = makeSession({
+      id: 'permission-child',
+      parentSessionId: runningSession.id,
+    });
+    const children = buildChildSessionsByParent([runningSession, child]);
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      [runningSession.id, { type: 'running' }],
+      [child.id, { type: 'requestPermission' }],
+    ]);
+
+    expect(
+      getEffectiveProjectActivitySummary([runningSession], children, liveSessionStatuses)
+    ).toEqual({ status: 'requestPermission', hasUnreadMessages: false });
+  });
+
+  test('ignores durable status without live presence', () => {
+    const session = makeSession({ id: 'stale', status: { type: 'running' } });
+
+    expect(getEffectiveProjectActivitySummary([session])).toEqual({
+      status: null,
+      hasUnreadMessages: false,
+    });
+  });
+
+  test('keeps a child-tab unread result alongside live project activity', () => {
+    const parent = makeSession({ id: 'parent', lastMessageAt: 2_000, lastReadAt: 2_000 });
+    const child = makeSession({
+      id: 'child',
+      parentSessionId: parent.id,
+      lastMessageAt: 3_000,
+      lastReadAt: 1_000,
+    });
+    const children = buildChildSessionsByParent([parent, child]);
+    const liveSessionStatuses = new Map<string, SessionStatus>([[parent.id, { type: 'running' }]]);
+
+    expect(getEffectiveProjectActivitySummary([parent], children, liveSessionStatuses)).toEqual({
+      status: 'running',
+      hasUnreadMessages: true,
     });
   });
 });

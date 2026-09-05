@@ -128,6 +128,7 @@ import {
   buildChildSessionsByParent,
   buildSessionListRows,
   buildSidebarOpenerRowResolver,
+  getEffectiveProjectActivitySummary,
   getEffectiveSessionActivitySummary,
   getEffectiveLatestMessageAt,
   getLatestPullRequestInfo,
@@ -168,6 +169,7 @@ import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
+  SessionRowIndicator,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -919,6 +921,8 @@ export type LocalProjectItemProps = {
   removalState?: LocalProjectRemovalState | null;
   collapsed: boolean;
   isSelected: boolean;
+  /** All project Sessions, including pinned rows rendered in the separate top section. */
+  activitySessionsForProject?: SessionMeta[];
   sessionsForProject: SessionMeta[];
   /**
    * Map of parent session id -> non-archived child sessions. Used to roll up
@@ -1007,6 +1011,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   removalState = null,
   collapsed,
   isSelected,
+  activitySessionsForProject,
   sessionsForProject,
   childSessionsByParent,
   liveSessionStatuses,
@@ -1062,6 +1067,15 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     [childSessionsByParent, collapsedOpenedBySessionIds, resolveOpenerRowId, sessionsForProject]
   );
   const showTreeGutter = hasOpenedByTreeNesting(sessionNodes);
+  const projectActivity = useMemo(
+    () =>
+      getEffectiveProjectActivitySummary(
+        activitySessionsForProject ?? sessionsForProject,
+        childSessionsByParent,
+        liveSessionStatuses
+      ),
+    [activitySessionsForProject, childSessionsByParent, liveSessionStatuses, sessionsForProject]
+  );
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
   const baseAriaLabel = formattedPath
@@ -1075,7 +1089,28 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       : removalState === 'removing'
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
-  const ariaLabel = removalStateLabel ? `${baseAriaLabel} · ${removalStateLabel}` : baseAriaLabel;
+  const projectActivityLabel = !collapsed
+    ? null
+    : projectActivity.status === 'requestPermission'
+      ? t('sessions.status.requestPermission', 'Request Permission')
+      : projectActivity.status === 'initializing'
+        ? t('sessions.status.initializing', 'Initializing')
+        : projectActivity.status === 'running'
+          ? t('sessions.status.running', 'Running')
+          : projectActivity.hasUnreadMessages
+            ? t('sessions.unreadMessages', 'Unread messages')
+            : null;
+  const projectHasLiveActivity = projectActivity.status != null;
+  const projectIndicatorLabel =
+    collapsed &&
+    projectActivity.status !== 'requestPermission' &&
+    projectHasLiveActivity &&
+    projectActivity.hasUnreadMessages
+      ? `${projectActivityLabel} · ${t('sessions.unreadMessages', 'Unread messages')}`
+      : projectActivityLabel;
+  const ariaLabel = [baseAriaLabel, removalStateLabel, projectIndicatorLabel]
+    .filter(Boolean)
+    .join(' · ');
   const showSelectedState = isSelected && !isMobile;
   const handleNavigate = useCallback(() => {
     if (!canNavigateProject || removalState) return;
@@ -1192,53 +1227,73 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       </TooltipTrigger>
                       <TooltipContent side="right">{removalStateLabel}</TooltipContent>
                     </Tooltip>
-                  ) : showProjectMenu || showNewChatButton ? (
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      {showProjectMenu ? (
-                        <button
-                          type="button"
-                          className={cn(hoverActionClassName, menuTriggerOpenClassName)}
-                          aria-label={projectMenuLabel}
-                          onClick={(event) => {
-                            // Open the row's own right-click menu from a left click.
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            event.currentTarget.dispatchEvent(
-                              new MouseEvent('contextmenu', {
-                                bubbles: true,
-                                cancelable: true,
-                                clientX: Math.round(rect.left),
-                                clientY: Math.round(rect.bottom),
-                              })
-                            );
-                          }}
+                  ) : (
+                    <>
+                      {collapsed &&
+                      (projectActivity.status || projectActivity.hasUnreadMessages) ? (
+                        <span
+                          data-sidebar-project-activity={projectActivity.status ?? 'unread'}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center"
+                          aria-hidden="true"
                         >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
+                          <SessionRowIndicator
+                            isWaitingPermission={projectActivity.status === 'requestPermission'}
+                            isWorking={projectHasLiveActivity}
+                            hasUnreadMessages={projectActivity.hasUnreadMessages}
+                            showUnreadWithWorking={projectActivity.status !== 'requestPermission'}
+                          />
+                        </span>
                       ) : null}
-                      {showNewChatButton ? (
-                        <button
-                          type="button"
-                          className={hoverActionClassName}
-                          aria-label={newChatLabel}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onNewChatInProject?.(machineId, project.id);
-                          }}
-                        >
-                          <SquarePen className="h-3.5 w-3.5" />
-                        </button>
+                      {showProjectMenu || showNewChatButton ? (
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          {showProjectMenu ? (
+                            <button
+                              type="button"
+                              className={cn(hoverActionClassName, menuTriggerOpenClassName)}
+                              aria-label={projectMenuLabel}
+                              onClick={(event) => {
+                                // Open the row's own right-click menu from a left click.
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                event.currentTarget.dispatchEvent(
+                                  new MouseEvent('contextmenu', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: Math.round(rect.left),
+                                    clientY: Math.round(rect.bottom),
+                                  })
+                                );
+                              }}
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                          {showNewChatButton ? (
+                            <button
+                              type="button"
+                              className={hoverActionClassName}
+                              aria-label={newChatLabel}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onNewChatInProject?.(machineId, project.id);
+                              }}
+                            >
+                              <SquarePen className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
-                    </div>
-                  ) : null}
+                    </>
+                  )}
                 </div>
               </ContextMenuTrigger>
             </TooltipTrigger>
-            {formattedPath || trimmedMachineName ? (
+            {formattedPath || trimmedMachineName || projectIndicatorLabel ? (
               <TooltipContent side="right" align="start" className="max-w-[420px] break-all">
                 <div className="flex flex-col gap-0.5 text-xs">
+                  {projectIndicatorLabel ? <span>{projectIndicatorLabel}</span> : null}
                   {trimmedMachineName ? (
                     <span className="text-muted-foreground">{trimmedMachineName}</span>
                   ) : null}
@@ -2430,6 +2485,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         }
                         collapsed={collapsed}
                         isSelected={isSelected}
+                        activitySessionsForProject={
+                          localProjectSessionsByKey.get(projectKey) ?? sessionsForProject
+                        }
                         sessionsForProject={sessionsForProject}
                         childSessionsByParent={childSessionsByParent}
                         liveSessionStatuses={liveSessionStatuses}
