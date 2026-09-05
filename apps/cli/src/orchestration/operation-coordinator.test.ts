@@ -1239,6 +1239,69 @@ describe('LodyOperationCoordinator', () => {
     ]);
   });
 
+  it('retries terminal settlement after its consume write fails', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      agentConfigId: 'removed-agent-config',
+      configurationSyncSucceeds: true,
+    });
+    const consume = vi.spyOn(LodyOperationStore.prototype, 'consumeClaimedDelivery');
+    const originalConsume = consume.getMockImplementation();
+    consume.mockImplementationOnce(() => {
+      throw new Error('terminal settlement write failed');
+    });
+    if (originalConsume) consume.mockImplementation(originalConsume);
+
+    try {
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+
+      const afterFailure = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        const delivery = afterFailure.getDelivery(harness.requesterSessionId, 'review-round-1');
+        expect(delivery).toMatchObject({ state: 'pending', attemptCount: 0 });
+        expect(delivery.activeClaimId).toBeUndefined();
+        expect(delivery.activeClaimWorkerBootId).toBeUndefined();
+      } finally {
+        afterFailure.close();
+      }
+      expect(harness.histories.get(harness.requesterSessionId)).toEqual([
+        expect.objectContaining({
+          items: [
+            expect.objectContaining({
+              type: 'operation_completion',
+              continuation: {
+                status: 'not_started',
+                reason: expect.objectContaining({ code: 'CONFIGURATION_UNAVAILABLE' }),
+              },
+            }),
+          ],
+        }),
+      ]);
+
+      await harness.coordinator.wake('retry-terminal-settlement-1');
+      await harness.coordinator.idle();
+      await harness.coordinator.wake('retry-terminal-settlement-2');
+      await harness.coordinator.idle();
+      harness.coordinator.stop();
+
+      expect(harness.continueSession).not.toHaveBeenCalled();
+      const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'consumed',
+          attemptCount: 0,
+        });
+      } finally {
+        finalStore.close();
+      }
+      expect(harness.histories.get(harness.requesterSessionId)).toHaveLength(1);
+    } finally {
+      harness.coordinator.stop();
+      consume.mockRestore();
+    }
+  });
+
   it('does not write configuration failure when another Worker claims during config sync', async () => {
     let markSyncStarted!: () => void;
     let resolveSync!: (value: boolean) => void;

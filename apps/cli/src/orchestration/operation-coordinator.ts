@@ -1161,35 +1161,43 @@ export class LodyOperationCoordinator {
       if (continuationFailure) {
         await this.writeCompletionTurn(sessionDoc, operation, delivery, continuationFailure);
       }
-    } catch (error) {
-      this.withStore((store) =>
-        store.releaseDeliveryClaim(
+      const result = this.withStore((store) =>
+        store.consumeClaimedDelivery(
           delivery.requesterSessionId,
           delivery.operationId,
           this.workerBootId,
           claimId
         )
       );
+      if (!result.consumed) return false;
+      const timer = this.configurationTimers.get(delivery.requesterSessionId);
+      if (timer) clearTimeout(timer);
+      this.configurationTimers.delete(delivery.requesterSessionId);
+      this.options.logger.debug(
+        `[orchestration] Delivery ${delivery.deliveryId} consumed reason=${evidence} wake=${wakeReason} durationMs=${(
+          performance.now() - startedAt
+        ).toFixed(2)}`
+      );
+      return true;
+    } catch (error) {
+      try {
+        this.withStore((store) =>
+          store.releaseDeliveryClaim(
+            delivery.requesterSessionId,
+            delivery.operationId,
+            this.workerBootId,
+            claimId
+          )
+        );
+      } catch (releaseError) {
+        this.options.logger.warn(
+          `[orchestration] Could not release Delivery ${delivery.deliveryId} terminal claim after settlement failed: ${
+            releaseError instanceof Error ? releaseError.message : String(releaseError)
+          }`
+        );
+      }
       throw error;
     }
-    const result = this.withStore((store) =>
-      store.consumeClaimedDelivery(
-        delivery.requesterSessionId,
-        delivery.operationId,
-        this.workerBootId,
-        claimId
-      )
-    );
-    if (!result.consumed) return false;
-    const timer = this.configurationTimers.get(delivery.requesterSessionId);
-    if (timer) clearTimeout(timer);
-    this.configurationTimers.delete(delivery.requesterSessionId);
-    this.options.logger.debug(
-      `[orchestration] Delivery ${delivery.deliveryId} consumed reason=${evidence} wake=${wakeReason} durationMs=${(
-        performance.now() - startedAt
-      ).toFixed(2)}`
-    );
-    return true;
   }
 
   /**
