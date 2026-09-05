@@ -217,6 +217,47 @@ describe('resolveHistoryACPProcessLaunch', () => {
     expect(historyLaunch.env.PATH).toBe('/usr/bin');
   });
 
+  it('resolves a custom ACP launch from the provider launch spec', async () => {
+    const historyLaunch = await resolveHistoryACPProcessLaunch({
+      provider: {
+        cliType: 'custom',
+        agentType: 'my-agent',
+        customAcp: {
+          command: process.execPath,
+          args: ['custom-acp-server.mjs', '--stdio'],
+        },
+      },
+      env: { PATH: '/usr/bin' },
+    });
+
+    expect(historyLaunch.command).toBe(process.execPath);
+    expect(historyLaunch.args).toEqual(['custom-acp-server.mjs', '--stdio']);
+    expect(historyLaunch.env.PATH).toBe('/usr/bin');
+  });
+
+  it('merges the authoritative custom ACP environment before spawning history', async () => {
+    const historyLaunch = await resolveHistoryACPProcessLaunch({
+      provider: {
+        cliType: 'custom',
+        agentType: 'my-agent',
+        customAcp: { command: process.execPath },
+        env: {
+          ACP_API_KEY: 'config-secret',
+          ACP_BASE_URL: 'https://config.example.test',
+          PATH: '/config/bin',
+        },
+      },
+      env: {
+        ACP_API_KEY: 'caller-secret',
+        PATH: '/caller/bin',
+      },
+    });
+
+    expect(historyLaunch.env.ACP_API_KEY).toBe('config-secret');
+    expect(historyLaunch.env.ACP_BASE_URL).toBe('https://config.example.test');
+    expect(historyLaunch.env.PATH).toBe('/config/bin');
+  });
+
   it('uses the same registry Interactive Claude npx launch as normal sessions', async () => {
     const provider = { cliType: 'registry', agentType: 'claude-p' } as const;
     const sessionLaunch = resolveACPProcessLaunch(provider);
