@@ -66,10 +66,8 @@ delegation proofs or a shared-machine gate without a new product and security de
   "not delivered" label for that exact entry from the marker plus its non-terminal
   status (no CLI repair write, no schema change), and recovery is a fresh send:
   the row's "not delivered" label opens a confirmation dialog that re-sends the
-  SAME content as a brand-new message (new turn id) through the ordinary
-  producer path, whose ordinary dispatch write clears the marker as a side
-  effect; the resend also supersedes the abandoned entry to `canceled` so the
-  stale pending copy can never dispatch once the marker is gone. The watcher
+  SAME content as a brand-new message (new turn id). The renderer retains the
+  marker and supersedes the abandoned entry to `canceled`. The watcher
   must not publish or clear
   session active presence; `../lib/loro/session-active-presence.ts` is the only owner
   for start/phase/heartbeat/clear. Owned-session startup/meta bootstrap scans may contain

@@ -137,7 +137,7 @@ work) and a hover preview.
 - A user entry marked by `SessionMeta.lastMissingHistoryUserMsgId` renders the
   terminal "Not delivered" label. That label is the only recovery entry: its
   dialog resends the same content as a new ordinary message, then marks the old
-  entry `canceled`; the producer clears the marker. Never automatically dispatch
-  or revive the old turn.
+  entry `canceled` while retaining the marker as a tombstone. Never automatically
+  dispatch or revive the old turn.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).

@@ -858,7 +858,6 @@ export function useSessionActions(): SessionActions {
       try {
         await runtime.writer.upsertDocMeta(roomId, {
           latestUserMsgId: userTurnId,
-          lastMissingHistoryUserMsgId: undefined,
         } as Partial<SessionMeta>);
       } catch (error) {
         // The RPC fast path may already have delivered this turn to the CLI; a

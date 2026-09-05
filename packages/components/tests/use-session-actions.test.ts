@@ -535,10 +535,9 @@ describe('useSessionActions', () => {
     });
     await vi.waitFor(() => expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1));
 
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
+    expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
+      latestUserMsgId: userTurnId,
+    });
     expect(setState).not.toHaveBeenCalled();
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 
