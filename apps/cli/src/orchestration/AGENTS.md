@@ -55,9 +55,9 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
   dispatch ownership. Assistant `finished`/`endedAt` is never Delivery completion
   evidence: teardown writes the same terminal footprint. Delivery execution has three
-  fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one
-  boot id and starts only after the daemon supervisor confirms the previous child exited
-  (foreground startup crosses the Host-lease barrier); and each attempt owns a fresh token.
+  fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one boot
+  id and starts only after the supervisor/Host-lease lifecycle barrier; and each attempt owns
+  a fresh token.
   Execution fields live in `delivery_execution_state`, not `deliveries`: stable binaries parse
   `SELECT * FROM deliveries` strictly, so adding columns there makes a downgraded binary unable
   to read the shared local database.
@@ -76,7 +76,9 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   the user to continue manually if needed. Provider-accepted steer settles the original
   Delivery immediately, so cancellation of a later user-owned turn cannot reopen it.
   Settlement write failure retries the observed outcome without ACP; replacement-Worker
-  recovery converts any still-fenced started claim to `uncertain`, never to runnable. At most
+  recovery converts any still-fenced started claim to `uncertain`, never to runnable. A
+  coordinated workspace stop abandons only that coordinator's claims before closing its store:
+  `claimed`/`prepared` become runnable and `started` becomes `uncertain`. At most
   one confirmed pre-provider recovery is allowed; after two prepared attempts,
   `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed without invoking ACP. A pending
   Delivery from the pre-claim schema migrates as `uncertain`; its prior execution count is

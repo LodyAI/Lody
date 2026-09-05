@@ -828,6 +828,30 @@ export class LodyOperationStore {
     return result.changes;
   }
 
+  /** Run only after this coordinator has stopped scheduling new Delivery work. */
+  abandonDeliveryClaimsOwnedBy(workspaceId: WorkspaceId, workerBootId: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE delivery_execution_state
+         SET execution_phase = CASE
+               WHEN execution_phase = 'started' THEN 'uncertain'
+               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
+               ELSE execution_phase
+             END,
+             active_claim_id = NULL,
+             active_claim_worker_boot_id = NULL
+         WHERE active_claim_worker_boot_id = ?
+           AND EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+               AND deliveries.operation_id = delivery_execution_state.operation_id
+               AND deliveries.workspace_id = ? AND deliveries.state = 'pending'
+           )`
+      )
+      .run(workerBootId, workspaceId);
+    return result.changes;
+  }
+
   claimDeliveryExecution(
     requesterSessionId: SessionId,
     operationId: string,

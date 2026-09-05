@@ -449,6 +449,56 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('abandons only the stopped coordinator owner and fences its prepared callback', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed' });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
+
+      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-b')).toBe(0);
+      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
+        executionPhase: 'prepared',
+        activeClaimId: 'attempt-a',
+        activeClaimWorkerBootId: 'worker-a',
+      });
+      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-a')).toBe(1);
+      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
+        executionPhase: 'ready',
+        attemptCount: 1,
+      });
+      expect(
+        store.markClaimedDeliveryExecutionStarted(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toBe(false);
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+    } finally {
+      store.close();
+    }
+  });
+
   it('quarantines an orphaned claim after provider execution starts', async () => {
     const store = await makeStore();
     try {

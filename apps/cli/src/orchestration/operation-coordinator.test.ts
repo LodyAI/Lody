@@ -42,6 +42,7 @@ const makeHarness = async (options?: {
   agentConfigId?: string;
   configurationSyncSucceeds?: boolean;
   configurationSync?: () => Promise<boolean>;
+  beforeTurnClaim?: () => Promise<void>;
   beforeTargetMetaRead?: () => Promise<void>;
   now?: () => number;
   machineAgentConfig?: AgentConfigMeta;
@@ -174,6 +175,7 @@ const makeHarness = async (options?: {
   const continueSession = vi.fn(async (message: unknown, dispatchOptions: unknown) => {
     const typedMessage = message as { sessionId: SessionId; userTurnId: string };
     const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+    await options?.beforeTurnClaim?.();
     if ((await typedOptions.onTurnClaimed?.()) === false) return;
     const assistantTurnId = `assistant:${typedMessage.userTurnId}`;
     histories.set(typedMessage.sessionId, [
@@ -256,7 +258,7 @@ const makeHarness = async (options?: {
     }
     if (shouldFail) throw new Error('transient Streams failure');
   });
-  const coordinator = new LodyOperationCoordinator({
+  const coordinatorOptions = {
     workspaceId,
     machineId,
     userId: 'user-1',
@@ -285,7 +287,8 @@ const makeHarness = async (options?: {
       return { close: vi.fn() };
     },
     materializeTarget,
-  });
+  } satisfies ConstructorParameters<typeof LodyOperationCoordinator>[0];
+  const coordinator = new LodyOperationCoordinator(coordinatorOptions);
   const store = new LodyOperationStore(storePath, () => TEST_NOW_MS);
   store.accept({
     workspaceId,
@@ -313,6 +316,7 @@ const makeHarness = async (options?: {
   store.close();
   return {
     coordinator,
+    coordinatorOptions,
     continueSession,
     resolveUser,
     histories,
@@ -1285,6 +1289,86 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('does not finalize a Delivery after stopping during configuration sync', async () => {
+    let markSyncStarted!: () => void;
+    let resolveSync!: (value: boolean) => void;
+    const syncStarted = new Promise<void>((resolve) => {
+      markSyncStarted = resolve;
+    });
+    const syncResult = new Promise<boolean>((resolve) => {
+      resolveSync = resolve;
+    });
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      agentConfigId: 'removed-agent-config',
+      configurationSync: async () => {
+        markSyncStarted();
+        return await syncResult;
+      },
+    });
+
+    harness.coordinator.start();
+    await syncStarted;
+    const oldWork = harness.coordinator.idle();
+    harness.coordinator.stop();
+    resolveSync(true);
+    await oldWork;
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      const delivery = finalStore.getDelivery(harness.requesterSessionId, 'review-round-1');
+      expect(delivery).toMatchObject({
+        state: 'pending',
+        executionPhase: 'ready',
+      });
+      expect(delivery.activeClaimId).toBeUndefined();
+    } finally {
+      finalStore.close();
+    }
+  });
+
+  it('does not claim a Delivery after stopping before the execution claim', async () => {
+    let markClaimPending!: () => void;
+    let releaseClaim!: () => void;
+    const claimPending = new Promise<void>((resolve) => {
+      markClaimPending = resolve;
+    });
+    const claimReleased = new Promise<void>((resolve) => {
+      releaseClaim = resolve;
+    });
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      beforeTurnClaim: async () => {
+        markClaimPending();
+        await claimReleased;
+      },
+    });
+
+    harness.coordinator.start();
+    await claimPending;
+    const oldWork = harness.coordinator.idle();
+    harness.coordinator.stop();
+    releaseClaim();
+    await oldWork;
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      const delivery = finalStore.getDelivery(harness.requesterSessionId, 'review-round-1');
+      expect(delivery).toMatchObject({
+        state: 'pending',
+        executionPhase: 'ready',
+        attemptCount: 0,
+      });
+      expect(delivery.activeClaimId).toBeUndefined();
+    } finally {
+      finalStore.close();
+    }
+  });
+
   it('clears a stale non-started marker when recovered execution begins', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
     harness.histories.set(harness.requesterSessionId, [
@@ -1411,6 +1495,67 @@ describe('LodyOperationCoordinator', () => {
         },
       }),
     ]);
+  });
+
+  it('recovers a started claim after the workspace coordinator restarts in one Worker', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseOldExecution!: () => void;
+    const oldExecutionReleased = new Promise<void>((resolve) => {
+      releaseOldExecution = resolve;
+    });
+    let markOldExecutionReturned!: () => void;
+    const oldExecutionReturned = new Promise<void>((resolve) => {
+      markOldExecutionReturned = resolve;
+    });
+    harness.continueSession.mockImplementationOnce(async (_message, dispatchOptions) => {
+      const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+      expect(await typedOptions.onTurnClaimed?.()).toBe(true);
+      expect(await typedOptions.onTurnStarted?.()).toBe(true);
+      markStarted();
+      await oldExecutionReleased;
+      markOldExecutionReturned();
+    });
+
+    harness.coordinator.start();
+    await started;
+    const oldStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(oldStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'pending',
+        executionPhase: 'started',
+        activeClaimId: expect.any(String),
+        activeClaimWorkerBootId: expect.any(String),
+      });
+    } finally {
+      oldStore.close();
+    }
+    harness.coordinator.stop();
+
+    const replacement = new LodyOperationCoordinator(harness.coordinatorOptions);
+    try {
+      replacement.start();
+      await replacement.idle();
+    } finally {
+      replacement.stop();
+      releaseOldExecution();
+      await oldExecutionReturned;
+    }
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'consumed',
+        executionPhase: 'uncertain',
+        attemptCount: 1,
+      });
+    } finally {
+      finalStore.close();
+    }
   });
 
   it('consumes the Delivery when a user turn lands before its completed assistant turn', async () => {

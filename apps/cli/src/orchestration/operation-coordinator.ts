@@ -243,6 +243,25 @@ export class LodyOperationCoordinator {
     this.storeWatch = null;
     if (this.storeWakeTimer) clearTimeout(this.storeWakeTimer);
     this.storeWakeTimer = null;
+    if (this.store) {
+      try {
+        const abandonedClaims = this.store.abandonDeliveryClaimsOwnedBy(
+          this.options.workspaceId,
+          this.workerBootId
+        );
+        if (abandonedClaims > 0) {
+          this.options.logger.warn(
+            `[orchestration] Abandoned ${abandonedClaims} Delivery claim(s) while stopping the workspace coordinator`
+          );
+        }
+      } catch (error) {
+        this.options.logger.warn(
+          `[orchestration] Could not abandon Delivery claims during coordinator stop: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
     this.store?.close();
     this.store = null;
     for (const subscription of this.targetSubscriptions.values()) {
@@ -934,6 +953,7 @@ export class LodyOperationCoordinator {
       {
         dispatchSource: 'delivery',
         onTurnClaimed: async () => {
+          if (!this.started) return false;
           const claim = this.withStore((store) =>
             store.claimDeliveryExecution(delivery.requesterSessionId, delivery.operationId, {
               claimId: attemptId,
@@ -1120,6 +1140,7 @@ export class LodyOperationCoordinator {
     requireAttemptsExhausted = false,
     requiredExecutionPhase: 'ready' | 'uncertain' = 'ready'
   ): Promise<boolean> {
+    if (!this.started) return false;
     const startedAt = performance.now();
     const claimId = randomUUID();
     const claim = this.withStore((store) =>
