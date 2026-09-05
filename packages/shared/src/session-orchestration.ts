@@ -120,6 +120,8 @@ export type LodyOperationSnapshot =
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;
   inputConfig: SessionTurnInputConfig;
+  /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
+  sourceTurnId?: string;
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.

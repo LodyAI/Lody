@@ -1,0 +1,129 @@
+name: Desktop E2E PR
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Regression suite to run
+        required: true
+        type: choice
+        options: [smoke, full]
+        default: smoke
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: desktop-e2e-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  gate:
+    name: Select desktop E2E suite
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+      suite: ${{ steps.select.outputs.suite }}
+    steps:
+      - name: Select suite from trusted event metadata
+        id: select
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('run', 'true')
+              core.setOutput('suite', context.payload.inputs?.suite === 'full' ? 'full' : 'smoke')
+              return
+            }
+
+            const labels = new Set((context.payload.pull_request?.labels ?? []).map((label) => label.name))
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100
+            })
+            const criticalPrefixes = [
+              'e2e/',
+              'apps/electron/',
+              'apps/cli/',
+              'packages/components/',
+              'packages/platform/',
+              'packages/shared/',
+              'packages/cli-supervisor/'
+            ]
+            const criticalFiles = new Set([
+              'package.json',
+              'pnpm-lock.yaml',
+              'pnpm-workspace.yaml',
+              '.github/workflows/e2e-smoke.yml',
+              '.github/workflows/e2e-pr-reconcile.yml',
+              '.github/workflows/e2e-daily.yml',
+              '.github/workflows/e2e-daily-reconcile.yml'
+            ])
+            const critical = files.some(({ filename }) =>
+              criticalFiles.has(filename) || criticalPrefixes.some((prefix) => filename.startsWith(prefix))
+            )
+            core.setOutput('run', String(critical || labels.has('e2e') || labels.has('e2e-full')))
+            core.setOutput('suite', labels.has('e2e-full') ? 'full' : 'smoke')
+
+  regression:
+    name: Desktop E2E (${{ needs.gate.outputs.suite }})
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check suite contract
+        run: pnpm --filter @lody/e2e check
+
+      - name: Build OSS desktop and bundled CLI
+        run: pnpm --dir apps/electron build
+
+      - name: Run selected desktop journeys
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p e2e/artifacts
+          pnpm --filter @lody/e2e ${{ needs.gate.outputs.suite }} 2>&1 | tee e2e/artifacts/cucumber-output.log
+
+      - name: Render failed journey videos
+        if: failure()
+        run: |
+          pnpm --filter @lody/e2e exec playwright install ffmpeg
+          pnpm --filter @lody/e2e failure:videos
+
+      - name: Upload desktop E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-${{ needs.gate.outputs.suite }}-${{ github.run_id }}
+          path: e2e/artifacts/
+          if-no-files-found: warn
+          retention-days: 14

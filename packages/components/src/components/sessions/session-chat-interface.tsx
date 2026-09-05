@@ -1723,6 +1723,7 @@ export function SessionSearchBar({
 }
 
 interface SessionChatInterfaceProps {
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
   className?: string;
@@ -1917,6 +1918,7 @@ export const SessionChatInterface = memo(
       hideMessageArea = false,
       syncEnabled = !hideMessageArea,
       isVisible = true,
+      claimNavigationFocus,
       isExternalHistoryRefreshing = false,
       externalHistoryProviderLabel,
       onNavigateToComment,
@@ -5993,6 +5995,7 @@ export const SessionChatInterface = memo(
                       the bottom surface; chat queue is bypassed for the same reason. */}
                   {shouldReplaceComposerWithPermission ? null : (
                     <SessionChatInputArea
+                      claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
                       ref={inputAreaRef}
                       session={session}
                       sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}

@@ -6,6 +6,7 @@ import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
 import readyToBegin from '@/assets/onboarding/intro/ready-to-begin.png';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
+import { WINDOW_DRAG_EXEMPT_CLASS } from '@/ui/window-drag-region';
 import type { AudioLayers } from './use-onboarding-audio';
 import { playClick, playCut, playReveal, playSelect } from './ui-sounds';
 
@@ -407,7 +408,10 @@ export function IntroSequence({
                   playClick();
                   setCurrent(LAST);
                 }}
-                className="absolute right-8 top-7 z-10 border-b border-transparent px-1 py-1 font-mono text-[10.5px] tracking-[0.08em] text-slate-600 transition-colors hover:border-slate-500 hover:text-slate-950"
+                className={cn(
+                  WINDOW_DRAG_EXEMPT_CLASS,
+                  'absolute right-8 top-14 z-10 border-b border-transparent px-1 py-1 font-mono text-[10.5px] tracking-[0.08em] text-slate-600 transition-colors hover:border-slate-500 hover:text-slate-950'
+                )}
               >
                 {t('onboarding.intro.skip', 'Skip intro')}
               </button>

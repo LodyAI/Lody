@@ -101,6 +101,9 @@ their failures and perform expiry.
   current response.
 - Code CI runs on `pull_request` with read-only repository permissions and
   checks out all public submodules recursively.
+- Desktop journey authoring runs on a maintainer machine. GitHub workflows never
+  receive Codex credentials or publish author output; an ordinary PR exposes the
+  reviewed patch to the existing read-only code checks.
 
 ## Other automation
 

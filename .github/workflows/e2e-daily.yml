@@ -1,0 +1,78 @@
+name: Desktop E2E Daily
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Regression suite to run
+        required: true
+        type: choice
+        options: [full, smoke]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-e2e-daily
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  regression:
+    name: Desktop E2E daily (${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check suite contract
+        run: pnpm --filter @lody/e2e check
+
+      - name: Build OSS desktop and bundled CLI
+        run: pnpm --dir apps/electron build
+
+      - name: Run desktop journeys
+        shell: bash
+        env:
+          SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}
+        run: |
+          set -o pipefail
+          mkdir -p e2e/artifacts
+          pnpm --filter @lody/e2e "$SUITE" 2>&1 | tee e2e/artifacts/cucumber-output.log
+
+      - name: Render failed journey videos
+        if: failure()
+        run: |
+          pnpm --filter @lody/e2e exec playwright install ffmpeg
+          pnpm --filter @lody/e2e failure:videos
+
+      - name: Upload desktop E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-daily-${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}-${{ github.run_id }}
+          path: e2e/artifacts/
+          if-no-files-found: warn
+          retention-days: 30

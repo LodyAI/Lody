@@ -270,7 +270,11 @@ describe('SessionExecutionService', () => {
       userTurnId: 'user-1',
       session: activeSession,
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
       activePromptRun: initialPromptRun,
       yieldedFinalization: Promise.resolve(),
     };
@@ -291,7 +295,7 @@ describe('SessionExecutionService', () => {
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'unsupported' });
     expect(steerPrompt).not.toHaveBeenCalled();
-    expect(runtime.requesterUserId).toBe('user-1');
+    expect(runtime.invocation.requesterUserId).toBe('user-1');
 
     await expect(
       service.steerSession({
@@ -319,6 +323,16 @@ describe('SessionExecutionService', () => {
     );
     expect(runtime.turnId).toBe('assistant:user-2');
     expect(runtime.userTurnId).toBe('user-2');
+    expect(runtime.invocation).toEqual({
+      requesterUserId: 'user-1',
+      sourceTurnId: 'user-2',
+      inputConfig: { prompt: 'change direction' },
+    });
+    expect(service.getActiveInvocationContext(sessionId)).toEqual({
+      requesterUserId: 'user-1',
+      sourceTurnId: 'user-2',
+      inputConfig: { prompt: 'change direction' },
+    });
     expect(initialPromptRun.successor?.turnId).toBe('assistant:user-2');
     expect(runtime.activePromptRun.turnId).toBe('assistant:user-2');
 
@@ -624,7 +638,11 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-no-steer' as ACPSessionId,
       },
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'original' },
+      },
     };
     (
       service as unknown as {
@@ -674,7 +692,11 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-ended-before-submit' as ACPSessionId,
       },
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'original' },
+      },
     };
     (
       service as unknown as {
@@ -729,7 +751,11 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-codex-steer-config' as ACPSessionId,
       },
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'original' },
+      },
     };
     (
       service as unknown as {
@@ -832,7 +858,11 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-refused' as ACPSessionId,
       },
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'original' },
+      },
       activePromptRun: { turnId: 'assistant:user-1' },
     };
     (
@@ -1016,7 +1046,11 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-ambiguous' as ACPSessionId,
       },
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'original' },
+      },
       activePromptRun: { turnId: 'assistant:user-1' },
     };
     (
@@ -1361,7 +1395,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('starts active presence before prepared dispatch awaits machine access', async () => {
+  it('exposes RPC invocation identity before prepared dispatch awaits machine access', async () => {
     let resolveAccess!: (value: {
       outcome: 'indeterminate';
       cause: 'network';
@@ -1389,7 +1423,12 @@ describe('SessionExecutionService', () => {
       sessionId: 'session-prepared-presence' as SessionId,
       sessionDoc,
       userTurnId: 'turn-prepared-presence',
-      dispatchSource: 'crdt',
+      invocation: {
+        sourceTurnId: 'turn-prepared-presence',
+        requesterUserId: 'user-b',
+        inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
+      },
+      dispatchSource: 'rpc',
       accessPromise,
       requestPromise: new Promise<never>(() => {}),
       onAccessAllowed,
@@ -1404,11 +1443,16 @@ describe('SessionExecutionService', () => {
     expect(deps.beginConversationTurn).toHaveBeenCalledWith(
       'session-prepared-presence',
       'turn-prepared-presence',
-      { dispatchSource: 'crdt', sessionDoc, deferACPUpdateTarget: true }
+      { dispatchSource: 'rpc', sessionDoc, deferACPUpdateTarget: true }
     );
     expect(service.getExecutionSnapshot('session-prepared-presence' as SessionId)).toMatchObject({
       activeTurnId: 'assistant:turn-prepared-presence',
       hasActiveTurn: true,
+    });
+    expect(service.getActiveInvocationContext('session-prepared-presence' as SessionId)).toEqual({
+      requesterUserId: 'user-b',
+      sourceTurnId: 'turn-prepared-presence',
+      inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
     });
     expect(onAccessAllowed).not.toHaveBeenCalled();
 
@@ -1465,6 +1509,7 @@ describe('SessionExecutionService', () => {
       sessionId,
       sessionDoc: sessionDoc as never,
       userTurnId,
+      invocation: { sourceTurnId: userTurnId, inputConfig: {} },
       dispatchSource: 'crdt',
       accessPromise: new Promise<never>(() => {}),
       requestPromise: new Promise<never>(() => {}),
@@ -1477,6 +1522,9 @@ describe('SessionExecutionService', () => {
       activeTurnId: turnId,
       hasActiveTurn: true,
     });
+    expect(() => service.getActiveInvocationContext(sessionId)).toThrow(
+      'Active invocation identity is unavailable'
+    );
 
     await expect(
       service.cancelSession({
@@ -1577,6 +1625,7 @@ describe('SessionExecutionService', () => {
       sessionId,
       sessionDoc: preparedSessionDoc as never,
       userTurnId,
+      invocation: { sourceTurnId: userTurnId, inputConfig: {} },
       dispatchSource: 'rpc',
       accessPromise: Promise.resolve({ outcome: 'allowed' as const }),
       requestPromise: new Promise<never>(() => {}),

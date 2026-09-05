@@ -264,6 +264,10 @@ function registerLinuxAppImageProtocolHandler({
 
 export function registerLodyProtocolClient(options: RegisterProtocolClientOptions): void {
   const { protocol, log } = options
+  if (!app.isPackaged && process.env.LODY_E2E === '1') {
+    log('registerLodyProtocolClient skipped for E2E', { protocol })
+    return
+  }
   const appEntry = resolveDefaultAppEntryPath()
   let registrationResult = false
 

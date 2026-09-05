@@ -50,6 +50,14 @@ Parent `AGENTS.md` files also apply.
   a latency optimization: billing permissions, quota checks, destructive-operation
   guards, and Stripe invoice history keep their existing live/on-demand data paths.
 
+## ACP selectors
+
+- Built-in Codex reasoning selectors normalize cached options against exact model support
+  in `components/shared/acp-selector-options.ts`: Astra, Sol, and Terra expose Max/Ultra;
+  Luna exposes Max only. Keep this aligned with the ACP model catalog; a model version
+  threshold cannot represent per-model differences, and cached efforts may belong to
+  a different selected model.
+
 ## ACP authentication
 
 - Custom and Registry Provider authentication renders supported agent-driven method choices and
