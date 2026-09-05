@@ -3819,7 +3819,12 @@ export class MessageHandler {
       this.getMachineFlockDocIdForMachine()
     );
     return readMachineFlockRowsFromFlock(handle.flock, {
-      families: ['archiveSessionCommand', 'deleteSessionCommand', 'deleteLocalProjectCommand'],
+      families: [
+        'archiveSessionCommand',
+        'deleteSessionCommand',
+        'deleteLocalProjectCommand',
+        'localProject',
+      ],
     });
   }
 
@@ -3977,9 +3982,10 @@ export class MessageHandler {
     this.logger.debug(`[${sessionId}] Preview tunnel closed for archive`);
 
     const sessionRoomId = getSessionRoomId(sessionId);
-    const [sessionMetaDoc, archiveMachineMetaDoc] = await Promise.all([
+    const [sessionMetaDoc, archiveMachineMetaDoc, archiveMachineFlockRows] = await Promise.all([
       this.workspaceDocument.repo.getDocMeta(sessionRoomId),
       this.workspaceDocument.repo.getDocMeta(getMachineRoomId(this.machineId)),
+      this.tryReadMachineFlockCommandRows(),
     ]);
     const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
     const archiveMachineMeta = archiveMachineMetaDoc?.meta as MachineLegacyMetaFields | undefined;
@@ -3995,6 +4001,7 @@ export class MessageHandler {
       const cleanupTarget = this.resolveWorktreeCleanupTarget({
         sessionMeta,
         machineMeta: archiveMachineMeta,
+        machineFlockRows: archiveMachineFlockRows,
       });
       if (cleanupTarget) {
         const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
