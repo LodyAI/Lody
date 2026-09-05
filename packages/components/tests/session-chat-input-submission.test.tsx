@@ -229,6 +229,7 @@ describe('SessionChatInputArea submission feedback', () => {
   afterEach(async () => {
     await act(async () => root?.unmount());
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     root = null;
     container?.remove();
     container = null;
@@ -291,99 +292,6 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(container.querySelector('textarea')?.disabled).toBe(false);
   });
 
-  it('dismisses the mobile keyboard for keyboard and button sends', async () => {
-    let acceptance = deferredBoolean();
-    Object.defineProperty(window, '__LODY_NATIVE__', {
-      configurable: true,
-      value: true,
-    });
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'session-mobile-keyboard-send',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            isArchived: false,
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => undefined,
-          onModelChange: () => undefined,
-          onSendMessage: () => acceptance.promise,
-          onStop: () => undefined,
-          onRemoveQueueItem: async () => undefined,
-          initialInputText: 'send from keyboard',
-        })
-      );
-    });
-
-    const textarea = container.querySelector('textarea');
-    const blurSpy = vi.spyOn(textarea!, 'blur');
-    textarea?.focus();
-    expect(document.activeElement).toBe(textarea);
-
-    await act(async () => {
-      textarea?.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-      await Promise.resolve();
-    });
-
-    expect(blurSpy).toHaveBeenCalledOnce();
-    expect(document.activeElement).not.toBe(textarea);
-    expect(textarea?.value).toBe('');
-    expect(textarea?.disabled).toBe(true);
-
-    await act(async () => {
-      acceptance.resolve(false);
-      await acceptance.promise;
-    });
-
-    expect(textarea?.value).toBe('send from keyboard');
-    expect(textarea?.disabled).toBe(false);
-    expect(document.activeElement).toBe(textarea);
-
-    acceptance = deferredBoolean();
-
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
-      await Promise.resolve();
-    });
-
-    expect(blurSpy).toHaveBeenCalledTimes(2);
-    expect(document.activeElement).not.toBe(textarea);
-    expect(textarea?.value).toBe('');
-    expect(textarea?.disabled).toBe(true);
-
-    await act(async () => {
-      acceptance.resolve(true);
-      await acceptance.promise;
-    });
-
-    expect(textarea?.disabled).toBe(false);
-    expect(document.activeElement).not.toBe(textarea);
-  });
-
   it('shows a turn limit without an upgrade action when none is provided', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -431,11 +339,13 @@ describe('SessionChatInputArea submission feedback', () => {
     onSendMessage,
     isArchived = false,
     composerRef,
+    claimNavigationFocus,
   }: {
     sessionId?: string;
     onSendMessage: (blocks: SessionInputBlock[]) => Promise<boolean>;
     isArchived?: boolean;
     composerRef?: RefObject<SessionChatInputAreaHandle | null>;
+    claimNavigationFocus?: () => boolean;
   }) {
     if (!container) {
       container = document.createElement('div');
@@ -446,6 +356,7 @@ describe('SessionChatInputArea submission feedback', () => {
       root!.render(
         createElement(SessionChatInputArea, {
           ref: composerRef,
+          claimNavigationFocus,
           session: {
             id: sessionId,
             userId: 'user-1',
@@ -526,9 +437,50 @@ describe('SessionChatInputArea submission feedback', () => {
       await submit('button');
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe('focus regression draft');
-      expect(document.activeElement).toBe(textarea);
+      expect(document.activeElement === textarea).toBe(!mobile);
     }
   );
+
+  for (const mobilePlatform of ['narrow-browser', 'wide-native'] as const) {
+    function setMobilePlatform() {
+      if (mobilePlatform === 'wide-native') {
+        Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
+      } else {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+      }
+    }
+    it.each(['keyboard', 'button'] as const)(
+      `never refocuses ${mobilePlatform} after %s submission succeeds or fails`,
+      async (source) => {
+        setMobilePlatform();
+        for (const accepted of [false, true]) {
+          const acceptance = deferredBoolean();
+          const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+          textarea.focus();
+          await submit(source);
+          expect(document.activeElement).not.toBe(textarea);
+          await act(async () => acceptance.resolve(accepted));
+          expect(textarea.disabled).toBe(false);
+          expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
+          expect(document.activeElement).not.toBe(textarea);
+        }
+      }
+    );
+    it(`consumes a navigation request without focusing on ${mobilePlatform}`, async () => {
+      setMobilePlatform();
+      let pending = true;
+      const textarea = await renderComposer({
+        onSendMessage: async () => true,
+        claimNavigationFocus: () => {
+          const claimed = pending;
+          pending = false;
+          return claimed;
+        },
+      });
+      expect(pending).toBe(false);
+      expect(document.activeElement).not.toBe(textarea);
+    });
+  }
 
   it.each(['focus', 'focus-stopped', 'focus-then-blur', 'pointer', 'window-blur'] as const)(
     'respects focus relinquished via %s while sending',

@@ -1,4 +1,20 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+  useRouter,
+} from '@tanstack/react-router';
+import { ChatLandingView } from '@/components/chat/chat-landing-view';
+import {
+  getSessionCreationNavigation,
+  useComposerNavigationFocus,
+} from '@/components/chat/submission/use-composer-navigation-focus';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { isNativeAppShell } from '@/lib/native-platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
@@ -49,6 +65,7 @@ type StoryShellProps = {
   initialInputText?: string;
   showFreeTurnLimitNotice?: boolean;
   onSendMessage?: () => Promise<boolean>;
+  claimNavigationFocus?: () => boolean;
 };
 
 function createStoryStore() {
@@ -66,6 +83,7 @@ function StoryShell({
   initialInputText = '',
   showFreeTurnLimitNotice = false,
   onSendMessage = async () => true,
+  claimNavigationFocus,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
   const session = useMemo<SessionMeta>(
@@ -100,6 +118,7 @@ function StoryShell({
             <div className="h-[20rem] bg-muted/20" />
             <SessionChatInputArea
               session={session}
+              claimNavigationFocus={claimNavigationFocus}
               sessionLocalProjectRootPath={null}
               isMachineRemoved={false}
               isAgentBusy={isAgentBusy}
@@ -201,3 +220,87 @@ export const DeferredSubmission: Story = {
       }),
   },
 };
+
+function NavigationLanding() {
+  const router = useRouter();
+  const isMobile = useIsMobile();
+  const [prompt, setPrompt] = useState('');
+  const navigate = () => {
+    void router.navigate(
+      getSessionCreationNavigation(
+        'storybook',
+        'session-storybook-idle',
+        isMobile || isNativeAppShell()
+      )
+    );
+  };
+  return (
+    <>
+      <ChatLandingView
+        tone="light"
+        title="New chat"
+        isMobile={isMobile}
+        promptValue={prompt}
+        onPromptChange={setPrompt}
+        onSubmit={navigate}
+        submitLabel="Send"
+        errorLabels={{ tryAgain: 'Retry' }}
+        onPromptKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            navigate();
+          }
+        }}
+      />
+      <button onClick={() => router.history.back()}>Back to session</button>
+    </>
+  );
+}
+
+function NavigationSession() {
+  const router = useRouter();
+  const claimNavigationFocus = useComposerNavigationFocus('session-storybook-idle');
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const markReady = () => setReady(true);
+    window.addEventListener('storybook:composer-ready', markReady);
+    return () => window.removeEventListener('storybook:composer-ready', markReady);
+  }, []);
+  return (
+    <>
+      <button onClick={() => void router.navigate({ to: '/' })}>Leave session</button>
+      {ready ? (
+        <StoryShell isAgentBusy={false} claimNavigationFocus={claimNavigationFocus} />
+      ) : (
+        <p>Preparing session</p>
+      )}
+    </>
+  );
+}
+
+function NavigationStory() {
+  const router = useMemo(() => {
+    const rootRoute = createRootRoute({ component: Outlet });
+    const landingRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/',
+      component: NavigationLanding,
+    });
+    const sessionRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/$workspaceName/sessions/$sessionId',
+      component: NavigationSession,
+    });
+    return createRouter({
+      routeTree: rootRoute.addChildren([landingRoute, sessionRoute]),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    });
+  }, []);
+  return (
+    <PlatformContext.Provider value={storyPlatform}>
+      <RouterProvider router={router} />
+    </PlatformContext.Provider>
+  );
+}
+
+export const LandingNavigation: Story = { render: () => <NavigationStory /> };

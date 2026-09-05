@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
 
 interface Submission {
   isCurrent: () => boolean;
-  finish: (accepted: boolean) => void;
+  finish: () => void;
   dispose: () => void;
 }
 
@@ -65,27 +65,31 @@ export function useComposerSubmission(
         window?.removeEventListener('blur', relinquishFocus);
       };
       const restoreFocus = () => {
-        if (!focusRelinquished) inputRef.current?.focus({ preventScroll: true });
+        if (!dismissKeyboard && !focusRelinquished)
+          inputRef.current?.focus({ preventScroll: true });
       };
       const submission: Submission = {
         isCurrent: () => scope.submission === submission,
         dispose,
-        finish: (accepted) => {
+        finish: () => {
           if (!submission.isCurrent()) return;
           // A new state object makes completion observable even if React batches
           // pending and settled into one commit (including immediate rejection).
           setState({
             scope,
             pending: false,
-            restoreFocus: !dismissKeyboard || !accepted ? restoreFocus : () => {},
+            restoreFocus,
           });
         },
       };
       scope.submission = submission;
-      document.addEventListener('focusin', onFocus, true);
-      document.addEventListener('pointerdown', onPointerDown, true);
-      window?.addEventListener('blur', relinquishFocus);
-      if (dismissKeyboard) input.blur();
+      if (dismissKeyboard) {
+        input.blur();
+      } else {
+        document.addEventListener('focusin', onFocus, true);
+        document.addEventListener('pointerdown', onPointerDown, true);
+        window?.addEventListener('blur', relinquishFocus);
+      }
       setState({ scope, pending: true, restoreFocus });
       return submission;
     },

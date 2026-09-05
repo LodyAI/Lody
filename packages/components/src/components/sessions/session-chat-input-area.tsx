@@ -378,6 +378,8 @@ export function getSessionChatInputAreaShellClassName({
 }
 
 export interface SessionChatInputAreaProps {
+  /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   sessionLocalProjectRootPath: string | null;
   isMachineRemoved: boolean;
@@ -492,6 +494,7 @@ export const SessionChatInputArea = memo(
   forwardRef<SessionChatInputAreaHandle, SessionChatInputAreaProps>(function SessionChatInputArea(
     {
       session,
+      claimNavigationFocus,
       sessionLocalProjectRootPath,
       isMachineRemoved,
       canStopAgent = false,
@@ -575,6 +578,11 @@ export const SessionChatInputArea = memo(
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useLayoutEffect(() => {
+      if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
+        textareaRef.current?.focus({ preventScroll: true });
+      }
+    }, [claimNavigationFocus, usesMobileKeyboardAction]);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
     const agentRoleRunConfigRef = useRef({
@@ -1863,9 +1871,8 @@ export const SessionChatInputArea = memo(
       };
       const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
       if (!submission) return;
-      let accepted = false;
       try {
-        accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
+        const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
         if (accepted) {
           if (submission.isCurrent()) {
             clearInput();
@@ -1890,7 +1897,7 @@ export const SessionChatInputArea = memo(
           }
         }
       } finally {
-        submission.finish(accepted);
+        submission.finish();
       }
     }, [
       beginSubmission,

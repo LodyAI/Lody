@@ -190,6 +190,7 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
+import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
 import {
   extractIssuePRMentionsFromText,
@@ -1400,11 +1401,11 @@ function WorkspaceChatLanding({
   );
 
   // Auto-focus textarea on mount (desktop only)
-  const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
+  const mobileKeyboardRef = useRef(usesMobileKeyboardAction);
+  mobileKeyboardRef.current = usesMobileKeyboardAction;
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (!isMobileRef.current) {
+      if (!mobileKeyboardRef.current) {
         promptTextareaRef.current?.focus();
       }
     });
@@ -3255,10 +3256,9 @@ function WorkspaceChatLanding({
         promptTextareaRef.current?.blur();
         setMobileNewChatOpen(false);
       }
-      await navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug, sessionId },
-      });
+      await navigate(
+        getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
+      );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
         user_id: userId ?? null,

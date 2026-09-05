@@ -18,3 +18,10 @@
   remount the mention tree. Verify submission with the real composer, not a textarea mock.
 - Pending submission text is a controlled render value; do not also clear the DOM
   imperatively while retaining the draft for rejection recovery.
+- Creating a session hands desktop focus across navigation through a one-shot
+  history-state request, claimed by the visible target composer after mounting.
+  Consume it from history before focusing; ordinary visits, remounts, and Back
+  must not replay the handoff. Never guess readiness with a timeout.
+- Automatic composer focus is desktop-only. Narrow mobile layouts and native
+  shells (including wide iPads) must not focus on entry or submission completion,
+  whether the submission succeeds or fails. Explicit user focus actions still work.
