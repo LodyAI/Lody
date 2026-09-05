@@ -12,10 +12,12 @@ Runtime output is written below ignored `e2e/artifacts/` directories.
 | `cli-backlog.json`   | Bundled CLI output exposed through the production IPC service   |
 | `failure-index.json` | Stable scenario id to artifact-directory mapping                |
 
-Daily and pull-request regression set `LODY_E2E_RECORD_VIDEO=1`. Playwright records each
-scenario independently at 640x360, deletes the recording after a clean pass,
-and retains `failure.webm` after an assertion or teardown failure. The
-read-only Daily job uploads all evidence as one suite-qualified Actions artifact.
+Daily and pull-request regression trace every scenario with screenshots. After
+a journey failure, a separate bounded renderer samples at most 600 ordered
+trace frames and encodes a 640px `failure.webm`. Video generation therefore
+cannot alter Electron startup or journey timing. Successful scenarios do not
+produce videos. The read-only Daily job uploads all evidence as one
+suite-qualified Actions artifact.
 A separate trusted reconciler validates the failure index and each video, then
 attaches up to one independently retryable comment per failed scenario on the
 durable Daily failure Issue. Only a successful `full` artifact can resolve that

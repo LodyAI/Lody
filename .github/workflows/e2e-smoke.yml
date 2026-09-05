@@ -108,12 +108,16 @@ jobs:
 
       - name: Run selected desktop journeys
         shell: bash
-        env:
-          LODY_E2E_RECORD_VIDEO: '1'
         run: |
           set -o pipefail
           mkdir -p e2e/artifacts
           pnpm --filter @lody/e2e ${{ needs.gate.outputs.suite }} 2>&1 | tee e2e/artifacts/cucumber-output.log
+
+      - name: Render failed journey videos
+        if: failure()
+        run: |
+          pnpm --filter @lody/e2e exec playwright install ffmpeg
+          pnpm --filter @lody/e2e failure:videos
 
       - name: Upload desktop E2E evidence
         if: always()
