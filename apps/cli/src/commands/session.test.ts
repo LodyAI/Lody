@@ -7,6 +7,7 @@ import {
   getMachineFlockDocId,
   getSessionRoomId,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
   type AgentConfigMeta,
   type LocalProjectGitState,
   type MachineId,
@@ -139,6 +140,108 @@ const createAcpCapability = (): AcpCapabilityCacheEntry => ({
       options: [],
     },
   ],
+  fetchedAt: 1,
+});
+
+const cursorThinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorEffortSelect = (
+  values: readonly string[],
+  currentValue: string
+): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue,
+  options: values.map((value) => ({ value, name: value })),
+});
+
+const cursorFastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorContextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const createCursorAcpCapability = (): AcpCapabilityCacheEntry => ({
+  cliType: 'custom',
+  agentType: 'cursor',
+  modes: [],
+  models: [],
+  configOptions: [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: 'opus',
+      options: [
+        { value: 'opus', name: 'Opus' },
+        { value: 'sonnet', name: 'Sonnet' },
+        { value: 'gemini', name: 'Gemini' },
+        { value: 'gpt', name: 'GPT' },
+      ],
+    },
+    cursorThinkingSelect(),
+    cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+    cursorFastSelect(),
+    cursorContextSelect(),
+  ],
+  configOptionsByModel: {
+    opus: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+      cursorFastSelect(),
+      cursorContextSelect(),
+    ],
+    sonnet: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'max'], 'medium'),
+    ],
+    gemini: [cursorEffortSelect(['minimal', 'low', 'medium', 'high'], 'medium')],
+    gpt: [
+      {
+        id: 'reasoning',
+        name: 'Reasoning',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'low',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'extra-high', name: 'Extra high' },
+        ],
+      },
+      cursorFastSelect(),
+    ],
+    empty: [],
+  },
   fetchedAt: 1,
 });
 
@@ -543,6 +646,48 @@ describe('session command helpers', () => {
     expect(() =>
       validateTurnModeAndModel({ modeId: 'plan', modelId: 'model-b' }, capability)
     ).not.toThrow();
+  });
+
+  it('validates turn config option values against the target model catalog', () => {
+    const capability = createCursorAcpCapability();
+    expect(() =>
+      validateTurnConfigOptionValues({ effort: 'max' }, capability, undefined, 'gemini')
+    ).toThrow(/Allowed values/);
+    expect(() =>
+      validateTurnConfigOptionValues({ fast: 'true' }, capability, undefined, 'sonnet')
+    ).toThrow('Unknown ACP config option for the selected agent: fast.');
+    expect(() =>
+      validateTurnConfigOptionValues({ thinking: 'true' }, capability, undefined, 'sonnet')
+    ).not.toThrow();
+  });
+
+  it('drops inherited options that the explicit target model catalog rejects', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { modelId: 'opus', configOptionValues: { fast: 'true', effort: 'xhigh' } },
+        createCursorAcpCapability(),
+        { targetModelId: 'sonnet' }
+      )
+    ).toEqual({ modelId: 'opus' });
+  });
+
+  it('filters inherited options against the inherited model when no create target is given', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { modelId: 'sonnet', configOptionValues: { fast: 'true' } },
+        createCursorAcpCapability()
+      )
+    ).toEqual({ modelId: 'sonnet' });
+  });
+
+  it('removes a superseded inherited model option when create names a different model', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { configOptionValues: { model: 'opus', thinking: 'true' } },
+        createCursorAcpCapability(),
+        { targetModelId: 'sonnet' }
+      )
+    ).toEqual({ configOptionValues: { thinking: 'true' } });
   });
 
   it('sorts sessions with invalid createdAt timestamps deterministically', () => {

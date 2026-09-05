@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isAcpOnOffSelectValues,
+  isAcpToggleSelectEnabledValue,
+  isAcpTrueFalseSelectValues,
+  resolveAcpConfigOptionsForModel,
+  resolveAcpTargetModelId,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
+  toggleAcpSelectOptionValue,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
 } from '../src';
 
 /** Codex-shaped agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
@@ -351,5 +358,518 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+
+  it('recognises a true/false fast select and writes those advertised values', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'cursor',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'fast',
+          name: 'Fast',
+          type: 'select',
+          currentValue: 'false',
+          options: [
+            { value: 'true', name: 'On' },
+            { value: 'false', name: 'Off' },
+          ],
+        },
+      ],
+      fetchedAt: 1,
+    };
+
+    expect(summarizeAgentRunConfigCapabilities(capability).fastMode).toBe(true);
+    expect(resolveAgentRunConfigSelection({ fastMode: true }, capability)).toEqual({
+      configOptionValues: { fast: 'true' },
+    });
+    expect(resolveAgentRunConfigSelection({ fastMode: false }, capability)).toEqual({
+      configOptionValues: { fast: 'false' },
+    });
+  });
+});
+
+const modelSelect = (currentValue = 'a'): AcpConfigOptionSummary => ({
+  id: 'model',
+  name: 'Model',
+  category: 'model',
+  type: 'select',
+  currentValue,
+  options: [
+    { value: 'a', name: 'A' },
+    { value: 'b', name: 'B' },
+    { value: 'c', name: 'C' },
+  ],
+});
+
+const modeSelect = (): AcpConfigOptionSummary => ({
+  id: 'mode',
+  name: 'Mode',
+  category: 'mode',
+  type: 'select',
+  currentValue: 'agent',
+  options: [{ value: 'agent', name: 'Agent' }],
+});
+
+const thinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+});
+
+const effortSelect = (): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'high', name: 'High' },
+  ],
+});
+
+const fastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+});
+
+const reasoningSelect = (): AcpConfigOptionSummary => ({
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'minimal',
+  options: [
+    { value: 'minimal', name: 'Minimal' },
+    { value: 'full', name: 'Full' },
+  ],
+});
+
+const contextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const catalogCompositionEntry = (): Pick<
+  AcpCapabilityCacheEntry,
+  'configOptions' | 'configOptionsByModel'
+> => ({
+  configOptions: [modelSelect(), modeSelect(), thinkingSelect(), effortSelect(), fastSelect()],
+  configOptionsByModel: {
+    a: [thinkingSelect(), effortSelect(), fastSelect()],
+    b: [reasoningSelect(), contextSelect()],
+    c: [],
+  },
+});
+
+describe('resolveAcpConfigOptionsForModel', () => {
+  it('composes shared snapshot options with model a catalog entries', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'a')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'thinking',
+      'effort',
+      'fast',
+    ]);
+  });
+
+  it('does not leak probe-time per-model options into model b', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'b')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'reasoning',
+      'context',
+    ]);
+  });
+
+  it('keeps only shared snapshot options for a known model with an empty catalog entry', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'c')?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+    ]);
+  });
+
+  it('returns the snapshot unchanged for a model the catalog does not know', () => {
+    const entry = catalogCompositionEntry();
+    expect(resolveAcpConfigOptionsForModel(entry, 'z')).toBe(entry.configOptions);
+  });
+
+  it('returns the snapshot when the catalog is absent or the model id is not a string', () => {
+    const entry = catalogCompositionEntry();
+    const snapshot = entry.configOptions;
+    expect(resolveAcpConfigOptionsForModel({ configOptions: snapshot }, 'a')).toBe(snapshot);
+    expect(resolveAcpConfigOptionsForModel(entry, undefined)).toBe(snapshot);
+    expect(resolveAcpConfigOptionsForModel(entry, null)).toBe(snapshot);
+  });
+
+  it('ignores model and mode options that a catalog entry tries to replace', () => {
+    const snapshotModel = modelSelect();
+    const snapshotMode = modeSelect();
+    const entry = {
+      configOptions: [snapshotModel, snapshotMode, thinkingSelect(), effortSelect(), fastSelect()],
+      configOptionsByModel: {
+        a: [
+          {
+            ...modelSelect('a'),
+            options: [{ value: 'a', name: 'A' }],
+          },
+          {
+            ...modeSelect(),
+            currentValue: 'catalog-mode',
+            options: [{ value: 'catalog-mode', name: 'Catalog mode' }],
+          },
+          thinkingSelect(),
+          effortSelect(),
+          fastSelect(),
+        ],
+        b: [reasoningSelect(), contextSelect()],
+        c: [],
+      },
+    };
+
+    const resolved = resolveAcpConfigOptionsForModel(entry, 'a');
+    expect(resolved?.[0]).toBe(snapshotModel);
+    expect(resolved?.[1]).toBe(snapshotMode);
+    expect(resolved?.[0]?.options.map((option) => option.value)).toEqual(['a', 'b', 'c']);
+    expect(resolved?.[1]?.currentValue).toBe('agent');
+    expect(resolved?.map((option) => option.id)).toEqual([
+      'model',
+      'mode',
+      'thinking',
+      'effort',
+      'fast',
+    ]);
+  });
+});
+
+describe('resolveAcpTargetModelId', () => {
+  it('prefers an explicit model id over config values and the current value', () => {
+    expect(
+      resolveAcpTargetModelId({
+        modelId: 'explicit',
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('explicit');
+  });
+
+  it('reads the model-category select from config option values before currentValue', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-values');
+    expect(resolveAcpTargetModelId({ configOptions: [modelSelect('from-current')] })).toBe(
+      'from-current'
+    );
+  });
+
+  it('treats an empty-string modelId as not explicit', () => {
+    expect(
+      resolveAcpTargetModelId({
+        modelId: '',
+        configOptionValues: { model: 'from-values' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-values');
+  });
+
+  it('ignores a non-string model option value', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: true },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-current');
+  });
+
+  it('treats an empty-string model option value as not selected', () => {
+    expect(
+      resolveAcpTargetModelId({
+        configOptionValues: { model: '' },
+        configOptions: [modelSelect('from-current')],
+      })
+    ).toBe('from-current');
+  });
+});
+
+describe('ACP toggle select predicates', () => {
+  it('recognises on/off selects that include extra values', () => {
+    expect(isAcpOnOffSelectValues(['off', 'on', 'auto'])).toBe(true);
+  });
+
+  it('recognises exactly the true/false select set', () => {
+    expect(isAcpTrueFalseSelectValues(['true', 'false'])).toBe(true);
+    expect(isAcpTrueFalseSelectValues(['false', 'true'])).toBe(true);
+    expect(isAcpTrueFalseSelectValues(['true', 'false', 'auto'])).toBe(false);
+    expect(isAcpTrueFalseSelectValues(['true', 'true'])).toBe(false);
+    expect(isAcpTrueFalseSelectValues(['True', 'False'])).toBe(false);
+  });
+
+  it('writes the advertised toggle representation', () => {
+    expect(toggleAcpSelectOptionValue(['true', 'false'], true)).toBe('true');
+    expect(toggleAcpSelectOptionValue(['on', 'off'], false)).toBe('off');
+  });
+
+  it('treats only the advertised enabled strings as on', () => {
+    expect(isAcpToggleSelectEnabledValue('true')).toBe(true);
+    expect(isAcpToggleSelectEnabledValue('on')).toBe(true);
+    expect(isAcpToggleSelectEnabledValue('false')).toBe(false);
+    expect(isAcpToggleSelectEnabledValue(true)).toBe(false);
+  });
+});
+
+const cursorThinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorEffortSelect = (
+  values: readonly string[],
+  currentValue: string
+): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue,
+  options: values.map((value) => ({ value, name: value })),
+});
+
+const cursorFastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorContextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const cursorReasoningSelect = (): AcpConfigOptionSummary => ({
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'medium', name: 'Medium' },
+    { value: 'high', name: 'High' },
+    { value: 'extra-high', name: 'Extra high' },
+  ],
+});
+
+const cursorModelSelect = (): AcpConfigOptionSummary => ({
+  id: 'model',
+  name: 'Model',
+  category: 'model',
+  type: 'select',
+  currentValue: 'opus',
+  options: [
+    { value: 'opus', name: 'Opus' },
+    { value: 'sonnet', name: 'Sonnet' },
+    { value: 'gemini', name: 'Gemini' },
+    { value: 'gpt', name: 'GPT' },
+    { value: 'empty', name: 'Empty' },
+  ],
+});
+
+const cursorOpusSnapshotOptions = (): AcpConfigOptionSummary[] => [
+  cursorModelSelect(),
+  cursorThinkingSelect(),
+  cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+  cursorFastSelect(),
+  cursorContextSelect(),
+];
+
+const cursorCatalogCapability = (): AcpCapabilityCacheEntry => ({
+  cliType: 'custom',
+  agentType: 'cursor',
+  modes: [],
+  models: [],
+  configOptions: cursorOpusSnapshotOptions(),
+  configOptionsByModel: {
+    opus: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+      cursorFastSelect(),
+      cursorContextSelect(),
+    ],
+    sonnet: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'max'], 'medium'),
+    ],
+    gemini: [cursorEffortSelect(['minimal', 'low', 'medium', 'high'], 'medium')],
+    gpt: [cursorReasoningSelect(), cursorFastSelect()],
+    empty: [],
+  },
+  fetchedAt: 1,
+});
+
+describe('per-model config catalog run config', () => {
+  it('writes gpt extra-high onto reasoning and marks that id pre-validated', () => {
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'gpt', reasoningEffort: 'extra-high' },
+      cursorCatalogCapability()
+    );
+    expect(resolved.configOptionValues).toEqual({ reasoning: 'extra-high' });
+    expect(resolved.configOptionValues).not.toHaveProperty('thinking');
+    expect(resolved.validatedConfigIds).toEqual(['reasoning']);
+  });
+
+  it('rejects a reasoning effort the target model catalog does not allow', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gemini', reasoningEffort: 'max' },
+        cursorCatalogCapability()
+      )
+    ).toThrow('Invalid reasoning effort for model gemini');
+  });
+
+  it('rejects fast mode when the target catalog omits it and accepts gpt without unverifiedSelections', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'sonnet', fastMode: true },
+        cursorCatalogCapability()
+      )
+    ).toThrow('does not offer a fast mode option');
+
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'gpt', fastMode: true },
+      cursorCatalogCapability()
+    );
+    expect(resolved.configOptionValues).toEqual({ fast: 'true' });
+    expect(resolved.unverifiedSelections).toBeUndefined();
+  });
+
+  it('rejects reasoning effort when the target catalog entry is empty', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'empty', reasoningEffort: 'high' },
+        cursorCatalogCapability()
+      )
+    ).toThrow('does not offer a reasoning effort option');
+  });
+
+  it('keeps snapshot-based unverified selections when the agent has no catalog', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...cursorCatalogCapability(),
+      configOptionsByModel: undefined,
+    };
+    const resolved = resolveAgentRunConfigSelection(
+      { modelId: 'sonnet', reasoningEffort: 'high', fastMode: true },
+      capability
+    );
+    expect(resolved.configOptionValues).toEqual({ effort: 'high', fast: 'true' });
+    expect(resolved.unverifiedSelections).toEqual(['reasoningEffort=high', 'fastMode=true']);
+    expect(resolved.validatedConfigIds).toEqual(['effort']);
+  });
+
+  it('maps reasoning effort onto a lone thinking toggle when no effort ladder exists', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'kimi',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'k2',
+          options: [{ value: 'k2', name: 'K2' }],
+        },
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'off',
+          options: [
+            { value: 'off', name: 'Off' },
+            { value: 'on', name: 'On' },
+          ],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'on' }, capability).configOptionValues
+    ).toEqual({ thinking: 'on' });
+    expect(summarizeAgentRunConfigCapabilities(capability).reasoningEffortValues).toEqual([
+      'off',
+      'on',
+    ]);
+  });
+
+  it('publishes per-model catalog efforts and still prefers legacy modelReasoningEfforts', () => {
+    const summary = summarizeAgentRunConfigCapabilities(cursorCatalogCapability());
+    expect(summary.models.find((model) => model.id === 'gpt')?.reasoningEffortValues).toEqual([
+      'low',
+      'medium',
+      'high',
+      'extra-high',
+    ]);
+    expect(summary.models.find((model) => model.id === 'gemini')?.reasoningEffortValues).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+    expect(
+      summary.models.find((model) => model.id === 'empty')?.reasoningEffortValues
+    ).toBeUndefined();
+
+    const withLegacy = summarizeAgentRunConfigCapabilities({
+      ...cursorCatalogCapability(),
+      modelReasoningEfforts: { gpt: ['low', 'high'] },
+    });
+    expect(withLegacy.models.find((model) => model.id === 'gpt')?.reasoningEffortValues).toEqual([
+      'low',
+      'high',
+    ]);
   });
 });

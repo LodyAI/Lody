@@ -1522,7 +1522,7 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal } = {}
+    options: { signal?: AbortSignal; configOptionsByModel?: Record<string, AcpConfigOptionSummary[]> } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -3120,6 +3120,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     models: entry.models,
     configOptions: entry.configOptions,
     modelReasoningEfforts: entry.modelReasoningEfforts,
+    configOptionsByModel: entry.configOptionsByModel,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -3208,7 +3209,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal } = {}
+    options: { signal?: AbortSignal; configOptionsByModel?: Record<string, AcpConfigOptionSummary[]> } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
@@ -3221,6 +3222,19 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       name: model.name ?? model.modelId,
       description: model.description ?? undefined,
     }));
+    const handle = await this.openMachineFlockDoc();
+    options.signal?.throwIfAborted();
+    const capabilityKey = getAcpCapabilityCacheKey(configId);
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[capabilityKey];
+    // omitted keeps the stored catalog for the same sourceVersion
+    const configOptionsByModel =
+      options.configOptionsByModel !== undefined
+        ? options.configOptionsByModel
+        : existing && existing.sourceVersion === sourceVersion
+          ? existing.configOptionsByModel
+          : undefined;
     const entry: AcpCapabilityCacheEntry = {
       cliType,
       agentType,
@@ -3239,13 +3253,8 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
           ? modelReasoningEfforts
           : undefined,
       fetchedAt: getServerNow(),
+      ...(configOptionsByModel !== undefined ? { configOptionsByModel } : {}),
     };
-    const handle = await this.openMachineFlockDoc();
-    options.signal?.throwIfAborted();
-    const capabilityKey = getAcpCapabilityCacheKey(configId);
-    const existing = getMachineFlockAcpCapabilities(
-      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-    )[capabilityKey];
     if (
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===

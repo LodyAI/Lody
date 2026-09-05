@@ -305,6 +305,14 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * Non-model config options each advertised model exposes, keyed by the
+   * `model` option value. Only an explicit capability probe of an agent that
+   * publishes a whole-catalog method fills it; ACP sessions never do. A model
+   * with no model-dependent options maps to `[]`, while a missing key means the
+   * catalog does not know that model. Absent when the agent exposes no catalog.
+   */
+  configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */

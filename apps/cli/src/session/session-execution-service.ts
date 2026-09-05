@@ -501,6 +501,7 @@ export type SessionExecutionServiceDeps = {
     modes: NonNullable<MachineAcpCapabilitiesRefreshResponse['modes']>;
     models: NonNullable<MachineAcpCapabilitiesRefreshResponse['models']>;
     configOptions?: AcpConfigOptionSummary[];
+    configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
@@ -5170,6 +5171,7 @@ export class SessionExecutionService {
         modes,
         models,
         configOptions,
+        configOptionsByModel,
         availableCommands,
         sessionFork,
         acknowledgedSteer,
@@ -5213,7 +5215,10 @@ export class SessionExecutionService {
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
-        { signal: options.signal }
+        {
+          signal: options.signal,
+          ...(configOptionsByModel !== undefined ? { configOptionsByModel } : {}),
+        }
       );
 
       return {
