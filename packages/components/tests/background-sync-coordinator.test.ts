@@ -33,6 +33,12 @@ function createFakeTime() {
         timers.delete(handle as number);
       },
     },
+    pending: () => timers.size,
+    // A backgrounded phone is suspended: wall-clock time passes but timers do
+    // not run. They all come due at once when the OS resumes the process.
+    advanceSuspended: (ms: number) => {
+      now += ms;
+    },
     advance: (ms: number) => {
       now += ms;
       for (const [id, timer] of Array.from(timers)) {
@@ -190,6 +196,29 @@ function createFakeVisibilitySource(initial: SessionId[] = []) {
   };
 }
 
+function createFakeInteractionSource() {
+  let interacting = false;
+  const subscribers = new Set<() => void>();
+  return {
+    set: (next: boolean) => {
+      if (interacting === next) {
+        return;
+      }
+      interacting = next;
+      for (const subscriber of Array.from(subscribers)) {
+        subscriber();
+      }
+    },
+    view: {
+      isInteracting: () => interacting,
+      subscribe: (onChange: () => void) => {
+        subscribers.add(onChange);
+        return () => subscribers.delete(onChange);
+      },
+    },
+  };
+}
+
 const RUNNING: SessionStatus = { type: 'running' };
 
 function setup(
@@ -198,6 +227,7 @@ function setup(
     policy?: Partial<EagerSyncPolicy>;
     highWaterStore?: EagerSyncHighWaterStore;
     visibility?: BackgroundSyncCoordinatorDeps['visibility'];
+    interaction?: BackgroundSyncCoordinatorDeps['interaction'];
   } = {}
 ) {
   const time = createFakeTime();
@@ -213,6 +243,7 @@ function setup(
     maxWarmDocs: 24,
     candidateWindow: 50,
     prefetchTimeoutMs: 20_000,
+    deferWhileInteracting: true,
     ...options.policy,
   };
   const deps: BackgroundSyncCoordinatorDeps = {
@@ -225,13 +256,14 @@ function setup(
     policy,
     highWaterStore: options.highWaterStore,
     visibility: options.visibility,
+    interaction: options.interaction,
   };
   const coordinator = createBackgroundSyncCoordinator(deps);
   return { coordinator, time, registry, env, activity, prefetcher, policy };
 }
 
 describe('createBackgroundSyncCoordinator', () => {
-  it('uses a bounded web policy and full desktop/mobile policy', () => {
+  it('uses a bounded web policy and a full desktop policy', () => {
     expect(resolveEagerSyncPolicy('web')).toMatchObject({
       concurrency: 2,
       batchSize: 4,
@@ -246,7 +278,39 @@ describe('createBackgroundSyncCoordinator', () => {
       candidateWindow: Number.POSITIVE_INFINITY,
       maxWarmDocs: 96,
     });
-    expect(resolveEagerSyncPolicy('mobile')).toBe(resolveEagerSyncPolicy('desktop'));
+    expect(resolveEagerSyncPolicy('desktop').warmupCandidateWindow).toBeUndefined();
+  });
+
+  it('only defers to interaction where the main thread is the bottleneck', () => {
+    // The gate in drain() is policy-independent, so a surface that does not ask
+    // for this must not get an interaction port at all — otherwise typing a long
+    // prompt on a desktop keeps pushing the quiet window out and eager-sync,
+    // which exists to make opening a session instant, never runs.
+    expect(resolveEagerSyncPolicy('desktop').deferWhileInteracting).toBe(false);
+    expect(resolveEagerSyncPolicy('mobile').deferWhileInteracting).toBe(true);
+    // Web may be a phone browser and nothing here can tell; it defers, and its
+    // already-bounded scope is what keeps that cheap on a workstation.
+    expect(resolveEagerSyncPolicy('web').deferWhileInteracting).toBe(true);
+  });
+
+  it('paces mobile more gently than desktop and warms up before widening', () => {
+    const mobile = resolveEagerSyncPolicy('mobile');
+    const desktop = resolveEagerSyncPolicy('desktop');
+
+    // The bug this guards: mobile falling back to the desktop policy. A phone
+    // has one main thread and every prefetch deserializes a doc on it, so it
+    // must start less work at once, pause longer between batches, and hold
+    // fewer docs resident — whatever the exact numbers are.
+    expect(mobile.concurrency).toBeLessThan(desktop.concurrency);
+    expect(mobile.batchSize).toBeLessThan(desktop.batchSize);
+    expect(mobile.batchCooldownMs).toBeGreaterThan(desktop.batchCooldownMs);
+    expect(mobile.maxWarmDocs).toBeLessThan(desktop.maxWarmDocs);
+
+    // It warms up on a strictly narrower slice, and still ends up with the same
+    // eventual coverage as desktop — the pacing is what protects the phone.
+    expect(mobile.warmupCandidateWindow).toBeLessThan(mobile.candidateWindow);
+    expect(mobile.warmupHoldMs).toBeGreaterThan(0);
+    expect(mobile.candidateWindow).toBe(desktop.candidateWindow);
   });
 
   it('prefetches a recently-active session on start', async () => {
@@ -618,22 +682,332 @@ describe('createBackgroundSyncCoordinator', () => {
     expect(coordinator.getState().inFlight).toEqual([]);
   });
 
-  it('stop() clears the queue and aborts in-flight work', async () => {
-    const { coordinator, activity } = setup({
+  it('warms up on the top candidates and widens only once drained and then idle', async () => {
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 400 },
+        { sessionId: sid('second'), lastMessageAt: 300 },
+        { sessionId: sid('tail'), lastMessageAt: 200 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 2, warmupHoldMs: 5_000 },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+    // Still inside the warm-up window: the tail is out of scope entirely.
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second')]);
+
+    // A prefetch is still in flight, so the idle hold has not begun.
+    time.advance(5_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second')]);
+
+    prefetcher.resolve(sid('second'), 'synced');
+    await tick();
+    time.advance(4_999);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second')]);
+
+    time.advance(1);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second'), sid('tail')]);
+  });
+
+  it('holds the warm-up while work keeps arriving', async () => {
+    const { coordinator, prefetcher, activity, time } = setup({
+      activity: [
+        { sessionId: sid('a'), lastMessageAt: 100 },
+        { sessionId: sid('b'), lastMessageAt: 50 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+
+    // Hold armed, then the queue re-fills before it elapses → the scope must
+    // not widen on the wall clock alone.
+    time.advance(999);
+    activity.emit({ sessionId: sid('a'), lastMessageAt: 200 });
+    await tick();
+    time.advance(1);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('a')]);
+
+    // The hold elapsed while busy, so it must have been discarded rather than
+    // applied late: 'b' is still out of scope once the queue drains.
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('a')]);
+
+    time.advance(1_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('a'), sid('b')]);
+  });
+
+  it('restarts the hold when work interrupts idle and finishes before it elapses', async () => {
+    const { coordinator, prefetcher, activity, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 100 },
+        { sessionId: sid('tail'), lastMessageAt: 50 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    // Hold armed at t=0. New activity arrives at t=900 and settles immediately,
+    // so by the original deadline the app is idle again — but it has only been
+    // idle for 100ms, not the 1000ms the hold requires.
+    time.advance(900);
+    activity.emit({ sessionId: sid('top'), lastMessageAt: 200 });
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    time.advance(100);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('top')]);
+
+    // A full hold from the moment it went quiet again, and only then the tail.
+    time.advance(900);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('top'), sid('tail')]);
+  });
+
+  it('restarts the hold after an interaction that begins and ends inside it', async () => {
+    const interaction = createFakeInteractionSource();
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 100 },
+        { sessionId: sid('tail'), lastMessageAt: 50 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+      interaction: interaction.view,
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    // The hold only re-checks interaction at the instant it fires, so a gesture
+    // entirely inside the window is invisible to it — but those 300ms were not
+    // idle, and the user was holding the phone the whole time.
+    time.advance(300);
+    interaction.set(true);
+    await tick();
+    time.advance(300);
+    interaction.set(false);
+    await tick();
+
+    time.advance(400);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top')]);
+
+    time.advance(600);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('tail')]);
+  });
+
+  it('does not widen while a batch cooldown still has work queued', async () => {
+    const { coordinator, prefetcher, activity, time } = setup({
+      activity: [{ sessionId: sid('a'), lastMessageAt: 400 }],
+      policy: {
+        concurrency: 1,
+        batchSize: 1,
+        batchCooldownMs: 5_000,
+        warmupCandidateWindow: 3,
+        warmupHoldMs: 1_000,
+      },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+
+    // Hold armed. Now two more warm-up candidates arrive: one starts, the other
+    // waits behind a batch cooldown — so nothing is in flight, but the warm-up
+    // set is demonstrably not finished.
+    activity.emit({ sessionId: sid('b'), lastMessageAt: 300 });
+    activity.emit({ sessionId: sid('c'), lastMessageAt: 200 });
+    await tick();
+    prefetcher.resolve(sid('b'), 'synced');
+    await tick();
+    expect(coordinator.getState().inFlight).toEqual([]);
+    expect(coordinator.getState().queued).toEqual([sid('c')]);
+
+    time.advance(1_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b')]);
+
+    // Cooldown ends, 'c' finishes the warm-up set, and only then does the tail
+    // come into scope.
+    time.advance(4_000);
+    await tick();
+    prefetcher.resolve(sid('c'), 'synced');
+    await tick();
+    activity.emit({ sessionId: sid('tail'), lastMessageAt: 100 });
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b'), sid('c')]);
+
+    time.advance(1_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b'), sid('c'), sid('tail')]);
+  });
+
+  it('warms up again, for a full hold, after a suspended background stretch', async () => {
+    const { coordinator, prefetcher, env, activity, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 400 },
+        { sessionId: sid('second'), lastMessageAt: 300 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+    });
+
+    // Warm up and widen once, so the coordinator is past its warm-up.
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+    time.advance(1_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second')]);
+    prefetcher.resolve(sid('second'), 'synced');
+    await tick();
+
+    // Background the app. A suspended phone does not run timers, so an armed
+    // hold comes due the moment the OS resumes the process.
+    env.set({ visible: false });
+    await tick();
+    time.advanceSuspended(60_000);
+    activity.emit({ sessionId: sid('late'), lastMessageAt: 100 });
+    await tick();
+
+    env.set({ visible: true });
+    await tick();
+    time.advance(1);
+    await tick();
+    // Resuming is a fresh cold start: back inside the warm-up window, and no
+    // stale hold from before the pause may widen it on the spot.
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second')]);
+
+    time.advance(999);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('second'), sid('late')]);
+  });
+
+  it('yields to interaction: no new prefetch, no widening, in-flight work left alone', async () => {
+    const interaction = createFakeInteractionSource();
+    const { coordinator, prefetcher, time } = setup({
+      activity: [
+        { sessionId: sid('a'), lastMessageAt: 300 },
+        { sessionId: sid('b'), lastMessageAt: 200 },
+        { sessionId: sid('tail'), lastMessageAt: 100 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 2, warmupHoldMs: 1_000 },
+      interaction: interaction.view,
+    });
+
+    coordinator.start();
+    await tick();
+    expect(coordinator.getState().inFlight).toEqual([sid('a')]);
+
+    interaction.set(true);
+    await tick();
+    // Aborting would only cost a fresh room join later; it buys back no frame now.
+    expect(coordinator.getState().inFlight).toEqual([sid('a')]);
+
+    // Settling it must not start the next warm-up candidate under the finger.
+    prefetcher.resolve(sid('a'), 'synced');
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a')]);
+
+    interaction.set(false);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b')]);
+    prefetcher.resolve(sid('b'), 'synced');
+    await tick();
+
+    // The warm-up set is now fully drained — but the user picks the phone back
+    // up, and time under their finger is not idle time, so it must not widen.
+    interaction.set(true);
+    await tick();
+    time.advance(10_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b')]);
+
+    interaction.set(false);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b')]);
+
+    time.advance(1_000);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('a'), sid('b'), sid('tail')]);
+  });
+
+  it('does not let a hold armed before backgrounding widen the scope on resume', async () => {
+    const { coordinator, prefetcher, env, time } = setup({
+      activity: [
+        { sessionId: sid('top'), lastMessageAt: 400 },
+        { sessionId: sid('tail'), lastMessageAt: 200 },
+      ],
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
+    });
+
+    coordinator.start();
+    await tick();
+    prefetcher.resolve(sid('top'), 'synced');
+    await tick();
+
+    // A hold is now armed. The phone is backgrounded and suspended for far
+    // longer than the hold, so that timer is overdue the instant it resumes —
+    // and firing it would widen to the full workspace with no warm-up at all,
+    // which is the stall this whole policy exists to avoid.
+    env.set({ visible: false });
+    await tick();
+    time.advanceSuspended(60_000);
+    env.set({ visible: true });
+    await tick();
+    time.advance(1);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top')]);
+
+    time.advance(999);
+    await tick();
+    expect(prefetcher.calls).toEqual([sid('top'), sid('tail')]);
+  });
+
+  it('stop() clears the queue, aborts in-flight work, and leaves no timers', async () => {
+    const { coordinator, activity, prefetcher, time } = setup({
       activity: [
         { sessionId: sid('a'), lastMessageAt: 1 },
         { sessionId: sid('b'), lastMessageAt: 2 },
       ],
-      policy: { concurrency: 1 },
+      policy: { concurrency: 1, warmupCandidateWindow: 1, warmupHoldMs: 1_000 },
     });
     coordinator.start();
     await tick();
     expect(coordinator.getState().inFlight.length).toBe(1);
 
+    // Drain to idle so a warm-up hold is armed alongside the prefetch timers.
+    prefetcher.resolve(prefetcher.calls[0], 'synced');
+    await tick();
+    expect(time.pending()).toBeGreaterThan(0);
+
     coordinator.stop();
     await tick();
     expect(coordinator.getState().inFlight).toEqual([]);
     expect(coordinator.getState().queued).toEqual([]);
+    expect(time.pending()).toBe(0);
 
     // After stop, new activity is ignored.
     activity.emit({ sessionId: sid('c'), lastMessageAt: 3 });

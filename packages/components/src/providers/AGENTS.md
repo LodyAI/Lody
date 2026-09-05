@@ -30,3 +30,47 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
   projection and disables queries, Machine Flock, sharing, and eager-sync inputs. Provider-
   external consumers such as `RuntimeProvider` retain their existing default behavior. Explicit
   `workspaceId` / `enabled` options remain fenced by the route scope and cannot reopen stale work.
+
+## Background eager-sync
+
+- `background-sync-coordinator.ts` stays PURE and dependency-injected: no loro-repo,
+  no React, no real timers. Every new signal is an injected port with a fake in
+  `tests/background-sync-coordinator.test.ts`, driven by that suite's fake clock.
+- Mobile is not desktop with a smaller screen. Each prefetch deserializes a Loro doc
+  on the one main thread a phone has, so `resolveEagerSyncPolicy('mobile')` must keep
+  its own policy — never share the desktop one. What protects the phone is the PACING
+  (concurrency, batch cooldown, resident cap), not a smaller eventual scope: mobile
+  reaches the same `candidateWindow` as desktop.
+- `warmupCandidateWindow` narrows that scope until the queue has drained AND the app
+  has then stayed idle for `warmupHoldMs`. It must never widen on wall-clock time
+  alone — queued work, in-flight work, or an interacting user all hold it — and a
+  suspended phone does not run timers, so a hold armed before backgrounding is
+  overdue the moment it resumes. Clear it on pause and restart the warm-up on resume,
+  or every resume widens instantly with no warm-up at all.
+- Do not gate candidates on a `priorityOf` FLOOR. `visibility.isVisible` is fed from
+  `useVisibleSessionMetas`, which is a permission filter over every non-archived
+  session, not a viewport filter — so a floor at the visible weight excludes nothing.
+  The window is what bounds the scope; priority only orders it.
+- Prefetching yields to the user through the `interaction` port
+  (`eager-sync-interaction.ts`): while it reports true the coordinator starts nothing
+  new. It does NOT abort in-flight work for interaction — that costs a fresh room
+  join later and buys no frame back now; only offline/hidden aborts. The signal is
+  fed by direct-manipulation events only and deliberately ignores `scroll`, because
+  the conversation view auto-scrolls itself while an agent streams and would
+  otherwise starve background sync for as long as any session runs.
+- That gate is in `drain()` and so is POLICY-INDEPENDENT: any surface handed an
+  `interaction` port defers, warm-up or not. Which surfaces want it is
+  `policy.deferWhileInteracting`, beside concurrency and the batch cooldown, and the
+  runtime must not create or bind the signal when a policy does not ask for it.
+  Deferring costs prefetch throughput, and a slower session open is the thing
+  eager-sync exists to prevent, so it is only worth paying where the main thread is
+  the bottleneck: mobile and web yes, Electron no. Web defers even though
+  `detectAppDeviceClass()` could split it, because routing a phone browser to the
+  mobile policy would swap the window, resident cap and pacing too, and web's
+  already-bounded scope is what makes deferring cheap on a workstation anyway.
+- The hold is reset by anything that INTERRUPTS IDLE — `enqueueForPrefetch` and the
+  start of an interaction — not only by pause/stop. Re-checking when the hold fires
+  is not sufficient on its own: it sees one instant, so work or a gesture that both
+  starts and ends inside the window would pass it and the hold would degrade into a
+  plain wall-clock timer. Clearing it is the reset; `drain()` arms a fresh full hold
+  the next time the queue drains.

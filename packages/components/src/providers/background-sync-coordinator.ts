@@ -19,6 +19,16 @@ import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shar
  * - Candidate scope depends on the surface: native/electron can eventually
  *   warm all candidates, while web stays bounded to the highest-priority set.
  *   All surfaces use bounded concurrency plus batch cooldowns.
+ * - A surface may WARM UP on a narrow slice first (`policy.warmupCandidateWindow`)
+ *   and widen to its full scope only once the queue has drained and the app has
+ *   then stayed idle. On a phone this is the difference between "the app is
+ *   usable while it syncs" and "the app is busy deserializing every doc it has
+ *   ever seen".
+ * - Prefetching yields to the user (`deps.interaction`). Opening a doc
+ *   deserializes it on the main thread, so while the user is scrolling or
+ *   typing the coordinator starts nothing new. It does not abort in-flight
+ *   work for interaction: that would cost a fresh room join later without
+ *   making the main thread any quieter now.
  */
 
 /** Minimal view of a session's metadata the coordinator reasons about. */
@@ -78,6 +88,15 @@ export interface BackgroundSyncCoordinatorDeps {
     /** Fires when the UI-visible session set changes. Returns an unsubscribe fn. */
     subscribe(onChange: () => void): () => void;
   };
+  /**
+   * Optional "the user is busy right now" signal (scrolling, typing, dragging).
+   * While it reports true the coordinator starts no new prefetches.
+   */
+  interaction?: {
+    isInteracting(): boolean;
+    /** Fires when the interacting/idle state flips. Returns an unsubscribe fn. */
+    subscribe(onChange: () => void): () => void;
+  };
   clock: { now(): number };
   scheduler: {
     setTimeout(handler: () => void, ms: number): unknown;
@@ -103,6 +122,26 @@ export interface EagerSyncPolicy {
   candidateWindow: number;
   /** Abort a prefetch that has not settled within this window. */
   prefetchTimeoutMs: number;
+  /**
+   * Yield to the user: start no new prefetch while `deps.interaction` reports
+   * that input is in flight. Worth it only where the main thread is the
+   * bottleneck — deferring costs prefetch throughput, and slower session opens
+   * are the thing eager-sync exists to prevent, so a machine with headroom
+   * should pay nothing for this.
+   */
+  deferWhileInteracting: boolean;
+  /**
+   * Optional narrower window used until the coordinator has warmed up. Absent
+   * means `candidateWindow` applies from the start, which is the historical
+   * behavior. Candidates are always drained highest-priority first, so this is
+   * a cap on how much is in scope at once, not on which sessions come first.
+   */
+  warmupCandidateWindow?: number;
+  /**
+   * How long the queue must stay drained and idle before widening from
+   * `warmupCandidateWindow` to `candidateWindow`.
+   */
+  warmupHoldMs?: number;
 }
 
 export type EagerSyncSurface = 'web' | 'desktop' | 'mobile';
@@ -118,6 +157,21 @@ export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 20,
   candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
+  // Web is the one surface that may be either a phone browser or a workstation.
+  // `detectAppDeviceClass()` could tell them apart, but routing a phone browser
+  // to the mobile policy would not be an equivalent substitution — it also swaps
+  // the candidate window, the resident cap and the pacing, which are separate
+  // decisions made for a native shell — and hanging `deferWhileInteracting`
+  // alone off a device class would add a second, runtime-varying axis to a table
+  // that is otherwise static and readable side by side.
+  //
+  // It is not worth that: web defers either way, because the two mistakes are
+  // not symmetric. On a phone browser, not deferring reproduces exactly the
+  // stall this policy exists to prevent. On a workstation the cost is small and
+  // bounded BECAUSE web's scope is — 20 candidates, 20 resident, and persisted
+  // high-water marks mean steady state is nearly free, so only the cold warm-up
+  // can be delayed, and only until a second after the user pauses.
+  deferWhileInteracting: true,
 };
 
 export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
@@ -128,12 +182,55 @@ export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   maxWarmDocs: 96,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
+  // Electron is a desktop-class machine with an unbounded warm scope: the main
+  // thread is not the bottleneck, so deferring would trade real prefetch
+  // throughput — every keystroke of a long prompt pushing the quiet window out
+  // — for a smoothness it already has.
+  deferWhileInteracting: false,
+};
+
+/**
+ * Mobile is NOT desktop with a smaller screen: every prefetch deserializes a
+ * Loro doc on the one main thread a phone has, so the desktop policy's wide,
+ * fast, deeply-resident warm-up is felt as the app being frozen until sync
+ * finishes. Hence concurrency 1 (never two deserializations racing a frame),
+ * long batch cooldowns (breathing room for rendering), a small resident cap
+ * (catch-up is durable in IndexedDB, so an evicted doc costs a re-open and not
+ * a re-sync), and a warm-up window before the full scope opens up.
+ *
+ * The pacing, not the scope, is what keeps this off the user's frames — so the
+ * eventual scope stays the same as desktop's and a phone still ends up able to
+ * open any conversation offline.
+ */
+export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
+  concurrency: 1,
+  batchSize: 3,
+  batchCooldownMs: 3_000,
+  freshnessTtlMs: 15_000,
+  maxWarmDocs: 12,
+  candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
+  prefetchTimeoutMs: 20_000,
+  // The whole point on a phone: a prefetch deserializes a doc on the one thread
+  // that is also drawing the frame under the user's finger.
+  deferWhileInteracting: true,
+  // Roughly a screenful of the highest-priority sessions — pinned, on screen,
+  // running — then five idle seconds before the rest comes into scope.
+  warmupCandidateWindow: 6,
+  warmupHoldMs: 5_000,
 };
 
 export const DEFAULT_EAGER_SYNC_POLICY = WEB_EAGER_SYNC_POLICY;
 
-export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy =>
-  surface === 'web' ? WEB_EAGER_SYNC_POLICY : FULL_EAGER_SYNC_POLICY;
+export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy => {
+  switch (surface) {
+    case 'web':
+      return WEB_EAGER_SYNC_POLICY;
+    case 'mobile':
+      return MOBILE_EAGER_SYNC_POLICY;
+    default:
+      return FULL_EAGER_SYNC_POLICY;
+  }
+};
 
 export interface BackgroundSyncCoordinator {
   start(): void;
@@ -155,6 +252,7 @@ export function createBackgroundSyncCoordinator(
     prefetcher,
     env,
     visibility,
+    interaction,
     clock,
     scheduler,
     policy,
@@ -167,6 +265,9 @@ export function createBackgroundSyncCoordinator(
   let drainScheduled = false;
   let startedInCurrentBatch = 0;
   let batchCooldownHandle: unknown | null = null;
+  // Narrow candidate scope until the app has warmed up and gone idle once.
+  let warmingUp = policy.warmupCandidateWindow != null;
+  let warmupExitHandle: unknown | null = null;
 
   // Most recent snapshot per session — the trailing re-evaluation re-runs against
   // this so we don't miss the tail of a burst.
@@ -235,28 +336,59 @@ export function createBackgroundSyncCoordinator(
     return pinnedBoost + visibleBoost + activityBoost;
   };
 
-  const comparePrefetchPriority = (
-    left: SessionActivitySnapshot,
-    right: SessionActivitySnapshot
-  ): number => {
-    const priorityDelta = priorityOf(right) - priorityOf(left);
+  const isInteracting = (): boolean => interaction?.isInteracting() === true;
+
+  /**
+   * A candidate with its priority already computed. Sorting recomputes the
+   * comparator's inputs O(n log n) times, and a bounded candidate window
+   * re-sorts on every activity event, so the seed path pays for `priorityOf`
+   * once per candidate instead.
+   */
+  type RankedCandidate = { snap: SessionActivitySnapshot; priority: number };
+
+  const rankCandidate = (snap: SessionActivitySnapshot): RankedCandidate => ({
+    snap,
+    priority: priorityOf(snap),
+  });
+
+  const compareRankedCandidates = (left: RankedCandidate, right: RankedCandidate): number => {
+    const priorityDelta = right.priority - left.priority;
     if (priorityDelta !== 0) {
       return priorityDelta;
     }
-    const activityDelta = (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0);
+    const activityDelta = (right.snap.lastMessageAt ?? 0) - (left.snap.lastMessageAt ?? 0);
     if (activityDelta !== 0) {
       return activityDelta;
     }
-    return String(left.sessionId).localeCompare(String(right.sessionId));
+    return String(left.snap.sessionId).localeCompare(String(right.snap.sessionId));
   };
+
+  // The queue is bounded by the candidate window, so ranking on the fly here is
+  // cheap; keeping one comparator body is what keeps the drain order and the
+  // window's contents from ever disagreeing.
+  const comparePrefetchPriority = (
+    left: SessionActivitySnapshot,
+    right: SessionActivitySnapshot
+  ): number => compareRankedCandidates(rankCandidate(left), rankCandidate(right));
 
   const getBatchSize = (): number => Math.max(1, Math.floor(policy.batchSize));
 
+  /**
+   * NOTE: a finite limit is not free. It makes `handleActivity` re-seed — a full
+   * re-rank of every candidate — per activity event, where an unbounded scope
+   * evaluates one session. During warm-up that lands on the cold-start sync
+   * burst, which is the very path being protected, and it is why the warm-up
+   * scope is a short warm-up and not a permanently narrow window.
+   */
   const getCandidateLimit = (): number | null => {
-    if (!Number.isFinite(policy.candidateWindow)) {
+    const window =
+      warmingUp && policy.warmupCandidateWindow != null
+        ? policy.warmupCandidateWindow
+        : policy.candidateWindow;
+    if (!Number.isFinite(window)) {
       return null;
     }
-    return Math.max(0, Math.floor(policy.candidateWindow));
+    return Math.max(0, Math.floor(window));
   };
 
   const listCandidateSnapshots = (): SessionActivitySnapshot[] => {
@@ -267,11 +399,57 @@ export function createBackgroundSyncCoordinator(
     for (const snap of latest.values()) {
       snapshots.set(snap.sessionId, snap);
     }
-    const candidates = Array.from(snapshots.values())
-      .filter((snap) => !snap.isArchived && snap.lastMessageAt != null)
-      .sort(comparePrefetchPriority);
+    const ranked: RankedCandidate[] = [];
+    for (const snap of snapshots.values()) {
+      if (snap.isArchived || snap.lastMessageAt == null) {
+        continue;
+      }
+      ranked.push(rankCandidate(snap));
+    }
+    ranked.sort(compareRankedCandidates);
     const limit = getCandidateLimit();
-    return limit == null ? candidates : candidates.slice(0, limit);
+    const capped = limit == null ? ranked : ranked.slice(0, limit);
+    return capped.map((entry) => entry.snap);
+  };
+
+  const clearWarmupExit = () => {
+    if (warmupExitHandle !== null) {
+      scheduler.clearTimeout(warmupExitHandle);
+      warmupExitHandle = null;
+    }
+  };
+
+  const isDrainIdle = (): boolean => queued.size === 0 && inFlight.size === 0;
+
+  const canExitWarmup = (): boolean => started && !paused && !isInteracting() && warmingUp;
+
+  /**
+   * Widen to the full candidate scope, but only after the warm-up set has fully
+   * drained and the app has THEN stayed idle for the hold. Never on a wall-clock
+   * schedule alone.
+   *
+   * The re-check when the hold fires is not enough for that on its own: it only
+   * sees the instant of firing, so work that arrives and finishes inside the
+   * window would pass it. Anything that interrupts idle therefore CLEARS the
+   * hold as it happens — `enqueueForPrefetch` and the start of an interaction —
+   * and this re-arms a full one the next time the queue drains. The one-armed-
+   * timer guard below is why clearing, not extending, is the reset.
+   */
+  const armWarmupExit = () => {
+    if (warmupExitHandle !== null || !canExitWarmup() || !isDrainIdle()) {
+      return;
+    }
+    warmupExitHandle = scheduler.setTimeout(() => {
+      warmupExitHandle = null;
+      if (!canExitWarmup() || !isDrainIdle()) {
+        // Busy again — the next drain-to-idle re-arms a fresh hold.
+        return;
+      }
+      warmingUp = false;
+      logger?.debug('[eager-sync] warm-up finished; widening candidate scope');
+      seedFromList();
+      scheduleDrain();
+    }, Math.max(0, policy.warmupHoldMs ?? 0));
   };
 
   const clearBatchCooldown = () => {
@@ -355,6 +533,20 @@ export function createBackgroundSyncCoordinator(
     return true;
   };
 
+  /**
+   * The single way work enters the queue. Enqueuing INTERRUPTS IDLE, so it drops
+   * any armed warm-up hold: that hold means "the app has been quiet since it
+   * drained", and it has not been. Dropping it rather than extending it is what
+   * keeps it from degrading into a wall-clock timer — the queue draining again
+   * re-arms a fresh, full hold from `drain()`.
+   */
+  const enqueueForPrefetch = (sessionId: SessionId, snap: SessionActivitySnapshot) => {
+    clearTrailing(sessionId);
+    queued.set(sessionId, snap);
+    clearWarmupExit();
+    scheduleDrain();
+  };
+
   const evaluate = (sessionId: SessionId) => {
     if (!started || paused) {
       return;
@@ -375,9 +567,7 @@ export function createBackgroundSyncCoordinator(
       scheduleTrailing(sessionId, policy.freshnessTtlMs);
       return;
     }
-    clearTrailing(sessionId);
-    queued.set(sessionId, snap);
-    scheduleDrain();
+    enqueueForPrefetch(sessionId, snap);
   };
 
   const dequeueHighestPriority = (): SessionActivitySnapshot | undefined => {
@@ -462,6 +652,20 @@ export function createBackgroundSyncCoordinator(
     if (!started || paused) {
       return;
     }
+    if (isInteracting()) {
+      // Every prefetch deserializes a Loro doc on the main thread, so starting
+      // one under the user's finger is exactly the stall this coordinator
+      // exists to avoid. In-flight work is deliberately left running: aborting
+      // it only buys a fresh room join later, not a quieter frame now.
+      //
+      // Sustained input therefore stalls eager-sync entirely, and the warm-up
+      // cannot widen either. That is the trade this makes: instant session
+      // opens are given up exactly while the user is busy doing something else.
+      // There is deliberately no ceiling on the deferral — the quiet window is
+      // ~1s, so any pause resumes it, and a ceiling would only reintroduce the
+      // jank mid-gesture.
+      return;
+    }
     if (batchCooldownHandle !== null) {
       return;
     }
@@ -478,6 +682,7 @@ export function createBackgroundSyncCoordinator(
     }
     if (queued.size === 0) {
       resetBatchWindow();
+      armWarmupExit();
       return;
     }
     if (startedInCurrentBatch >= batchSize) {
@@ -541,14 +746,39 @@ export function createBackgroundSyncCoordinator(
     if (!active && !paused) {
       paused = true;
       resetBatchWindow();
+      // Drop the armed hold too. A timer left running across a long background
+      // stretch fires the instant we resume, widening the scope without the
+      // fresh idle period the user is owed.
+      clearWarmupExit();
       abortAllInFlight();
       logger?.debug('[eager-sync] paused (offline/hidden)');
     } else if (active && paused) {
       paused = false;
+      // Coming back from offline/background is a fresh cold start as far as the
+      // user is concerned, so the warm-up restarts: the highest-priority
+      // sessions are caught up before the full scope opens again. Already-synced
+      // sessions are skipped by the high-water mark, so this costs a re-sort,
+      // not re-work.
+      warmingUp = policy.warmupCandidateWindow != null;
       logger?.debug('[eager-sync] resumed');
       seedFromList();
       scheduleDrain();
     }
+  };
+
+  const onInteractionChange = () => {
+    if (!started || paused) {
+      return;
+    }
+    if (isInteracting()) {
+      // The other way idle is interrupted. `canExitWarmup()` only sees the
+      // interaction if it is still going when the hold fires, so a gesture that
+      // starts and ends inside the window would otherwise leave the hold intact
+      // and count time under the user's finger as idle.
+      clearWarmupExit();
+      return;
+    }
+    scheduleDrain();
   };
 
   const onRegistryChange = () => {
@@ -568,6 +798,9 @@ export function createBackgroundSyncCoordinator(
       if (visibility) {
         unsubscribers.push(visibility.subscribe(onVisibilityChange));
       }
+      if (interaction) {
+        unsubscribers.push(interaction.subscribe(onInteractionChange));
+      }
       unsubscribers.push(registry.subscribe(onRegistryChange));
       seedFromList();
       scheduleDrain();
@@ -585,6 +818,7 @@ export function createBackgroundSyncCoordinator(
         scheduler.clearTimeout(handle);
       }
       resetBatchWindow();
+      clearWarmupExit();
       trailingTimers.clear();
       queued.clear();
     },
@@ -603,9 +837,7 @@ export function createBackgroundSyncCoordinator(
         return;
       }
       const snap = latest.get(sessionId) ?? { sessionId };
-      clearTrailing(sessionId);
-      queued.set(sessionId, snap);
-      scheduleDrain();
+      enqueueForPrefetch(sessionId, snap);
     },
   };
 }
