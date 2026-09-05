@@ -599,10 +599,18 @@
             <option value="">全部</option>
           </select></label
         >
+        <label
+          >Evidence
+          <select id="visual-evidence-filter">
+            <option value="review">Review candidates · peer ≥ 2</option>
+            <option value="all">All raw deviations</option>
+          </select></label
+        >
         <a href="visual-repetition.json">完整 discovery JSON</a>
         <p class="meta">
           排序仅供 review；不进入 ledger / gate。红框为候选，绿框为 dominant，橙框为
-          peers，绿线为预期坐标；pitch 是间距，仅标记目标。
+          peers，绿线为预期坐标；pitch 是间距，仅标记目标。默认合并同一 atom 的重复边界测量；
+          完整原始结果见 JSON。
         </p>
         <div id="visual-candidates"></div>
         <button type="button" id="visual-more">显示更多</button>
@@ -631,7 +639,7 @@
       const report = JSON.parse(document.getElementById('geometry-report-data').textContent);
 
       const visualCaptures = report.visualRepetition?.captures ?? [];
-      const visualCandidates = visualCaptures
+      const rawVisualCandidates = visualCaptures
         .flatMap((capture) => {
           const atoms = new Map(capture.atoms.map((atom) => [atom.id, atom]));
           return capture.deviations.map((deviation) => ({
@@ -641,10 +649,29 @@
             atoms,
           }));
         })
-        .sort((a, b) => b.deviation.score - a.deviation.score)
-        .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+        .sort((a, b) => b.deviation.score - a.deviation.score);
+      const rankVisualCandidates = (candidates) =>
+        [...candidates]
+          .sort((a, b) => b.deviation.score - a.deviation.score)
+          .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+      const reviewVisualCandidates = rankVisualCandidates(
+        rawVisualCandidates
+          .filter(({ deviation }) => deviation.peerSupport >= 2)
+          .reduce((unique, candidate) => {
+            // Start/end/center are three views of one edge question. Keep pitch
+            // separate because it measures spacing along the series axis.
+            const { capture, deviation, atom } = candidate;
+            const measureFamily = deviation.measure === 'pitch' ? 'pitch' : 'edge';
+            const key = `${capture.captureId}\u0000${atom.id}\u0000${deviation.axis}\u0000${measureFamily}`;
+            const previous = unique.get(key);
+            if (!previous || previous.deviation.score < deviation.score) unique.set(key, candidate);
+            return unique;
+          }, new Map())
+          .values()
+      );
+      const visualCandidates = rankVisualCandidates(rawVisualCandidates);
       document.getElementById('visual-summary').textContent =
-        `${visualCaptures.length} captures · ${visualCaptures.reduce((sum, capture) => sum + capture.atoms.length, 0)} atoms · ${visualCandidates.length} candidates · 每个 capture 独立计算，尚未跨 capture 确认`;
+        `${visualCaptures.length} captures · ${visualCaptures.reduce((sum, capture) => sum + capture.atoms.length, 0)} atoms · ${reviewVisualCandidates.length} review candidates / ${visualCandidates.length} raw deviations · 每个 capture 独立计算，尚未跨 capture 确认`;
       const visualList = document.getElementById('visual-candidates');
       const px = (value) => `${Number(value.toFixed(2))}px`;
       function appendVisualCandidate({ capture, deviation, atom, atoms, rank }) {
@@ -733,13 +760,14 @@
         visualList.append(card);
       }
       const captureFilter = document.getElementById('visual-capture-filter');
+      const evidenceFilter = document.getElementById('visual-evidence-filter');
       for (const capture of visualCaptures) {
         const option = document.createElement('option');
         option.value = capture.captureId;
         option.textContent = `${capture.captureId} (${capture.deviations.length})`;
         captureFilter.append(option);
       }
-      let selectedVisualCandidates = visualCandidates;
+      let selectedVisualCandidates = reviewVisualCandidates;
       let visibleVisualCount = 0;
       const visualMore = document.getElementById('visual-more');
       function showMoreVisualCandidates() {
@@ -750,14 +778,18 @@
         visualMore.textContent = `显示更多 (${visibleVisualCount}/${selectedVisualCandidates.length})`;
       }
       visualMore.addEventListener('click', showMoreVisualCandidates);
-      captureFilter.addEventListener('change', () => {
-        selectedVisualCandidates = visualCandidates.filter(
+      const updateVisualCandidates = () => {
+        const candidates =
+          evidenceFilter.value === 'all' ? visualCandidates : reviewVisualCandidates;
+        selectedVisualCandidates = candidates.filter(
           ({ capture }) => !captureFilter.value || capture.captureId === captureFilter.value
         );
         visibleVisualCount = 0;
         visualList.replaceChildren();
         showMoreVisualCandidates();
-      });
+      };
+      captureFilter.addEventListener('change', updateVisualCandidates);
+      evidenceFilter.addEventListener('change', updateVisualCandidates);
       showMoreVisualCandidates();
 
       const chevronSvg =
