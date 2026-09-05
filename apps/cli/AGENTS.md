@@ -598,3 +598,11 @@ first. Managed runtime artifact pins and checksums live in
 external distribution responsibilities. Observed per-agent edit-evidence behavior and
 the ACP protocol reference are documented in `context/acp-protocol.md` and
 `context/acp-agent-edit-evidence.md`.
+
+The authenticated ACP contract smoke test is explicitly opt-in: `pnpm --filter lody test:acp-live`, with absolute `CODEX_PATH` and
+`CLAUDE_CODE_EXECUTABLE` pointing at the native versions being checked. It rebuilds
+both adapters and typechecks the probe separately because ordinary CLI typechecking
+excludes tests. It uses temporary workspaces and synthetic prompts, consumes provider
+quota, and is not part of the deterministic offline suite. Never commit its raw logs.
+A passing smoke test covers advertised config transitions and plain-text output, not
+all tools, recovery, cancellations, or every provider-side model execution.
