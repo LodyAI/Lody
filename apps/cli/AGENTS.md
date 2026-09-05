@@ -332,12 +332,21 @@ Two things the dev build does deliberately, both load-bearing:
   deadline.
 
 - `src/lib/gh-shim-script.ts` owns agent `gh` credential selection at invocation time:
-  explicit credentials → owner-local active gh login → requester-bound broker token.
+  broker authorization → owner credentials/local active gh login → requester-bound token.
   Only definitive 401/missing credentials advance the chain; never replay the actual command.
   `session-manager.ts` installs the shim and activates/refreshes broker contexts, without
   injecting session-wide GitHub tokens. `/github-auth-context` grants local auth only for
-  the daemon owner; stale contexts fail closed. `gh-token-env.ts` clears legacy managed
-  tokens by fingerprint. Token caching remains in `github-token-manager.ts`; git HTTPS
+  the daemon owner; missing/stale contexts fail closed even with explicit tokens. Managed
+  wrappers and shell startup files live in `gh-session-bin/<workspace-binding>`; their
+  absolute broker state path is fixed by the daemon, never selected by child env. Ordinary
+  local shells use native gh. `Session` receives machine-owner identity as a constructor
+  dependency and strips all four GitHub token env vars after every overlay for non-owners.
+  Requester changes replace ACP before prompt delivery; cross-requester steer queues a new
+  turn. Internal replacement emits `acp-replacement`: execution retains turn ownership,
+  and MessageHandler must not finalize the turn or release its presence/workspace watch.
+  This prevents automatic credential inheritance, not same-OS-user/keychain access.
+  `gh-token-env.ts` also clears legacy managed tokens by fingerprint. Token caching remains
+  in `github-token-manager.ts`; git HTTPS
   continues to use `git-credential-helper-script.ts`. API hosts and PR/issue URLs override
   ambient repo context; GitHub.com managed tokens must never be injected for another host.
 - INVARIANT: host-side git must receive its credential broker as an explicit argument

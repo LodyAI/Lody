@@ -41,7 +41,13 @@ import {
   type McpServerId,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
-import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
+import {
+  SessionConfig,
+  SessionOutputEvent,
+  SessionErrorEvent,
+  SessionExitEvent,
+  type SessionTerminationReason,
+} from './types';
 import { LoroDocumentManager } from '../lib/loro/doc';
 import {
   AgentClient,
@@ -310,7 +316,7 @@ export interface ISession {
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
-  terminate(force?: boolean): Promise<void>;
+  terminate(force?: boolean, reason?: SessionTerminationReason): Promise<void>;
   /**
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
@@ -400,6 +406,7 @@ export type AgentStartConfig = {
 };
 
 export type SessionTerminatedEvent = {
+  reason?: SessionTerminationReason;
   sessionId: SessionId;
   exitCode?: number;
   [key: string]: unknown;
@@ -1025,7 +1032,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         ensureDefaultSessionWorkdir(sessionId);
         createdDefaultWorkdir = true;
       }
-      session = new Session(config, this.logger, provisionalWorkdir, sandbox);
+      session = new Session(
+        config,
+        this.logger,
+        provisionalWorkdir,
+        sandbox,
+        this.cloudPort.identity.userId
+      );
       sandbox = null;
       this.preparationSessions.set(sessionId, session);
       await this.rebalanceSessionSandboxes();
@@ -1521,12 +1534,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
     }
 
-    this.ensureGhShimSessionEnv(sessionEnv);
+    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
+    if (!brokerStateFilePath) {
+      throw new Error('GitHub broker state is required to prepare session credentials');
+    }
+    this.ensureGhShimSessionEnv(sessionEnv, brokerStateFilePath);
 
     const credentialHelperValue = buildCredentialHelperValueForHost(repoId);
     const brokerUrl = brokerEnv.url;
-
-    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
 
     config.env = {
       ...sessionEnv,
@@ -1534,9 +1549,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
       // Keeps the helper's connection-refused fallback inside this workspace instead
       // of landing on the shared, last-writer-wins broker.json.
-      ...(brokerStateFilePath
-        ? { [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath }
-        : {}),
+      [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath,
       LODY_GITHUB_REPO_FULL_NAME: githubRepo,
       GIT_TERMINAL_PROMPT: '0',
       // Use credential helper for all git invocations inside the ACP process tree.
@@ -1570,17 +1583,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.getGitHubTokenManager()?.invalidate(githubRepo, { requesterUserId });
   }
 
-  private ensureGhShimSessionEnv(sessionEnv: Record<string, string>): void {
-    ensureGhShimScript();
+  private ensureGhShimSessionEnv(
+    sessionEnv: Record<string, string>,
+    brokerStateFilePath: string
+  ): void {
+    ensureGhShimScript(brokerStateFilePath);
 
-    sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH);
+    sessionEnv.PATH = prependGhShimBinDirToPath(
+      sessionEnv.PATH ?? process.env.PATH,
+      brokerStateFilePath
+    );
 
     if (shouldInjectBashEnvForGhShim()) {
-      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV);
+      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV, brokerStateFilePath);
     }
 
     if (shouldInjectZdotdirForGhShim()) {
-      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR);
+      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR, brokerStateFilePath);
     }
   }
 
@@ -1983,7 +2002,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     } else {
       const sandbox = await this.sessionSandboxFactory(config.sessionId!);
       this.logger.debug(`[${config.sessionId}] Session sandbox: ${sandbox.description}`);
-      session = new Session(config, this.logger, workdir, sandbox);
+      session = new Session(config, this.logger, workdir, sandbox, this.cloudPort.identity.userId);
     }
     this.registerSessionEvents(session);
     this.sessions.set(config.sessionId!, session);
@@ -1991,14 +2010,18 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return session;
   }
 
-  async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {
+  async terminateSession(
+    sessionId: SessionId,
+    force: boolean = false,
+    reason?: SessionTerminationReason
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       this.logger.debug(`Session ${sessionId} not found`);
       return;
     }
 
-    await session.terminate(force);
+    await session.terminate(force, reason);
     this.logger.debug(`[${sessionId}] Session terminated`);
   }
 
@@ -2191,6 +2214,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       const terminatedEvent: SessionTerminatedEvent = {
+        ...(event.reason ? { reason: event.reason } : {}),
         sessionId: event.sessionId,
         exitCode: event.exitCode,
       };

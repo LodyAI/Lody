@@ -1182,6 +1182,12 @@ export class SessionExecutionService {
     if (!runtime.promptInFlight) {
       return await rejectUndelivered('no-active-turn');
     }
+    if (runtime.requesterUserId !== options.userId) {
+      return await rejectUndelivered(
+        'unsupported',
+        'A different requester must start a new turn with their own credentials.'
+      );
+    }
     if (runtime.userTurnId === options.userTurnId) {
       return {
         type: 'session/steer_response',
@@ -3808,7 +3814,9 @@ export class SessionExecutionService {
                 yield* self.ignoreWithWarning(
                   sessionId,
                   'Failed to terminate stale ACP session before prompt retry',
-                  self.tryPromise(() => self.deps.sessionManager.terminateSession(sessionId, true))
+                  self.tryPromise(() =>
+                    self.deps.sessionManager.terminateSession(sessionId, true, 'acp-replacement')
+                  )
                 );
                 session = null;
                 runtime.session = undefined;
@@ -3836,7 +3844,19 @@ export class SessionExecutionService {
             )
           );
 
-        bindReadySession(readySession);
+        // An ACP process retains its launch environment. A requester switch must
+        // replace it before delivering input, or the previous user's tokens survive.
+        if (readySession.getGitIdentityForUser && !readySession.getGitIdentityForUser(userId)) {
+          yield* abortIfCancelled();
+          yield* self.tryPromise(() =>
+            self.deps.sessionManager.terminateSession(sessionId, true, 'acp-replacement')
+          );
+          session = null;
+          runtime.session = undefined;
+          runtime.pendingSession = undefined;
+          activeSession = yield* restoreMissingSession(ctx);
+        }
+        bindReadySession(activeSession);
         yield* acpReplaySuppression.release;
         self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
         yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));

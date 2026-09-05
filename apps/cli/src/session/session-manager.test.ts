@@ -782,7 +782,7 @@ describe('SessionManager.requestSessionTerminate', () => {
     const terminate = vi.spyOn(session, 'terminate').mockResolvedValue(undefined);
 
     await expect(manager.requestSessionTerminate(sessionId)).resolves.toBe('terminated');
-    expect(terminate).toHaveBeenCalledWith(true);
+    expect(terminate).toHaveBeenCalledWith(true, undefined);
   });
 
   it('reports not-found for a session that is neither resident nor pending', async () => {

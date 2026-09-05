@@ -144,12 +144,38 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
     });
   };
 
-  return { handler, sessionId, sessionDoc, handleSessionChat };
+  return { handler, sessionId, sessionDoc, sessionManager, handleSessionChat };
 }
 
 describe('MessageHandler chat status transitions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('keeps the active turn intact when only its ACP process is replaced', () => {
+    const { handler, sessionId, sessionManager } = createTestHarness({});
+    const host = handler as unknown as {
+      setupSessionEventHandlers(): void;
+      finalizeACPState(sessionId: SessionId): Promise<void>;
+      clearSessionActivePresence(sessionId: SessionId): void;
+      codeCollabV2Service: { releaseWorkspaceWatchForOwner(sessionId: SessionId): void };
+    };
+    const finalize = vi.spyOn(host, 'finalizeACPState').mockResolvedValue();
+    const clearPresence = vi.spyOn(host, 'clearSessionActivePresence').mockImplementation(() => {});
+    const releaseWatch = vi
+      .spyOn(host.codeCollabV2Service, 'releaseWorkspaceWatchForOwner')
+      .mockImplementation(() => {});
+    host.setupSessionEventHandlers();
+    const terminated = sessionManager.on.mock.calls.find(
+      ([event]) => event === 'terminated'
+    )?.[1] as
+      | ((event: { sessionId: SessionId; exitCode: number; reason: 'acp-replacement' }) => void)
+      | undefined;
+    expect(terminated).toBeDefined();
+    terminated?.({ sessionId, exitCode: 0, reason: 'acp-replacement' });
+    expect(finalize).not.toHaveBeenCalled();
+    expect(clearPresence).not.toHaveBeenCalled();
+    expect(releaseWatch).not.toHaveBeenCalled();
   });
 
   it('updates an existing assistant entry with the latest model info', async () => {

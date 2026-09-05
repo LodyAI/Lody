@@ -3,7 +3,11 @@ import os from 'os';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 
-import { SessionManager, type ISession } from '../src/session/session-manager';
+import {
+  SessionManager,
+  type ISession,
+  type SessionTerminatedEvent,
+} from '../src/session/session-manager';
 import type { SessionConfig } from '../src/session/types';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { Logger } from '../src/utils/logger';
@@ -95,7 +99,7 @@ describe('SessionManager sandbox rebalance', () => {
       createSessionInner(config: SessionConfig): Promise<ISession>;
     };
 
-    const sessionOne = await managerInternals.createSessionInner(createConfig('session-1'));
+    await managerInternals.createSessionInner(createConfig('session-1'));
     const sandboxOne = sandboxes.get('session-1');
     expect(sandboxOne?.applyLimits).toHaveBeenCalledWith({
       memoryMaxBytes: Math.floor(16 * GIB * 0.75),
@@ -113,14 +117,12 @@ describe('SessionManager sandbox rebalance', () => {
     expect(sandboxOne?.applyLimits).toHaveBeenLastCalledWith(sharedLimits);
     expect(sandboxTwo?.applyLimits).toHaveBeenCalledWith(sharedLimits);
 
-    (
-      sessionOne as unknown as {
-        emit(event: 'terminated', payload: { sessionId: SessionId; exitCode: number }): void;
-      }
-    ).emit('terminated', {
-      sessionId: 'session-1' as SessionId,
-      exitCode: 0,
-    });
+    const terminatedEvents: SessionTerminatedEvent[] = [];
+    manager.on('terminated', (event) => terminatedEvents.push(event));
+    await manager.terminateSession('session-1' as SessionId, true, 'acp-replacement');
+    expect(terminatedEvents).toEqual([
+      { sessionId: 'session-1', exitCode: 0, reason: 'acp-replacement' },
+    ]);
     await Promise.resolve();
     await Promise.resolve();
 

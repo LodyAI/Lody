@@ -3,20 +3,23 @@ import {
   constants,
   lstatSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   statSync,
   unlinkSync,
 } from 'fs';
 import { writeIfChanged } from './shell-file-utils';
 import path from 'path';
+import { createHash } from 'crypto';
 
-import { LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
+import { GITHUB_CREDENTIAL_ENV_KEYS, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const GH_SHIM_POSIX_BASENAME = 'gh';
 const GH_SHIM_WINDOWS_BASENAME = 'gh.cmd';
 const REAL_GH_PATH_PLACEHOLDER = '__LODY_REAL_GH_PATH__';
 const NODE_EXEC_PATH_PLACEHOLDER = '__LODY_NODE_EXEC_PATH__';
+const BROKER_STATE_PATH_PLACEHOLDER = '__LODY_BROKER_STATE_PATH__';
 const MANAGED_TOKEN_MARKER_ENV = LODY_MANAGED_GH_TOKEN_SHA256_ENV;
 
 const getWindowsExecutableCandidateNames = (name: string): string[] =>
@@ -58,6 +61,7 @@ const resolveExecutableFromPath = (name: string, excludedPath: string): string |
 
   const excludedComparablePath = toComparablePath(excludedPath);
   const excludedComparableDir = toComparablePath(path.dirname(excludedPath));
+  const managedRoot = toComparablePath(path.join(getLodyDataDir(), 'gh-session-bin'));
   const candidateNames =
     process.platform === 'win32' ? getWindowsExecutableCandidateNames(name) : [name];
 
@@ -67,7 +71,7 @@ const resolveExecutableFromPath = (name: string, excludedPath: string): string |
     }
 
     const comparableDir = toComparablePath(dir);
-    if (comparableDir === excludedComparableDir) {
+    if (comparableDir === excludedComparableDir || path.dirname(comparableDir) === managedRoot) {
       continue;
     }
 
@@ -93,12 +97,12 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const REAL_GH_PATH = '${REAL_GH_PATH_PLACEHOLDER}';
 const SHIM_PATH = __filename;
 const SHIM_DIR = path.dirname(SHIM_PATH);
 const MANAGED_TOKEN_MARKER_ENV = '${MANAGED_TOKEN_MARKER_ENV}';
+const GITHUB_CREDENTIAL_ENV_KEYS = ${JSON.stringify(GITHUB_CREDENTIAL_ENV_KEYS)};
 const WINDOWS_EXECUTABLE_CANDIDATE_NAMES = ['gh.exe', 'gh.cmd', 'gh.bat', 'gh.com', 'gh'];
 
 const normalizeComparablePath = (value) => {
@@ -133,12 +137,13 @@ const resolveGhFromPath = () => {
 
   const shimComparablePath = toComparablePath(SHIM_PATH);
   const shimComparableDir = toComparablePath(SHIM_DIR);
+  const shimRoot = path.dirname(shimComparableDir);
   const candidateNames =
     process.platform === 'win32' ? WINDOWS_EXECUTABLE_CANDIDATE_NAMES : ['gh'];
 
   for (const dir of pathEnv.split(path.delimiter)) {
     if (!dir) continue;
-    if (toComparablePath(dir) === shimComparableDir) continue;
+    if (path.dirname(toComparablePath(dir)) === shimRoot) continue;
 
     for (const candidateName of candidateNames) {
       const candidate = path.join(dir, candidateName);
@@ -354,54 +359,22 @@ const readGitHubTarget = async (args) => {
     { host, repo: null };
 };
 
-const BROKER_STATE_PATHS = process.env.LODY_GIT_CRED_BROKER_STATE_FILE
-  ? [process.env.LODY_GIT_CRED_BROKER_STATE_FILE]
-  : [
-  '/home/node/.lody/broker.json',
-  path.join(
-    process.env.LODY_DATA_DIR ||
-      path.join(os.homedir(), process.env.LODY_PLATFORM === 'local' ? '.lody-oss' : '.lody'),
-    'broker.json'
-  ),
-];
-
-const getBrokerConfigFromFile = () => {
-  for (const statePath of BROKER_STATE_PATHS) {
-    try {
-      if (!fs.existsSync(statePath)) continue;
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (state && typeof state.url === 'string' && typeof state.token === 'string') {
-        return { url: state.url, token: state.token, source: 'file' };
-      }
-    } catch {
-      // Try the next state path.
-    }
-  }
-  return null;
-};
-
+// The daemon chooses this workspace binding when generating the wrapper.
+// Child environment overrides must never select the authorization authority.
+const BROKER_STATE_PATH = '${BROKER_STATE_PATH_PLACEHOLDER}';
 const getBrokerConfig = () => {
-  const envUrl = process.env.LODY_GIT_CRED_BROKER_URL;
-  const envToken = process.env.LODY_GIT_CRED_BROKER_TOKEN;
-  if (envUrl && envToken) {
-    return { url: envUrl, token: envToken, source: 'env' };
-  }
-  return getBrokerConfigFromFile();
+  try {
+    const state = JSON.parse(fs.readFileSync(BROKER_STATE_PATH, 'utf8'));
+    if (state && typeof state.url === 'string' && typeof state.token === 'string') {
+      return { url: state.url, token: state.token };
+    }
+  } catch { /* Missing or unreadable trusted state fails closed. */ }
+  return null;
 };
 
 const getContextToken = () => {
   const value = process.env.LODY_GIT_CRED_CONTEXT_TOKEN;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-};
-
-const isConnectionError = (error) => {
-  if (!error) return false;
-  const code = error.code || (error.cause && error.cause.code);
-  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
-    return true;
-  }
-  const message = String(error.message || '').toLowerCase();
-  return message.includes('econnrefused') || message.includes('enotfound') || message.includes('fetch failed');
 };
 
 const doBrokerRequest = async (baseUrl, brokerToken, endpoint, body, timeoutMs) => {
@@ -471,26 +444,14 @@ const doRejectToBroker = async (
   return { result: reply.res.ok };
 };
 
-const callBrokerWithFallback = async (action) => {
-  const brokerConfig = getBrokerConfig();
-  if (!brokerConfig) return null;
-
-  const { url, token, source } = brokerConfig;
-  const first = await action(url, token);
-  if (first.result !== undefined) return first;
-
-  if (first.error && source === 'env' && isConnectionError(first.error)) {
-    const fileConfig = getBrokerConfigFromFile();
-    if (fileConfig && fileConfig.url !== url) {
-      return await action(fileConfig.url, fileConfig.token);
-    }
-  }
-  return first;
+const callBroker = async (action) => {
+  const config = getBrokerConfig();
+  return config ? await action(config.url, config.token) : null;
 };
 
 const fetchTokenFromBroker = async (repoFullName) => {
   const contextToken = getContextToken();
-  const reply = await callBrokerWithFallback((url, token) =>
+  const reply = await callBroker((url, token) =>
     doFetchFromBroker(url, token, repoFullName, contextToken)
   );
   return reply && reply.result ? reply.result : null;
@@ -498,7 +459,7 @@ const fetchTokenFromBroker = async (repoFullName) => {
 
 const rejectTokenToBroker = async (repoFullName, invalidatedToken) => {
   const contextToken = getContextToken();
-  await callBrokerWithFallback((url, token) =>
+  await callBroker((url, token) =>
     doRejectToBroker(url, token, repoFullName, invalidatedToken, contextToken)
   );
 };
@@ -519,10 +480,9 @@ const isGhAuthFailureOutput = (stderrText) => {
 const mayUseLocalAuth = async () => {
   const contextToken = getContextToken();
   if (!contextToken) {
-    // Old managed sessions without context must not adopt the machine owner's login.
-    return !process.env.LODY_GITHUB_REPO_FULL_NAME;
+    throw new Error('GitHub credential context is required for this session.');
   }
-  const reply = await callBrokerWithFallback(async (url, token) => {
+  const reply = await callBroker(async (url, token) => {
     const response = await doBrokerRequest(url, token, '/github-auth-context', { contextToken }, 5000);
     if (response.error) return { error: response.error };
     if (!response.res || !response.res.ok) return { result: null };
@@ -536,14 +496,24 @@ const mayUseLocalAuth = async () => {
 const buildGhEnv = async (ghCommand, args) => {
   const env = { ...process.env };
   clearManagedTokenEnv(env);
+  // Neither a missing environment marker nor an inherited token proves ownership.
+  const allowLocalAuth = await mayUseLocalAuth();
+  if (!allowLocalAuth) {
+    for (const key of Object.keys(env)) {
+      if (GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
+    }
+  }
   // Authentication management must reach the owner's real gh unchanged, even
   // when no login exists yet; injecting an App token prevents gh auth login.
-  if (args[0] === 'auth' && await mayUseLocalAuth()) return { env };
+  if (args[0] === 'auth') {
+    if (allowLocalAuth) return { env };
+    throw new Error('GitHub authentication management is unavailable for this session.');
+  }
   const target = await readGitHubTarget(args);
   if (!target.host) {
     // The owner's native gh can resolve ambiguous arguments itself. A shared
     // session must stop rather than risk selecting another host's credentials.
-    if (await mayUseLocalAuth()) return { env };
+    if (allowLocalAuth) return { env };
     throw new Error('Cannot determine the GitHub target safely for this session.');
   }
   const tokenKeys = target.host === 'github.com' || target.host.endsWith('.ghe.com')
@@ -555,7 +525,6 @@ const buildGhEnv = async (ghCommand, args) => {
     if (await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
     delete env[key];
   }
-  const allowLocalAuth = await mayUseLocalAuth();
   if (allowLocalAuth && await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
 
   // Lody's installation credentials belong exclusively to github.com.
@@ -613,25 +582,44 @@ const windowsLauncherSourceTemplate = `@echo off
 "${NODE_EXEC_PATH_PLACEHOLDER}" "%~dp0gh" %*
 `;
 
-export const getGhShimHostBinDir = (): string => path.join(getLodyDataDir(), 'bin');
+// Only managed session PATHs include this directory. Ordinary local shells use
+// native gh, so missing session context never needs an authorization exception.
+const resolveBrokerStatePath = (statePath?: string): string =>
+  path.resolve(statePath ?? path.join(getLodyDataDir(), 'broker.json'));
 
-const getGhShimHostNodeScriptPath = (): string =>
-  path.join(getGhShimHostBinDir(), GH_SHIM_POSIX_BASENAME);
+export const getGhShimHostBinDir = (brokerStateFilePath?: string): string =>
+  path.join(
+    getLodyDataDir(),
+    'gh-session-bin',
+    createHash('sha256')
+      .update(resolveBrokerStatePath(brokerStateFilePath))
+      .digest('hex')
+      .slice(0, 16)
+  );
 
-const getGhShimHostWindowsLauncherPath = (): string =>
-  path.join(getGhShimHostBinDir(), GH_SHIM_WINDOWS_BASENAME);
+const getGhShimHostNodeScriptPath = (brokerStateFilePath?: string): string =>
+  path.join(getGhShimHostBinDir(brokerStateFilePath), GH_SHIM_POSIX_BASENAME);
 
-export const getGhShimHostPath = (): string =>
-  process.platform === 'win32' ? getGhShimHostWindowsLauncherPath() : getGhShimHostNodeScriptPath();
+const getGhShimHostWindowsLauncherPath = (brokerStateFilePath?: string): string =>
+  path.join(getGhShimHostBinDir(brokerStateFilePath), GH_SHIM_WINDOWS_BASENAME);
+
+export const getGhShimHostPath = (brokerStateFilePath?: string): string =>
+  process.platform === 'win32'
+    ? getGhShimHostWindowsLauncherPath(brokerStateFilePath)
+    : getGhShimHostNodeScriptPath(brokerStateFilePath);
 
 const escapeForSingleQuotedString = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
 const escapeForDoubleQuotedCmdString = (value: string): string => value.replace(/"/g, '""');
 
-const buildGhShimSource = (realGhPath: string | null): string => {
+const buildGhShimSource = (realGhPath: string | null, brokerStateFilePath?: string): string => {
   const escapedRealPath = realGhPath ? escapeForSingleQuotedString(realGhPath) : '';
-  return wrapperSourceTemplate.split(REAL_GH_PATH_PLACEHOLDER).join(escapedRealPath);
+  return wrapperSourceTemplate
+    .split(REAL_GH_PATH_PLACEHOLDER)
+    .join(escapedRealPath)
+    .split(BROKER_STATE_PATH_PLACEHOLDER)
+    .join(escapeForSingleQuotedString(resolveBrokerStatePath(brokerStateFilePath)));
 };
 
 const buildWindowsLauncherSource = (): string =>
@@ -639,7 +627,8 @@ const buildWindowsLauncherSource = (): string =>
     .split(NODE_EXEC_PATH_PLACEHOLDER)
     .join(escapeForDoubleQuotedCmdString(process.execPath));
 
-const resolveRealGhPath = (): string | null => resolveExecutableFromPath('gh', getGhShimHostPath());
+const resolveRealGhPath = (brokerStateFilePath?: string): string | null =>
+  resolveExecutableFromPath('gh', getGhShimHostPath(brokerStateFilePath));
 
 const ensureParentDirForFile = (filePath: string): void => {
   const dir = path.dirname(filePath);
@@ -683,15 +672,51 @@ const ensureWritableShimTarget = (filePath: string): void => {
   }
 };
 
-export const ensureGhShimScript = (): void => {
-  const source = buildGhShimSource(resolveRealGhPath());
+const removeLegacyGlobalGhShim = (): void => {
+  const legacyPath = path.join(getLodyDataDir(), 'bin', 'gh');
+  let source: string;
+  try {
+    // Never remove a user's executable or symlink from the general-purpose bin.
+    if (!lstatSync(legacyPath).isFile()) return;
+    source = readFileSync(legacyPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (
+    !source.startsWith('#!/usr/bin/env node') ||
+    !source.includes('const SHIM_PATH = __filename;') ||
+    !source.includes("const MANAGED_TOKEN_MARKER_ENV = 'LODY_MANAGED_GH_TOKEN_SHA256';") ||
+    !source.includes('/github-token')
+  )
+    return;
+
+  unlinkSync(legacyPath);
+  const launcherPath = legacyPath + '.cmd';
+  try {
+    if (!lstatSync(launcherPath).isFile()) return;
+    const launcher = readFileSync(launcherPath, 'utf8');
+    if (/^@echo off\r?\n"[^"\r\n]+" "%~dp0gh" %\*\r?\n$/.test(launcher)) {
+      unlinkSync(launcherPath);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+};
+
+export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
+  removeLegacyGlobalGhShim();
+  const source = buildGhShimSource(resolveRealGhPath(brokerStateFilePath), brokerStateFilePath);
   const shimTargets =
     process.platform === 'win32'
       ? [
-          { filePath: getGhShimHostNodeScriptPath(), content: source },
-          { filePath: getGhShimHostWindowsLauncherPath(), content: buildWindowsLauncherSource() },
+          { filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source },
+          {
+            filePath: getGhShimHostWindowsLauncherPath(brokerStateFilePath),
+            content: buildWindowsLauncherSource(),
+          },
         ]
-      : [{ filePath: getGhShimHostNodeScriptPath(), content: source }];
+      : [{ filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source }];
 
   for (const { filePath, content } of shimTargets) {
     ensureParentDirForFile(filePath);
@@ -711,8 +736,11 @@ export const ensureGhShimScript = (): void => {
   }
 };
 
-export const prependGhShimBinDirToPath = (pathEnv: string | undefined): string => {
-  const shimBinDir = getGhShimHostBinDir();
+export const prependGhShimBinDirToPath = (
+  pathEnv: string | undefined,
+  brokerStateFilePath?: string
+): string => {
+  const shimBinDir = getGhShimHostBinDir(brokerStateFilePath);
   const entries = (pathEnv ?? '').split(path.delimiter).filter(Boolean);
   const shimComparableDir = toComparablePath(shimBinDir);
   const filtered = entries.filter((entry) => toComparablePath(entry) !== shimComparableDir);

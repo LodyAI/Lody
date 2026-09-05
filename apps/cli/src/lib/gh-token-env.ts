@@ -30,3 +30,19 @@ export const clearManagedGhTokenEnv = (env: Record<string, string | undefined>):
     delete env[LODY_MANAGED_GH_TOKEN_SHA256_ENV];
   }
 };
+
+export const GITHUB_CREDENTIAL_ENV_KEYS = [
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+  LODY_MANAGED_GH_TOKEN_SHA256_ENV,
+];
+
+/** Remove host credentials before handing an environment to a non-owner process. */
+export const clearGitHubTokenEnv = (env: Record<string, string | undefined>): void => {
+  // Windows child environments treat variable names case-insensitively.
+  for (const key of Object.keys(env)) {
+    if (GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
+  }
+};

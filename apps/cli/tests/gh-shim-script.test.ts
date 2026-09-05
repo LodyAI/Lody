@@ -1,9 +1,10 @@
 import { spawn } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 import {
   ensureGhShimScript,
@@ -46,6 +47,10 @@ if [ "$1" = "api" ] && [ "$4" = "user" ]; then
 fi
 if [ -n "$FAKE_GH_EXEC_LOG" ]; then printf '%s\\n' "$*" >> "$FAKE_GH_EXEC_LOG"; fi
 if [ -n "$FAKE_GH_COMMAND_ERROR" ]; then printf '%s' "$FAKE_GH_COMMAND_ERROR" >&2; exit 1; fi
+if [ "$1" = "print-mixed-case-tokens" ]; then
+  printf '%s|%s|%s|%s' "$gh_token" "$GitHub_Token" "$Gh_Enterprise_Token" "$github_enterprise_token"
+  exit 0
+fi
 if [ "$1" = "print-token" ]; then
   printf 'GH_TOKEN=%s\\n' "\${GH_TOKEN:-}"
   printf 'GITHUB_TOKEN=%s\\n' "\${GITHUB_TOKEN:-}"
@@ -75,6 +80,50 @@ afterEach(async () => {
 });
 
 describe('ensureGhShimScript', () => {
+  it('keeps the managed wrapper out of the ordinary CLI bin and removes its legacy copy', () => {
+    ensureGhShimScript();
+    const managedPath = getGhShimHostPath();
+    const binDir = path.join(getLodyDataDir(), 'bin');
+    const legacyPath = path.join(binDir, 'gh');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(legacyPath, readFileSync(managedPath), { mode: 0o755 });
+    vi.stubEnv('PATH', [binDir, fakeBinDir!, originalPath].join(path.delimiter));
+
+    ensureGhShimScript();
+
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(managedPath).toContain('gh-session-bin');
+    expect(readFileSync(managedPath, 'utf8')).toContain(path.join(fakeBinDir!, 'gh'));
+  });
+
+  it('preserves user executables in the ordinary CLI bin', () => {
+    const binDir = path.join(getLodyDataDir(), 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const userGh = path.join(binDir, 'gh');
+    writeFileSync(userGh, '#!/bin/sh\necho user-gh\n', { mode: 0o755 });
+    ensureGhShimScript();
+    expect(readFileSync(userGh, 'utf8')).toBe('#!/bin/sh\necho user-gh\n');
+  });
+
+  it('keeps workspace bindings separate and never chains through another managed wrapper', async () => {
+    await startTokenBroker('app-token', { allowLocalAuth: true });
+    const firstState = path.join(getLodyDataDir(), 'broker.json');
+    const secondState = path.join(getLodyDataDir(), 'second-workspace.json');
+    writeFileSync(secondState, readFileSync(firstState));
+    ensureGhShimScript(firstState);
+    vi.stubEnv(
+      'PATH',
+      [getGhShimHostBinDir(firstState), fakeBinDir!, originalPath].join(path.delimiter)
+    );
+    ensureGhShimScript(secondState);
+    rmSync(firstState);
+
+    expect(getGhShimHostPath(firstState)).not.toBe(getGhShimHostPath(secondState));
+    const result = await runShim({ FAKE_GH_AUTHED: '1' }, ['print-token'], secondState);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('GH_TOKEN=\nGITHUB_TOKEN=\nMARKER=\n');
+  });
+
   it('generates a gh wrapper without PR association behavior', () => {
     ensureGhShimScript();
 
@@ -127,9 +176,9 @@ describe('ensureGhShimScript', () => {
   );
 
   it(
-    'preserves a user-provided GH_TOKEN and does not call the broker',
+    'preserves an authorized owner GH_TOKEN without fetching a managed token',
     async () => {
-      const broker = await startTokenBroker('installation-token');
+      const broker = await startTokenBroker('installation-token', { allowLocalAuth: true });
       ensureGhShimScript();
 
       const result = await runShim({
@@ -150,7 +199,7 @@ describe('ensureGhShimScript', () => {
   it(
     'clears a managed GH_TOKEN while preserving a user-provided GITHUB_TOKEN',
     async () => {
-      const broker = await startTokenBroker('installation-token');
+      const broker = await startTokenBroker('installation-token', { allowLocalAuth: true });
       const managedToken = 'old-lody-token';
       ensureGhShimScript();
 
@@ -257,7 +306,13 @@ describe('ensureGhShimScript', () => {
 
   it('tries GITHUB_TOKEN after a revoked GH_TOKEN without changing the parent env', async () => {
     ensureGhShimScript();
-    const env = { GH_TOKEN: 'expired-token', GITHUB_TOKEN: 'user-token' };
+    const broker = await startTokenBroker('app-token', { allowLocalAuth: true });
+    const env = {
+      GH_TOKEN: 'expired-token',
+      GITHUB_TOKEN: 'user-token',
+      LODY_GIT_CRED_BROKER_URL: broker.url,
+      LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
+    };
     const result = await runShim(env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('GH_TOKEN=\nGITHUB_TOKEN=user-token');
@@ -304,6 +359,116 @@ describe('ensureGhShimScript', () => {
     expect(result.stdout).toBe('');
   });
 
+  it.each(['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'])(
+    'does not accept a teammate inherited %s before broker authorization',
+    async (key) => {
+      const broker = await startTokenBroker('unused', { status: 403 });
+      ensureGhShimScript();
+      const result = await runShim(
+        {
+          [key]: 'owner-token',
+          FAKE_GH_AUTHED: '1',
+          LODY_GIT_CRED_CONTEXT_TOKEN: 'teammate-context',
+          LODY_GIT_CRED_BROKER_URL: broker.url,
+          LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
+          LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+        },
+        [
+          'api',
+          '--hostname',
+          key.includes('ENTERPRISE') ? 'enterprise.example' : 'github.com',
+          'user',
+        ]
+      );
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('No managed GitHub credential');
+    }
+  );
+
+  it('rejects an expired context even when an explicit token is valid', async () => {
+    const broker = await startTokenBroker('unused', { contextStatus: 403 });
+    ensureGhShimScript();
+    const result = await runShim({
+      GH_TOKEN: 'owner-token',
+      LODY_GIT_CRED_BROKER_URL: broker.url,
+      LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
+      LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('context is unavailable or expired');
+    expect(brokerRequestCount).toBe(0);
+  });
+
+  it('strips mixed-case Windows credential names before the managed child executes', async () => {
+    await startTokenBroker('app-token');
+    ensureGhShimScript();
+    const result = await runShim(
+      {
+        gh_token: 'owner',
+        GitHub_Token: 'owner',
+        Gh_Enterprise_Token: 'owner',
+        github_enterprise_token: 'owner',
+        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+      },
+      ['print-mixed-case-tokens']
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('|||');
+  });
+
+  it('ignores caller-supplied broker authorities, including state and installation paths', async () => {
+    await startTokenBroker('unused', { status: 403 });
+    ensureGhShimScript();
+    let hostileRequests = 0;
+    const hostile = http.createServer((_req, res) => {
+      hostileRequests++;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ allowLocalAuth: true, token: 'hostile-token' }));
+    });
+    await new Promise<void>((resolve) => hostile.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = hostile.address();
+      if (!address || typeof address === 'string')
+        throw new Error('Missing hostile broker address');
+      const url = `http://127.0.0.1:${address.port}`;
+      const hostileState = path.join(tempHomeDir!, 'broker.json');
+      writeFileSync(hostileState, JSON.stringify({ url, token: 'hostile-token' }));
+      const result = await runShim({
+        GH_TOKEN: 'owner-token',
+        FAKE_GH_AUTHED: '1',
+        LODY_GIT_CRED_BROKER_URL: url,
+        LODY_GIT_CRED_BROKER_TOKEN: 'hostile-token',
+        LODY_GIT_CRED_BROKER_STATE_FILE: hostileState,
+        LODY_DATA_DIR: tempHomeDir!,
+        LODY_PLATFORM: 'cloud',
+        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('No managed GitHub credential');
+      expect(hostileRequests).toBe(0);
+      expect(brokerRequestCount).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => hostile.close(() => resolve()));
+    }
+  });
+
+  it('does not fall back to environment authority when trusted state is unavailable', async () => {
+    const broker = await startTokenBroker('app-token', { allowLocalAuth: true });
+    ensureGhShimScript();
+    rmSync(path.join(getLodyDataDir(), 'broker.json'));
+    const result = await runShim({
+      GH_TOKEN: 'owner-token',
+      LODY_GIT_CRED_BROKER_URL: broker.url,
+      LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('context is unavailable or expired');
+  });
+
   it.each([
     ['--repo', 'enterprise.example/owner/repo'],
     ['--repo=https://enterprise.example/owner/repo'],
@@ -324,11 +489,27 @@ describe('ensureGhShimScript', () => {
     expect(brokerRequestCount).toBe(0);
   });
 
-  it('keeps local-project sessions on the host login without a cloud context', async () => {
+  it.each([
+    ['api', 'user'],
+    ['auth', 'token'],
+  ])('rejects calls with removed context and repo markers: %j', async (...args) => {
+    const broker = await startTokenBroker('app-token');
     ensureGhShimScript();
-    const result = await runShim({ LODY_SESSION_ID: 'local-session', FAKE_GH_AUTHED: '1' });
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('GH_TOKEN=\nGITHUB_TOKEN=\nMARKER=\n');
+    const result = await runShim(
+      {
+        FAKE_GH_AUTHED: '1',
+        GH_TOKEN: 'owner-token',
+        LODY_GIT_CRED_BROKER_URL: broker.url,
+        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
+        LODY_GIT_CRED_CONTEXT_TOKEN: undefined,
+        LODY_GITHUB_REPO_FULL_NAME: undefined,
+      },
+      args
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('context is required');
+    expect(brokerRequestCount).toBe(0);
   });
 
   it.each([
@@ -433,7 +614,9 @@ describe('ensureGhShimScript', () => {
     );
     expect(result.status).toBe(0);
     expect(brokerRequestCount).toBe(1);
-    expect(brokerRequests).toEqual([{ repoFullName: 'loro-dev/lody' }]);
+    expect(brokerRequests).toEqual([
+      { repoFullName: 'loro-dev/lody', contextToken: 'test-context' },
+    ]);
   });
 
   it('allows the owner to log in without injecting managed credentials', async () => {
@@ -475,10 +658,11 @@ const setPlatformForTest = (platform: NodeJS.Platform): (() => void) => {
 
 const runShim = async (
   env: Record<string, string | undefined>,
-  args: string[] = ['print-token']
+  args: string[] = ['print-token'],
+  brokerStateFilePath?: string
 ): Promise<{ status: number | null; stdout: string; stderr: string }> => {
-  const shimPath = getGhShimHostPath();
-  const shimBinDir = getGhShimHostBinDir();
+  const shimPath = getGhShimHostPath(brokerStateFilePath);
+  const shimBinDir = getGhShimHostBinDir(brokerStateFilePath);
   if (!fakeBinDir) {
     throw new Error('fakeBinDir is not initialized');
   }
@@ -488,6 +672,8 @@ const runShim = async (
 
   const childEnv: NodeJS.ProcessEnv = {
     HOME: tempHomeDir,
+    // Managed invocation fixtures carry a broker context unless a test removes it.
+    LODY_GIT_CRED_CONTEXT_TOKEN: 'test-context',
     PATH: [shimBinDir, fakeBinDir, path.dirname(process.execPath)].join(path.delimiter),
   };
   if (process.platform === 'win32') {
@@ -591,5 +777,11 @@ const startTokenBroker = async (
   if (!address || typeof address === 'string') {
     throw new Error('broker did not bind to a TCP port');
   }
-  return { url: `http://127.0.0.1:${address.port}`, authToken };
+  const url = `http://127.0.0.1:${address.port}`;
+  mkdirSync(getLodyDataDir(), { recursive: true });
+  writeFileSync(
+    path.join(getLodyDataDir(), 'broker.json'),
+    JSON.stringify({ url, token: authToken })
+  );
+  return { url, authToken };
 };

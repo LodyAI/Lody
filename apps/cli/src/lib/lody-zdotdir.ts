@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 import { getGhShimHostBinDir } from './gh-shim-script';
 import {
@@ -8,8 +7,6 @@ import {
   toSingleQuotedShellString,
   writeIfChanged,
 } from './shell-file-utils';
-
-const LODY_ZDOTDIR_PATH = path.join(getLodyDataDir(), 'zdotdir');
 
 const buildInheritedSourceTarget = (
   filename: '.zshenv' | '.zprofile' | '.zshrc' | '.zlogin' | '.zlogout',
@@ -67,14 +64,17 @@ export PATH=${toSingleQuotedShellString(ghShimBinDir)}:"$PATH"
 export const shouldInjectZdotdirForGhShim = (): boolean =>
   process.platform === 'darwin' && (existsSync('/bin/zsh') || existsSync('/usr/bin/zsh'));
 
-export const ensureLodyZdotdirForGhShim = (inheritZdotdir?: string): string => {
-  const zdotdirPath = LODY_ZDOTDIR_PATH;
+export const ensureLodyZdotdirForGhShim = (
+  inheritZdotdir?: string,
+  brokerStateFilePath?: string
+): string => {
+  const zdotdirPath = path.join(getGhShimHostBinDir(brokerStateFilePath), 'zdotdir');
   mkdirSync(zdotdirPath, { recursive: true });
 
   writeIfChanged(path.join(zdotdirPath, '.zshenv'), buildZshenvSource(inheritZdotdir, zdotdirPath));
   writeIfChanged(
     path.join(zdotdirPath, '.zprofile'),
-    buildZprofileSource(getGhShimHostBinDir(), inheritZdotdir, zdotdirPath)
+    buildZprofileSource(getGhShimHostBinDir(brokerStateFilePath), inheritZdotdir, zdotdirPath)
   );
   writeIfChanged(
     path.join(zdotdirPath, '.zshrc'),

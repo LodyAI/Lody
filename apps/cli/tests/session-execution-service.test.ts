@@ -284,6 +284,19 @@ describe('SessionExecutionService', () => {
       service.steerSession({
         sessionId,
         expectedTurnId: 'assistant:user-1',
+        userTurnId: 'teammate-turn',
+        userId: 'teammate',
+        timestamp: '2026-07-11T00:00:00.000Z',
+        inputConfig: { prompt: 'teammate input' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'unsupported' });
+    expect(steerPrompt).not.toHaveBeenCalled();
+    expect(runtime.requesterUserId).toBe('user-1');
+
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
         userTurnId: 'user-2',
         userId: 'user-1',
         timestamp: '2026-07-11T00:00:00.000Z',
@@ -611,6 +624,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-no-steer' as ACPSessionId,
       },
       promptInFlight: true,
+      requesterUserId: 'user-1',
     };
     (
       service as unknown as {
@@ -660,6 +674,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-ended-before-submit' as ACPSessionId,
       },
       promptInFlight: true,
+      requesterUserId: 'user-1',
     };
     (
       service as unknown as {
@@ -714,6 +729,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-codex-steer-config' as ACPSessionId,
       },
       promptInFlight: true,
+      requesterUserId: 'user-1',
     };
     (
       service as unknown as {
@@ -816,6 +832,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-refused' as ACPSessionId,
       },
       promptInFlight: true,
+      requesterUserId: 'user-1',
       activePromptRun: { turnId: 'assistant:user-1' },
     };
     (
@@ -999,6 +1016,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-ambiguous' as ACPSessionId,
       },
       promptInFlight: true,
+      requesterUserId: 'user-1',
       activePromptRun: { turnId: 'assistant:user-1' },
     };
     (
@@ -1707,113 +1725,145 @@ describe('SessionExecutionService', () => {
     expect(activeClearedAt).toBeGreaterThan(finalizeStartedAt);
   });
 
-  it('restores and retries a stale in-memory ACP session when the connection is closed', async () => {
-    const sessionId = 'session-stale-acp' as SessionId;
-    const acpSessionId = 'acp-stale' as ACPSessionId;
-    const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
-    let history: Array<Record<string, unknown>> = [
-      {
-        id: 'turn-user-1',
-        role: 'user',
-        status: 'pending',
-        read: false,
-      },
-    ];
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const exec = vi.fn(async (command: string, args: string[]) => {
-      const key = `${command} ${args.join(' ')}`;
-      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
-      if (key === 'git rev-parse HEAD') return 'abc123\n';
-      return '';
-    });
-    const activeSession = {
-      sessionId,
-      acpSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec,
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => acpSessionId),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: restoredAcpSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => restoredAcpSessionId),
-    };
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const deps = createBaseDeps({});
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      terminateSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    const workspaceDocument = deps.workspaceDocument as unknown as {
-      getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+  it.each(['stale connection', 'requester switch'] as const)(
+    'replaces the ACP process after %s before delivering the turn',
+    async (reason) => {
+      const sessionId = 'session-stale-acp' as SessionId;
+      const acpSessionId = 'acp-stale' as ACPSessionId;
+      const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
+      let history: Array<Record<string, unknown>> = [
+        {
+          id: 'turn-user-1',
+          role: 'user',
+          status: 'pending',
+          read: false,
+        },
+      ];
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          throw new Error('ACP connection closed');
+        }),
+        currentModel: undefined,
+      };
+      const restoredAgentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const exec = vi.fn(async (command: string, args: string[]) => {
+        const key = `${command} ${args.join(' ')}`;
+        if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
+        if (key === 'git rev-parse HEAD') return 'abc123\n';
+        return '';
+      });
+      const activeSession = {
+        sessionId,
+        acpSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec,
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        ...(reason === 'requester switch' ? { getGitIdentityForUser: () => null } : {}),
+        createAgent: vi.fn(async () => acpSessionId),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const restoredSession = {
+        ...activeSession,
+        updateGitIdentity: vi.fn(),
+        acpSessionId: restoredAcpSessionId,
+        agentClient: restoredAgentClient,
+        createAgent: vi.fn(async () => restoredAcpSessionId),
+      };
+      const sessionDoc = {
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async () => {}),
+        waitUntilSynced: vi.fn(async () => {}),
+        getHistory: vi.fn(async () => history),
+        updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+          history = updater(history);
+        }),
+      };
+      const deps = createBaseDeps({});
+      const sessionManager = deps.sessionManager as unknown as {
+        getSession: ReturnType<typeof vi.fn>;
+        terminateSession: ReturnType<typeof vi.fn>;
+        createSession: ReturnType<typeof vi.fn>;
+      };
+      const workspaceDocument = deps.workspaceDocument as unknown as {
+        getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
+      };
+      sessionManager.getSession.mockReturnValue(activeSession);
+      let terminated = false;
+      const terminationStarted = createDeferred();
+      const oldProcessExited = createDeferred();
+      sessionManager.terminateSession.mockImplementation(async () => {
+        terminationStarted.resolve();
+        await oldProcessExited.promise;
+        terminated = true;
+      });
+      sessionManager.createSession.mockImplementation(async (config) => {
+        expect(terminated).toBe(true);
+        expect(config.requesterUserId).toBe('user-1');
+        return restoredSession;
+      });
+      workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
 
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const service = new SessionExecutionService(deps);
+      const turn = service.continueSession({
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
-    expect(agentClient.prompt).toHaveBeenCalledWith(
-      'acp-stale',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
+      await terminationStarted.promise;
+      expect(sessionManager.createSession).not.toHaveBeenCalled();
+      expect(restoredAgentClient.prompt).not.toHaveBeenCalled();
+      oldProcessExited.resolve();
+      await turn;
+
+      if (reason === 'requester switch') {
+        expect(agentClient.prompt).not.toHaveBeenCalled();
+        expect(activeSession.updateGitIdentity).not.toHaveBeenCalled();
+      } else {
+        expect(agentClient.prompt).toHaveBeenCalledWith(
+          'acp-stale',
+          [{ type: 'text', text: 'hello' }],
+          {
+            signal: expect.any(AbortSignal),
+          }
+        );
       }
-    );
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
-    expect(sessionManager.createSession).toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-      'acp-restored',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
-      }
-    );
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    expect(history[0]?.status).toBe('handled');
-  });
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith(
+        sessionId,
+        true,
+        'acp-replacement'
+      );
+      expect(sessionManager.createSession).toHaveBeenCalled();
+      expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
+        'acp-restored',
+        [{ type: 'text', text: 'hello' }],
+        {
+          signal: expect.any(AbortSignal),
+        }
+      );
+      expect(deps.recordChatFailure).not.toHaveBeenCalled();
+      expect(history[0]?.status).toBe('handled');
+    }
+  );
 
   it('does not write legacy code-session tags when Code Collab is enabled for new turns', async () => {
     let history: Array<Record<string, unknown>> = [
@@ -2319,9 +2369,9 @@ describe('SessionExecutionService', () => {
       transport: 'r2',
       uploadedAt: 123,
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
-    const buildAcpPromptBlocks = vi.fn(
-      async (): Promise<ContentBlock[]> => [{ type: 'text', text: 'built prompt' }]
-    );
+    const buildAcpPromptBlocks = vi.fn(async (): Promise<ContentBlock[]> => [
+      { type: 'text', text: 'built prompt' },
+    ]);
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => null),
