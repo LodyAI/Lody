@@ -2,9 +2,62 @@ import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 
 import { cn } from '@/lib/utils';
+import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 
-function Drawer({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
+const DrawerViewportContext = React.createContext(false);
+
+function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
+  // Android-compatible shells can resize the layout viewport along with the
+  // keyboard. Vaul captures that already-shrunk drawer as its initial height
+  // and can restore it on hide (e.g. HarmonyOS / Zhuoyi). Side drawers instead
+  // keep their CSS height and track only the currently occluded bottom edge.
+  const followViewport =
+    (props.direction === 'right' || props.direction === 'left') &&
+    !props.snapPoints &&
+    repositionInputs !== false &&
+    isNativeAppShell() &&
+    !isNativeIOSAppShell();
+
+  return (
+    <DrawerViewportContext.Provider value={followViewport}>
+      <DrawerPrimitive.Root
+        data-slot="drawer"
+        {...props}
+        repositionInputs={followViewport ? false : repositionInputs}
+      />
+    </DrawerViewportContext.Provider>
+  );
+}
+
+function useDrawerViewportBottom() {
+  const enabled = React.useContext(DrawerViewportContext);
+  const [bottom, setBottom] = React.useState(0);
+
+  React.useLayoutEffect(() => {
+    if (!enabled) return;
+    const viewport = window.visualViewport;
+    const measure = () => {
+      // A resized WebView needs no extra inset; an overlay keyboard does.
+      // Never infer keyboard visibility from focus or resize-event counts:
+      // Android's Back button can hide the keyboard while retaining focus.
+      setBottom(
+        viewport && viewport.scale === 1
+          ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+          : 0
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    viewport?.addEventListener('resize', measure);
+    viewport?.addEventListener('scroll', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      viewport?.removeEventListener('resize', measure);
+      viewport?.removeEventListener('scroll', measure);
+    };
+  }, [enabled]);
+
+  return enabled ? bottom : undefined;
 }
 
 function DrawerTrigger({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
@@ -41,9 +94,11 @@ function DrawerContent({
   style,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+  const viewportBottom = useDrawerViewportBottom();
   const mergedStyle = {
     '--lody-drawer-width': '256px',
     ...style,
+    ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
   } as React.CSSProperties;
 
   return (

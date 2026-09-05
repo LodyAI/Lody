@@ -12,6 +12,12 @@ Parent `AGENTS.md` files also apply.
 
 ## Keyboard navigation
 
+- Native non-iOS side drawers without snap points use `ui/drawer.tsx`'s live
+  viewport bottom inset when input repositioning is enabled. Never cache a
+  keyboard-shrunken drawer height or infer keyboard visibility from focus:
+  Android-compatible shells can resize the WebView and retain input focus on hide.
+  Preserve the separate iOS native keyboard offset and bottom-sheet handling.
+
 - Each independently navigable list owns one `FocusScope` and one
   `useListKeyboardNavigation` call. Rows expose `data-scope-item` plus a stable
   `data-id`; Up/Down (and J/K) move only in the active scope, while the shell's
