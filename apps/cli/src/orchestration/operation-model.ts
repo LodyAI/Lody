@@ -6,7 +6,18 @@
 export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'consumed';
+  delivery:
+    | 'absent'
+    | 'pending'
+    | 'claimed'
+    | 'prepared'
+    | 'started'
+    | 'uncertain'
+    | 'finalizing'
+    | 'uncertain_finalizing'
+    | 'consumed';
+  deliveryClaimOwner: 'none' | 'current' | 'previous';
+  deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
   archived: boolean;
@@ -24,7 +35,17 @@ export type OrchestrationModelAction =
   | 'deadline'
   | 'enqueue_user'
   | 'schedule'
+  | 'prepare_turn'
+  | 'start_turn'
+  | 'history_write_fail'
   | 'complete_turn'
+  | 'fail_turn'
+  | 'interrupt_turn'
+  | 'cancel_turn'
+  | 'complete_finalization'
+  | 'finalization_consume_fail'
+  | 'restart'
+  | 'recover_orphans'
   | 'archive'
   | 'restore'
   | 'delete_configuration';
@@ -33,6 +54,8 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   operation: 'absent',
   targetInput: 'absent',
   delivery: 'absent',
+  deliveryClaimOwner: 'none',
+  deliveryAttempts: 0,
   activeTurn: 'none',
   queuedUsers: 0,
   archived: false,
@@ -92,17 +115,144 @@ export const stepOrchestrationModel = (
       if (next.queuedUsers > 0) {
         next.queuedUsers -= 1;
         next.activeTurn = 'user';
+      } else if (next.delivery === 'uncertain') {
+        next.delivery = 'uncertain_finalizing';
+        next.deliveryClaimOwner = 'current';
       } else if (next.delivery === 'pending') {
-        next.completionTurnWrites += 1;
-        next.delivery = 'consumed';
-        if (next.configurationAvailable) {
+        if (!next.configurationAvailable || next.deliveryAttempts >= 2) {
+          next.delivery = 'finalizing';
+          next.deliveryClaimOwner = 'current';
+        } else {
+          next.delivery = 'claimed';
+          next.deliveryClaimOwner = 'current';
           next.activeTurn = 'delivery';
-          next.chainDepth += 1;
         }
       }
       break;
+    case 'prepare_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'claimed' &&
+        next.deliveryClaimOwner === 'current' &&
+        next.deliveryAttempts < 2
+      ) {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+        next.delivery = 'prepared';
+        if (next.deliveryAttempts === 0) {
+          next.chainDepth += 1;
+        }
+        next.deliveryAttempts += 1;
+      }
+      break;
+    case 'start_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'prepared' &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.delivery = 'started';
+      }
+      break;
+    case 'history_write_fail':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'claimed' &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.delivery = 'pending';
+        next.deliveryClaimOwner = 'none';
+        next.activeTurn = 'none';
+      }
+      break;
     case 'complete_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
       next.activeTurn = 'none';
+      break;
+    case 'fail_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'interrupt_turn':
+      if (next.activeTurn === 'delivery' && next.delivery === 'started') {
+        next.delivery = 'uncertain';
+        next.deliveryClaimOwner = 'none';
+      } else if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'claimed' || next.delivery === 'prepared')
+      ) {
+        next.delivery = 'pending';
+        next.deliveryClaimOwner = 'none';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'cancel_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'claimed' || next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'finalization_consume_fail':
+      if (
+        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+      }
+      break;
+    case 'complete_finalization':
+      if (
+        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
+      break;
+    case 'restart':
+      if (
+        (next.delivery === 'claimed' ||
+          next.delivery === 'prepared' ||
+          next.delivery === 'started' ||
+          next.delivery === 'finalizing' ||
+          next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.deliveryClaimOwner = 'previous';
+      }
+      next.activeTurn = 'none';
+      break;
+    case 'recover_orphans':
+      if (
+        (next.delivery === 'claimed' ||
+          next.delivery === 'prepared' ||
+          next.delivery === 'started' ||
+          next.delivery === 'finalizing' ||
+          next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'previous'
+      ) {
+        next.delivery =
+          next.delivery === 'started' || next.delivery === 'uncertain_finalizing'
+            ? 'uncertain'
+            : 'pending';
+        next.deliveryClaimOwner = 'none';
+      }
       break;
     case 'archive':
       next.archived = true;
@@ -130,8 +280,29 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.operation === 'finished' && state.targetInput === 'retry_scheduled') {
     throw new Error('a terminal Operation retained a materialization retry');
   }
-  if (state.activeTurn === 'delivery' && state.delivery !== 'consumed') {
-    throw new Error('a Delivery continuation started before the Delivery was claimed');
+  if (
+    state.activeTurn === 'delivery' &&
+    state.delivery !== 'claimed' &&
+    state.delivery !== 'prepared' &&
+    state.delivery !== 'started'
+  ) {
+    throw new Error('a Delivery continuation is active without a durable attempt claim');
+  }
+  if (
+    (state.delivery === 'claimed' ||
+      state.delivery === 'prepared' ||
+      state.delivery === 'started' ||
+      state.delivery === 'finalizing' ||
+      state.delivery === 'uncertain_finalizing') !==
+    (state.deliveryClaimOwner !== 'none')
+  ) {
+    throw new Error('Delivery claim state and its fenced owner disagree');
+  }
+  if (state.activeTurn === 'delivery' && state.deliveryClaimOwner !== 'current') {
+    throw new Error('a Delivery turn is active under a non-current Worker boot');
+  }
+  if (state.deliveryAttempts > 2) {
+    throw new Error('a Delivery exceeded its bounded attempt count');
   }
   if (state.chainDepth > 5) {
     throw new Error('machine-originated chain exceeded the fixed depth cap');
@@ -148,7 +319,17 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'deadline',
     'enqueue_user',
     'schedule',
+    'prepare_turn',
+    'start_turn',
+    'history_write_fail',
     'complete_turn',
+    'fail_turn',
+    'interrupt_turn',
+    'cancel_turn',
+    'complete_finalization',
+    'finalization_consume_fail',
+    'restart',
+    'recover_orphans',
     'archive',
     'restore',
     'delete_configuration',

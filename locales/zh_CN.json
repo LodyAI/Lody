@@ -3476,6 +3476,7 @@
   "orchestration.operationCancelled": "操作 {{id}} 已取消",
   "orchestration.operationItemSummary": "共 {{total}} 项 · {{succeeded}} 项成功 · {{failed}} 项失败 · {{cancelled}} 项取消",
   "orchestration.continuationNotStarted": "保存的 Agent 配置不可用，因此没有启动后续执行。",
+  "orchestration.continuationUncertain": "后续执行可能在中断前已经启动，因此没有自动重放。请检查现有输出，并在需要时手动继续。",
   "commands.tasks.quickAdd": "新建任务",
   "commands.tasks.open": "打开任务",
   "tasks.title": "任务",

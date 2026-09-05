@@ -233,6 +233,11 @@ type TurnRuntimeState = {
   cancelFinalized: boolean;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
+  settlement?: {
+    callback: (settlement: SessionTurnSettlement) => Promise<void>;
+    forcedOutcome?: SessionTurnSettlement;
+    completed: boolean;
+  };
   /** Logical prompt tail currently owned by the one session-owner fiber. */
   activePromptRun?: PromptHandoffRun;
   /** Serialized ancillary finalization for yielded logical turns. */
@@ -310,6 +315,14 @@ type VisibleSessionTurnOptions = {
   session?: ISession;
   userTurnId?: string;
   /**
+   * Turn that deterministically owns the assistant history entry. Delivery
+   * uses its system Turn here while leaving userTurnId absent so it cannot
+   * mutate user dispatch status or pointers.
+   */
+  assistantEntryParentTurnId?: string;
+  onTurnStarted?: () => Promise<boolean>;
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
+  /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
    * through a TurnHistoryGate (created in beginConversationTurn).
@@ -333,10 +346,18 @@ type SessionDispatchOptions = {
   /**
    * Runs only after this process has synchronously claimed the per-Session
    * visible-turn owner. Delivery uses this to append its system cause without
-   * racing a user dispatch between the idle check and the history write.
+   * racing a user dispatch between the idle check and the history write. False
+   * means an external durable claim lost contention; the turn is released
+   * without history, ACP, failure, or settlement side effects.
    */
-  onTurnClaimed?: () => Promise<void>;
+  onTurnClaimed?: () => Promise<boolean>;
+  /** Runs immediately before the request can cross into the ACP provider. */
+  onTurnStarted?: () => Promise<boolean>;
+  /** Reports whether the provider was handled, cancelled, never started, or left uncertain. */
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
 };
+
+type SessionTurnSettlement = 'handled' | 'cancelled' | 'not_started' | 'uncertain';
 
 export type PreparedSessionDispatchRequest =
   | { mode: 'create'; request: SessionCreateRequestValidated }
@@ -368,6 +389,11 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   reason: ChatFailedReason;
 }> {}
 
+class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
+  sessionId: SessionId;
+  turnId: string;
+}> {}
+
 const isSessionTurnCancelled = (error: unknown): error is SessionTurnCancelled => {
   return (
     typeof error === 'object' &&
@@ -383,6 +409,15 @@ const isSessionTurnHalted = (error: unknown): error is SessionTurnHalted => {
     error !== null &&
     '_tag' in error &&
     error._tag === 'SessionTurnHalted'
+  );
+};
+
+const isSessionTurnClaimContended = (error: unknown): error is SessionTurnClaimContended => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'SessionTurnClaimContended'
   );
 };
 
@@ -1273,6 +1308,10 @@ export class SessionExecutionService {
           return reject('stale-turn', 'Steer application arrived after ownership changed');
         }
 
+        // Provider acceptance hands the original dispatch forward. A later
+        // user-owned steer turn must not cancel or reopen that responsibility.
+        await this.settleVisibleTurn(runtime, 'handled', { force: true });
+
         try {
           await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
         } catch (error) {
@@ -1532,7 +1571,8 @@ export class SessionExecutionService {
     sessionId: SessionId,
     turnId: string,
     userTurnId?: string,
-    session?: ISession
+    session?: ISession,
+    onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>
   ): TurnRuntimeState {
     return {
       sessionId,
@@ -1550,8 +1590,28 @@ export class SessionExecutionService {
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
+      ...(onTurnSettled ? { settlement: { callback: onTurnSettled, completed: false } } : {}),
       yieldedFinalization: Promise.resolve(),
     };
+  }
+
+  private async settleVisibleTurn(
+    runtime: TurnRuntimeState,
+    outcome: SessionTurnSettlement,
+    options: { force?: boolean } = {}
+  ): Promise<void> {
+    const settlement = runtime.settlement;
+    if (!settlement || settlement.completed) return;
+    if (options.force) settlement.forcedOutcome = outcome;
+    const effectiveOutcome = settlement.forcedOutcome ?? outcome;
+    try {
+      await settlement.callback(effectiveOutcome);
+      settlement.completed = true;
+    } catch (error) {
+      this.deps.logger.error(
+        `[${runtime.sessionId}] Failed to persist ${effectiveOutcome} turn settlement: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private getTurnRuntime(sessionId: SessionId, turnId: string): TurnRuntimeState | undefined {
@@ -2530,6 +2590,7 @@ export class SessionExecutionService {
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
     const { sessionId, sessionDoc, session, userTurnId } = options;
+    const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
       sessionId,
       ...(userTurnId ? { userTurnId } : {}),
@@ -2558,13 +2619,19 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
-      turnId = this.deps.beginConversationTurn(sessionId, userTurnId, {
+      turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
         deferACPUpdateTarget: true,
       });
       this.markCurrentTurn(sessionId, turnId);
-      runtime = this.createTurnRuntime(sessionId, turnId, userTurnId, session);
+      runtime = this.createTurnRuntime(
+        sessionId,
+        turnId,
+        userTurnId,
+        session,
+        options.onTurnSettled
+      );
       this.registerTurnRuntime(runtime);
     } finally {
       releaseConflict();
@@ -2697,7 +2764,7 @@ export class SessionExecutionService {
                         sessionDoc,
                         runtime.turnId,
                         runtime.session?.agentClient?.currentModel,
-                        userTurnId
+                        assistantEntryParentTurnId
                       )
                   )
                 );
@@ -2742,6 +2809,18 @@ export class SessionExecutionService {
                 if (!agentClient || !acpSessionId) {
                   yield* Effect.fail(new Error('Agent session was not ready'));
                   return undefined;
+                }
+                if (options.onTurnStarted) {
+                  const started = yield* self.tryPromise(options.onTurnStarted);
+                  if (!started) {
+                    yield* Effect.fail(
+                      new SessionTurnClaimContended({
+                        sessionId,
+                        turnId: runtime.turnId,
+                      })
+                    );
+                    return undefined;
+                  }
                 }
                 runtime.terminateSessionOnCancel = false;
                 self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
@@ -2809,13 +2888,17 @@ export class SessionExecutionService {
 
     const fiber = Effect.runFork(program);
     runtime.fiber = fiber;
+    let settlement: SessionTurnSettlement | undefined;
     try {
       await this.awaitTurnFiber(fiber, sessionId, turnId);
       if (outcome === 'unknown') {
         outcome = 'completed';
       }
+      settlement = 'handled';
     } catch (error) {
-      if (isSessionTurnHalted(error)) {
+      if (isSessionTurnClaimContended(error)) {
+        outcome = 'claim-contended';
+      } else if (isSessionTurnHalted(error)) {
         outcome = `halted-${error.reason}`;
         await this.finalizeHaltedTurn({
           sessionId,
@@ -2823,10 +2906,8 @@ export class SessionExecutionService {
           turnId: runtime.turnId,
           reason: error.reason,
         });
-        return outcome;
-      }
-
-      if (
+        settlement = 'handled';
+      } else if (
         isSessionTurnCancelled(error) ||
         runtime.cancelFinalized ||
         runtime.cancelRequested ||
@@ -2834,25 +2915,37 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
-        return outcome;
+        const explicitlyCancelled =
+          runtime.cancelRequested ||
+          this.isTurnCancelled(sessionId, runtime.turnId) ||
+          (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId));
+        settlement = explicitlyCancelled
+          ? 'cancelled'
+          : runtime.promptStarted
+            ? 'uncertain'
+            : 'not_started';
+      } else {
+        await this.handleVisibleTurnUnhandledError({
+          sessionId,
+          sessionDoc,
+          userTurnId: runtime.userTurnId,
+          runtime,
+          error,
+          code: effectiveErrorContext.code,
+          describe: effectiveErrorContext.describe,
+          onUnhandledError: effectiveErrorContext.onUnhandledError,
+        });
+        outcome = 'unhandled-error-recorded';
+        settlement = 'handled';
       }
-
-      await this.handleVisibleTurnUnhandledError({
-        sessionId,
-        sessionDoc,
-        userTurnId: runtime.userTurnId,
-        runtime,
-        error,
-        code: effectiveErrorContext.code,
-        describe: effectiveErrorContext.describe,
-        onUnhandledError: effectiveErrorContext.onUnhandledError,
-      });
-      outcome = 'unhandled-error-recorded';
     } finally {
       if (!runtime.promptStarted) {
         this.deps.clearConversationTurn(sessionId, runtime.turnId);
       }
       span.end({ outcome, turnId });
+    }
+    if (settlement) {
+      await this.settleVisibleTurn(runtime, settlement);
     }
     return outcome;
   }
@@ -3277,7 +3370,18 @@ export class SessionExecutionService {
     }
     const body = dispatchOptions?.onTurnClaimed
       ? (ctx: VisibleSessionTurnContext) =>
-          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(Effect.flatMap(() => turn.body(ctx)))
+          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(
+            Effect.flatMap((claimed) =>
+              claimed
+                ? turn.body(ctx)
+                : Effect.fail(
+                    new SessionTurnClaimContended({
+                      sessionId: message.sessionId,
+                      turnId: ctx.turnId,
+                    })
+                  )
+            )
+          )
       : turn.body;
     await this.runVisibleSessionTurn(turn.options, body);
   }
@@ -4002,6 +4106,11 @@ export class SessionExecutionService {
         sessionDoc,
         ...(session ? { session } : {}),
         userTurnId: executionUserTurnId,
+        ...(dispatchOptions?.dispatchSource === 'delivery'
+          ? { assistantEntryParentTurnId: userTurnId }
+          : {}),
+        ...(dispatchOptions?.onTurnStarted ? { onTurnStarted: dispatchOptions.onTurnStarted } : {}),
+        ...(dispatchOptions?.onTurnSettled ? { onTurnSettled: dispatchOptions.onTurnSettled } : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),

@@ -34,11 +34,24 @@ import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher'
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import type { SessionUserResolver } from '@/session/session-user-resolver';
 
-import { getLodyOperationStorePath, LodyOperationStore } from './operation-store';
+import {
+  DELIVERY_MAX_ATTEMPTS,
+  getLodyOperationStorePath,
+  LodyOperationStore,
+} from './operation-store';
 
 type TargetSubscription = {
   unsubscribe: () => void;
 };
+
+type DeliveryTurnSettlement = 'handled' | 'cancelled' | 'not_started' | 'uncertain';
+
+type ObservedDeliverySettlement = {
+  claimId: string;
+} & (
+  | { outcome: DeliveryTurnSettlement }
+  | { outcome: 'finalize'; pendingHistoryWrite?: () => Promise<void> }
+);
 
 const TARGET_OUTPUT_PREVIEW_MAX_BYTES = 8 * 1024;
 const MATERIALIZATION_RETRY_MIN_MS = 1_000;
@@ -50,6 +63,11 @@ const MATERIALIZATION_RETRY_MAX_MS = 30_000;
 // default Operation deadline is 24h, so a legitimately finished completion
 // always has at least this window to reach the requester's idle boundary.
 const DELIVERY_EXPIRY_GRACE_MS = 8 * 60 * 60 * 1_000;
+// This module is loaded once by each CLI Worker process. All workspace
+// coordinators in that Worker share one boot identity, while a replacement
+// Worker necessarily receives a fresh identity after the supervisor's child
+// exit barrier (or the foreground Host-lease acquisition barrier).
+const WORKER_BOOT_ID = randomUUID();
 
 const truncateTargetOutput = (
   text: string
@@ -120,6 +138,7 @@ export type LodyOperationCoordinatorOptions = {
     directory: string,
     onChange: (filename: string | Buffer | null) => void
   ) => Pick<FSWatcher, 'close'>;
+  workerBootId?: string;
   materializeTarget: (
     operation: StoredLodyOperation,
     item: Extract<LodyOperationItemResult, { status: 'active' }>,
@@ -128,16 +147,14 @@ export type LodyOperationCoordinatorOptions = {
   ) => Promise<void>;
 };
 
+const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
+  entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
+
 const terminalAssistantFor = (
   history: SessionHistoryInput[],
   userTurnId: string
 ): SessionHistoryInput | undefined =>
-  history.find(
-    (entry) =>
-      entry.role === 'assistant' &&
-      entry.userTurnId === userTurnId &&
-      (entry.finished === true || typeof entry.endedAt === 'number')
-  );
+  history.find((entry) => entry.userTurnId === userTurnId && isTerminalAssistantEntry(entry));
 
 const completionText = (operation: StoredLodyOperation): string =>
   [
@@ -158,6 +175,7 @@ export class LodyOperationCoordinator {
   private readonly deliveryChains = new Map<SessionId, Promise<void>>();
   private readonly queuedDeliveryIds = new Set<string>();
   private readonly dirtyDeliveryReasons = new Map<string, string>();
+  private readonly observedDeliverySettlements = new Map<string, ObservedDeliverySettlement>();
   private readonly operationAbortControllers = new Map<string, AbortController>();
   private metaWatch: RepoWatchHandle | null = null;
   private store: LodyOperationStore | null = null;
@@ -165,11 +183,13 @@ export class LodyOperationCoordinator {
   private storeWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private readonly materializationClaimToken = randomUUID();
+  private readonly workerBootId: string;
 
   constructor(private readonly options: LodyOperationCoordinatorOptions) {
     const storePath = options.storePath ?? getLodyOperationStorePath(options.machineId);
     this.storeFactory = options.storeFactory ?? (() => new LodyOperationStore(storePath));
     this.now = options.now ?? getServerNow;
+    this.workerBootId = options.workerBootId ?? WORKER_BOOT_ID;
   }
 
   start(): void {
@@ -193,6 +213,15 @@ export class LodyOperationCoordinator {
     // event loop (multiple workspace coordinators watching the shared
     // machine-level store amplify it).
     this.store = this.storeFactory();
+    const recoveredClaims = this.store.recoverOrphanedDeliveryClaims(
+      this.options.workspaceId,
+      this.workerBootId
+    );
+    if (recoveredClaims > 0) {
+      this.options.logger.warn(
+        `[orchestration] Recovered ${recoveredClaims} orphaned Delivery claim(s) from an exited Worker`
+      );
+    }
     const storePath = this.options.storePath ?? getLodyOperationStorePath(this.options.machineId);
     const storeBasename = path.basename(storePath);
     const watchOperationStore =
@@ -224,6 +253,25 @@ export class LodyOperationCoordinator {
     this.storeWatch = null;
     if (this.storeWakeTimer) clearTimeout(this.storeWakeTimer);
     this.storeWakeTimer = null;
+    if (this.store) {
+      try {
+        const abandonedClaims = this.store.abandonDeliveryClaimsOwnedBy(
+          this.options.workspaceId,
+          this.workerBootId
+        );
+        if (abandonedClaims > 0) {
+          this.options.logger.warn(
+            `[orchestration] Abandoned ${abandonedClaims} Delivery claim(s) while stopping the workspace coordinator`
+          );
+        }
+      } catch (error) {
+        this.options.logger.warn(
+          `[orchestration] Could not abandon Delivery claims during coordinator stop: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
     this.store?.close();
     this.store = null;
     for (const subscription of this.targetSubscriptions.values()) {
@@ -243,6 +291,7 @@ export class LodyOperationCoordinator {
     this.deliveryChains.clear();
     this.queuedDeliveryIds.clear();
     this.dirtyDeliveryReasons.clear();
+    this.observedDeliverySettlements.clear();
     for (const controller of this.operationAbortControllers.values()) controller.abort();
     this.operationAbortControllers.clear();
   }
@@ -780,8 +829,105 @@ export class LodyOperationCoordinator {
     );
   }
 
+  private async settleObservedDeliveryClaim(
+    delivery: StoredLodyDelivery,
+    settlement: ObservedDeliverySettlement
+  ): Promise<StoredLodyDelivery> {
+    const previous = this.observedDeliverySettlements.get(delivery.deliveryId);
+    if (!previous || previous.claimId === settlement.claimId) {
+      this.observedDeliverySettlements.set(delivery.deliveryId, settlement);
+    }
+    if (settlement.outcome === 'finalize' && settlement.pendingHistoryWrite) {
+      const current = this.withStore((store) =>
+        store.getDelivery(delivery.requesterSessionId, delivery.operationId)
+      );
+      if (
+        current.activeClaimWorkerBootId !== this.workerBootId ||
+        current.activeClaimId !== settlement.claimId
+      ) {
+        if (this.observedDeliverySettlements.get(delivery.deliveryId) === settlement) {
+          this.observedDeliverySettlements.delete(delivery.deliveryId);
+        }
+        return current;
+      }
+      await settlement.pendingHistoryWrite();
+      delete settlement.pendingHistoryWrite;
+    }
+    // History writes can yield across workspace stop or claim replacement.
+    const current = this.withStore((store) => {
+      let latest = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+      if (
+        latest.activeClaimWorkerBootId !== this.workerBootId ||
+        latest.activeClaimId !== settlement.claimId
+      ) {
+        return latest;
+      }
+      if (
+        settlement.outcome === 'handled' ||
+        settlement.outcome === 'cancelled' ||
+        settlement.outcome === 'finalize'
+      ) {
+        return store.consumeClaimedDelivery(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        ).delivery;
+      }
+      if (settlement.outcome === 'uncertain') {
+        store.markClaimedDeliveryExecutionUncertain(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        );
+      } else {
+        store.releaseDeliveryClaim(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        );
+      }
+      latest = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+      return latest;
+    });
+    if (
+      current.activeClaimWorkerBootId !== this.workerBootId ||
+      current.activeClaimId !== settlement.claimId
+    ) {
+      if (this.observedDeliverySettlements.get(delivery.deliveryId) === settlement) {
+        this.observedDeliverySettlements.delete(delivery.deliveryId);
+      }
+    }
+    return current;
+  }
+
   private async deliverIfRunnable(delivery: StoredLodyDelivery, reason: string): Promise<void> {
     if (!this.started) return;
+    delivery = this.withStore((store) =>
+      store.getDelivery(delivery.requesterSessionId, delivery.operationId)
+    );
+    if (delivery.state === 'consumed') {
+      this.observedDeliverySettlements.delete(delivery.deliveryId);
+      return;
+    }
+    // A claim is exclusive regardless of owner. Foreign-boot claims
+    // are removed only once during Worker startup, after the lifecycle barrier.
+    if (delivery.activeClaimId || delivery.activeClaimWorkerBootId) {
+      const settlement = this.observedDeliverySettlements.get(delivery.deliveryId);
+      if (
+        settlement &&
+        delivery.activeClaimWorkerBootId === this.workerBootId &&
+        delivery.activeClaimId === settlement.claimId
+      ) {
+        await this.settleObservedDeliveryClaim(delivery, settlement);
+      } else if (settlement) {
+        this.observedDeliverySettlements.delete(delivery.deliveryId);
+      }
+      return;
+    }
+    this.observedDeliverySettlements.delete(delivery.deliveryId);
     const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
       getSessionRoomId(delivery.requesterSessionId)
     );
@@ -793,33 +939,35 @@ export class LodyOperationCoordinator {
     );
     this.subscribeTarget(delivery.requesterSessionId, sessionDoc);
 
-    // Durable recovery evidence is deliberately checked before configuration
-    // lookup or remote sync. A completed continuation (or an authoritative
-    // unavailable completion) must only consume the Delivery, regardless of
-    // repo-meta size or later configuration changes. An active turn alone is
-    // not durable evidence: leave the Delivery pending until history records an
-    // assistant response or chat_failed notice.
     const execution = this.options.executionService.getExecutionSnapshot(
       delivery.requesterSessionId
     );
-    const historyBeforeDispatch = await sessionDoc.getHistory();
-    const continuationEvidence = this.getContinuationEvidence(
-      historyBeforeDispatch,
-      delivery.systemTurnId
-    );
-    if (continuationEvidence) {
-      this.consumeDelivery(delivery, reason, continuationEvidence);
-      return;
-    }
     const operation = this.withStore((store) =>
       store.get(delivery.requesterSessionId, delivery.operationId)
     );
     if (this.now() >= Date.parse(operation.deadlineAt) + DELIVERY_EXPIRY_GRACE_MS) {
-      this.consumeDelivery(delivery, reason, 'expired_stale');
+      await this.finalizeDeliveryWithoutExecution(
+        sessionDoc,
+        operation,
+        delivery,
+        reason,
+        'expired_stale',
+        undefined,
+        false,
+        delivery.executionPhase === 'uncertain' ? 'uncertain' : 'ready'
+      );
+      return;
+    }
+    if (delivery.executionPhase === 'uncertain') {
+      await this.failUncertainDelivery(sessionDoc, operation, delivery, reason);
       return;
     }
     if (execution.hasActiveTurn) return;
     if (this.options.dispatchWatcher.hasPendingDispatch(delivery.requesterSessionId)) return;
+    if (delivery.attemptCount >= DELIVERY_MAX_ATTEMPTS) {
+      await this.failExhaustedDelivery(sessionDoc, operation, delivery, reason);
+      return;
+    }
 
     const configuration = await this.resolveFrozenConfiguration(operation, delivery, reason);
     if (configuration === 'unknown') {
@@ -827,14 +975,57 @@ export class LodyOperationCoordinator {
       return;
     }
     if (configuration === 'unavailable') {
-      await this.writeCompletionTurn(sessionDoc, operation, delivery, false);
-      this.consumeDelivery(delivery, reason, 'configuration_unavailable');
+      await this.finalizeDeliveryWithoutExecution(
+        sessionDoc,
+        operation,
+        delivery,
+        reason,
+        'configuration_unavailable',
+        {
+          code: 'CONFIGURATION_UNAVAILABLE',
+          message: 'The frozen continuation agent configuration is no longer available.',
+        }
+      );
       return;
     }
 
     const frozen = operation.frozenContinuationConfig.inputConfig;
     const requester = await this.resolveRequesterIdentity(operation.requesterUserId);
-    await this.options.executionService.continueSession(
+    const attemptId = randomUUID();
+    let observedSettlement: DeliveryTurnSettlement | undefined;
+    const settleResidualClaim = () =>
+      observedSettlement
+        ? this.settleObservedDeliveryClaim(delivery, {
+            claimId: attemptId,
+            outcome: observedSettlement,
+          })
+        : this.withStore((store) => {
+            let current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+            if (
+              current.activeClaimWorkerBootId !== this.workerBootId ||
+              current.activeClaimId !== attemptId
+            ) {
+              return current;
+            }
+            if (current.executionPhase === 'started') {
+              store.markClaimedDeliveryExecutionUncertain(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              );
+            } else {
+              store.releaseDeliveryClaim(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              );
+            }
+            current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+            return current;
+          });
+    const continuation = this.options.executionService.continueSession(
       {
         type: 'session/chat',
         sessionId: delivery.requesterSessionId,
@@ -860,29 +1051,197 @@ export class LodyOperationCoordinator {
       {
         dispatchSource: 'delivery',
         onTurnClaimed: async () => {
-          await this.writeCompletionTurn(sessionDoc, operation, delivery, true);
+          if (!this.started) return false;
+          const claim = this.withStore((store) =>
+            store.claimDeliveryExecution(delivery.requesterSessionId, delivery.operationId, {
+              claimId: attemptId,
+              workerBootId: this.workerBootId,
+            })
+          );
+          if (claim.status !== 'claimed') {
+            this.options.logger.debug(
+              `[orchestration] Delivery ${delivery.deliveryId} claim lost status=${claim.status}`
+            );
+            return false;
+          }
+          try {
+            await this.writeCompletionTurn(sessionDoc, operation, delivery);
+            const prepared = this.withStore((store) =>
+              store.prepareClaimedDeliveryExecution(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              )
+            );
+            if (!prepared.prepared) {
+              this.withStore((store) =>
+                store.releaseDeliveryClaim(
+                  delivery.requesterSessionId,
+                  delivery.operationId,
+                  this.workerBootId,
+                  attemptId
+                )
+              );
+              this.options.logger.debug(
+                `[orchestration] Delivery ${delivery.deliveryId} execution start lost its claim`
+              );
+              return false;
+            }
+          } catch (error) {
+            this.withStore((store) =>
+              store.releaseDeliveryClaim(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              )
+            );
+            throw error;
+          }
+          return true;
+        },
+        onTurnStarted: async () =>
+          this.withStore((store) =>
+            store.markClaimedDeliveryExecutionStarted(
+              delivery.requesterSessionId,
+              delivery.operationId,
+              this.workerBootId,
+              attemptId
+            )
+          ),
+        onTurnSettled: async (outcome) => {
+          observedSettlement = outcome;
+          const settled = await this.settleObservedDeliveryClaim(delivery, {
+            claimId: attemptId,
+            outcome,
+          });
+          if (outcome === 'handled' || outcome === 'cancelled') {
+            this.options.logger.debug(
+              `[orchestration] Delivery ${delivery.deliveryId} consumed=${String(settled.state === 'consumed')}`
+            );
+          }
         },
       }
     );
-    const historyAfterExecution = await sessionDoc.getHistory();
-    const evidenceAfterExecution = this.getContinuationEvidence(
-      historyAfterExecution,
-      delivery.systemTurnId
-    );
-    if (evidenceAfterExecution) {
-      this.consumeDelivery(delivery, reason, evidenceAfterExecution);
+    try {
+      await continuation;
+    } catch (error) {
+      const afterInterruption = await settleResidualClaim();
+      if (afterInterruption.executionPhase === 'uncertain') {
+        await this.failUncertainDelivery(sessionDoc, operation, afterInterruption, reason);
+      }
+      if (
+        afterInterruption.state === 'pending' &&
+        !afterInterruption.activeClaimId &&
+        afterInterruption.attemptCount >= DELIVERY_MAX_ATTEMPTS
+      ) {
+        await this.failExhaustedDelivery(sessionDoc, operation, afterInterruption, reason);
+      }
+      throw error;
+    }
+    const afterExecution = await settleResidualClaim();
+    if (afterExecution.executionPhase === 'uncertain') {
+      await this.failUncertainDelivery(sessionDoc, operation, afterExecution, reason);
+      return;
+    }
+    if (
+      afterExecution.state === 'pending' &&
+      !afterExecution.activeClaimId &&
+      afterExecution.attemptCount >= DELIVERY_MAX_ATTEMPTS
+    ) {
+      await this.failExhaustedDelivery(sessionDoc, operation, afterExecution, reason);
     }
   }
 
-  private consumeDelivery(
+  private async failExhaustedDelivery(
+    sessionDoc: SessionDocument,
+    operation: StoredLodyOperation,
+    delivery: StoredLodyDelivery,
+    wakeReason: string
+  ): Promise<void> {
+    await this.finalizeDeliveryWithoutExecution(
+      sessionDoc,
+      operation,
+      delivery,
+      wakeReason,
+      'attempts_exhausted',
+      {
+        code: 'DELIVERY_ATTEMPTS_EXHAUSTED',
+        message: 'The completion continuation did not settle after two delivery attempts.',
+      },
+      true
+    );
+  }
+
+  private async failUncertainDelivery(
+    sessionDoc: SessionDocument,
+    operation: StoredLodyOperation,
+    delivery: StoredLodyDelivery,
+    wakeReason: string
+  ): Promise<void> {
+    await this.finalizeDeliveryWithoutExecution(
+      sessionDoc,
+      operation,
+      delivery,
+      wakeReason,
+      'execution_uncertain',
+      {
+        status: 'uncertain',
+        code: 'DELIVERY_EXECUTION_UNCERTAIN',
+        message:
+          'The completion continuation may have started before execution was interrupted. It was not replayed; review the session output and continue manually if needed.',
+      },
+      false,
+      'uncertain'
+    );
+  }
+
+  private async finalizeDeliveryWithoutExecution(
+    sessionDoc: SessionDocument,
+    operation: StoredLodyOperation,
     delivery: StoredLodyDelivery,
     wakeReason: string,
-    evidence: string
-  ): void {
+    evidence: string,
+    continuationFailure?: {
+      status?: 'not_started' | 'uncertain';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
+      message: string;
+    },
+    requireAttemptsExhausted = false,
+    requiredExecutionPhase: 'ready' | 'uncertain' = 'ready'
+  ): Promise<boolean> {
+    if (!this.started) return false;
     const startedAt = performance.now();
-    this.withStore((store) =>
-      store.consumeDelivery(delivery.requesterSessionId, delivery.operationId)
+    const claimId = randomUUID();
+    const claim = this.withStore((store) =>
+      store.claimDeliveryFinalization(delivery.requesterSessionId, delivery.operationId, {
+        claimId,
+        workerBootId: this.workerBootId,
+        requireAttemptsExhausted,
+        requiredExecutionPhase,
+      })
     );
+    if (claim.status !== 'claimed') {
+      this.options.logger.debug(
+        `[orchestration] Delivery ${delivery.deliveryId} finalization skipped status=${claim.status} reason=${evidence} wake=${wakeReason}`
+      );
+      return false;
+    }
+    const settled = await this.settleObservedDeliveryClaim(delivery, {
+      claimId,
+      outcome: 'finalize',
+      ...(continuationFailure
+        ? {
+            pendingHistoryWrite: () =>
+              this.writeCompletionTurn(sessionDoc, operation, delivery, continuationFailure),
+          }
+        : {}),
+    });
+    if (settled.state !== 'consumed') return false;
     const timer = this.configurationTimers.get(delivery.requesterSessionId);
     if (timer) clearTimeout(timer);
     this.configurationTimers.delete(delivery.requesterSessionId);
@@ -891,6 +1250,7 @@ export class LodyOperationCoordinator {
         performance.now() - startedAt
       ).toFixed(2)}`
     );
+    return true;
   }
 
   /**
@@ -980,7 +1340,14 @@ export class LodyOperationCoordinator {
     sessionDoc: SessionDocument,
     operation: StoredLodyOperation,
     delivery: StoredLodyDelivery,
-    configAvailable: boolean
+    continuationFailure?: {
+      status?: 'not_started' | 'uncertain';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
+      message: string;
+    }
   ): Promise<void> {
     if (!operation.completion) {
       throw new Error(`Finished Operation ${operation.operationId} has no completion.`);
@@ -991,13 +1358,13 @@ export class LodyOperationCoordinator {
       operationId: operation.operationId,
       operationKind: operation.kind,
       completion: operation.completion,
-      ...(!configAvailable
+      ...(continuationFailure
         ? {
             continuation: {
-              status: 'not_started' as const,
+              status: continuationFailure.status ?? ('not_started' as const),
               reason: {
-                code: 'CONFIGURATION_UNAVAILABLE' as const,
-                message: 'The frozen continuation agent configuration is no longer available.',
+                code: continuationFailure.code,
+                message: continuationFailure.message,
               },
             },
           }
@@ -1016,36 +1383,39 @@ export class LodyOperationCoordinator {
         chainDepth: operation.initiatorChainDepth + 1,
       },
     };
-    await sessionDoc.updateHistory((history) =>
-      history.some((entry) => entry.id === delivery.systemTurnId) ? history : [...history, turn]
-    );
-  }
-
-  private getContinuationEvidence(
-    history: SessionHistoryInput[],
-    systemTurnId: string
-  ): string | null {
-    const index = history.findIndex(
-      (entry) => entry.id === systemTurnId && entry.role === 'system'
-    );
-    if (index < 0) return null;
-    const completionWasUnavailable = history[index]?.items?.some(
-      (item) =>
-        item.type === 'operation_completion' &&
-        item.continuation?.status === 'not_started' &&
-        item.continuation.reason.code === 'CONFIGURATION_UNAVAILABLE'
-    );
-    if (completionWasUnavailable) return 'configuration_unavailable';
-    for (const entry of history.slice(index + 1)) {
-      if (entry.role === 'assistant') return 'assistant_history';
-      if (entry.role === 'user') return null;
-      if (
-        entry.role === 'system' &&
-        entry.items?.some((item) => item.type === 'system_notice' && item.name === 'chat_failed')
-      ) {
-        return 'chat_failed';
-      }
-    }
-    return null;
+    await sessionDoc.updateHistory((history) => {
+      const existing = history.find((entry) => entry.id === delivery.systemTurnId);
+      if (!existing) return [...history, turn];
+      if (existing.role !== 'system') return history;
+      return history.map((entry) =>
+        entry.id !== delivery.systemTurnId
+          ? entry
+          : {
+              ...entry,
+              items: entry.items?.map((existingItem) => {
+                if (
+                  existingItem.type !== 'operation_completion' ||
+                  existingItem.deliveryId !== delivery.deliveryId
+                ) {
+                  return existingItem;
+                }
+                if (continuationFailure) {
+                  return {
+                    ...existingItem,
+                    continuation: {
+                      status: continuationFailure.status ?? ('not_started' as const),
+                      reason: {
+                        code: continuationFailure.code,
+                        message: continuationFailure.message,
+                      },
+                    },
+                  };
+                }
+                const { continuation: _continuation, ...withoutContinuation } = existingItem;
+                return withoutContinuation;
+              }),
+            }
+      );
+    });
   }
 }

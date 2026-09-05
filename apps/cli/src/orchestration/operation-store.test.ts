@@ -72,6 +72,130 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('marks an existing legacy pending Delivery as execution-uncertain', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-migration-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const legacy = new Database(dbPath);
+    try {
+      legacy.exec(`
+        CREATE TABLE operations (
+          workspace_id TEXT NOT NULL,
+          owner_machine_id TEXT NOT NULL,
+          requester_session_id TEXT NOT NULL,
+          requester_user_id TEXT NOT NULL,
+          operation_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          canonical_command_json TEXT NOT NULL,
+          frozen_config_json TEXT NOT NULL,
+          initiator_chain_depth INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          deadline_at TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('active', 'finished')),
+          items_json TEXT NOT NULL,
+          completion_json TEXT,
+          finished_at TEXT,
+          PRIMARY KEY (requester_session_id, operation_id)
+        );
+        CREATE TABLE deliveries (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id TEXT NOT NULL,
+          requester_session_id TEXT NOT NULL,
+          operation_id TEXT NOT NULL,
+          delivery_id TEXT NOT NULL UNIQUE,
+          system_turn_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
+          initiator_chain_depth INTEGER NOT NULL,
+          completion_json TEXT NOT NULL,
+          consumed_at TEXT,
+          FOREIGN KEY (requester_session_id, operation_id)
+            REFERENCES operations (requester_session_id, operation_id)
+            ON DELETE CASCADE
+        );
+        INSERT INTO operations (
+          workspace_id, owner_machine_id, requester_session_id, requester_user_id,
+          operation_id, kind, fingerprint, canonical_command_json, frozen_config_json,
+          initiator_chain_depth, created_at, deadline_at, state, items_json,
+          completion_json, finished_at
+        ) VALUES (
+          'workspace-1', 'machine-1', 'legacy-requester', 'user-1',
+          'legacy-operation', 'session_chat', 'legacy-fingerprint', '{}',
+          '{"inputConfig":{}}', 0, '2026-07-20T00:00:00.000Z',
+          '2026-07-20T01:00:00.000Z', 'finished', '[]',
+          '{"type":"cancelled"}', '2026-07-20T00:01:00.000Z'
+        );
+        INSERT INTO deliveries (
+          workspace_id, requester_session_id, operation_id, delivery_id,
+          system_turn_id, state, initiator_chain_depth, completion_json
+        ) VALUES (
+          'workspace-1', 'legacy-requester', 'legacy-operation',
+          'operation:legacy-requester:legacy-operation:completion',
+          'operation-completion:legacy-requester:legacy-operation',
+          'pending', 0, '{"type":"cancelled"}'
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new LodyOperationStore(dbPath);
+    try {
+      migrated.accept(baseInput());
+      migrated.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(migrated.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
+        expect.objectContaining({
+          operationId: 'legacy-operation',
+          attemptCount: 0,
+          executionPhase: 'uncertain',
+        }),
+        expect.objectContaining({ attemptCount: 0, executionPhase: 'ready', state: 'pending' }),
+      ]);
+    } finally {
+      migrated.close();
+    }
+
+    const legacyReader = new Database(dbPath, { readonly: true });
+    try {
+      const columns = legacyReader.pragma('table_info(deliveries)') as Array<{ name: string }>;
+      expect(columns.map((column) => column.name)).toEqual([
+        'sequence',
+        'workspace_id',
+        'requester_session_id',
+        'operation_id',
+        'delivery_id',
+        'system_turn_id',
+        'state',
+        'initiator_chain_depth',
+        'completion_json',
+        'consumed_at',
+      ]);
+      expect(
+        legacyReader
+          .prepare(
+            'SELECT execution_phase, attempt_count, active_claim_id, active_claim_worker_boot_id FROM delivery_execution_state WHERE requester_session_id = ? AND operation_id = ?'
+          )
+          .get('legacy-requester', 'legacy-operation')
+      ).toEqual({
+        execution_phase: 'uncertain',
+        attempt_count: 0,
+        active_claim_id: null,
+        active_claim_worker_boot_id: null,
+      });
+    } finally {
+      legacyReader.close();
+    }
+
+    const reopened = new LodyOperationStore(dbPath);
+    try {
+      expect(
+        reopened.getDelivery('legacy-requester' as SessionId, 'legacy-operation')
+      ).toMatchObject({ state: 'pending', attemptCount: 0, executionPhase: 'uncertain' });
+    } finally {
+      reopened.close();
+    }
+  });
+
   it('accepts once and returns the same Operation for canonical-equivalent retries', async () => {
     const store = await makeStore();
     try {
@@ -187,6 +311,415 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('consumes only the active Delivery claim atomically', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-1',
+          workerBootId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'stale-attempt'
+        )
+      ).toMatchObject({ prepared: false, delivery: { attemptCount: 0 } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'stale-attempt'
+        )
+      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
+
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toMatchObject({
+        consumed: true,
+        delivery: { state: 'consumed' },
+      });
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('fences terminal finalization without spending an execution attempt', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'premature-exhaustion',
+          workerBootId: 'worker-a',
+          requireAttemptsExhausted: true,
+        })
+      ).toMatchObject({ status: 'not_ready', delivery: { attemptCount: 0 } });
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'finalization-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({
+        status: 'claimed',
+        delivery: { attemptCount: 0, activeClaimId: 'finalization-a' },
+      });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
+        })
+      ).toMatchObject({
+        status: 'in_flight',
+        delivery: { attemptCount: 0, activeClaimId: 'finalization-a' },
+      });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-b',
+          'finalization-a'
+        )
+      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'finalization-a'
+        )
+      ).toMatchObject({ consumed: true, delivery: { state: 'consumed', attemptCount: 0 } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('recovers an orphaned terminal claim without changing the execution count', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'finalization-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+
+      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'finalization-a'
+        )
+      ).toMatchObject({ consumed: false, delivery: { state: 'pending', attemptCount: 0 } });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('abandons only the stopped coordinator owner and fences its prepared callback', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed' });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
+
+      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-b')).toBe(0);
+      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
+        executionPhase: 'prepared',
+        activeClaimId: 'attempt-a',
+        activeClaimWorkerBootId: 'worker-a',
+      });
+      expect(store.abandonDeliveryClaimsOwnedBy('workspace-1' as WorkspaceId, 'worker-a')).toBe(1);
+      expect(store.getDelivery('requester-1' as SessionId, 'review-round-1')).toMatchObject({
+        executionPhase: 'ready',
+        attemptCount: 1,
+      });
+      expect(
+        store.markClaimedDeliveryExecutionStarted(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toBe(false);
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('quarantines an orphaned claim after provider execution starts', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { executionPhase: 'claimed' } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({
+        prepared: true,
+        delivery: { attemptCount: 1, executionPhase: 'prepared' },
+      });
+      expect(
+        store.markClaimedDeliveryExecutionStarted(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toBe(true);
+
+      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
+      const recovered = store.getDelivery('requester-1' as SessionId, 'review-round-1');
+      expect(recovered).toMatchObject({
+        state: 'pending',
+        executionPhase: 'uncertain',
+        attemptCount: 1,
+      });
+      expect(recovered).not.toHaveProperty('activeClaimId');
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
+        })
+      ).toMatchObject({ status: 'in_flight', delivery: { executionPhase: 'uncertain' } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('permits one prepared Delivery recovery and then exhausts attempts', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-1',
+          workerBootId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
+      expect(
+        store.releaseDeliveryClaim(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toBe(true);
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-2',
+          workerBootId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-2'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 2 } });
+      expect(
+        store.releaseDeliveryClaim(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-2'
+        )
+      ).toBe(true);
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-3',
+          workerBootId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'exhausted', delivery: { attemptCount: 2, state: 'pending' } });
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'finalization-1',
+          workerBootId: 'daemon-1',
+          requireAttemptsExhausted: true,
+        })
+      ).toMatchObject({
+        status: 'claimed',
+        delivery: { attemptCount: 2, activeClaimId: 'finalization-1' },
+      });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'finalization-1'
+        )
+      ).toMatchObject({ consumed: true, delivery: { state: 'consumed', attemptCount: 2 } });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('fences concurrent Workers and recovers only attempts from an older boot', async () => {
+    const store = await makeStore();
+    try {
+      store.accept(baseInput());
+      store.finish('requester-1' as SessionId, 'review-round-1', { type: 'cancelled' });
+
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-a',
+          workerBootId: 'worker-a',
+        })
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b-before-barrier',
+          workerBootId: 'worker-b',
+        })
+      ).toMatchObject({
+        status: 'in_flight',
+        delivery: {
+          attemptCount: 1,
+          activeClaimId: 'attempt-a',
+          activeClaimWorkerBootId: 'worker-a',
+        },
+      });
+      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-a')).toBe(0);
+      expect(store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')).toBe(1);
+      expect(
+        store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'attempt-b',
+          workerBootId: 'worker-b',
+        })
+      ).toMatchObject({
+        status: 'claimed',
+        delivery: { attemptCount: 1, activeClaimWorkerBootId: 'worker-b' },
+      });
+      expect(
+        store.prepareClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-b',
+          'attempt-b'
+        )
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 2 } });
+
+      expect(
+        store.releaseDeliveryClaim(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toBe(false);
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({
+        consumed: false,
+        delivery: { state: 'pending', activeClaimId: 'attempt-b' },
+      });
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'finalization-a',
+          workerBootId: 'worker-a',
+          requireAttemptsExhausted: true,
+        })
+      ).toMatchObject({ status: 'in_flight', delivery: { activeClaimId: 'attempt-b' } });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'finalization-a'
+        )
+      ).toMatchObject({ consumed: false, delivery: { state: 'pending' } });
+    } finally {
+      store.close();
+    }
+  });
+
   it('delivers the same caller-chosen operation id independently for two Sessions', async () => {
     const store = await makeStore();
     try {
@@ -263,7 +796,20 @@ describe('LodyOperationStore', () => {
       nowMs += 8 * 24 * 60 * 60 * 1_000;
 
       expect(store.get('requester-1' as SessionId, 'review-round-1').state).toBe('finished');
-      store.consumeDelivery('requester-1' as SessionId, 'review-round-1');
+      expect(
+        store.claimDeliveryFinalization('requester-1' as SessionId, 'review-round-1', {
+          claimId: 'retention-finalization',
+          workerBootId: 'daemon-1',
+        })
+      ).toMatchObject({ status: 'claimed' });
+      expect(
+        store.consumeClaimedDelivery(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'retention-finalization'
+        )
+      ).toMatchObject({ consumed: true });
       nowMs += 8 * 24 * 60 * 60 * 1_000;
 
       expect(() => store.get('requester-1' as SessionId, 'review-round-1')).toThrowError(

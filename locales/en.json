@@ -3476,6 +3476,7 @@
   "orchestration.operationCancelled": "Operation {{id}} cancelled",
   "orchestration.operationItemSummary": "{{total}} items · {{succeeded}} succeeded · {{failed}} failed · {{cancelled}} cancelled",
   "orchestration.continuationNotStarted": "The saved agent configuration is unavailable, so no continuation was started.",
+  "orchestration.continuationUncertain": "The continuation may have started before it was interrupted. It was not replayed; review the output and continue manually if needed.",
   "commands.tasks.quickAdd": "New Task",
   "commands.tasks.open": "Open Tasks",
   "tasks.title": "Tasks",
