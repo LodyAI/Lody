@@ -2088,6 +2088,84 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('retries an observed settlement on a later wake without replaying provider execution', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      workerBootId: 'worker-a',
+    });
+    const originalConsume = LodyOperationStore.prototype.consumeClaimedDelivery;
+    const consume = vi.spyOn(LodyOperationStore.prototype, 'consumeClaimedDelivery');
+    consume
+      .mockImplementationOnce(() => {
+        throw new Error('settlement callback write failed');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('settlement fallback write failed');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('first wake settlement write failed');
+      })
+      .mockImplementation(originalConsume);
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
+      const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+      expect(await typedOptions.onTurnClaimed?.()).toBe(true);
+      expect(await typedOptions.onTurnStarted?.()).toBe(true);
+      try {
+        await typedOptions.onTurnSettled?.('handled');
+      } catch {
+        // SessionExecutionService logs settlement persistence failures and returns.
+      }
+    });
+
+    try {
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+
+      const strandedStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(
+          strandedStore.getDelivery(harness.requesterSessionId, 'review-round-1')
+        ).toMatchObject({
+          state: 'pending',
+          executionPhase: 'started',
+          activeClaimWorkerBootId: 'worker-a',
+        });
+      } finally {
+        strandedStore.close();
+      }
+
+      await harness.coordinator.wake('retry-observed-settlement-1');
+      await harness.coordinator.idle();
+      const retryStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(retryStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'pending',
+          executionPhase: 'started',
+          activeClaimWorkerBootId: 'worker-a',
+        });
+      } finally {
+        retryStore.close();
+      }
+
+      await harness.coordinator.wake('retry-observed-settlement-2');
+      await harness.coordinator.idle();
+      harness.coordinator.stop();
+
+      expect(harness.continueSession).toHaveBeenCalledOnce();
+      const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'consumed',
+          attemptCount: 1,
+        });
+      } finally {
+        finalStore.close();
+      }
+    } finally {
+      consume.mockRestore();
+    }
+  });
+
   it('does not spend execution attempts when completion history is not durable', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',

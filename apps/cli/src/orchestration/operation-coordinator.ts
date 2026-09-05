@@ -44,6 +44,13 @@ type TargetSubscription = {
   unsubscribe: () => void;
 };
 
+type DeliveryTurnSettlement = 'handled' | 'cancelled' | 'not_started' | 'uncertain';
+
+type ObservedDeliverySettlement = {
+  claimId: string;
+  outcome: DeliveryTurnSettlement;
+};
+
 const TARGET_OUTPUT_PREVIEW_MAX_BYTES = 8 * 1024;
 const MATERIALIZATION_RETRY_MIN_MS = 1_000;
 const MATERIALIZATION_RETRY_MAX_MS = 30_000;
@@ -166,6 +173,7 @@ export class LodyOperationCoordinator {
   private readonly deliveryChains = new Map<SessionId, Promise<void>>();
   private readonly queuedDeliveryIds = new Set<string>();
   private readonly dirtyDeliveryReasons = new Map<string, string>();
+  private readonly observedDeliverySettlements = new Map<string, ObservedDeliverySettlement>();
   private readonly operationAbortControllers = new Map<string, AbortController>();
   private metaWatch: RepoWatchHandle | null = null;
   private store: LodyOperationStore | null = null;
@@ -281,6 +289,7 @@ export class LodyOperationCoordinator {
     this.deliveryChains.clear();
     this.queuedDeliveryIds.clear();
     this.dirtyDeliveryReasons.clear();
+    this.observedDeliverySettlements.clear();
     for (const controller of this.operationAbortControllers.values()) controller.abort();
     this.operationAbortControllers.clear();
   }
@@ -818,15 +827,79 @@ export class LodyOperationCoordinator {
     );
   }
 
+  private settleObservedDeliveryClaim(
+    delivery: StoredLodyDelivery,
+    settlement: ObservedDeliverySettlement
+  ): StoredLodyDelivery {
+    this.observedDeliverySettlements.set(delivery.deliveryId, settlement);
+    const current = this.withStore((store) => {
+      let latest = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+      if (
+        latest.activeClaimWorkerBootId !== this.workerBootId ||
+        latest.activeClaimId !== settlement.claimId
+      ) {
+        return latest;
+      }
+      if (settlement.outcome === 'handled' || settlement.outcome === 'cancelled') {
+        return store.consumeClaimedDelivery(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        ).delivery;
+      }
+      if (settlement.outcome === 'uncertain') {
+        store.markClaimedDeliveryExecutionUncertain(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        );
+      } else {
+        store.releaseDeliveryClaim(
+          delivery.requesterSessionId,
+          delivery.operationId,
+          this.workerBootId,
+          settlement.claimId
+        );
+      }
+      latest = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+      return latest;
+    });
+    if (
+      current.activeClaimWorkerBootId !== this.workerBootId ||
+      current.activeClaimId !== settlement.claimId
+    ) {
+      this.observedDeliverySettlements.delete(delivery.deliveryId);
+    }
+    return current;
+  }
+
   private async deliverIfRunnable(delivery: StoredLodyDelivery, reason: string): Promise<void> {
     if (!this.started) return;
     delivery = this.withStore((store) =>
       store.getDelivery(delivery.requesterSessionId, delivery.operationId)
     );
-    if (delivery.state === 'consumed') return;
+    if (delivery.state === 'consumed') {
+      this.observedDeliverySettlements.delete(delivery.deliveryId);
+      return;
+    }
     // A claim is exclusive regardless of owner. Foreign-boot claims
     // are removed only once during Worker startup, after the lifecycle barrier.
-    if (delivery.activeClaimId || delivery.activeClaimWorkerBootId) return;
+    if (delivery.activeClaimId || delivery.activeClaimWorkerBootId) {
+      const settlement = this.observedDeliverySettlements.get(delivery.deliveryId);
+      if (
+        settlement &&
+        delivery.activeClaimWorkerBootId === this.workerBootId &&
+        delivery.activeClaimId === settlement.claimId
+      ) {
+        this.settleObservedDeliveryClaim(delivery, settlement);
+      } else if (settlement) {
+        this.observedDeliverySettlements.delete(delivery.deliveryId);
+      }
+      return;
+    }
+    this.observedDeliverySettlements.delete(delivery.deliveryId);
     const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
       getSessionRoomId(delivery.requesterSessionId)
     );
@@ -891,42 +964,47 @@ export class LodyOperationCoordinator {
     const frozen = operation.frozenContinuationConfig.inputConfig;
     const requester = await this.resolveRequesterIdentity(operation.requesterUserId);
     const attemptId = randomUUID();
-    let observedSettlement: 'handled' | 'cancelled' | 'not_started' | 'uncertain' | undefined;
+    let observedSettlement: DeliveryTurnSettlement | undefined;
     const settleResidualClaim = () =>
-      this.withStore((store) => {
-        let current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
-        if (
-          current.activeClaimWorkerBootId !== this.workerBootId ||
-          current.activeClaimId !== attemptId
-        ) {
-          return current;
-        }
-        if (observedSettlement === 'handled' || observedSettlement === 'cancelled') {
-          return store.consumeClaimedDelivery(
-            delivery.requesterSessionId,
-            delivery.operationId,
-            this.workerBootId,
-            attemptId
-          ).delivery;
-        }
-        if (current.executionPhase === 'started') {
-          store.markClaimedDeliveryExecutionUncertain(
-            delivery.requesterSessionId,
-            delivery.operationId,
-            this.workerBootId,
-            attemptId
-          );
-        } else {
-          store.releaseDeliveryClaim(
-            delivery.requesterSessionId,
-            delivery.operationId,
-            this.workerBootId,
-            attemptId
-          );
-        }
-        current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
-        return current;
-      });
+      observedSettlement
+        ? this.settleObservedDeliveryClaim(delivery, {
+            claimId: attemptId,
+            outcome: observedSettlement,
+          })
+        : this.withStore((store) => {
+            let current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+            if (
+              current.activeClaimWorkerBootId !== this.workerBootId ||
+              current.activeClaimId !== attemptId
+            ) {
+              return current;
+            }
+            if (observedSettlement === 'handled' || observedSettlement === 'cancelled') {
+              return store.consumeClaimedDelivery(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              ).delivery;
+            }
+            if (current.executionPhase === 'started') {
+              store.markClaimedDeliveryExecutionUncertain(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              );
+            } else {
+              store.releaseDeliveryClaim(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              );
+            }
+            current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+            return current;
+          });
     const continuation = this.options.executionService.continueSession(
       {
         type: 'session/chat',
@@ -1014,39 +1092,15 @@ export class LodyOperationCoordinator {
           ),
         onTurnSettled: async (outcome) => {
           observedSettlement = outcome;
-          if (outcome === 'not_started') {
-            this.withStore((store) =>
-              store.releaseDeliveryClaim(
-                delivery.requesterSessionId,
-                delivery.operationId,
-                this.workerBootId,
-                attemptId
-              )
+          const settled = this.settleObservedDeliveryClaim(delivery, {
+            claimId: attemptId,
+            outcome,
+          });
+          if (outcome === 'handled' || outcome === 'cancelled') {
+            this.options.logger.debug(
+              `[orchestration] Delivery ${delivery.deliveryId} consumed=${String(settled.state === 'consumed')}`
             );
-            return;
           }
-          if (outcome === 'uncertain') {
-            this.withStore((store) =>
-              store.markClaimedDeliveryExecutionUncertain(
-                delivery.requesterSessionId,
-                delivery.operationId,
-                this.workerBootId,
-                attemptId
-              )
-            );
-            return;
-          }
-          const result = this.withStore((store) =>
-            store.consumeClaimedDelivery(
-              delivery.requesterSessionId,
-              delivery.operationId,
-              this.workerBootId,
-              attemptId
-            )
-          );
-          this.options.logger.debug(
-            `[orchestration] Delivery ${delivery.deliveryId} consumed=${String(result.consumed)}`
-          );
         },
       }
     );

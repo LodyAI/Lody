@@ -77,8 +77,9 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   `DELIVERY_EXECUTION_UNCERTAIN` under a terminal claim, preserves existing output, and tells
   the user to continue manually if needed. Provider-accepted steer settles the original
   Delivery immediately, so cancellation of a later user-owned turn cannot reopen it.
-  Settlement write failure retries the observed outcome without ACP; replacement-Worker
-  recovery converts any still-fenced started claim to `uncertain`, never to runnable. A
+  Settlement write failure retains the claim-bound outcome in the live coordinator and retries
+  it on later wakes without ACP; replacement-Worker recovery converts any still-fenced started
+  claim to `uncertain`, never to runnable. A
   coordinated workspace stop abandons only that coordinator's claims before closing its store:
   `claimed`/`prepared` become runnable and `started` becomes `uncertain`. At most
   one confirmed pre-provider recovery is allowed; after two prepared attempts,
