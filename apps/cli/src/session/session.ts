@@ -117,7 +117,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
   public terminalManager: TerminalManager;
-  public ghTokenInjected: boolean = false;
 
   constructor(
     config: SessionConfig,

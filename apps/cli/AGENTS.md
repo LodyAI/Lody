@@ -331,12 +331,15 @@ Two things the dev build does deliberately, both load-bearing:
   credentials actually became usable and must finish inside the renderer's 300-second workflow
   deadline.
 
-- Agent `gh` auth for GitHub repo sessions is managed in
-  `src/session/session-manager.ts`: it creates the git credential broker, prepends the
-  `~/.lody/bin/gh` shim, and injects/refreshes a managed `GH_TOKEN` when no user token
-  is present. The shim lives in `src/lib/gh-shim-script.ts`; token fetching/caching is
-  in `src/lib/github-token-manager.ts`; git HTTPS auth uses
-  `src/lib/git-credential-helper-script.ts`.
+- `src/lib/gh-shim-script.ts` owns agent `gh` credential selection at invocation time:
+  explicit credentials → owner-local active gh login → requester-bound broker token.
+  Only definitive 401/missing credentials advance the chain; never replay the actual command.
+  `session-manager.ts` installs the shim and activates/refreshes broker contexts, without
+  injecting session-wide GitHub tokens. `/github-auth-context` grants local auth only for
+  the daemon owner; stale contexts fail closed. `gh-token-env.ts` clears legacy managed
+  tokens by fingerprint. Token caching remains in `github-token-manager.ts`; git HTTPS
+  continues to use `git-credential-helper-script.ts`. API hosts and PR/issue URLs override
+  ambient repo context; GitHub.com managed tokens must never be injected for another host.
 - INVARIANT: host-side git must receive its credential broker as an explicit argument
   (`WorktreeManager.ensureRepo({ brokerAuth })`), never from ambient `process.env`.
   A fleet process runs one `GitCredentialBroker` per workspace, each bound at

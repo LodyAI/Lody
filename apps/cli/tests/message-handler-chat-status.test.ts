@@ -99,7 +99,7 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
     hasSession: vi.fn(),
     initialize: vi.fn(),
     releaseGitHubRepoOwner: vi.fn(),
-    refreshGhTokenForSession: vi.fn(async () => {}),
+    refreshGitHubCredentialContext: vi.fn(async () => {}),
   };
 
   const logger = createSilentLogger();

@@ -3722,8 +3722,8 @@ export class SessionExecutionService {
           triggerReason: 'initial' | 'stale_acp_recovery'
         ): Effect.Effect<void, unknown, never> =>
           Effect.gen(function* () {
-            // Refresh GH_TOKEN before the ACP turn so the agent has a fresh token for git/gh operations.
-            // Installation tokens expire ~1h; refreshing at turn start avoids mid-turn auth failures.
+            // Bind git/gh credential selection to the requester before starting the ACP turn.
+            // The helper and gh shim resolve fresh credentials when a command needs them.
             if (!project) {
               const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
               project = self.resolveProjectFromMeta(meta, message.project?.branch);
@@ -3735,10 +3735,10 @@ export class SessionExecutionService {
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,
-                'execution.refresh_gh_token',
+                'execution.refresh_github_context',
                 { sessionId, turnId, triggerReason },
                 async () =>
-                  await self.deps.sessionManager.refreshGhTokenForSession(
+                  await self.deps.sessionManager.refreshGitHubCredentialContext(
                     targetSession,
                     githubRepo,
                     userId
