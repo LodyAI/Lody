@@ -944,6 +944,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
     });
     signal.throwIfAborted();
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
@@ -1347,6 +1348,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
         if (event.phase === 'complete' && !managedRuntimeReadyLogged) {

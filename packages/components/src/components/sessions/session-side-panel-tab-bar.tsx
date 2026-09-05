@@ -128,12 +128,13 @@ type SessionSidePanelTabBarProps = {
   onPanelOpen?: (panelId: SessionSidePanelOption['id']) => void;
   addPanelLabel?: string;
   closeTabLabel: (tabLabel: string) => string;
+  /** Sits immediately left of the + button; empty for tabs with no actions. */
+  moreSlot?: ReactNode;
   endSlot?: ReactNode;
   className?: string;
 };
 
-const TAB_CLASS =
-  `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors ${WINDOW_DRAG_EXEMPT_CLASS}`;
+const TAB_CLASS = `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors ${WINDOW_DRAG_EXEMPT_CLASS}`;
 // Soft cool-gray pills on the white side panel (Linear-like), not heavy slate washes.
 const ACTIVE_TAB_CLASS =
   'bg-foreground/[0.08] text-tab-active-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]';
@@ -211,6 +212,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   onPanelOpen = () => undefined,
   addPanelLabel = 'Add panel',
   closeTabLabel,
+  moreSlot,
   endSlot,
   className,
 }: SessionSidePanelTabBarProps) {
@@ -314,6 +316,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
           })}
         </div>
       </ScrollArea>
+      {moreSlot ? (
+        <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{moreSlot}</div>
+      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button

@@ -57,6 +57,10 @@ const LONG_URL_WITH_REPEATED_NON_CLOSERS = `https://example.com/${LONG_URL_SEGME
 const EXPLICIT_BOLD_LINK_MARKDOWN =
   '**[https://example.com**(\\`code\\`)](https://destination.test)**';
 const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
+const BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN =
+  'PR 已开：**https://github.com/LodyAI/Lody/pull/317**，分支 `fix/mobile-staged-background-sync`。';
+const AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN = '见 https://example.com/a。然后是别的';
+const AUTOLINK_WITH_CJK_PATH_MARKDOWN = '见 https://zh.example.com/wiki/中文 页面';
 const URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN = '**https://example.com**𐄀(`code`)';
 const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_branch_)';
 const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
@@ -220,6 +224,33 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.querySelector('code')).toBeNull();
   });
 
+  it('ends a bold autolink at full-width punctuation instead of swallowing the sentence', async () => {
+    await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
+
+    const url = 'https://github.com/LodyAI/Lody/pull/317';
+    const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+    expect(link?.textContent).toBe(url);
+    expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
+    expect(container?.textContent).toContain('，分支');
+    expect(container?.textContent).not.toContain('**');
+  });
+
+  it('ends a bare autolink at full-width punctuation', async () => {
+    await renderMarkdown(AUTOLINK_BEFORE_CJK_PUNCTUATION_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/a');
+    expect(link?.textContent).toBe('https://example.com/a');
+    expect(container?.textContent).toBe('见 https://example.com/a。然后是别的');
+  });
+
+  it('keeps non-ASCII letters that belong to the URL path', async () => {
+    await renderMarkdown(AUTOLINK_WITH_CJK_PATH_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.textContent).toBe('https://zh.example.com/wiki/中文');
+  });
+
   it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {
     await renderMarkdown(URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN);
 
@@ -288,6 +319,45 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(copyButton.getAttribute('aria-label')).toBe('Copy code');
   });
 
+  it('renders headerless diff fences with semantic line rows and existing code controls', async () => {
+    await renderMarkdown(
+      [
+        '```diff',
+        ' resolveSource(session)',
+        '-  return staleProvider',
+        '+  return localFiles',
+        '@@ -8,1 +8,1 @@',
+        '--- a/source.ts',
+        '+++ b/source.ts',
+        '```',
+      ].join('\n')
+    );
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-language')).toBe('diff');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="context"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="hunk"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="metadata"]')).toHaveLength(2);
+    expect(
+      diffBlock
+        .querySelector('[data-streamdown="code-block-copy-button"]')
+        ?.getAttribute('aria-label')
+    ).toBe('Copy code');
+  });
+
+  it('keeps an incomplete streaming diff fence in the semantic renderer', async () => {
+    await renderMarkdown(['```diff', '-old source', '+new source'].join('\n'), {
+      isStreaming: true,
+    });
+
+    const diffBlock = await waitForElement('[data-markdown-diff-block="true"]');
+    expect(diffBlock.getAttribute('data-incomplete')).toBe('true');
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="deletion"]')).toHaveLength(1);
+    expect(diffBlock.querySelectorAll('[data-markdown-diff-line="addition"]')).toHaveLength(1);
+  });
+
   it('renders sanitized raw HTML when allowHtml is enabled', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.', { allowHtml: true });
 
@@ -308,6 +378,82 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     expect(container?.querySelector('.katex')).not.toBeNull();
     expect(await waitForElement('[data-streamdown="mermaid-block"]')).not.toBeNull();
+  });
+
+  it('renders Codex-style parenthesis and bracket LaTeX delimiters', async () => {
+    await renderMarkdown(
+      [
+        'Let \\(t_i\\) denote the token allocation.',
+        '',
+        '\\[',
+        '\\boxed{DV(t^*)[a]}',
+        '=',
+        '\\int \\xi_i a_i\\,di',
+        '\\]',
+        '',
+        'where \\(\\xi_i = \\underbrace{V_z / \\Lambda}_{\\text{social value}} r_{i,t}\\).',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(3);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+  });
+
+  it('keeps Codex-style LaTeX delimiters literal inside Markdown code', async () => {
+    await renderMarkdown(
+      [
+        '`\\(inline_code\\)`',
+        '',
+        '```tex',
+        '\\[',
+        'fenced_code',
+        '\\]',
+        '```',
+        '',
+        'Outside \\(x_i\\) renders.',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelector('code')?.textContent).toBe('\\(inline_code\\)');
+    expect(container?.textContent).toContain('\\[fenced_code\\]');
+  });
+
+  it('keeps LaTeX delimiters literal in indented code blocks', async () => {
+    await renderMarkdown(['    \\(literal\\)', '', 'Outside \\(x_i\\) renders.'].join('\n'));
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelector('pre code')?.textContent).toContain('\\(literal\\)');
+  });
+
+  it('keeps LaTeX delimiters literal in container-nested fenced code', async () => {
+    await renderMarkdown(
+      [
+        '> ```tex',
+        '> \\(blockquote_literal\\)',
+        '> ```',
+        '',
+        '- ~~~tex',
+        '  \\[list_literal\\]',
+        '  ~~~',
+        '',
+        '> - ````tex',
+        '>   \\(nested_literal\\)',
+        '>   ````',
+        '',
+        '10. ```tex',
+        '    \\(ordered_list_literal\\)',
+        '    ```',
+        '',
+        'Outside \\(x_i\\) renders.',
+      ].join('\n')
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.textContent).toContain('\\(blockquote_literal\\)');
+    expect(container?.textContent).toContain('\\[list_literal\\]');
+    expect(container?.textContent).toContain('\\(nested_literal\\)');
+    expect(container?.textContent).toContain('\\(ordered_list_literal\\)');
   });
 
   it('does not parse dollars inside code spans or link labels as LaTeX', async () => {

@@ -6588,8 +6588,11 @@ export class MessageHandler {
         return await this.filePreviewService.previewFile(request.params);
       case 'file/preview-local':
         await assertOwner(request.params.sessionId as SessionId);
+        // Same machine: no wire to protect, so the read is not held to the
+        // remote transport's size budget.
         return await this.filePreviewService.previewFile(request.params, {
           allowArbitraryPaths: true,
+          sameMachine: true,
         });
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({

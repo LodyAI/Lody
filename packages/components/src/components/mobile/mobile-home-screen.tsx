@@ -2289,6 +2289,11 @@ function ChatsFlatView({
         chats={visible}
         groupBy={groupBy}
         groupLabels={labels.chatGroupLabels}
+        /* Home aggregates every project and worktree into one scroll, so each
+           bucket previews its latest rows and offers the rest. Without it a
+           single busy project owns the screen — the whole reason the cap
+           exists. The in-project list deliberately does not pass this. */
+        capGroupPreviews
         /* Active list is flat — no "全部对话" section label. Only the
            archived surface keeps a heading so the mode is obvious. */
         flatHeading={archived ? (labels.archivedChatsHeading ?? '归档对话') : undefined}

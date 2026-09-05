@@ -43,6 +43,9 @@ export type PreviewValidationStage = 'report' | 'create' | 'connect' | 'revoke';
 
 export type PreviewErrorCode =
   | 'host_not_loopback'
+  // `host_not_private` and `target_resolution_failed` are no longer produced: a
+  // managed preview is loopback-only, so there is no private-LAN branch left to
+  // fail. They stay in the vocabulary so a response from an older CLI decodes.
   | 'host_not_private'
   | 'host_prohibited'
   | 'target_resolution_failed'
@@ -229,7 +232,14 @@ export type SessionPreviewCreateRequest = {
 
 export type PreviewTargetApproval = {
   source: 'browser_address' | 'share_action';
-  targetClass: 'loopback' | 'private_lan';
+  /**
+   * Always loopback. A managed preview opens one approved port on the agent
+   * machine itself and never reaches past it — a LAN target would make that
+   * machine a pivot into its own network for whoever holds the tunnel. The type
+   * is narrowed so a client cannot even express the request; the CLI's
+   * `normalizeTarget` is the authoritative rejection for any client that does.
+   */
+  targetClass: 'loopback';
   target: PreviewTarget;
   confirmedByUserId: string;
   confirmedAt: number;
@@ -281,7 +291,6 @@ export const PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_LOW_WATERMARK_BYTES = 512 * 1024
 const SHORT_ID_SAFE_CHARS = /[^a-z0-9]/gi;
 const PREVIEW_TUNNEL_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PREVIEW_PUBLIC_DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
 
 export const normalizePreviewPublicBaseDomain = (value: string): string => {
   const domain = value.trim().toLowerCase();

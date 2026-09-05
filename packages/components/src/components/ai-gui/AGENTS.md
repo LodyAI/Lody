@@ -33,10 +33,10 @@
 - Finished turns keep the answer/result tail visible and fold earlier work.
   Streaming turns stay expanded. Details remain sibling rows; search opens both
   the worked region and activity group.
-- The final answer is the last text before trailing never-collapsed items, not
-  necessarily the last item. Generated `image_group`s and the `switch_mode`
-  "Exited Plan Mode" card may follow it; use
-  `getTextIndexBeforeTrailingNeverCollapsedItems`.
+- The final answer is the final contiguous run of text before trailing
+  never-collapsed items, not necessarily the last item. Keep walking backward
+  through adjacent text blocks until a non-text boundary. Generated
+  `image_group`s and the `switch_mode` "Exited Plan Mode" card may follow it.
 - One turn may contain several `AssistantTurnRenderSegment`s. A plan approval
   inside a running turn cuts a segment so implementation stays under the plan.
   Match ACP kind `switch_mode`, never a title; carrier varies
@@ -109,6 +109,19 @@ work) and a hover preview.
   `conversation-font-size-classes.ts`; settings own legacy preset migration.
   Keep Streamdown in streaming mode, but never enable word-level `animated`: its
   span-per-word compositor cost is unbounded on long turns.
+- A Mermaid diagram opens in `mermaid-diagram-viewer.tsx`, never Streamdown's own
+  full-screen overlay (`controls.mermaid.fullscreen` stays off). That overlay put its
+  ONLY exit at a raw `top-4 right-4` — inside the status-bar inset on a phone — while
+  its content layer covered the backdrop and swallowed every tap, so a touch user could
+  not leave it. The replacement keeps three properties: its controls are padded by the
+  `--safe-area-*` variables rather than a fixed viewport offset and are at least 44px;
+  there is never a single exit (close button, a click off the diagram, Escape); and it
+  stacks at `--z-image-viewer`, so a diagram opened inside a dialog lands above that
+  dialog. It opens the diagram at NATURAL size
+  when it does not fit — an agent's sequence diagram scaled to a phone screen is
+  unreadable — and pans instead. Streamdown owns that markup, so the click target and
+  its `role`/`tabindex` are applied by observer in `markdown-renderer.tsx`; the block's
+  own copy/download controls must stay reachable without hover.
 - `chat_failed` raw errors use a modal; extraction/copy live in `chat-failed-error-report.ts`.
 - Capacity retry targets only the latest notice: first click consents; bounded countdowns send a
   new continuation turn, never replay the failed input. During a visible countdown, the countdown

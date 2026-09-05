@@ -20,7 +20,9 @@ maintenance commands here.
 
 ## Generated artifacts
 
-- `generate-acp-registry.mjs` produces the public ACP registry.
+- `generate-acp-registry.mjs` produces the public ACP registry and its bundled,
+  generation-time-validated SVG icon map. Use `--icons-only` when refreshing
+  icons without also updating Provider versions.
   `generate-open-source-attributions.mjs` produces the in-app attribution
   bundle and root `THIRD_PARTY_NOTICES.md`. Generated output must come only
   from public repository inputs.

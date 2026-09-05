@@ -42,19 +42,16 @@ const FILES: MentionCandidate[] = [
     kind: 'dir',
     path: 'src/components/mentions',
     token: 'src/components/mentions/',
-    searchable: 'src/components/mentions/',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/ui/mention/mention-root.tsx',
     token: 'src/ui/mention/mention-root.tsx',
-    searchable: 'src/ui/mention/mention-root.tsx',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/components/mentions/mention-registry.ts',
     token: 'src/components/mentions/mention-registry.ts',
-    searchable: 'src/components/mentions/mention-registry.ts',
   }),
 ];
 
@@ -66,7 +63,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3312',
     label: '3312',
     searchableNumber: '3312',
-    searchableTitle: 'mention menu cannot be scrolled on mobile',
   }),
   toIssuePrCandidate({
     number: 3298,
@@ -75,7 +71,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3298',
     label: '3298',
     searchableNumber: '3298',
-    searchableTitle: 'switching sessions janks the composer',
   }),
 ];
 

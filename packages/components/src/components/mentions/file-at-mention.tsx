@@ -11,6 +11,7 @@ import {
   getRepoMentionAnalyticsId,
   normalizeGithubFetchErrorCode,
 } from '@/components/mentions/mention-analytics';
+import { scoreMentionMatch } from '@/components/mentions/mention-rank';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
@@ -31,15 +32,6 @@ export type RepoFilePathsResult = {
   paths: string[];
   truncated: boolean;
 };
-
-export type FuseInstance<T> = {
-  search: (pattern: string, options?: { limit?: number }) => Array<{ item: T; score?: number }>;
-};
-
-export type FuseConstructor<T> = new (
-  list: T[],
-  options?: Record<string, unknown>
-) => FuseInstance<T>;
 
 const RepoFilePathsResultSchema = z.object({
   repoFullName: z.string(),
@@ -119,15 +111,10 @@ function isStale(entry: RepoFilePathsCacheEntry, now: number) {
   return now - entry.fetchedAt > CACHE_TTL_MS;
 }
 
-function toSearchablePath(path: string) {
-  return path.toLowerCase();
-}
-
 export type PathSuggestion = {
   kind: 'dir' | 'file';
   path: string;
   token: string;
-  searchable: string;
 };
 
 export function buildPathSuggestions(filePaths: string[]) {
@@ -156,7 +143,6 @@ export function buildPathSuggestions(filePaths: string[]) {
       kind: 'dir',
       path,
       token: `${path}/`,
-      searchable: toSearchablePath(`${path}/`),
     }));
 
   const files = Array.from(fileSet)
@@ -165,7 +151,6 @@ export function buildPathSuggestions(filePaths: string[]) {
       kind: 'file',
       path,
       token: path,
-      searchable: toSearchablePath(path),
     }));
 
   const allSuggestions = [...dirs, ...files];
@@ -222,27 +207,16 @@ export function getCommonPrefixLen(a: string[], b: string[]) {
   return i;
 }
 
-export function getFuseOptions() {
-  return {
-    keys: ['token'],
-    includeScore: true,
-    threshold: 0.35,
-    ignoreLocation: true,
-    minMatchCharLength: 2,
-    shouldSort: true,
-  } as const;
-}
-
 export function getSuggestions(
   suggestions: {
     dirs: PathSuggestion[];
     files: PathSuggestion[];
     allSuggestions: PathSuggestion[];
   },
-  term: string,
-  fuse: FuseInstance<PathSuggestion> | null
+  term: string
 ) {
-  const trimmed = term.trim().toLowerCase();
+  const query = term.trim();
+  const trimmed = query.toLowerCase();
 
   if (!trimmed) {
     const topDirs = suggestions.dirs.filter((s) => isTopLevelToken(s.token));
@@ -250,18 +224,22 @@ export function getSuggestions(
     return [...topDirs, ...topFiles].slice(0, MAX_DEFAULT_SUGGESTIONS);
   }
 
-  const candidates: Array<{ item: PathSuggestion; score: number | null }> = (() => {
-    if (fuse) {
-      const results = fuse.search(trimmed, { limit: MAX_SUGGESTIONS * 3 });
-      return results.map((r) => ({
-        item: r.item,
-        score: typeof r.score === 'number' ? r.score : null,
-      }));
-    }
-    return suggestions.allSuggestions
-      .filter((s) => s.searchable.includes(trimmed))
-      .map((item) => ({ item, score: null }));
-  })();
+  type Candidate = {
+    item: PathSuggestion;
+    /** Higher is better, following VS Code's fuzzy scorer. */
+    fuzzyScore: number;
+  };
+
+  const candidates: Candidate[] = [];
+  for (const item of suggestions.allSuggestions) {
+    const fuzzyScore = scoreMentionMatch(query, item.token);
+    if (fuzzyScore === null) continue;
+    candidates.push({ item, fuzzyScore });
+  }
+
+  const compareMatchQuality = (a: Candidate, b: Candidate) => {
+    return b.fuzzyScore - a.fuzzyScore;
+  };
 
   // If user is typing a path (contains `/`), prioritize matches by path prefix depth.
   if (trimmed.includes('/')) {
@@ -278,9 +256,8 @@ export function getSuggestions(
       const bDepth = bSegs.length;
       if (aDepth !== bDepth) return aDepth - bDepth;
 
-      if (a.score !== null && b.score !== null && a.score !== b.score) {
-        return a.score - b.score;
-      }
+      const matchQuality = compareMatchQuality(a, b);
+      if (matchQuality !== 0) return matchQuality;
 
       // Prefer directories only when match quality is otherwise identical.
       if (a.item.kind !== b.item.kind) return a.item.kind === 'dir' ? -1 : 1;
@@ -303,9 +280,8 @@ export function getSuggestions(
       const aDepth = getTokenDepth(a.item.token);
       const bDepth = getTokenDepth(b.item.token);
       if (aDepth !== bDepth) return aDepth - bDepth;
-      if (a.score !== null && b.score !== null && a.score !== b.score) {
-        return a.score - b.score;
-      }
+      const matchQuality = compareMatchQuality(a, b);
+      if (matchQuality !== 0) return matchQuality;
       return a.item.token.localeCompare(b.item.token);
     }
 
@@ -326,9 +302,8 @@ export function getSuggestions(
       return aMatch.depth - bMatch.depth;
     }
 
-    if (a.score !== null && b.score !== null && a.score !== b.score) {
-      return a.score - b.score;
-    }
+    const matchQuality = compareMatchQuality(a, b);
+    if (matchQuality !== 0) return matchQuality;
 
     // Prefer directories only when match quality is otherwise identical.
     if (a.item.kind !== b.item.kind) return a.item.kind === 'dir' ? -1 : 1;
@@ -509,37 +484,10 @@ function FileAtMentionMenu({
     return buildPathSuggestions(entry.paths);
   }, [entry]);
 
-  const [fuseCtor, setFuseCtor] = React.useState<FuseConstructor<PathSuggestion> | null>(null);
-  React.useEffect(() => {
-    if (!suggestionIndex) return undefined;
-    let cancelled = false;
-    void import('fuse.js')
-      .then((mod) => {
-        if (cancelled) return;
-        const ctor = (mod as unknown as { default?: unknown }).default ?? mod;
-        setFuseCtor(() => ctor as unknown as FuseConstructor<PathSuggestion>);
-      })
-      .catch(() => {
-        // fuse.js isn't installed yet; fallback to substring matching.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [suggestionIndex]);
-
-  const fuse = React.useMemo(() => {
-    if (!fuseCtor || !suggestionIndex) return null;
-    try {
-      return new fuseCtor(suggestionIndex.allSuggestions, getFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [fuseCtor, suggestionIndex]);
-
   const indexed = React.useMemo(() => {
     if (!suggestionIndex) return [];
-    return getSuggestions(suggestionIndex, term, fuse);
-  }, [suggestionIndex, term, fuse]);
+    return getSuggestions(suggestionIndex, term);
+  }, [suggestionIndex, term]);
 
   React.useEffect(() => {
     if (!context.open) return;

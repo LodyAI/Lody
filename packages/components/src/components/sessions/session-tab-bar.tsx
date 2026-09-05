@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Loader2, X, History, Undo2, Pin, FileDiff } from 'lucide-react';
+import { Plus, Loader2, X, History, Undo2, Pin, FileDiff, Hand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
@@ -32,6 +32,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
 import {
@@ -207,6 +208,12 @@ function TabContent({
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(session.id));
   const isWorking = liveStatus != null;
   const isWaiting = liveStatus?.type === 'requestPermission';
+  /* A background sub-session tab is the only place its new output is announced:
+     child tabs get no sidebar row of their own, so without this the finished
+     answer stays invisible until the user happens to click the tab. Suppressed
+     on the ACTIVE tab because that surface is the one clearing unread — the dot
+     would be a flash between the click and the read receipt landing. */
+  const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
   const showClose = !isParent && onTabClose && !isEditing;
   const tabId = `session-tab-${session.id}`;
@@ -256,11 +263,25 @@ function TabContent({
         }
       }}
     >
-      <span className="shrink-0">
-        {isWorking ? (
+      {/* ONE status slot, priority-ordered `waiting > working > unread > agent`,
+          matching the sidebar row and the mobile tab sheet. `isWaiting` must be
+          tested BEFORE `isWorking`: a permission request is also live presence,
+          so the busy spinner would otherwise swallow the one state that needs
+          the user. Waiting is the sidebar's `Hand`, NOT a dot: `--primary` and
+          `--status-warning` are both amber in the shipped themes, so an amber
+          waiting dot beside a primary unread dot read as the same marker.
+          Fixed 12px box so every state keeps the label on the same pixel. */}
+      <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
+        {isWaiting ? (
+          <Hand className="h-3 w-3 text-status-warning" />
+        ) : isWorking ? (
           <Loader2 className="h-3 w-3 animate-spin text-tab-active-accent" />
-        ) : isWaiting ? (
-          <span className="inline-block h-2 w-2 rounded-full bg-status-warning" />
+        ) : isUnread ? (
+          <span
+            data-session-tab-unread=""
+            className="h-2 w-2 rounded-full bg-primary"
+            aria-label={t('sessions.unreadMessages', 'Unread messages')}
+          />
         ) : (
           <AgentIcon
             cliType={session.cliType}

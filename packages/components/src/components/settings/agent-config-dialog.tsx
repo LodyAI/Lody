@@ -4,6 +4,8 @@ import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
   computeTitleGenerationDefaults,
+  DEEPSEEK_HARNESS_API_KEY_ENV,
+  DEEPSEEK_HARNESS_BASE_URL_ENV,
   formatCustomAcpCommandLine,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
@@ -83,9 +85,8 @@ type Translate = ReturnType<typeof useTranslation>['t'];
 
 export const DEEPSEEK_CLAUDE_PRESET_ID = 'deepseek-over-claude-code';
 export const DEEPSEEK_REASONIX_PRESET_ID = 'deepseek-reasonix';
-const DEEPSEEK_API_KEY_ENV = 'DEEPSEEK_API_KEY';
-const DEEPSEEK_BASE_URL_ENV = 'DEEPSEEK_BASE_URL';
 const DEEPSEEK_OFFICIAL_BASE_URL = 'https://api.deepseek.com';
+const LEGACY_DSH_MODELS_ENV = 'ACP_EXTENSION_DSH_MODELS';
 type DeepSeekEndpointMode = 'official' | 'custom';
 export const MIMO_CLAUDE_PRESET_ID = 'mimo-over-claude-code';
 export const MINIMAX_CLAUDE_PRESET_ID = 'minimax-over-claude-code';
@@ -753,7 +754,7 @@ function resolveDeepSeekEndpointForm(
       deepseekCustomBaseUrl: explicit.deepseekCustomBaseUrl ?? '',
     };
   }
-  const stored = env[DEEPSEEK_BASE_URL_ENV];
+  const stored = env[DEEPSEEK_HARNESS_BASE_URL_ENV];
   if (!stored?.trim() || isDeepSeekOfficialBaseUrl(stored)) {
     return { deepseekEndpointMode: 'official', deepseekCustomBaseUrl: '' };
   }
@@ -762,8 +763,9 @@ function resolveDeepSeekEndpointForm(
 
 function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, string> {
   const additionalEnv = { ...env };
-  delete additionalEnv[DEEPSEEK_API_KEY_ENV];
-  delete additionalEnv[DEEPSEEK_BASE_URL_ENV];
+  delete additionalEnv[DEEPSEEK_HARNESS_API_KEY_ENV];
+  delete additionalEnv[DEEPSEEK_HARNESS_BASE_URL_ENV];
+  delete additionalEnv[LEGACY_DSH_MODELS_ENV];
   return additionalEnv;
 }
 
@@ -771,7 +773,8 @@ function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigForm
   if (!isDeepSeekBuiltinForm(form)) return form;
   const env = { ...form.env };
   const resolved = resolveDeepSeekEndpointForm(env, form);
-  delete env[DEEPSEEK_BASE_URL_ENV];
+  delete env[DEEPSEEK_HARNESS_BASE_URL_ENV];
+  delete env[LEGACY_DSH_MODELS_ENV];
   return {
     ...form,
     env,
@@ -782,13 +785,13 @@ function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigForm
 
 function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, string> {
   const env = omitDeepSeekProtectedEnv(formData.env);
-  const apiKey = formData.env[DEEPSEEK_API_KEY_ENV]?.trim();
+  const apiKey = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]?.trim();
   if (apiKey) {
-    env[DEEPSEEK_API_KEY_ENV] = apiKey;
+    env[DEEPSEEK_HARNESS_API_KEY_ENV] = apiKey;
   } else {
-    delete env[DEEPSEEK_API_KEY_ENV];
+    delete env[DEEPSEEK_HARNESS_API_KEY_ENV];
   }
-  env[DEEPSEEK_BASE_URL_ENV] =
+  env[DEEPSEEK_HARNESS_BASE_URL_ENV] =
     getDeepSeekEndpointMode(formData) === 'custom'
       ? (formData.deepseekCustomBaseUrl ?? '').trim()
       : DEEPSEEK_OFFICIAL_BASE_URL;
@@ -1029,7 +1032,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && isManagedBuiltin;
+    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1508,7 +1511,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekProtectedEnv(formData.env) : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
-  const updateEnvironment = (env: Record<string, string>) => {
+  const invalidateBuiltinVerification = () => {
     setManuallyTested(false);
     setAuthRequired(false);
     setProbeError(null);
@@ -1516,6 +1519,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setBuiltinVerificationRevision((revision) => revision + 1);
     setVerifiedBuiltinContext(null);
     setPendingCreateBuiltinContext(null);
+  };
+
+  const updateEnvironment = (env: Record<string, string>) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, env }));
   };
 
@@ -1523,16 +1530,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     const env = omitDeepSeekProtectedEnv(formData.env);
     const apiKey = value.trim();
     if (apiKey) {
-      env[DEEPSEEK_API_KEY_ENV] = apiKey;
+      env[DEEPSEEK_HARNESS_API_KEY_ENV] = apiKey;
     }
     updateEnvironment(env);
   };
 
   const updateDeepSeekEndpointMode = (endpointMode: DeepSeekEndpointMode) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, deepseekEndpointMode: endpointMode }));
   };
 
   const updateDeepSeekCustomBaseUrl = (value: string) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, deepseekCustomBaseUrl: value }));
   };
 
@@ -1691,7 +1700,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         ? t('agents.disableReason.invalidCustomCommand', 'The launch command has unclosed quotes')
         : t('agents.disableReason.missingCustomCommand', 'Please enter the launch command');
     }
-    if (isDeepSeekBuiltin && !formData.env[DEEPSEEK_API_KEY_ENV]?.trim()) {
+    if (isDeepSeekBuiltin && !formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]?.trim()) {
       return t('agents.disableReason.missingDeepseekApiKey', 'Please enter your DeepSeek API Key');
     }
     if (isDeepSeekBuiltin && deepseekEndpointMode === 'custom') {
@@ -2050,7 +2059,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             <DeepSeekHarnessPanel
               endpointMode={deepseekEndpointMode}
               onEndpointModeChange={updateDeepSeekEndpointMode}
-              apiKey={formData.env[DEEPSEEK_API_KEY_ENV] ?? ''}
+              apiKey={formData.env[DEEPSEEK_HARNESS_API_KEY_ENV] ?? ''}
               onApiKeyChange={updateDeepSeekApiKey}
               customBaseUrl={formData.deepseekCustomBaseUrl ?? ''}
               onCustomBaseUrlChange={updateDeepSeekCustomBaseUrl}
@@ -2409,8 +2418,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   return;
                 }
                 const next = omitDeepSeekProtectedEnv(env);
-                if (formData.env[DEEPSEEK_API_KEY_ENV]) {
-                  next[DEEPSEEK_API_KEY_ENV] = formData.env[DEEPSEEK_API_KEY_ENV];
+                if (formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]) {
+                  next[DEEPSEEK_HARNESS_API_KEY_ENV] = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV];
                 }
                 updateEnvironment(next);
               }}
@@ -2859,6 +2868,12 @@ function DeepSeekHarnessPanel({
               className="h-9 font-mono"
             />
           </Field>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'settings.agent.dialog.deepseek.modelsDiscovered',
+              'Available models are discovered automatically from the endpoint when this provider is verified.'
+            )}
+          </p>
           <DeepSeekApiKeyField
             value={apiKey}
             onChange={onApiKeyChange}

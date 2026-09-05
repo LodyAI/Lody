@@ -90,6 +90,12 @@ export const ClaudeWithRateLimit: Story = {
               windowDurationSeconds: 604_800,
               resetsAtEpochSeconds: resetIn(86_400),
             },
+            {
+              label: 'Fable',
+              usedPercent: 67,
+              windowDurationSeconds: 604_800,
+              resetsAtEpochSeconds: resetIn(86_400),
+            },
           ],
         },
       },

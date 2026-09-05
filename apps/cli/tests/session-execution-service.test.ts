@@ -10,6 +10,7 @@ import {
   type SessionExecutionServiceDeps,
 } from '../src/session/session-execution-service';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
@@ -5676,21 +5677,47 @@ describe('SessionExecutionService', () => {
   });
 
   it('refreshes machine ACP capabilities and persists them to machine meta', async () => {
-    const updateAcpCapabilities = vi.fn(async () => {});
-    const fetchAcpCapabilities = vi.fn(async () => ({
-      modes: [{ id: 'agent', name: 'Agent Mode' }],
-      models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+    const capability = {
+      cliType: 'registry' as const,
+      agentType: 'deepseek',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'registry:deepseek:unknown',
+      modes: [],
+      models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
       configOptions: [
         {
-          id: 'approval',
-          name: 'Approval Policy',
-          category: 'safety',
-          options: [{ id: 'never', name: 'Never' }],
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'kimi-k3',
+          options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'max',
+          options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
         },
       ],
+      modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+      sessionFork: false,
+      acknowledgedSteer: true,
+      sessionForkWorktree: false,
+      fetchedAt: 1,
+    };
+    const updateAcpCapabilities = vi.fn(async () => capability);
+    const fetchAcpCapabilities = vi.fn(async () => ({
+      modes: [],
+      models: capability.models,
+      configOptions: capability.configOptions,
       availableCommands: [{ name: 'review', description: 'Review changes' }],
       sessionFork: false,
       acknowledgedSteer: true,
+      modelReasoningEfforts: capability.modelReasoningEfforts,
     }));
 
     const deps = createBaseDeps({
@@ -5702,7 +5729,10 @@ describe('SessionExecutionService', () => {
         getOrCreateSessionDoc: vi.fn(),
         updateAcpCapabilities,
         getAgentConfigForMachineLaunch: vi.fn(async () =>
-          createLaunchConfig({ env: { ACP_PROVIDER_TOKEN: 'secret-token' } })
+          createLaunchConfig({
+            agentType: 'deepseek',
+            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
+          })
         ),
       } as unknown as LoroDocumentManager,
       fetchAcpCapabilities,
@@ -5718,7 +5748,7 @@ describe('SessionExecutionService', () => {
 
     expect(fetchAcpCapabilities).toHaveBeenCalledWith(
       'registry',
-      'codex',
+      'deepseek',
       { ACP_PROVIDER_TOKEN: 'secret-token' },
       undefined,
       undefined,
@@ -5730,22 +5760,14 @@ describe('SessionExecutionService', () => {
       'machine-1',
       capabilityConfigId,
       'registry',
-      'codex',
-      [{ id: 'agent', name: 'Agent Mode' }],
-      [{ modelId: 'gpt-5', name: 'GPT-5' }],
-      [
-        {
-          id: 'approval',
-          name: 'Approval Policy',
-          category: 'safety',
-          options: [{ id: 'never', name: 'Never' }],
-        },
-      ],
+      'deepseek',
+      [],
+      capability.models,
+      capability.configOptions,
       [{ name: 'review', description: 'Review changes' }],
       false,
-      'registry:codex:unknown',
-      // Per-model reasoning efforts: this stub agent reports none.
-      undefined,
+      'registry:deepseek:unknown',
+      capability.modelReasoningEfforts,
       true,
       { signal: expect.any(AbortSignal) }
     );
@@ -5755,8 +5777,9 @@ describe('SessionExecutionService', () => {
         machineId: 'machine-1',
         configId: capabilityConfigId,
         cliType: 'registry',
-        agentType: 'codex',
+        agentType: 'deepseek',
         success: true,
+        capability,
       })
     );
   });

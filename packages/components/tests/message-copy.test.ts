@@ -116,10 +116,25 @@ describe('getVisibleAssistantTextContent', () => {
     expect(getVisibleAssistantTextContent(items, true)).toBe('visible response');
   });
 
-  it('keeps the last text visible when generated images are appended after it', () => {
+  it('keeps the final contiguous text run visible', () => {
     const items = [
       text('hidden progress'),
-      text('visible response'),
+      { type: 'thought', text: 'hidden thought' } satisfies MessageContent,
+      text('visible response, part one'),
+      text('visible response, part two'),
+    ];
+
+    expect(getVisibleAssistantTextContent(items, true)).toBe(
+      'visible response, part one\n\nvisible response, part two'
+    );
+  });
+
+  it('keeps the final contiguous text run visible when generated images follow it', () => {
+    const items = [
+      text('hidden progress'),
+      { type: 'thought', text: 'hidden thought' } satisfies MessageContent,
+      text('visible response, part one'),
+      text('visible response, part two'),
       {
         type: 'image_group',
         images: [
@@ -132,7 +147,9 @@ describe('getVisibleAssistantTextContent', () => {
       },
     ] satisfies MessageContent[];
 
-    expect(getVisibleAssistantTextContent(items, true)).toBe('visible response');
+    expect(getVisibleAssistantTextContent(items, true)).toBe(
+      'visible response, part one\n\nvisible response, part two'
+    );
   });
 
   it('returns no text when a finished turn only has text inside the collapsed work group', () => {
@@ -174,10 +191,12 @@ describe('shouldCollapseAssistantMessageItem', () => {
     ).toEqual([true, false, false]);
   });
 
-  it('keeps the text immediately before trailing image groups outside the work group', () => {
+  it('keeps the contiguous text run before trailing image groups outside the work group', () => {
     const items = [
       text('hidden progress'),
-      text('visible response'),
+      { type: 'thought', text: 'hidden thought' } satisfies MessageContent,
+      text('visible response, part one'),
+      text('visible response, part two'),
       {
         type: 'image_group',
         images: [
@@ -199,7 +218,7 @@ describe('shouldCollapseAssistantMessageItem', () => {
           isTurnFinished: true,
         })
       )
-    ).toEqual([true, false, false]);
+    ).toEqual([true, true, false, false, false]);
   });
 
   it('does not collapse switch_mode tool calls (Exited Plan Mode)', () => {
@@ -227,7 +246,7 @@ describe('shouldCollapseAssistantMessageItem', () => {
     ).toEqual([true, false, false]);
   });
 
-  it('keeps the plan visible when Exited Plan Mode ends the turn', () => {
+  it('keeps the contiguous plan text run visible when Exited Plan Mode ends the turn', () => {
     // Approving a plan splits the ACP turn (CLI `rollAssistantEntryForPlanExit`),
     // so the plan turn ends on the switch card. The plan is that turn's answer
     // and must not be folded away as progress output.
@@ -252,7 +271,7 @@ describe('shouldCollapseAssistantMessageItem', () => {
           isTurnFinished: true,
         })
       )
-    ).toEqual([true, false, false]);
+    ).toEqual([false, false, false]);
   });
 
   it('does not collapse plan blocks', () => {

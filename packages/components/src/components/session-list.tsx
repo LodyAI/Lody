@@ -25,6 +25,7 @@ import {
   Link2,
   Loader2,
   LockKeyhole,
+  Mail,
   Pencil,
   Pin,
   PinOff,
@@ -187,6 +188,7 @@ export type SessionListProps = {
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
   onArchiveSession?: (sessionId: string) => void;
+  onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   /** Toggle pin state for a session. Receives the next desired state (true = pin, false = unpin). */
   onTogglePinSession?: (sessionId: string, nextPinned: boolean) => void;
@@ -486,6 +488,7 @@ type SessionGroupSectionProps = {
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
   onArchiveSession?: (sessionId: string) => void;
+  onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   onTogglePinSession?: (sessionId: string, nextPinned: boolean) => void;
   onCopySessionUrl?: (sessionId: string) => void;
@@ -519,6 +522,7 @@ export type ContextMenuLabels = {
   pin: string;
   unpin: string;
   archive: string;
+  markUnread: string;
   copyUrl: string;
   shareWithTeam: string;
   onlyOwnerCanShare: string;
@@ -538,6 +542,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
   onArchiveSession,
+  onMarkSessionUnread,
   onRenameSession,
   onTogglePinSession,
   onCopySessionUrl,
@@ -794,6 +799,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
               prStatus !== 'closed';
             const showMergeablePill = isMergeable && !isSelected;
             const canArchive = typeof onArchiveSession === 'function';
+            const canMarkUnread =
+              typeof onMarkSessionUnread === 'function' && !session.hasUnreadMessages;
             const showInlineArchive = canArchive && !isMobile;
             const isChatSession = group.kind === 'chat';
             // Copy URL stays available for private sessions (the link still
@@ -864,6 +871,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               onRenameSession ||
               onTogglePinSession ||
               onArchiveSession ||
+              canMarkUnread ||
               onCopySessionUrl ||
               shareMenuState ||
               session.branchName ||
@@ -1066,6 +1074,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       {onRenameSession ||
                       onTogglePinSession ||
                       onArchiveSession ||
+                      canMarkUnread ||
                       onCopySessionUrl ||
                       session.branchName ? (
                         <ContextMenuSeparator />
@@ -1092,6 +1101,16 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
                     </ContextMenuItem>
                   ) : null}
+                  {canMarkUnread ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        onMarkSessionUnread?.(session.sessionId);
+                      }}
+                    >
+                      <Mail />
+                      {contextMenuLabels.markUnread}
+                    </ContextMenuItem>
+                  ) : null}
                   {onArchiveSession ? (
                     <ContextMenuItem
                       onSelect={() => {
@@ -1102,7 +1121,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       {contextMenuLabels.archive}
                     </ContextMenuItem>
                   ) : null}
-                  {(onRenameSession || onTogglePinSession || onArchiveSession) &&
+                  {(onRenameSession || onTogglePinSession || onArchiveSession || canMarkUnread) &&
                   (onCopySessionUrl || session.branchName) ? (
                     <ContextMenuSeparator />
                   ) : null}
@@ -1344,6 +1363,7 @@ export const SessionList = memo(function SessionList({
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
   onArchiveSession,
+  onMarkSessionUnread,
   onRenameSession,
   onTogglePinSession,
   onCopySessionUrl,
@@ -1366,6 +1386,7 @@ export const SessionList = memo(function SessionList({
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
       onlyOwnerCanShare: t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share'),
@@ -1493,6 +1514,7 @@ export const SessionList = memo(function SessionList({
                     onToggleRepoCollapsed={onToggleRepoCollapsed}
                     onToggleChatsCollapsed={onToggleChatsCollapsed}
                     onArchiveSession={onArchiveSession}
+                    onMarkSessionUnread={onMarkSessionUnread}
                     onRenameSession={onRenameSession}
                     onTogglePinSession={onTogglePinSession}
                     onCopySessionUrl={onCopySessionUrl}
@@ -1526,6 +1548,7 @@ export const SessionList = memo(function SessionList({
                   onToggleRepoCollapsed={onToggleRepoCollapsed}
                   onToggleChatsCollapsed={onToggleChatsCollapsed}
                   onArchiveSession={onArchiveSession}
+                  onMarkSessionUnread={onMarkSessionUnread}
                   onRenameSession={onRenameSession}
                   onTogglePinSession={onTogglePinSession}
                   onCopySessionUrl={onCopySessionUrl}
