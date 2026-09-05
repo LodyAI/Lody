@@ -21,6 +21,10 @@ this file; edit `AGENTS.md` only.
 - Follow viewport-size changes from the viewport's `ResizeObserver` records.
   Keyboard and terminal transitions resize that same element, so do not restore
   custom resize-event pumps, guessed transition durations, or stop timers.
+  Only height changes re-anchor the viewport: a flex sibling such as the desktop
+  sidebar can animate width every frame, and sending those width-only records to
+  Virtua competes with the content observer's bottom correction and visibly
+  jitters the conversation.
 - A session composer height change sets a one-shot ref immediately before its
   inline height write. Consume that ref only for the next viewport _height_
   resize, without calling `scrollToRealBottom`; it preserves the reader's
@@ -77,6 +81,37 @@ this file; edit `AGENTS.md` only.
   updates with no new outcome must not synchronously rewrite local storage. Its
   idle timer depends on the stable candidate turn id, not the derived outcomes
   array, so an identity-only history update cannot consume and cancel the prompt.
+  The negative-context gate reaches the timer through a ref for that same reason.
+  Persisted state (`lody:app-store-review:v2:<userId>`, device-local, not synced
+  and deliberately NOT in `clear-local-cache.ts` — it is user state, not cache)
+  is just the newest 50 completed-turn timestamps plus the last attempt time.
+  That list answers the whole threshold — if the oldest of the newest N is
+  already outside the window then fewer than N are inside it — and its last
+  element doubles as the watermark that makes a repeated history scan
+  idempotent, replacing v1's list of up to 512 `sessionId:turnId` strings that
+  were re-serialized on every completed turn. It is also why the recording
+  effect can pass the whole outcomes array instead of diffing against a
+  per-mount observed set. Because that watermark is a stored timestamp, NO
+  stored time may ever be in the future: turn times come from the agent
+  machine's clock and `nowMs` from the phone's, so a stored future value
+  swallows every genuinely newer turn until real time catches up to it. Future
+  input is rejected (deferred, not lost — the next history update re-scans the
+  session) and stored future times are dropped, so a phone clock corrected
+  backwards heals on the next turn. It under-counts by design: a session opened OLDER than the
+  watermark does not backfill, which can never manufacture eligibility. Keep the product gates at engagement + cooldown + a narrow
+  negative-context check — StoreKit already caps the sheet at three per device
+  per 365 days, so a second rate limiter here only makes the prompt unreachable,
+  which is exactly what v1's active-day and 72h-any-failure gates did.
+  StoreKit reports nothing back and every gate is device-local, so
+  `mobile/app_store_review_prompt_requested` / `_blocked` are the only evidence
+  that the path works at all: `requested` fires once per actual bridge call, and
+  `blocked` names the FIRST gate a candidate turn died on — policy gates from
+  `resolveAppStoreReviewBlockReason` plus the runtime ones (missing bridge, text
+  entry, interaction cancel, hidden app). `blocked` is deduplicated per user AND
+  per reason for the app process's lifetime: a candidate turn arrives on every
+  completed turn, so an undeduplicated event would be among the noisiest in the
+  product, while deduplicating on the user alone lets the first gate mask the
+  rest. Keep both bounds when adding a gate.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then
   coalesces history-only mirror bursts to the latest snapshot once per animation
   frame through `lib/latest-frame-subscription.ts`. Session history snapshots are
@@ -109,3 +144,24 @@ this file; edit `AGENTS.md` only.
   during an owed frame it only advances the target. A switch renders
   synchronously for longer than the key repeat, so a held shortcut otherwise
   queues renders nobody sees. Not a time-based debounce.
+- `use-lody-live-activity.ts` throttles the summary INPUT; the bridge debounce
+  cannot do that job. `atoms/doc-meta` republishes the session and agent-config
+  arrays once per flushed batch, so a cold start reset the 250ms timer before it
+  ever fired while every batch still paid for a full rebuild. EVERY summary input
+  goes through one leading-edge throttle whose trailing deadline is anchored to
+  the last EMIT, so a burst of any rate still delivers and its final value lands;
+  a single input left outside it restores the starvation on its own. Nothing that
+  reaches the payload memo may carry a per-render identity for the same reason —
+  the permission candidate is a fresh object per scan, so depend on its key and
+  title, not on it. The 250ms debounce stays for a different job: a flush lands in
+  the commit AFTER the change that requested it, and without the debounce the
+  bridge gets both, the stale one marking the alert shown so the fresh one is
+  dropped by the already-alerted early return.
+  A pending permission request is scanned from the UNTHROTTLED list and flushes
+  the window, so the alert ships promptly and with a summary that contains it;
+  `shownPermissionAlertKeysRef` still shows one alert per candidate key. Compute
+  nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the native
+  iOS shell are BOTH required and are not equivalent — the atom defaults to true,
+  so without the shell check every desktop build rebuilds a summary it can never
+  show. The activity id is derived separately from that gate so the disable and
+  unmount paths can still end an activity the payload no longer describes.

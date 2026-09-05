@@ -167,6 +167,33 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
 - Lists: `mobile-chat-list.tsx`, `mobile-swipeable-row.tsx` (iOS-Mail-style
   row actions; also `touch-action: pan-y`), `mobile-filter-pill-bar.tsx`,
   `mobile-filter-drawer.tsx`, `mobile-inline-picker.tsx`.
+- Group preview cap: under `MobileChatList capGroupPreviews` every bucket
+  previews at most `MOBILE_CHAT_PREVIEW_MAX_ROOTS` (5 — the desktop
+  `MAX_VISIBLE_SESSIONS`, copied rather than imported so the mobile bundle skips
+  `session-list.tsx`) and ends in a `sessions.showAll` / `sessions.showLess`
+  toggle. Workspace home passes it, because its buckets compete for the screen;
+  the in-project list does NOT — the user drilled in to read exactly that list
+  and there is nothing else there for a cap to make room for. It counts
+  TOP-LEVEL rows via `countOpenedByTreeRoots`, and `maxRoots` applies AFTER
+  `rootRank`, so a preview truncates the pinned-first / latest-activity order
+  rather than reshuffling it and never splits an opener from the Sessions it
+  opened. The expanded set is per
+  bucket id in `MobileChatList`, NEVER the shared
+  `sidebarCollapsedOpenedBySessionsAtom` — that atom is opener fold state the
+  drawer sidebar must agree on. The cap is SUSPENDED while archived multi-select
+  is active: "select all" takes every id in the list, so a capped surface would
+  confirm a permanent delete of rows it never showed. The preview state joins the
+  `AnimatePresence` key so "Show less" remounts instead of running a 0.4s height
+  exit per hidden row, and collapsing `scrollIntoView({ block: 'nearest' })`s the
+  toggle from a LAYOUT effect — the rows that vanish are above it. The toggle's
+  leading 16px slot stays EMPTY (it only aligns the label to the row-title x):
+  that column carries a row's status indicator and an opener's fold chevron, so a
+  chevron there would read as one of those.
+  The list is deliberately NOT virtualized. `VList` must own the scroll element,
+  but the home screen owns it — pull-to-refresh translates that subtree, the
+  dock-collapse listener reads it, hidden home tabs stay mounted for scroll
+  position — and `contain: strict` would strip the `liftAboveEdgeSwipeZone`
+  escape the opener chevron needs. The cap bounds the row count instead.
 - Opened-by tree: `MobileChatListCard` runs the shared
   `lib/session-opened-by-tree.ts` model over EACH bucket, so a Session created
   by the `lody_session_create` MCP tool indents under its opener the same way

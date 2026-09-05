@@ -63,7 +63,12 @@
   depend on a runtime API or hosted search service. `scripts/generate-llms.mjs`
   validates docs title/description frontmatter and generates root
   `public/llms.txt` + `public/llms-full.txt` from the ordered English docs and
-  public blog content. `scripts/generate-rss.mjs` writes `public/rss.xml` (en)
+  public blog content. `llms.txt` also includes a short Answers section from
+  `scripts/llms-answers.mjs`; every answer link must resolve to a current
+  English docs path on this tree (do not invent pages that are still draft).
+  `scripts/generate-docs-faq.mjs` extracts MDX `## FAQ` / `## 常见问题`
+  sections into `lib/docs-faq.generated.ts` for FAQPage JSON-LD.
+  `scripts/generate-rss.mjs` writes `public/rss.xml` (en)
   and `public/rss-zh.xml` (zh) from the same blog frontmatter, skipping drafts;
   both feeds are linked from every blog `head()`. Root `public/robots.txt` is
   also owned here; the App build must not overwrite public-site SEO files.
@@ -82,15 +87,30 @@
   values. Marketing pages (landing/pricing/changelog/download) must stay on
   `--landing-*` / `--mkt-*` and reference no `fd-` token, which is what keeps
   this override off them — check that before moving a component between them.
-- SEO lives in `lib/metadata.ts` and TanStack route `head()` functions. Canonical
-  page URLs should match Cloudflare Pages' directory form (`/`, `/zh/`,
-  `/docs/.../`, `/zh/docs/.../`); file URLs keep their extension. `/home` and
-  `/zh/home` are compatibility routes and should stay `noindex,follow`.
+- SEO lives in `lib/metadata.ts` and TanStack route `head()` functions. Docs,
+  blog, changelog, and pricing `head()` titles go through `brandTitle` so they
+  get `| Lody`; landing/download titles already include the brand and must not be
+  double-suffixed. Visible `DocsTitle` stays unbranded. Canonical page URLs
+  should match Cloudflare Pages' directory form (`/`, `/zh/`, `/docs/.../`,
+  `/zh/docs/.../`); file URLs keep their extension. `/home` and `/zh/home` are
+  compatibility routes and should stay `noindex,follow`. Unmatched URLs must not
+  SPA-fallback to the homepage: prerender `/404` to `out/client/404.html`
+  (Cloudflare Pages serves that file with HTTP 404). The 404 document is
+  `noindex,follow` and must not canonicalize to `/`. Do not add a Vite
+  `configurePreviewServer` 404 interceptor — TanStack prerender uses that
+  preview server to fetch pages that do not exist on disk yet. Use
+  `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
+  After prerender, `scripts/finalize-404-html.mjs` strips app hydration from
+  `404.html` so a junk URL cannot boot the client router and blank the page.
+  Docs pages that have an MDX `## FAQ` / `## 常见问题` section emit FAQPage
+  JSON-LD through `pageHead` (`lib/docs-faq.ts`); do not duplicate that FAQ copy
+  in a second catalog.
 - `vite.config.ts` is the build integration point. Keep TanStack Start, Fumadocs
   MDX, Tailwind, React, and preview-only aliases there. The deployable static
   build output is `site-docs/out/client`; do not publish the SSR server bundle.
 - `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/docs-search.json`, `public/llms.txt`,
-  `public/llms-full.txt`, `public/rss.xml`, and `public/rss-zh.xml` are
+  `public/llms-full.txt`, `public/rss.xml`, `public/rss-zh.xml`,
+  `lib/blog-reading-time.generated.ts`, and `lib/docs-faq.generated.ts` are
   generated and ignored. `pretypecheck` runs `tsr generate`; `generate` writes
   the SEO files. Do not edit or format the generated route tree or generated
   public SEO files.

@@ -71,7 +71,8 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  sidebarCollapsedAtom,
+  navigationSidebarHiddenAtom,
+  showNavigationSidebarAtom,
   tasksFeatureEnabledAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
@@ -921,8 +922,8 @@ function WorkspaceChatLanding({
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
-  const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;
     return machineId && machines.has(machineId) ? machineId : null;
@@ -6559,12 +6560,12 @@ function WorkspaceChatLanding({
         onGoToAgentSettings={handleGoToAgentSettings}
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
-          !isMobile && isLeftSidebarCollapsed ? (
+          !isMobile && isLeftSidebarHidden ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setLeftSidebarCollapsed(false)}
+              onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               className="h-7 w-7 shrink-0 text-muted-foreground"
             >

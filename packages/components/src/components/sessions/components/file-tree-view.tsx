@@ -5,6 +5,13 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
 import { type TreeDataItem } from '@/components/tree-view';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/ui/context-menu';
+import { useSessionFileActions, type SessionFileMenuItem } from '@/hooks/use-session-file-actions';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
@@ -56,6 +63,12 @@ interface FileTreeViewProps {
   fileProviderPending?: boolean;
   fileProviderMessage?: string;
   autoCodeCollab?: boolean;
+  /**
+   * Right-click actions for file rows, from `useSessionFileActions`. The owner
+   * passes them because it also renders the same actions in the side panel ⋯
+   * menu, and both must offer exactly the same set. Must be stable.
+   */
+  fileMenuItems?: readonly SessionFileMenuItem[];
   // Paths of files that appear in the session "Changes" list. When provided,
   // these drive the modified-file highlight in the tree (provider metadata does
   // not carry per-file modified state in live mode). Omitted by Storybook /
@@ -204,10 +217,16 @@ function VirtualFileTree({
   data,
   viewportRef,
   viewStateKey,
+  fileMenuItems,
 }: {
   readonly data: readonly TreeDataItem[];
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   readonly viewStateKey?: string;
+  /**
+   * Right-click actions for FILE rows. Must be referentially stable — the rows
+   * are memoized against per-frame scroll re-renders.
+   */
+  readonly fileMenuItems?: readonly SessionFileMenuItem[];
 }) {
   const [viewState, updateViewState] = useFileTreeViewState(viewStateKey);
   const selectedId = viewState.selectedId;
@@ -303,6 +322,7 @@ function VirtualFileTree({
             selected={selectedId === row.item.id}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            fileMenuItems={fileMenuItems}
           />
         ))}
       </div>
@@ -330,6 +350,7 @@ function VirtualFileTree({
             virtualSize={virtualItem.size}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            fileMenuItems={fileMenuItems}
           />
         );
       })}
@@ -349,6 +370,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   virtualSize,
   onSelect,
   onToggleDirectory,
+  fileMenuItems,
 }: {
   readonly row: VirtualFileTreeRowModel;
   readonly selected: boolean;
@@ -356,6 +378,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   readonly virtualSize?: number;
   readonly onSelect: (itemId: string) => void;
   readonly onToggleDirectory: (itemId: string) => void;
+  readonly fileMenuItems?: readonly SessionFileMenuItem[];
 }) {
   const item = row.item;
   const disabled = item.disabled === true;
@@ -379,7 +402,11 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
     item.onClick?.();
   };
 
-  return (
+  // A directory always carries a `children` array (empty while a lazy one is
+  // uninitialized); only a file has none. `hasChildren` cannot stand in for
+  // this — an empty directory has none either.
+  const isFile = item.children === undefined;
+  const rowButton = (
     <button
       type="button"
       role="treeitem"
@@ -436,6 +463,26 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       </span>
     </button>
   );
+
+  // Only files get a menu, and only when the surface resolved actions for this
+  // session — no menu at all beats a menu that can only disappoint.
+  if (!isFile || !fileMenuItems || fileMenuItems.length === 0) return rowButton;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{rowButton}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[190px]">
+        {fileMenuItems.map((menuItem) => {
+          const ItemIcon = menuItem.icon;
+          return (
+            <ContextMenuItem key={menuItem.id} onSelect={() => menuItem.run(item.id)}>
+              <ItemIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              {menuItem.label}
+            </ContextMenuItem>
+          );
+        })}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 });
 
 function ControlledFileTreeView({
@@ -445,6 +492,7 @@ function ControlledFileTreeView({
   fileProviderMessage,
   changedFilePaths,
   viewStateKey,
+  fileMenuItems,
 }: ControlledFileTreeViewProps) {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -536,6 +584,7 @@ function ControlledFileTreeView({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          {...(fileMenuItems === undefined ? {} : { fileMenuItems })}
         />
       </div>
     </ScrollArea>
@@ -564,6 +613,7 @@ const AutoFileTreeView = ({
   autoCodeCollab = true,
   changedFilePaths,
   viewStateKey,
+  fileMenuItems,
 }: FileTreeViewProps) => {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -676,6 +726,7 @@ const AutoFileTreeView = ({
   const providerFileTree = useFileWorkspaceTree(activeFileProvider, {
     enabled: shouldUseProviderFileList,
   });
+  const sessionFileActions = useSessionFileActions({ session, fileProvider: activeFileProvider });
 
   const localFileTree = useMemo(
     () => buildFileTreeFromPaths(localProjectFileData.entry?.paths ?? []),
@@ -855,6 +906,7 @@ const AutoFileTreeView = ({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          fileMenuItems={fileMenuItems ?? sessionFileActions.menuItems}
         />
 
         {shouldUseLocalFileList && localListTruncated ? (

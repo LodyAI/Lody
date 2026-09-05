@@ -52,6 +52,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
 import { MobileSettingsDetailHeader } from '@/components/mobile/mobile-settings-layout';
+import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
@@ -74,6 +75,7 @@ export type MachineProvidersSectionProps = {
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
+  variant?: 'default' | 'mobile-list';
 };
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
@@ -89,8 +91,76 @@ export function MachineProvidersSection({
   onRetrySetup,
   onDeleteSetup,
   flush = false,
+  variant = 'default',
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
+  const addButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          onClick={onAddConfig}
+          aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t('settings.agent.provider.addProvider', 'Add provider')}</TooltipContent>
+    </Tooltip>
+  );
+
+  if (variant === 'mobile-list') {
+    return (
+      <MobileSettingsSection
+        title={t('settings.agent.provider.title', 'Agent Provider')}
+        actions={addButton}
+      >
+        {configs.length === 0 && setups.length === 0 ? (
+          <div className="flex flex-col items-center px-6 py-8 text-center text-sm">
+            <Bot className="h-6 w-6 text-muted-foreground/70" />
+            <p className="mt-2 text-muted-foreground">
+              {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+            </p>
+            <Button size="sm" className="mt-3" onClick={onAddConfig}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t('settings.agent.provider.addProvider', 'Add provider')}
+            </Button>
+          </div>
+        ) : (
+          <>
+            {setups.map((setup, index) => (
+              <ProviderSetupRow
+                key={setup.id}
+                setup={setup}
+                machine={machine}
+                onRetry={onRetrySetup ?? (async () => undefined)}
+                onDelete={onDeleteSetup ?? (async () => undefined)}
+                className={cn(
+                  'rounded-none border-0 bg-transparent',
+                  index > 0 && 'border-t border-border'
+                )}
+              />
+            ))}
+            {configs.map((config, index) => (
+              <ProviderRow
+                key={config.id}
+                config={config}
+                machine={machine}
+                onEdit={onEditConfig}
+                onDelete={onDeleteConfig}
+                onRefresh={onRefreshConfig}
+                variant="list"
+                className={index === 0 && setups.length > 0 ? 'border-t border-border' : undefined}
+              />
+            ))}
+          </>
+        )}
+      </MobileSettingsSection>
+    );
+  }
+
   return (
     <section className="flex flex-col">
       <div
@@ -102,22 +172,7 @@ export function MachineProvidersSection({
         <h3 className="text-xs font-semibold text-muted-foreground">
           {t('settings.agent.provider.title', 'Agent Provider')}
         </h3>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              onClick={onAddConfig}
-              aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t('settings.agent.provider.addProvider', 'Add provider')}
-          </TooltipContent>
-        </Tooltip>
+        {addButton}
       </div>
       {configs.length === 0 && setups.length === 0 ? (
         <EmptyProviders onAdd={onAddConfig} flush={flush} />

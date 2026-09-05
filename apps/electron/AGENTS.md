@@ -94,6 +94,29 @@ Root `AGENTS.md` also applies.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the
   listener after settlement, and treats only the final response as completion.
+- The public browser (`services/public-browser-service.ts`) has NO network guard:
+  no resolver check, no per-request hostname policy — only engine routing, so a
+  loopback address is refused here and sent to Managed Preview. The view is a
+  sandboxed `WebContentsView` with no preload, script injection, page capture,
+  or agent-facing tool; the only reader of what it renders is the person looking
+  at it, so it is strictly less capable than the user's own Chrome and a guard
+  protects nothing. The one it used to have blocked every fake-IP proxy user.
+  Engine routing is a check on the hostname TEXT: a public name that RESOLVES to
+  loopback (`localtest.me`) still renders here, showing this machine's loopback
+  rather than the agent's. Do not describe the split as resolution-accurate — it
+  is a routing miss, not an exposure, and closing it means resolving every
+  hostname again.
+  Two triggers require bringing a guard back, and both are about who is on the
+  other end, not about the address. A non-human READER — agent DOM access,
+  screenshots, a preload bridge — makes rendered content exfiltratable. A
+  non-human NAVIGATOR already exists: a Managed Preview page is agent-authored
+  and can post navigation requests to the panel, so `session-browser-panel.tsx`
+  refuses private-LAN destinations from page content. Keep that refusal on the
+  panel side; this process cannot tell the two sources apart.
+  The engine-routing check runs on `will-navigate` AND `will-redirect`, like
+  `installNavigationGuard` in `window.ts`: `will-navigate` does not fire for a
+  server-side 3xx, so a public page redirecting to loopback would otherwise
+  commit here and never reach Managed Preview.
 - Image preview export (`services/image-export-service.ts`) keeps the native
   menu, clipboard, and save dialog here because the renderer holds the only copy
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
@@ -135,17 +158,26 @@ Root `AGENTS.md` also applies.
   never `electron-builder` directly. It injects the released version via
   `extraMetadata` so `package.json` is a fallback rather than the release source of
   truth, and it forces `--publish never` unless a caller opts in.
-- The `publish` block in `electron-builder.yml` is what gives the public build an
-  update feed: `electron.vite.config.ts` strips every `VITE_*` value, so
-  `AppUpdaterService` finds no `VITE_ELECTRON_UPDATE_URL` and falls back to the
-  packaged `app-update.yml`. That block is also what makes electron-builder emit
-  `latest*.yml` at all. Its tag contract is `v${version}`.
-- Artifact names must stay space-free. GitHub Releases rewrites spaces in uploaded
-  asset names to periods, which would desynchronize them from the names recorded in
-  `latest*.yml`. Do not reintroduce `${productName}` into an `artifactName`.
-- macOS releases must be signed and notarized. Squirrel.Mac will not install an update
-  it cannot validate against the running app's signature, so an unsigned macOS build
-  silently has no working auto-update. Windows and Linux do not have this constraint.
+- Windows/Linux electron-updater still uses the `publish` block: Vite strips every
+  `VITE_*` value, so `AppUpdaterService` falls back to packaged `app-update.yml` and
+  `latest*.yml`. Tag contract is `v${version}`.
+- macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
+  Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
+  `SPARKLE_ED_PUBLIC_KEY` before signing. The release workflow then runs
+  `Innei/electron-sparkle-updater/action` pinned to a reviewed full commit SHA against
+  this release's zips only
+  (`publish: false`); the Action fetches the two previous `v*` zip releases as
+  delta bases. Keep Apple signing credentials scoped to the packaging step and the
+  Sparkle private key scoped to validation plus the pinned signing Action; never expose
+  them as job-level environment variables. Previous zips stay out of the published asset list. Sparkle load
+  failure falls back to electron-updater. Sparkle UI stays silent; progress and
+  ready-to-install go through `ElectronUpdaterState` for the renderer banner.
+- Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
+  which desynchronizes `latest*.yml` and Sparkle enclosures. Do not use
+  `${productName}` in `artifactName`.
+- macOS releases must be signed and notarized. `generate_appcast` refuses archives
+  that fail `codesign --verify --deep --strict`, and Gatekeeper needs a notarized
+  first-install DMG. Windows and Linux do not have this constraint.
 - CI packages Linux as `AppImage deb` only; `snap` stays in the target list for local
   builds because it needs snapcraft on the machine.
 

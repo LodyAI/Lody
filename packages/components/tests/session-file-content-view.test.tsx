@@ -453,10 +453,13 @@ describe('SessionFileContentView', () => {
     );
     await flushMicrotasks();
 
+    // The viewer asks for the machine's whole read allowance rather than the
+    // 64 KiB preview default, which used to truncate every larger file.
     expect(readSessionWorktreeFile).toHaveBeenCalledWith(
       'loro-dev/lody',
       githubSession.id,
-      'README.md'
+      'README.md',
+      { maxBytes: 5 * 1024 * 1024 }
     );
     expect(view.textContent).toContain('Local worktree');
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();

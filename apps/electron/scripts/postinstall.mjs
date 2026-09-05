@@ -37,4 +37,16 @@ const result = spawnSync(electronBuilderBin, ['install-app-deps'], {
   shell: process.platform === 'win32'
 })
 
-process.exit(result.status ?? 1)
+if (result.status !== 0) {
+  process.exit(result.status ?? 1)
+}
+
+if (process.platform === 'darwin') {
+  const sparkleBin = path.join(process.cwd(), 'node_modules', '.bin', 'electron-sparkle-updater')
+  if (fs.existsSync(sparkleBin)) {
+    const sparkleRebuild = spawnSync(sparkleBin, ['rebuild'], { stdio: 'inherit' })
+    process.exit(sparkleRebuild.status ?? 1)
+  }
+}
+
+process.exit(0)

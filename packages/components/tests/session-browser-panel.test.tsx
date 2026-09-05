@@ -43,13 +43,27 @@ vi.mock('../src/components/sessions/public-browser-surface', () => ({
 }));
 
 vi.mock('../src/components/sessions/managed-preview-surface', () => ({
-  ManagedPreviewSurface: ({ viewerUrl, logicalUrl }: { viewerUrl: string; logicalUrl: string }) =>
-    createElement('div', {
+  ManagedPreviewSurface: ({
+    viewerUrl,
+    logicalUrl,
+    onNavigationRequest,
+  }: {
+    viewerUrl: string;
+    logicalUrl: string;
+    onNavigationRequest: (url: string) => void;
+  }) => {
+    // The real surface calls this when the agent-authored page inside the preview posts
+    // a navigation request up. Capturing it lets a test drive that path directly.
+    lastManagedNavigationRequest = onNavigationRequest;
+    return createElement('div', {
       'data-testid': 'managed-preview',
       'data-viewer-url': viewerUrl,
       'data-logical-url': logicalUrl,
-    }),
+    });
+  },
 }));
+
+let lastManagedNavigationRequest: ((url: string) => void) | null = null;
 
 vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
@@ -427,6 +441,43 @@ describe('SessionBrowserPanel controller', () => {
       expect.objectContaining({ replaceExisting: false })
     );
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
+  });
+
+  it('refuses a private-LAN destination requested by the page, but not one the user types', async () => {
+    const testRuntime = createRuntime({ plane: 'cloud' });
+    const rendered = await renderPanel(testRuntime.runtime);
+    lastManagedNavigationRequest = null;
+
+    await enterAddress(rendered, '127.0.0.1:5173');
+    await confirmDialog();
+    expect(lastManagedNavigationRequest).not.toBeNull();
+    publicBrowserSurfaceRender.mockClear();
+
+    // The page inside the preview is served by the agent machine, so this request is
+    // agent-authored. A LAN address would otherwise open silently on the USER's network.
+    await act(async () => {
+      lastManagedNavigationRequest?.('http://192.168.1.10:3000/admin');
+      await flushMicrotasks();
+    });
+
+    expect(document.body.textContent).toContain('The page asked to open a private network');
+    expect(publicBrowserSurfaceRender).not.toHaveBeenCalled();
+    expect(rendered.querySelector('[data-testid="public-browser"]')).toBeNull();
+
+    // A public destination from the same source is an ordinary external link.
+    await act(async () => {
+      lastManagedNavigationRequest?.('https://example.com/docs');
+      await flushMicrotasks();
+    });
+    expect(rendered.querySelector('[data-testid="public-browser"]')?.getAttribute('data-url')).toBe(
+      'https://example.com/docs'
+    );
+
+    // The person typing the same LAN address is still allowed.
+    await enterAddress(rendered, '192.168.1.10:3000/admin');
+    expect(rendered.querySelector('[data-testid="public-browser"]')?.getAttribute('data-url')).toBe(
+      'http://192.168.1.10:3000/admin'
+    );
   });
 
   it('opens a reported candidate from the composer bar and creates its tunnel directly', async () => {

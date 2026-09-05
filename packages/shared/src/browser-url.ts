@@ -85,12 +85,6 @@ const parseIpv6 = (host: string): number[] | null => {
   return [...left, ...Array.from({ length: 8 - left.length - right.length }, () => 0), ...right];
 };
 
-// RFC 2544 benchmarking range 198.18.0.0/15. It is never globally routed, so a literal
-// address stays prohibited, but fake-IP proxies (Clash, Surge, sing-box, Shadowrocket)
-// answer every DNS query from this range and then intercept the connection by domain.
-const isBenchmarkingIpv4 = ([first, second]: Ipv4Octets): boolean =>
-  first === 198 && (second === 18 || second === 19);
-
 const classifyIpv4 = (octets: Ipv4Octets): BrowserTargetClass => {
   const [first, second, third, fourth] = octets;
   if (first === 127) return 'loopback';
@@ -104,7 +98,7 @@ const classifyIpv4 = (octets: Ipv4Octets): BrowserTargetClass => {
     (first === 169 && second === 254) ||
     (first === 192 && second === 0 && third === 0) ||
     (first === 192 && second === 0 && third === 2) ||
-    isBenchmarkingIpv4(octets) ||
+    (first === 198 && (second === 18 || second === 19)) ||
     (first === 198 && second === 51 && third === 100) ||
     (first === 203 && second === 0 && third === 113) ||
     (first === 255 && second === 255 && third === 255 && fourth === 255);
@@ -143,20 +137,6 @@ export const classifyBrowserHostname = (hostname: string): BrowserTargetClass =>
   const ipv6 = parseIpv6(host);
   if (ipv6) return classifyIpv6(ipv6);
   return 'public';
-};
-
-/**
- * Classifies an address that the resolver returned for a public hostname, as opposed to a
- * hostname the user typed. The only difference from `classifyBrowserHostname` is 198.18.0.0/15:
- * a public name resolving there is a fake-IP proxy's synthetic answer, and the connection to it
- * is intercepted by that proxy and forwarded by domain, so it is treated as public. A literal
- * 198.18.x.x address is still prohibited because nothing legitimate lives in that range.
- */
-export const classifyResolvedBrowserAddress = (address: string): BrowserTargetClass => {
-  const host = stripIpv6Brackets(address);
-  const ipv4 = parseIpv4(host) ?? mappedIpv4(parseIpv6(host) ?? []);
-  if (ipv4 && isBenchmarkingIpv4(ipv4)) return 'public';
-  return classifyBrowserHostname(address);
 };
 
 const parseWithDefaultScheme = (input: string): URL => {
@@ -218,7 +198,14 @@ export const parseBrowserAddress = (rawInput: string): BrowserAddress => {
   }
 
   const logicalUrl = url.toString();
-  if (targetClass === 'public') {
+  // Two engines, split on exactly one question: is this the agent machine's own
+  // loopback? Only that goes through Managed Preview, where the machine opens a
+  // single approved port on itself. Everything else — public sites AND private
+  // LAN / mDNS / docker hosts — is the user's own local browser reaching the
+  // user's own network, which is the user's business. Routing a LAN address
+  // through the machine would make that machine a pivot into its LAN; see
+  // `apps/cli/src/preview/preview-service.ts` for the authoritative rejection.
+  if (targetClass !== 'loopback') {
     return { logicalUrl, engine: 'public-web', targetClass };
   }
 

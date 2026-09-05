@@ -19,18 +19,26 @@ Lody launches the session based on these selections.
 
 A session can also contain multiple tabs: the main chat, child chats, file previews, and diff views can all stay inside the same session. If you want to keep chatting while reading code, or split one task into several review threads, see [Session Tabs](/docs/session-tabs).
 
+To invite a teammate into an existing session so they continue the same conversation, diffs, and worktree, see [Share a Coding Agent Session](/docs/session-handoff). Forking, below, starts a new session for you — it does not add someone to the original one.
+
 ## Fork a Session
 
 When your Agent supports native session forking, the latest completed Agent reply shows a **Fork
 session** button below the reply. Forking creates a new session with the conversation history up to
 that reply, then lets you continue in a separate direction without changing the original session.
 
-Codex and Claude Code can also fork from an earlier completed Agent reply. Forked sessions share the
-same machine and working directory as the source session, so file changes made in one are visible to
-the others; only the conversation history and subsequent turns are independent.
+Codex and Claude Code can also fork from an earlier completed Agent reply.
 
-Fork is available only when the active Agent reports native support for it. It is not a separate Git
-branch or worktree.
+On a Git-backed session that advertises worktree forking, **Fork session** offers two destinations:
+
+- **Current workspace** — a new tab that shares files and uncommitted changes with the source
+- **New worktree** — a new independent session from the latest committed `HEAD`; uncommitted and
+  untracked files stay on the source
+
+If **New worktree** is not offered, fork stays on the current workspace. Side Chat always uses the
+shared-directory path.
+
+Fork is available only when the active Agent reports native support for it.
 
 ## Right Sidebar: Browser and Side Chat
 

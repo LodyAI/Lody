@@ -1,0 +1,30 @@
+---
+title: '20260905'
+version: 0.91.0
+date: 2026-09-05
+description: Added session file actions, semantic diffs, unread indicators, and better mention search, with improvements to agent models, Markdown, mobile, and the public site.
+---
+
+Version 0.91.0
+
+### ✨ New
+
+- Support GPT-6 Astra.
+- Added session file actions so files that cannot be previewed directly can be opened in a system app, revealed in the file manager, or downloaded ([#375](https://github.com/LodyAI/Lody/pull/375)).
+- Markdown can now render semantic diff code blocks ([#373](https://github.com/LodyAI/Lody/pull/373)).
+- Session sidebars and desktop child-session tabs now show unread state ([#332](https://github.com/LodyAI/Lody/pull/332), [#384](https://github.com/LodyAI/Lody/pull/384)).
+- File, Issue, and PR mentions now use VS Code-style fuzzy matching, making targets easier to find ([#378](https://github.com/LodyAI/Lody/pull/378)).
+- Added bilingual guides for shared-session handoff, parallel agents, and agent teams ([#387](https://github.com/LodyAI/Lody/pull/387), [#389](https://github.com/LodyAI/Lody/pull/389), [#390](https://github.com/LodyAI/Lody/pull/390), [#393](https://github.com/LodyAI/Lody/pull/393), [#394](https://github.com/LodyAI/Lody/pull/394)).
+
+### 🐛 Fixes and Improvements
+
+- Strengthened team preview and local browser connection checks for safer, more reliable access ([#374](https://github.com/LodyAI/Lody/pull/374)).
+- DeepSeek Harness now discovers models from custom services and exposes model, reasoning, and permission options from the active runtime ([#380](https://github.com/LodyAI/Lody/pull/380), [#395](https://github.com/LodyAI/Lody/pull/395), [DeepSeek ACP #10](https://github.com/LodyAI/acp-extension-dsh/pull/10), [#11](https://github.com/LodyAI/acp-extension-dsh/pull/11)).
+- Kimi model selectors now display and search model providers, making same-named models easier to distinguish ([Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)).
+- Improved Markdown and streaming message rendering with TeX bracket delimiters, correct autolink boundaries around non-ASCII punctuation, preserved final text output, and a touch-closeable Mermaid full-screen viewer ([#336](https://github.com/LodyAI/Lody/pull/336), [#370](https://github.com/LodyAI/Lody/pull/370), [#388](https://github.com/LodyAI/Lody/pull/388), [#396](https://github.com/LodyAI/Lody/pull/396)).
+- Fixed chat jitter while resizing the sidebar and made billing information load sooner ([#368](https://github.com/LodyAI/Lody/pull/368), [#371](https://github.com/LodyAI/Lody/pull/371)).
+- Reduced Live Activity update overhead and capped mobile session-group previews for smoother long lists ([#319](https://github.com/LodyAI/Lody/pull/319), [#323](https://github.com/LodyAI/Lody/pull/323)).
+- Improved when App Store review prompts appear and how their state is handled ([#310](https://github.com/LodyAI/Lody/pull/310)).
+- Updated ACP provider icons and runtime registry information ([#369](https://github.com/LodyAI/Lody/pull/369)).
+- Improved public-site page titles, search discoverability, and 404 handling for unknown pages ([#379](https://github.com/LodyAI/Lody/pull/379), [#383](https://github.com/LodyAI/Lody/pull/383), [#391](https://github.com/LodyAI/Lody/pull/391)).
+- Thanks to external contributor [@nokizw](https://github.com/nokizw) for improving provider display and search in Kimi model selectors ([Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)).

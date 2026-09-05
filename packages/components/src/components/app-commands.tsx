@@ -1,7 +1,7 @@
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { currentWorkspaceSlugAtom, settingsDialogOpenAtom } from '@/atoms';
+import { currentWorkspaceSlugAtom, settingsDialogOpenAtom, toggleZenLayoutModeAtom } from '@/atoms';
 import { taskQuickAddOpenAtom } from '@/atoms/tasks';
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
@@ -26,6 +26,7 @@ export function AppCommands() {
   const settingsModalOpen = useAtomValue(settingsDialogOpenAtom);
   const { openSettings, closeSettings } = useOpenSettings();
   const { theme, setTheme } = useTheme();
+  const toggleZenLayoutMode = useSetAtom(toggleZenLayoutModeAtom);
 
   // window.history.back()/forward() (not router.history — TanStack doesn't expose it);
   // both are safe no-ops at the history boundaries, so no `when` gating is needed.
@@ -53,6 +54,15 @@ export function AppCommands() {
     run: () => {
       setTheme(nextCycledTheme(theme));
     },
+  });
+
+  useCommand({
+    id: 'layout.toggleZenMode',
+    title: t('commands.layout.toggleZenMode', 'Toggle Zen Layout'),
+    category: 'View',
+    keybindings: getCommandKeybindings('layout.toggleZenMode'),
+    when: () => !isMobile,
+    run: () => toggleZenLayoutMode(),
   });
 
   // ⌘, toggles settings: open from anywhere (remembering where we came from so the

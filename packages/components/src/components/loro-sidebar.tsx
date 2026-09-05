@@ -215,6 +215,8 @@ export interface LoroSidebarProps {
    * so both organize modes share the same destination handler.
    */
   onArchiveUpdatedItem?: (id: string) => void;
+  /** Mark a read session unread in the desktop Updated/Pinned lists. */
+  onMarkUpdatedItemUnread?: (id: string) => void;
   /** Rename an Updated row through the shared Rename Chat dialog. */
   onRenameUpdatedItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /** Toggle pin for an Updated row. Mirrors `sessionListProps.onTogglePinSession`. */
@@ -652,6 +654,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onToggleUpdatedBucket,
   onToggleUpdatedShowFullBucket,
   onArchiveUpdatedItem,
+  onMarkUpdatedItemUnread,
   onRenameUpdatedItem,
   onToggleUpdatedItemPinned,
   onCopyUpdatedItemUrl,
@@ -1078,6 +1081,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   onToggleBucket={onTogglePinnedSection}
                   toggleBucketLabel={mergedLabels.pinned}
                   onArchiveItem={onArchiveUpdatedItem}
+                  onMarkItemUnread={onMarkUpdatedItemUnread}
                   onRenameItem={onRenameUpdatedItem}
                   onTogglePinItem={onToggleUpdatedItemPinned}
                   onCopyItemUrl={onCopyUpdatedItemUrl}
@@ -1115,6 +1119,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onToggleBucket={onToggleUpdatedBucket}
                     onToggleFullBucket={onToggleUpdatedShowFullBucket}
                     onArchiveItem={onArchiveUpdatedItem}
+                    onMarkItemUnread={onMarkUpdatedItemUnread}
                     onRenameItem={onRenameUpdatedItem}
                     onTogglePinItem={onToggleUpdatedItemPinned}
                     onCopyItemUrl={onCopyUpdatedItemUrl}

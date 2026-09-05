@@ -1,0 +1,115 @@
+---
+title: How to Share a Claude Code Session with Your Team (Handoff, Not Just a Link)
+date: 2026-09-04
+author: Lody Team
+authorLink: https://lody.ai
+description: A screenshot, export, or Lore-style link is not a handoff. Invite a teammate into the same Lody Claude Code session so they can continue the conversation, diffs, and worktree.
+tag: Guide
+sidebar: false
+aside: false
+---
+
+You spend an hour in a Claude Code session. The agent already has the repo context, the dead ends, and a half-written fix. Then a teammate needs to take it from here.
+
+The usual move is to send a screenshot, export the transcript, or paste a ChatGPT-style share link. Those let someone **read** what happened. They do not let them open the **same** session and keep going.
+
+That is the gap this post is about: how to share a Claude Code session as a handoff, not a souvenir.
+
+## Why a share link is not a handoff
+
+Most “share my Claude Code session” workflows publish a record:
+
+- A **screenshot** shows a slice of the chat. The next person cannot search it, continue it, or see the files the agent actually changed.
+- A **Markdown / transcript export** is static text. They can paste it into a new chat and hope the model reconstructs the context. They are starting over.
+- A **ChatGPT-style share link** is a read-only snapshot. Fine for “look at this.” Useless for “you drive the next turn.”
+- A **[Lore](https://lore.link/share)-style link** renders the thread — prompts, tool calls, files touched — and can seed a **new** agent run. The original session stays where it ran. The teammate does not join it.
+
+None of those put a teammate in the live conversation, on the same diffs, in the same worktree. If they have to re-explain the task, the handoff already failed.
+
+## What continuing the same session means
+
+In Lody, a [coding agent session handoff](/docs/session-handoff/) means a workspace teammate opens the session you already started and continues it.
+
+They get:
+
+- the live [conversation](/docs/session)
+- the file [diffs](/docs/diff-viewer) the agent produced
+- the session [worktree](/docs/worktrees) and branch
+- the same [agent config](/docs/agents) — including Claude Code — so they can send the next prompt
+
+That is not a fork, and not a new composer thread. They open **that** session.
+
+Lody can still [copy a conversation as Markdown](/docs/copy-md) when you only need a record. Copying a session URL without sharing the session also does not grant access — the link still works for the owner.
+
+## How the usual options compare
+
+| Approach | What they get | Same live session? |
+| --- | --- | --- |
+| Screenshot | A picture of the chat | No |
+| Transcript / Markdown export | Static text to paste elsewhere | No — they start a new chat |
+| ChatGPT-style share link | A read-only conversation snapshot | No |
+| [Lore](https://lore.link/share) | A rendered thread you can view or fork into a **new** agent session | No — the original session stays where it ran |
+| **Lody** | The existing workspace [session](/docs/session) | **Yes** — open it and continue |
+
+Lore is honest about what it is: a viewer, and sometimes a way to start a *new* run from distilled context. Lody is the other job — invite someone into the existing session.
+
+The full comparison, including SpecStory and the permission model, is in [Share a Coding Agent Session](/docs/session-handoff/).
+
+## How to hand off a Claude Code session in Lody
+
+Handoff is a team-workspace action. The session has to exist in a Lody workspace, and the other person has to be a member. The steps below match the product guide; use that page if you want every permission edge case.
+
+### 1. Invite them to the workspace
+
+1. Open **Settings** -> **Workspace** -> **General**.
+2. In the **Members** section, click **Invite Member**.
+3. Enter their email and choose a role.
+4. They can accept from the email, or you can copy the invite link and send it yourself.
+
+Details: [Invite Members](/docs/team#invite-members).
+
+### 2. Make the session visible to the team
+
+New machines stay **private**. A session is team-visible only when the resources it runs on are shared.
+
+From the session:
+
+1. Open the session `...` menu, or the **Private** control in the desktop session header.
+2. Choose **Share with team…** (the label may say **Share device with team…** or **Share project with team…** when those grants are what is missing).
+3. Confirm. Lody shares the required machine and, for a local project, the project, then copies a link.
+
+Only the **device owner** can share. If the device is not registered for team access, register it first. You can also share a machine from **Settings** -> **Machines** -> **Share machine** without opening a specific session. See [Team Machine Visibility](/docs/team#team-machine-visibility).
+
+Sharing a session may share its machine and/or local project with everyone in the workspace. Other conversations on that device can become visible too. The confirmation dialog states the scope before you confirm.
+
+### 3. Point them at the session
+
+After the session is team-visible:
+
+- Send the copied session link, or
+- Ask them to open the home-page session list. If they only see their own conversations, switch the sidebar filter from **My Tasks** to **All Tasks** (on mobile, **Team Tasks**). Avatars show who started each one. The list defaults to **All Tasks**.
+
+They should open **that** session — not a fork, and not a new thread in the composer.
+
+### 4. They continue the work
+
+Once they are in the session they can read the full conversation, review the current diffs, keep working in the same worktree and branch, and send the next prompt to the same Claude Code (or other) agent config.
+
+Forking is a different tool: it copies history into a **new** session on the same machine and directory. Use fork when you want a private branch of the conversation. Use share when you want a teammate in the original one. See [Fork a Session](/docs/session#fork-a-session).
+
+To coordinate several conversations from one agent, see [Agent Session Control](/docs/session-orchestration).
+
+## If they cannot see the session
+
+Check three things: they accepted the workspace invite, the machine (and local project, if any) is shared, and they are looking at **All Tasks** rather than **My Tasks**. Unshared machines never sync those conversations into other members’ sidebars.
+
+Joining a workspace does **not** expose your laptop. Machines stay private until you share them. Agent configs can be shared separately so teammates run the same CLI setup; see [Agent Config](/docs/agents) and [Team Features](/docs/team).
+
+## When you only need a record
+
+If the teammate just needs to read what happened, copy a message or use **Copy as Markdown** from the session menu. That is a transcript, not a handoff. See [Copy Conversations](/docs/copy-md).
+
+## Get started
+
+- [Download Lody](/download)
+- Product guide: [Share a Coding Agent Session](/docs/session-handoff/)

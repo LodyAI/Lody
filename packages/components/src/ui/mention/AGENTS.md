@@ -24,6 +24,18 @@ Shared mention primitive used by composer autocomplete surfaces.
   commits a highlighted non-navigation item the same way Enter does.
   Shift+Tab still closes the menu so the composer mode-cycle binding
   is not stolen.
+- A committed mention is an atomic editing range. A collapsed caret placed
+  inside it by pointer/focus/selection changes snaps to the nearest boundary;
+  otherwise the chip mirror hides the native caret and the next edit silently
+  decommits the range. Non-collapsed selections remain native so copy and
+  whole-region edits can span mentions. At a mention boundary, the textarea is
+  raised above the opaque chip and its text fill is made transparent while the
+  background mirror carries the glyphs; this leaves the native caret visible
+  without painting a second caret. Readonly inputs still apply this visual
+  boundary constraint. IME composition is the offset exception: its transient
+  caret must not snap against the still-committed ranges, and both mirrors map
+  those ranges through the transient edit so the chip neither disappears nor
+  exposes a duplicated suffix.
 - The pop-back itself is `context.onNavigateBack()`, owned by the root next to
   `onMentionAdd`: it has to interleave the controlled value commit with caret
   restoration, so a menu's own Back affordance calls it rather than restaging the

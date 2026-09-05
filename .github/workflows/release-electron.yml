@@ -1,7 +1,8 @@
 name: Release Electron
 
 # Builds and publishes the public Lody OSS desktop app for macOS, Windows and
-# Linux, plus the electron-updater metadata that drives in-app auto-update.
+# Linux. Windows/Linux in-app updates use electron-updater metadata (latest*.yml).
+# macOS updates use Sparkle appcast.xml produced after packaging.
 #
 # The tag is the source of truth for the released version: `package-electron.mjs`
 # injects it through extraMetadata so apps/electron/package.json never silently
@@ -9,6 +10,7 @@ name: Release Electron
 # block in electron-builder.yml, which electron-builder bakes into the packaged
 # app-update.yml — the public renderer build strips every VITE_* value, so the
 # cloud composition's VITE_ELECTRON_UPDATE_URL injection is not available here.
+# Sparkle reads SUFeedURL / SUPublicEDKey from Info.plist instead.
 
 on:
   push:
@@ -60,14 +62,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     environment: release
     env:
-      CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
-      CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
-      CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
-      APPLE_API_KEY_P8: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_P8 || '' }}
-      APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
-      APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
-      # Signing identities come from the secrets above only; never from whatever
-      # happens to be in the runner keychain.
+      # Signing identities are injected only into the trusted preparation and
+      # package steps; never discover whatever happens to be in the runner keychain.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
     steps:
@@ -101,31 +97,6 @@ jobs:
           echo "LODY_OSS_RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
           echo "Packaging Lody OSS ${version}"
 
-      - name: Prepare macOS signing and notarization credentials
-        if: matrix.target == 'mac'
-        shell: bash
-        run: |
-          set -euo pipefail
-          required_envs=(
-            "CSC_LINK"
-            "CSC_KEY_PASSWORD"
-            "APPLE_API_KEY_P8"
-            "APPLE_API_KEY_ID"
-            "APPLE_API_ISSUER"
-          )
-          for key in "${required_envs[@]}"; do
-            if [[ -z "${!key:-}" ]]; then
-              echo "Missing required macOS signing secret: ${key}"
-              echo "macOS auto-update cannot work from an unsigned build, so this is fatal."
-              exit 1
-            fi
-          done
-
-          api_key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
-          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
-          chmod 600 "${api_key_path}"
-          echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
@@ -141,8 +112,103 @@ jobs:
       - name: Build bundled CLI and renderer
         run: pnpm --dir apps/electron run build
 
+      - name: Prepare macOS signing and notarization credentials
+        if: matrix.target == 'mac'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "CSC_LINK"
+            "CSC_KEY_PASSWORD"
+            "APPLE_API_KEY_P8"
+            "APPLE_API_KEY_ID"
+            "APPLE_API_ISSUER"
+            "SPARKLE_ED_PUBLIC_KEY"
+            "SPARKLE_ED_PRIVATE_KEY"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required macOS signing or Sparkle secret: ${key}"
+              echo "macOS Sparkle auto-update needs a signed build and SUPublicEDKey, so this is fatal."
+              exit 1
+            fi
+          done
+
+          api_key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
+
       - name: Package (${{ matrix.target }})
+        env:
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
         run: pnpm --dir apps/electron run package -- ${{ matrix.package_args }} --publish never
+
+      - name: Remove macOS notarization key
+        if: ${{ always() && matrix.target == 'mac' }}
+        shell: bash
+        run: |
+          if [[ -n "${APPLE_API_KEY:-}" ]]; then
+            rm -f "${APPLE_API_KEY}"
+          fi
+
+      - name: Prepare Sparkle archive dir
+        if: matrix.target == 'mac'
+        id: sparkle-archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_dir="${RUNNER_TEMP}/sparkle-appcast"
+          mkdir -p "${archive_dir}"
+          find apps/electron/dist -maxdepth 1 -type f -name '*.zip' -exec cp {} "${archive_dir}/" \;
+          if [[ -z "$(ls -A "${archive_dir}")" ]]; then
+            echo "No macOS zip archives were produced for Sparkle"
+            exit 1
+          fi
+          echo "dir=${archive_dir}" >> "$GITHUB_OUTPUT"
+
+      - name: Expose Sparkle CLI for the release Action
+        if: matrix.target == 'mac'
+        shell: bash
+        run: echo "${GITHUB_WORKSPACE}/apps/electron/node_modules/.bin" >> "$GITHUB_PATH"
+
+      # Same Action kansoku uses in desktop-release.yml. publish stays false:
+      # Lody's ubuntu job publishes mac/win/linux together.
+      - name: Sign appcast and generate Sparkle deltas
+        if: matrix.target == 'mac'
+        uses: Innei/electron-sparkle-updater/action@002472bdb78a9608eddc8b39202572af3f7986fb # v1
+        with:
+          tag: v${{ env.LODY_OSS_RELEASE_VERSION }}
+          repo: ${{ github.repository }}
+          tag-prefix: v
+          archive-dir: ${{ steps.sparkle-archive.outputs.dir }}
+          ed-private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          delta-bases: '2'
+          fetch-delta-bases: 'true'
+          publish: 'false'
+          github-token: ${{ github.token }}
+
+      - name: Stage Sparkle feed assets
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_dir="${{ steps.sparkle-archive.outputs.dir }}"
+          cp "${archive_dir}/appcast.xml" apps/electron/dist/appcast.xml
+          find "${archive_dir}" -maxdepth 1 -type f -name '*.delta' -exec cp {} apps/electron/dist/ \;
 
       - name: Collect release assets
         shell: bash
@@ -156,6 +222,8 @@ jobs:
               -name '*.exe' -o \
               -name '*.dmg' -o \
               -name '*.zip' -o \
+              -name '*.delta' -o \
+              -name 'appcast.xml' -o \
               -name '*.AppImage' -o \
               -name '*.deb' \
             \) \

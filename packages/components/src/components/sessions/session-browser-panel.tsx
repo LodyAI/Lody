@@ -83,7 +83,7 @@ const approvalFor = (
   source: PreviewTargetApproval['source']
 ): PreviewTargetApproval => ({
   source,
-  targetClass: address.targetClass === 'private-lan' ? 'private_lan' : 'loopback',
+  targetClass: 'loopback',
   target: address.target,
   confirmedByUserId: userId,
   confirmedAt: getServerNow(),
@@ -396,10 +396,27 @@ function SessionBrowserPanelController({
         approved?: boolean;
         historyIndex?: number;
         restore?: boolean;
+        /** The destination came from page content, not from the person. */
+        fromPageContent?: boolean;
       }
     ) => {
       const sequence = ++navigationSequenceRef.current;
       setError(null);
+      // A page inside Managed Preview is served by the agent machine, so a navigation
+      // request it posts up is agent-authored, not a user gesture. Public destinations
+      // are ordinary external links, and loopback still lands in the managed branch
+      // below where it needs its own approval — but a private-LAN address would open
+      // silently in the user's own browser, on the user's own network, which no page
+      // has any business asking for. Only the address bar can reach one.
+      if (options?.fromPageContent && next.targetClass === 'private-lan') {
+        setError(
+          t(
+            'sessions.browser.errors.pagePrivateNetworkBlocked',
+            'The page asked to open a private network address. Only you can enter one, from the address bar.'
+          )
+        );
+        return;
+      }
       if (next.engine === 'public-web') {
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
@@ -928,7 +945,7 @@ function SessionBrowserPanelController({
   const handleManagedNavigationRequest = useCallback(
     (url: string) => {
       try {
-        void openAddress(parseBrowserAddress(url));
+        void openAddress(parseBrowserAddress(url), { fromPageContent: true });
       } catch (navigationError) {
         setError(errorMessage(navigationError));
       }
