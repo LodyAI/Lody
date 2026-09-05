@@ -5384,6 +5384,69 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  it('finalizes a stale unfinished compaction turn when no live runtime owns it', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const compactionItem = {
+      type: 'tool_call',
+      toolCallId: 'context-compaction-stale',
+      title: 'Context compacting',
+      status: 'in_progress',
+      activityKind: 'context_compaction',
+    };
+    const history = [
+      {
+        id: 'assistant-stale-compaction',
+        role: 'assistant',
+        items: [compactionItem],
+        finished: false,
+      },
+    ];
+    const sessionDoc = {
+      getHistory: vi.fn(async () => history),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
+        update(history);
+      }),
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      getActiveTurnId: vi.fn(() => undefined),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({ meta: {} })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-stale-compaction' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant-stale-compaction',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(compactionItem.status).toBe('failed');
+    expect(sessionDoc.updateHistory).toHaveBeenCalled();
+    expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-compaction', {
+      lastCanceledTurn: undefined,
+    });
+  });
+
   it('keeps a newer queued turn pending when cancelling the currently running turn', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = {

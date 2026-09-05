@@ -4677,6 +4677,52 @@ export class SessionExecutionService {
     const currentTurnId = activeTurnId ?? this.currentTurnBySession.get(sessionId);
     // Cancel is exact-match only: a stale stop request must not interrupt a newer assistant turn.
     if (!isPrompting && !isCurrentExecutionTurn) {
+      const history = await sessionDoc.getHistory();
+      const hasUnfinishedRequestedTurn = history.some(
+        (entry) =>
+          entry.id === turnId &&
+          entry.role === 'assistant' &&
+          entry.finished !== true &&
+          typeof entry.endedAt !== 'number' &&
+          entry.items?.some(
+            (item) =>
+              item.type === 'tool_call' &&
+              item.activityKind === 'context_compaction' &&
+              (item.status === 'pending' || item.status === 'in_progress')
+          ) === true
+      );
+      if (currentTurnId == null && hasUnfinishedRequestedTurn) {
+        this.deps.logger.debug(
+          `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
+        );
+        this.deps.clearSessionActivePresence(sessionId);
+        await sessionDoc.updateHistory((nextHistory) => {
+          for (const entry of nextHistory) {
+            if (entry.id !== turnId) continue;
+            entry.finished = true;
+            entry.endedAt = getServerNow();
+            if (!entry.items) continue;
+            for (const item of entry.items) {
+              if (
+                item.type === 'tool_call' &&
+                item.activityKind === 'context_compaction' &&
+                (item.status === 'pending' || item.status === 'in_progress')
+              ) {
+                item.status = 'failed';
+              }
+            }
+          }
+          return nextHistory;
+        });
+
+        await this.finalizeCancelledTurn({
+          sessionId,
+          sessionDoc,
+          turnId,
+          reportTurnError: false,
+        });
+        return { success: true };
+      }
       this.deps.logger.debug(
         `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
       );
