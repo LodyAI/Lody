@@ -7,7 +7,7 @@ interface Submission {
 }
 
 function createScope(key: string) {
-  return { key, active: false, submission: null as Submission | null };
+  return { key, submission: null as Submission | null };
 }
 
 /**
@@ -28,9 +28,7 @@ export function useComposerSubmission(
   } | null>(null);
 
   useLayoutEffect(() => {
-    scope.active = true;
     return () => {
-      scope.active = false;
       scope.submission?.dispose();
       scope.submission = null;
     };
@@ -45,15 +43,13 @@ export function useComposerSubmission(
 
   const beginSubmission = useCallback(
     ({ dismissKeyboard }: { dismissKeyboard: boolean }): Submission | null => {
-      // The ref-backed lock also covers two submissions in the same React batch.
-      if (!scope.active || scope.submission) return null;
+      // The submission token also covers two submissions in the same React batch.
+      if (scope.submission) return null;
       const input = inputRef.current;
-      if (!input || input.disabled) return null;
+      if (!input) return null;
       const document = input.ownerDocument;
       const window = document.defaultView;
-      const initiator = document.activeElement;
       let focusRelinquished = false;
-      let finished = false;
       const relinquishFocus = () => {
         focusRelinquished = true;
       };
@@ -64,23 +60,18 @@ export function useComposerSubmission(
         if (event.target !== inputRef.current) relinquishFocus();
       };
       const dispose = () => {
-        document.removeEventListener('focusin', onFocus);
+        document.removeEventListener('focusin', onFocus, true);
         document.removeEventListener('pointerdown', onPointerDown, true);
         window?.removeEventListener('blur', relinquishFocus);
       };
       const restoreFocus = () => {
-        const target = inputRef.current;
-        if (focusRelinquished || !target?.isConnected || target.disabled) return;
-        const active = document.activeElement;
-        if (active !== document.body && active !== target && active !== initiator) return;
-        target.focus({ preventScroll: true });
+        if (!focusRelinquished) inputRef.current?.focus({ preventScroll: true });
       };
       const submission: Submission = {
-        isCurrent: () => scope.active && scope.submission === submission,
+        isCurrent: () => scope.submission === submission,
         dispose,
         finish: (accepted) => {
-          if (finished || !submission.isCurrent()) return;
-          finished = true;
+          if (!submission.isCurrent()) return;
           // A new state object makes completion observable even if React batches
           // pending and settled into one commit (including immediate rejection).
           setState({
@@ -91,7 +82,7 @@ export function useComposerSubmission(
         },
       };
       scope.submission = submission;
-      document.addEventListener('focusin', onFocus);
+      document.addEventListener('focusin', onFocus, true);
       document.addEventListener('pointerdown', onPointerDown, true);
       window?.addEventListener('blur', relinquishFocus);
       if (dismissKeyboard) input.blur();

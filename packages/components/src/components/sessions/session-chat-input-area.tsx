@@ -1720,215 +1720,203 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
-    const sendMessage = useCallback(
-      async (source: 'keyboard' | 'button' = 'button') => {
-        if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'free_session_turn_limit_reached',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (isArchived) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'session_archived',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (durableAgentRoleReady === false) {
-          return;
-        }
-        if (isMachineRemoved) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'machine_removed',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (isExternalHistoryRefreshing) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'external_history_syncing',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        const currentValue = textareaRef.current?.value ?? userInput;
-        // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
-        // that need no rewrite all resolve against the same original text, and
-        // the spans record where each landed.
-        const expandedPrompt = expandPromptMentionsRef.current({
-          text: currentValue,
-          mentions: mentionRangesRef.current,
-          pastedTextDrafts,
+    const sendMessage = useCallback(async () => {
+      if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'free_session_turn_limit_reached',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
         });
-        const trimmedPrompt = expandedPrompt.text.trim();
-        // The trim moves every character left; re-anchor before the offsets ship.
-        const trimmedSpans = reanchorMessageTextSpansForTrim(
-          expandedPrompt.text,
-          trimmedPrompt,
-          expandedPrompt.spans
-        );
-        const textBlocks: SessionInputBlock[] = trimmedPrompt
-          ? [
-              {
-                type: 'text',
-                text: trimmedPrompt,
-                ...(trimmedSpans ? { spans: trimmedSpans } : {}),
-              },
-            ]
-          : [];
-        const uploadedImages = pendingImages
-          .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
-            return image.status === 'uploaded' && !!image.uploaded;
-          })
-          .map((image) => toImageInputBlock(image.uploaded));
-        const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
-        // A still-uploading file (not failed) blocks send; failed ones are
-        // skipped so a single failed attachment doesn't trap the message.
-        const hasBlockingFiles = pendingFiles.some((file) =>
-          isSessionFileTransferPhase(file.status)
-        );
-        const uploadedFiles = pendingFiles
-          .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
-            return file.status === 'uploaded' && !!file.uploaded;
-          })
-          .map((file) => toFileInputBlock(file.uploaded));
-        if (hasBlockingImages || hasBlockingFiles) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'image_upload_in_progress',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: true,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
-          type: 'comment_reference' as const,
+        return;
+      }
+      if (isArchived) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'session_archived',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      if (durableAgentRoleReady === false) {
+        return;
+      }
+      if (isMachineRemoved) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'machine_removed',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      if (isExternalHistoryRefreshing) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'external_history_syncing',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      const currentValue = textareaRef.current?.value ?? userInput;
+      // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
+      // that need no rewrite all resolve against the same original text, and
+      // the spans record where each landed.
+      const expandedPrompt = expandPromptMentionsRef.current({
+        text: currentValue,
+        mentions: mentionRangesRef.current,
+        pastedTextDrafts,
+      });
+      const trimmedPrompt = expandedPrompt.text.trim();
+      // The trim moves every character left; re-anchor before the offsets ship.
+      const trimmedSpans = reanchorMessageTextSpansForTrim(
+        expandedPrompt.text,
+        trimmedPrompt,
+        expandedPrompt.spans
+      );
+      const textBlocks: SessionInputBlock[] = trimmedPrompt
+        ? [
+            {
+              type: 'text',
+              text: trimmedPrompt,
+              ...(trimmedSpans ? { spans: trimmedSpans } : {}),
+            },
+          ]
+        : [];
+      const uploadedImages = pendingImages
+        .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
+          return image.status === 'uploaded' && !!image.uploaded;
+        })
+        .map((image) => toImageInputBlock(image.uploaded));
+      const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
+      // A still-uploading file (not failed) blocks send; failed ones are
+      // skipped so a single failed attachment doesn't trap the message.
+      const hasBlockingFiles = pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+      const uploadedFiles = pendingFiles
+        .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
+          return file.status === 'uploaded' && !!file.uploaded;
+        })
+        .map((file) => toFileInputBlock(file.uploaded));
+      if (hasBlockingImages || hasBlockingFiles) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'image_upload_in_progress',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: true,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
+        type: 'comment_reference' as const,
+        ...item.reference,
+      }));
+      const visualAnnotationRefBlocks: SessionInputBlock[] =
+        visualAnnotationReferencesRef.current.map((item) => ({
+          type: 'visual_annotation_reference' as const,
           ...item.reference,
         }));
-        const visualAnnotationRefBlocks: SessionInputBlock[] =
-          visualAnnotationReferencesRef.current.map((item) => ({
-            type: 'visual_annotation_reference' as const,
-            ...item.reference,
-          }));
-        const submittedVisualAnnotationReferences = visualAnnotationReferencesRef.current.map(
-          (item) => item.reference
-        );
+      const submittedVisualAnnotationReferences = visualAnnotationReferencesRef.current.map(
+        (item) => item.reference
+      );
 
-        if (
-          textBlocks.length === 0 &&
-          uploadedImages.length === 0 &&
-          uploadedFiles.length === 0 &&
-          commentRefBlocks.length === 0 &&
-          visualAnnotationRefBlocks.length === 0
-        ) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'empty_input',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: false,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
+      if (
+        textBlocks.length === 0 &&
+        uploadedImages.length === 0 &&
+        uploadedFiles.length === 0 &&
+        commentRefBlocks.length === 0 &&
+        visualAnnotationRefBlocks.length === 0
+      ) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'empty_input',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: false,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
 
-        const inputBlocks: SessionInputBlock[] = [
-          ...commentRefBlocks,
-          ...visualAnnotationRefBlocks,
-          ...uploadedImages,
-          ...uploadedFiles,
-          ...textBlocks,
-        ];
-        const dismissKeyboardForSubmit =
-          usesMobileKeyboardAction && (source === 'keyboard' || source === 'button');
-        const submittedDraft = {
-          text: sessionDraftsCache.get(session.id),
-          images: sessionImageDraftsCache.get(session.id),
-          files: sessionFileDraftsCache.get(session.id),
-          pastedText: sessionPastedTextDraftsCache.get(session.id),
-        };
-        const submission = beginSubmission({ dismissKeyboard: dismissKeyboardForSubmit });
-        if (!submission) return;
-        // React still owns the preserved draft state. Clear only the visible DOM
-        // immediately so Enter/click feedback does not wait for local IPC.
-        if (textareaRef.current) {
-          textareaRef.current.value = '';
-        }
-        let accepted = false;
-        try {
-          accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
-          if (accepted) {
-            if (submission.isCurrent()) {
-              clearInput();
-              clearPendingImages();
-              clearPendingFiles();
-              updatePastedTextDraftsForSession(session.id, () => []);
-              publishCommentReferences([]);
-              publishVisualAnnotationReferences([]);
-            } else if (
-              sessionDraftsCache.get(session.id) === submittedDraft.text &&
-              sessionImageDraftsCache.get(session.id) === submittedDraft.images &&
-              sessionFileDraftsCache.get(session.id) === submittedDraft.files &&
-              sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText
-            ) {
-              // Acceptance retires the original cached draft even after unmount.
-              // A later edit owns a different snapshot and must survive. Never
-              // write component state from a retired submission.
-              clearSessionChatInputDrafts(session.id);
-            }
-            if (submittedVisualAnnotationReferences.length > 0) {
-              void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
-            }
+      const inputBlocks: SessionInputBlock[] = [
+        ...commentRefBlocks,
+        ...visualAnnotationRefBlocks,
+        ...uploadedImages,
+        ...uploadedFiles,
+        ...textBlocks,
+      ];
+      const submittedDraft = {
+        text: sessionDraftsCache.get(session.id),
+        images: sessionImageDraftsCache.get(session.id),
+        files: sessionFileDraftsCache.get(session.id),
+        pastedText: sessionPastedTextDraftsCache.get(session.id),
+      };
+      const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
+      if (!submission) return;
+      let accepted = false;
+      try {
+        accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
+        if (accepted) {
+          if (submission.isCurrent()) {
+            clearInput();
+            clearPendingImages();
+            clearPendingFiles();
+            updatePastedTextDraftsForSession(session.id, () => []);
+            publishCommentReferences([]);
+            publishVisualAnnotationReferences([]);
+          } else if (
+            sessionDraftsCache.get(session.id) === submittedDraft.text &&
+            sessionImageDraftsCache.get(session.id) === submittedDraft.images &&
+            sessionFileDraftsCache.get(session.id) === submittedDraft.files &&
+            sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText
+          ) {
+            // Acceptance retires the original cached draft even after unmount.
+            // A later edit owns a different snapshot and must survive. Never
+            // write component state from a retired submission.
+            clearSessionChatInputDrafts(session.id);
           }
-        } finally {
-          submission.finish(accepted);
+          if (submittedVisualAnnotationReferences.length > 0) {
+            void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
+          }
         }
-      },
-      [
-        beginSubmission,
-        clearInput,
-        clearPendingImages,
-        clearPendingFiles,
-        freeTurnLimitNotice,
-        isArchived,
-        durableAgentRoleReady,
-        isExternalHistoryRefreshing,
-        isMachineRemoved,
-        onSendMessage,
-        onVisualAnnotationReferencesSubmitted,
-        pendingFiles,
-        pendingImages,
-        pastedTextDrafts,
-        publishCommentReferences,
-        publishVisualAnnotationReferences,
-        postHog,
-        session.id,
-        sessionProjectKind,
-        updatePastedTextDraftsForSession,
-        userInput,
-        usesMobileKeyboardAction,
-        workspaceId,
-      ]
-    );
+      } finally {
+        submission.finish(accepted);
+      }
+    }, [
+      beginSubmission,
+      clearInput,
+      clearPendingImages,
+      clearPendingFiles,
+      freeTurnLimitNotice,
+      isArchived,
+      durableAgentRoleReady,
+      isExternalHistoryRefreshing,
+      isMachineRemoved,
+      onSendMessage,
+      onVisualAnnotationReferencesSubmitted,
+      pendingFiles,
+      pendingImages,
+      pastedTextDrafts,
+      publishCommentReferences,
+      publishVisualAnnotationReferences,
+      postHog,
+      session.id,
+      sessionProjectKind,
+      updatePastedTextDraftsForSession,
+      userInput,
+      usesMobileKeyboardAction,
+      workspaceId,
+    ]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1945,7 +1933,7 @@ export const SessionChatInputArea = memo(
           return;
         }
         e.preventDefault();
-        void sendMessage('keyboard');
+        void sendMessage();
       },
       [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
     );
@@ -2405,7 +2393,7 @@ export const SessionChatInputArea = memo(
         type="button"
         size="icon"
         variant="ghost"
-        onClick={() => void sendMessage('button')}
+        onClick={() => void sendMessage()}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel

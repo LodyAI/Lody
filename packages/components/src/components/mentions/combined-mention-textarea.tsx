@@ -798,7 +798,6 @@ export const CombinedMentionTextarea = React.forwardRef<
         });
     }, [externalMentions, internalMentions]);
 
-    const [instanceKey, setInstanceKey] = React.useState(0);
     const prevValueRef = React.useRef(value);
     const [hydrationKey, setHydrationKey] = React.useState(0);
     const [menuOpen, setMenuOpen] = React.useState(false);
@@ -812,7 +811,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       setRenderedDraftKey(draftKey);
       setInternalMentions([]);
       setMenuOpen(false);
-      setInstanceKey((k) => k + 1);
       // The swap is not an edit, so it must not read as one: an incoming empty
       // draft would otherwise trip the cleared-input reset below and report the
       // *new* draft's ranges as emptied.
@@ -894,7 +892,7 @@ export const CombinedMentionTextarea = React.forwardRef<
 
     return (
       <Mention
-        key={instanceKey}
+        key={draftKey}
         open={value !== '' && menuOpen}
         onOpenChange={setMenuOpen}
         triggers={triggers}

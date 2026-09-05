@@ -7,8 +7,14 @@
   transition, even when pending and completion batch into one render.
 - Scope changes and unmount retire submissions. Late completion must not unlock,
   clear, or focus a newer composer. Draft persistence stays with the caller.
+- The scope's submission token owns both lifetime identity and the synchronous
+  submission lock; do not mirror it with independent active/finished flags.
 - Focus ownership ends when the user focuses/clicks elsewhere or leaves the window;
   returning focus to body does not renew that ownership. No timers or focus retries.
+- Observe focus and pointer changes in capture phase so child event propagation
+  cannot hide a focus handoff. Native focus eligibility belongs to the browser.
 - Consumers keep the input DOM stable when clearing its value. Mention data and
   hydration reset independently of the textarea; only a draft identity change may
   remount the mention tree. Verify submission with the real composer, not a textarea mock.
+- Pending submission text is a controlled render value; do not also clear the DOM
+  imperatively while retaining the draft for rejection recovery.

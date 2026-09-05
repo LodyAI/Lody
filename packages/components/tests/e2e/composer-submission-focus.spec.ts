@@ -31,22 +31,28 @@ for (const source of ['keyboard', 'button'] as const) {
   }
 }
 
-test('completion does not reclaim focus after the user moves away and blurs', async ({ page }) => {
-  await page.goto(
-    '/iframe.html?id=sessions-sessionchatinputarea--deferred-submission&viewMode=story'
-  );
-  const input = page.locator('textarea[data-lody-composer-input]');
-  await input.fill('Synthetic focus regression draft');
-  await input.press('Enter');
-  await expect(input).toBeDisabled();
-  await page.evaluate(() => {
-    const other = document.createElement('input');
-    document.body.appendChild(other);
-    other.focus();
-    other.blur();
-    other.remove();
-    window.dispatchEvent(new CustomEvent('storybook:submission-result', { detail: true }));
+for (const stopPropagation of [false, true]) {
+  test(`completion preserves relinquished focus (stopPropagation=${stopPropagation})`, async ({
+    page,
+  }) => {
+    await page.goto(
+      '/iframe.html?id=sessions-sessionchatinputarea--deferred-submission&viewMode=story'
+    );
+    const input = page.locator('textarea[data-lody-composer-input]');
+    await input.fill('Synthetic focus regression draft');
+    await input.press('Enter');
+    await expect(input).toBeDisabled();
+    await page.evaluate((stopFocusPropagation) => {
+      const other = document.createElement('input');
+      document.body.appendChild(other);
+      if (stopFocusPropagation)
+        other.addEventListener('focusin', (event) => event.stopPropagation());
+      other.focus();
+      other.blur();
+      other.remove();
+      window.dispatchEvent(new CustomEvent('storybook:submission-result', { detail: true }));
+    }, stopPropagation);
+    await expect(input).toBeEnabled();
+    await expect(input).not.toBeFocused();
   });
-  await expect(input).toBeEnabled();
-  await expect(input).not.toBeFocused();
-});
+}

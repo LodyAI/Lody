@@ -153,6 +153,39 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     });
   }
 
+  it('closes an open mention menu on external clear and keeps it closed for the next draft', async () => {
+    knownFileTokens = new Set(['src/app.ts']);
+    let setText!: React.Dispatch<React.SetStateAction<string>>;
+    function Composer() {
+      const [value, setValue] = React.useState('');
+      setText = setValue;
+      return (
+        <CombinedMentionTextarea
+          value={value}
+          onValueChange={setValue}
+          mentionSource={{ kind: 'local', localProjectId: 'p1' } as never}
+        />
+      );
+    }
+    await act(async () => root.render(<Composer />));
+    const textarea = container.querySelector('textarea')!;
+    await act(async () => {
+      textarea.focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        textarea,
+        '@'
+      );
+      textarea.setSelectionRange(1, 1);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(textarea.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => setText(''));
+    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(textarea.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => setText('next draft'));
+    expect(textarea.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('clears and rehydrates mention data without replacing or blurring the input', async () => {
     knownFileTokens = new Set(['src/app.ts']);
     const props = { resetOnEmpty: true };

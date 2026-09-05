@@ -425,80 +425,6 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(container.textContent).not.toContain('Upgrade to Plus');
   });
 
-  it('does not restore focus when the session changes during a pending send', async () => {
-    const acceptance = deferredBoolean();
-    const sessionA: SessionMeta = {
-      id: 'session-switch-a',
-      userId: 'user-1',
-      machineId: 'machine-1',
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      isArchived: false,
-      createdAt: '2026-07-19T00:00:00.000Z',
-    } as SessionMeta;
-    const sessionB: SessionMeta = {
-      ...sessionA,
-      id: 'session-switch-b',
-    };
-
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    const baseProps = (session: SessionMeta) => ({
-      session,
-      sessionLocalProjectRootPath: null,
-      isMachineRemoved: false,
-      isAgentBusy: false,
-      isDark: false,
-      isEmptyConversation: false,
-      selectedModeId: null,
-      selectedModelId: null,
-      modeOptions: [],
-      modelOptions: [],
-      onModeChange: () => undefined,
-      onModelChange: () => undefined,
-      onSendMessage: () => acceptance.promise,
-      onStop: () => undefined,
-      onRemoveQueueItem: async () => undefined,
-      initialInputText: 'draft before switch',
-    });
-
-    await act(async () => {
-      root?.render(createElement(SessionChatInputArea, baseProps(sessionA)));
-    });
-
-    const textarea = container.querySelector('textarea');
-    expect(textarea?.value).toBe('draft before switch');
-
-    // Start the send — the textarea becomes disabled and the session id is
-    // snapshotted inside sendMessage BEFORE the await.
-    await act(async () => {
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click();
-      await Promise.resolve();
-    });
-
-    expect(textarea?.disabled).toBe(true);
-
-    // Switch the session prop in-place while the send is still pending.
-    await act(async () => {
-      root?.render(createElement(SessionChatInputArea, baseProps(sessionB)));
-    });
-
-    // The session switch resets submissionPending and loads session B's draft.
-    // Now resolve the original send. The desktop focus-restore effect must see
-    // that the stored session id (A) no longer matches the current session (B)
-    // and skip the focus restore.
-    await act(async () => {
-      acceptance.resolve(false);
-      await acceptance.promise;
-    });
-
-    const textareaAfterSwitch = container.querySelector('textarea');
-    // Focus must NOT have been restored to the new session's textarea.
-    expect(document.activeElement).not.toBe(textareaAfterSwitch);
-  });
   let nextSession = 0;
   async function renderComposer({
     sessionId = `focus-${++nextSession}`,
@@ -604,7 +530,7 @@ describe('SessionChatInputArea submission feedback', () => {
     }
   );
 
-  it.each(['focus', 'focus-then-blur', 'pointer', 'window-blur'] as const)(
+  it.each(['focus', 'focus-stopped', 'focus-then-blur', 'pointer', 'window-blur'] as const)(
     'respects focus relinquished via %s while sending',
     async (gesture) => {
       const acceptance = deferredBoolean();
@@ -616,6 +542,9 @@ describe('SessionChatInputArea submission feedback', () => {
       document.body.removeAttribute('tabindex');
       const other = document.createElement('button');
       container!.appendChild(other);
+      if (gesture === 'focus-stopped') {
+        other.addEventListener('focusin', (event) => event.stopPropagation());
+      }
       if (gesture.startsWith('focus')) {
         other.focus();
         if (gesture === 'focus-then-blur') other.blur();
@@ -629,9 +558,14 @@ describe('SessionChatInputArea submission feedback', () => {
     }
   );
 
-  it.each([false, true])(
-    'ignores an old completion after a session switch (return=%s)',
-    async (returnToA) => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    'ignores an old completion after a session switch (return=%s, accepted=%s)',
+    async (returnToA, accepted) => {
       const oldAcceptance = deferredBoolean();
       const newAcceptance = deferredBoolean();
       const sessionA = `switch-a-${++nextSession}`;
@@ -652,8 +586,9 @@ describe('SessionChatInputArea submission feedback', () => {
         });
       expect(textarea.disabled).toBe(false);
       const newDraft = textarea.value;
-      await act(async () => oldAcceptance.resolve(true));
+      await act(async () => oldAcceptance.resolve(accepted));
       expect(textarea.value).toBe(newDraft);
+      expect(document.activeElement).not.toBe(textarea);
       textarea.focus();
       await submit('keyboard');
       expect(textarea.disabled).toBe(true);
