@@ -16,6 +16,6 @@ export class UpdaterIpc extends IpcService {
 
   @IpcMethod()
   async quitAndInstall() {
-    return getIpcServiceDeps().appUpdaterService.quitAndInstall()
+    return await getIpcServiceDeps().appUpdaterService.quitAndInstall()
   }
 }

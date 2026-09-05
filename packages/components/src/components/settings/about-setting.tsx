@@ -191,6 +191,15 @@ export function AboutSettingsComponent() {
         {updaterState && phase !== 'disabled' && (
           <CompactRow label={t('settings.about.checkForUpdates')}>
             {showStatus && <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />}
+            {isDownloaded && updaterState.error && (
+              <span
+                className="flex items-center gap-1 text-xs text-destructive"
+                title={updaterState.error}
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                {t('settings.about.updateError')}
+              </span>
+            )}
             {isDownloaded ? (
               <Button
                 size="sm"

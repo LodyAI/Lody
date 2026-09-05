@@ -172,6 +172,16 @@ Root `AGENTS.md` also applies.
   them as job-level environment variables. Previous zips stay out of the published asset list. Sparkle load
   failure falls back to electron-updater. Sparkle UI stays silent; progress and
   ready-to-install go through `ElectronUpdaterState` for the renderer banner.
+- Linux `.deb` installs go through `app-updater-linux-install.ts`, never
+  electron-updater's `DebUpdater`: its `spawnSync` freezes the main process for
+  the whole polkit prompt, which no JS-side timeout can interrupt. Spawn
+  asynchronously, quit only after a zero exit, and treat a signalled installer
+  as a failure rather than the success `spawnSync` reports. AppImage needs no
+  privileged helper and stays on electron-updater.
+- A downloaded package outlives a failed check or install. While
+  `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
+  to `error` hides the sidebar banner and the About install button, which are
+  the only ways to retry.
 - Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
   which desynchronizes `latest*.yml` and Sparkle enclosures. Do not use
   `${productName}` in `artifactName`.
