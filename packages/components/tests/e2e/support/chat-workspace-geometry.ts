@@ -712,6 +712,11 @@ export async function captureChatWorkspaceGeometryScopes(
         return (
           style.display !== 'none' &&
           style.visibility !== 'hidden' &&
+          // `sr-only` deliberately stays in the accessibility tree. Its
+          // clipped text range can still report the full label width, so a
+          // non-zero rect alone is not evidence that the primitive is painted.
+          (style.clip === 'auto' || style.clip === '') &&
+          style.clipPath === 'none' &&
           rect.right >= 0 &&
           rect.bottom >= 0 &&
           rect.left <= innerWidth &&

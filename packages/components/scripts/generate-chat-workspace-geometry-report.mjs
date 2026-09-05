@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAX_REPORT_SCREENSHOTS } from './geometry-report-budget.mjs';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const templatePath = path.join(
@@ -140,7 +141,6 @@ const detailImageBytes = imageStats.reduce((total, { file }) => total + file.siz
 // A screenshot budget, enforced rather than intended. Cards are chosen by how
 // much they deviate, so an unbounded report is one nobody opens: the run fails
 // instead of quietly growing.
-const MAX_REPORT_SCREENSHOTS = 80;
 const assetFiles = (await readdir(path.join(outputDirectory, 'assets'))).filter((name) =>
   name.endsWith('.png')
 );

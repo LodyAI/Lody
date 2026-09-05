@@ -8,9 +8,17 @@ The authored path — `geometry-contracts.json`, its compiled contracts and the 
 and names its members by DOM shape. This directory is the other half: expectations are
 MINED from what the product repeatedly renders, and nobody writes the number down.
 
-Not yet wired to the capture run or the gate. It is a report, and it stays one until its
-findings have been triaged once: a recall-first pass that blocks CI has exactly one natural
-remedy, raising its thresholds, which destroys the recall it exists for.
+`visual-capture.ts` projects each persisted capture's complete block-candidate rectangles
+into one atom per primitive, deduplicating anchors and overlapping scopes. Mine each capture
+independently; DOM ordinals are capture-local references, not durable finding identities.
+Labels, scopes and Fiber pointers are report evidence only and never grouping inputs.
+The report writes `visual-repetition.json` beside the existing rail artifacts and displays
+all ranked deviations as untriaged candidates, outside findings, ledger and gate.
+Screenshot overlays reuse the owning capture's clean overview and clip; a capture without
+an overview says so explicitly. Dominant/peer primitive references travel with the deviation
+as witnesses, never as finding keys.
+A recall-first pass that blocks CI has exactly one natural remedy, raising its thresholds,
+which destroys the recall it exists for.
 
 ## Grouping is visual. Never structural.
 
@@ -26,7 +34,7 @@ structural difference, and a structural key files the two paths into different g
 never compares them: the more real the bug, the more reliably it is hidden. The reader
 perceives a column because pixels line up, not because elements share a tag.
 
-`VisualAtom.id` exists to name a finding across runs and must stay out of grouping. The
+`VisualAtom.id` names a primitive within one capture and must stay out of grouping. The
 moment identity decides who is compared with whom, that blindness is back.
 
 ## Levels grow to an ANCHOR, not to a neighbour

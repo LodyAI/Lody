@@ -434,6 +434,37 @@
         color: var(--text);
       }
 
+      .visual-candidates {
+        margin: 28px 0;
+      }
+      .visual-candidates details {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .visual-candidates summary {
+        cursor: pointer;
+      }
+      .visual-candidates .evidence {
+        color: var(--text-muted);
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+      .visual-overlay {
+        position: relative;
+        margin-top: 12px;
+      }
+      .visual-overlay img {
+        display: block;
+        width: 100%;
+      }
+      .visual-overlay svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
       /* ---------- lightbox ---------- */
 
       dialog.lightbox {
@@ -559,6 +590,25 @@
         </div>
       </details>
 
+      <section class="visual-candidates" aria-label="Visual repetition candidates">
+        <h2>Visual repetition candidates · 未分诊</h2>
+        <p class="meta" id="visual-summary"></p>
+        <label
+          >Capture
+          <select id="visual-capture-filter">
+            <option value="">全部</option>
+          </select></label
+        >
+        <a href="visual-repetition.json">完整 discovery JSON</a>
+        <p class="meta">
+          排序仅供 review；不进入 ledger / gate。红框为候选，绿框为 dominant，橙框为
+          peers，绿线为预期坐标；pitch 是间距，仅标记目标。
+        </p>
+        <div id="visual-candidates"></div>
+        <button type="button" id="visual-more">显示更多</button>
+      </section>
+
+      <h2>Existing rails</h2>
       <div class="toolbar" id="toolbar" role="group" aria-label="按类型筛选"></div>
 
       <div class="detail-reviews" id="detail-reviews"></div>
@@ -579,6 +629,136 @@
     </script>
     <script>
       const report = JSON.parse(document.getElementById('geometry-report-data').textContent);
+
+      const visualCaptures = report.visualRepetition?.captures ?? [];
+      const visualCandidates = visualCaptures
+        .flatMap((capture) => {
+          const atoms = new Map(capture.atoms.map((atom) => [atom.id, atom]));
+          return capture.deviations.map((deviation) => ({
+            capture,
+            deviation,
+            atom: atoms.get(deviation.atomId),
+            atoms,
+          }));
+        })
+        .sort((a, b) => b.deviation.score - a.deviation.score)
+        .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+      document.getElementById('visual-summary').textContent =
+        `${visualCaptures.length} captures · ${visualCaptures.reduce((sum, capture) => sum + capture.atoms.length, 0)} atoms · ${visualCandidates.length} candidates · 每个 capture 独立计算，尚未跨 capture 确认`;
+      const visualList = document.getElementById('visual-candidates');
+      const px = (value) => `${Number(value.toFixed(2))}px`;
+      function appendVisualCandidate({ capture, deviation, atom, atoms, rank }) {
+        const card = document.createElement('details');
+        const heading = document.createElement('summary');
+        const signedDelta = deviation.value - deviation.expected;
+        heading.textContent = `#${rank} ${atom.label} · ${deviation.axis}-${deviation.measure} · ${signedDelta >= 0 ? '+' : ''}${px(signedDelta)} · ${capture.captureId}`;
+        card.append(heading);
+        // Materialize images only on expansion; retain every ranked candidate.
+        card.addEventListener('toggle', () => {
+          if (!card.open || card.dataset.rendered) return;
+          card.dataset.rendered = 'true';
+          const evidence = document.createElement('p');
+          evidence.className = 'evidence';
+          evidence.textContent = `expected ${px(deviation.expected)} · actual ${px(deviation.value)} · dominant support ${deviation.dominantSupport} · peer support ${deviation.peerSupport} · series ${deviation.seriesSize} · score ${Number(deviation.score.toFixed(2))} · ${deviation.signature}`;
+          const provenance = document.createElement('p');
+          provenance.className = 'evidence';
+          provenance.textContent = `${capture.captureId} · ${capture.viewport.width}×${capture.viewport.height} · DPR ${capture.deviceScaleFactor} · ${JSON.stringify(capture.dimensions ?? {})} · ${atom.id} · ${atom.scope ?? ''} · ${atom.component ?? ''} · ${atom.className ?? ''}`;
+          card.append(evidence, provenance);
+          const witnesses = document.createElement('p');
+          witnesses.className = 'evidence';
+          const labels = (ids) => ids.map((id) => `${atoms.get(id).label} (${id})`).join(' · ');
+          witnesses.textContent = `Dominant: ${labels(deviation.dominantAtomIds)} / Peers: ${labels(deviation.peerAtomIds)}`;
+          card.append(witnesses);
+          if (!capture.screenshot || !capture.screenshotClip) {
+            const missing = document.createElement('p');
+            missing.className = 'evidence';
+            missing.textContent = '此 capture 未保存整体截图；完整测量见 visual-repetition.json。';
+            card.append(missing);
+            return;
+          }
+          const clip = capture.screenshotClip;
+          const figure = document.createElement('div');
+          figure.className = 'visual-overlay';
+          const image = document.createElement('img');
+          image.src = capture.screenshot;
+          image.alt = `${capture.captureId} · ${atom.label}`;
+          const ns = 'http://www.w3.org/2000/svg';
+          const overlay = document.createElementNS(ns, 'svg');
+          overlay.setAttribute('viewBox', `${clip.x} ${clip.y} ${clip.width} ${clip.height}`);
+          const addBox = (member, color) => {
+            const box = document.createElementNS(ns, 'rect');
+            for (const [key, value] of Object.entries({
+              x: member.xStart,
+              y: member.yStart,
+              width: member.xEnd - member.xStart,
+              height: member.yEnd - member.yStart,
+              fill: 'none',
+              stroke: color,
+              'stroke-width': 2,
+            }))
+              box.setAttribute(key, String(value));
+            overlay.append(box);
+          };
+          deviation.dominantAtomIds.forEach((id) => addBox(atoms.get(id), '#10b981'));
+          deviation.peerAtomIds.forEach((id) => addBox(atoms.get(id), '#f59e0b'));
+          addBox(atom, '#ff4050');
+          if (deviation.measure !== 'pitch') {
+            const line = document.createElementNS(ns, 'line');
+            const points =
+              deviation.axis === 'x'
+                ? {
+                    x1: deviation.expected,
+                    x2: deviation.expected,
+                    y1: clip.y,
+                    y2: clip.y + clip.height,
+                  }
+                : {
+                    y1: deviation.expected,
+                    y2: deviation.expected,
+                    x1: clip.x,
+                    x2: clip.x + clip.width,
+                  };
+            for (const [key, value] of Object.entries({
+              ...points,
+              stroke: '#10b981',
+              'stroke-width': 1,
+              'stroke-dasharray': '4 3',
+            }))
+              line.setAttribute(key, String(value));
+            overlay.append(line);
+          }
+          figure.append(image, overlay);
+          card.append(figure);
+        });
+        visualList.append(card);
+      }
+      const captureFilter = document.getElementById('visual-capture-filter');
+      for (const capture of visualCaptures) {
+        const option = document.createElement('option');
+        option.value = capture.captureId;
+        option.textContent = `${capture.captureId} (${capture.deviations.length})`;
+        captureFilter.append(option);
+      }
+      let selectedVisualCandidates = visualCandidates;
+      let visibleVisualCount = 0;
+      const visualMore = document.getElementById('visual-more');
+      function showMoreVisualCandidates() {
+        const next = selectedVisualCandidates.slice(visibleVisualCount, visibleVisualCount + 30);
+        next.forEach(appendVisualCandidate);
+        visibleVisualCount += next.length;
+        visualMore.hidden = visibleVisualCount === selectedVisualCandidates.length;
+        visualMore.textContent = `显示更多 (${visibleVisualCount}/${selectedVisualCandidates.length})`;
+      }
+      visualMore.addEventListener('click', showMoreVisualCandidates);
+      captureFilter.addEventListener('change', () => {
+        selectedVisualCandidates = visualCandidates.filter(
+          ({ capture }) => !captureFilter.value || capture.captureId === captureFilter.value
+        );
+        visibleVisualCount = 0;
+        visualList.replaceChildren();
+        showMoreVisualCandidates();
+      });
+      showMoreVisualCandidates();
 
       const chevronSvg =
         '<svg class="chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +

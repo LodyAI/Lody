@@ -20,6 +20,10 @@ the overlay and capture cannot disagree about one row.
   observation, never an ink one. A `<textarea>` is a FIELD before it is text: its default
   value is a child text node that never renders, and measuring it as text would make its
   48px box the ink of a label.
+- Visual primitives exclude CSS-clipped content (`clip` or `clip-path`), including
+  `sr-only`: it stays in the accessibility tree and its text range can still report
+  the full label bounds even though no pixels are painted. `aria-hidden` alone does
+  not exclude a visible decorative primitive from visual discovery.
 - Flow text gives start/end edges, never a centre; centred text only its centre; numeric
   text, diff statistics included, is trailing-edge.
 - Vertical anchors come from that same rect, so an SVG's box centre already IS its

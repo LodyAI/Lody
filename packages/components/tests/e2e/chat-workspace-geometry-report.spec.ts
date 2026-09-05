@@ -1,7 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { discoverVisualRepetition } from '../../src/lib/geometry-discovery/visual-capture';
+import { MAX_REPORT_SCREENSHOTS } from '../../scripts/geometry-report-budget.mjs';
 
 import {
   CHAT_WORKSPACE_GEOMETRY_ANCHORS,
@@ -2049,6 +2051,12 @@ test('captures the visual geometry report', async ({ browser }) => {
   const persistedCapture = JSON.parse(
     await readFile(capturePath, 'utf8')
   ) as GeometryCaptureArtifact;
+  const visualRepetition = discoverVisualRepetition(persistedCapture);
+  await writeFile(
+    path.join(outputDirectory, 'visual-repetition.json'),
+    `${JSON.stringify(visualRepetition, null, 2)}\n`,
+    'utf8'
+  );
   const observationArtifact = observeGeometryCaptures(persistedCapture);
   await writeFile(observationPath, `${JSON.stringify(observationArtifact, null, 2)}\n`, 'utf8');
 
@@ -2129,6 +2137,14 @@ test('captures the visual geometry report', async ({ browser }) => {
       )
     )
     .map((proposal) => crossFamilyProposalCard(proposal));
+  const capturedImageCount = (await readdir(assetsDirectory)).filter((file) =>
+    file.endsWith('.png')
+  ).length;
+  // Overview/X coverage consumes the same budget; each extra Y card needs two images.
+  const yCardLimit = Math.max(
+    0,
+    Math.min(MAX_Y_FINDING_CARDS, Math.floor((MAX_REPORT_SCREENSHOTS - 1 - capturedImageCount) / 2))
+  );
   const yCards = [
     ...selectYFindingCards(persistedFindings.findings, MAX_Y_FINDING_CARDS, warmCaptureIds).map(
       (card) => ({ ...card, detailKind: 'candidate' as const, idPrefix: 'block' })
@@ -2144,7 +2160,7 @@ test('captures the visual geometry report', async ({ browser }) => {
         Math.abs(right.finding.offset) - Math.abs(left.finding.offset) ||
         left.finding.label.localeCompare(right.finding.label)
     )
-    .slice(0, MAX_Y_FINDING_CARDS);
+    .slice(0, yCardLimit);
   const yCardDetails: ReportDetail[] = [];
   const yCardsByCapture = new Map<string, Array<{ detail: ReportDetail; index: number }>>();
   for (const [index, { finding, evidence, detailKind, idPrefix }] of yCards.entries()) {
@@ -2463,6 +2479,15 @@ test('captures the visual geometry report', async ({ browser }) => {
 
   const reportData = {
     generatedAt: new Date().toISOString(),
+    visualRepetition: {
+      ...visualRepetition,
+      captures: visualRepetition.captures.map((capture) => ({
+        ...capture,
+        screenshotClip: detailsByCaptureId
+          .get(capture.captureId)
+          ?.find((detail) => detail.kind === 'overview')?.clip,
+      })),
+    },
     viewport,
     spec: CHAT_WORKSPACE_GEOMETRY_SPEC,
     snapshot: measurement.snapshot,

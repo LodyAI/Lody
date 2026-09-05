@@ -22,7 +22,7 @@
  */
 
 /**
- * A rendered box. `id` exists so a finding can be named across runs and never
+ * A rendered box. `id` references a primitive within its capture and never
  * takes part in grouping: the moment identity decides who is compared with
  * whom, the DOM blindness described above is back.
  */
@@ -52,6 +52,9 @@ export type VisualDeviation = Readonly<{
   peerSupport: number;
   /** How many share the level it deviates from. */
   dominantSupport: number;
+  /** Capture-local witnesses, retained so a report can show the actual comparison. */
+  dominantAtomIds: readonly string[];
+  peerAtomIds: readonly string[];
   seriesSize: number;
   /** Higher is more suspicious. Ranking only; never a pass/fail threshold. */
   score: number;
@@ -180,6 +183,8 @@ function scoreLevels(
         delta,
         peerSupport,
         dominantSupport,
+        dominantAtomIds: dominant.atoms.map((member) => member.id),
+        peerAtomIds: level.atoms.map((member) => member.id),
         seriesSize,
         score: (delta * dominantSupport) / peerSupport,
       });
