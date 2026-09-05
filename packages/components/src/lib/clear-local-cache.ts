@@ -24,6 +24,7 @@ import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
+import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -188,7 +189,13 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       // `indexedDB.databases()` is unsupported (e.g. Firefox) — fall back to the
       // known static names plus any per-workspace names the caller passed.
     }
-    await Promise.all([...names].map(deleteDatabaseBestEffort));
+    // A Shortcut outbox may contain the only copy of an offline save. Only the
+    // explicitly destructive hard reset below may remove these databases.
+    await Promise.all(
+      [...names]
+        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .map(deleteDatabaseBestEffort)
+    );
   }
 
   if (typeof caches !== 'undefined') {
@@ -422,7 +429,11 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
-  await Promise.all(extraNames.map(deleteDatabaseBestEffort));
+  await Promise.all(
+    extraNames
+      .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+      .map(deleteDatabaseBestEffort)
+  );
 }
 
 /** Test-only: forget the per-page-load memo so each case starts clean. */

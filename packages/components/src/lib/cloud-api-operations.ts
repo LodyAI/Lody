@@ -90,6 +90,7 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 }
 
 function capabilityForOperation(name: string): PlatformCapability {
+  if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
   if (name.startsWith('github:')) return 'githubIntegration';
@@ -135,6 +136,23 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  promptShortcuts: {
+    stageDocument: mutation<ConvexApi['promptShortcuts']['stageDocument']>(
+      'promptShortcuts:stageDocument'
+    ),
+    activateDocument: mutation<ConvexApi['promptShortcuts']['activateDocument']>(
+      'promptShortcuts:activateDocument'
+    ),
+    revokeShortcut: mutation<ConvexApi['promptShortcuts']['revokeShortcut']>(
+      'promptShortcuts:revokeShortcut'
+    ),
+    listAccessibleDocuments: query<ConvexApi['promptShortcuts']['listAccessibleDocuments']>(
+      'promptShortcuts:listAccessibleDocuments'
+    ),
+    getStreamToken: action<ConvexApi['promptShortcuts']['getStreamToken']>(
+      'promptShortcuts:getStreamToken'
+    ),
+  },
   activity: {
     recordMyWorkspaceDailyActiveUser: mutation<
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']

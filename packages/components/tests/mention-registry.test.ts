@@ -6,6 +6,7 @@ import {
   getCategoryNavigateText,
   selectMentionMenuView,
   selectMentionMenuViewForTrigger,
+  selectMentionViewActivations,
   toFileCandidate,
   toIssuePrCandidate,
   type MentionCandidate,
@@ -55,6 +56,25 @@ function makeIssuePrSuggestion(number: number, type: 'issue' | 'pr', title: stri
 }
 
 describe('selectMentionMenuView', () => {
+  it('keeps disabled categories visible without ranking or activating them through any trigger', () => {
+    const skill = makeCategory('skill', 'skill', 'Skills', ['review']);
+    skill.status = 'disabled';
+    skill.message = 'Select a project and agent first';
+    skill.directTrigger = '$';
+    skill.activation = { sourceKey: 'skill', activate: vi.fn() };
+    const index = selectMentionMenuView([skill], '');
+    expect(index).toMatchObject({ level: 'categories', categories: [skill] });
+    for (const view of [
+      selectMentionMenuView([skill], 'review'),
+      selectMentionMenuView([skill], 'skill:review'),
+      selectMentionMenuViewForTrigger([skill], '$', 'review'),
+    ]) {
+      expect(selectMentionViewActivations(view, [skill])).toEqual([]);
+      if (view?.level === 'aggregate') expect(view.groups).toEqual([]);
+      if (view?.level === 'category') expect(view.candidates).toEqual([]);
+    }
+    expect(skill.getCandidates).not.toHaveBeenCalled();
+  });
   it('shows the category list when nothing is typed after the trigger', () => {
     const file = makeCategory('file', 'file', 'Files', ['a.ts']);
     const issue = makeCategory('issue', 'issue', 'Issues', ['#1']);

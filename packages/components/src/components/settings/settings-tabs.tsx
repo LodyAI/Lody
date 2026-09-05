@@ -13,6 +13,7 @@ import {
   Monitor,
   Palette,
   Plug,
+  FileText,
   SlidersHorizontal,
   UserRound,
   UserRoundCog,
@@ -30,6 +31,7 @@ export type SettingsTabId =
   | 'machines'
   | 'agents'
   | 'agent-roles'
+  | 'prompt-shortcuts'
   | 'mcp'
   | 'projects'
   | 'github'
@@ -47,6 +49,7 @@ export type SettingsPath =
   | '/$workspaceName/settings/machines'
   | '/$workspaceName/settings/agents'
   | '/$workspaceName/settings/agent-roles'
+  | '/$workspaceName/settings/prompt-shortcuts'
   | '/$workspaceName/settings/mcp'
   | '/$workspaceName/settings/projects'
   | '/$workspaceName/settings/github'
@@ -148,6 +151,14 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/mcp',
   },
   {
+    id: 'prompt-shortcuts',
+    section: 'workspace',
+    labelKey: 'settings.tabs.promptShortcuts',
+    descriptionKey: 'settings.categories.promptShortcuts.description',
+    icon: FileText,
+    path: '/$workspaceName/settings/prompt-shortcuts',
+  },
+  {
     id: 'projects',
     section: 'workspace',
     labelKey: 'settings.tabs.projects',
@@ -219,6 +230,7 @@ export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
     ['/settings/agents', 'agents'],
     ['/settings/agent-config', 'agents'],
     ['/settings/agent-roles', 'agent-roles'],
+    ['/settings/prompt-shortcuts', 'prompt-shortcuts'],
     ['/settings/mcp', 'mcp'],
     ['/settings/projects', 'projects'],
     ['/settings/github', 'github'],

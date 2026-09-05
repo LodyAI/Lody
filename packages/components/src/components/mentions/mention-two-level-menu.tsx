@@ -56,7 +56,13 @@ export function useMentionCategoryActivation(
   const activateCategory = React.useCallback(
     (category: MentionCategory) => {
       const activation = category.activation;
-      if (!open || !activation || !shouldActivateSource(activation.sourceKey)) return;
+      if (
+        !open ||
+        category.status === 'disabled' ||
+        !activation ||
+        !shouldActivateSource(activation.sourceKey)
+      )
+        return;
       activation.activate();
     },
     [open, shouldActivateSource]
@@ -129,6 +135,8 @@ function CategoryRow({
   return (
     <MentionItem
       value={`category:${category.id}`}
+      disabled={category.status === 'disabled'}
+      title={category.status === 'disabled' ? category.message : undefined}
       label={category.label}
       navigateText={getCategoryNavigateText(category)}
       // Navigation-item selection does not commit a mention. Start its lazy
@@ -137,8 +145,15 @@ function CategoryRow({
       onMentionNavigate={onNavigate ? () => onNavigate(category) : undefined}
     >
       <CandidateIcon icon={category.icon} className={ICON_CLASS} />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{category.label}</span>
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{category.label}</span>
+        {category.status === 'disabled' && (category.message?.length ?? 0) > 0 ? (
+          <span className="block text-xs text-muted-foreground">{category.message}</span>
+        ) : null}
+      </span>
+      {category.status !== 'disabled' ? (
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" />
+      ) : null}
     </MentionItem>
   );
 }

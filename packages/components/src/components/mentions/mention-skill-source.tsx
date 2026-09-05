@@ -183,7 +183,7 @@ export function getAllowedSkillMentionDirs(
   ]);
 }
 
-function getSkillMentionReferencePath(item: SkillMentionItem): string {
+export function getSkillMentionReferencePath(item: SkillMentionItem): string {
   // Home-scoped skills (global + system) expand to their absolute SKILL.md path;
   // project skills use the project-relative path.
   if (item.scope !== 'project') {

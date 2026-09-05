@@ -337,6 +337,25 @@ export const Categories: Story = {
   args: { search: '' },
 };
 
+export const ShortcutWithoutScope: Story = {
+  args: {
+    search: '',
+    categories: CATEGORIES.filter((item) => item.id !== 'session' && item.id !== 'command').map(
+      (item) =>
+        item.id === 'agent_role'
+          ? item
+          : {
+              ...item,
+              status: 'disabled' as const,
+              message:
+                item.id === 'skill'
+                  ? 'Select Project / Machine and Agent scope first'
+                  : 'Select Project scope first',
+            }
+    ),
+  },
+};
+
 /** `@mention` — one query answered across every category, Files first. */
 export const AggregateSearch: Story = {
   args: { search: 'mention' },

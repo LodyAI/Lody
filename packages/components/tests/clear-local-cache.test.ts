@@ -69,6 +69,13 @@ afterEach(() => {
 });
 
 describe('maybeClearLodyCacheOnBoot', () => {
+  it('preserves durable Shortcut outboxes on cache clear, including explicitly supplied names', async () => {
+    presentDatabases.push('lody-shortcut-data-ws1:alice');
+    markCacheClearPending();
+    await maybeClearLodyCacheOnBoot(['lody-shortcut-data-ws1:alice']);
+    expect(deletedDatabases).toContain('lody-loro-repo-db-ws1');
+    expect(deletedDatabases).not.toContain('lody-shortcut-data-ws1:alice');
+  });
   it('does nothing when no clear was requested', async () => {
     localStorage.setItem('lody:auth-token', 'token');
 

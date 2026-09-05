@@ -4,6 +4,13 @@ Product-level mention sources built on `src/ui/mention`.
 
 ## Invariants
 
+- A `disabled` category remains discoverable, with a source-supplied localized
+  reason, but cannot navigate, rank candidates or activate its lazy source.
+  This is distinct from `enabled: false` (absent) and `loading` (eligible but
+  pending). Enforce it for typed namespaces, direct triggers and aggregate
+  search as well as pointer/keyboard selection; Shortcut editors use this for
+  explicit scope requirements, never silently adopting the current composer.
+
 - `@` reaches every mention type through the two-level menu. Skills also retain
   their direct `$` menu for compatibility, and `/` still opens commands
   directly because a slash command must own the whole prompt. `#` does not open

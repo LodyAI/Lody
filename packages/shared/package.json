@@ -8,6 +8,14 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./prompt-shortcuts": {
+      "types": "./src/prompt-shortcuts/index.ts",
+      "import": "./src/prompt-shortcuts/index.ts"
+    },
+    "./prompt-shortcuts/*": {
+      "types": "./src/prompt-shortcuts/*.ts",
+      "import": "./src/prompt-shortcuts/*.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"

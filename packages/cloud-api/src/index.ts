@@ -274,6 +274,51 @@ type SeatInvitePreview =
     };
 
 export type CloudApi = {
+  promptShortcuts: {
+    stageDocument: Mutation<
+      {
+        workspaceId: string;
+        ownerUserId: string;
+        shortcutId: string;
+        bodyDocId: string;
+        visibility: 'private' | 'workspace';
+      },
+      { bodyDocId: string; status: 'staged' | 'active' }
+    >;
+    activateDocument: Mutation<
+      {
+        workspaceId: string;
+        bodyDocId: string;
+        previousBodyDocId: string | null;
+        previousRevision: string | null;
+        revision: string;
+        slug: string;
+        indexBytes: number;
+      },
+      null
+    >;
+    revokeShortcut: Mutation<{ workspaceId: string; shortcutId: string }, null>;
+    listAccessibleDocuments: Query<
+      { workspaceId: string },
+      Array<{
+        shortcutId: string;
+        bodyDocId: string;
+        ownerUserId: string;
+        visibility: 'private' | 'workspace';
+        revision: string | null;
+      }>
+    >;
+    getStreamToken: Action<
+      {
+        workspaceId: string;
+        target:
+          | { kind: 'index'; ownerUserId: string; visibility: 'private' | 'workspace' }
+          | { kind: 'body'; bodyDocId: string };
+        write: boolean;
+      },
+      { token: string; expiresIn: number; gatewayBaseUrl: string; streamId: string }
+    >;
+  };
   activity: {
     recordMyWorkspaceDailyActiveUser: Mutation<
       { workspaceId: string },

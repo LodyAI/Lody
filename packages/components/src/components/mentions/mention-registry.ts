@@ -55,7 +55,7 @@ export type MentionIcon =
   | 'session'
   | 'agent_role';
 
-export type MentionCategoryStatus = 'ready' | 'loading' | 'error';
+export type MentionCategoryStatus = 'ready' | 'loading' | 'error' | 'disabled';
 
 /**
  * Side-panel content for a highlighted candidate. Deliberately neutral: the
@@ -221,6 +221,7 @@ export function selectMentionViewActivations(
     view?.level === 'category' ? [view.category] : view?.level === 'aggregate' ? categories : [];
   const bySource = new Map<MentionSourceKey, MentionCategoryActivation>();
   for (const category of queried) {
+    if (category.status === 'disabled') continue;
     if (category.activation) bySource.set(category.activation.sourceKey, category.activation);
   }
   return [...bySource.values()];
@@ -246,7 +247,12 @@ export function selectMentionMenuView(
     const category = categories.find((entry) => entry.namespace === namespaced.namespace);
     if (category) {
       const { term } = namespaced;
-      return { level: 'category', category, term, candidates: category.getCandidates(term) };
+      return {
+        level: 'category',
+        category,
+        term,
+        candidates: category.status === 'disabled' ? [] : category.getCandidates(term),
+      };
     }
   }
 
@@ -257,6 +263,7 @@ export function selectMentionMenuView(
   const limit = options?.aggregateLimitPerCategory ?? AGGREGATE_LIMIT_PER_CATEGORY;
   const groups: MentionCandidateGroup[] = [];
   for (const category of categories) {
+    if (category.status === 'disabled') continue;
     // `limit` is passed down so a source can stop early, and enforced here so
     // the cap holds whether or not it did.
     const candidates = category.getCandidates(search, limit).slice(0, limit);
@@ -290,7 +297,7 @@ export function selectMentionMenuViewForTrigger(
     level: 'category',
     category: direct,
     term: search,
-    candidates: direct.getCandidates(search),
+    candidates: direct.status === 'disabled' ? [] : direct.getCandidates(search),
   };
 }
 
@@ -578,7 +585,10 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
   return {
     status: source.status ?? 'ready',
     message: source.message,
-    activation: source.onActivate ? { sourceKey, activate: source.onActivate } : undefined,
+    activation:
+      source.status !== 'disabled' && source.onActivate
+        ? { sourceKey, activate: source.onActivate }
+        : undefined,
   };
 }
 
@@ -628,14 +638,20 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
   // types, and re-splitting it inside `getCandidates` walked the whole list
   // twice on every keystroke.
   const issueSuggestions = React.useMemo(
-    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'issue') : []),
+    () =>
+      issuePr?.enabled && issuePr.status !== 'disabled'
+        ? issuePr.suggestions.filter((item) => item.type === 'issue')
+        : [],
     [issuePr]
   );
   const prSuggestions = React.useMemo(
-    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'pr') : []),
+    () =>
+      issuePr?.enabled && issuePr.status !== 'disabled'
+        ? issuePr.suggestions.filter((item) => item.type === 'pr')
+        : [],
     [issuePr]
   );
-  const createIssuePrFuse = issuePr?.createFuse;
+  const createIssuePrFuse = issuePr?.status === 'disabled' ? undefined : issuePr?.createFuse;
   const issueFuse = React.useMemo(
     () => createIssuePrFuse?.(issueSuggestions) ?? null,
     [createIssuePrFuse, issueSuggestions]

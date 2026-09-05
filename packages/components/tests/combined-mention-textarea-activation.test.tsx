@@ -88,6 +88,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
+    templateScope?: React.ComponentProps<typeof CombinedMentionTextarea>['templateScope'];
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -98,6 +99,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           skillAgent={props.skillAgent as never}
           mentionSource={props.mentionSource as never}
           commandsEnabled={props.commandsEnabled}
+          templateScope={props.templateScope}
           resetOnEmpty={false}
         />
       );
@@ -317,6 +319,26 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     await render({ value: '', skillAgent: { machineId: 'machine-1' } });
 
     expect(skillScanEnabled).not.toContain(true);
+  });
+
+  it('keeps template skills disabled without explicit scope even if an agent is supplied', async () => {
+    await render({ value: '', templateScope: {}, skillAgent: { machineId: 'machine-1' } });
+    await typeInto('@skill:');
+    expect(skillScanEnabled).not.toContain(true);
+    expect(document.body.textContent).toContain(
+      'Select the required Project, Machine and Agent scope first.'
+    );
+  });
+
+  it('does not hydrate or fetch typed template skill tokens on mount', async () => {
+    await render({
+      value: 'use $review',
+      templateScope: { machineId: 'machine-1', providerKey: 'builtin:codex' },
+      skillAgent: { machineId: 'machine-1' },
+    });
+    expect(skillScanEnabled).not.toContain(true);
+    await typeInto('@skill:');
+    expect(skillScanEnabled).toContain(true);
   });
 
   it('scans skills when the menu scopes to the Skills category', async () => {

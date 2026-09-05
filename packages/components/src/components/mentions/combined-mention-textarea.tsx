@@ -68,6 +68,8 @@ import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/
 import { Textarea, type TextareaProps } from '@/ui/textarea';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
+import { shortcutTemplateCategories } from './mention-shortcut-template';
 
 // ============================================================================
 // Two-level `@` menu
@@ -109,6 +111,7 @@ function TwoLevelMentionMenu({
   enableAgentRoleMentions,
   agentRoleItems,
   surface,
+  templateScope,
 }: {
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
@@ -132,6 +135,7 @@ function TwoLevelMentionMenu({
   enableAgentRoleMentions: boolean;
   agentRoleItems: readonly AgentRoleMentionItem[];
   surface: MentionSurface;
+  templateScope?: PromptShortcutScope;
 }) {
   const context = useMentionContext('TwoLevelMentionMenu');
   const { t } = useTranslation();
@@ -199,7 +203,7 @@ function TwoLevelMentionMenu({
     [issuePrFuseCtor]
   );
 
-  const fileSource = React.useMemo<MentionCategorySources['file']>(
+  const fileSource = React.useMemo<NonNullable<MentionCategorySources['file']>>(
     () => ({
       enabled: enableFileMentions,
       status:
@@ -237,7 +241,7 @@ function TwoLevelMentionMenu({
     void refreshIssuePr();
   }, [refreshIssuePr]);
 
-  const issuePrSource = React.useMemo<MentionCategorySources['issuePr']>(
+  const issuePrSource = React.useMemo<NonNullable<MentionCategorySources['issuePr']>>(
     () => ({
       enabled: enableIssueMentions,
       status:
@@ -266,7 +270,7 @@ function TwoLevelMentionMenu({
     ]
   );
 
-  const skillSource = React.useMemo<MentionCategorySources['skill']>(
+  const skillSource = React.useMemo<NonNullable<MentionCategorySources['skill']>>(
     () => ({
       enabled: enableSkillMentions,
       status:
@@ -349,7 +353,7 @@ function TwoLevelMentionMenu({
     ]
   );
 
-  const agentRoleSource = React.useMemo<MentionCategorySources['agentRole']>(
+  const agentRoleSource = React.useMemo<NonNullable<MentionCategorySources['agentRole']>>(
     () => ({ enabled: enableAgentRoleMentions, items: agentRoleItems }),
     [agentRoleItems, enableAgentRoleMentions]
   );
@@ -359,18 +363,42 @@ function TwoLevelMentionMenu({
     [availableCommands, enableCommandMentions]
   );
 
-  const categories = useMentionCategories(
+  const baseCategories = useMentionCategories(
     React.useMemo(
       () => ({
-        file: fileSource,
-        issuePr: issuePrSource,
-        skill: skillSource,
+        file: templateScope ? { ...fileSource, enabled: true } : fileSource,
+        issuePr: templateScope ? { ...issuePrSource, enabled: true } : issuePrSource,
+        skill: templateScope ? { ...skillSource, enabled: true } : skillSource,
         session: sessionSource,
-        agentRole: agentRoleSource,
+        agentRole: templateScope ? { ...agentRoleSource, enabled: true } : agentRoleSource,
         command: commandSource,
       }),
-      [agentRoleSource, commandSource, fileSource, issuePrSource, sessionSource, skillSource]
+      [
+        agentRoleSource,
+        commandSource,
+        fileSource,
+        issuePrSource,
+        sessionSource,
+        skillSource,
+        templateScope,
+      ]
     )
+  );
+  const categories = React.useMemo(
+    () =>
+      templateScope
+        ? shortcutTemplateCategories({
+            categories: baseCategories,
+            scope: templateScope,
+            skills: skillItems,
+            allowedDirs: allowedSkillDirs,
+            disabledReason: t(
+              'settings.promptShortcuts.mentionScope',
+              'Select the required Project, Machine and Agent scope first.'
+            ),
+          })
+        : baseCategories,
+    [templateScope, baseCategories, skillItems, allowedSkillDirs, t]
   );
 
   // Ask the provider to list a directory the user has drilled into but that was
@@ -589,6 +617,8 @@ export interface CombinedMentionTextareaProps extends Omit<
   TextareaProps,
   'value' | 'defaultValue' | 'onChange'
 > {
+  /** Explicit template scope. Disables token hydration and context-dependent session/command mentions. */
+  templateScope?: PromptShortcutScope;
   mentionSource?: MentionProjectSource;
   availableCommands?: AcpCommandSummary[];
   /** The selected ACP provider. When set, the `$` skill menu only offers
@@ -656,6 +686,7 @@ export const CombinedMentionTextarea = React.forwardRef<
   (
     {
       mentionSource,
+      templateScope,
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
@@ -726,7 +757,9 @@ export const CombinedMentionTextarea = React.forwardRef<
             : false;
     // Enable `$` when there are project skills OR a known machine whose global
     // skills we can list (so GitHub / plain-agent chats still offer skills).
-    const enableSkillMentions = hasProjectSkillSource || Boolean(skillGlobalMachineId);
+    const enableSkillMentions =
+      (hasProjectSkillSource || Boolean(skillGlobalMachineId)) &&
+      (!templateScope || (!!templateScope.providerKey && !!skillAgent));
     // Only scan/fetch skills once they are actually asked for, so the composer
     // doesn't kick a skills RPC on every mount. Two things ask: the menu, when a
     // query reaches the Skills category (`onActivate` below), and a draft that
@@ -736,7 +769,8 @@ export const CombinedMentionTextarea = React.forwardRef<
     const [skillsRequested, setSkillsRequested] = React.useState(false);
     const activateSkills = React.useCallback(() => setSkillsRequested(true), []);
     const skillsActive =
-      enableSkillMentions && (skillsRequested || value.includes(SKILL_MENTION_TRIGGER));
+      enableSkillMentions &&
+      (skillsRequested || (!templateScope && value.includes(SKILL_MENTION_TRIGGER)));
 
     const { fileData, initializeLazyDirectory, getKnownFileTokens } =
       useMentionProjectFiles(mentionSource);
@@ -757,11 +791,13 @@ export const CombinedMentionTextarea = React.forwardRef<
     );
     const agentRoleContext = React.useMemo(
       () =>
-        buildAgentRoleMentionContext({
-          mentionSource,
-          currentMachineId: skillAgent?.machineId,
-        }),
-      [mentionSource, skillAgent?.machineId]
+        templateScope
+          ? { kind: 'github' as const }
+          : buildAgentRoleMentionContext({
+              mentionSource,
+              currentMachineId: skillAgent?.machineId,
+            }),
+      [mentionSource, skillAgent?.machineId, templateScope]
     );
     const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
     // A committed range carries only the Role id, so the caller's chip resolver
@@ -893,18 +929,20 @@ export const CombinedMentionTextarea = React.forwardRef<
       textarea?.focus();
     }, [instanceKey, ref]);
 
-    const enableCommandMentions = Boolean(availableCommands && availableCommands.length > 0);
+    const enableCommandMentions =
+      !templateScope && Boolean(availableCommands && availableCommands.length > 0);
     const hasExternalMentionSupport =
       externalMentions.length > 0 || Boolean(onExternalMentionsChange) || Boolean(onMentionClick);
     // One list of what `@` can reach, so registering the trigger and mounting
     // the mention tree can never disagree about a type. They drifted once
     // already: a composer with only issues rendered a plain textarea.
-    const enableSessionMentions = sessionItems.length > 0;
+    const enableSessionMentions = !templateScope && sessionItems.length > 0;
     // Having any mentionable Role IS the enablement rule: the list is already
     // filtered by visibility, executability, and work context, so an empty one
     // means there is nothing this composer could offer.
     const enableAgentRoleMentions = agentRoleItems.length > 0;
     const enableAtMentions =
+      !!templateScope ||
       enableFileMentions ||
       enableIssueMentions ||
       enableSkillMentions ||
@@ -964,7 +1002,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         <FileMentionHydrator
           text={value}
           getKnownPaths={getKnownFileTokens}
-          enabled={enableFileMentions}
+          enabled={enableFileMentions && !templateScope}
         />
         {persistedMentions && persistedMentions.length > 0 ? (
           <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
@@ -979,7 +1017,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           getKnownFileTokens={getKnownFileTokens}
           text={value}
           items={agentRoleItems}
-          enabled={enableAgentRoleMentions}
+          enabled={enableAgentRoleMentions && !templateScope}
         />
         {mentionActionsRef ? (
           <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
@@ -988,7 +1026,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           <SkillMentionHydrator
             text={value}
             knownTokens={knownSkillTokens}
-            enabled={skillsActive}
+            enabled={skillsActive && !templateScope}
           />
         ) : null}
         {enableIssueMentions ? (
@@ -996,7 +1034,7 @@ export const CombinedMentionTextarea = React.forwardRef<
             <IssuePrMentionHydrator
               text={value}
               knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
+              enabled={enableIssueMentions && !templateScope}
             />
             <IssuePrMentionTitleHint
               repoFullName={githubRepoFullName}
@@ -1016,6 +1054,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           {...props}
         />
         <TwoLevelMentionMenu
+          templateScope={templateScope}
           fileData={fileData}
           fileSourceKind={fileSourceKind}
           enableFileMentions={enableFileMentions}

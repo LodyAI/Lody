@@ -35,6 +35,7 @@ import { IntegrationsSettingsComponent } from './integrations-setting';
 import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 import { AboutSettingsComponent } from './about-setting';
 import { AgentRolesSetting } from './agent-roles-setting';
+import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
@@ -284,6 +285,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       );
     case 'agent-roles':
       return <AgentRolesSetting />;
+    case 'prompt-shortcuts':
+      return <PromptShortcutsSetting />;
     case 'mcp':
       return <McpSetting />;
     case 'machines':

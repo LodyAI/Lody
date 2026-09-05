@@ -11,6 +11,7 @@ import { StuckConnectionBannerContainer } from './stuck-connection-banner';
 import { DesktopSettingsModal } from './settings/desktop-settings-modal';
 import { TaskQuickAddDialogContainer } from './tasks/task-quick-add-dialog-container';
 import { TaskStatusWatcher } from './tasks/task-status-watcher';
+import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
 export {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
@@ -55,19 +56,21 @@ export function MainLayout({
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
 
   return (
-    <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
-      {children}
-      {tasksEnabled && workspaceReady ? (
-        <>
-          <TaskIndexSync />
-          <TaskStatusWatcher />
-          <TaskQuickAddDialogContainer />
-        </>
-      ) : null}
-      {workspaceReady ? <BugReportDialogContainer /> : null}
-      <JoinCommunityDialogContainer />
-      <StuckConnectionBannerContainer />
-      {workspaceReady ? <DesktopSettingsModal /> : null}
-    </WorkspaceRuntimeShell>
+    <PromptShortcutProvider enabled={workspaceReady}>
+      <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
+        {children}
+        {tasksEnabled && workspaceReady ? (
+          <>
+            <TaskIndexSync />
+            <TaskStatusWatcher />
+            <TaskQuickAddDialogContainer />
+          </>
+        ) : null}
+        {workspaceReady ? <BugReportDialogContainer /> : null}
+        <JoinCommunityDialogContainer />
+        <StuckConnectionBannerContainer />
+        {workspaceReady ? <DesktopSettingsModal /> : null}
+      </WorkspaceRuntimeShell>
+    </PromptShortcutProvider>
   );
 }
