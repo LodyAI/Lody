@@ -984,6 +984,27 @@ async function syncMachineFlockDocsForRead(
   );
 }
 
+async function syncMachineFlockDocsForReadBestEffort(
+  manager: LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineIds: readonly MachineId[],
+  reason: string
+): Promise<void> {
+  const logger = getLogger('session');
+  await Promise.all(
+    Array.from(new Set(machineIds)).map(async (machineId) => {
+      try {
+        await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], reason);
+      } catch (error) {
+        logger.warn(
+          `Machine Flock freshness sync did not complete (${reason}:${machineId}); ` +
+            `continuing with the local replica: ${formatErrorMessage(error)}`
+        );
+      }
+    })
+  );
+}
+
 export async function resolveLocalProjectRefOrThrow(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
@@ -992,7 +1013,7 @@ export async function resolveLocalProjectRefOrThrow(
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.local-projects');
+  await syncMachineFlockDocsForReadBestEffort(manager, workspaceId, [machineId], 'session.local-projects');
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
@@ -2457,7 +2478,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.local-projects');
+  await syncMachineFlockDocsForReadBestEffort(manager, workspaceId, [machineId], 'session.local-projects');
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );

@@ -1020,7 +1020,7 @@ describe('session command helpers', () => {
     ).toEqual([authorizedProject]);
   });
 
-  it('marks local project refs for worktree session creation', async () => {
+  it('continues local project resolution when machine Flock freshness sync fails', async () => {
     const rootPath = mkdtempSync(path.join(os.tmpdir(), 'lody-session-git-project-'));
     try {
       execFileSync('git', ['init'], { cwd: rootPath, stdio: 'ignore' });
@@ -1038,7 +1038,9 @@ describe('session command helpers', () => {
         ],
         { cwd: rootPath, stdio: 'ignore' }
       );
-      const syncFlockDocOrThrow = vi.fn(async () => undefined);
+      const syncFlockDocOrThrow = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Streams sync failed: network_error'));
       const manager = {
         syncFlockDocOrThrow,
         repo: {
