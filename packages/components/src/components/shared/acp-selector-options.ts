@@ -60,10 +60,12 @@ export const CODEX_COLLABORATION_MODE_PLAN_VALUE = ACP_COLLABORATION_MODE_PLAN_V
 export const CONFIG_OPTION_ON_VALUE = ACP_CONFIG_OPTION_ON_VALUE;
 export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 
-const CODEX_EXTENDED_REASONING_MODEL_IDS = new Set([
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
+// Keep model-specific support aligned with the Codex ACP model catalog.
+const CODEX_EXTENDED_REASONING_BY_MODEL = new Map<string, readonly string[]>([
+  ['gpt-6-astra', ['max', 'ultra']],
+  ['gpt-5.6-sol', ['max', 'ultra']],
+  ['gpt-5.6-terra', ['max', 'ultra']],
+  ['gpt-5.6-luna', ['max']],
 ]);
 const CODEX_EXTENDED_REASONING_OPTIONS: AcpSessionSelectOption[] = [
   {
@@ -364,26 +366,25 @@ export const normalizeCodexReasoningEffortSelectors = (
   ) {
     return selectors;
   }
-  const selectedModelId = target.selectedModelId;
+  const supportedValues = CODEX_EXTENDED_REASONING_BY_MODEL.get(target.selectedModelId) ?? [];
 
   return selectors.map((selector) => {
     if (selector.type !== 'select' || selector.configId !== 'reasoning_effort') {
       return selector;
     }
 
-    let options: AcpSessionSelectOption[];
-    if (CODEX_EXTENDED_REASONING_MODEL_IDS.has(selectedModelId)) {
-      const existingValues = new Set(selector.options.map((option) => option.value));
-      const missingOptions = CODEX_EXTENDED_REASONING_OPTIONS.filter(
-        (option) => !existingValues.has(option.value)
-      );
-      options =
-        missingOptions.length === 0 ? selector.options : [...selector.options, ...missingOptions];
-    } else {
-      options = selector.options.filter(
-        (option) => !CODEX_EXTENDED_REASONING_VALUES.has(option.value)
-      );
-    }
+    const visibleOptions = selector.options.filter(
+      (option) =>
+        !CODEX_EXTENDED_REASONING_VALUES.has(option.value) || supportedValues.includes(option.value)
+    );
+    const existingValues = new Set(visibleOptions.map((option) => option.value));
+    const missingOptions = CODEX_EXTENDED_REASONING_OPTIONS.filter(
+      (option) => supportedValues.includes(option.value) && !existingValues.has(option.value)
+    );
+    const options =
+      visibleOptions.length === selector.options.length && missingOptions.length === 0
+        ? selector.options
+        : [...visibleOptions, ...missingOptions];
 
     const currentValue = options.some((option) => option.value === selector.currentValue)
       ? selector.currentValue

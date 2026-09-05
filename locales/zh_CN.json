@@ -846,6 +846,7 @@
   "machines.rateLimits.resetUnknown": "重置时间未知",
   "machines.rateLimits.resetsAt": "重置于{{time}}",
   "machines.rateLimits.sevenDay": "7 天用量",
+  "machines.rateLimits.namedWindow": "{{duration}} · {{label}}",
   "machines.rateLimits.unlabeled": "未命名额度",
   "machines.rateLimits.usedPercent": "已使用 {{percent}}%",
   "machines.resourceStatus": "资源状态",
