@@ -100,6 +100,100 @@ describe('Session buildShellEnv', () => {
     expect(env.LODY_GIT_CRED_CONTEXT_TOKEN).toBe('next-context');
   });
 
+  it.each(['ACP', 'terminal', 'exec'] as const)(
+    'scrubs every GitHub token source before %s spawn for non-owners',
+    async (kind) => {
+      const tokenKeys = [
+        'GH_TOKEN',
+        'GITHUB_TOKEN',
+        'GH_ENTERPRISE_TOKEN',
+        'GITHUB_ENTERPRISE_TOKEN',
+        'gh_token',
+        'GitHub_Token',
+        'Gh_Enterprise_Token',
+        'github_enterprise_token',
+      ];
+      const tokens = Object.fromEntries(tokenKeys.map((key) => [key, `owner-${key}`]));
+      for (const [key, value] of Object.entries(tokens)) vi.stubEnv(key, value);
+      loginShellOverlay.value = tokens;
+      resolvedLoginShellOverlay.value = tokens;
+      let spawnedEnv: NodeJS.ProcessEnv | undefined;
+      const stop = new Error('captured spawn');
+      const sandbox = {
+        spawn: vi.fn(async (_command, _args, options) => {
+          spawnedEnv = options.env;
+          throw stop;
+        }),
+      } as unknown as SessionSandbox;
+      const session = new Session(
+        createConfig({ requesterUserId: 'teammate', env: tokens }),
+        createSilentLogger(),
+        process.cwd(),
+        sandbox,
+        'owner'
+      );
+      try {
+        const operation =
+          kind === 'ACP'
+            ? session.createAgent({
+                cliType: 'registry',
+                agentType: 'opencode',
+                command: 'opencode',
+                args: ['acp'],
+                env: tokens,
+              } as CreateAgentConfig)
+            : kind === 'terminal'
+              ? (() => {
+                  session.acpSessionId = 'acp-test' as NonNullable<Session['acpSessionId']>;
+                  return session.terminalManager.createTerminal(
+                    'acp-test',
+                    'command',
+                    [],
+                    process.cwd(),
+                    tokens
+                  );
+                })()
+              : session.exec('command', [], process.cwd(), false);
+        await expect(operation).rejects.toBe(stop);
+        expect(spawnedEnv).toBeDefined();
+        for (const key of tokenKeys) expect(spawnedEnv?.[key]).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+  );
+
+  it('preserves owner tokens, then removes them when requester identity changes', () => {
+    const tokens = {
+      GH_TOKEN: 'owner-gh',
+      GITHUB_TOKEN: 'owner-github',
+      GH_ENTERPRISE_TOKEN: 'owner-enterprise',
+      GITHUB_ENTERPRISE_TOKEN: 'owner-github-enterprise',
+    };
+    loginShellOverlay.value = tokens;
+    const session = new Session(
+      createConfig({ env: { ...tokens } }),
+      createSilentLogger(),
+      process.cwd(),
+      undefined,
+      'user-1'
+    );
+    const build = () =>
+      (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
+    expect(build()).toMatchObject(tokens);
+    session.updateGitIdentity('Teammate', 'teammate@example.com', 'user-2');
+    for (const key of Object.keys(tokens)) expect(build()[key]).toBeUndefined();
+  });
+
+  it('does not inherit GitHub credentials when machine ownership is unknown', () => {
+    const session = new Session(
+      createConfig({ env: { GH_TOKEN: 'owner-token' } }),
+      createSilentLogger()
+    );
+    const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
+    expect(env.GH_TOKEN).toBeUndefined();
+  });
+
   it('scrubs inherited Anthropic auth when claude session has explicit ANTHROPIC_AUTH_TOKEN', () => {
     const original = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-from-shell';

@@ -7,6 +7,7 @@ import {
   SessionOutputEvent,
   SessionErrorEvent,
   SessionExitEvent,
+  type SessionTerminationReason,
 } from './types';
 import { JsonLinesParser } from '../utils/json-lines-parser';
 import path from 'path';
@@ -49,6 +50,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { truncateLogText } from '@/utils/log-format';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { resolveSessionGitIdentity } from './git-identity';
+import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
@@ -117,13 +119,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
   public terminalManager: TerminalManager;
-  public ghTokenInjected: boolean = false;
 
   constructor(
     config: SessionConfig,
     logger: Logger,
     workdir?: string,
-    sandbox: SessionSandbox = createNoopSessionSandbox()
+    sandbox: SessionSandbox = createNoopSessionSandbox(),
+    private readonly machineOwnerUserId?: string
   ) {
     super();
     this.config = config;
@@ -237,7 +239,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
-  async terminate(force: boolean = false): Promise<void> {
+  async terminate(force: boolean = false, reason?: SessionTerminationReason): Promise<void> {
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
 
@@ -302,6 +304,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.status = 'terminated';
 
     const event: SessionExitEvent = {
+      ...(reason ? { reason } : {}),
       sessionId: this.sessionId,
       exitCode: activeProcess?.child.exitCode ?? 0,
     };
@@ -440,26 +443,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       LODY_WORKSPACE_SESSION_ID: workspaceSessionId,
     };
 
-    // Same ENOENT trap as the ACP runner: overlay the login-shell env so a
-    // GUI/daemon launch with a minimal PATH can still find agent binaries. This
-    // path is synchronous (terminal-manager callback), so read the cached env;
-    // withDefaultAcpPathEntries covers the not-yet-warmed first call.
-    //
-    // This MUST happen before the scrub below: the login profile (~/.zshrc) is a
-    // second source of ANTHROPIC_*/CLAUDE_CODE_* vars that the scrub never saw
-    // otherwise. Scrubbing first and overlaying after would let a stray
-    // `ANTHROPIC_API_KEY` from the shell silently override a configured
-    // `ANTHROPIC_AUTH_TOKEN` — the exact override the scrub exists to prevent.
-    // Same ENOENT trap as the ACP runner: overlay the login-shell env so a
-    // GUI/daemon launch with a minimal PATH can still find agent binaries. This
-    // path is synchronous (terminal-manager callback), so read the cached env;
-    // withDefaultAcpPathEntries covers the not-yet-warmed first call.
-    //
-    // This MUST happen before the scrub below: the login profile (~/.zshrc) is a
-    // second source of ANTHROPIC_*/CLAUDE_CODE_* vars that the scrub never saw
-    // otherwise. Scrubbing first and overlaying after would let a stray
-    // `ANTHROPIC_API_KEY` from the shell silently override a configured
-    // `ANTHROPIC_AUTH_TOKEN` — the exact override the scrub exists to prevent.
+    // Login profiles are another source of credentials as well as PATH entries.
+    // Apply them before scrubbing so they cannot restore a removed host token.
     const withLoginShell = mergeLoginShellEnv(merged, loginShellEnv);
 
     // For Claude-like builtins, when the user has explicit auth/routing config (preset or
@@ -470,6 +455,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const agentEnv = shouldScrubClaudeAuthEnv(this.config.agentCliType, this.config.agentType)
       ? scrubInheritedClaudeAuthEnv(withLoginShell, { ...configEnv, ...extraEnv })
       : withLoginShell;
+    // Launch config and tool-provided overrides have no verified token ownership.
+    // Only the trusted machine owner may inherit GitHub credentials from any source.
+    if (!this.machineOwnerUserId || this.gitIdentity.id !== this.machineOwnerUserId) {
+      clearGitHubTokenEnv(agentEnv);
+    }
     // The child talks to Lody's own loopback services (MCP HTTP host, preview
     // gateway); a proxy inherited from the host process or the login shell
     // must never intercept those. Runs last so a proxy contributed by the

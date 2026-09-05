@@ -3762,6 +3762,9 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      // The execution service still owns the current turn while replacing ACP.
+      // An unscoped async finalizer here could clear the replacement's updates.
+      if (event.reason === 'acp-replacement') return;
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;

@@ -172,6 +172,51 @@ describe('GitCredentialBroker', () => {
     });
   });
 
+  it.each([true, false, undefined])(
+    'reports local-auth permission without fetching a token: %s',
+    async (allowLocalAuth) => {
+      const handler = createGitCredentialBrokerHandler({
+        authToken: 'auth-token',
+        tokenManager: {} as GitHubTokenManager,
+        logger: { debug: vi.fn() } as unknown as Logger,
+        resolveContext: () => ({
+          sessionId: 's1',
+          requesterUserId: 'u1',
+          machineId: 'm1',
+          allowLocalAuth,
+        }),
+      });
+      const res = makeRes();
+      handler(
+        makeReq({
+          url: '/github-auth-context',
+          auth: 'Bearer auth-token',
+          body: { contextToken: 'ctx' },
+        }),
+        res
+      );
+      await res.finished;
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({ allowLocalAuth: allowLocalAuth === true });
+    }
+  );
+
+  it.each([{}, { contextToken: 'stale' }])(
+    'rejects missing or stale context for local auth: %j',
+    async (body) => {
+      const handler = createGitCredentialBrokerHandler({
+        authToken: 'auth-token',
+        tokenManager: {} as GitHubTokenManager,
+        logger: { debug: vi.fn() } as unknown as Logger,
+        resolveContext: () => null,
+      });
+      const res = makeRes();
+      handler(makeReq({ url: '/github-auth-context', auth: 'Bearer auth-token', body }), res);
+      await res.finished;
+      expect(res.statusCode).toBe(403);
+    }
+  );
+
   describe('activateSessionContext', () => {
     const makeBroker = () => {
       const tokenManager = {} as GitHubTokenManager;
@@ -261,6 +306,15 @@ describe('GitCredentialBroker', () => {
 
       expect(reactivated).not.toBe(original);
       expect(peekContexts(broker).has(original)).toBe(false);
+    });
+
+    it('revokes a local-auth context when its permission changes', () => {
+      const broker = makeBroker();
+      const context = { sessionId: 's1', requesterUserId: 'u1', machineId: 'm1' };
+      const original = broker.activateSessionContext({ ...context, allowLocalAuth: true });
+      const current = broker.activateSessionContext({ ...context, allowLocalAuth: false });
+      expect(peekContexts(broker).has(original)).toBe(false);
+      expect(peekContexts(broker).get(current)?.allowLocalAuth).toBe(false);
     });
 
     it('uses independent contextTokens for different sessions', () => {

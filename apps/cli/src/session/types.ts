@@ -118,7 +118,10 @@ export interface SessionErrorEvent {
 /**
  * 会话退出事件
  */
+export type SessionTerminationReason = 'acp-replacement';
+
 export interface SessionExitEvent {
+  reason?: SessionTerminationReason;
   sessionId: SessionId;
   exitCode: number;
 }

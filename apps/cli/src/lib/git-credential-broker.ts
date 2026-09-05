@@ -38,6 +38,8 @@ export type GitCredentialBrokerSessionContext = {
   sessionId: string;
   requesterUserId: string;
   machineId: string;
+  /** Only the daemon owner may use this OS account's saved gh login. */
+  allowLocalAuth?: boolean;
 };
 
 export type GitCredentialBrokerEnv = {
@@ -68,6 +70,7 @@ export const createGitCredentialBrokerHandler = (options: {
         ![
           '/git-credential',
           '/github-token',
+          '/github-auth-context',
           '/git-credential/reject',
           '/github-token/reject',
         ].includes(req.url ?? '')
@@ -93,13 +96,6 @@ export const createGitCredentialBrokerHandler = (options: {
       const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
       const repoFullName = obj && typeof obj.repoFullName === 'string' ? obj.repoFullName : null;
       const contextToken = obj && typeof obj.contextToken === 'string' ? obj.contextToken : null;
-      if (!repoFullName) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({ error: 'bad_request', message: 'Missing required field: repoFullName.' })
-        );
-        return;
-      }
       const context = contextToken ? (options.resolveContext?.(contextToken) ?? null) : null;
       if (contextToken && !context) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -108,6 +104,18 @@ export const createGitCredentialBrokerHandler = (options: {
             error: 'invalid_context',
             message: 'Invalid or expired GitHub credential context.',
           })
+        );
+        return;
+      }
+      if (req.url === '/github-auth-context') {
+        res.writeHead(context ? 200 : 403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ allowLocalAuth: context?.allowLocalAuth === true }));
+        return;
+      }
+      if (!repoFullName) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'bad_request', message: 'Missing required field: repoFullName.' })
         );
         return;
       }
@@ -295,7 +303,8 @@ export class GitCredentialBroker {
       if (
         existing &&
         existing.requesterUserId === context.requesterUserId &&
-        existing.machineId === context.machineId
+        existing.machineId === context.machineId &&
+        existing.allowLocalAuth === context.allowLocalAuth
       ) {
         return existingToken;
       }

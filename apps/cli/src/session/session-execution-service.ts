@@ -1191,6 +1191,12 @@ export class SessionExecutionService {
     if (!runtime.promptInFlight) {
       return await rejectUndelivered('no-active-turn');
     }
+    if (runtime.invocation?.requesterUserId !== options.userId) {
+      return await rejectUndelivered(
+        'unsupported',
+        'A different requester must start a new turn with their own credentials.'
+      );
+    }
     if (runtime.userTurnId === options.userTurnId) {
       return {
         type: 'session/steer_response',
@@ -3761,8 +3767,8 @@ export class SessionExecutionService {
           triggerReason: 'initial' | 'stale_acp_recovery'
         ): Effect.Effect<void, unknown, never> =>
           Effect.gen(function* () {
-            // Refresh GH_TOKEN before the ACP turn so the agent has a fresh token for git/gh operations.
-            // Installation tokens expire ~1h; refreshing at turn start avoids mid-turn auth failures.
+            // Bind git/gh credential selection to the requester before starting the ACP turn.
+            // The helper and gh shim resolve fresh credentials when a command needs them.
             if (!project) {
               const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
               project = self.resolveProjectFromMeta(meta, message.project?.branch);
@@ -3774,10 +3780,10 @@ export class SessionExecutionService {
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,
-                'execution.refresh_gh_token',
+                'execution.refresh_github_context',
                 { sessionId, turnId, triggerReason },
                 async () =>
-                  await self.deps.sessionManager.refreshGhTokenForSession(
+                  await self.deps.sessionManager.refreshGitHubCredentialContext(
                     targetSession,
                     githubRepo,
                     userId
@@ -3847,7 +3853,9 @@ export class SessionExecutionService {
                 yield* self.ignoreWithWarning(
                   sessionId,
                   'Failed to terminate stale ACP session before prompt retry',
-                  self.tryPromise(() => self.deps.sessionManager.terminateSession(sessionId, true))
+                  self.tryPromise(() =>
+                    self.deps.sessionManager.terminateSession(sessionId, true, 'acp-replacement')
+                  )
                 );
                 session = null;
                 runtime.session = undefined;
@@ -3875,7 +3883,19 @@ export class SessionExecutionService {
             )
           );
 
-        bindReadySession(readySession);
+        // An ACP process retains its launch environment. A requester switch must
+        // replace it before delivering input, or the previous user's tokens survive.
+        if (readySession.getGitIdentityForUser && !readySession.getGitIdentityForUser(userId)) {
+          yield* abortIfCancelled();
+          yield* self.tryPromise(() =>
+            self.deps.sessionManager.terminateSession(sessionId, true, 'acp-replacement')
+          );
+          session = null;
+          runtime.session = undefined;
+          runtime.pendingSession = undefined;
+          activeSession = yield* restoreMissingSession(ctx);
+        }
+        bindReadySession(activeSession);
         yield* acpReplaySuppression.release;
         self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
         yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));

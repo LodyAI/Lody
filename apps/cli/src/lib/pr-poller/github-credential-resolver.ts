@@ -9,7 +9,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 /**
  * Per-repo GitHub credential resolution for the poller (plan §3).
  *
- * Precedence mirrors `gh-token-injector.ts`: the managed workspace token
+ * Unlike interactive owner gh commands, the poller uses the managed workspace token
  * wins; the ambient `gh auth token` is only a fallback (harvested one-shot
  * and cached). Resolver instances are workspace-local, while credential
  * scopes intentionally converge across workspaces that use the same GitHub

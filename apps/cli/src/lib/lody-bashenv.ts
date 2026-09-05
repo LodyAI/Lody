@@ -1,6 +1,5 @@
 import { mkdirSync } from 'fs';
 import path from 'path';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 import { getGhShimHostBinDir } from './gh-shim-script';
 import {
@@ -8,8 +7,6 @@ import {
   toSingleQuotedShellString,
   writeIfChanged,
 } from './shell-file-utils';
-
-const LODY_BASH_ENV_PATH = path.join(getLodyDataDir(), 'bashenv');
 
 const buildBashEnvSource = (
   ghShimBinDir: string,
@@ -34,12 +31,15 @@ ${sourceInherited}export PATH=${toSingleQuotedShellString(ghShimBinDir)}:"$PATH"
 
 export const shouldInjectBashEnvForGhShim = (): boolean => process.platform !== 'win32';
 
-export const ensureLodyBashEnvForGhShim = (inheritBashEnv?: string): string => {
-  const bashEnvPath = LODY_BASH_ENV_PATH;
+export const ensureLodyBashEnvForGhShim = (
+  inheritBashEnv?: string,
+  brokerStateFilePath?: string
+): string => {
+  const bashEnvPath = path.join(getGhShimHostBinDir(brokerStateFilePath), 'bashenv');
   mkdirSync(path.dirname(bashEnvPath), { recursive: true });
   writeIfChanged(
     bashEnvPath,
-    buildBashEnvSource(getGhShimHostBinDir(), inheritBashEnv, bashEnvPath)
+    buildBashEnvSource(getGhShimHostBinDir(brokerStateFilePath), inheritBashEnv, bashEnvPath)
   );
   return bashEnvPath;
 };
