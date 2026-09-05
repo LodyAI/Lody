@@ -63,7 +63,7 @@ import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
 
-export type LoroSidebarNavKey = 'home' | 'archive' | 'tasks';
+export type LoroSidebarNavKey = 'home' | 'archive' | 'tasks' | 'schedules';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -105,6 +105,7 @@ export type LoroSidebarChatItem = {
 export type LoroSidebarLabels = {
   home: string;
   tasks: string;
+  schedules: string;
   newTask: string;
   docs: string;
   joinCommunity: string;
@@ -243,6 +244,8 @@ export interface LoroSidebarProps {
    * `tasksFeatureEnabledAtom`.
    */
   showTasks?: boolean;
+  showSchedules?: boolean;
+  onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
   onDocsClicked?: () => void;
   onJoinCommunityClicked?: () => void;
@@ -272,6 +275,7 @@ const COLLAPSE_DRAG_THRESHOLD = 160;
 const defaultLabels: LoroSidebarLabels = {
   home: 'Home',
   tasks: 'Tasks',
+  schedules: 'Schedules',
   newTask: 'New task',
   docs: 'Docs',
   joinCommunity: 'Join community',
@@ -667,6 +671,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   onTasksClicked,
   onNewTaskClicked,
   showTasks = false,
+  showSchedules = false,
+  onSchedulesClicked,
   onSettingsClicked,
   onDocsClicked,
   onJoinCommunityClicked,
@@ -1003,6 +1009,14 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<SquarePen className="h-4 w-4" />}
             onClick={onHomeClicked}
           />
+          {showSchedules ? (
+            <NavButton
+              active={activeNav === 'schedules'}
+              label={mergedLabels.schedules}
+              icon={<ListTodo className="h-4 w-4" />}
+              onClick={onSchedulesClicked}
+            />
+          ) : null}
           {/* Tasks sits with New Chat rather than in the bottom icon rail: it is a
              primary destination, and the rail reads as utilities (docs, feedback,
              settings). Still gated — see `showTasks`. */}

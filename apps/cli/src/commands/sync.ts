@@ -3,12 +3,15 @@ import {
   getMachineFlockDocId,
   getTaskIndexFlockDocId,
   getTaskRoomId,
+  getScheduleRoomId,
+  getScheduleRegistryFlockDocId,
   isMachineDocRoomId,
   type MachineMeta,
   type TaskId,
   type WorkspaceId,
 } from '@lody/shared';
 import { listWorkspaceTaskIds } from '@/lib/task-doc';
+import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveDocMetas,
@@ -245,6 +248,7 @@ async function listSyncableFlockDocIds(
   return [
     ...machines.map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id)),
     getTaskIndexFlockDocId(workspaceId),
+    getScheduleRegistryFlockDocId(workspaceId),
   ].sort((left, right) => left.localeCompare(right));
 }
 
@@ -257,11 +261,16 @@ async function listSyncableFlockDocIds(
  */
 export function buildSyncDocIds(
   aliveRoomIds: readonly string[],
-  taskIds: readonly TaskId[]
+  taskIds: readonly TaskId[],
+  scheduleIds: readonly string[] = []
 ): string[] {
-  return [...new Set([...aliveRoomIds, ...taskIds.map((taskId) => getTaskRoomId(taskId))])].sort(
-    (left, right) => left.localeCompare(right)
-  );
+  return [
+    ...new Set([
+      ...aliveRoomIds,
+      ...taskIds.map((taskId) => getTaskRoomId(taskId)),
+      ...scheduleIds.map(getScheduleRoomId),
+    ]),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
 async function syncWorkspace(input: {
@@ -297,7 +306,15 @@ async function syncWorkspace(input: {
     }
 
     const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
-    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true), taskIds);
+    await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
+      reason: 'sync:schedules:registry',
+    });
+    const scheduleIds = await listWorkspaceScheduleIds(manager, workspaceId);
+    const docIds = buildSyncDocIds(
+      await listAliveRoomIds(manager, () => true),
+      taskIds,
+      scheduleIds
+    );
     const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId);
 
     await syncItems({

@@ -5,6 +5,7 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   tasksBetaEnabledAtom,
+  schedulesBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
@@ -22,12 +23,23 @@ export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
+  const [schedulesEnabled, setSchedulesEnabled] = useAtom(schedulesBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
 
   if (!developerModeEnabled) return null;
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
+      <CompactRow
+        label={t('schedules.title', 'Schedules')}
+        helper={t('schedules.betaHelp', 'Run prompts on a schedule using your own machine.')}
+      >
+        <Switch
+          checked={schedulesEnabled}
+          onCheckedChange={setSchedulesEnabled}
+          aria-label={t('schedules.title', 'Schedules')}
+        />
+      </CompactRow>
       <CompactRow
         label={t('settings.beta.tasks', 'Tasks')}
         helper={t(

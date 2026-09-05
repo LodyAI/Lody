@@ -133,6 +133,7 @@ export type FrozenOperationContinuationConfig = {
      * from the driving Turn so recovery keeps the same tool surface.
      */
     taskToolsEnabled?: boolean;
+    scheduleToolsEnabled?: boolean;
     inheritSessionDefaults?: false;
   } | null>;
 };

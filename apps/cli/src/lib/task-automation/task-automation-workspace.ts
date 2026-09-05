@@ -6,6 +6,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
+import type { AgentExecutionSlots } from '../agent-execution-slots';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { streamsRoomBinding } from '@/lib/loro/streams-room-binding';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
@@ -26,6 +27,8 @@ export type TaskAutomationWorkspaceOptions = {
   machineId: MachineId;
   userId: string;
   logger: Logger;
+  executionSlots?: AgentExecutionSlots;
+  localOnly?: boolean;
   /** Starts a task on this machine; supplied by the fleet so the command layer stays owner of dispatch. */
   startTask: (taskId: TaskId, agentConfigId: string) => Promise<void>;
 };
@@ -57,7 +60,8 @@ export function createTaskAutomationWorkspace(
       listMergedAgentConfigs(documentManager.repo, workspaceId, [machineId]).catch(() => []),
     // Being connected is what makes this machine able to run anything; an
     // offline pass must hold the queue rather than fail the starts.
-    isMachineOnline: () => documentManager.isTransportConnected(),
+    isMachineOnline: () => options.localOnly === true || documentManager.isTransportConnected(),
+    executionSlots: options.executionSlots,
     startTask,
     onQueued: (taskId, position) => {
       logger.debug(`[task-automation] queued taskId=${taskId} position=${position}`);
@@ -67,6 +71,10 @@ export function createTaskAutomationWorkspace(
   let unsubscribe: (() => void) | null = null;
   let disposed = false;
   let joined: { unsubscribe: () => void } | null = null;
+  const detachSlots = options.executionSlots?.subscribe((releasedOwner) => {
+    // A failed Task start must wait for a fresh fact, not retry on its own release.
+    if (!releasedOwner?.startsWith('task:')) void scheduler.evaluate().catch(() => undefined);
+  });
   // An offline pass holds the queue instead of failing, so something has to
   // re-evaluate once this machine is back. The index subscription alone is not
   // enough: if nothing changed remotely while we were down, no row event arrives
@@ -129,6 +137,7 @@ export function createTaskAutomationWorkspace(
       disposed = true;
       scheduler.stop();
       detachReconnect();
+      detachSlots?.();
       unsubscribe?.();
       joined?.unsubscribe();
     },

@@ -584,6 +584,7 @@ export interface AgentClientOptions {
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Whether this Agent session mounts the built-in Lody Task MCP tools. */
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
@@ -700,6 +701,7 @@ export class AgentClient implements acp.Client {
               machineId: this.options.machineId,
               workdir,
               taskToolsEnabled: this.options.taskToolsEnabled === true,
+              scheduleToolsEnabled: this.options.scheduleToolsEnabled === true,
             }),
           },
         ];
@@ -719,6 +721,10 @@ export class AgentClient implements acp.Client {
       {
         name: 'LODY_MCP_TASK_TOOLS_ENABLED',
         value: this.options.taskToolsEnabled === true ? '1' : '0',
+      },
+      {
+        name: 'LODY_MCP_SCHEDULE_TOOLS_ENABLED',
+        value: this.options.scheduleToolsEnabled === true ? '1' : '0',
       },
     ];
 
@@ -1747,9 +1753,7 @@ export class AgentClient implements acp.Client {
     const forkCapability = initResponse.agentCapabilities?.sessionCapabilities?.fork;
     this.supportsFork = !!forkCapability;
     const extensionMeta = initResponse.agentCapabilities?._meta as
-      | Record<string, unknown>
-      | null
-      | undefined;
+      Record<string, unknown> | null | undefined;
     this.lodyExtensionCapabilities = parseLodyExtensionCapabilities(extensionMeta);
     this.supportsForkAtTurn = this.lodyExtensionCapabilities.forkAtTurn?.version === 1;
     this.acknowledgedSteerCapability = parseAcknowledgedSteerCapability(extensionMeta);

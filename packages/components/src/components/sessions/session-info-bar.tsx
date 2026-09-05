@@ -13,6 +13,7 @@ import {
   ScheduleChip,
   StatusChip,
   TaskChip,
+  ScheduleSourceChip,
   useScheduledTaskSignature,
   type GoalChipCommandHandler,
   type ContextChipAction,
@@ -22,13 +23,14 @@ import {
 import type { SessionStatusStripState } from './session-status-strip';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 
-export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'task' | 'context';
+export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'task' | 'scheduleSource' | 'context';
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
   /** Task this session belongs to; the chip is the way back to it. */
   task?: { taskId: string; title: string } | null;
   onOpenTask?: (taskId: string) => void;
+  scheduleSource?: { title: string; onOpen: () => void } | null;
   /** Active/paused/terminal goal snapshot; the chip replaces the old sticky top banner. */
   goal?: SessionGoalMessage | null;
   goalCommands?: readonly SessionGoalCommand[];
@@ -110,6 +112,7 @@ export function SessionInfoBar({
   onGoalDismiss,
   task,
   onOpenTask,
+  scheduleSource,
   scheduledTasks,
   prCiRuns,
   onOpenPrCiRun,
@@ -142,11 +145,13 @@ export function SessionInfoBar({
     goal: hasGoal,
     schedule: hasSchedule,
     task: hasTask,
+    scheduleSource: !!scheduleSource,
     context: hasContext,
   };
   const defaultKey =
-    (['context', 'status', 'goal', 'schedule', 'task'] as const).find((key) => present[key]) ??
-    null;
+    (['context', 'status', 'goal', 'schedule', 'task', 'scheduleSource'] as const).find(
+      (key) => present[key]
+    ) ?? null;
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
@@ -237,6 +242,15 @@ export function SessionInfoBar({
         return hasSchedule && scheduledTasks ? (
           <ScheduleChip key={key} tasks={scheduledTasks} {...itemMode} />
         ) : null;
+      case 'scheduleSource':
+        return scheduleSource ? (
+          <ScheduleSourceChip
+            key={key}
+            title={scheduleSource.title}
+            onOpen={scheduleSource.onOpen}
+            {...itemMode}
+          />
+        ) : null;
       case 'task':
         return task ? (
           <TaskChip
@@ -268,9 +282,9 @@ export function SessionInfoBar({
     }
   };
 
-  const clusterKeys = (['status', 'goal', 'schedule', 'task', 'context'] as const).filter(
-    (key) => present[key] && key !== stagedKey
-  );
+  const clusterKeys = (
+    ['status', 'goal', 'schedule', 'task', 'scheduleSource', 'context'] as const
+  ).filter((key) => present[key] && key !== stagedKey);
   const clusterNonEmpty = clusterKeys.length > 0 || !!onOpenBrowser;
 
   return (

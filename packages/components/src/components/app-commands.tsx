@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { currentWorkspaceSlugAtom, settingsDialogOpenAtom } from '@/atoms';
 import { taskQuickAddOpenAtom } from '@/atoms/tasks';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
+import { tasksFeatureEnabledAtom, schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isSettingsPath, resolveSettingsCloseTo } from '@/lib/settings-navigation';
@@ -59,6 +59,41 @@ export function AppCommands() {
   // close can return there), or — when already on a settings page — close back to it.
   const openTaskQuickAdd = useSetAtom(taskQuickAddOpenAtom);
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
+  useCommand(
+    {
+      id: 'schedules.open',
+      title: t('commands.schedules.open', 'Open Schedules'),
+      category: 'Workspace',
+      keybindings: [],
+      when: () => !!workspaceSlug,
+      run: () => {
+        if (workspaceSlug)
+          void router.navigate({
+            to: '/$workspaceName/schedules',
+            params: { workspaceName: workspaceSlug },
+          });
+      },
+    },
+    schedulesEnabled
+  );
+  useCommand(
+    {
+      id: 'schedules.new',
+      title: t('commands.schedules.new', 'New Schedule'),
+      category: 'Workspace',
+      keybindings: [],
+      when: () => !!workspaceSlug,
+      run: () => {
+        if (workspaceSlug)
+          void router.navigate({
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: workspaceSlug, scheduleId: 'new' },
+          });
+      },
+    },
+    schedulesEnabled
+  );
 
   // Registered only while the Tasks beta is on, so the palette and the keyboard
   // settings list stay free of commands the user has no feature for.

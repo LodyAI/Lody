@@ -62,6 +62,7 @@ export type SessionConversationConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
 };
 
 export const resolveSessionConversationConfig = (
@@ -87,6 +88,9 @@ export const resolveSessionConversationConfig = (
       ...(inputConfig.mcpServerIds ? { mcpServerIds: inputConfig.mcpServerIds } : {}),
       ...(typeof inputConfig.taskToolsEnabled === 'boolean'
         ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
+        : {}),
+      ...(typeof inputConfig.scheduleToolsEnabled === 'boolean'
+        ? { scheduleToolsEnabled: inputConfig.scheduleToolsEnabled }
         : {}),
     };
   };
@@ -125,6 +129,11 @@ export const resolveSessionTaskToolsEnabled = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
   messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
 ): boolean => resolveSessionConversationConfig(history, messageQueue).taskToolsEnabled === true;
+
+export const resolveSessionScheduleToolsEnabled = (
+  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
+  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
+): boolean => resolveSessionConversationConfig(history, messageQueue).scheduleToolsEnabled === true;
 
 const normalizeTextInputBlock = (
   block: Extract<SessionInputBlock, { type: 'text' }>
@@ -487,6 +496,7 @@ export const buildSessionTurnInputConfig = (args: {
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
   issuePRMentions?: IssuePRMention[];
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
@@ -507,6 +517,9 @@ export const buildSessionTurnInputConfig = (args: {
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
     ...(args.taskToolsEnabled !== undefined
       ? { taskToolsEnabled: args.taskToolsEnabled === true }
+      : {}),
+    ...(args.scheduleToolsEnabled !== undefined
+      ? { scheduleToolsEnabled: args.scheduleToolsEnabled === true }
       : {}),
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,

@@ -2,6 +2,8 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { getSessionRoomId, getTaskRoomId, type WorkspaceId } from '@lody/shared';
 import { listWorkspaceTaskIds } from '@/lib/task-doc';
+import { getScheduleRegistryFlockDocId, getScheduleRoomId } from '@lody/shared';
+import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveSessionMetas,
@@ -51,6 +53,16 @@ async function syncWorkspaceSessionsForExport(
   // This reconciles visible index rows with repo existence, repairing a missing
   // projection row without reviving an explicit index tombstone.
   const workspaceId = workspace.id as WorkspaceId;
+  await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
+    reason: 'export:schedules:registry',
+  });
+  await mapWithConcurrency(
+    await listWorkspaceScheduleIds(manager, workspaceId),
+    EXPORT_SYNC_CONCURRENCY,
+    async (id) => {
+      await syncDocForRead(manager, getScheduleRoomId(id), `export:schedule:${id}`);
+    }
+  );
   const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
   await mapWithConcurrency(taskIds, EXPORT_SYNC_CONCURRENCY, async (taskId) => {
     await syncDocForRead(manager, getTaskRoomId(taskId), `export:${workspace.id}:${taskId}`);

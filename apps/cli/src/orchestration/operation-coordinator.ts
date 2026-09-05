@@ -209,6 +209,10 @@ export class LodyOperationCoordinator {
     void this.wake('startup');
   }
 
+  hasPendingWorkForRequester(sessionId: SessionId): boolean {
+    return this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? true;
+  }
+
   stop(): void {
     this.started = false;
     this.metaWatch?.unsubscribe();
@@ -918,8 +922,7 @@ export class LodyOperationCoordinator {
   ): Promise<'available' | 'unavailable' | 'unknown'> {
     const startedAt = performance.now();
     const agentConfigId = operation.frozenContinuationConfig.agentConfigId as
-      | AgentConfigId
-      | undefined;
+      AgentConfigId | undefined;
     const finish = (
       result: 'available' | 'unavailable' | 'unknown',
       lookup: AgentConfigPointLookup | null,

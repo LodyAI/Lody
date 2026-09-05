@@ -12,6 +12,7 @@ export type SessionPreparationRunConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
 };
 
 export type SessionPreparationClaimIdentity = {
@@ -46,6 +47,7 @@ export function buildSessionPreparationRunConfig(input: {
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
 }): SessionPreparationRunConfig | undefined {
   const modeId = trimOptionalId(input.modeId);
   const modelId = trimOptionalId(input.modelId);
@@ -62,8 +64,16 @@ export function buildSessionPreparationRunConfig(input: {
       : undefined;
   const mcpServerIds = input.mcpServerIds ? [...input.mcpServerIds] : undefined;
   const taskToolsEnabled = input.taskToolsEnabled === true ? true : undefined;
+  const scheduleToolsEnabled = input.scheduleToolsEnabled === true ? true : undefined;
 
-  if (!modeId && !modelId && !nonEmptyConfigOptionValues && !mcpServerIds && !taskToolsEnabled) {
+  if (
+    !modeId &&
+    !modelId &&
+    !nonEmptyConfigOptionValues &&
+    !mcpServerIds &&
+    !taskToolsEnabled &&
+    !scheduleToolsEnabled
+  ) {
     return undefined;
   }
   return {
@@ -72,6 +82,7 @@ export function buildSessionPreparationRunConfig(input: {
     ...(nonEmptyConfigOptionValues ? { configOptionValues: nonEmptyConfigOptionValues } : {}),
     ...(mcpServerIds ? { mcpServerIds } : {}),
     ...(taskToolsEnabled ? { taskToolsEnabled } : {}),
+    ...(scheduleToolsEnabled ? { scheduleToolsEnabled } : {}),
   };
 }
 
@@ -91,6 +102,7 @@ export function normalizeSessionPreparationRunConfigForDedup(
       ? []
       : [normalizeMcpServerIdsForDedup(config.mcpServerIds)]),
     ...(config.taskToolsEnabled === true ? [true] : []),
+    ...(config.scheduleToolsEnabled === true ? [{ schedules: true }] : []),
   ];
 }
 

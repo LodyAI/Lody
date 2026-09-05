@@ -536,6 +536,15 @@ export class LodyOperationStore {
     return rows.map((row) => this.decodeOperation(row));
   }
 
+  hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
+    return !!this.db
+      .prepare(
+        `SELECT 1 FROM operations WHERE workspace_id=? AND requester_session_id=? AND state='active'
+      UNION ALL SELECT 1 FROM deliveries WHERE workspace_id=? AND requester_session_id=? AND state='pending' LIMIT 1`
+      )
+      .get(workspaceId, requesterSessionId, workspaceId, requesterSessionId);
+  }
+
   updateItems(
     requesterSessionId: SessionId,
     operationId: string,
@@ -572,8 +581,7 @@ export class LodyOperationStore {
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
           )
           .get(requesterSessionId, operationId, itemIndex) as
-          | { claim_token: string; claimed_at_ms: number }
-          | undefined;
+          { claim_token: string; claimed_at_ms: number } | undefined;
         const nowMs = this.now();
         if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
           return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };

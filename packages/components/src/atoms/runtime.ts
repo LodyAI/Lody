@@ -145,11 +145,27 @@ export type TaskDocStore = {
   waitUntilSynced: () => Promise<void>;
 };
 
+export type ScheduleDocStore = {
+  readonly roomId: string;
+  readonly firstSynced: Promise<void>;
+  getState: () => import('@lody/shared').ScheduleDocument | null;
+  subscribe: (listener: () => void) => () => void;
+  dispose: () => void;
+  waitUntilSynced: () => Promise<void>;
+};
+
 export type WorkspaceRuntime = {
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */
   readonly workspaceSlug: string;
+  withScheduleStore: <T>(
+    scheduleId: string,
+    fn: (store: ScheduleDocStore) => Promise<T> | T,
+    options?: { create?: boolean }
+  ) => Promise<T>;
+  acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
+  releaseScheduleStoreRef: (scheduleId: string) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
    */

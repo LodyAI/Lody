@@ -54,6 +54,18 @@ describe('session preparation run config', () => {
     expect(buildSessionPreparationRunConfig({ taskToolsEnabled: false })).toBeUndefined();
   });
 
+  it('separates Schedule-enabled preparation from both plain and Task-only Agent instances', () => {
+    const enabled = buildSessionPreparationRunConfig({ scheduleToolsEnabled: true });
+    expect(enabled).toEqual({ scheduleToolsEnabled: true });
+    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).not.toEqual(
+      normalizeSessionPreparationRunConfigForDedup({})
+    );
+    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).not.toEqual(
+      normalizeSessionPreparationRunConfigForDedup({ taskToolsEnabled: true })
+    );
+    expect(buildSessionPreparationRunConfig({ scheduleToolsEnabled: false })).toBeUndefined();
+  });
+
   it('omits an empty selection', () => {
     expect(
       buildSessionPreparationRunConfig({

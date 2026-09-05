@@ -19,6 +19,7 @@ import {
   type ProjectRef,
   resolveSessionMcpSelection,
   resolveSessionTaskToolsEnabled,
+  resolveSessionScheduleToolsEnabled,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -353,6 +354,7 @@ export class SessionForkService {
           agentType: marker.cleanup.agentType as never,
           mcpServerIds: resolveSessionMcpSelection(history),
           taskToolsEnabled: false,
+          scheduleToolsEnabled: false,
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
           githubRepo: marker.cleanup.repoFullName,
@@ -823,6 +825,7 @@ export class SessionForkService {
             agentType: source.agentType,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
             taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
+            scheduleToolsEnabled: resolveSessionScheduleToolsEnabled(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
             env: agentConfig.env,
@@ -944,6 +947,7 @@ export class SessionForkService {
       agentType: source.agentType,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
       taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
+      scheduleToolsEnabled: resolveSessionScheduleToolsEnabled(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       env: agentConfig.env,

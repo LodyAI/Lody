@@ -1,3 +1,6 @@
+import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
+import { getScheduleRoomId, scheduleDocSchema, ScheduleDefinitionSchema } from '@lody/shared';
+import type { ScheduleDocStore } from '@/atoms/runtime';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -3993,6 +3996,63 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     unload: (taskId) => repo.unloadDoc(getTaskRoomId(taskId)),
   });
 
+  const scheduleStoreCache = createManagedStoreCache<string, ScheduleDocStore>({
+    releaseDelayMs: STORE_RELEASE_DELAY_MS,
+    unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
+    create: async (id) => {
+      const roomId = getScheduleRoomId(id);
+      const handle = await repo.openPersistedDoc(roomId);
+      const mirror = new Mirror({
+        doc: handle.doc as LoroDoc,
+        schema: scheduleDocSchema,
+        ignoreUnknownProperties: true,
+      });
+      let room: RepoRoomSubscription | null = null;
+      let disposed = false;
+      const syncAbort = new AbortController();
+      const firstSynced = transportReady.promise.then(async () => {
+        const joined = await waitForRoomToSync(() => handle.joinRoom(), {
+          roomId,
+          initialDelayMs: 0,
+          isCancelled: () => disposed,
+          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+          onSubscription: (sub) => {
+            room = sub;
+          },
+        });
+        if (disposed) joined?.unsubscribe();
+        else room = joined ?? null;
+      });
+      void firstSynced.catch(() => {});
+      return {
+        roomId,
+        firstSynced,
+        getState: () => {
+          const state = mirror.getState();
+          const parsed = ScheduleDefinitionSchema.safeParse(state.definition);
+          return parsed.success && parsed.data.scheduleId === id
+            ? { definition: parsed.data, prompt: state.prompt, timeline: state.timeline }
+            : null;
+        },
+        subscribe: (listener) => mirror.subscribe(listener),
+        waitUntilSynced: async () => {
+          await firstSynced.catch(() => {});
+          if (room && !disposed)
+            await waitForScheduleWriteSync(
+              readinessBindingForDocRoom(room, roomId),
+              syncAbort.signal
+            );
+        },
+        dispose: () => {
+          disposed = true;
+          syncAbort.abort();
+          mirror.dispose();
+          room?.unsubscribe();
+        },
+      };
+    },
+  });
+
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
@@ -4012,6 +4072,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sessionStoreCache.releaseIdle(),
       previewVisualCommentStoreCache.releaseIdle(),
       taskStoreCache.releaseIdle(),
+      scheduleStoreCache.releaseIdle(),
     ]);
   };
 
@@ -4384,6 +4445,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await sessionStoreCache.disposeAll();
       await previewVisualCommentStoreCache.disposeAll();
       await taskStoreCache.disposeAll();
+      await scheduleStoreCache.disposeAll();
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
         await codeCollabFileIndexCache.dispose();
@@ -4553,6 +4615,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
     releaseTaskStore: taskStoreCache.release,
     acquireTaskStore: taskStoreCache.acquire,
+    withScheduleStore: <T>(
+      id: string,
+      fn: (store: ScheduleDocStore) => Promise<T> | T,
+      options?: { create?: boolean }
+    ): Promise<T> => withScheduleWrite(scheduleStoreCache, id, fn, options),
+    acquireScheduleStore: scheduleStoreCache.acquire,
+    releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     releaseTaskStoreRef: taskStoreCache.releaseRef,
     sendControl,
     waitForSessionCreateResponse,

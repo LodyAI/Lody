@@ -17,6 +17,7 @@ import {
   MCP_HTTP_PREFERRED_PORT_ENV,
   MCP_HTTP_SESSION_ID_HEADER,
   MCP_HTTP_TASK_TOOLS_ENABLED_HEADER,
+  MCP_HTTP_SCHEDULE_TOOLS_ENABLED_HEADER,
   MCP_HTTP_TOKEN_ENV,
   MCP_HTTP_WORKDIR_B64_HEADER,
   MCP_HTTP_WORKSPACE_ID_HEADER,
@@ -218,6 +219,7 @@ const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContex
     workspaceId,
     machineId,
     taskToolsEnabled: taskToolsEnabled === '1',
+    scheduleToolsEnabled: singleHeader(req, MCP_HTTP_SCHEDULE_TOOLS_ENABLED_HEADER) === '1',
     workdir,
     localControlSocketPath: getLocalControlSocketPath(),
   };
@@ -304,7 +306,10 @@ async function handleRequest(
   // down when the response closes. The MCP client re-initializes per
   // connection, and every tool call carries its full context in headers, so no
   // cross-request state is needed and concurrent sessions cannot interleave.
-  const server = buildLodyMcpServer({ taskToolsEnabled: context.taskToolsEnabled });
+  const server = buildLodyMcpServer({
+    taskToolsEnabled: context.taskToolsEnabled,
+    scheduleToolsEnabled: context.scheduleToolsEnabled,
+  });
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

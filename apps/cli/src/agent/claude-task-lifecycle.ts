@@ -83,8 +83,7 @@ type TaskLifecycleAcpStatus = NonNullable<
 >;
 
 export type ClaudeTaskLifecycleConversionResult =
-  | { ok: true; notification: AcpSessionNotification }
-  | { ok: false; reason: string };
+  { ok: true; notification: AcpSessionNotification } | { ok: false; reason: string };
 
 export type TaskLifecycleConversionOptions = {
   defaultActor: string;

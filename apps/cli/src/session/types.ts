@@ -29,6 +29,7 @@ export interface SessionConfig {
   mcpServerIds: McpServerId[];
   /** Whether this driving Turn mounts the built-in Lody Task MCP tools. */
   taskToolsEnabled: boolean;
+  scheduleToolsEnabled?: boolean;
   /** Launch spec for this execution request; durable default lives on the agent config. */
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex. */

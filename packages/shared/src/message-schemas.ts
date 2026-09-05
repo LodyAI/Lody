@@ -357,6 +357,7 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    scheduleToolsEnabled: z.boolean().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -376,6 +377,7 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    scheduleToolsEnabled: z.boolean().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -471,6 +473,10 @@ export const normalizeSessionTurnInputConfig = (
   const taskToolsEnabled = maybeParseField(z.boolean(), record.taskToolsEnabled);
   if (taskToolsEnabled !== undefined) {
     normalized.taskToolsEnabled = taskToolsEnabled;
+  }
+  const scheduleToolsEnabled = maybeParseField(z.boolean(), record.scheduleToolsEnabled);
+  if (scheduleToolsEnabled !== undefined) {
+    normalized.scheduleToolsEnabled = scheduleToolsEnabled;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
@@ -892,6 +898,7 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
+    scheduleToolsEnabled: z.boolean().optional(),
   })
   .strict();
 

@@ -11,6 +11,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
+import type { AgentExecutionSlots } from '../agent-execution-slots';
 import {
   collectTaskAutomationBaseline,
   planTaskAutomation,
@@ -33,6 +34,7 @@ export type TaskAutomationSchedulerDeps = {
   startTask: (taskId: TaskId, agentConfigId: string) => Promise<void>;
   /** Called when a task is eligible but has to wait its turn or for the agent. */
   onQueued?: (taskId: TaskId, position: number) => void;
+  executionSlots?: AgentExecutionSlots;
 };
 
 const toCandidate = (row: TaskIndexRow): TaskAutomationCandidate => ({
@@ -97,6 +99,7 @@ export class TaskAutomationScheduler {
 
   private async runPass(): Promise<void> {
     const rows = await this.deps.readTaskIndex();
+    this.deps.executionSlots?.replaceTaskOccupancy(rows, this.deps.operatorUserId);
     const candidates = rows.map(toCandidate);
     const ownedAgents = await this.deps.listOwnedAgentConfigs();
     const ownedAgentConfigIds = new Set(
@@ -162,6 +165,12 @@ export class TaskAutomationScheduler {
         // Another start in this same pass already claimed the agent's slot.
         continue;
       }
+      const slotOwner = `task:${start.taskId}`;
+      if (
+        this.deps.executionSlots &&
+        !this.deps.executionSlots.reserve(start.agentConfigId, slotOwner)
+      )
+        continue;
       this.inFlightByAgentConfigId.set(start.agentConfigId, start.taskId);
       this.started.add(start.taskId);
       try {
@@ -179,6 +188,15 @@ export class TaskAutomationScheduler {
           }`
         );
       } finally {
+        // Refresh the durable in_progress policy before relinquishing the
+        // transient reservation, otherwise Schedule could slip into the gap.
+        if (this.deps.executionSlots) {
+          this.deps.executionSlots.replaceTaskOccupancy(
+            await this.deps.readTaskIndex(),
+            this.deps.operatorUserId
+          );
+          this.deps.executionSlots.release(start.agentConfigId, slotOwner);
+        }
         this.inFlightByAgentConfigId.delete(start.agentConfigId);
       }
     }

@@ -422,6 +422,7 @@ export const sessionPlanEntrySchema = schema.LoroMap({
 
 export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
+  | 'prepared'
   | 'pending'
   | 'pending_apply'
   | 'seen'
@@ -459,6 +460,7 @@ const acpSessionConfigSchema = schema
       mcpServerIds: schema.Any({ required: false }),
       /** Whether the built-in Lody Task MCP tools are mounted for this Turn. */
       taskToolsEnabled: schema.Boolean({ required: false }),
+      scheduleToolsEnabled: schema.Boolean({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -512,7 +514,7 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply';
+    return status !== 'prepared' && status !== 'pending' && status !== 'pending_apply';
   }
   return entry?.read === true;
 };
@@ -786,6 +788,8 @@ export type SessionMeta = {
    */
   agentRoleId?: AgentRoleId;
   agentRoleRevision?: number;
+  /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
+  scheduleId?: string;
   acpSessionId?: ACPSessionId;
   /** Exact Session or child Tab that created/opened this session, when known. */
   openedBySessionId?: SessionId;

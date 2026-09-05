@@ -97,6 +97,36 @@ export function TaskChip({
   );
 }
 
+export function ScheduleSourceChip({
+  title,
+  onOpen,
+  ...itemMode
+}: { title: string; onOpen?: (() => void) | undefined } & InfoBarItemMode) {
+  const { t } = useTranslation();
+  const label = title.trim() || t('schedules.source', 'Scheduled task');
+
+  if (itemMode.mode === 'cluster') {
+    return (
+      <ClusterChip
+        icon={Clock}
+        label={label}
+        textClassName="text-muted-foreground"
+        onPromote={itemMode.onPromote}
+      />
+    );
+  }
+
+  return (
+    <StageChip
+      icon={Clock}
+      label={label}
+      textClassName="text-muted-foreground"
+      summary={label}
+      {...(onOpen ? { detail: { kind: 'action', onAction: onOpen, ariaLabel: label } } : {})}
+    />
+  );
+}
+
 export function StatusChip({
   state,
   ...itemMode
@@ -168,8 +198,7 @@ export function GoalChip({
     goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
   const showResume =
     goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
-  const showClear =
-    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
+  const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const durationUnitLabels: DurationUnitLabels = {

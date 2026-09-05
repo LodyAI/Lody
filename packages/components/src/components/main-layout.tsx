@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
+import { tasksFeatureEnabledAtom, schedulesFeatureEnabledAtom } from '@/atoms/settings';
+import { useScheduleRegistrySync } from '@/hooks/use-schedules';
 import { useIsMobile } from '../hooks/use-mobile';
 import { useTaskIndexSync } from '../hooks/use-task-index';
 import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
@@ -38,6 +39,11 @@ function TaskIndexSync() {
   return null;
 }
 
+function ScheduleRegistrySync() {
+  useScheduleRegistrySync();
+  return null;
+}
+
 export function MainLayout({
   children,
   workspaceReady = true,
@@ -52,10 +58,12 @@ export function MainLayout({
   // Behind the beta gate none of this mounts: no index subscription, no status
   // watcher, no quick-add dialog listening for its open atom.
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
 
   return (
     <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
       {children}
+      {schedulesEnabled && workspaceReady ? <ScheduleRegistrySync /> : null}
       {tasksEnabled && workspaceReady ? (
         <>
           <TaskIndexSync />

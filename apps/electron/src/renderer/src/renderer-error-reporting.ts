@@ -1,9 +1,5 @@
 export type RendererFatalScope =
-  | 'boot:synchronous'
-  | 'react:caught'
-  | 'react:uncaught'
-  | 'window.error'
-  | 'unhandledrejection'
+  'boot:synchronous' | 'react:caught' | 'react:uncaught' | 'window.error' | 'unhandledrejection'
 
 type ErrorEventLike = {
   error?: unknown

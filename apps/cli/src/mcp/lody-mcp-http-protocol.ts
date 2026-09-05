@@ -17,6 +17,7 @@ export const MCP_HTTP_SESSION_ID_HEADER = 'x-lody-mcp-session-id';
 export const MCP_HTTP_WORKSPACE_ID_HEADER = 'x-lody-mcp-workspace-id';
 export const MCP_HTTP_MACHINE_ID_HEADER = 'x-lody-mcp-machine-id';
 export const MCP_HTTP_TASK_TOOLS_ENABLED_HEADER = 'x-lody-mcp-task-tools-enabled';
+export const MCP_HTTP_SCHEDULE_TOOLS_ENABLED_HEADER = 'x-lody-mcp-schedule-tools-enabled';
 // Base64url-encoded: workdir paths are arbitrary UTF-8, HTTP headers are not.
 export const MCP_HTTP_WORKDIR_B64_HEADER = 'x-lody-mcp-workdir-b64';
 
@@ -41,6 +42,7 @@ export const buildLodyMcpHttpHeaders = (
     machineId: string;
     workdir: string;
     taskToolsEnabled: boolean;
+    scheduleToolsEnabled?: boolean;
   }
 ): Array<{ name: string; value: string }> => [
   { name: 'Authorization', value: `Bearer ${endpoint.token}` },
@@ -48,6 +50,7 @@ export const buildLodyMcpHttpHeaders = (
   { name: MCP_HTTP_WORKSPACE_ID_HEADER, value: context.workspaceId },
   { name: MCP_HTTP_MACHINE_ID_HEADER, value: context.machineId },
   { name: MCP_HTTP_TASK_TOOLS_ENABLED_HEADER, value: context.taskToolsEnabled ? '1' : '0' },
+  { name: MCP_HTTP_SCHEDULE_TOOLS_ENABLED_HEADER, value: context.scheduleToolsEnabled ? '1' : '0' },
   {
     name: MCP_HTTP_WORKDIR_B64_HEADER,
     value: Buffer.from(context.workdir, 'utf8').toString('base64url'),

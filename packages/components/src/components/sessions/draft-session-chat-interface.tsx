@@ -1,3 +1,4 @@
+import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import {
   forwardRef,
   memo,
@@ -162,6 +163,7 @@ export const DraftSessionChatInterface = memo(
       const agentConfigs = useAtomValue(getAllAgentConfigAtom);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
       const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
+      const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
       // The draft composer has no MCP picker yet, so the first turn carries the
       // workspace default selection — the same set the promoted child composer
       // resolves for an empty session doc.
@@ -383,6 +385,7 @@ export const DraftSessionChatInterface = memo(
                 : undefined,
               mcpServerIds: mcpSelection.selectedIds,
               taskToolsEnabled: tasksFeatureEnabled,
+              scheduleToolsEnabled: schedulesEnabled,
             }),
           };
         },
@@ -402,6 +405,7 @@ export const DraftSessionChatInterface = memo(
           selectedModeId,
           selectedModelId,
           tasksFeatureEnabled,
+          schedulesEnabled,
         ]
       );
 

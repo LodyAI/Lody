@@ -10,10 +10,14 @@ export type MachineProtocolCapabilities = Record<string, number>;
 export const MACHINE_PROTOCOL_CAPABILITIES = {
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
+  schedules: 'schedules',
+  preparedSessionInput: 'preparedSessionInput',
 } as const;
 
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+export const SCHEDULES_PROTOCOL_VERSION = 1;
+export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -45,6 +49,8 @@ export function machineSupportsProtocolCapability(
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
 };
 
 /** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
@@ -66,5 +72,25 @@ export function machineSupportsProviderSetupProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.providerSetup,
     PROVIDER_SETUP_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSchedulesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsPreparedSessionInputProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
+    PREPARED_SESSION_INPUT_PROTOCOL_VERSION
   );
 }

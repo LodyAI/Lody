@@ -116,16 +116,17 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@loro-dev/streams-crdt": "catalog:",
+    "acp-extension-core": "workspace:*",
     "acp-extension-dsh": "workspace:*",
     "better-auth": "catalog:",
+    "croner": "10.0.1",
     "cross-spawn": "^7.0.6",
     "dockerode": "^4.0.9",
     "effect": "catalog:",
     "loro-mirror": "catalog:",
-    "@agentclientprotocol/sdk": "catalog:",
-    "acp-extension-core": "workspace:*",
     "zod": "catalog:"
   },
   "peerDependencies": {

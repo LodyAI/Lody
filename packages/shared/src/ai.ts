@@ -1575,6 +1575,7 @@ export type ACPSessionConfig = {
   mcpServerIds?: McpServerId[];
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;

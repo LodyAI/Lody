@@ -18,6 +18,8 @@ import {
 import type { ExportManifest, ExportSessionSummary } from './types';
 import { listWorkspaceTaskIds, readTask } from '@/lib/task-doc';
 import { formatErrorMessage } from '@/utils/format-error';
+import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
+import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
 
 type WorkspaceDescriptor = {
   id: string;
@@ -238,6 +240,40 @@ export async function exportWorkspaceData(
     warnings,
   });
   await writeJson(path.join(options.outputDir, 'tasks', 'index.json'), taskIndex);
+  const scheduleRepository = new ScheduleRepository(
+    options.manager.repo,
+    options.workspace.id as WorkspaceId
+  );
+  const scheduleIds = await listWorkspaceScheduleIds(
+    options.manager,
+    options.workspace.id as WorkspaceId
+  );
+  const scheduleIndex: { scheduleId: string; title: string }[] = [];
+  for (const id of scheduleIds) {
+    const document = await scheduleRepository.read(id);
+    if (!document) {
+      warnings.push(`Schedule ${id} is unavailable in the local replica.`);
+      continue;
+    }
+    const directory = path.join(
+      options.outputDir,
+      'schedules',
+      encodeExportPathSegment(id, 'schedule')
+    );
+    await writeJson(path.join(directory, 'schedule.json'), document);
+    await writeText(
+      path.join(directory, 'schedule.md'),
+      `# ${document.definition.title}\n\n${document.prompt}\n`
+    );
+    scheduleIndex.push({ scheduleId: id, title: document.definition.title });
+  }
+  await writeJson(path.join(options.outputDir, 'schedules', 'index.json'), scheduleIndex);
+  const scheduleRegistry = await options.manager.repo.openFlockDoc(
+    getScheduleRegistryFlockDocId(options.workspace.id as WorkspaceId)
+  );
+  await writeJson(path.join(options.outputDir, 'schedules', 'registry.json'), [
+    ...scheduleRegistry.flock.scan(),
+  ]);
 
   let usageExported = false;
   try {
@@ -245,16 +281,17 @@ export async function exportWorkspaceData(
       workspaceId: options.workspace.id,
       cliToken: options.cliToken,
     });
-    await writeJson(path.join(options.outputDir, 'usage', 'workspace-summary.json'), usageBundle.summary);
+    await writeJson(
+      path.join(options.outputDir, 'usage', 'workspace-summary.json'),
+      usageBundle.summary
+    );
     await writeJson(
       path.join(options.outputDir, 'usage', 'workspace-timeline.json'),
       usageBundle.timelines
     );
     usageExported = true;
   } catch (error) {
-    warnings.push(
-      `Workspace usage export failed: ${formatErrorMessage(error)}`
-    );
+    warnings.push(`Workspace usage export failed: ${formatErrorMessage(error)}`);
   }
 
   const manifest: ExportManifest = {
@@ -268,6 +305,7 @@ export async function exportWorkspaceData(
     outputDir: options.outputDir,
     sessionCount: sessionIndex.length,
     taskCount: taskIndex.length,
+    scheduleCount: scheduleIndex.length,
     usageExported,
   };
 

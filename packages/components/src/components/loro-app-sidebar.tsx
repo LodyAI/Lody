@@ -1,3 +1,4 @@
+import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
@@ -1368,6 +1369,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
     if (isTasksRoute(location.pathname, workspaceSlug)) return 'tasks';
+    if (workspaceSlug && location.pathname.startsWith(`/${workspaceSlug}/schedules`))
+      return 'schedules';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -2397,6 +2400,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
 
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
 
   const handleTasksClicked = useCallback(() => {
     if (!workspaceSlug) return;
@@ -2517,6 +2521,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {
+      schedules: t('schedules.title', 'Schedules'),
       home: t('sidebar.home', 'Home'),
       newTask: t('tasks.newTask', 'New task'),
       docs: t('sidebar.docs', 'Docs'),
@@ -2949,6 +2954,16 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onTasksClicked={handleTasksClicked}
         onNewTaskClicked={handleNewTaskClicked}
         showTasks={tasksEnabled}
+        showSchedules={schedulesEnabled}
+        onSchedulesClicked={() => {
+          if (workspaceSlug) {
+            closeMobileDrawer();
+            void router.navigate({
+              to: '/$workspaceName/schedules',
+              params: { workspaceName: workspaceSlug },
+            });
+          }
+        }}
         onDocsClicked={handleDocsClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}
         onFeedbackClicked={handleFeedbackClicked}

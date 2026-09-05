@@ -626,6 +626,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           },
           configOptionValues: this.config.configOptionValues,
           taskToolsEnabled: this.config.taskToolsEnabled,
+          scheduleToolsEnabled: this.config.scheduleToolsEnabled,
           launcher,
           workspaceId: this.config.workspaceId,
           machineId: this.config.machineId as MachineId,

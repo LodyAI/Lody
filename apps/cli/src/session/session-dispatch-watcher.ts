@@ -175,11 +175,7 @@ export type SessionRpcTurnOffer = {
 };
 
 export type SessionRpcTurnOfferDisposition =
-  | 'accepted'
-  | 'duplicate'
-  | 'already-terminal'
-  | 'not-owned'
-  | 'error';
+  'accepted' | 'duplicate' | 'already-terminal' | 'not-owned' | 'error';
 
 type StashedRpcTurn = {
   entry: SessionHistoryInput;
@@ -1970,6 +1966,7 @@ export class SessionDispatchWatcher {
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
+        scheduleToolsEnabled: entry.inputConfig?.scheduleToolsEnabled === true,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
@@ -2012,6 +2009,7 @@ export class SessionDispatchWatcher {
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
+        scheduleToolsEnabled: entry.inputConfig?.scheduleToolsEnabled === true,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume,
       },
@@ -2109,6 +2107,7 @@ export class SessionDispatchWatcher {
         mcpServerIds:
           normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
         taskToolsEnabled: queuedItem.acpSessionConfig?.taskToolsEnabled === true,
+        scheduleToolsEnabled: queuedItem.acpSessionConfig?.scheduleToolsEnabled === true,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
         resume: resolveResumableAcpSessionId(meta),
       });

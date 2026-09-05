@@ -15,9 +15,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 export type TerminalSessionMetaLookup =
-  | { type: 'found'; meta: SessionMeta }
-  | { type: 'deleted' }
-  | { type: 'missing' };
+  { type: 'found'; meta: SessionMeta } | { type: 'deleted' } | { type: 'missing' };
 
 export type TerminalWorkdirResolverOptions = {
   sessionId: SessionId;

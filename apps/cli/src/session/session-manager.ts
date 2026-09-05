@@ -261,7 +261,8 @@ function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
   configOptionValues: SessionConfig['configOptionValues'],
-  taskToolsEnabled: boolean
+  taskToolsEnabled: boolean,
+  scheduleToolsEnabled?: boolean
 ) {
   return {
     launch: buildSessionLaunchConfig({
@@ -273,6 +274,7 @@ function buildSessionPreparationCompatibility(
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
       taskToolsEnabled,
+      scheduleToolsEnabled,
     }),
   };
 }
@@ -602,7 +604,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           current.config,
           resource.config.mcpServerIds,
           resource.config.configOptionValues,
-          resource.config.taskToolsEnabled
+          resource.config.taskToolsEnabled,
+          resource.config.scheduleToolsEnabled
         )
       )
     ) {
@@ -669,7 +672,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.taskToolsEnabled
+      config.taskToolsEnabled,
+      config.scheduleToolsEnabled
     );
     const claim = this.preparationService.claim({
       sessionId,
@@ -697,7 +701,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               current.config,
               config.mcpServerIds,
               config.configOptionValues,
-              config.taskToolsEnabled
+              config.taskToolsEnabled,
+              config.scheduleToolsEnabled
             )
           )
         );
@@ -917,6 +922,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       configOptionValues: spec.runConfig?.configOptionValues,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
       taskToolsEnabled: spec.runConfig?.taskToolsEnabled === true,
+      scheduleToolsEnabled: spec.runConfig?.scheduleToolsEnabled === true,
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       project: spec.project as ProjectRef | undefined,
@@ -935,7 +941,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.taskToolsEnabled
+      config.taskToolsEnabled,
+      config.scheduleToolsEnabled
     );
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();

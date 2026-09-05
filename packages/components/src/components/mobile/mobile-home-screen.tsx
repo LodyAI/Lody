@@ -1,3 +1,4 @@
+import { SchedulesWorkspace } from '../schedules/schedules-workspace';
 import {
   forwardRef,
   Fragment,
@@ -101,7 +102,7 @@ export type { MobileChatGroupBy };
    developer-mode Tasks beta gate). The 项目 tab merges Local + GitHub
    via an inner sub-tab; the 设置 surface lives in the header's gear
    button. */
-export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'tasks';
+export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'tasks' | 'schedules';
 
 /* Sub-tab inside the "项目" tab. Drives both the heading + full list
    below the segmented selector. Persisted via `mobileHomeProjectsSubTabAtom`
@@ -285,6 +286,7 @@ export type MobileHomeScreenLabels = {
   /** Label for the Tasks tab in the bottom dock. Only rendered when the
      caller also passes `showTasksTab`. */
   tasksTab?: string;
+  schedulesTab?: string;
   settingsTab?: string;
   /** aria-label for the archive-toggle chip in the header. Toggles the
      Chat tab between active and archived conversations. */
@@ -390,6 +392,7 @@ export type MobileHomeScreenProps = {
      gate). When false the tab is not rendered at all — as if never
      built — and a `selectedTab` of `'tasks'` falls back to Chat. */
   showTasksTab?: boolean;
+  showSchedulesTab?: boolean;
   /** Active sub-tab inside the Projects tab. Required when `selectedTab`
      is 'projects'; ignored on the Chat tab. */
   selectedProjectsSubTab?: MobileProjectsSubTab;
@@ -988,7 +991,8 @@ function RecentItemsRow<TItem extends { id: string }>({
 function workspaceTabSpecs(
   labels: MobileHomeScreenLabels,
   showTasksTab = false,
-  showInboxTab = false
+  showInboxTab = false,
+  showSchedulesTab = false
 ): ReadonlyArray<MobileBottomTabBarTabSpec<MobileHomeTab>> {
   /* Icons at 24px (h-6) — the dock pill is h-14, so h-5/20px read as
      under-drawn next to the label. Material icons go through MobileReactIcon
@@ -1017,6 +1021,16 @@ function workspaceTabSpecs(
             ios: <ListTodo className="h-6 w-6" strokeWidth={1.75} />,
             material: <MobileReactIcon icon={MdChecklist} className="h-6 w-6" />,
             label: labels.tasksTab ?? 'Tasks',
+          },
+        ]
+      : []),
+    ...(showSchedulesTab
+      ? [
+          {
+            key: 'schedules' as const,
+            ios: <Clock3 className="h-6 w-6" />,
+            material: <Clock3 className="h-6 w-6" />,
+            label: labels.schedulesTab ?? 'Schedules',
           },
         ]
       : []),
@@ -1250,6 +1264,7 @@ export function MobileHomeScreen({
   selectedTab,
   showInboxTab = false,
   showTasksTab = false,
+  showSchedulesTab = false,
   selectedProjectsSubTab = 'local',
   onProjectsSubTabSelect,
   onAddLocalProject,
@@ -1359,9 +1374,12 @@ export function MobileHomeScreen({
      while the user is sitting on the tab (or a stale `selectedTab`
      arrives), fall back to Chat rather than rendering a featureless
      shell — gate-off must behave as if the tab were never built. */
-  const tasksTabActive = showTasksTab && selectedTab === 'tasks';
+  const scheduleTabActive = showSchedulesTab && selectedTab === 'schedules';
+  const tasksTabActive = (showTasksTab && selectedTab === 'tasks') || scheduleTabActive;
   const effectiveSelectedTab: MobileHomeTab =
-    selectedTab === 'tasks' && !showTasksTab ? 'chat' : selectedTab;
+    (selectedTab === 'tasks' && !showTasksTab) || (selectedTab === 'schedules' && !showSchedulesTab)
+      ? 'chat'
+      : selectedTab;
 
   const resolvedTheme: 'ios' | 'material' =
     theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
@@ -1701,7 +1719,7 @@ export function MobileHomeScreen({
           {tasksTabActive ? (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={null}>
-                <TasksListBody mobile embedded />
+                {scheduleTabActive ? <SchedulesWorkspace /> : <TasksListBody mobile embedded />}
               </Suspense>
             </div>
           ) : null}
@@ -1713,7 +1731,7 @@ export function MobileHomeScreen({
             of the bottom tabs. Tabs are built locally so the
             translations stay co-located with the other screen copy. */}
         <MobileWorkspaceTabBar<MobileHomeTab>
-          tabs={workspaceTabSpecs(labels, showTasksTab, showInboxTab)}
+          tabs={workspaceTabSpecs(labels, showTasksTab, showInboxTab, showSchedulesTab)}
           selectedTab={effectiveSelectedTab}
           onTabSelect={(tab) => onTabSelect?.(tab)}
           onNewChat={onNewChat}

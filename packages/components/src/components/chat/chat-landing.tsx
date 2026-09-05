@@ -1,3 +1,4 @@
+import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import {
   useCallback,
   useEffect,
@@ -559,6 +560,7 @@ function WorkspaceChatLanding({
   const currentUser = useAtomValue(userAtom);
   const userId = currentUser?.id;
   const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -2973,6 +2975,7 @@ function WorkspaceChatLanding({
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
         taskToolsEnabled: tasksFeatureEnabled,
+        scheduleToolsEnabled: schedulesEnabled,
       });
       const pendingHistoryEntry = buildPendingUserHistoryEntry({
         userId,
@@ -4148,6 +4151,7 @@ function WorkspaceChatLanding({
         configOptionValues: dispatchConfigOptionValues,
         mcpServerIds: mcpSelection.selectedIds,
         taskToolsEnabled: tasksFeatureEnabled,
+        scheduleToolsEnabled: schedulesEnabled,
       }),
     [
       dispatchConfigOptionValues,
@@ -4157,6 +4161,7 @@ function WorkspaceChatLanding({
       selectedModeId,
       selectedModelId,
       tasksFeatureEnabled,
+      schedulesEnabled,
     ]
   );
   const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
@@ -5047,6 +5052,7 @@ function WorkspaceChatLanding({
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
+    (selectedMobileHomeTab === 'schedules' && !schedulesEnabled) ||
     (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
     (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
       ? 'chat'
@@ -6183,6 +6189,7 @@ function WorkspaceChatLanding({
           selectedTab={effectiveMobileHomeTab}
           showInboxTab={showMobileInbox}
           showTasksTab={tasksFeatureEnabled}
+          showSchedulesTab={schedulesEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
           onAddLocalProject={() => openAddProjectDialog()}
@@ -6241,6 +6248,7 @@ function WorkspaceChatLanding({
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
             tasksTab: t('tasks.title', 'Tasks'),
+            schedulesTab: t('schedules.title', 'Schedules'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),

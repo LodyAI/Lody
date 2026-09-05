@@ -2,10 +2,7 @@ import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
-import {
-  SETTINGS_DEFAULT_TAB,
-  type SettingsTabId,
-} from '@/components/settings/settings-tabs';
+import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
@@ -126,10 +123,7 @@ export const electronSessionCompletionNotificationsEnabledAtom = atomWithStorage
 // (e.g. an unwrapped Markdown paragraph) stays readable without horizontal
 // scrolling — especially on mobile. Shared by every SessionMonacoTextViewer
 // mount via the viewer reading this atom directly.
-export const fileViewerWordWrapAtom = atomWithStorage<boolean>(
-  'lody-file-viewer-word-wrap',
-  true
-);
+export const fileViewerWordWrapAtom = atomWithStorage<boolean>('lody-file-viewer-word-wrap', true);
 
 // Mobile composer keyboard return key behavior.
 export const mobileKeyboardActionAtom = atomWithStorage<MobileKeyboardAction>(
@@ -196,9 +190,7 @@ export function readTasksFeatureEnabledFromStorage(): boolean {
     return false;
   }
   try {
-    const developerMode = JSON.parse(
-      localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false'
-    );
+    const developerMode = JSON.parse(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false');
     const tasksBeta = JSON.parse(localStorage.getItem(TASKS_BETA_STORAGE_KEY) ?? 'false');
     return developerMode === true && tasksBeta === true;
   } catch {
@@ -236,6 +228,16 @@ export const tasksBetaEnabledAtom = atomWithStorage<boolean>(
  */
 export const tasksFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(tasksBetaEnabledAtom)
+);
+
+export const schedulesBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-schedules-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+export const schedulesFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(schedulesBetaEnabledAtom)
 );
 
 // Opt-in for the unfinished mobile Inbox. Like Tasks, this is reachable only

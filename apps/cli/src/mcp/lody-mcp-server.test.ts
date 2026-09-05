@@ -108,8 +108,11 @@ const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   ...overrides,
 });
 
-const listPublishedToolNames = async (taskToolsEnabled: boolean): Promise<string[]> => {
-  const server = buildLodyMcpServer({ taskToolsEnabled });
+const listPublishedToolNames = async (
+  taskToolsEnabled: boolean,
+  scheduleToolsEnabled = false
+): Promise<string[]> => {
+  const server = buildLodyMcpServer({ taskToolsEnabled, scheduleToolsEnabled });
   const client = new Client({ name: 'task-gate-test-client', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -574,6 +577,7 @@ describe('session MCP input schemas', () => {
       modelId: 'opus',
       configOptionValues: { reasoning_effort: 'medium' },
       taskToolsEnabled: false,
+      scheduleToolsEnabled: false,
       inheritSessionDefaults: false,
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
@@ -1131,5 +1135,23 @@ describe('lody task MCP input schemas', () => {
   it('derives the provider from the pull request URL', () => {
     expect(resolveTaskPrProvider('https://github.com/o/r/pull/1')).toBe('github');
     expect(resolveTaskPrProvider('https://gitlab.com/o/r/-/merge_requests/1')).toBe('gitlab');
+  });
+});
+
+describe('Schedule MCP tool gate', () => {
+  it('advertises only the bounded Schedule family independently of Task tools', async () => {
+    expect(
+      (await listPublishedToolNames(true, false)).filter((name) =>
+        name.startsWith('lody_schedule_')
+      )
+    ).toEqual([]);
+    const names = await listPublishedToolNames(false, true);
+    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
+      'lody_schedule_get',
+      'lody_schedule_list',
+      'lody_schedule_pause',
+      'lody_schedule_propose',
+    ]);
+    expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
 });

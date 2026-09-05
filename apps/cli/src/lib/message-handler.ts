@@ -2889,6 +2889,8 @@ export class MessageHandler {
       {
         ...resolveTurnDispatchConfig({}),
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
+        scheduleToolsEnabled:
+          operation.frozenContinuationConfig.inputConfig.scheduleToolsEnabled === true,
       },
       undefined,
       operation.requesterUserId,
@@ -3554,8 +3556,7 @@ export class MessageHandler {
     try {
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const supportsStreamsRpc = !!this.machineRpcServer;
 
       const hasMeta = !!machineMeta;
@@ -4053,8 +4054,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToArchiveSessions?.[sessionId]) {
       if (!removedFlockRow) {
         this.logger.debug(`[archive] Archive request already cleared (${sessionId})`);
@@ -4625,8 +4625,7 @@ export class MessageHandler {
     }
 
     const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
+      MachineLegacyMetaFields | undefined;
     if (!machineMeta?.needToDeleteSessions?.[sessionId]) {
       if (removedFlockRow || removedLaunchConfigRow) {
         this.logger.debug(`[delete] Delete Flock request removed (${sessionId})`);
@@ -6053,8 +6052,7 @@ export class MessageHandler {
 
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineMeta
-        | undefined;
+        MachineMeta | undefined;
       const existingName = machineMeta?.name?.trim();
       // The CLI startup name is only a bootstrap default. Settings-page renames own the
       // persisted display name, so reconnect/registration must not overwrite synced edits.
@@ -9892,6 +9890,20 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** Host-local admission snapshot; durable pending input is checked by its caller. */
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    return (
+      execution.hasActiveTurn ||
+      execution.hasBlockingPendingCreate ||
+      execution.hasActiveAutomation ||
+      execution.hasRewriteBarrier ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+      this.hasSessionActivePresence(sessionId) ||
+      this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
+    );
   }
 
   /**

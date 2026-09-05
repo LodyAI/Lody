@@ -80,6 +80,7 @@ export type CreateAcpClientOptions = {
   };
   configOptionValues?: AgentClientOptions['configOptionValues'];
   taskToolsEnabled?: boolean;
+  scheduleToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   resumeSessionId?: ACPSessionId;
@@ -128,6 +129,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
     taskToolsEnabled: options.taskToolsEnabled,
+    scheduleToolsEnabled: options.scheduleToolsEnabled,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,

@@ -1,3 +1,5 @@
+import { useSchedules } from '@/hooks/use-schedules';
+import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import {
   startTransition,
   forwardRef,
@@ -1946,6 +1948,7 @@ export const SessionChatInterface = memo(
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
     const currentUser = useAtomValue(userAtom);
     const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
+    const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
     const billingEntitlement = useCloudQuery(
       cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -3515,6 +3518,7 @@ export const SessionChatInterface = memo(
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
             taskToolsEnabled: tasksEnabled,
+            scheduleToolsEnabled: schedulesEnabled,
             resume: session.acpSessionId ?? undefined,
           });
 
@@ -3621,6 +3625,7 @@ export const SessionChatInterface = memo(
         updateHistoryEntry,
         t,
         tasksEnabled,
+        schedulesEnabled,
       ]
     );
 
@@ -3653,6 +3658,7 @@ export const SessionChatInterface = memo(
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
             taskToolsEnabled: tasksEnabled,
+            scheduleToolsEnabled: schedulesEnabled,
             resume: session.acpSessionId ?? undefined,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
@@ -3666,6 +3672,7 @@ export const SessionChatInterface = memo(
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...mcpSelection.selectedIds],
             taskToolsEnabled: inputConfig.taskToolsEnabled,
+            scheduleToolsEnabled: inputConfig.scheduleToolsEnabled,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
           };
@@ -3713,6 +3720,7 @@ export const SessionChatInterface = memo(
         sessionProject,
         t,
         tasksEnabled,
+        schedulesEnabled,
       ]
     );
 
@@ -4317,6 +4325,7 @@ export const SessionChatInterface = memo(
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
     const sessionTaskId = session.taskId;
+    const scheduleRegistry = useSchedules();
     const taskIndexRows = useAtomValue(taskIndexRowsAtom);
     // A session keeps its `taskId` even for a user who never enabled the Tasks
     // beta (an agent or another device can set it), so the chip is gated too —
@@ -5733,6 +5742,26 @@ export const SessionChatInterface = memo(
                     }
                     onGoalCommand={handleGoalCardCommand}
                     onGoalDismiss={handleDismissGoalBanner}
+                    scheduleSource={
+                      schedulesEnabled && session.scheduleId
+                        ? {
+                            title:
+                              scheduleRegistry.rows.find(
+                                (row) => row.scheduleId === session.scheduleId
+                              )?.title ?? t('schedules.source', 'Scheduled task'),
+                            onOpen: () => {
+                              if (workspaceSlug && session.scheduleId)
+                                void router.navigate({
+                                  to: '/$workspaceName/schedules/$scheduleId',
+                                  params: {
+                                    workspaceName: workspaceSlug,
+                                    scheduleId: session.scheduleId,
+                                  },
+                                });
+                            },
+                          }
+                        : null
+                    }
                     task={sessionTaskChip}
                     onOpenTask={handleOpenSessionTask}
                     scheduledTasks={pendingScheduledTasks}

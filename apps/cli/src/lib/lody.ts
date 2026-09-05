@@ -329,6 +329,10 @@ export class Lody {
     return this.runtime.getActiveSessionCount();
   }
 
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
+  }
+
   async attachRemoteBridge(): Promise<void> {
     await this.runtime.attachRemoteBridge();
     this.startBuiltinAgentRegistration();

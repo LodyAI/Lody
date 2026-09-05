@@ -135,6 +135,7 @@ import {
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
 import { publishTaskProposal } from '@/mcp/task-proposal';
+import { registerScheduleTools } from './schedule-tools';
 import { version as cliVersion } from '@/pkg';
 import { uploadTaskImages } from '@/lib/task-image-upload';
 import {
@@ -884,6 +885,7 @@ export interface McpSessionContext {
   localControlSocketPath: string | undefined;
   workdir: string;
   taskToolsEnabled: boolean;
+  scheduleToolsEnabled?: boolean;
 }
 
 // The stdio entrypoint is a dedicated per-session process, so its context can
@@ -905,6 +907,7 @@ const getSessionContext = (): McpSessionContext =>
     localControlSocketPath: readOptionalEnv('LODY_MCP_SOCKET_PATH', 'LODY_PREVIEW_MCP_SOCKET_PATH'),
     workdir: readOptionalEnv('LODY_MCP_WORKDIR', 'LODY_PREVIEW_MCP_WORKDIR') ?? process.cwd(),
     taskToolsEnabled: readOptionalEnv('LODY_MCP_TASK_TOOLS_ENABLED') === '1',
+    scheduleToolsEnabled: readOptionalEnv('LODY_MCP_SCHEDULE_TOOLS_ENABLED') === '1',
   };
 
 // One connection for the whole MCP server process, opened without the
@@ -1204,6 +1207,7 @@ const resolveMcpSessionCreate = (
       dispatchConfig: {
         ...buildMcpTurnDispatchConfig(input),
         taskToolsEnabled: invoking?.frozenInputConfig.taskToolsEnabled === true,
+        scheduleToolsEnabled: invoking?.frozenInputConfig.scheduleToolsEnabled === true,
       },
     };
   }
@@ -1259,6 +1263,7 @@ const resolveMcpSessionCreate = (
     dispatchConfig: {
       ...role.runConfig,
       taskToolsEnabled: invoking?.frozenInputConfig.taskToolsEnabled === true,
+      scheduleToolsEnabled: invoking?.frozenInputConfig.scheduleToolsEnabled === true,
       inheritSessionDefaults: false,
     },
     role,
@@ -1735,7 +1740,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
       execution: SessionExecutionSnapshot;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
-    for (let offset = 0; offset < candidates.length && matches.length <= limit; ) {
+    for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
       const chunk = candidates.slice(offset, offset + readChunkSize);
       offset += chunk.length;
       const liveStatuses = await readSessionLiveStatusesMany({
@@ -2769,6 +2774,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         {
           ...resolveTurnDispatchConfig({}),
           taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
+          scheduleToolsEnabled: invoking.frozenInputConfig.scheduleToolsEnabled === true,
         },
         undefined,
         auth.userId,
@@ -3272,6 +3278,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             {
               ...resolveTurnDispatchConfig({}),
               taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
+              scheduleToolsEnabled: invoking.frozenInputConfig.scheduleToolsEnabled === true,
             },
             undefined,
             auth.userId,
@@ -3785,7 +3792,9 @@ export const __lodyMcpServerInternals = {
   SESSION_CONTROL_TIMEOUT_MS,
 };
 
-export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}): McpServer {
+export function buildLodyMcpServer(
+  config: { taskToolsEnabled?: boolean; scheduleToolsEnabled?: boolean } = {}
+): McpServer {
   // The HTTP host is long-lived and the stdio server normally lives for the
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
@@ -3793,6 +3802,17 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
   const server = new McpServer({
     name: 'lody',
     version: '0.1.0',
+  });
+  registerScheduleTools(server, {
+    enabled: config.scheduleToolsEnabled === true,
+    execute: async (command) => {
+      const ctx = getSessionContext();
+      const { sendScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
+      return sendScheduleCommand(command, {
+        workspace: getMcpWorkspaceId(ctx),
+        requesterSessionId: ctx.sessionId,
+      });
+    },
   });
 
   server.registerTool(
@@ -4877,7 +4897,8 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
 
 export async function runLodyMcpServer(): Promise<void> {
   const context = getSessionContext();
-  await buildLodyMcpServer({ taskToolsEnabled: context.taskToolsEnabled }).connect(
-    new StdioServerTransport()
-  );
+  await buildLodyMcpServer({
+    taskToolsEnabled: context.taskToolsEnabled,
+    scheduleToolsEnabled: context.scheduleToolsEnabled,
+  }).connect(new StdioServerTransport());
 }

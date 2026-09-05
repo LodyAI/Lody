@@ -9,6 +9,7 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   tasksBetaEnabledAtom,
+  schedulesBetaEnabledAtom,
 } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
@@ -110,6 +111,7 @@ export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
+  const [schedulesEnabled, setSchedulesEnabled] = useAtom(schedulesBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
@@ -301,6 +303,19 @@ export function MobileAboutSettings() {
                 checked={tasksBetaEnabled}
                 onCheckedChange={setTasksBetaEnabled}
                 aria-label={t('settings.beta.tasks', 'Tasks')}
+              />
+            </MobileSettingsRow>
+            <MobileSettingsRow
+              label={t('schedules.title', 'Schedules')}
+              helper={t(
+                'schedules.betaHelp',
+                'Track work you are not starting yet, separately from chats. In development — expect rough edges.'
+              )}
+            >
+              <Switch
+                checked={schedulesEnabled}
+                onCheckedChange={setSchedulesEnabled}
+                aria-label={t('schedules.title', 'Schedules')}
               />
             </MobileSettingsRow>
             <MobileSettingsRow

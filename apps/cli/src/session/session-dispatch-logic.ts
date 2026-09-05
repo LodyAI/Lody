@@ -318,6 +318,12 @@ export function findNextDispatchableUserTurn(
 
     // Path 1: New status field — explicit lifecycle state
     if (typeof entry.status === 'string') {
+      // Prepared input is inert until the producer commits its dispatch
+      // pointer. History sync or stale status repair is not authorization.
+      if (entry.status === 'prepared') {
+        if (entry.id === getPendingUserTurnActivationId(meta)) return entry;
+        continue;
+      }
       if (entry.status === 'pending' || entry.status === 'seen' || entry.status === 'processing') {
         return entry;
       }
