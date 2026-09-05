@@ -164,6 +164,7 @@ export type StoredLodyDelivery = {
   deliveryId: string;
   systemTurnId: string;
   state: 'pending' | 'consumed';
+  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
   attemptCount: number;
   activeClaimId?: string;
   activeClaimWorkerBootId?: string;
@@ -179,9 +180,12 @@ export type OperationCompletionContent = {
   operationKind: LodyOperationKind;
   completion: LodyOperationCompletion;
   continuation?: {
-    status: 'not_started';
+    status: 'not_started' | 'uncertain';
     reason: {
-      code: 'CONFIGURATION_UNAVAILABLE' | 'DELIVERY_ATTEMPTS_EXHAUSTED';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
       message: string;
     };
   };

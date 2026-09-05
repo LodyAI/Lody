@@ -65,17 +65,22 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   a terminal continuation failure or consume without execution must acquire the same
   exclusive token first; the history write and token-matched consume happen while it is
   held. Once per Worker startup, the coordinator clears tokens owned by older boot ids
-  without resetting the attempt count. Release and consume must match both the boot id and
-  claim token. Claim contention exits before history or ACP
-  side effects and records no failure. An execution claim does not spend the attempt budget;
-  increment it under the same token only after the completion Turn is durable and immediately
-  before entering the execution body. Only the execution service's durable handled callback
-  may consume an execution claim; settlement carries no Assistant identity because the
-  callback is already bound to that claim. Cancellation/interruption releases it. At most one
-  recovery attempt is allowed; after two unsettled
-  attempts, `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed under a terminal claim
-  without invoking ACP again. A pending Delivery from the pre-claim schema counts as one
-  unknown prior attempt, leaving exactly one recovery opportunity after upgrade.
+  without resetting the attempt count. A claim records `claimed`, becomes `prepared` only
+  after the completion Turn is durable (which spends one bounded preparation attempt), and
+  becomes `started` immediately before calling ACP. Release and consume must match both the
+  boot id and claim token. Claim contention exits before history or ACP side effects and
+  records no failure. Only a confirmed pre-provider interruption releases a prepared claim;
+  user cancellation consumes it. A missing settlement after ACP started becomes `uncertain`
+  and is never automatically replayed: reconciliation writes
+  `DELIVERY_EXECUTION_UNCERTAIN` under a terminal claim, preserves existing output, and tells
+  the user to continue manually if needed. Provider-accepted steer settles the original
+  Delivery immediately, so cancellation of a later user-owned turn cannot reopen it.
+  Settlement write failure retries the observed outcome without ACP; replacement-Worker
+  recovery converts any still-fenced started claim to `uncertain`, never to runnable. At most
+  one confirmed pre-provider recovery is allowed; after two prepared attempts,
+  `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed without invoking ACP. A pending
+  Delivery from the pre-claim schema migrates as `uncertain`; its prior execution count is
+  unknowable and must not be fabricated.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

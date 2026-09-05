@@ -831,8 +831,15 @@ export class LodyOperationCoordinator {
         operation,
         delivery,
         reason,
-        'expired_stale'
+        'expired_stale',
+        undefined,
+        false,
+        delivery.executionPhase === 'uncertain' ? 'uncertain' : 'ready'
       );
+      return;
+    }
+    if (delivery.executionPhase === 'uncertain') {
+      await this.failUncertainDelivery(sessionDoc, operation, delivery, reason);
       return;
     }
     if (execution.hasActiveTurn) return;
@@ -865,6 +872,42 @@ export class LodyOperationCoordinator {
     const frozen = operation.frozenContinuationConfig.inputConfig;
     const requester = await this.resolveRequesterIdentity(operation.requesterUserId);
     const attemptId = randomUUID();
+    let observedSettlement: 'handled' | 'cancelled' | 'not_started' | 'uncertain' | undefined;
+    const settleResidualClaim = () =>
+      this.withStore((store) => {
+        let current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+        if (
+          current.activeClaimWorkerBootId !== this.workerBootId ||
+          current.activeClaimId !== attemptId
+        ) {
+          return current;
+        }
+        if (observedSettlement === 'handled' || observedSettlement === 'cancelled') {
+          return store.consumeClaimedDelivery(
+            delivery.requesterSessionId,
+            delivery.operationId,
+            this.workerBootId,
+            attemptId
+          ).delivery;
+        }
+        if (current.executionPhase === 'started') {
+          store.markClaimedDeliveryExecutionUncertain(
+            delivery.requesterSessionId,
+            delivery.operationId,
+            this.workerBootId,
+            attemptId
+          );
+        } else {
+          store.releaseDeliveryClaim(
+            delivery.requesterSessionId,
+            delivery.operationId,
+            this.workerBootId,
+            attemptId
+          );
+        }
+        current = store.getDelivery(delivery.requesterSessionId, delivery.operationId);
+        return current;
+      });
     const continuation = this.options.executionService.continueSession(
       {
         type: 'session/chat',
@@ -905,15 +948,15 @@ export class LodyOperationCoordinator {
           }
           try {
             await this.writeCompletionTurn(sessionDoc, operation, delivery);
-            const started = this.withStore((store) =>
-              store.startClaimedDeliveryExecution(
+            const prepared = this.withStore((store) =>
+              store.prepareClaimedDeliveryExecution(
                 delivery.requesterSessionId,
                 delivery.operationId,
                 this.workerBootId,
                 attemptId
               )
             );
-            if (!started.started) {
+            if (!prepared.prepared) {
               this.withStore((store) =>
                 store.releaseDeliveryClaim(
                   delivery.requesterSessionId,
@@ -940,10 +983,31 @@ export class LodyOperationCoordinator {
           }
           return true;
         },
+        onTurnStarted: async () =>
+          this.withStore((store) =>
+            store.markClaimedDeliveryExecutionStarted(
+              delivery.requesterSessionId,
+              delivery.operationId,
+              this.workerBootId,
+              attemptId
+            )
+          ),
         onTurnSettled: async (outcome) => {
-          if (outcome === 'interrupted') {
+          observedSettlement = outcome;
+          if (outcome === 'not_started') {
             this.withStore((store) =>
               store.releaseDeliveryClaim(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              )
+            );
+            return;
+          }
+          if (outcome === 'uncertain') {
+            this.withStore((store) =>
+              store.markClaimedDeliveryExecutionUncertain(
                 delivery.requesterSessionId,
                 delivery.operationId,
                 this.workerBootId,
@@ -969,15 +1033,10 @@ export class LodyOperationCoordinator {
     try {
       await continuation;
     } catch (error) {
-      const afterInterruption = this.withStore((store) => {
-        store.releaseDeliveryClaim(
-          delivery.requesterSessionId,
-          delivery.operationId,
-          this.workerBootId,
-          attemptId
-        );
-        return store.getDelivery(delivery.requesterSessionId, delivery.operationId);
-      });
+      const afterInterruption = settleResidualClaim();
+      if (afterInterruption.executionPhase === 'uncertain') {
+        await this.failUncertainDelivery(sessionDoc, operation, afterInterruption, reason);
+      }
       if (
         afterInterruption.state === 'pending' &&
         !afterInterruption.activeClaimId &&
@@ -987,9 +1046,11 @@ export class LodyOperationCoordinator {
       }
       throw error;
     }
-    const afterExecution = this.withStore((store) =>
-      store.getDelivery(delivery.requesterSessionId, delivery.operationId)
-    );
+    const afterExecution = settleResidualClaim();
+    if (afterExecution.executionPhase === 'uncertain') {
+      await this.failUncertainDelivery(sessionDoc, operation, afterExecution, reason);
+      return;
+    }
     if (
       afterExecution.state === 'pending' &&
       !afterExecution.activeClaimId &&
@@ -1019,6 +1080,29 @@ export class LodyOperationCoordinator {
     );
   }
 
+  private async failUncertainDelivery(
+    sessionDoc: SessionDocument,
+    operation: StoredLodyOperation,
+    delivery: StoredLodyDelivery,
+    wakeReason: string
+  ): Promise<void> {
+    await this.finalizeDeliveryWithoutExecution(
+      sessionDoc,
+      operation,
+      delivery,
+      wakeReason,
+      'execution_uncertain',
+      {
+        status: 'uncertain',
+        code: 'DELIVERY_EXECUTION_UNCERTAIN',
+        message:
+          'The completion continuation may have started before execution was interrupted. It was not replayed; review the session output and continue manually if needed.',
+      },
+      false,
+      'uncertain'
+    );
+  }
+
   private async finalizeDeliveryWithoutExecution(
     sessionDoc: SessionDocument,
     operation: StoredLodyOperation,
@@ -1026,10 +1110,15 @@ export class LodyOperationCoordinator {
     wakeReason: string,
     evidence: string,
     continuationFailure?: {
-      code: 'CONFIGURATION_UNAVAILABLE' | 'DELIVERY_ATTEMPTS_EXHAUSTED';
+      status?: 'not_started' | 'uncertain';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
       message: string;
     },
-    requireAttemptsExhausted = false
+    requireAttemptsExhausted = false,
+    requiredExecutionPhase: 'ready' | 'uncertain' = 'ready'
   ): Promise<boolean> {
     const startedAt = performance.now();
     const claimId = randomUUID();
@@ -1038,6 +1127,7 @@ export class LodyOperationCoordinator {
         claimId,
         workerBootId: this.workerBootId,
         requireAttemptsExhausted,
+        requiredExecutionPhase,
       })
     );
     if (claim.status !== 'claimed') {
@@ -1169,7 +1259,11 @@ export class LodyOperationCoordinator {
     operation: StoredLodyOperation,
     delivery: StoredLodyDelivery,
     continuationFailure?: {
-      code: 'CONFIGURATION_UNAVAILABLE' | 'DELIVERY_ATTEMPTS_EXHAUSTED';
+      status?: 'not_started' | 'uncertain';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
       message: string;
     }
   ): Promise<void> {
@@ -1185,8 +1279,11 @@ export class LodyOperationCoordinator {
       ...(continuationFailure
         ? {
             continuation: {
-              status: 'not_started' as const,
-              reason: continuationFailure,
+              status: continuationFailure.status ?? ('not_started' as const),
+              reason: {
+                code: continuationFailure.code,
+                message: continuationFailure.message,
+              },
             },
           }
         : {}),
@@ -1224,8 +1321,11 @@ export class LodyOperationCoordinator {
                   return {
                     ...existingItem,
                     continuation: {
-                      status: 'not_started' as const,
-                      reason: continuationFailure,
+                      status: continuationFailure.status ?? ('not_started' as const),
+                      reason: {
+                        code: continuationFailure.code,
+                        message: continuationFailure.message,
+                      },
                     },
                   };
                 }

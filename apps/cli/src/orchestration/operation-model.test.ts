@@ -27,8 +27,9 @@ describe('Operation delivery executable model', () => {
       delivery: 'claimed',
       completionTurnWrites: 0,
     });
-    const started = stepOrchestrationModel(afterDelivery, 'start_turn');
-    expect(started).toMatchObject({ delivery: 'attempting', completionTurnWrites: 1 });
+    const prepared = stepOrchestrationModel(afterDelivery, 'prepare_turn');
+    const started = stepOrchestrationModel(prepared, 'start_turn');
+    expect(started).toMatchObject({ delivery: 'started', completionTurnWrites: 1 });
     expect(stepOrchestrationModel(started, 'complete_turn').delivery).toBe('consumed');
   });
 
@@ -38,8 +39,9 @@ describe('Operation delivery executable model', () => {
     const restored = trace('accept', 'materialize_success', 'archive', 'finish', 'restore');
     const claimed = stepOrchestrationModel(restored, 'schedule');
     expect(claimed.delivery).toBe('claimed');
-    const started = stepOrchestrationModel(claimed, 'start_turn');
-    expect(started.delivery).toBe('attempting');
+    const prepared = stepOrchestrationModel(claimed, 'prepare_turn');
+    const started = stepOrchestrationModel(prepared, 'start_turn');
+    expect(started.delivery).toBe('started');
   });
 
   it('writes the result once without starting an assistant when configuration is gone', () => {
@@ -70,13 +72,19 @@ describe('Operation delivery executable model', () => {
     });
   });
 
-  it('permits one interrupted recovery and consumes without a third attempt', () => {
-    const firstAttempt = trace('accept', 'materialize_success', 'finish', 'schedule', 'start_turn');
+  it('permits one confirmed pre-provider recovery and consumes without a third attempt', () => {
+    const firstAttempt = trace(
+      'accept',
+      'materialize_success',
+      'finish',
+      'schedule',
+      'prepare_turn'
+    );
     const secondAttempt = stepOrchestrationModel(
       stepOrchestrationModel(stepOrchestrationModel(firstAttempt, 'interrupt_turn'), 'schedule'),
-      'start_turn'
+      'prepare_turn'
     );
-    expect(secondAttempt).toMatchObject({ delivery: 'attempting', deliveryAttempts: 2 });
+    expect(secondAttempt).toMatchObject({ delivery: 'prepared', deliveryAttempts: 2 });
     const exhausted = stepOrchestrationModel(
       stepOrchestrationModel(secondAttempt, 'interrupt_turn'),
       'schedule'
@@ -90,11 +98,37 @@ describe('Operation delivery executable model', () => {
     expect(stepOrchestrationModel(exhausted, 'complete_finalization').delivery).toBe('consumed');
   });
 
+  it('consumes a user cancellation without reopening the Delivery', () => {
+    const started = trace(
+      'accept',
+      'materialize_success',
+      'finish',
+      'schedule',
+      'prepare_turn',
+      'start_turn'
+    );
+    const cancelled = stepOrchestrationModel(started, 'cancel_turn');
+    expect(cancelled).toMatchObject({
+      delivery: 'consumed',
+      deliveryClaimOwner: 'none',
+      activeTurn: 'none',
+      deliveryAttempts: 1,
+    });
+    expect(stepOrchestrationModel(cancelled, 'schedule')).toEqual(cancelled);
+  });
+
   it('keeps a crashed attempt fenced until a replacement Worker recovers the old boot', () => {
-    const firstAttempt = trace('accept', 'materialize_success', 'finish', 'schedule', 'start_turn');
+    const firstAttempt = trace(
+      'accept',
+      'materialize_success',
+      'finish',
+      'schedule',
+      'prepare_turn',
+      'start_turn'
+    );
     const afterExit = stepOrchestrationModel(firstAttempt, 'restart');
     expect(afterExit).toMatchObject({
-      delivery: 'attempting',
+      delivery: 'started',
       deliveryClaimOwner: 'previous',
       activeTurn: 'none',
       deliveryAttempts: 1,
@@ -102,16 +136,19 @@ describe('Operation delivery executable model', () => {
     expect(stepOrchestrationModel(afterExit, 'schedule')).toEqual(afterExit);
 
     const recovered = stepOrchestrationModel(afterExit, 'recover_orphans');
-    const secondAttempt = stepOrchestrationModel(
-      stepOrchestrationModel(recovered, 'schedule'),
-      'start_turn'
-    );
-    expect(secondAttempt).toMatchObject({
-      delivery: 'attempting',
-      deliveryClaimOwner: 'current',
-      activeTurn: 'delivery',
-      deliveryAttempts: 2,
+    expect(recovered).toMatchObject({
+      delivery: 'uncertain',
+      deliveryClaimOwner: 'none',
+      activeTurn: 'none',
+      deliveryAttempts: 1,
     });
+    const finalizing = stepOrchestrationModel(recovered, 'schedule');
+    expect(finalizing).toMatchObject({
+      delivery: 'uncertain_finalizing',
+      deliveryClaimOwner: 'current',
+      activeTurn: 'none',
+    });
+    expect(stepOrchestrationModel(finalizing, 'complete_finalization').delivery).toBe('consumed');
   });
 
   it('releases pre-start claims without spending the execution budget', () => {
@@ -130,10 +167,10 @@ describe('Operation delivery executable model', () => {
       deliveryClaimOwner: 'none',
     });
     const recovered = stepOrchestrationModel(
-      stepOrchestrationModel(secondFailure, 'schedule'),
+      stepOrchestrationModel(stepOrchestrationModel(secondFailure, 'schedule'), 'prepare_turn'),
       'start_turn'
     );
-    expect(recovered).toMatchObject({ delivery: 'attempting', deliveryAttempts: 1 });
+    expect(recovered).toMatchObject({ delivery: 'started', deliveryAttempts: 1 });
   });
 
   it('keeps terminal history finalization fenced across Worker replacement', () => {

@@ -32,6 +32,7 @@ import {
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
+import { LodyOperationStore } from '../src/orchestration/operation-store';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
 
@@ -264,6 +265,7 @@ describe('SessionExecutionService', () => {
       turnId: 'assistant:user-1',
       promptPromise: new Promise(() => {}),
     });
+    const onTurnSettled = vi.fn(async () => {});
     const runtime = {
       sessionId,
       turnId: 'assistant:user-1',
@@ -273,6 +275,7 @@ describe('SessionExecutionService', () => {
       requesterUserId: 'user-1',
       activePromptRun: initialPromptRun,
       yieldedFinalization: Promise.resolve(),
+      settlement: { callback: onTurnSettled, completed: false },
     };
     (
       service as unknown as {
@@ -290,6 +293,8 @@ describe('SessionExecutionService', () => {
         inputConfig: { prompt: 'change direction' },
       })
     ).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
 
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(
       sessionId,
@@ -387,6 +392,7 @@ describe('SessionExecutionService', () => {
       })
     ).resolves.toEqual({ success: true });
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('acp-steer'));
+    expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
   it('completes A to B to C when yielded prompts never settle', async () => {
@@ -485,18 +491,22 @@ describe('SessionExecutionService', () => {
       ),
     });
     const service = new SessionExecutionService(deps);
-    const lifecycle = service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
-      userTurnId: 'user-a',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    const onTurnSettled = vi.fn(async () => {});
+    const lifecycle = service.continueSession(
+      {
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
+        userTurnId: 'user-a',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      },
+      { onTurnSettled }
+    );
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     const steerB = service.steerSession({
@@ -517,6 +527,8 @@ describe('SessionExecutionService', () => {
     const releaseB = vi.fn();
     applicationB.resolve({ steerId: 'steer-b', release: releaseB });
     await expect(steerB).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
     expect(releaseB).toHaveBeenCalledOnce();
     expect(deps.activateConversationTurnForACPUpdates).toHaveBeenCalledTimes(2);
     expect(
@@ -597,6 +609,7 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.notifySessionCompleted).toHaveBeenCalledTimes(1);
     expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
   it('rejects steer without mutating the active turn when the agent lacks support', async () => {
@@ -1123,6 +1136,10 @@ describe('SessionExecutionService', () => {
     hasPromptOutputForTurn: boolean;
     dispatchSource?: 'delivery';
     onTurnClaimed?: () => Promise<boolean>;
+    onTurnStarted?: () => Promise<boolean>;
+    onTurnSettled?: (
+      settlement: 'handled' | 'cancelled' | 'not_started' | 'uncertain'
+    ) => Promise<void>;
   }) => {
     let history: Array<Record<string, unknown>> = [
       {
@@ -1162,7 +1179,7 @@ describe('SessionExecutionService', () => {
       }),
     };
     const notifySessionCompleted = vi.fn(async () => {});
-    const onTurnSettled = vi.fn(async () => {});
+    const onTurnSettled = options.onTurnSettled ?? vi.fn(async () => {});
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
       beginConversationTurn: vi.fn(
@@ -1210,6 +1227,7 @@ describe('SessionExecutionService', () => {
             dispatchSource: options.dispatchSource,
             onTurnSettled,
             ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
+            ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
           }
         : undefined
     );
@@ -1307,6 +1325,102 @@ describe('SessionExecutionService', () => {
     });
 
     expect(onTurnSettled).toHaveBeenCalledWith('handled');
+  });
+
+  it('crosses the durable Delivery start fence before calling the provider', async () => {
+    const onTurnStarted = vi.fn(async () => true);
+    const { agentClient } = await runSilentPromptTurn({
+      sessionId: 'session-delivery-start-fence',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+      onTurnStarted,
+    });
+
+    expect(onTurnStarted).toHaveBeenCalledOnce();
+    expect(onTurnStarted.mock.invocationCallOrder[0]).toBeLessThan(
+      agentClient.prompt.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+  });
+
+  it('does not replay a real stored Delivery when settlement persistence fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-delivery-execution-integration-'));
+    const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'));
+    const requesterSessionId = 'session-delivery-store' as SessionId;
+    const operationId = 'operation-delivery-store';
+    const workerBootId = 'worker-integration';
+    const claimId = 'claim-integration';
+    try {
+      store.accept({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        ownerMachineId: 'machine-1' as MachineId,
+        requesterSessionId,
+        requesterUserId: 'user-1',
+        operationId,
+        kind: 'session_chat',
+        canonicalCommand: { prompt: 'integration' },
+        frozenContinuationConfig: {
+          inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
+        },
+        initiatorChainDepth: 0,
+        createdAt: '2026-09-05T00:00:00.000Z',
+        deadlineAt: '2026-09-05T01:00:00.000Z',
+        items: [],
+      });
+      store.finish(requesterSessionId, operationId, { type: 'cancelled' });
+
+      const { agentClient } = await runSilentPromptTurn({
+        sessionId: requesterSessionId,
+        hasPromptOutputForTurn: true,
+        dispatchSource: 'delivery',
+        onTurnClaimed: async () => {
+          const claim = store.claimDeliveryExecution(requesterSessionId, operationId, {
+            claimId,
+            workerBootId,
+          });
+          if (claim.status !== 'claimed') return false;
+          return store.prepareClaimedDeliveryExecution(
+            requesterSessionId,
+            operationId,
+            workerBootId,
+            claimId
+          ).prepared;
+        },
+        onTurnStarted: async () =>
+          store.markClaimedDeliveryExecutionStarted(
+            requesterSessionId,
+            operationId,
+            workerBootId,
+            claimId
+          ),
+        onTurnSettled: async (settlement) => {
+          expect(settlement).toBe('handled');
+          throw new Error('settlement write failed');
+        },
+      });
+
+      expect(agentClient.prompt).toHaveBeenCalledOnce();
+      expect(store.getDelivery(requesterSessionId, operationId)).toMatchObject({
+        state: 'pending',
+        executionPhase: 'started',
+        attemptCount: 1,
+        activeClaimId: claimId,
+      });
+      expect(
+        store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-replacement')
+      ).toBe(1);
+      expect(
+        store.claimDeliveryExecution(requesterSessionId, operationId, {
+          claimId: 'replacement-claim',
+          workerBootId: 'worker-replacement',
+        })
+      ).toMatchObject({
+        status: 'in_flight',
+        delivery: { executionPhase: 'uncertain', attemptCount: 1 },
+      });
+    } finally {
+      store.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('silently releases a Delivery turn when its durable attempt claim loses contention', async () => {
@@ -4746,7 +4860,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'turn-prompt-cancel',
       processingUserMsgId: undefined,
     });
-    expect(onTurnSettled).toHaveBeenCalledWith('interrupted');
+    expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
   });
 
   it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {

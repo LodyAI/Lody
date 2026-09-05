@@ -179,6 +179,7 @@ const DeliveryRowSchema = z
   .strict();
 
 const DeliveryReadRowSchema = DeliveryRowSchema.extend({
+  execution_phase: z.enum(['ready', 'claimed', 'prepared', 'started', 'uncertain']),
   attempt_count: z.number().int().nonnegative(),
   active_claim_id: z.string().nullable(),
   active_claim_worker_boot_id: z.string().nullable(),
@@ -195,6 +196,7 @@ const DELIVERY_READ_COLUMNS = `
   deliveries.initiator_chain_depth,
   deliveries.completion_json,
   deliveries.consumed_at,
+  delivery_execution_state.execution_phase,
   delivery_execution_state.attempt_count,
   delivery_execution_state.active_claim_id,
   delivery_execution_state.active_claim_worker_boot_id`;
@@ -802,7 +804,13 @@ export class LodyOperationStore {
     const result = this.db
       .prepare(
         `UPDATE delivery_execution_state
-         SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
+         SET execution_phase = CASE
+               WHEN execution_phase = 'started' THEN 'uncertain'
+               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
+               ELSE execution_phase
+             END,
+             active_claim_id = NULL,
+             active_claim_worker_boot_id = NULL
          WHERE (active_claim_id IS NOT NULL OR active_claim_worker_boot_id IS NOT NULL)
            AND (
              active_claim_id IS NULL
@@ -837,15 +845,19 @@ export class LodyOperationStore {
       if (current.activeClaimId !== undefined || current.activeClaimWorkerBootId !== undefined) {
         return { status: 'in_flight', delivery: current };
       }
+      if (current.executionPhase !== 'ready') {
+        return { status: 'in_flight', delivery: current };
+      }
       if (current.attemptCount >= DELIVERY_MAX_ATTEMPTS) {
         return { status: 'exhausted', delivery: current };
       }
       const result = this.db
         .prepare(
           `UPDATE delivery_execution_state
-           SET active_claim_id = ?, active_claim_worker_boot_id = ?
+           SET execution_phase = 'claimed', active_claim_id = ?, active_claim_worker_boot_id = ?
            WHERE requester_session_id = ? AND operation_id = ?
              AND attempt_count < ?
+             AND execution_phase = 'ready'
              AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
              AND EXISTS (
                SELECT 1 FROM deliveries
@@ -877,19 +889,28 @@ export class LodyOperationStore {
     return transaction.immediate();
   }
 
-  startClaimedDeliveryExecution(
+  prepareClaimedDeliveryExecution(
     requesterSessionId: SessionId,
     operationId: string,
     workerBootId: string,
     claimId: string
-  ): { started: boolean; delivery: StoredLodyDelivery } {
+  ): { prepared: boolean; delivery: StoredLodyDelivery } {
     const transaction = this.db.transaction(() => {
+      const current = this.getDelivery(requesterSessionId, operationId);
+      if (
+        current.activeClaimWorkerBootId === workerBootId &&
+        current.activeClaimId === claimId &&
+        (current.executionPhase === 'prepared' || current.executionPhase === 'started')
+      ) {
+        return { prepared: true, delivery: current };
+      }
       const result = this.db
         .prepare(
           `UPDATE delivery_execution_state
-           SET attempt_count = attempt_count + 1
+           SET execution_phase = 'prepared', attempt_count = attempt_count + 1
            WHERE requester_session_id = ? AND operation_id = ?
              AND attempt_count < ?
+             AND execution_phase = 'claimed'
              AND active_claim_worker_boot_id = ? AND active_claim_id = ?
              AND EXISTS (
                SELECT 1 FROM deliveries
@@ -900,11 +921,67 @@ export class LodyOperationStore {
         )
         .run(requesterSessionId, operationId, DELIVERY_MAX_ATTEMPTS, workerBootId, claimId);
       return {
-        started: result.changes === 1,
+        prepared: result.changes === 1,
         delivery: this.getDelivery(requesterSessionId, operationId),
       };
     });
     return transaction.immediate();
+  }
+
+  markClaimedDeliveryExecutionStarted(
+    requesterSessionId: SessionId,
+    operationId: string,
+    workerBootId: string,
+    claimId: string
+  ): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE delivery_execution_state
+         SET execution_phase = 'started'
+         WHERE requester_session_id = ? AND operation_id = ?
+           AND execution_phase = 'prepared'
+           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
+           AND EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+               AND deliveries.operation_id = delivery_execution_state.operation_id
+               AND deliveries.state = 'pending'
+           )`
+      )
+      .run(requesterSessionId, operationId, workerBootId, claimId);
+    if (result.changes === 1) return true;
+    const current = this.getDelivery(requesterSessionId, operationId);
+    return (
+      current.executionPhase === 'started' &&
+      current.activeClaimWorkerBootId === workerBootId &&
+      current.activeClaimId === claimId
+    );
+  }
+
+  markClaimedDeliveryExecutionUncertain(
+    requesterSessionId: SessionId,
+    operationId: string,
+    workerBootId: string,
+    claimId: string
+  ): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE delivery_execution_state
+         SET execution_phase = 'uncertain',
+             active_claim_id = NULL,
+             active_claim_worker_boot_id = NULL
+         WHERE requester_session_id = ? AND operation_id = ?
+           AND execution_phase = 'started'
+           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
+           AND EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+               AND deliveries.operation_id = delivery_execution_state.operation_id
+               AND deliveries.state = 'pending'
+           )`
+      )
+      .run(requesterSessionId, operationId, workerBootId, claimId);
+    return result.changes === 1;
   }
 
   claimDeliveryFinalization(
@@ -914,6 +991,7 @@ export class LodyOperationStore {
       claimId: string;
       workerBootId: string;
       requireAttemptsExhausted?: boolean;
+      requiredExecutionPhase?: 'ready' | 'uncertain';
     }
   ): DeliveryFinalizationClaim {
     const transaction = this.db.transaction((): DeliveryFinalizationClaim => {
@@ -929,7 +1007,11 @@ export class LodyOperationStore {
         return { status: 'in_flight', delivery: current };
       }
       const minimumAttemptCount = claim.requireAttemptsExhausted ? DELIVERY_MAX_ATTEMPTS : 0;
+      const requiredExecutionPhase = claim.requiredExecutionPhase ?? 'ready';
       if (current.attemptCount < minimumAttemptCount) {
+        return { status: 'not_ready', delivery: current };
+      }
+      if (current.executionPhase !== requiredExecutionPhase) {
         return { status: 'not_ready', delivery: current };
       }
       const result = this.db
@@ -938,6 +1020,7 @@ export class LodyOperationStore {
            SET active_claim_id = ?, active_claim_worker_boot_id = ?
            WHERE requester_session_id = ? AND operation_id = ?
              AND attempt_count >= ?
+             AND execution_phase = ?
              AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
              AND EXISTS (
                SELECT 1 FROM deliveries
@@ -951,7 +1034,8 @@ export class LodyOperationStore {
           claim.workerBootId,
           requesterSessionId,
           operationId,
-          minimumAttemptCount
+          minimumAttemptCount,
+          requiredExecutionPhase
         );
       if (result.changes !== 1) {
         const latest = this.getDelivery(requesterSessionId, operationId);
@@ -978,9 +1062,15 @@ export class LodyOperationStore {
     const result = this.db
       .prepare(
         `UPDATE delivery_execution_state
-         SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
+         SET execution_phase = CASE
+               WHEN execution_phase IN ('claimed', 'prepared') THEN 'ready'
+               ELSE execution_phase
+             END,
+             active_claim_id = NULL,
+             active_claim_worker_boot_id = NULL
          WHERE requester_session_id = ? AND operation_id = ?
            AND active_claim_worker_boot_id = ? AND active_claim_id = ?
+           AND execution_phase <> 'started'
            AND EXISTS (
              SELECT 1 FROM deliveries
              WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
@@ -1153,6 +1243,7 @@ export class LodyOperationStore {
       deliveryId: parsed.delivery_id,
       systemTurnId: parsed.system_turn_id,
       state: parsed.state,
+      executionPhase: parsed.execution_phase,
       attemptCount: parsed.attempt_count,
       ...(parsed.active_claim_id ? { activeClaimId: parsed.active_claim_id } : {}),
       ...(parsed.active_claim_worker_boot_id
@@ -1238,6 +1329,13 @@ export class LodyOperationStore {
               "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'delivery_execution_state'"
             )
             .get() !== undefined;
+        const hadDeliveryExecutionPhase =
+          hadDeliveryExecutionState &&
+          (
+            this.db.prepare(`PRAGMA table_info(delivery_execution_state)`).all() as Array<{
+              name: string;
+            }>
+          ).some((column) => column.name === 'execution_phase');
         this.db.exec(`
       CREATE TABLE IF NOT EXISTS operations (
         workspace_id TEXT NOT NULL,
@@ -1284,6 +1382,8 @@ export class LodyOperationStore {
       CREATE TABLE IF NOT EXISTS delivery_execution_state (
         requester_session_id TEXT NOT NULL,
         operation_id TEXT NOT NULL,
+        execution_phase TEXT NOT NULL DEFAULT 'ready'
+          CHECK (execution_phase IN ('ready', 'claimed', 'prepared', 'started', 'uncertain')),
         attempt_count INTEGER NOT NULL DEFAULT 0,
         active_claim_id TEXT,
         active_claim_worker_boot_id TEXT,
@@ -1310,16 +1410,33 @@ export class LodyOperationStore {
         value TEXT NOT NULL
       );
     `);
+        if (hadDeliveryExecutionState && !hadDeliveryExecutionPhase) {
+          this.db.exec(
+            `ALTER TABLE delivery_execution_state
+             ADD COLUMN execution_phase TEXT NOT NULL DEFAULT 'ready'`
+          );
+          this.db.exec(
+            `UPDATE delivery_execution_state
+             SET execution_phase = CASE
+               WHEN attempt_count > 0
+                 OR active_claim_id IS NOT NULL
+                 OR active_claim_worker_boot_id IS NOT NULL
+               THEN 'uncertain'
+               ELSE 'ready'
+             END`
+          );
+        }
         this.db
           .prepare(
             `INSERT OR IGNORE INTO delivery_execution_state (
-               requester_session_id, operation_id, attempt_count
+               requester_session_id, operation_id, execution_phase, attempt_count
              )
              SELECT requester_session_id, operation_id,
-               CASE WHEN state = 'pending' THEN ? ELSE 0 END
+               CASE WHEN state = 'pending' THEN ? ELSE 'ready' END,
+               0
              FROM deliveries`
           )
-          .run(hadDeliveryExecutionState ? 0 : 1);
+          .run(hadDeliveryExecutionState ? 'ready' : 'uncertain');
       })
       .immediate();
   }
@@ -1356,9 +1473,9 @@ export class LodyOperationStore {
         this.db
           .prepare(
             `INSERT OR IGNORE INTO delivery_execution_state (
-               requester_session_id, operation_id, attempt_count
+               requester_session_id, operation_id, execution_phase, attempt_count
              )
-             SELECT requester_session_id, operation_id, 0 FROM deliveries`
+             SELECT requester_session_id, operation_id, 'ready', 0 FROM deliveries`
           )
           .run();
       })

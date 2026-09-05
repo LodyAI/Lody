@@ -27,7 +27,10 @@ const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 type DeliveryDispatchOptions = {
   onTurnClaimed?: () => Promise<boolean>;
-  onTurnSettled?: (settlement: 'handled' | 'interrupted') => Promise<void>;
+  onTurnStarted?: () => Promise<boolean>;
+  onTurnSettled?: (
+    settlement: 'handled' | 'cancelled' | 'not_started' | 'uncertain'
+  ) => Promise<void>;
 };
 
 const makeHarness = async (options?: {
@@ -834,7 +837,32 @@ describe('LodyOperationCoordinator', () => {
   it('expires a Delivery 8h past its Operation deadline instead of waking the requester', async () => {
     // deadline + 8h grace lands exactly on TEST_NOW: stranded completions from
     // a long-dead store or downtime must not restart old conversations.
-    const harness = await makeHarness({ deadlineAt: '2026-07-19T16:00:00.000Z' });
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T16:00:00.000Z',
+      workerBootId: 'worker-new',
+    });
+    const oldStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      oldStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
+      oldStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+        claimId: 'stale-attempt',
+        workerBootId: 'worker-old',
+      });
+      oldStore.prepareClaimedDeliveryExecution(
+        harness.requesterSessionId,
+        'review-round-1',
+        'worker-old',
+        'stale-attempt'
+      );
+      oldStore.markClaimedDeliveryExecutionStarted(
+        harness.requesterSessionId,
+        'review-round-1',
+        'worker-old',
+        'stale-attempt'
+      );
+    } finally {
+      oldStore.close();
+    }
     harness.coordinator.start();
     await harness.coordinator.idle();
     harness.coordinator.stop();
@@ -1297,7 +1325,7 @@ describe('LodyOperationCoordinator', () => {
     expect(completion).not.toHaveProperty('continuation');
   });
 
-  it('retries after graceful teardown terminalizes the Assistant without a Delivery ack', async () => {
+  it('does not replay after graceful teardown terminalizes a started Delivery turn', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
       workerBootId: 'daemon-after-restart',
@@ -1312,15 +1340,15 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed' });
       expect(
-        shutdownStore.startClaimedDeliveryExecution(
+        shutdownStore.prepareClaimedDeliveryExecution(
           harness.requesterSessionId,
           'review-round-1',
           'daemon-before-restart',
           'attempt-before-graceful-shutdown'
         )
-      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
       expect(
-        shutdownStore.releaseDeliveryClaim(
+        shutdownStore.markClaimedDeliveryExecutionStarted(
           harness.requesterSessionId,
           'review-round-1',
           'daemon-before-restart',
@@ -1335,7 +1363,15 @@ describe('LodyOperationCoordinator', () => {
         id: 'operation-completion:requester-1:review-round-1',
         role: 'system',
         timestamp: '2026-07-20T00:00:00.000Z',
-        items: [{ type: 'text', text: 'partial output before daemon shutdown' }],
+        items: [
+          {
+            type: 'operation_completion',
+            deliveryId: 'operation:requester-1:review-round-1:completion',
+            operationId: 'review-round-1',
+            operationKind: 'session_chat',
+            completion: { type: 'cancelled' },
+          },
+        ],
         fileDiff: [],
         finished: true,
         endedAt: TEST_NOW_MS - 1,
@@ -1354,17 +1390,27 @@ describe('LodyOperationCoordinator', () => {
     await harness.coordinator.idle();
     harness.coordinator.stop();
 
-    expect(harness.continueSession).toHaveBeenCalledOnce();
+    expect(harness.continueSession).not.toHaveBeenCalled();
     const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
       expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
       expect(store.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'consumed',
-        attemptCount: 2,
+        executionPhase: 'uncertain',
+        attemptCount: 1,
       });
     } finally {
       store.close();
     }
+    expect(harness.histories.get(harness.requesterSessionId)?.[0]?.items).toEqual([
+      expect.objectContaining({
+        type: 'operation_completion',
+        continuation: {
+          status: 'uncertain',
+          reason: expect.objectContaining({ code: 'DELIVERY_EXECUTION_UNCERTAIN' }),
+        },
+      }),
+    ]);
   });
 
   it('consumes the Delivery when a user turn lands before its completed assistant turn', async () => {
@@ -1547,7 +1593,7 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
-  it('recovers one crashed Delivery attempt after a replacement Worker starts', async () => {
+  it('recovers one prepared pre-provider Delivery after a replacement Worker starts', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
       workerBootId: 'daemon-new',
@@ -1562,13 +1608,13 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed' });
       expect(
-        oldStore.startClaimedDeliveryExecution(
+        oldStore.prepareClaimedDeliveryExecution(
           harness.requesterSessionId,
           'review-round-1',
           'daemon-old',
           'attempt-before-crash'
         )
-      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
     } finally {
       oldStore.close();
     }
@@ -1589,7 +1635,68 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
-  it('consumes two orphaned attempts without starting ACP a third time', async () => {
+  it('does not replay provider execution left uncertain by an exited Worker', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      workerBootId: 'daemon-new',
+    });
+    const oldStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      oldStore.finish(harness.requesterSessionId, 'review-round-1', { type: 'cancelled' });
+      oldStore.claimDeliveryExecution(harness.requesterSessionId, 'review-round-1', {
+        claimId: 'attempt-before-crash',
+        workerBootId: 'daemon-old',
+      });
+      oldStore.prepareClaimedDeliveryExecution(
+        harness.requesterSessionId,
+        'review-round-1',
+        'daemon-old',
+        'attempt-before-crash'
+      );
+      expect(
+        oldStore.markClaimedDeliveryExecutionStarted(
+          harness.requesterSessionId,
+          'review-round-1',
+          'daemon-old',
+          'attempt-before-crash'
+        )
+      ).toBe(true);
+    } finally {
+      oldStore.close();
+    }
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'consumed',
+        executionPhase: 'uncertain',
+        attemptCount: 1,
+      });
+    } finally {
+      finalStore.close();
+    }
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        items: [
+          expect.objectContaining({
+            type: 'operation_completion',
+            continuation: {
+              status: 'uncertain',
+              reason: expect.objectContaining({ code: 'DELIVERY_EXECUTION_UNCERTAIN' }),
+            },
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('exhausts two orphaned pre-provider attempts without starting ACP a third time', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
       workerBootId: 'worker-c',
@@ -1604,13 +1711,13 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
       expect(
-        crashedStore.startClaimedDeliveryExecution(
+        crashedStore.prepareClaimedDeliveryExecution(
           harness.requesterSessionId,
           'review-round-1',
           'worker-a',
           'attempt-a'
         )
-      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 1 } });
       expect(
         crashedStore.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')
       ).toBe(1);
@@ -1621,13 +1728,13 @@ describe('LodyOperationCoordinator', () => {
         })
       ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
       expect(
-        crashedStore.startClaimedDeliveryExecution(
+        crashedStore.prepareClaimedDeliveryExecution(
           harness.requesterSessionId,
           'review-round-1',
           'worker-b',
           'attempt-b'
         )
-      ).toMatchObject({ started: true, delivery: { attemptCount: 2 } });
+      ).toMatchObject({ prepared: true, delivery: { attemptCount: 2 } });
     } finally {
       crashedStore.close();
     }
@@ -1729,6 +1836,50 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('retries settlement persistence without replaying handled provider execution', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    const consume = vi.spyOn(LodyOperationStore.prototype, 'consumeClaimedDelivery');
+    const originalConsume = consume.getMockImplementation();
+    consume.mockImplementationOnce(() => {
+      throw new Error('settlement write failed');
+    });
+    if (originalConsume) consume.mockImplementation(originalConsume);
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
+      const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+      expect(await typedOptions.onTurnClaimed?.()).toBe(true);
+      expect(await typedOptions.onTurnStarted?.()).toBe(true);
+      try {
+        await typedOptions.onTurnSettled?.('handled');
+      } catch {
+        // SessionExecutionService logs settlement persistence failures and returns.
+      }
+    });
+
+    try {
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      harness.coordinator.stop();
+
+      expect(harness.continueSession).toHaveBeenCalledOnce();
+      const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'consumed',
+          attemptCount: 1,
+        });
+      } finally {
+        finalStore.close();
+      }
+      const completion = harness.histories
+        .get(harness.requesterSessionId)
+        ?.find((entry) => entry.role === 'system')
+        ?.items?.find((item) => item.type === 'operation_completion');
+      expect(completion).not.toHaveProperty('continuation');
+    } finally {
+      consume.mockRestore();
+    }
+  });
+
   it('does not spend execution attempts when completion history is not durable', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
@@ -1804,6 +1955,45 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
+  it('records uncertainty when provider execution returns without settlement', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
+      const typedOptions = dispatchOptions as DeliveryDispatchOptions;
+      expect(await typedOptions.onTurnClaimed?.()).toBe(true);
+      expect(await typedOptions.onTurnStarted?.()).toBe(true);
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.wake('duplicate-wake-after-missing-settlement');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'consumed',
+        executionPhase: 'uncertain',
+        attemptCount: 1,
+      });
+    } finally {
+      finalStore.close();
+    }
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            continuation: {
+              status: 'uncertain',
+              reason: expect.objectContaining({ code: 'DELIVERY_EXECUTION_UNCERTAIN' }),
+            },
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it('records a static failure after two executions exit without a settlement', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
     harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
@@ -1830,7 +2020,7 @@ describe('LodyOperationCoordinator', () => {
     }
   });
 
-  it('stops after one interrupted Delivery recovery instead of waking ACP forever', async () => {
+  it('consumes a user-cancelled Delivery without starting ACP again', async () => {
     const harness = await makeHarness({
       deadlineAt: '2026-07-19T23:59:59.000Z',
       workerBootId: 'daemon-1',
@@ -1838,7 +2028,8 @@ describe('LodyOperationCoordinator', () => {
     harness.continueSession.mockImplementation(async (_message, dispatchOptions) => {
       const typedOptions = dispatchOptions as DeliveryDispatchOptions;
       await typedOptions.onTurnClaimed?.();
-      await typedOptions.onTurnSettled?.('interrupted');
+      await typedOptions.onTurnStarted?.();
+      await typedOptions.onTurnSettled?.('cancelled');
     });
 
     harness.coordinator.start();
@@ -1849,13 +2040,13 @@ describe('LodyOperationCoordinator', () => {
     await harness.coordinator.idle();
     harness.coordinator.stop();
 
-    expect(harness.continueSession).toHaveBeenCalledTimes(2);
+    expect(harness.continueSession).toHaveBeenCalledTimes(1);
     const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
     try {
       const delivery = finalStore.getDelivery(harness.requesterSessionId, 'review-round-1');
       expect(delivery).toMatchObject({
         state: 'consumed',
-        attemptCount: 2,
+        attemptCount: 1,
       });
     } finally {
       finalStore.close();
@@ -1863,15 +2054,7 @@ describe('LodyOperationCoordinator', () => {
     expect(harness.histories.get(harness.requesterSessionId)).toEqual([
       expect.objectContaining({
         id: 'operation-completion:requester-1:review-round-1',
-        items: [
-          expect.objectContaining({
-            type: 'operation_completion',
-            continuation: {
-              status: 'not_started',
-              reason: expect.objectContaining({ code: 'DELIVERY_ATTEMPTS_EXHAUSTED' }),
-            },
-          }),
-        ],
+        items: [expect.objectContaining({ type: 'operation_completion' })],
       }),
     ]);
   });

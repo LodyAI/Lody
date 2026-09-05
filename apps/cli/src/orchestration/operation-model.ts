@@ -6,7 +6,16 @@
 export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'claimed' | 'attempting' | 'finalizing' | 'consumed';
+  delivery:
+    | 'absent'
+    | 'pending'
+    | 'claimed'
+    | 'prepared'
+    | 'started'
+    | 'uncertain'
+    | 'finalizing'
+    | 'uncertain_finalizing'
+    | 'consumed';
   deliveryClaimOwner: 'none' | 'current' | 'previous';
   deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
@@ -26,11 +35,13 @@ export type OrchestrationModelAction =
   | 'deadline'
   | 'enqueue_user'
   | 'schedule'
+  | 'prepare_turn'
   | 'start_turn'
   | 'history_write_fail'
   | 'complete_turn'
   | 'fail_turn'
   | 'interrupt_turn'
+  | 'cancel_turn'
   | 'complete_finalization'
   | 'restart'
   | 'recover_orphans'
@@ -103,6 +114,9 @@ export const stepOrchestrationModel = (
       if (next.queuedUsers > 0) {
         next.queuedUsers -= 1;
         next.activeTurn = 'user';
+      } else if (next.delivery === 'uncertain') {
+        next.delivery = 'uncertain_finalizing';
+        next.deliveryClaimOwner = 'current';
       } else if (next.delivery === 'pending') {
         if (!next.configurationAvailable || next.deliveryAttempts >= 2) {
           next.delivery = 'finalizing';
@@ -114,7 +128,7 @@ export const stepOrchestrationModel = (
         }
       }
       break;
-    case 'start_turn':
+    case 'prepare_turn':
       if (
         next.activeTurn === 'delivery' &&
         next.delivery === 'claimed' &&
@@ -122,11 +136,20 @@ export const stepOrchestrationModel = (
         next.deliveryAttempts < 2
       ) {
         next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-        next.delivery = 'attempting';
+        next.delivery = 'prepared';
         if (next.deliveryAttempts === 0) {
           next.chainDepth += 1;
         }
         next.deliveryAttempts += 1;
+      }
+      break;
+    case 'start_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'prepared' &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.delivery = 'started';
       }
       break;
     case 'history_write_fail':
@@ -141,28 +164,53 @@ export const stepOrchestrationModel = (
       }
       break;
     case 'complete_turn':
-      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
         next.delivery = 'consumed';
         next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'fail_turn':
-      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
         next.delivery = 'consumed';
         next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
     case 'interrupt_turn':
-      if (next.activeTurn === 'delivery' && next.delivery === 'attempting') {
+      if (next.activeTurn === 'delivery' && next.delivery === 'started') {
+        next.delivery = 'uncertain';
+        next.deliveryClaimOwner = 'none';
+      } else if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'claimed' || next.delivery === 'prepared')
+      ) {
         next.delivery = 'pending';
         next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
       break;
+    case 'cancel_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        (next.delivery === 'claimed' || next.delivery === 'prepared' || next.delivery === 'started')
+      ) {
+        next.delivery = 'consumed';
+        next.deliveryClaimOwner = 'none';
+      }
+      next.activeTurn = 'none';
+      break;
     case 'complete_finalization':
-      if (next.delivery === 'finalizing' && next.deliveryClaimOwner === 'current') {
+      if (
+        (next.delivery === 'finalizing' || next.delivery === 'uncertain_finalizing') &&
+        next.deliveryClaimOwner === 'current'
+      ) {
         next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
         next.delivery = 'consumed';
         next.deliveryClaimOwner = 'none';
@@ -171,8 +219,10 @@ export const stepOrchestrationModel = (
     case 'restart':
       if (
         (next.delivery === 'claimed' ||
-          next.delivery === 'attempting' ||
-          next.delivery === 'finalizing') &&
+          next.delivery === 'prepared' ||
+          next.delivery === 'started' ||
+          next.delivery === 'finalizing' ||
+          next.delivery === 'uncertain_finalizing') &&
         next.deliveryClaimOwner === 'current'
       ) {
         next.deliveryClaimOwner = 'previous';
@@ -182,11 +232,16 @@ export const stepOrchestrationModel = (
     case 'recover_orphans':
       if (
         (next.delivery === 'claimed' ||
-          next.delivery === 'attempting' ||
-          next.delivery === 'finalizing') &&
+          next.delivery === 'prepared' ||
+          next.delivery === 'started' ||
+          next.delivery === 'finalizing' ||
+          next.delivery === 'uncertain_finalizing') &&
         next.deliveryClaimOwner === 'previous'
       ) {
-        next.delivery = 'pending';
+        next.delivery =
+          next.delivery === 'started' || next.delivery === 'uncertain_finalizing'
+            ? 'uncertain'
+            : 'pending';
         next.deliveryClaimOwner = 'none';
       }
       break;
@@ -219,14 +274,17 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (
     state.activeTurn === 'delivery' &&
     state.delivery !== 'claimed' &&
-    state.delivery !== 'attempting'
+    state.delivery !== 'prepared' &&
+    state.delivery !== 'started'
   ) {
     throw new Error('a Delivery continuation is active without a durable attempt claim');
   }
   if (
     (state.delivery === 'claimed' ||
-      state.delivery === 'attempting' ||
-      state.delivery === 'finalizing') !==
+      state.delivery === 'prepared' ||
+      state.delivery === 'started' ||
+      state.delivery === 'finalizing' ||
+      state.delivery === 'uncertain_finalizing') !==
     (state.deliveryClaimOwner !== 'none')
   ) {
     throw new Error('Delivery claim state and its fenced owner disagree');
@@ -252,11 +310,13 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'deadline',
     'enqueue_user',
     'schedule',
+    'prepare_turn',
     'start_turn',
     'history_write_fail',
     'complete_turn',
     'fail_turn',
     'interrupt_turn',
+    'cancel_turn',
     'complete_finalization',
     'restart',
     'recover_orphans',

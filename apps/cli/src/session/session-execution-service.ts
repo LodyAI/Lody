@@ -233,6 +233,11 @@ type TurnRuntimeState = {
   cancelFinalized: boolean;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
+  settlement?: {
+    callback: (settlement: SessionTurnSettlement) => Promise<void>;
+    forcedOutcome?: SessionTurnSettlement;
+    completed: boolean;
+  };
   /** Logical prompt tail currently owned by the one session-owner fiber. */
   activePromptRun?: PromptHandoffRun;
   /** Serialized ancillary finalization for yielded logical turns. */
@@ -315,6 +320,7 @@ type VisibleSessionTurnOptions = {
    * mutate user dispatch status or pointers.
    */
   assistantEntryParentTurnId?: string;
+  onTurnStarted?: () => Promise<boolean>;
   onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
   /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
@@ -345,14 +351,13 @@ type SessionDispatchOptions = {
    * without history, ACP, failure, or settlement side effects.
    */
   onTurnClaimed?: () => Promise<boolean>;
-  /**
-   * Runs after terminal history bookkeeping and distinguishes retryable
-   * interruption from a durably handled outcome.
-   */
+  /** Runs immediately before the request can cross into the ACP provider. */
+  onTurnStarted?: () => Promise<boolean>;
+  /** Reports whether the provider was handled, cancelled, never started, or left uncertain. */
   onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
 };
 
-type SessionTurnSettlement = 'handled' | 'interrupted';
+type SessionTurnSettlement = 'handled' | 'cancelled' | 'not_started' | 'uncertain';
 
 export type PreparedSessionDispatchRequest =
   | { mode: 'create'; request: SessionCreateRequestValidated }
@@ -1303,6 +1308,10 @@ export class SessionExecutionService {
           return reject('stale-turn', 'Steer application arrived after ownership changed');
         }
 
+        // Provider acceptance hands the original dispatch forward. A later
+        // user-owned steer turn must not cancel or reopen that responsibility.
+        await this.settleVisibleTurn(runtime, 'handled', { force: true });
+
         try {
           await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
         } catch (error) {
@@ -1562,7 +1571,8 @@ export class SessionExecutionService {
     sessionId: SessionId,
     turnId: string,
     userTurnId?: string,
-    session?: ISession
+    session?: ISession,
+    onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>
   ): TurnRuntimeState {
     return {
       sessionId,
@@ -1580,8 +1590,28 @@ export class SessionExecutionService {
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
+      ...(onTurnSettled ? { settlement: { callback: onTurnSettled, completed: false } } : {}),
       yieldedFinalization: Promise.resolve(),
     };
+  }
+
+  private async settleVisibleTurn(
+    runtime: TurnRuntimeState,
+    outcome: SessionTurnSettlement,
+    options: { force?: boolean } = {}
+  ): Promise<void> {
+    const settlement = runtime.settlement;
+    if (!settlement || settlement.completed) return;
+    if (options.force) settlement.forcedOutcome = outcome;
+    const effectiveOutcome = settlement.forcedOutcome ?? outcome;
+    try {
+      await settlement.callback(effectiveOutcome);
+      settlement.completed = true;
+    } catch (error) {
+      this.deps.logger.error(
+        `[${runtime.sessionId}] Failed to persist ${effectiveOutcome} turn settlement: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private getTurnRuntime(sessionId: SessionId, turnId: string): TurnRuntimeState | undefined {
@@ -2595,7 +2625,13 @@ export class SessionExecutionService {
         deferACPUpdateTarget: true,
       });
       this.markCurrentTurn(sessionId, turnId);
-      runtime = this.createTurnRuntime(sessionId, turnId, userTurnId, session);
+      runtime = this.createTurnRuntime(
+        sessionId,
+        turnId,
+        userTurnId,
+        session,
+        options.onTurnSettled
+      );
       this.registerTurnRuntime(runtime);
     } finally {
       releaseConflict();
@@ -2774,6 +2810,18 @@ export class SessionExecutionService {
                   yield* Effect.fail(new Error('Agent session was not ready'));
                   return undefined;
                 }
+                if (options.onTurnStarted) {
+                  const started = yield* self.tryPromise(options.onTurnStarted);
+                  if (!started) {
+                    yield* Effect.fail(
+                      new SessionTurnClaimContended({
+                        sessionId,
+                        turnId: runtime.turnId,
+                      })
+                    );
+                    return undefined;
+                  }
+                }
                 runtime.terminateSessionOnCancel = false;
                 self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
                 runtime.promptStarted = true;
@@ -2867,7 +2915,15 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
-        settlement = 'interrupted';
+        const explicitlyCancelled =
+          runtime.cancelRequested ||
+          this.isTurnCancelled(sessionId, runtime.turnId) ||
+          (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId));
+        settlement = explicitlyCancelled
+          ? 'cancelled'
+          : runtime.promptStarted
+            ? 'uncertain'
+            : 'not_started';
       } else {
         await this.handleVisibleTurnUnhandledError({
           sessionId,
@@ -2888,8 +2944,8 @@ export class SessionExecutionService {
       }
       span.end({ outcome, turnId });
     }
-    if (settlement && options.onTurnSettled) {
-      await options.onTurnSettled(settlement);
+    if (settlement) {
+      await this.settleVisibleTurn(runtime, settlement);
     }
     return outcome;
   }
@@ -4053,6 +4109,7 @@ export class SessionExecutionService {
         ...(dispatchOptions?.dispatchSource === 'delivery'
           ? { assistantEntryParentTurnId: userTurnId }
           : {}),
+        ...(dispatchOptions?.onTurnStarted ? { onTurnStarted: dispatchOptions.onTurnStarted } : {}),
         ...(dispatchOptions?.onTurnSettled ? { onTurnSettled: dispatchOptions.onTurnSettled } : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
