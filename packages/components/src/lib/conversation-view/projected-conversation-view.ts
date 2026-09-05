@@ -1,5 +1,5 @@
 import type { SessionHistory } from '@lody/shared';
-import type { AcceptedSessionHistoryProjection } from '@/atoms/session-history-projection';
+import type { AcceptedSessionHistoryProjection } from '../../atoms/session-history-projection';
 import { indexRowFromEntry } from './index-row';
 import type { ConversationView, ConversationViewChange, TurnIndexRow } from './types';
 

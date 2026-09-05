@@ -1,5 +1,5 @@
 import type { MessageContent, SessionHistory } from '@lody/shared';
-import { firstTextOf, proseLengthOf } from '@/lib/conversation-outline';
+import { firstTextOf, proseLengthOf } from '../conversation-outline';
 import { isContainer, type LoroList, type LoroMap, type LoroText } from 'loro-crdt';
 import { TURN_SUMMARY_HEAD_CHARS, type TurnSummary } from './types';
 

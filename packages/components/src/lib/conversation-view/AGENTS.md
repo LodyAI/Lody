@@ -36,3 +36,9 @@ Opening a conversation must cost O(window), not O(turns). loro-mirror's
 - loro-mirror's upcoming `LazyList` maps 1:1 onto this interface (`index` ↔
   `index`, `get` ↔ `turn`, `hydrate` ↔ `ensureRange`, `subscribeRange` ↔
   `subscribe` + `ensureRange`/`release`); keep the surface this narrow.
+
+## No `@/` aliases in this module
+
+`packages/history-import`'s benchmark imports these files by relative path and
+its tsconfig has no `@/` mapping, so an alias here fails `pnpm typecheck` in a
+package that never touches the renderer. Import siblings relatively.

@@ -1,5 +1,8 @@
 import type { MessageContent, SessionHistoryParsed } from '@lody/shared';
-import type { TurnIndexRow } from './conversation-view';
+// The module file, not the barrel: the barrel also exports renderer-only code
+// (the feature flag reads `import.meta.env`), and this module is on the import
+// path of `@lody/history-import`'s benchmark, which compiles without Vite types.
+import type { TurnIndexRow } from './conversation-view/types';
 import { getSearchableMarkdownText } from './session-chat-search';
 
 /**

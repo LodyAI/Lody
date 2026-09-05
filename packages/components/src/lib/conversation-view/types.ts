@@ -22,7 +22,7 @@ export type TurnSummary = {
  * placeholder round and a hydrated round must produce the same title, so the
  * two cannot be separate numbers.
  */
-export { SUMMARY_SOURCE_WINDOW as TURN_SUMMARY_HEAD_CHARS } from '@/lib/conversation-outline';
+export { SUMMARY_SOURCE_WINDOW as TURN_SUMMARY_HEAD_CHARS } from '../conversation-outline';
 
 /**
  * Role-selection scalars of a user turn's `inputConfig`, read shallowly
