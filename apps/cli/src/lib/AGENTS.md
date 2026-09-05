@@ -293,7 +293,12 @@ control-plane path is DEPRECATED; do not add functionality to it.
   whose small `rawInput`/`rawOutput` are kept, whose persisted `title` is pinned to the
   canonical tool name, and which also record `schedulingTimeZone` (this machine's IANA zone,
   captured at persist time — cron is local-time to it, so the panel resolves fire times in
-  that zone via `nextCronFireMs`, not the viewer's browser zone). The deriver reads exactly
+  that zone via `nextCronFireMs`, not the viewer's browser zone) and `recordedAtMs` (the
+  first-persisted wall-clock sighting; the turn entry's `endedAt` is NOT a safe creation
+  anchor because runtime-internal cron-fire steers keep extending the same entry past a
+  one-shot's fire minute, which rolled the resolved fire to the next year — the "fires in
+  364 days" phantom). For one-shot crons the deriver prefers the output's `nextFireAt`
+  line over any anchor. The deriver reads exactly
   those fields — do not "clean up" this exception or the panel goes silently empty (unit tests
   fabricate history and won't catch it).
   The former `_meta.claudeCode.toolName` carrier is read only by the centralized

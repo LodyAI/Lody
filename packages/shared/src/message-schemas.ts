@@ -3204,6 +3204,9 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
     toolName: z.string().optional(),
     // IANA timezone of the machine that ran a scheduling tool (cron is local-time to it).
     schedulingTimeZone: z.string().optional(),
+    // Epoch ms when a scheduling tool call was first persisted (true creation moment;
+    // turn-level timestamps are not a safe proxy — see `recordedAtMs` in ai.ts).
+    recordedAtMs: z.number().optional(),
     permissionRequest: PermissionRequestInfoSchema.optional(),
   }),
   z.object({

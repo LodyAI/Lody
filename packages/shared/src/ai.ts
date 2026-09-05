@@ -1465,6 +1465,15 @@ export type MessageContent =
        * for scheduling tool calls; see `collectPendingScheduledTasksFromHistory`.
        */
       schedulingTimeZone?: string;
+      /**
+       * Epoch ms when this tool call was first persisted by the machine that ran it.
+       * Only set for scheduling tool calls: the turn entry's timestamps are NOT a safe
+       * proxy for the creation moment (cron-fire follow-up turns are runtime-internal
+       * steers, so one history entry can aggregate several runtime turns and its
+       * `endedAt` keeps advancing past a one-shot's fire minute). See
+       * `collectPendingScheduledTasksFromHistory`.
+       */
+      recordedAtMs?: number;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];
