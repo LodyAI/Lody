@@ -259,7 +259,12 @@ export const applyAgentRoleRunConfigDefaults = (
   for (const selector of selectAuthorableAgentRoleConfigOptions(
     selectorOptions.configOptionSelectors
   )) {
-    if (configOptionValues[selector.configId] !== undefined) continue;
+    if (
+      selector.hasDefault === false ||
+      selector.availability ||
+      configOptionValues[selector.configId] !== undefined
+    )
+      continue;
     configOptionValues[selector.configId] = selector.currentValue;
   }
 
@@ -313,7 +318,9 @@ export const findAgentRoleRunConfigIssues = (
   }
   if (
     runConfig.modelId &&
-    !selectorOptions.modelOptions.some((option) => option.value === runConfig.modelId)
+    !selectorOptions.modelOptions.some(
+      (option) => option.value === runConfig.modelId && !option.disabled
+    )
   ) {
     issues.push({ kind: 'model_unsupported', value: runConfig.modelId });
   }

@@ -1,4 +1,10 @@
 {
+  "chat.fastCapabilitiesUnknown": "Fast 模式未确认",
+  "chat.fastCapabilitiesUnsupported": "此模型不支持 Fast 模式",
+  "chat.reasoningCapabilitiesUnknown": "推理档位未确认",
+  "chat.reasoningCapabilitiesUnsupported": "此模型未提供可选推理档位",
+  "chat.reasoningCapabilitiesRefreshHint": "请在设置中刷新此 Provider 的能力，或更新所选机器上的 Lody。",
+  "chat.retainedConfigValue": "保留的选择：{{value}}",
   "agents.acpCapabilities.refreshError": "刷新失败",
   "agents.acpCapabilities.refreshModelsAndModes": "刷新模型和模式",
   "agents.acpCapabilities.refreshSuccess": "能力已刷新：{{modelCount}} 个模型，{{modeCount}} 个模式",

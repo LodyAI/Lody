@@ -5,6 +5,9 @@ import {
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
   isAcpFastModeConfigId,
+  isAcpPerModelConfigId,
+  resolveAcpModelControls,
+  type AcpCapabilityCacheEntry,
   isAcpThoughtLevelConfigOption,
   getAcpCapabilityCacheKey,
   getAcpCapabilityCacheEntryAuthority,
@@ -29,6 +32,10 @@ export type AcpConfigOptionValue = SharedAcpConfigOptionValue;
  */
 type AcpConfigOptionSelectorBase = {
   configId: string;
+  /** Advisory model evidence; never discard an explicit turn request. */
+  perModel?: boolean;
+  hasDefault?: boolean;
+  availability?: 'unknown' | 'unsupported';
   label: string;
   description?: string;
   /** Semantic category for icon selection: 'mode' | 'model' | 'thought_level' | custom. */
@@ -126,17 +133,32 @@ export const isConfigOptionValueValid = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
 ): value is AcpConfigOptionValue => {
+  if (selector.availability) return false;
   if (selector.type === 'boolean') {
     return typeof value === 'boolean';
   }
-  return typeof value === 'string' && selector.options.some((option) => option.value === value);
+  return (
+    typeof value === 'string' &&
+    selector.options.some((option) => option.value === value && !option.disabled)
+  );
 };
+
+/** Retaining an explicit request is different from offering it as a menu choice. */
+export const canRetainAcpConfigOptionValue = (
+  selector: AcpConfigOptionSelector,
+  value: AcpConfigOptionValue | undefined
+): value is AcpConfigOptionValue =>
+  selector.perModel || selector.category === 'model'
+    ? selector.type === 'boolean'
+      ? typeof value === 'boolean'
+      : typeof value === 'string' && value.length > 0
+    : isConfigOptionValueValid(selector, value);
 
 export const resolveConfigOptionValue = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
 ): AcpConfigOptionValue =>
-  isConfigOptionValueValid(selector, value) ? value : selector.currentValue;
+  canRetainAcpConfigOptionValue(selector, value) ? value : selector.currentValue;
 
 export const resolveFastModeSelectorEnabled = (
   selector: AcpFastModeConfigOptionSelector,
@@ -210,6 +232,7 @@ export type AcpSelectorTarget = {
 type ResolvedConfigOptions = {
   authority: AcpCapabilityAuthority;
   configOptions?: AcpConfigOptionSummary[];
+  capability?: AcpCapabilityCacheEntry;
 };
 
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
@@ -223,7 +246,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions };
+        return { authority, configOptions: capability.configOptions, capability };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -256,6 +279,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       }
       return {
         authority,
+        capability,
         configOptions: synthesized.length > 0 ? synthesized : undefined,
       };
     }
@@ -315,9 +339,12 @@ const buildConfigOptionSelectors = (
     }
 
     const currentValue = typeof opt.currentValue === 'string' ? opt.currentValue : '';
-    const selectedValue = target?.configOptionValues?.[opt.id];
+    const selectedValue =
+      opt.category === 'model'
+        ? (target?.selectedModelId ?? opt.currentValue)
+        : target?.configOptionValues?.[opt.id];
     const optionValues =
-      authority !== 'authoritative' &&
+      (authority !== 'authoritative' || opt.category === 'model') &&
       typeof selectedValue === 'string' &&
       !opt.options.some((option) => option.value === selectedValue)
         ? [...opt.options, { value: selectedValue, name: selectedValue }]
@@ -339,6 +366,9 @@ const buildConfigOptionSelectors = (
               ? formatModeLabel(v.value, v.name, target)
               : stripRecommended(v.name),
         description: v.description,
+        ...(opt.category === 'model' && !opt.options.some((option) => option.value === v.value)
+          ? { disabled: true }
+          : {}),
       })),
     };
   });
@@ -369,7 +399,11 @@ export const normalizeCodexReasoningEffortSelectors = (
   const supportedValues = CODEX_EXTENDED_REASONING_BY_MODEL.get(target.selectedModelId) ?? [];
 
   return selectors.map((selector) => {
-    if (selector.type !== 'select' || selector.configId !== 'reasoning_effort') {
+    if (
+      selector.perModel ||
+      selector.type !== 'select' ||
+      selector.configId !== 'reasoning_effort'
+    ) {
       return selector;
     }
 
@@ -394,6 +428,114 @@ export const normalizeCodexReasoningEffortSelectors = (
     }
     return { ...selector, options, currentValue };
   });
+};
+
+/** Project the selected model once, shared by composer and settings menus. */
+const buildResolvedSelectors = (
+  resolved: ResolvedConfigOptions,
+  target?: AcpSelectorTarget
+): AcpConfigOptionSelector[] => {
+  const { configOptions, authority, capability } = resolved;
+  const selectors = buildConfigOptionSelectors(configOptions, target, authority);
+  const modelId = resolveSelectedModelId(configOptions, target);
+  const listedModel = configOptions?.some(
+    (option) =>
+      option.category === 'model' && option.options.some((value) => value.value === modelId)
+  );
+  if (!modelId || (authority !== 'authoritative' && listedModel)) {
+    return normalizeCodexReasoningEffortSelectors(
+      selectors,
+      target ? { ...target, selectedModelId: modelId } : undefined
+    ).map((selector) =>
+      isAcpPerModelConfigId(selector.configId) ? { ...selector, perModel: true } : selector
+    );
+  }
+  const controls = resolveAcpModelControls(
+    authority === 'authoritative' && capability
+      ? capability
+      : {
+          agentType: target?.agentType ?? '',
+          modes: [],
+          models: [],
+          configOptions: [],
+        },
+    modelId
+  );
+  const result = selectors.filter(
+    (selector) =>
+      selector.configId !== controls.effort?.configId &&
+      selector.configId !== controls.fast?.configId
+  );
+  if (controls.effort) {
+    const { configId, values, snapshot } = controls.effort;
+    const storedValue = target?.configOptionValues?.[configId];
+    // Some providers publish a non-select thought control; retain its wire shape.
+    if (snapshot?.type === 'boolean') {
+      result.push(...buildConfigOptionSelectors([snapshot], target, authority));
+    } else {
+      result.push({
+        configId,
+        label: snapshot?.name ?? 'Reasoning effort',
+        category: 'thought_level',
+        type: 'select',
+        perModel: true,
+        hasDefault: snapshot !== undefined,
+        ...(values === undefined
+          ? { availability: 'unknown' as const }
+          : values.length === 0
+            ? { availability: 'unsupported' as const }
+            : {}),
+        currentValue:
+          typeof storedValue === 'string'
+            ? storedValue
+            : typeof snapshot?.currentValue === 'string'
+              ? snapshot.currentValue
+              : '',
+        options: (values ?? []).map((value) => {
+          const original = snapshot?.options.find((option) => option.value === value);
+          return { value, label: original?.name ?? value, description: original?.description };
+        }),
+      });
+    }
+  }
+  if (controls.fast) {
+    const { configId, snapshot, wireOption, supported } = controls.fast;
+    const stored = target?.configOptionValues?.[configId];
+    // An existing Fast request must remain visible even without positive evidence.
+    if (supported || stored === true || stored === CONFIG_OPTION_ON_VALUE) {
+      const option = wireOption
+        ? buildConfigOptionSelectors([wireOption], target, authority)[0]
+        : undefined;
+      const fastSelector: AcpConfigOptionSelector = option
+        ? {
+            ...option,
+            perModel: true,
+            hasDefault: snapshot !== undefined,
+          }
+        : {
+            configId,
+            label: 'Fast mode',
+            type: 'boolean',
+            options: [],
+            perModel: true,
+            hasDefault: false,
+            currentValue: false,
+          };
+      result.push({
+        ...fastSelector,
+        ...(supported === undefined
+          ? { availability: 'unknown' as const }
+          : supported === false
+            ? { availability: 'unsupported' as const }
+            : {}),
+      });
+    }
+  }
+  const order = new Map(selectors.map((selector, index) => [selector.configId, index]));
+  return result.sort(
+    (a, b) =>
+      (order.get(a.configId) ?? selectors.length) - (order.get(b.configId) ?? selectors.length)
+  );
 };
 
 /**
@@ -434,8 +576,7 @@ const buildModeOptions = (
  */
 const buildModelOptions = (
   configOptions: AcpConfigOptionSummary[] | undefined,
-  target?: AcpSelectorTarget,
-  authority: AcpCapabilityAuthority = 'unavailable'
+  target?: AcpSelectorTarget
 ): AcpSessionSelectOption[] => {
   const modelOption = configOptions?.find(
     (opt) => opt.category === 'model' && opt.type === 'select'
@@ -443,20 +584,18 @@ const buildModelOptions = (
   if (!modelOption) {
     return [];
   }
-  const options = modelOption.options.map((opt) => ({
+  const options: AcpSessionSelectOption[] = modelOption.options.map((opt) => ({
     value: opt.value,
     label: formatModelLabel(opt.name, target),
     description: opt.description,
   }));
-  if (
-    authority !== 'authoritative' &&
-    target?.selectedModelId &&
-    !options.some((option) => option.value === target.selectedModelId)
-  ) {
+  const selectedModelId = resolveSelectedModelId(configOptions, target);
+  if (selectedModelId && !options.some((option) => option.value === selectedModelId)) {
     options.push({
-      value: target.selectedModelId,
-      label: formatModelLabel(target.selectedModelId, target),
+      value: selectedModelId,
+      label: formatModelLabel(selectedModelId, target),
       description: undefined,
+      disabled: true,
     });
   }
   return options;
@@ -496,7 +635,8 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions } = resolveConfigOptions(target);
+  const resolved = resolveConfigOptions(target);
+  const { authority: capabilityAuthority, configOptions } = resolved;
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -509,23 +649,12 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
   const modeOptions = shouldUseDedicatedModeOptions
     ? buildModeOptions(configOptions, target, capabilityAuthority)
     : [];
-  const modelOptions = isAcpProbed
-    ? []
-    : buildModelOptions(configOptions, target, capabilityAuthority);
+  const modelOptions = isAcpProbed ? [] : buildModelOptions(configOptions, target);
   const modelConfigOption = configOptions?.find(
     (option) => option.category === 'model' && option.type === 'select'
   );
 
-  const allSelectors = normalizeCodexReasoningEffortSelectors(
-    buildConfigOptionSelectors(configOptions, target, capabilityAuthority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
-  );
+  const allSelectors = buildResolvedSelectors(resolved, target);
   const configOptionSelectors = allSelectors.filter((selector) => {
     const category = selector.category ?? '';
     if (selector.configId === 'interaction_mode') {
@@ -555,15 +684,5 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
 export const buildAllConfigOptionSelectors = (
   target?: AcpSelectorTarget
 ): AcpConfigOptionSelector[] => {
-  const { authority, configOptions } = resolveConfigOptions(target);
-  return normalizeCodexReasoningEffortSelectors(
-    buildConfigOptionSelectors(configOptions, target, authority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
-  );
+  return buildResolvedSelectors(resolveConfigOptions(target), target);
 };

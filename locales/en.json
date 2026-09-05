@@ -1,4 +1,10 @@
 {
+  "chat.fastCapabilitiesUnknown": "Fast mode not confirmed",
+  "chat.fastCapabilitiesUnsupported": "This model does not offer Fast mode",
+  "chat.reasoningCapabilitiesUnknown": "Reasoning levels not confirmed",
+  "chat.reasoningCapabilitiesUnsupported": "This model offers no selectable reasoning levels",
+  "chat.reasoningCapabilitiesRefreshHint": "Refresh this provider’s capabilities in Settings, or update Lody on the selected machine.",
+  "chat.retainedConfigValue": "Saved selection: {{value}}",
   "agents.acpCapabilities.refreshError": "Refresh failed",
   "agents.acpCapabilities.refreshModelsAndModes": "Refresh models and modes",
   "agents.acpCapabilities.refreshSuccess": "Capabilities refreshed: {{modelCount}} models, {{modeCount}} modes",

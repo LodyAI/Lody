@@ -1,7 +1,7 @@
 import { isAcpPerModelConfigId } from '@lody/shared';
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
-  isConfigOptionValueValid,
+  canRetainAcpConfigOptionValue,
   normalizeCodexReasoningEffortSelectors,
   type AcpConfigOptionSelector,
   type AcpSelectorTarget,
@@ -229,14 +229,8 @@ export const resolveAcpSessionConfigSelection = (
   target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType'>
 ): ResolvedAcpSessionConfigSelection => {
   const { edits, preferences, runtimePreferences } = inputs;
-  const {
-    capabilityAuthority,
-    modeOptions,
-    modelOptions,
-    defaultModeId,
-    defaultModelId,
-    configOptionSelectors,
-  } = selectorOptions;
+  const { capabilityAuthority, modeOptions, defaultModeId, defaultModelId, configOptionSelectors } =
+    selectorOptions;
 
   const selectedModeId = resolveSelectField(
     edits.mode,
@@ -246,14 +240,9 @@ export const resolveAcpSessionConfigSelection = (
     defaultModeId,
     capabilityAuthority
   );
-  const selectedModelId = resolveSelectField(
-    edits.model,
-    runtimePreferences?.modelId,
-    preferences.modelId,
-    modelOptions,
-    defaultModelId,
-    capabilityAuthority
-  );
+  const selectedModelId = edits.model
+    ? edits.model.value
+    : (runtimePreferences?.modelId ?? preferences.modelId ?? defaultModelId);
   const selectors = target
     ? normalizeCodexReasoningEffortSelectors(configOptionSelectors, {
         cliType: target.cliType,
@@ -275,7 +264,7 @@ export const resolveAcpSessionConfigSelection = (
     Object.assign(configOptionValues, baseTable);
     if (!runtimeTable) {
       for (const selector of selectors) {
-        if (!(selector.configId in configOptionValues)) {
+        if (selector.hasDefault !== false && !(selector.configId in configOptionValues)) {
           configOptionValues[selector.configId] = selector.currentValue;
         }
       }
@@ -287,21 +276,23 @@ export const resolveAcpSessionConfigSelection = (
     for (const selector of selectors) {
       const configId = selector.configId;
       const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
-      if (isConfigOptionValueValid(selector, editValue)) {
+      if (canRetainAcpConfigOptionValue(selector, editValue)) {
         configOptionValues[configId] = editValue;
         continue;
       }
       if (runtimeTable) {
         const runtimeValue = runtimeTable[configId];
-        if (isConfigOptionValueValid(selector, runtimeValue)) {
+        if (canRetainAcpConfigOptionValue(selector, runtimeValue)) {
           configOptionValues[configId] = runtimeValue;
         }
         continue;
       }
       const preferredValue = preferences.configOptionValues?.[configId];
-      configOptionValues[configId] = isConfigOptionValueValid(selector, preferredValue)
-        ? preferredValue
-        : selector.currentValue;
+      if (canRetainAcpConfigOptionValue(selector, preferredValue)) {
+        configOptionValues[configId] = preferredValue;
+      } else if (selector.hasDefault !== false) {
+        configOptionValues[configId] = selector.currentValue;
+      }
     }
 
     /* A stored value for a PER-MODEL control is kept while no runtime table
@@ -350,7 +341,7 @@ export const filterAcpSessionConfigOptionValues = (
   }
   for (const selector of selectors) {
     const value = values?.[selector.configId];
-    if (isConfigOptionValueValid(selector, value)) {
+    if (canRetainAcpConfigOptionValue(selector, value)) {
       filtered[selector.configId] = value;
     }
   }

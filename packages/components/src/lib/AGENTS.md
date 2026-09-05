@@ -58,7 +58,11 @@ sub-cap and the shared weekly pool are concurrent constraints, not alternatives.
 
 Before creating a top-level or child session, call
 `filterAcpSessionConfigOptionValues()` so cached values outside the current
-selector schema are not dispatched or persisted again.
+selector schema are not dispatched or persisted again. Explicit per-model values are the
+exception: `canRetainAcpConfigOptionValue` checks their wire type, while
+`isConfigOptionValueValid` still checks menu membership for authoring/discovery.
+A catalog update never replaces an explicit model id. A synthetic selector with
+`hasDefault: false` must not seed a turn or title-generation configuration.
 
 ## A resolved open is cached under BOTH spellings
 

@@ -457,6 +457,50 @@ export const findDeclaredEffortValues = (
   );
 };
 
+/** Menu evidence, never execution authorization. Missing metadata is unknown. */
+export const resolveAcpModelControls = (
+  capability: RunConfigCapabilitySource,
+  modelId: string,
+  now: number = Date.now()
+) => {
+  const binding = findAgentPerModelBinding(capability);
+  const effortOption = findReasoningEffortOption(capability);
+  const fastOption = findFastModeOption(capability);
+  const bindingOption = capability.configOptions?.find(
+    (option) => option.id === binding?.reasoningEffortConfigId
+  );
+  const measuredModel = capability.measuredForModelId ?? findCurrentModelId(capability);
+  const sameModel = measuredModel === modelId;
+  const effortValues =
+    findDeclaredEffortValues(capability, modelId, now) ??
+    (sameModel && effortOption?.type === 'select' && effortOption.options.length > 0
+      ? effortOption.options.map((option) => option.value)
+      : undefined);
+  const fastSupported =
+    findDeclaredFastModeSupport(capability, modelId, now) ??
+    (sameModel && fastOption ? true : undefined);
+  return {
+    // Only known per-model bindings participate; arbitrary provider controls
+    // keep their published shape and are never guessed from another agent.
+    effort:
+      binding?.reasoningEffortConfigId && bindingOption?.type !== 'boolean'
+        ? {
+            configId: effortOption?.id ?? binding.reasoningEffortConfigId,
+            values: effortValues,
+            snapshot: sameModel ? effortOption : undefined,
+          }
+        : undefined,
+    fast: binding?.fastModeConfigId
+      ? {
+          configId: fastOption?.id ?? binding.fastModeConfigId,
+          supported: fastSupported,
+          wireOption: fastOption,
+          snapshot: sameModel ? fastOption : undefined,
+        }
+      : undefined,
+  };
+};
+
 /**
  * Maps a semantic selection onto the target agent's concrete ACP ids.
  *

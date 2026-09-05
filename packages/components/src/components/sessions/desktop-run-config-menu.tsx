@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { useMemo, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -901,7 +902,12 @@ export function DesktopRunConfigMenu({
           </DropdownMenuSub>
         ) : null}
 
-        {thinkingSelector ? (
+        {thinkingSelector?.availability ? (
+          <AcpControlAvailability
+            selector={thinkingSelector}
+            value={configOptionValues?.[thinkingSelector.configId]}
+          />
+        ) : thinkingSelector ? (
           <DropdownMenuSub>
             <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
             <DropdownMenuSubContent>
@@ -941,7 +947,12 @@ export function DesktopRunConfigMenu({
             }
           />
         ) : null}
-        {fastSelector ? (
+        {fastSelector?.availability ? (
+          <AcpControlAvailability
+            selector={fastSelector}
+            value={configOptionValues?.[fastSelector.configId]}
+          />
+        ) : fastSelector ? (
           <ToggleItem
             icon={<Zap className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
             label={fastRowLabel}

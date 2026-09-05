@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { lazy, Suspense, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -455,7 +456,7 @@ function ValueSelect({
 }: {
   label: string;
   value: string | null;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; disabled?: boolean }[];
   onChange: (value: string) => void;
 }) {
   return (
@@ -465,7 +466,7 @@ function ValueSelect({
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}
           </SelectItem>
         ))}
@@ -484,6 +485,7 @@ function ConfigOptionField({
   onChange: (value: string | boolean) => void;
 }) {
   const fieldId = useId();
+  if (selector.availability) return <AcpControlAvailability selector={selector} value={value} />;
   if (selector.type === 'boolean') {
     return (
       <div className="flex items-center justify-between gap-4">
