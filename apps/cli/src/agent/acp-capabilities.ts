@@ -1,4 +1,5 @@
 import {
+  type AcpConfigOptionSummary,
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
@@ -13,6 +14,7 @@ import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
+import { fetchCursorModelCatalog, isRegistryCursorAgent } from '@/agent/cursor-acp';
 
 export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
@@ -24,6 +26,7 @@ export type FetchAcpCapabilitiesOptions = {
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
+  configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
 };
 
 /**
@@ -88,12 +91,17 @@ export async function fetchAcpCapabilities(
     });
 
   try {
+    const normalized = normalizeAcpSessionCapabilities(sessionResponse, {
+      sessionFork: client.supportsSessionFork?.() === true,
+      acknowledgedSteer: client.supportsAcknowledgedSteer(),
+    });
+    const configOptionsByModel = isRegistryCursorAgent({ cliType, agentType })
+      ? await fetchCursorModelCatalog({ client, signal: options.signal, logger })
+      : undefined;
     return {
-      ...normalizeAcpSessionCapabilities(sessionResponse, {
-        sessionFork: client.supportsSessionFork?.() === true,
-        acknowledgedSteer: client.supportsAcknowledgedSteer(),
-      }),
+      ...normalized,
       capabilitySourceVersion,
+      ...(configOptionsByModel !== undefined ? { configOptionsByModel } : {}),
     };
   } finally {
     await shutdownLocalAcpAgent({
