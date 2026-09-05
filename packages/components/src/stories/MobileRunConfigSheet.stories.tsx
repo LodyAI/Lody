@@ -237,6 +237,7 @@ function StoryShell({
                   selectedRoleId: roleId,
                   onSelect: setRoleId,
                   onCreate: fn(),
+                  onSendInstruction: async () => true,
                 }
               : undefined
           }
@@ -337,8 +338,9 @@ export const NoAgentRolesYet: Story = {
 
 /**
  * The Role row sits above Agent, because a Role answers every row under it.
- * Mobile is the picker only: no detail pane, no create action. `None` leads the
- * list, and an unavailable Role stays listed and disabled with its reason.
+ * Mobile is the picker only: no detail pane. `None` leads the list, and an
+ * unavailable Role stays listed and disabled with its reason. Long-press a Role
+ * to see the existing-Session Apply / Send Instruction actions.
  */
 export const WithAgentRoles: Story = {
   args: {
@@ -347,15 +349,30 @@ export const WithAgentRoles: Story = {
     selectors: codexSelectors,
     agentRoles: [
       {
-        role: makeRole({ id: 'role-reviewer' as AgentRoleId, name: 'Code Reviewer', emoji: '🔍' }),
+        role: makeRole({
+          id: 'role-reviewer' as AgentRoleId,
+          name: 'Code Reviewer',
+          emoji: '🔍',
+          promptPrefix: 'Review the current change for correctness before style.',
+        }),
         availability: { kind: 'available' },
       },
       {
-        role: makeRole({ id: 'role-docs' as AgentRoleId, name: 'Docs Writer', emoji: '📝' }),
+        role: makeRole({
+          id: 'role-docs' as AgentRoleId,
+          name: 'Docs Writer',
+          emoji: '📝',
+          promptPrefix: 'Update the documentation for the current change.',
+        }),
         availability: { kind: 'available' },
       },
       {
-        role: makeRole({ id: 'role-gone' as AgentRoleId, name: 'Retired Reviewer', emoji: '🗑️' }),
+        role: makeRole({
+          id: 'role-gone' as AgentRoleId,
+          name: 'Retired Reviewer',
+          emoji: '🗑️',
+          promptPrefix: 'Review the current change without applying this retired Role.',
+        }),
         availability: { kind: 'unavailable', reason: 'agent_config_missing' },
       },
     ],

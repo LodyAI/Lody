@@ -17,6 +17,14 @@ const sessionAgentRoleState = vi.hoisted(() => ({
   },
 }));
 
+const desktopRunConfigState = vi.hoisted(() => ({
+  agentRoles: undefined as
+    | {
+        onSendInstruction?: (role: AgentRole) => Promise<boolean>;
+      }
+    | undefined,
+}));
+
 vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
 
 vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
@@ -65,7 +73,12 @@ vi.mock('../src/components/sessions/desktop-run-config-menu', async () => {
   return {
     DesktopPermissionModeButton: () =>
       React.createElement('div', { 'data-testid': 'desktop-permission-mode-button' }),
-    DesktopRunConfigMenu: () => null,
+    DesktopRunConfigMenu: (props: {
+      agentRoles?: { onSendInstruction?: (role: AgentRole) => Promise<boolean> };
+    }) => {
+      desktopRunConfigState.agentRoles = props.agentRoles;
+      return null;
+    },
   };
 });
 vi.mock('../src/hooks/use-session-agent-role', () => ({
@@ -113,6 +126,7 @@ describe('SessionChatInputArea submission feedback', () => {
       selectedRoleId: null,
       onSelect: () => undefined,
     };
+    desktopRunConfigState.agentRoles = undefined;
     await initI18n('en');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -200,6 +214,75 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(
       container.querySelector('[data-testid="desktop-permission-mode-button"]')
     ).not.toBeNull();
+  });
+
+  it('keeps the composer draft when a Role instruction is sent separately', async () => {
+    const instructionRole = {
+      v: 1,
+      id: 'role-instruction' as AgentRoleId,
+      revision: 1,
+      name: 'Reviewer',
+      visibility: 'private',
+      ownerUserId: 'user-1',
+      machineId: 'machine-1',
+      agentConfigId: 'agent-1',
+      promptPrefix: 'Review only the current change.',
+      runConfig: {},
+      createdAt: 1,
+      updatedAt: 1,
+    } as AgentRole;
+    sessionAgentRoleState.control = {
+      items: [{ role: instructionRole, availability: { kind: 'available' } }],
+      selectedRoleId: null,
+      onSelect: () => undefined,
+    };
+    const onSendAgentRoleInstruction = vi.fn(async () => true);
+    const onSendMessage = vi.fn(async () => true);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        createElement(SessionChatInputArea, {
+          session: {
+            id: 'session-role-instruction',
+            userId: 'user-1',
+            machineId: 'machine-1',
+            agentConfigId: 'agent-1',
+            cliType: 'builtin',
+            agentType: 'codex',
+            status: { type: 'idle' },
+            isArchived: false,
+            createdAt: '2026-09-03T00:00:00.000Z',
+          } as SessionMeta,
+          sessionLocalProjectRootPath: null,
+          isMachineRemoved: false,
+          isAgentBusy: false,
+          isDark: false,
+          isEmptyConversation: false,
+          selectedModeId: null,
+          selectedModelId: null,
+          modeOptions: [],
+          modelOptions: [],
+          onModeChange: () => undefined,
+          onModelChange: () => undefined,
+          onSendMessage,
+          onSendAgentRoleInstruction,
+          onStop: () => undefined,
+          onRemoveQueueItem: async () => undefined,
+          initialInputText: 'Keep this draft exactly as-is.',
+        })
+      );
+    });
+
+    await act(async () => {
+      await desktopRunConfigState.agentRoles?.onSendInstruction?.(instructionRole);
+    });
+
+    expect(onSendAgentRoleInstruction).toHaveBeenCalledWith(instructionRole);
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(container.querySelector('textarea')?.value).toBe('Keep this draft exactly as-is.');
   });
 
   it('does not submit against transient run-config defaults while the Session doc hydrates', async () => {

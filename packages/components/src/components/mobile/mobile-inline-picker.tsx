@@ -16,6 +16,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, Loader2, Search, X } from 'lucide-react';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
+import { useLongPress } from '@/hooks/use-long-press';
 import { cn } from '@/lib/utils';
 
 // Above this many (filtered) options the dropdown list is virtualized — big branch
@@ -35,6 +36,8 @@ export type MobileInlinePickerOption<T extends string = string> = {
   disabled?: boolean;
   /** Tooltip / aria title for disabled options. */
   disabledReason?: string;
+  /** Optional touch action. A completed hold suppresses the following tap. */
+  onLongPress?: () => void;
 };
 
 export type MobileInlinePickerProps<T extends string = string> = {
@@ -196,6 +199,11 @@ export function MobileInlinePicker<T extends string = string>({
      opens it without moving focus); ↑/↓ move this index, Enter/Space select it,
      Esc closes. -1 = nothing highlighted (closed). */
   const [activeIndex, setActiveIndex] = useState(-1);
+  const longPressOptionRef = useRef<MobileInlinePickerOption<T> | null>(null);
+  const { handlers: longPressHandlers, shouldSwallowClick } = useLongPress({
+    enabled: options.some((option) => option.onLongPress != null),
+    onLongPress: () => longPressOptionRef.current?.onLongPress?.(),
+  });
   /* Auto-focus the search input on open only with a precise pointer (desktop) —
      never on touch, where it would force the soft keyboard up. */
   const autoFocusSearch = useMemo(
@@ -407,14 +415,34 @@ export function MobileInlinePicker<T extends string = string>({
           type="button"
           id={optionId(index)}
           data-active={isActive}
-          disabled={opt.disabled}
+          /* A disabled option with a long-press action must still receive touch
+             events. It remains aria-disabled and its regular tap is ignored. */
+          disabled={opt.disabled && !opt.onLongPress}
+          aria-disabled={opt.disabled || undefined}
           title={opt.disabled ? opt.disabledReason : undefined}
-          onClick={() => {
+          onClick={(event) => {
+            if (opt.onLongPress && shouldSwallowClick()) {
+              event.preventDefault();
+              longPressOptionRef.current = null;
+              return;
+            }
             if (opt.disabled) return;
             handleSelect(opt.value);
           }}
-          onPointerMove={() => {
+          onPointerDown={(event) => {
+            if (!opt.onLongPress || event.button !== 0) return;
+            longPressOptionRef.current = opt;
+            longPressHandlers.onPointerDown?.(event);
+          }}
+          onPointerMove={(event) => {
+            if (opt.onLongPress) longPressHandlers.onPointerMove?.(event);
             if (!opt.disabled && !isActive) setActiveIndex(index);
+          }}
+          onPointerUp={(event) => longPressHandlers.onPointerUp?.(event)}
+          onPointerCancel={(event) => longPressHandlers.onPointerCancel?.(event)}
+          onPointerLeave={(event) => longPressHandlers.onPointerLeave?.(event)}
+          onContextMenu={(event) => {
+            if (opt.onLongPress) event.preventDefault();
           }}
           className={cn(
             'flex w-full select-none items-center gap-2 px-3 py-2 text-left text-sm transition-colors',

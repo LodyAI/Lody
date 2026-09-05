@@ -182,13 +182,25 @@ describe('ComposerAgentRolePanel', () => {
   it('offers editing the Role whose configuration it is showing', async () => {
     const onEdit = vi.fn();
     const view = await render({ onEdit });
-    const edit = [...view.querySelectorAll('button')].find((node) =>
-      node.textContent?.includes('Edit role')
-    );
+    const edit = view.querySelector<HTMLButtonElement>('button[aria-label="Edit role"]');
     await act(async () => {
-      (edit as HTMLElement).click();
+      edit?.click();
     });
     expect(onEdit).toHaveBeenCalledWith('r-1');
+  });
+
+  it('sends the instruction without selecting the previewed Role', async () => {
+    const onSelect = vi.fn();
+    const onSendInstruction = vi.fn(async () => true);
+    const view = await render({ onSelect, onSendInstruction });
+    const send = view.querySelector<HTMLButtonElement>('button[aria-label="Send instruction"]');
+
+    await act(async () => {
+      send?.click();
+    });
+
+    expect(onSendInstruction).toHaveBeenCalledWith(reviewer.role);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('keeps an unavailable Role listed, disabled, and says why', async () => {

@@ -243,9 +243,14 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   renders even when there is nothing to list, reading `None`. It sits above
   Agent, since a Role answers every row under it, and is an ordinary inline
   picker: `None` first, then the Roles by emoji + name, an unavailable one
-  listed but disabled with its reason, and `New role` last. Mobile has no detail
-  pane and no edit: a phone row cannot carry the binding a Role authorizes, so
-  that is read on desktop or in Settings. `None` reports `null`, which clears
+  listed but disabled for short-tap Apply with its reason, and `New role` last.
+  Mobile has no detail pane and no edit: a phone row cannot carry the binding a
+  Role authorizes, so that is read on desktop or in Settings. In an existing
+  Session, a 500ms long press replaces the list with Apply Role / Send
+  Instruction actions. Apply keeps the availability gate; Send remains enabled
+  for an unavailable Role with an instruction because it sends a Role-less Turn
+  and preserves the composer draft. New-chat omits that long-press action.
+  `None` reports `null`, which clears
   the NAME and leaves the configuration as it stands. `None` also carries an
   EMPTY glyph so its label lines up with the emoji-led rows under it; the
   trigger deliberately does not, because it shows one value rather than a

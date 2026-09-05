@@ -10,7 +10,7 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
-import type { AgentConfigCliType, AgentRoleId, MachineId } from '@lody/shared';
+import type { AgentConfigCliType, AgentRole, AgentRoleId, MachineId } from '@lody/shared';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
 import { MobileRunConfigButton } from './mobile-run-config-button';
 import { MobileRunConfigSheet } from './mobile-run-config-sheet';
@@ -58,6 +58,7 @@ export type MobileSessionRunConfigProps = {
     selectedRoleId: AgentRoleId | null;
     onSelect: (roleId: AgentRoleId | null) => void;
     onCreate?: () => void;
+    onSendInstruction?: (role: AgentRole) => Promise<boolean>;
   };
 };
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, createElement, type ComponentProps } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   AGENT_ROLE_VERSION,
@@ -122,9 +122,28 @@ describe('AgentRoleDetailPane', () => {
         edited = roleId;
       },
     });
+    const edit = editable.querySelector<HTMLButtonElement>('button[aria-label="Edit role"]');
+    expect(edit?.closest('header')).not.toBeNull();
     await act(async () => {
-      editable.querySelector('button')?.click();
+      edit?.click();
     });
     expect(edited).toBe('role-1');
+  });
+
+  it('sends the shown instruction only when the host is an existing Session', async () => {
+    const onSendInstruction = vi.fn(async () => true);
+    const instructionRole = role({ promptPrefix: 'Correctness before style.' });
+    const view = await render({ role: instructionRole, onSendInstruction });
+    const send = view.querySelector<HTMLButtonElement>('button[aria-label="Send instruction"]');
+    expect(send?.closest('header')).not.toBeNull();
+
+    await act(async () => {
+      send?.click();
+    });
+
+    expect(onSendInstruction).toHaveBeenCalledWith(instructionRole);
+
+    const noInstruction = await render({ role: role(), onSendInstruction });
+    expect(noInstruction.querySelector('button[aria-label="Send instruction"]')).toBeNull();
   });
 });

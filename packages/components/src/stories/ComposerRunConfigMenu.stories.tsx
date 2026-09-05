@@ -222,11 +222,14 @@ function StoryShell({
   items,
   initialRoleId = null,
   models = modelOptions,
+  canSendInstruction = false,
 }: {
   items: ReadonlyArray<ComposerAgentRoleItem>;
   initialRoleId?: AgentRoleId | null;
   /** Overridden by the long-list story: what an agent provider may publish. */
   models?: AcpSessionSelectOption[];
+  /** Existing Sessions can send a Role's instruction without applying it. */
+  canSendInstruction?: boolean;
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -321,6 +324,7 @@ function StoryShell({
                 },
                 onCreate: fn(),
                 onEdit: fn(),
+                onSendInstruction: canSendInstruction ? async () => true : undefined,
               }}
             />
             {/* Mirrors the composer footer: behind a Role that pins permission,
@@ -376,6 +380,14 @@ export const Menu: Story = {
 
 /** The Role submenu: recognise the Role on the left, read what it runs on the right. */
 export const RoleSubmenu: Story = {
+  play: async ({ canvasElement }) => {
+    await openRoleSubmenu(canvasElement);
+  },
+};
+
+/** An existing Session can send the highlighted Role's instruction without applying it. */
+export const RoleInstructionShortcut: Story = {
+  args: { canSendInstruction: true },
   play: async ({ canvasElement }) => {
     await openRoleSubmenu(canvasElement);
   },

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Ban, Check, Plus } from 'lucide-react';
 import {
   getAgentRoleEmoji,
+  type AgentRole,
   type AgentRoleAvailability,
   type AgentRoleId,
   type MachineViewMeta,
@@ -32,6 +33,7 @@ export function ComposerAgentRolePanel({
   onSelect,
   onCreate,
   onEdit,
+  onSendInstruction,
 }: {
   items: readonly ComposerAgentRoleItem[];
   /**
@@ -46,6 +48,7 @@ export function ComposerAgentRolePanel({
   onSelect: (roleId: AgentRoleId | null) => void;
   onCreate?: () => void;
   onEdit?: (roleId: AgentRoleId) => void;
+  onSendInstruction?: (role: AgentRole) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const [previewRoleId, setPreviewRoleId] = useState<AgentRoleId | null>(null);
@@ -123,6 +126,7 @@ export function ComposerAgentRolePanel({
         agentConfig={previewItem.agentConfig}
         machine={machine}
         onEdit={onEdit}
+        onSendInstruction={onSendInstruction}
       />
     </div>
   );

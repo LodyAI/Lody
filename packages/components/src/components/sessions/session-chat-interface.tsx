@@ -63,6 +63,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import type {
+  AgentRole,
   LocalProjectId,
   MessageContent,
   MessageQueueItemInput,
@@ -3973,6 +3974,19 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    const handleSendAgentRoleInstruction = useCallback(
+      async (role: AgentRole): Promise<boolean> => {
+        if (!role.promptPrefix?.trim()) return false;
+        /* This is deliberately not a composer submission: the only block is
+           the shortcut instruction, so the draft and attachments stay put.
+           Explicit None also prevents inheriting or applying any Role. */
+        return await dispatchInputBlocks([{ type: 'text', text: role.promptPrefix }], {
+          agentRole: null,
+        });
+      },
+      [dispatchInputBlocks]
+    );
+
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionDoc?.history,
@@ -6047,6 +6061,7 @@ export const SessionChatInterface = memo(
                       onModelChange={handleModelChange}
                       onConfigOptionChange={handleConfigOptionChange}
                       onSendMessage={handleSendMessage}
+                      onSendAgentRoleInstruction={handleSendAgentRoleInstruction}
                       onStop={() => {
                         void handleStop();
                       }}

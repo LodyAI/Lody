@@ -1,6 +1,6 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
+import { Check, ListChecks, Plus, Send, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getAllAgentConfigAtom } from '@/atoms';
@@ -37,13 +37,16 @@ import { Switch } from '@/ui/switch';
 import {
   classifyPermissionModeFace,
   getAgentRoleEmoji,
+  type AgentRole,
   type AgentRoleId,
   type MachineId,
 } from '@lody/shared';
 import {
   MobileInlinePicker,
   MobileInlinePickerCoordinator,
+  MobileInlineMenu,
   MobileInlinePickerRowSlot,
+  useMobileInlinePickerCoordinator,
   type MobileInlinePickerOption,
 } from './mobile-inline-picker';
 
@@ -102,6 +105,8 @@ export type MobileRunConfigSheetProps = {
     onSelect: (roleId: AgentRoleId | null) => void;
     /** Opens the Role editor seeded with what the composer is set to right now. */
     onCreate?: () => void;
+    /** Existing Sessions may send only a Role's instruction as a new Turn. */
+    onSendInstruction?: (role: AgentRole) => Promise<boolean>;
   };
 };
 
@@ -140,7 +145,10 @@ export function MobileRunConfigSheet({
           style={keyboard.scrollStyle}
         >
           <MobileInlinePickerCoordinator>
-            <MobileRunConfigSheetRows {...contentProps} />
+            <MobileRunConfigSheetRows
+              {...contentProps}
+              onRequestClose={() => onOpenChange(false)}
+            />
           </MobileInlinePickerCoordinator>
         </div>
       </DrawerContent>
@@ -167,8 +175,11 @@ function permissionModeIcon(modeId: string | null): ReactNode {
    with the same entry. */
 const ROLE_NONE_VALUE = '__none__';
 const ROLE_CREATE_VALUE = '__create__';
+const ROLE_ACTIONS_MENU_ID = 'run-config-role-actions';
 
-type MobileRunConfigSheetRowsProps = Omit<MobileRunConfigSheetProps, 'open' | 'onOpenChange'>;
+type MobileRunConfigSheetRowsProps = Omit<MobileRunConfigSheetProps, 'open' | 'onOpenChange'> & {
+  onRequestClose: () => void;
+};
 
 function MobileRunConfigSheetRows({
   agentSelection,
@@ -185,9 +196,12 @@ function MobileRunConfigSheetRows({
   configOptionValues,
   onConfigOptionChange,
   agentRoles,
+  onRequestClose,
 }: MobileRunConfigSheetRowsProps) {
   const { t } = useTranslation();
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
+  const pickerCoordinator = useMobileInlinePickerCoordinator();
+  const [actionRoleId, setActionRoleId] = useState<AgentRoleId | null>(null);
 
   const {
     modelSelectors,
@@ -245,6 +259,14 @@ function MobileRunConfigSheetRows({
             </span>
           ),
           disabled: reason !== null,
+          ...(agentRoles.onSendInstruction && role.promptPrefix?.trim()
+            ? {
+                onLongPress: () => {
+                  setActionRoleId(role.id);
+                  pickerCoordinator?.requestActive(ROLE_ACTIONS_MENU_ID);
+                },
+              }
+            : {}),
           ...(reason ? { description: reason, disabledReason: reason } : {}),
         };
       }),
@@ -259,9 +281,12 @@ function MobileRunConfigSheetRows({
           ]
         : []),
     ];
-  }, [agentRoles, roleNoneLabel, t]);
+  }, [agentRoles, pickerCoordinator, roleNoneLabel, t]);
   const selectedRole = agentRoles?.selectedRoleId
     ? agentRoles.items.find((item) => item.role.id === agentRoles.selectedRoleId)?.role
+    : undefined;
+  const actionRoleItem = actionRoleId
+    ? agentRoles?.items.find((item) => item.role.id === actionRoleId)
     : undefined;
 
   /* ── Agent (options scoped by allowedMachineIds when provided) ── */
@@ -448,34 +473,83 @@ function MobileRunConfigSheetRows({
           first one, which is what the desktop row does too. */}
       {agentRoles ? (
         <RunConfigRow label={roleRowLabel}>
-          <MobileInlinePicker<string>
-            id="run-config-role"
-            value={agentRoles.selectedRoleId ?? ROLE_NONE_VALUE}
-            onChange={(value) => {
-              if (value === ROLE_CREATE_VALUE) {
-                agentRoles.onCreate?.();
-                return;
+          <>
+            <MobileInlinePicker<string>
+              id="run-config-role"
+              value={agentRoles.selectedRoleId ?? ROLE_NONE_VALUE}
+              onChange={(value) => {
+                if (value === ROLE_CREATE_VALUE) {
+                  agentRoles.onCreate?.();
+                  return;
+                }
+                agentRoles.onSelect(value === ROLE_NONE_VALUE ? null : (value as AgentRoleId));
+              }}
+              options={roleOptions}
+              ariaLabel={roleRowLabel}
+              searchable={shouldOfferOptionSearch(roleOptions.length)}
+              triggerContent={
+                <>
+                  {/* No reserved slot here: the trigger is one value, not a list,
+                      so `None` reads better flush against the row than indented
+                      past an empty box. The OPTIONS keep the slot, because there
+                      the labels are read as a column. */}
+                  {selectedRole ? (
+                    <span className="text-base leading-none" aria-hidden="true">
+                      {getAgentRoleEmoji(selectedRole)}
+                    </span>
+                  ) : null}
+                  <span className="truncate">{selectedRole?.name ?? roleNoneLabel}</span>
+                </>
               }
-              agentRoles.onSelect(value === ROLE_NONE_VALUE ? null : (value as AgentRoleId));
-            }}
-            options={roleOptions}
-            ariaLabel={roleRowLabel}
-            searchable={shouldOfferOptionSearch(roleOptions.length)}
-            triggerContent={
-              <>
-                {/* No reserved slot here: the trigger is one value, not a list,
-                    so `None` reads better flush against the row than indented
-                    past an empty box. The OPTIONS keep the slot, because there
-                    the labels are read as a column. */}
-                {selectedRole ? (
-                  <span className="text-base leading-none" aria-hidden="true">
-                    {getAgentRoleEmoji(selectedRole)}
-                  </span>
-                ) : null}
-                <span className="truncate">{selectedRole?.name ?? roleNoneLabel}</span>
-              </>
-            }
-          />
+            />
+            {actionRoleItem && agentRoles.onSendInstruction ? (
+              <MobileInlineMenu
+                id={ROLE_ACTIONS_MENU_ID}
+                triggerContent={null}
+                ariaLabel={t('chat.runConfig.roles.actions', 'Role actions')}
+                triggerClassName="hidden"
+              >
+                {({ close }) => (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium">
+                      <span className="text-base leading-none" aria-hidden="true">
+                        {getAgentRoleEmoji(actionRoleItem.role)}
+                      </span>
+                      <span className="truncate">{actionRoleItem.role.name}</span>
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={actionRoleItem.availability.kind !== 'available'}
+                      onClick={() => {
+                        close();
+                        agentRoles.onSelect(actionRoleItem.role.id);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors active:bg-hover/60 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      {t('chat.runConfig.roles.apply', 'Apply role')}
+                    </button>
+                    {actionRoleItem.role.promptPrefix?.trim() ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          onRequestClose();
+                          void agentRoles.onSendInstruction?.(actionRoleItem.role);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors active:bg-hover/60"
+                      >
+                        <Send className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        {t('chat.runConfig.roles.sendInstruction', 'Send instruction')}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </MobileInlineMenu>
+            ) : null}
+          </>
         </RunConfigRow>
       ) : null}
 
