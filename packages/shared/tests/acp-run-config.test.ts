@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isAcpPerModelConfigId,
+  isAcpPermissionWiderThanRequested,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
@@ -145,10 +147,6 @@ describe('agent run config selection', () => {
         'fast-mode': true,
         collaboration_mode: 'plan',
       },
-      // This agent published no per-model breakdown, and the selection switches
-      // away from the probed model, so effort/fast cannot be checked offline.
-      validatedConfigIds: ['reasoning_effort'],
-      unverifiedSelections: ['reasoningEffort=high', 'fastMode=true'],
     });
   });
 
@@ -200,19 +198,69 @@ describe('agent run config selection', () => {
     expect(resolveAgentRunConfigSelection({ planMode: false }, claudeCapability())).toEqual({});
   });
 
-  it('rejects controls the agent does not offer instead of running with other settings', () => {
+  it('dispatches controls the snapshot does not carry instead of rejecting them', () => {
+    // A snapshot captured under a model with no fast tier and no effort list
+    // looks exactly like this. It cannot decide anything for another model.
     const capability: AcpCapabilityCacheEntry = {
       ...codexCapability(),
       configOptions: [],
     };
-    expect(() => resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toThrow(
-      /does not offer a reasoning effort option/
-    );
-    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, capability)).toThrow(
-      /does not offer a fast mode option/
-    );
+
+    expect(resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toEqual({
+      configOptionValues: { reasoning_effort: 'high' },
+    });
+    expect(resolveAgentRunConfigSelection({ fastMode: true }, capability)).toEqual({
+      configOptionValues: { 'fast-mode': true },
+    });
+
+    // Plan mode is the exception, and for a binding reason rather than a
+    // capability one: with neither a collaboration_mode option nor a plan
+    // permission mode there is no way to express the request at all.
     expect(() => resolveAgentRunConfigSelection({ planMode: true }, capability)).toThrow(
       /does not offer a plan mode/
+    );
+  });
+
+  it('spells a snapshot-less control the way the target agent spells it', () => {
+    // Probed under a model with neither control, for each builtin agent.
+    const bare = (agentType: string): AcpCapabilityCacheEntry => ({
+      ...codexCapability(),
+      agentType,
+      configOptions: [],
+    });
+
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, bare('codex'))
+        .configOptionValues
+    ).toEqual({ reasoning_effort: 'high', 'fast-mode': true });
+
+    // Claude spells both differently; Codex's ids would be a silent no-op there.
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, bare('claude'))
+        .configOptionValues
+    ).toEqual({ effort: 'high', fast: true });
+
+    // Kimi publishes thinking as `thinking`, and offers no fast toggle at all.
+    expect(
+      resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, bare('kimi')).configOptionValues
+    ).toEqual({ thinking: 'high' });
+    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, bare('kimi'))).toThrow(
+      /cannot be encoded/
+    );
+  });
+
+  it('reports a missing wire binding as such, not as an unsupported control', () => {
+    // A third-party agent Lody has no fast-mode convention for.
+    const capability: AcpCapabilityCacheEntry = {
+      ...codexCapability(),
+      agentType: 'some-registry-agent',
+      configOptions: [],
+    };
+    expect(() => resolveAgentRunConfigSelection({ fastMode: true }, capability)).toThrow(
+      /cannot be encoded/
+    );
+    expect(() => resolveAgentRunConfigSelection({ reasoningEffort: 'high' }, capability)).toThrow(
+      /cannot be encoded/
     );
   });
 
@@ -265,58 +313,6 @@ describe('agent run config selection', () => {
     expect(summary.measuredForModelId).toBe('gpt-5.6-sol');
   });
 
-  it('validates effort against the model being selected, not the probed one', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...codexCapability(),
-      modelReasoningEfforts: {
-        'gpt-5.6-sol': ['low', 'medium', 'high', 'xhigh'],
-        'gpt-5.4-mini': ['low', 'medium'],
-      },
-    };
-
-    // `xhigh` is absent from the probed model's snapshot options but valid for
-    // the model being selected: it must be accepted and marked pre-validated so
-    // the caller's snapshot check does not reject it.
-    expect(
-      resolveAgentRunConfigSelection(
-        { modelId: 'gpt-5.6-sol', reasoningEffort: 'xhigh' },
-        capability
-      )
-    ).toEqual({
-      modelId: 'gpt-5.6-sol',
-      configOptionValues: { reasoning_effort: 'xhigh' },
-      validatedConfigIds: ['reasoning_effort'],
-    });
-
-    // Valid for the probed model, unsupported by the target model.
-    expect(() =>
-      resolveAgentRunConfigSelection(
-        { modelId: 'gpt-5.4-mini', reasoningEffort: 'high' },
-        capability
-      )
-    ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini.*Allowed values: low, medium/s);
-  });
-
-  it('flags selections it cannot verify offline instead of pretending they hold', () => {
-    // No per-model breakdown: a model switch makes effort and fast unverifiable.
-    const resolved = resolveAgentRunConfigSelection(
-      { modelId: 'gpt-5.4-mini', reasoningEffort: 'high', fastMode: true },
-      codexCapability()
-    );
-
-    expect(resolved.unverifiedSelections).toEqual(['reasoningEffort=high', 'fastMode=true']);
-    expect(resolved.configOptionValues).toEqual({
-      reasoning_effort: 'high',
-      'fast-mode': true,
-    });
-
-    // Staying on the probed model keeps the snapshot authoritative.
-    expect(
-      resolveAgentRunConfigSelection({ reasoningEffort: 'high', fastMode: true }, codexCapability())
-        .unverifiedSelections
-    ).toBeUndefined();
-  });
-
   it('recovers the per-model effort breakdown from a legacy model[effort] list', () => {
     expect(
       deriveModelReasoningEffortsFromLegacyModelIds([
@@ -351,5 +347,42 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+});
+
+describe('per-model config ids', () => {
+  it('recognizes every builtin spelling, so a stored value survives a snapshot without it', () => {
+    for (const configId of ['fast-mode', 'fast', 'reasoning_effort', 'effort', 'thinking']) {
+      expect(isAcpPerModelConfigId(configId)).toBe(true);
+    }
+    // A key with no per-model excuse is not preserved on the strength of this.
+    expect(isAcpPerModelConfigId('approval_policy')).toBe(false);
+  });
+});
+
+describe('permission width', () => {
+  it('answers only on a ranked, strictly wider outcome', () => {
+    // Wider: the effective mode acts with less human involvement.
+    expect(isAcpPermissionWiderThanRequested('plan', 'auto')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('plan', 'default')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('default', 'bypassPermissions')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('read-only', 'agent-full-access')).toBe(true);
+    // Grok's `_permission` values and DeepSeek Harness's workspace tier.
+    expect(isAcpPermissionWiderThanRequested('ask', 'auto')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('ask', 'always-approve')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('read-only', 'workspace-write')).toBe(true);
+    expect(isAcpPermissionWiderThanRequested('workspace-write', 'danger-full-access')).toBe(true);
+
+    // Equal or narrower is a functional mismatch, not an escalation.
+    expect(isAcpPermissionWiderThanRequested('plan', 'plan')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('auto', 'plan')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('agent-full-access', 'agent')).toBe(false);
+
+    // Unranked or absent on either side answers false: a turn may not be
+    // stopped on a guess about a mode Lody does not adapt.
+    expect(isAcpPermissionWiderThanRequested('plan', 'vendor-mode')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('vendor-mode', 'agent-full-access')).toBe(false);
+    expect(isAcpPermissionWiderThanRequested('plan', undefined)).toBe(false);
+    expect(isAcpPermissionWiderThanRequested(undefined, 'agent-full-access')).toBe(false);
   });
 });

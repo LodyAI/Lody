@@ -127,6 +127,32 @@ describe('MobileRunConfigSheet agent-role row', () => {
     });
   };
 
+  it('shows missing model metadata without offering invented reasoning levels', async () => {
+    const view = await render({
+      selectedModelId: 'gpt-6-astra',
+      configOptionSelectors: [
+        {
+          configId: 'reasoning_effort',
+          label: 'Reasoning',
+          category: 'thought_level',
+          type: 'select',
+          options: [],
+          currentValue: '',
+          perModel: true,
+          hasDefault: false,
+          availability: 'unknown',
+        },
+      ],
+      configOptionValues: { reasoning_effort: 'high' },
+    });
+    const content = view;
+    const status = content.querySelector('[role="status"]');
+    expect(status?.textContent).toContain('Reasoning levels not confirmed');
+    expect(status?.textContent).toContain('Saved selection: high');
+    expect(status?.textContent).toContain('Settings');
+    expect(status?.querySelector('button')).toBeNull();
+  });
+
   it('has no Role row when the caller offers no Roles at all', async () => {
     const view = await render();
     expect(view.querySelector('button[aria-label="Role"]')).toBeNull();

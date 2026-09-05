@@ -1,4 +1,5 @@
 import {
+  deriveTurnInputConfigForNewTurn,
   buildPendingUserHistoryEntry,
   getServerNow,
   getSessionRoomId,
@@ -484,9 +485,12 @@ export class SessionEditAndResendService {
     replacement: SessionTurnInputConfig,
     preparedSessionId: ACPSessionId
   ): SessionTurnInputConfig {
+    // A spread would carry the ORIGINAL turn's one-time permission acceptance
+    // onto this new prompt: `replacement` merely lacks the field, and a missing
+    // key does not overwrite a present one. The client already drops it, but a
+    // rule the daemon does not enforce is a rule the next client forgets.
     return {
-      ...original.inputConfig,
-      ...replacement,
+      ...deriveTurnInputConfigForNewTurn(original.inputConfig, replacement),
       cliType: meta.cliType,
       agentType: meta.agentType,
       resume: preparedSessionId,

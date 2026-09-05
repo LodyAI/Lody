@@ -52,11 +52,13 @@ Parent `AGENTS.md` files also apply.
 
 ## ACP selectors
 
-- Built-in Codex reasoning selectors normalize cached options against exact model support
-  in `components/shared/acp-selector-options.ts`: Astra, Sol, and Terra expose Max/Ultra;
-  Luna exposes Max only. Keep this aligned with the ACP model catalog; a model version
-  threshold cannot represent per-model differences, and cached efforts may belong to
-  a different selected model.
+- Runtime reasoning/Fast menus use `resolveAcpModelControls` in shared, projected by
+  `components/shared/acp-selector-options.ts` for the SELECTED model. Fresh declarations
+  precede legacy per-model efforts; snapshot controls speak only for their measured model.
+  Never extend runtime catalogs with the static Codex model table. Missing evidence is
+  unknown, not unsupported: show `AcpControlAvailability` on desktop/mobile/inline surfaces.
+  A synthetic control has no default until the agent reports one; explicit model and
+  per-model requests survive catalog changes and remain subject to runtime reconciliation.
 
 ## ACP authentication
 

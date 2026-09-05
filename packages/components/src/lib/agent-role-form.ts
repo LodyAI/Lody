@@ -1,5 +1,6 @@
 import {
   AGENT_ROLE_VERSION,
+  type AcpCapabilityAuthority,
   ACP_CONFIG_OPTION_OFF_VALUE,
   getAgentRoleMentionSlug,
   isAcpThoughtLevelConfigOption,
@@ -98,7 +99,9 @@ export type AgentRoleFormError =
   | 'name_required'
   | 'name_taken'
   | 'machine_required'
-  | 'agent_config_required';
+  | 'agent_config_required'
+  /** The agent has not reported capabilities, so nothing can be pinned yet. */
+  | 'run_config_unavailable';
 
 /**
  * The name is the only authored label, so it carries both jobs: it is what the
@@ -110,7 +113,19 @@ export type AgentRoleFormError =
  */
 export const validateAgentRoleForm = (
   value: AgentRoleFormValue,
-  options: { accessibleRoles: readonly AgentRole[]; editingRoleId?: AgentRoleId | null }
+  options: {
+    accessibleRoles: readonly AgentRole[];
+    editingRoleId?: AgentRoleId | null;
+    /** How the selected agent's capabilities were obtained, when known. */
+    capabilityAuthority?: AcpCapabilityAuthority;
+    /**
+     * True only while editing a Role that already exists. It cannot be inferred
+     * from the value: the composer creates a Role pre-filled from whatever it
+     * currently shows, and under `provisional` capabilities those are the static
+     * tables' own defaults — a non-empty run config that nobody chose.
+     */
+    isEditingExistingRole?: boolean;
+  }
 ): AgentRoleFormError[] => {
   const errors: AgentRoleFormError[] = [];
   const slug = normalizeAgentRoleMentionSlug(value.name);
@@ -128,6 +143,24 @@ export const validateAgentRoleForm = (
 
   if (!value.machineId) errors.push('machine_required');
   if (!value.agentConfigId) errors.push('agent_config_required');
+
+  /* A Role IS its run config — it pins the permission mode, and the surfaces
+     that hide the permission control rely on that. Under non-authoritative
+     capabilities the only values available are the built-in static tables', so
+     a NEW Role created now would persist a guess as a durable promise: either
+     seeded here, or carried in from a composer that resolved those same static
+     defaults (chat landing and the input area both create a Role from what they
+     currently show). Emptiness cannot tell those apart, so the rule is the
+     creation itself, not the value. Editing an existing Role stays open — it
+     already carries what it pins, and its owner must be able to rename it while
+     the machine is offline. */
+  if (
+    options.capabilityAuthority !== undefined &&
+    options.capabilityAuthority !== 'authoritative' &&
+    !options.isEditingExistingRole
+  ) {
+    errors.push('run_config_unavailable');
+  }
   return errors;
 };
 
@@ -196,12 +229,20 @@ export const buildAgentRoleFromForm = (
  * Only unset fields are filled: a saved Role keeps its stored selection even
  * when it differs from the agent's current default, which is what makes an
  * incompatible value visible instead of silently replaced.
+ *
+ * A Role is a durable promise about how a Session will run, so it may only be
+ * seeded from capabilities the agent itself reported. `provisional` ones are
+ * the built-in static tables — a hand-maintained copy of a catalog the agent
+ * fetches per account — and writing those in would persist a GUESS as the
+ * Role's commitment. That is how a Role came to promise Fast mode for an agent
+ * whose probe never published the option. Unseeded fields stay unset and the
+ * user chooses them.
  */
 export const applyAgentRoleRunConfigDefaults = (
   value: AgentRoleFormValue,
   selectorOptions: AcpSelectorOptions | null
 ): AgentRoleFormValue => {
-  if (!selectorOptions || selectorOptions.capabilityAuthority === 'unavailable') return value;
+  if (!selectorOptions || selectorOptions.capabilityAuthority !== 'authoritative') return value;
 
   const modelId =
     value.modelId ??
@@ -218,7 +259,12 @@ export const applyAgentRoleRunConfigDefaults = (
   for (const selector of selectAuthorableAgentRoleConfigOptions(
     selectorOptions.configOptionSelectors
   )) {
-    if (configOptionValues[selector.configId] !== undefined) continue;
+    if (
+      selector.hasDefault === false ||
+      selector.availability ||
+      configOptionValues[selector.configId] !== undefined
+    )
+      continue;
     configOptionValues[selector.configId] = selector.currentValue;
   }
 
@@ -272,7 +318,9 @@ export const findAgentRoleRunConfigIssues = (
   }
   if (
     runConfig.modelId &&
-    !selectorOptions.modelOptions.some((option) => option.value === runConfig.modelId)
+    !selectorOptions.modelOptions.some(
+      (option) => option.value === runConfig.modelId && !option.disabled
+    )
   ) {
     issues.push({ kind: 'model_unsupported', value: runConfig.modelId });
   }

@@ -4,6 +4,7 @@ import {
   type AgentConfigCliType,
   type AgentConfigMeta,
   type ChatFailedCode,
+  type ChatFailedMeta,
   type ChatFailedReason,
   type IssuePRMention,
   type LocalProjectId,
@@ -88,6 +89,8 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import type { DeclaredModelCapabilities } from '@lody/shared';
+import { AcpPermissionNotAppliedError } from '@/session/acp-session-config-applier';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -464,7 +467,8 @@ export type SessionExecutionServiceDeps = {
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
     message?: string,
-    code?: ChatFailedCode
+    code?: ChatFailedCode,
+    permission?: ChatFailedMeta['permission']
   ) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
@@ -514,6 +518,8 @@ export type SessionExecutionServiceDeps = {
     sessionFork: boolean;
     acknowledgedSteer: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
+    measuredForModelId?: string;
+    declaredModelCapabilities?: DeclaredModelCapabilities;
     capabilitySourceVersion?: string;
   }>;
   /** Evict idle sessions if system memory is under pressure */
@@ -1891,6 +1897,19 @@ export class SessionExecutionService {
     // of a generic "failed before the agent could start".
     if (error instanceof AcpAuthenticationRequiredError) {
       await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
+    } else if (error instanceof AcpPermissionNotAppliedError) {
+      // Keep the specific reason AND both mode ids: they are what let the client
+      // name the two permissions and offer to run this exact turn once with the
+      // one the agent actually has, instead of a generic pre-prompt error.
+      // The turn id travels with the notice: the client must not have to guess
+      // which prompt this stop belongs to by looking at whatever user entry
+      // happens to sit above it.
+      await this.deps.recordChatFailure(sessionDoc, 'permission_not_applied', message, undefined, {
+        controlId: error.controlId,
+        requestedModeId: error.requestedModeId,
+        effectiveModeId: error.effectiveModeId,
+        ...(runtime.userTurnId ? { userTurnId: runtime.userTurnId } : {}),
+      });
     } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,
@@ -4917,7 +4936,15 @@ export class SessionExecutionService {
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
-        capabilities.acknowledgedSteer
+        capabilities.acknowledgedSteer,
+        {
+          ...(capabilities.measuredForModelId
+            ? { measuredForModelId: capabilities.measuredForModelId }
+            : {}),
+          ...(capabilities.declaredModelCapabilities
+            ? { declaredModelCapabilities: capabilities.declaredModelCapabilities }
+            : {}),
+        }
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -5227,6 +5254,8 @@ export class SessionExecutionService {
         sessionFork,
         acknowledgedSteer,
         modelReasoningEfforts,
+        measuredForModelId,
+        declaredModelCapabilities,
         capabilitySourceVersion,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
@@ -5266,7 +5295,11 @@ export class SessionExecutionService {
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
-        { signal: options.signal }
+        {
+          signal: options.signal,
+          ...(measuredForModelId ? { measuredForModelId } : {}),
+          ...(declaredModelCapabilities ? { declaredModelCapabilities } : {}),
+        }
       );
 
       return {

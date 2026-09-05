@@ -9,6 +9,7 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
+import { dedupeAcceptedWiderPermissions } from './acp-run-config';
 import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
@@ -354,6 +355,29 @@ export const SessionInputBlocksSchema = z
     }
   });
 
+/** One permission difference a user was shown and chose to run with. */
+export const AcceptedWiderPermissionSchema = z
+  .object({
+    controlId: z.string().trim().min(1),
+    requestedModeId: z.string().trim().min(1),
+    effectiveModeId: z.string().trim().min(1),
+  })
+  .strict();
+
+/**
+ * Every difference disclosed and accepted for ONE turn, deduplicated.
+ *
+ * Bounded because it grows only by one control per stop and an agent publishes
+ * a handful; a longer list is not a real disclosure history. Malformed input —
+ * including the boolean this field used to be, or a single bare object — is a
+ * whole-list rejection, so it reads as no acceptance rather than a partial one.
+ */
+export const AcceptedWiderPermissionsSchema = z
+  .array(AcceptedWiderPermissionSchema)
+  .min(1)
+  .max(8)
+  .transform(dedupeAcceptedWiderPermissions);
+
 export const ACPSessionConfigSchema = z
   .object({
     prompt: z.string(),
@@ -367,6 +391,7 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -388,6 +413,7 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    acceptWiderPermissions: AcceptedWiderPermissionsSchema.optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
@@ -487,6 +513,21 @@ export const normalizeSessionTurnInputConfig = (
     normalized.taskToolsEnabled = taskToolsEnabled;
   }
 
+  /* Only an explicit `true` survives. This is one-time informed acceptance of a
+     permission the agent reported as wider than the turn asked for, so `false`
+     and absent are the same thing — "not accepted" — and neither may be written
+     back as a value that another turn could read. Every transport normalizes
+     through here (direct RPC, the dispatch-turn and steer entries, the Loro
+     history readback, queue promotion), so a field this rebuild does not copy
+     never reaches the daemon at all. */
+  const acceptWiderPermissions = maybeParseField(
+    AcceptedWiderPermissionsSchema,
+    record.acceptWiderPermissions
+  );
+  if (acceptWiderPermissions?.length) {
+    normalized.acceptWiderPermissions = acceptWiderPermissions;
+  }
+
   if (record.agentRoleId === null) {
     normalized.agentRoleId = null;
   } else {
@@ -528,6 +569,32 @@ export const normalizeSessionTurnInputConfig = (
   }
 
   return Object.keys(normalized).length > 0 ? normalized : undefined;
+};
+
+/**
+ * A turn config derived from ANOTHER turn's, for a new turn.
+ *
+ * `acceptWiderPermission` is informed acceptance of a permission the agent
+ * reported as wider than what ONE prompt asked for. Copying it onto a different
+ * prompt would carry that consent somewhere the user never gave it, and the new
+ * turn would sail past the stop that exists to ask — a permission bypass built
+ * out of a spread. So any copy that mints a new `userTurnId`, or changes the
+ * prompt or input blocks, must go through here.
+ *
+ * Same-turn rewrites are NOT copies: marking a turn `processing`, tagging its
+ * delivery kind, or retrying its transport keeps the acceptance, because it is
+ * still the turn the user accepted.
+ */
+export const deriveTurnInputConfigForNewTurn = (
+  original: unknown,
+  // The one field a derived turn may not carry is also the one field the
+  // overrides may not put back: a caller that could pass it would have a
+  // one-line way around the whole rule.
+  overrides: Omit<Partial<SessionTurnInputConfig>, 'acceptWiderPermissions'> = {}
+): SessionTurnInputConfig => {
+  const { acceptWiderPermissions: _dropped, ...carried } =
+    normalizeSessionTurnInputConfig(original) ?? {};
+  return { ...carried, ...overrides };
 };
 
 export const ProjectRefSchema = z.discriminatedUnion('kind', [
@@ -923,6 +990,8 @@ export const SessionPreparationRunConfigSchema = z
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
       .optional(),
     taskToolsEnabled: z.boolean().optional(),
+    // No acceptance here on purpose: a speculative preparation is not a
+    // dispatched turn, so there is no disclosed difference for it to accept.
   })
   .strict();
 
@@ -3120,6 +3189,7 @@ export const ChatFailedReasonSchema = z.enum([
   'agent_disconnected',
   'agent_no_output',
   'turn_pre_prompt_failed',
+  'permission_not_applied',
   'message_delivery_failed',
   'machine_access_denied',
   'acp_auth_required',
@@ -3143,6 +3213,29 @@ export const ChatFailedMetaSchema = z.object({
   reason: ChatFailedReasonSchema,
   code: ChatFailedCodeSchema.optional(),
   message: z.string().optional(),
+  /**
+   * `permission_not_applied` only: the exact difference that was disclosed.
+   *
+   * The SAME shape the acceptance uses, deliberately — the client reads this
+   * meta and writes it straight back as `acceptWiderPermission`, so a second
+   * declaration here would let the two drift and, since Zod strips undeclared
+   * keys, silently drop a field on every history read. That is what happened:
+   * a `controlId` this schema did not know about was removed on parse, the
+   * client could no longer build an acceptance from the notice, and the "run
+   * once" action vanished from a failure the daemon had reported correctly.
+   *
+   * Absent-tolerant by DEGRADING, not by failing: a notice written before the
+   * triple existed carries only two of the three fields, and rejecting it would
+   * make the whole history item unparseable rather than merely actionless. It
+   * drops to `undefined`, so the failure still renders and simply offers no
+   * acceptance — which is the safe direction, since an acceptance that cannot
+   * name its control would be a blanket one.
+   */
+  permission: AcceptedWiderPermissionSchema.extend({
+    userTurnId: z.string().trim().min(1).optional(),
+  })
+    .optional()
+    .catch(undefined),
 });
 
 // Non-system notice MessageContent discriminated union

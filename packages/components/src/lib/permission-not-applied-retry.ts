@@ -1,0 +1,242 @@
+import { useCallback, useRef, useState } from 'react';
+import type {
+  AcceptedWiderPermission,
+  PermissionNotAppliedNotice,
+  AcpConfigOptionValue,
+  AgentRoleId,
+  SessionInputBlock,
+} from '@lody/shared';
+
+/**
+ * Recovering a turn the daemon stopped because the agent reported a permission
+ * wider than the turn asked for.
+ *
+ * The offer must replay THAT turn: its own prompt, mode, model and config
+ * option values, frozen in its `inputConfig`. Reading the composer instead
+ * would pair the old prompt with whatever the user has since selected, which is
+ * a different run than the one that was stopped — and the whole point of the
+ * stop was that the user gets to decide about this exact one.
+ */
+export type PermissionNotAppliedRetryTarget = {
+  /** History entry id of the failure notice, for matching the render site. */
+  noticeId: string;
+  /** The exact difference this notice disclosed. */
+  disclosed: AcceptedWiderPermission;
+  /**
+   * Differences already disclosed and accepted on the turn that was stopped.
+   *
+   * Two controls widening at once are disclosed one stop at a time, so a replay
+   * carrying only the newest acceptance would drop the previous one and land
+   * back on the first stop — the user would alternate between two notices with
+   * no way through. Read from the stopped turn's own frozen config and
+   * re-validated, so nothing but a previously accepted exact triple accumulates.
+   */
+  previouslyAccepted: AcceptedWiderPermission[];
+  userTurnId: string;
+  inputBlocks: SessionInputBlock[];
+  modeId?: string;
+  modelId?: string;
+  configOptionValues?: Record<string, AcpConfigOptionValue>;
+  agentRoleId?: AgentRoleId | null;
+  agentRoleRevision?: number;
+  /**
+   * Tool reach is part of what that turn was, not of what the composer holds
+   * now. An explicit empty selection is a selection — `mcpServerIds: []` means
+   * "no servers", which is why it travels as `undefined`-vs-array rather than
+   * being collapsed to falsy.
+   */
+  mcpServerIds?: string[];
+  taskToolsEnabled?: boolean;
+  issuePRMentions?: unknown[];
+};
+
+type RetryHistoryItem = { type?: string; name?: string; meta?: unknown } | null | undefined;
+
+type RetryHistoryEntry = {
+  id: string;
+  role?: string;
+  items?: readonly RetryHistoryItem[];
+  inputConfig?: unknown;
+};
+
+const readPermissionMeta = (item: RetryHistoryItem): PermissionNotAppliedNotice | null => {
+  if (item?.type !== 'system_notice' || item.name !== 'chat_failed') {
+    return null;
+  }
+  const meta = item.meta as
+    | {
+        reason?: unknown;
+        permission?: {
+          controlId?: unknown;
+          requestedModeId?: unknown;
+          effectiveModeId?: unknown;
+          userTurnId?: unknown;
+        };
+      }
+    | undefined;
+  if (meta?.reason !== 'permission_not_applied') {
+    return null;
+  }
+  const { controlId, requestedModeId, effectiveModeId, userTurnId } = meta.permission ?? {};
+  // All three or nothing: an acceptance that cannot name the control it is for
+  // would be a blanket one.
+  return typeof controlId === 'string' &&
+    typeof requestedModeId === 'string' &&
+    typeof effectiveModeId === 'string'
+    ? {
+        controlId,
+        requestedModeId,
+        effectiveModeId,
+        ...(typeof userTurnId === 'string' && userTurnId ? { userTurnId } : {}),
+      }
+    : null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Re-validates what a stopped turn claims it already accepted. */
+const readAcceptedWiderPermissions = (value: unknown): AcceptedWiderPermission[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const { controlId, requestedModeId, effectiveModeId } = entry;
+    return typeof controlId === 'string' &&
+      typeof requestedModeId === 'string' &&
+      typeof effectiveModeId === 'string'
+      ? [{ controlId, requestedModeId, effectiveModeId }]
+      : [];
+  });
+};
+
+/**
+ * The newest stopped turn still awaiting a decision, or null.
+ *
+ * A user entry newer than the notice supersedes it: the user moved on, and
+ * replaying the old turn would inject it out of order behind whatever they
+ * sent. The same rule the capacity retry uses.
+ */
+export const findPermissionNotAppliedRetryTarget = (
+  history: readonly RetryHistoryEntry[] | null | undefined
+): PermissionNotAppliedRetryTarget | null => {
+  if (!history) {
+    return null;
+  }
+  let noticeIndex = -1;
+  let permission: PermissionNotAppliedNotice | null = null;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (!entry) continue;
+    if (entry.role === 'user') {
+      return null;
+    }
+    const found = entry.items?.map(readPermissionMeta).find((value) => value !== null) ?? null;
+    if (found) {
+      noticeIndex = index;
+      permission = found;
+      break;
+    }
+  }
+  if (noticeIndex < 0 || !permission) {
+    return null;
+  }
+
+  /* The notice names its own turn, so it is found by id. Adjacency is the
+     fallback for notices written before that field existed: it attaches to
+     whatever user entry sits above, which is the right guess only when nothing
+     rewrote history between the failure and the notice landing. */
+  for (let index = noticeIndex - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (!entry || entry.role !== 'user') continue;
+    if (permission.userTurnId !== undefined && entry.id !== permission.userTurnId) continue;
+    const inputConfig = isRecord(entry.inputConfig) ? entry.inputConfig : undefined;
+    const inputBlocks = Array.isArray(inputConfig?.inputBlocks)
+      ? (inputConfig.inputBlocks as SessionInputBlock[])
+      : [];
+    if (inputBlocks.length === 0) {
+      // Without the frozen blocks there is nothing to replay faithfully, and
+      // reconstructing from the rendered items would risk sending something
+      // other than what that turn ran.
+      return null;
+    }
+    return {
+      noticeId: history[noticeIndex]?.id ?? '',
+      disclosed: permission,
+      previouslyAccepted: readAcceptedWiderPermissions(inputConfig?.acceptWiderPermissions),
+      userTurnId: entry.id,
+      inputBlocks,
+      ...(typeof inputConfig?.modeId === 'string' ? { modeId: inputConfig.modeId } : {}),
+      ...(typeof inputConfig?.modelId === 'string' ? { modelId: inputConfig.modelId } : {}),
+      ...(isRecord(inputConfig?.configOptionValues)
+        ? {
+            configOptionValues: inputConfig.configOptionValues as Record<
+              string,
+              AcpConfigOptionValue
+            >,
+          }
+        : {}),
+      ...(typeof inputConfig?.agentRoleId === 'string' || inputConfig?.agentRoleId === null
+        ? { agentRoleId: inputConfig.agentRoleId as AgentRoleId | null }
+        : {}),
+      ...(typeof inputConfig?.agentRoleRevision === 'number'
+        ? { agentRoleRevision: inputConfig.agentRoleRevision }
+        : {}),
+      ...(Array.isArray(inputConfig?.mcpServerIds)
+        ? { mcpServerIds: inputConfig.mcpServerIds as string[] }
+        : {}),
+      ...(typeof inputConfig?.taskToolsEnabled === 'boolean'
+        ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
+        : {}),
+      ...(Array.isArray(inputConfig?.issuePRMentions)
+        ? { issuePRMentions: inputConfig.issuePRMentions as unknown[] }
+        : {}),
+    };
+  }
+  return null;
+};
+
+/** What the failure notice needs to render its one-time acceptance action. */
+export type PermissionRetryControl = {
+  noticeId: string;
+  disclosed: AcceptedWiderPermission;
+  pending: boolean;
+  canRetry: boolean;
+  retry: () => void;
+};
+
+/**
+ * Runs an action at most once at a time.
+ *
+ * The ref closes the double-click window before the first `await`; `pending`
+ * only drives the button's disabled state, and React would not have re-rendered
+ * in time to stop the second click. The flag is always cleared, so a failed
+ * attempt leaves the action usable — the alternative is a permanently dead
+ * button on the one turn the user is trying to recover.
+ */
+export const useOneShotAction = (
+  action: () => Promise<void>
+): { pending: boolean; run: () => void } => {
+  const inFlightRef = useRef(false);
+  const [pending, setPending] = useState(false);
+  const actionRef = useRef(action);
+  actionRef.current = action;
+
+  const run = useCallback(() => {
+    if (inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+    setPending(true);
+    void actionRef
+      .current()
+      .catch(() => undefined)
+      .finally(() => {
+        inFlightRef.current = false;
+        setPending(false);
+      });
+  }, []);
+
+  return { pending, run };
+};

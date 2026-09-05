@@ -2080,7 +2080,10 @@ describe('SessionExecutionService', () => {
         // Per-model reasoning efforts: absent for this agent, which publishes no
         // legacy `model[effort]` combination list.
         undefined,
-        true
+        true,
+        // The trailing options bag: this response names no current model and
+        // carries no `_meta` declaration, so there is nothing to record.
+        {}
       )
     );
   });

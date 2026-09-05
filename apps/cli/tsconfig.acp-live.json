@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["tests/e2e/acp-runtime-contract.e2e.test.ts"],
+  "exclude": ["node_modules"]
+}

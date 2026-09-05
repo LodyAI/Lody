@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -170,7 +171,13 @@ export function ConfigOptionSelectors({
   return (
     <>
       {selectors.map((selector) =>
-        selector.type === 'select' ? (
+        selector.availability ? (
+          <AcpControlAvailability
+            key={selector.configId}
+            selector={selector}
+            value={values[selector.configId]}
+          />
+        ) : selector.type === 'select' ? (
           <AcpSessionSelect
             key={selector.configId}
             tone={tone}

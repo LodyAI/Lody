@@ -1,6 +1,7 @@
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
+  AcceptedWiderPermissionsSchema,
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
@@ -1977,6 +1978,13 @@ export class SessionDispatchWatcher {
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
+        // Only an explicit `true` travels, and only with the turn that carries
+        // it: this is one-time informed acceptance of a wider permission, so a
+        // rebuild that dropped it would stop the very turn the user just
+        // accepted, and one that defaulted it would accept for every turn.
+        ...(entry.inputConfig?.acceptWiderPermissions?.length
+          ? { acceptWiderPermissions: entry.inputConfig.acceptWiderPermissions }
+          : {}),
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
       userTurnId: entry.id,
@@ -2021,6 +2029,9 @@ export class SessionDispatchWatcher {
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
+        ...(entry.inputConfig?.acceptWiderPermissions?.length
+          ? { acceptWiderPermissions: entry.inputConfig.acceptWiderPermissions }
+          : {}),
         resume: entry.inputConfig?.resume,
       },
       worktreeSetup: launchConfig?.worktreeSetup,
@@ -2120,6 +2131,16 @@ export class SessionDispatchWatcher {
         agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
         agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
+        // A queued turn keeps the acceptance it was queued with; promotion must
+        // not quietly turn it back into a turn that will be stopped.
+        // The queued value crosses a CRDT, so it is re-validated rather than
+        // trusted: a malformed acceptance must read as no acceptance.
+        ...(() => {
+          const parsed = AcceptedWiderPermissionsSchema.safeParse(
+            queuedItem.acpSessionConfig?.acceptWiderPermissions
+          );
+          return parsed.success ? { acceptWiderPermissions: parsed.data } : {};
+        })(),
         resume: resolveResumableAcpSessionId(meta),
       });
       const pendingEntry = buildPendingUserHistoryEntry({

@@ -277,7 +277,41 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
+
+/** What an agent says one model can do, for controls it rebuilds per model. */
+export type DeclaredModelCapability = {
+  /** Reasoning-effort values this model accepts. */
+  effortValues?: string[];
+  /** Whether this model offers the fast toggle at all. */
+  fastMode?: boolean;
+};
+
+/**
+ * An agent's own statement about its models, from the Lody `_meta` extension on
+ * `session/new`.
+ *
+ * This is the only evidence that can say a model does NOT have a control. A
+ * capability snapshot cannot: it describes whichever model was current when it
+ * was captured, so an option missing from it means nothing for another model.
+ * Both builtin agents already hold this data when they build that snapshot —
+ * Codex reads `additionalSpeedTiers` and `supportedReasoningEfforts` off its
+ * model catalog, Claude off `ModelInfo` — and until now dropped it.
+ *
+ * SELF-declared, deliberately: it is the agent describing itself, not Lody
+ * vouching for it. It may shape menus and offline answers; it may never grant
+ * permission, and a live disagreement still wins.
+ */
+export type DeclaredModelCapabilities = {
+  version: 1;
+  models: Record<string, DeclaredModelCapability>;
+  /** When Lody received it. A statement about a catalog is not timeless. */
+  receivedAt: number;
+  /** Adapter/runtime identity it was received under. */
+  sourceVersion?: string;
+  /** Producer's own catalog revision, for transport throttling. */
+  producerRevision?: string;
+};
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -305,6 +339,16 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * The model `configOptions` was captured under.
+   *
+   * Stored rather than recovered from the model option's `currentValue`: every
+   * reader needs it to know what the snapshot is a snapshot OF, and inferring
+   * it at each call site is how a snapshot comes to be read as a catalog.
+   */
+  measuredForModelId?: string;
+  /** The agent's own per-model statement, when it publishes one. */
+  declaredModelCapabilities?: DeclaredModelCapabilities;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
@@ -1093,6 +1137,7 @@ export type ChatFailedReason =
   // HTTP 400), which would otherwise be recorded as an ordinary completion.
   | 'agent_no_output'
   | 'turn_pre_prompt_failed'
+  | 'permission_not_applied'
   | 'message_delivery_failed'
   | 'machine_access_denied' // requester is not authorized to use this machine (definitive backend deny)
   // ACP RPC errors (from @agentclientprotocol/sdk)
@@ -1121,6 +1166,12 @@ export type ChatFailedMeta = {
   code?: ChatFailedCode;
   /** Human-readable error message */
   message?: string;
+  /**
+   * `permission_not_applied` only: the mode the turn asked for and the wider one
+   * the agent reported. Structured so the notice can name both instead of the
+   * client parsing them back out of `message`.
+   */
+  permission?: PermissionNotAppliedNotice;
 };
 
 /**
@@ -1546,6 +1597,29 @@ export type ToolCallContent =
 
 export type ACPSessionId = string & { __brand: 'ACPSessionId' };
 
+/**
+ * The stopped turn's identity alongside the difference that stopped it.
+ *
+ * The client builds its acceptance from this notice, so the notice has to say
+ * WHICH turn it belongs to. Reading "the nearest user entry above" instead
+ * attaches the acceptance to whatever landed last — another client's turn, or
+ * an edit-and-resend that rewrote history between the failure and the notice —
+ * and if that prompt happens to make the same permission selection it runs with
+ * an acceptance nobody gave it.
+ */
+export type PermissionNotAppliedNotice = AcceptedWiderPermission & {
+  /** The turn this stop belongs to. Absent on notices written before this field. */
+  userTurnId?: string;
+};
+
+/** The one permission difference a user was shown and chose to run with. */
+export type AcceptedWiderPermission = {
+  /** The control it was disclosed for: a config option id, or the mode selector. */
+  controlId: string;
+  requestedModeId: string;
+  effectiveModeId: string;
+};
+
 export type IssuePRMention = {
   type: 'issue' | 'pr';
   title: string;
@@ -1570,6 +1644,23 @@ export type ACPSessionConfig = {
   mcpServerIds?: McpServerId[];
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
+  /**
+   * One-time informed acceptance, scoped to the turn that carries it — never
+   * inherited, never a default.
+   *
+   * Each entry names one exact difference the user was shown, because a bare
+   * "yes" would also accept differences they never saw: the agent may have
+   * moved further by the time the turn re-runs, and a second permission control
+   * may have widened alongside the one in the notice.
+   *
+   * It is a LIST because those differences are disclosed one at a time. Two
+   * controls widening at once produce two stops, and a replay that carried only
+   * the newest acceptance would drop the previous one and land back on the
+   * first stop — the user would alternate between two notices forever with no
+   * way through. Each entry is still matched exactly, so accumulating them
+   * grants nothing beyond what was individually shown and accepted.
+   */
+  acceptWiderPermissions?: AcceptedWiderPermission[];
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

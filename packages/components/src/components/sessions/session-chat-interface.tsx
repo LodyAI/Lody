@@ -105,6 +105,7 @@ import {
   isSessionGoalCleared,
   isSessionGoalActive,
   normalizeSessionInputBlocks,
+  deriveTurnInputConfigForNewTurn,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
@@ -211,6 +212,17 @@ import {
   CAPACITY_RETRY_CONTINUATION_PROMPT,
   useCapacityAutoRetry,
 } from './use-capacity-auto-retry';
+import {
+  findPermissionNotAppliedRetryTarget,
+  useOneShotAction,
+  type PermissionRetryControl,
+} from '@/lib/permission-not-applied-retry';
+import {
+  applyTurnScopedOverrides,
+  buildPermissionRetryOverrides,
+  pickTurnScopedOverrides,
+  type TurnScopedOverrides,
+} from '@/lib/turn-scoped-overrides';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -1853,7 +1865,7 @@ export type DispatchInputBlocksOptions = {
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
   /** Role identity frozen beside this Turn's run config; null is explicit None. */
   agentRole?: SessionTurnAgentRoleSelection;
-};
+} & TurnScopedOverrides;
 
 function buildEditedMessageQueueItem(
   item: MessageQueueItem,
@@ -1881,13 +1893,18 @@ function buildEditedMessageQueueItem(
     };
   }
 
+  // Editing the text makes this a different prompt, so the one-time permission
+  // acceptance the queued turn carried does not follow it — the same rule
+  // `deriveTurnInputConfigForNewTurn` applies, written out here because the
+  // queued config is its own nominal type.
+  const { acceptWiderPermissions: _notCarried, ...carriedConfig } = item.acpSessionConfig;
   return {
     ...item,
     task: nextTask || imageOnlyLabel,
     isEditing: false,
     editingStartedAt: undefined,
     acpSessionConfig: {
-      ...item.acpSessionConfig,
+      ...carriedConfig,
       prompt: nextTask,
       inputBlocks: nextInputBlocks.length > 0 ? nextInputBlocks : undefined,
     },
@@ -2947,14 +2964,17 @@ export const SessionChatInterface = memo(
           inputBlocks.push({ type: 'text', text: nextText });
         }
 
-        const originalConfig = normalizeSessionTurnInputConfig(message.inputConfig) ?? {};
-        const inputConfig: SessionTurnInputConfig = {
-          ...originalConfig,
-          prompt: extractPromptPreviewFromInputBlocks(inputBlocks),
-          inputBlocks,
-          cliType: session.cliType,
-          agentType: session.agentType,
-        };
+        // A new turn id and a changed prompt: the one-time permission acceptance
+        // the user gave the ORIGINAL prompt does not travel with it.
+        const inputConfig: SessionTurnInputConfig = deriveTurnInputConfigForNewTurn(
+          message.inputConfig,
+          {
+            prompt: extractPromptPreviewFromInputBlocks(inputBlocks),
+            inputBlocks,
+            cliType: session.cliType,
+            agentType: session.agentType,
+          }
+        );
         const replacementUserTurnId = uuidv4();
         try {
           const response = await runtime.requestSessionEditAndResend(
@@ -3533,7 +3553,7 @@ export const SessionChatInterface = memo(
     const enqueueInputBlocks = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
-        options?: {
+        options: {
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
@@ -3542,6 +3562,13 @@ export const SessionChatInterface = memo(
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
           agentRole?: SessionTurnAgentRoleSelection;
+          /**
+           * Required, not optional: every send route rebuilds the turn config
+           * from composer state, and a replay must override it. Making the
+           * carrier mandatory is what turns "this route forgot the acceptance"
+           * into a compile error instead of a turn that is stopped again.
+           */
+          turnScoped: TurnScopedOverrides;
         }
       ): Promise<boolean> => {
         try {
@@ -3555,21 +3582,27 @@ export const SessionChatInterface = memo(
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
-          const inputConfig = buildSessionTurnInputConfig({
-            inputBlocks,
-            cliType: session.cliType,
-            agentType: session.agentType,
-            modeId: turnModeId,
-            modelId: turnModelId,
-            configOptionValues: turnConfigOptionValues,
-            issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
-            agentRoleId:
-              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
-            agentRoleRevision: options?.agentRole?.agentRoleRevision,
-            resume: session.acpSessionId ?? undefined,
-          });
+          const inputConfig = buildSessionTurnInputConfig(
+            applyTurnScopedOverrides(
+              {
+                inputBlocks,
+                cliType: session.cliType,
+                agentType: session.agentType,
+                modeId: turnModeId,
+                modelId: turnModelId,
+                configOptionValues: turnConfigOptionValues,
+                issuePRMentions,
+                mcpServerIds: mcpSelection.selectedIds,
+                taskToolsEnabled: tasksEnabled,
+                agentRoleId:
+                  options?.agentRole?.agentRoleId ??
+                  (options?.agentRole === null ? null : undefined),
+                agentRoleRevision: options?.agentRole?.agentRoleRevision,
+                resume: session.acpSessionId ?? undefined,
+              },
+              options.turnScoped
+            )
+          );
 
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
@@ -3682,7 +3715,14 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'acceptWiderPermissions'
+          | 'mcpServerIdsOverride'
+          | 'taskToolsEnabledOverride'
+          | 'issuePRMentionsOverride'
         >
       ): Promise<boolean> => {
         try {
@@ -3696,21 +3736,27 @@ export const SessionChatInterface = memo(
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
-          const inputConfig = buildSessionTurnInputConfig({
-            inputBlocks,
-            cliType: session.cliType,
-            agentType: session.agentType,
-            modeId: turnModeId,
-            modelId: turnModelId,
-            configOptionValues: turnConfigOptionValues,
-            issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
-            agentRoleId:
-              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
-            agentRoleRevision: options?.agentRole?.agentRoleRevision,
-            resume: session.acpSessionId ?? undefined,
-          });
+          const inputConfig = buildSessionTurnInputConfig(
+            applyTurnScopedOverrides(
+              {
+                inputBlocks,
+                cliType: session.cliType,
+                agentType: session.agentType,
+                modeId: turnModeId,
+                modelId: turnModelId,
+                configOptionValues: turnConfigOptionValues,
+                issuePRMentions,
+                mcpServerIds: mcpSelection.selectedIds,
+                taskToolsEnabled: tasksEnabled,
+                agentRoleId:
+                  options?.agentRole?.agentRoleId ??
+                  (options?.agentRole === null ? null : undefined),
+                agentRoleRevision: options?.agentRole?.agentRoleRevision,
+                resume: session.acpSessionId ?? undefined,
+              },
+              pickTurnScopedOverrides(options)
+            )
+          );
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
             prompt: inputConfig.prompt,
             inputBlocks,
@@ -3720,8 +3766,13 @@ export const SessionChatInterface = memo(
             modelId: inputConfig.modelId ?? undefined,
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...mcpSelection.selectedIds],
+            // From the built config, not the composer: a queued replay must
+            // keep the stopped turn's tool reach and its acceptance.
+            mcpServerIds: [...(inputConfig.mcpServerIds ?? mcpSelection.selectedIds)],
             taskToolsEnabled: inputConfig.taskToolsEnabled,
+            ...(inputConfig.acceptWiderPermissions?.length
+              ? { acceptWiderPermissions: inputConfig.acceptWiderPermissions }
+              : {}),
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
@@ -3779,7 +3830,14 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'acceptWiderPermissions'
+          | 'mcpServerIdsOverride'
+          | 'taskToolsEnabledOverride'
+          | 'issuePRMentionsOverride'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3790,6 +3848,7 @@ export const SessionChatInterface = memo(
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          turnScoped: pickTurnScopedOverrides(options),
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -3855,6 +3914,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            ...pickTurnScopedOverrides(options),
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -3876,6 +3936,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            turnScoped: pickTurnScopedOverrides(options),
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -3905,6 +3966,7 @@ export const SessionChatInterface = memo(
           modelIdOverride: turnModelId,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          ...pickTurnScopedOverrides(options),
         });
         if (!accepted) {
           captureSessionEvent('session/message_submit_failed', {
@@ -3987,6 +4049,90 @@ export const SessionChatInterface = memo(
           t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
         ),
     });
+
+    /* The daemon stopped a turn because the agent reported a wider permission
+       than it asked for. The offer replays THAT turn — its frozen prompt, mode,
+       model, config values and Role — with a one-time acceptance, never the
+       composer's current selection. The flag rides this dispatch only: it is
+       written into the new turn's input config and into nothing that outlives
+       it, so the next ordinary send carries no acceptance at all. */
+    const permissionRetryTarget = useMemo(
+      () => findPermissionNotAppliedRetryTarget(sessionDoc?.history),
+      [sessionDoc?.history]
+    );
+    const handleRunWithAgentPermission = useCallback(async () => {
+      const target = permissionRetryTarget;
+      if (!target) {
+        return;
+      }
+      try {
+        const accepted = await dispatchInputBlocks(target.inputBlocks, {
+          modeIdOverride: target.modeId ?? null,
+          modelIdOverride: target.modelId ?? null,
+          configOptionValuesOverride: target.configOptionValues ?? {},
+          agentRole:
+            typeof target.agentRoleId === 'string' && target.agentRoleRevision !== undefined
+              ? { agentRoleId: target.agentRoleId, agentRoleRevision: target.agentRoleRevision }
+              : target.agentRoleId === null
+                ? null
+                : undefined,
+          // The offer is only shown while the agent is idle, so this is the
+          // route it takes; asking for it explicitly keeps the decision the
+          // user just made from being parked behind a queue.
+          forceDirect: true,
+          // Tool reach belonged to that turn too: replaying it with whatever the
+          // composer holds now would pair the old prompt with new permissions,
+          // and would silently drop an explicit empty MCP selection.
+          ...buildPermissionRetryOverrides(target),
+        });
+        if (!accepted) {
+          toast.error(
+            t('sessions.systemNotices.chatFailed.permissionRunFailed', 'Failed to start the turn')
+          );
+        }
+      } catch (error) {
+        console.warn('Failed to rerun the turn with the agent permission', {
+          sessionId: session.id,
+          userTurnId: target.userTurnId,
+          error,
+        });
+        toast.error(
+          t('sessions.systemNotices.chatFailed.permissionRunFailed', 'Failed to start the turn')
+        );
+      }
+    }, [dispatchInputBlocks, permissionRetryTarget, session.id, t]);
+
+    const { pending: permissionRetryPending, run: runWithAgentPermission } = useOneShotAction(
+      handleRunWithAgentPermission
+    );
+
+    const permissionRetry: PermissionRetryControl | null = useMemo(
+      () =>
+        permissionRetryTarget
+          ? {
+              noticeId: permissionRetryTarget.noticeId,
+              disclosed: permissionRetryTarget.disclosed,
+              pending: permissionRetryPending,
+              canRetry:
+                sessionDocReady &&
+                !isAgentBusy &&
+                !isMachineRemoved &&
+                !isArchivedSession &&
+                !isExternalHistoryRefreshing,
+              retry: runWithAgentPermission,
+            }
+          : null,
+      [
+        runWithAgentPermission,
+        isAgentBusy,
+        isArchivedSession,
+        isExternalHistoryRefreshing,
+        isMachineRemoved,
+        permissionRetryPending,
+        permissionRetryTarget,
+        sessionDocReady,
+      ]
+    );
 
     // Resend a user turn the missing-history recovery negatively acknowledged:
     // the row's "Not delivered" label opens a confirmation dialog that calls
@@ -5863,6 +6009,7 @@ export const SessionChatInterface = memo(
                           }
                           onResendUndelivered={handleResendUndelivered}
                           capacityRetry={capacityRetry ?? undefined}
+                          permissionRetry={permissionRetry ?? undefined}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={

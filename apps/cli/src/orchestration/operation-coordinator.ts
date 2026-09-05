@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 import type { RepoWatchHandle } from 'loro-repo';
 
 import {
+  deriveTurnInputConfigForNewTurn,
   buildMissingEmail,
   getServerNow,
   getSessionRoomId,
@@ -1011,8 +1012,11 @@ export class LodyOperationCoordinator {
       items: [item],
       fileDiff: [],
       finished: true,
+      // New `systemTurnId`, new prompt: the frozen turn's one-time permission
+      // acceptance stays with the turn it was given for, even in history that
+      // never dispatches — a nested Operation would freeze and copy it again.
       inputConfig: {
-        ...operation.frozenContinuationConfig.inputConfig,
+        ...deriveTurnInputConfigForNewTurn(operation.frozenContinuationConfig.inputConfig),
         prompt: completionText(operation),
         chainDepth: operation.initiatorChainDepth + 1,
       },

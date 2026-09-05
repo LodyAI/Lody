@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { useMemo, type ReactNode } from 'react';
 import { ListChecks, Zap, ZapOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +52,13 @@ export function MobileFastModeToggle({
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
     : false;
   if (!fastSelector) return null;
+  if (fastSelector.availability)
+    return (
+      <AcpControlAvailability
+        selector={fastSelector}
+        value={configOptionValues?.[fastSelector.configId]}
+      />
+    );
   return (
     <ToggleButton
       ariaLabel={fastSelector.label}
