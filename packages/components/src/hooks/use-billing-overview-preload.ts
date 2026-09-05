@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useCloudQuery } from '@lody/platform/react';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useAppCapability } from '@/lib/app-platform';
@@ -14,6 +14,9 @@ import {
 export function useBillingOverviewPreload(workspaceId: string | null): void {
   const billingAvailable = useAppCapability('billing');
   const { authSessionId } = useAuthenticatedConvex();
+  const previousWorkspaceAuthRef = useRef<{ workspaceId: string; authSessionId: string | null } | null>(
+    null
+  );
   const overview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
     billingAvailable && authSessionId && workspaceId ? { workspaceId } : 'skip'
@@ -21,6 +24,16 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
 
   useEffect(() => {
     if (!workspaceId) return;
+
+    const previousWorkspaceAuth = previousWorkspaceAuthRef.current;
+    if (
+      previousWorkspaceAuth?.workspaceId === workspaceId &&
+      previousWorkspaceAuth.authSessionId !== authSessionId
+    ) {
+      clearBillingOverviewCache(workspaceId);
+    }
+    previousWorkspaceAuthRef.current = { workspaceId, authSessionId };
+
     if (!billingAvailable) {
       clearBillingOverviewCache(workspaceId);
       return;

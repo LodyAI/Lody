@@ -36,13 +36,15 @@ function Probe({ workspaceId }: { workspaceId: string | null }) {
 describe('useBillingOverviewPreload', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let currentAuthSessionId: string | null;
 
   beforeEach(() => {
     localStorage.clear();
     useCloudQuery.mockReset();
     useAppCapability.mockReset();
     useAuthenticatedConvex.mockReset();
-    useAuthenticatedConvex.mockReturnValue({ authSessionId: 'session-1' });
+    currentAuthSessionId = 'session-1';
+    useAuthenticatedConvex.mockImplementation(() => ({ authSessionId: currentAuthSessionId }));
     useCloudQuery.mockReturnValue(undefined);
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -71,5 +73,25 @@ describe('useBillingOverviewPreload', () => {
     });
 
     expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
+  });
+
+  it('clears the workspace cache when the authenticated session changes', async () => {
+    useAppCapability.mockReturnValue(true);
+    writeBillingOverviewCache('workspace-1', 'session-1', OPTIMISTIC_BILLING_OVERVIEW);
+
+    await act(async () => {
+      root.render(createElement(Probe, { workspaceId: 'workspace-1' }));
+    });
+    expect(readBillingOverviewCache('workspace-1', 'session-1')).toMatchObject(
+      OPTIMISTIC_BILLING_OVERVIEW
+    );
+
+    currentAuthSessionId = 'session-2';
+    await act(async () => {
+      root.render(createElement(Probe, { workspaceId: 'workspace-1' }));
+    });
+
+    expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
+    expect(readBillingOverviewCache('workspace-1', 'session-2')).toBeNull();
   });
 });
