@@ -905,6 +905,28 @@ export class LodyOperationCoordinator {
           }
           try {
             await this.writeCompletionTurn(sessionDoc, operation, delivery);
+            const started = this.withStore((store) =>
+              store.startClaimedDeliveryExecution(
+                delivery.requesterSessionId,
+                delivery.operationId,
+                this.workerBootId,
+                attemptId
+              )
+            );
+            if (!started.started) {
+              this.withStore((store) =>
+                store.releaseDeliveryClaim(
+                  delivery.requesterSessionId,
+                  delivery.operationId,
+                  this.workerBootId,
+                  attemptId
+                )
+              );
+              this.options.logger.debug(
+                `[orchestration] Delivery ${delivery.deliveryId} execution start lost its claim`
+              );
+              return false;
+            }
           } catch (error) {
             this.withStore((store) =>
               store.releaseDeliveryClaim(
@@ -991,7 +1013,7 @@ export class LodyOperationCoordinator {
       'attempts_exhausted',
       {
         code: 'DELIVERY_ATTEMPTS_EXHAUSTED',
-        message: 'The completion continuation was interrupted twice and was not started again.',
+        message: 'The completion continuation did not settle after two delivery attempts.',
       },
       true
     );

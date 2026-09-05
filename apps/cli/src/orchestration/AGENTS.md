@@ -58,13 +58,18 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one
   boot id and starts only after the daemon supervisor confirms the previous child exited
   (foreground startup crosses the Host-lease barrier); and each attempt owns a fresh token.
+  Execution fields live in `delivery_execution_state`, not `deliveries`: stable binaries parse
+  `SELECT * FROM deliveries` strictly, so adding columns there makes a downgraded binary unable
+  to read the shared local database.
   Normal claims require no active token and never take over another owner. Paths that write
   a terminal continuation failure or consume without execution must acquire the same
   exclusive token first; the history write and token-matched consume happen while it is
   held. Once per Worker startup, the coordinator clears tokens owned by older boot ids
   without resetting the attempt count. Release and consume must match both the boot id and
   claim token. Claim contention exits before history or ACP
-  side effects and records no failure. Only the execution service's durable handled callback
+  side effects and records no failure. An execution claim does not spend the attempt budget;
+  increment it under the same token only after the completion Turn is durable and immediately
+  before entering the execution body. Only the execution service's durable handled callback
   may consume an execution claim; settlement carries no Assistant identity because the
   callback is already bound to that claim. Cancellation/interruption releases it. At most one
   recovery attempt is allowed; after two unsettled

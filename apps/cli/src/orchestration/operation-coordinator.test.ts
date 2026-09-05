@@ -49,6 +49,7 @@ const makeHarness = async (options?: {
   materializationFailuresBeforeSuccess?: number;
   materializationWritesBeforeFailure?: boolean;
   materializationWritesDocBeforeFailure?: boolean;
+  historyFailuresBeforeSuccess?: number;
   materializeTargetOverride?: () => Promise<void>;
   targetDocSync?: () => Promise<{
     history?: SessionHistoryInput[];
@@ -107,6 +108,7 @@ const makeHarness = async (options?: {
     ...(targetInputDurable ? ([[targetSessionId, targetMeta]] as const) : []),
   ]);
   const subscribers = new Map<SessionId, Set<() => void>>();
+  let historyUpdateAttempt = 0;
   const sessionDoc = (sessionId: SessionId) => ({
     mirror: {
       subscribe: (callback: () => void) => {
@@ -118,6 +120,12 @@ const makeHarness = async (options?: {
     },
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+      if (sessionId === requesterSessionId) {
+        historyUpdateAttempt += 1;
+        if (historyUpdateAttempt <= (options?.historyFailuresBeforeSuccess ?? 0)) {
+          throw new Error('transient history write failure');
+        }
+      }
       histories.set(sessionId, update(histories.get(sessionId) ?? []));
     },
   });
@@ -1227,7 +1235,7 @@ describe('LodyOperationCoordinator', () => {
           claimId: 'attempt-b',
           workerBootId: 'worker-b',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
     } finally {
       competitorStore.close();
     }
@@ -1303,6 +1311,14 @@ describe('LodyOperationCoordinator', () => {
           workerBootId: 'daemon-before-restart',
         })
       ).toMatchObject({ status: 'claimed' });
+      expect(
+        shutdownStore.startClaimedDeliveryExecution(
+          harness.requesterSessionId,
+          'review-round-1',
+          'daemon-before-restart',
+          'attempt-before-graceful-shutdown'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
       expect(
         shutdownStore.releaseDeliveryClaim(
           harness.requesterSessionId,
@@ -1545,6 +1561,14 @@ describe('LodyOperationCoordinator', () => {
           workerBootId: 'daemon-old',
         })
       ).toMatchObject({ status: 'claimed' });
+      expect(
+        oldStore.startClaimedDeliveryExecution(
+          harness.requesterSessionId,
+          'review-round-1',
+          'daemon-old',
+          'attempt-before-crash'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
     } finally {
       oldStore.close();
     }
@@ -1578,7 +1602,15 @@ describe('LodyOperationCoordinator', () => {
           claimId: 'attempt-a',
           workerBootId: 'worker-a',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        crashedStore.startClaimedDeliveryExecution(
+          harness.requesterSessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
       expect(
         crashedStore.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-b')
       ).toBe(1);
@@ -1587,7 +1619,15 @@ describe('LodyOperationCoordinator', () => {
           claimId: 'attempt-b',
           workerBootId: 'worker-b',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        crashedStore.startClaimedDeliveryExecution(
+          harness.requesterSessionId,
+          'review-round-1',
+          'worker-b',
+          'attempt-b'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 2 } });
     } finally {
       crashedStore.close();
     }
@@ -1635,7 +1675,7 @@ describe('LodyOperationCoordinator', () => {
             claimId: 'attempt-b',
             workerBootId: 'worker-b',
           })
-        ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+        ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
       } finally {
         competitorStore.close();
       }
@@ -1653,7 +1693,7 @@ describe('LodyOperationCoordinator', () => {
     try {
       expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
         state: 'pending',
-        attemptCount: 1,
+        attemptCount: 0,
         activeClaimId: 'attempt-b',
         activeClaimWorkerBootId: 'worker-b',
       });
@@ -1687,6 +1727,50 @@ describe('LodyOperationCoordinator', () => {
     } finally {
       finalStore.close();
     }
+  });
+
+  it('does not spend execution attempts when completion history is not durable', async () => {
+    const harness = await makeHarness({
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      historyFailuresBeforeSuccess: 2,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.wake('retry-first-history-failure');
+    await harness.coordinator.idle();
+
+    const beforeDurableHistory = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(
+        beforeDurableHistory.getDelivery(harness.requesterSessionId, 'review-round-1')
+      ).toMatchObject({
+        state: 'pending',
+        attemptCount: 0,
+      });
+    } finally {
+      beforeDurableHistory.close();
+    }
+
+    await harness.coordinator.wake('retry-after-history-recovers');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledTimes(3);
+    const finalStore = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(finalStore.getDelivery(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        state: 'consumed',
+        attemptCount: 1,
+      });
+    } finally {
+      finalStore.close();
+    }
+    const completion = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.role === 'system')
+      ?.items?.find((item) => item.type === 'operation_completion');
+    expect(completion).not.toHaveProperty('continuation');
   });
 
   it('recovers once when execution exits after claim without reporting a settlement', async () => {

@@ -6,7 +6,7 @@
 export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'attempting' | 'finalizing' | 'consumed';
+  delivery: 'absent' | 'pending' | 'claimed' | 'attempting' | 'finalizing' | 'consumed';
   deliveryClaimOwner: 'none' | 'current' | 'previous';
   deliveryAttempts: number;
   activeTurn: 'none' | 'user' | 'delivery';
@@ -26,6 +26,8 @@ export type OrchestrationModelAction =
   | 'deadline'
   | 'enqueue_user'
   | 'schedule'
+  | 'start_turn'
+  | 'history_write_fail'
   | 'complete_turn'
   | 'fail_turn'
   | 'interrupt_turn'
@@ -106,15 +108,36 @@ export const stepOrchestrationModel = (
           next.delivery = 'finalizing';
           next.deliveryClaimOwner = 'current';
         } else {
-          next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
-          next.delivery = 'attempting';
+          next.delivery = 'claimed';
           next.deliveryClaimOwner = 'current';
-          if (next.deliveryAttempts === 0) {
-            next.chainDepth += 1;
-          }
-          next.deliveryAttempts += 1;
           next.activeTurn = 'delivery';
         }
+      }
+      break;
+    case 'start_turn':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'claimed' &&
+        next.deliveryClaimOwner === 'current' &&
+        next.deliveryAttempts < 2
+      ) {
+        next.completionTurnWrites = Math.max(1, next.completionTurnWrites);
+        next.delivery = 'attempting';
+        if (next.deliveryAttempts === 0) {
+          next.chainDepth += 1;
+        }
+        next.deliveryAttempts += 1;
+      }
+      break;
+    case 'history_write_fail':
+      if (
+        next.activeTurn === 'delivery' &&
+        next.delivery === 'claimed' &&
+        next.deliveryClaimOwner === 'current'
+      ) {
+        next.delivery = 'pending';
+        next.deliveryClaimOwner = 'none';
+        next.activeTurn = 'none';
       }
       break;
     case 'complete_turn':
@@ -147,7 +170,9 @@ export const stepOrchestrationModel = (
       break;
     case 'restart':
       if (
-        (next.delivery === 'attempting' || next.delivery === 'finalizing') &&
+        (next.delivery === 'claimed' ||
+          next.delivery === 'attempting' ||
+          next.delivery === 'finalizing') &&
         next.deliveryClaimOwner === 'current'
       ) {
         next.deliveryClaimOwner = 'previous';
@@ -156,7 +181,9 @@ export const stepOrchestrationModel = (
       break;
     case 'recover_orphans':
       if (
-        (next.delivery === 'attempting' || next.delivery === 'finalizing') &&
+        (next.delivery === 'claimed' ||
+          next.delivery === 'attempting' ||
+          next.delivery === 'finalizing') &&
         next.deliveryClaimOwner === 'previous'
       ) {
         next.delivery = 'pending';
@@ -189,11 +216,17 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.operation === 'finished' && state.targetInput === 'retry_scheduled') {
     throw new Error('a terminal Operation retained a materialization retry');
   }
-  if (state.activeTurn === 'delivery' && state.delivery !== 'attempting') {
+  if (
+    state.activeTurn === 'delivery' &&
+    state.delivery !== 'claimed' &&
+    state.delivery !== 'attempting'
+  ) {
     throw new Error('a Delivery continuation is active without a durable attempt claim');
   }
   if (
-    (state.delivery === 'attempting' || state.delivery === 'finalizing') !==
+    (state.delivery === 'claimed' ||
+      state.delivery === 'attempting' ||
+      state.delivery === 'finalizing') !==
     (state.deliveryClaimOwner !== 'none')
   ) {
     throw new Error('Delivery claim state and its fenced owner disagree');
@@ -219,6 +252,8 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'deadline',
     'enqueue_user',
     'schedule',
+    'start_turn',
+    'history_write_fail',
     'complete_turn',
     'fail_turn',
     'interrupt_turn',

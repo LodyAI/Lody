@@ -79,6 +79,25 @@ describe('LodyOperationStore', () => {
     const legacy = new Database(dbPath);
     try {
       legacy.exec(`
+        CREATE TABLE operations (
+          workspace_id TEXT NOT NULL,
+          owner_machine_id TEXT NOT NULL,
+          requester_session_id TEXT NOT NULL,
+          requester_user_id TEXT NOT NULL,
+          operation_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          canonical_command_json TEXT NOT NULL,
+          frozen_config_json TEXT NOT NULL,
+          initiator_chain_depth INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          deadline_at TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('active', 'finished')),
+          items_json TEXT NOT NULL,
+          completion_json TEXT,
+          finished_at TEXT,
+          PRIMARY KEY (requester_session_id, operation_id)
+        );
         CREATE TABLE deliveries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
           workspace_id TEXT NOT NULL,
@@ -89,7 +108,22 @@ describe('LodyOperationStore', () => {
           state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
           initiator_chain_depth INTEGER NOT NULL,
           completion_json TEXT NOT NULL,
-          consumed_at TEXT
+          consumed_at TEXT,
+          FOREIGN KEY (requester_session_id, operation_id)
+            REFERENCES operations (requester_session_id, operation_id)
+            ON DELETE CASCADE
+        );
+        INSERT INTO operations (
+          workspace_id, owner_machine_id, requester_session_id, requester_user_id,
+          operation_id, kind, fingerprint, canonical_command_json, frozen_config_json,
+          initiator_chain_depth, created_at, deadline_at, state, items_json,
+          completion_json, finished_at
+        ) VALUES (
+          'workspace-1', 'machine-1', 'legacy-requester', 'user-1',
+          'legacy-operation', 'session_chat', 'legacy-fingerprint', '{}',
+          '{"inputConfig":{}}', 0, '2026-07-20T00:00:00.000Z',
+          '2026-07-20T01:00:00.000Z', 'finished', '[]',
+          '{"type":"cancelled"}', '2026-07-20T00:01:00.000Z'
         );
         INSERT INTO deliveries (
           workspace_id, requester_session_id, operation_id, delivery_id,
@@ -115,6 +149,36 @@ describe('LodyOperationStore', () => {
       ]);
     } finally {
       migrated.close();
+    }
+
+    const legacyReader = new Database(dbPath, { readonly: true });
+    try {
+      const columns = legacyReader.pragma('table_info(deliveries)') as Array<{ name: string }>;
+      expect(columns.map((column) => column.name)).toEqual([
+        'sequence',
+        'workspace_id',
+        'requester_session_id',
+        'operation_id',
+        'delivery_id',
+        'system_turn_id',
+        'state',
+        'initiator_chain_depth',
+        'completion_json',
+        'consumed_at',
+      ]);
+      expect(
+        legacyReader
+          .prepare(
+            'SELECT attempt_count, active_claim_id, active_claim_worker_boot_id FROM delivery_execution_state WHERE requester_session_id = ? AND operation_id = ?'
+          )
+          .get('legacy-requester', 'legacy-operation')
+      ).toEqual({
+        attempt_count: 1,
+        active_claim_id: null,
+        active_claim_worker_boot_id: null,
+      });
+    } finally {
+      legacyReader.close();
     }
 
     const reopened = new LodyOperationStore(dbPath);
@@ -253,7 +317,23 @@ describe('LodyOperationStore', () => {
           claimId: 'attempt-1',
           workerBootId: 'daemon-1',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'stale-attempt'
+        )
+      ).toMatchObject({ started: false, delivery: { attemptCount: 0 } });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
       expect(
         store.consumeClaimedDelivery(
           'requester-1' as SessionId,
@@ -358,7 +438,7 @@ describe('LodyOperationStore', () => {
           claimId: 'attempt-b',
           workerBootId: 'worker-b',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
     } finally {
       store.close();
     }
@@ -375,7 +455,15 @@ describe('LodyOperationStore', () => {
           claimId: 'attempt-1',
           workerBootId: 'daemon-1',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-1'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
       expect(
         store.releaseDeliveryClaim(
           'requester-1' as SessionId,
@@ -389,7 +477,15 @@ describe('LodyOperationStore', () => {
           claimId: 'attempt-2',
           workerBootId: 'daemon-1',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 2 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'daemon-1',
+          'attempt-2'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 2 } });
       expect(
         store.releaseDeliveryClaim(
           'requester-1' as SessionId,
@@ -438,7 +534,15 @@ describe('LodyOperationStore', () => {
           claimId: 'attempt-a',
           workerBootId: 'worker-a',
         })
-      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 1 } });
+      ).toMatchObject({ status: 'claimed', delivery: { attemptCount: 0 } });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-a',
+          'attempt-a'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 1 } });
       expect(
         store.claimDeliveryExecution('requester-1' as SessionId, 'review-round-1', {
           claimId: 'attempt-b-before-barrier',
@@ -461,8 +565,16 @@ describe('LodyOperationStore', () => {
         })
       ).toMatchObject({
         status: 'claimed',
-        delivery: { attemptCount: 2, activeClaimWorkerBootId: 'worker-b' },
+        delivery: { attemptCount: 1, activeClaimWorkerBootId: 'worker-b' },
       });
+      expect(
+        store.startClaimedDeliveryExecution(
+          'requester-1' as SessionId,
+          'review-round-1',
+          'worker-b',
+          'attempt-b'
+        )
+      ).toMatchObject({ started: true, delivery: { attemptCount: 2 } });
 
       expect(
         store.releaseDeliveryClaim(

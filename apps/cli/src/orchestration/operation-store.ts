@@ -172,14 +172,32 @@ const DeliveryRowSchema = z
     delivery_id: z.string(),
     system_turn_id: z.string(),
     state: z.enum(['pending', 'consumed']),
-    attempt_count: z.number().int().nonnegative(),
-    active_claim_id: z.string().nullable(),
-    active_claim_worker_boot_id: z.string().nullable(),
     initiator_chain_depth: z.number().int().nonnegative(),
     completion_json: z.string(),
     consumed_at: z.string().nullable(),
   })
   .strict();
+
+const DeliveryReadRowSchema = DeliveryRowSchema.extend({
+  attempt_count: z.number().int().nonnegative(),
+  active_claim_id: z.string().nullable(),
+  active_claim_worker_boot_id: z.string().nullable(),
+}).strict();
+
+const DELIVERY_READ_COLUMNS = `
+  deliveries.sequence,
+  deliveries.workspace_id,
+  deliveries.requester_session_id,
+  deliveries.operation_id,
+  deliveries.delivery_id,
+  deliveries.system_turn_id,
+  deliveries.state,
+  deliveries.initiator_chain_depth,
+  deliveries.completion_json,
+  deliveries.consumed_at,
+  delivery_execution_state.attempt_count,
+  delivery_execution_state.active_claim_id,
+  delivery_execution_state.active_claim_worker_boot_id`;
 
 export class LodyOperationStoreError extends Error {
   constructor(
@@ -695,6 +713,13 @@ export class LodyOperationStore {
           current.initiatorChainDepth,
           JSON.stringify(durableCompletion)
         );
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO delivery_execution_state (
+             requester_session_id, operation_id, attempt_count
+           ) VALUES (?, ?, 0)`
+        )
+        .run(current.requesterSessionId, current.operationId);
       const updated = this.getStored(requesterSessionId, operationId);
       if (!updated) {
         throw new Error('Finished Operation disappeared during transaction.');
@@ -732,16 +757,22 @@ export class LodyOperationStore {
     const rows = requesterSessionId
       ? this.db
           .prepare(
-            `SELECT * FROM deliveries
-             WHERE workspace_id = ? AND requester_session_id = ? AND state = 'pending'
-             ORDER BY sequence ASC`
+            `SELECT ${DELIVERY_READ_COLUMNS}
+             FROM deliveries
+             JOIN delivery_execution_state USING (requester_session_id, operation_id)
+             WHERE deliveries.workspace_id = ?
+               AND deliveries.requester_session_id = ?
+               AND deliveries.state = 'pending'
+             ORDER BY deliveries.sequence ASC`
           )
           .all(workspaceId, requesterSessionId)
       : this.db
           .prepare(
-            `SELECT * FROM deliveries
-             WHERE workspace_id = ? AND state = 'pending'
-             ORDER BY sequence ASC`
+            `SELECT ${DELIVERY_READ_COLUMNS}
+             FROM deliveries
+             JOIN delivery_execution_state USING (requester_session_id, operation_id)
+             WHERE deliveries.workspace_id = ? AND deliveries.state = 'pending'
+             ORDER BY deliveries.sequence ASC`
           )
           .all(workspaceId);
     return rows.map((row) => this.decodeDelivery(row));
@@ -750,8 +781,10 @@ export class LodyOperationStore {
   getDelivery(requesterSessionId: SessionId, operationId: string): StoredLodyDelivery {
     const row = this.db
       .prepare(
-        `SELECT * FROM deliveries
-         WHERE requester_session_id = ? AND operation_id = ?`
+        `SELECT ${DELIVERY_READ_COLUMNS}
+         FROM deliveries
+         JOIN delivery_execution_state USING (requester_session_id, operation_id)
+         WHERE deliveries.requester_session_id = ? AND deliveries.operation_id = ?`
       )
       .get(requesterSessionId, operationId);
     if (row === undefined) {
@@ -768,17 +801,22 @@ export class LodyOperationStore {
   recoverOrphanedDeliveryClaims(workspaceId: WorkspaceId, workerBootId: string): number {
     const result = this.db
       .prepare(
-        `UPDATE deliveries
+        `UPDATE delivery_execution_state
          SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
-         WHERE workspace_id = ? AND state = 'pending'
-           AND (active_claim_id IS NOT NULL OR active_claim_worker_boot_id IS NOT NULL)
+         WHERE (active_claim_id IS NOT NULL OR active_claim_worker_boot_id IS NOT NULL)
            AND (
              active_claim_id IS NULL
              OR active_claim_worker_boot_id IS NULL
              OR active_claim_worker_boot_id <> ?
+           )
+           AND EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+               AND deliveries.operation_id = delivery_execution_state.operation_id
+               AND deliveries.workspace_id = ? AND deliveries.state = 'pending'
            )`
       )
-      .run(workspaceId, workerBootId);
+      .run(workerBootId, workspaceId);
     return result.changes;
   }
 
@@ -804,12 +842,17 @@ export class LodyOperationStore {
       }
       const result = this.db
         .prepare(
-          `UPDATE deliveries
-           SET attempt_count = attempt_count + 1,
-               active_claim_id = ?, active_claim_worker_boot_id = ?
-           WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
+          `UPDATE delivery_execution_state
+           SET active_claim_id = ?, active_claim_worker_boot_id = ?
+           WHERE requester_session_id = ? AND operation_id = ?
              AND attempt_count < ?
-             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL`
+             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
+             AND EXISTS (
+               SELECT 1 FROM deliveries
+               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+                 AND deliveries.operation_id = delivery_execution_state.operation_id
+                 AND deliveries.state = 'pending'
+             )`
         )
         .run(
           claim.claimId,
@@ -828,6 +871,36 @@ export class LodyOperationStore {
       }
       return {
         status: 'claimed',
+        delivery: this.getDelivery(requesterSessionId, operationId),
+      };
+    });
+    return transaction.immediate();
+  }
+
+  startClaimedDeliveryExecution(
+    requesterSessionId: SessionId,
+    operationId: string,
+    workerBootId: string,
+    claimId: string
+  ): { started: boolean; delivery: StoredLodyDelivery } {
+    const transaction = this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `UPDATE delivery_execution_state
+           SET attempt_count = attempt_count + 1
+           WHERE requester_session_id = ? AND operation_id = ?
+             AND attempt_count < ?
+             AND active_claim_worker_boot_id = ? AND active_claim_id = ?
+             AND EXISTS (
+               SELECT 1 FROM deliveries
+               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+                 AND deliveries.operation_id = delivery_execution_state.operation_id
+                 AND deliveries.state = 'pending'
+             )`
+        )
+        .run(requesterSessionId, operationId, DELIVERY_MAX_ATTEMPTS, workerBootId, claimId);
+      return {
+        started: result.changes === 1,
         delivery: this.getDelivery(requesterSessionId, operationId),
       };
     });
@@ -861,11 +934,17 @@ export class LodyOperationStore {
       }
       const result = this.db
         .prepare(
-          `UPDATE deliveries
+          `UPDATE delivery_execution_state
            SET active_claim_id = ?, active_claim_worker_boot_id = ?
-           WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
+           WHERE requester_session_id = ? AND operation_id = ?
              AND attempt_count >= ?
-             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL`
+             AND active_claim_id IS NULL AND active_claim_worker_boot_id IS NULL
+             AND EXISTS (
+               SELECT 1 FROM deliveries
+               WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+                 AND deliveries.operation_id = delivery_execution_state.operation_id
+                 AND deliveries.state = 'pending'
+             )`
         )
         .run(
           claim.claimId,
@@ -898,11 +977,16 @@ export class LodyOperationStore {
   ): boolean {
     const result = this.db
       .prepare(
-        `UPDATE deliveries
+        `UPDATE delivery_execution_state
          SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
          WHERE requester_session_id = ? AND operation_id = ?
-           AND state = 'pending'
-           AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
+           AND active_claim_worker_boot_id = ? AND active_claim_id = ?
+           AND EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE deliveries.requester_session_id = delivery_execution_state.requester_session_id
+               AND deliveries.operation_id = delivery_execution_state.operation_id
+               AND deliveries.state = 'pending'
+           )`
       )
       .run(requesterSessionId, operationId, workerBootId, claimId);
     return result.changes === 1;
@@ -927,12 +1011,30 @@ export class LodyOperationStore {
       const result = this.db
         .prepare(
           `UPDATE deliveries
-           SET state = 'consumed', consumed_at = ?,
-               active_claim_id = NULL, active_claim_worker_boot_id = NULL
+           SET state = 'consumed', consumed_at = ?
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'
-             AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
+             AND EXISTS (
+               SELECT 1 FROM delivery_execution_state
+               WHERE delivery_execution_state.requester_session_id = deliveries.requester_session_id
+                 AND delivery_execution_state.operation_id = deliveries.operation_id
+                 AND delivery_execution_state.active_claim_worker_boot_id = ?
+                 AND delivery_execution_state.active_claim_id = ?
+             )`
         )
         .run(consumedAt, requesterSessionId, operationId, workerBootId, claimId);
+      if (result.changes === 1) {
+        const released = this.db
+          .prepare(
+            `UPDATE delivery_execution_state
+             SET active_claim_id = NULL, active_claim_worker_boot_id = NULL
+             WHERE requester_session_id = ? AND operation_id = ?
+               AND active_claim_worker_boot_id = ? AND active_claim_id = ?`
+          )
+          .run(requesterSessionId, operationId, workerBootId, claimId);
+        if (released.changes !== 1) {
+          throw new Error('Consumed Delivery lost its active claim during transaction.');
+        }
+      }
       const latest = this.getDelivery(requesterSessionId, operationId);
       return {
         consumed: result.changes === 1,
@@ -1042,7 +1144,7 @@ export class LodyOperationStore {
   }
 
   private decodeDelivery(row: unknown): StoredLodyDelivery {
-    const parsed = DeliveryRowSchema.parse(row);
+    const parsed = DeliveryReadRowSchema.parse(row);
     return {
       sequence: parsed.sequence,
       workspaceId: parsed.workspace_id as WorkspaceId,
@@ -1128,7 +1230,15 @@ export class LodyOperationStore {
   }
 
   private migrate(): void {
-    this.db.exec(`
+    this.db
+      .transaction(() => {
+        const hadDeliveryExecutionState =
+          this.db
+            .prepare(
+              "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'delivery_execution_state'"
+            )
+            .get() !== undefined;
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS operations (
         workspace_id TEXT NOT NULL,
         owner_machine_id TEXT NOT NULL,
@@ -1160,9 +1270,6 @@ export class LodyOperationStore {
         delivery_id TEXT NOT NULL UNIQUE,
         system_turn_id TEXT NOT NULL UNIQUE,
         state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        active_claim_id TEXT,
-        active_claim_worker_boot_id TEXT,
         initiator_chain_depth INTEGER NOT NULL,
         completion_json TEXT NOT NULL,
         consumed_at TEXT,
@@ -1173,6 +1280,18 @@ export class LodyOperationStore {
 
       CREATE INDEX IF NOT EXISTS deliveries_pending_session
       ON deliveries (workspace_id, requester_session_id, state, sequence);
+
+      CREATE TABLE IF NOT EXISTS delivery_execution_state (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        active_claim_id TEXT,
+        active_claim_worker_boot_id TEXT,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations (requester_session_id, operation_id)
+          ON DELETE CASCADE
+      );
 
       CREATE TABLE IF NOT EXISTS operation_item_materializations (
         requester_session_id TEXT NOT NULL,
@@ -1191,33 +1310,16 @@ export class LodyOperationStore {
         value TEXT NOT NULL
       );
     `);
-    this.ensureDeliveryColumns();
-  }
-
-  private ensureDeliveryColumns(): void {
-    this.db
-      .transaction(() => {
-        const columns = new Set(
-          (
-            this.db.pragma('table_info(deliveries)') as Array<{
-              name: string;
-            }>
-          ).map((column) => column.name)
-        );
-        const isLegacyDeliverySchema = !columns.has('attempt_count');
-        const additions = [
-          ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
-          ['active_claim_id', 'TEXT'],
-          ['active_claim_worker_boot_id', 'TEXT'],
-        ] as const;
-        for (const [name, declaration] of additions) {
-          if (!columns.has(name)) {
-            this.db.exec(`ALTER TABLE deliveries ADD COLUMN ${name} ${declaration}`);
-          }
-        }
-        if (isLegacyDeliverySchema) {
-          this.db.prepare("UPDATE deliveries SET attempt_count = 1 WHERE state = 'pending'").run();
-        }
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO delivery_execution_state (
+               requester_session_id, operation_id, attempt_count
+             )
+             SELECT requester_session_id, operation_id,
+               CASE WHEN state = 'pending' THEN ? ELSE 0 END
+             FROM deliveries`
+          )
+          .run(hadDeliveryExecutionState ? 0 : 1);
       })
       .immediate();
   }
@@ -1249,6 +1351,14 @@ export class LodyOperationStore {
                WHERE deliveries.requester_session_id = operations.requester_session_id
                  AND deliveries.operation_id = operations.operation_id
              )`
+          )
+          .run();
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO delivery_execution_state (
+               requester_session_id, operation_id, attempt_count
+             )
+             SELECT requester_session_id, operation_id, 0 FROM deliveries`
           )
           .run();
       })
