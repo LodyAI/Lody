@@ -189,7 +189,12 @@ jobs:
               per_page: 100
             })
             const existing = issues
-              .filter((issue) => !issue.pull_request && issue.body?.includes(marker))
+              .filter((issue) =>
+                !issue.pull_request &&
+                issue.user?.login === 'github-actions[bot]' &&
+                issue.user?.type === 'Bot' &&
+                issue.body?.includes(marker)
+              )
               .sort((left, right) => left.number - right.number)[0]
 
             if (existing) {

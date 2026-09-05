@@ -62,9 +62,13 @@ After(async function (this: LodyWorld, scenario: ITestCaseHookParameter) {
         path: join(artifacts.scenarioDir, 'failure.png'),
         fullPage: true,
       });
+    } catch (error) {
+      evidenceErrors.push(`failure screenshot: ${String(error)}`);
+    }
+    try {
       await harness.stopTrace(join(artifacts.scenarioDir, 'trace.zip'));
     } catch (error) {
-      evidenceErrors.push(`failure evidence: ${String(error)}`);
+      evidenceErrors.push(`failure trace: ${String(error)}`);
     }
     try {
       appendFailureIndex(artifacts);
