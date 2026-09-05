@@ -225,7 +225,7 @@ async function lineStatsForUntrackedFile(
 function parseDeletedPathsFromNameStatus(stdout: string): Set<string> {
   const deleted = new Set<string>();
   const tokens = stdout.split('\0').filter(Boolean);
-  for (let index = 0; index < tokens.length; ) {
+  for (let index = 0; index < tokens.length;) {
     const status = tokens[index] ?? '';
     index += 1;
     if (status.startsWith('R') || status.startsWith('C')) {

@@ -245,16 +245,17 @@ export async function exportWorkspaceData(
       workspaceId: options.workspace.id,
       cliToken: options.cliToken,
     });
-    await writeJson(path.join(options.outputDir, 'usage', 'workspace-summary.json'), usageBundle.summary);
+    await writeJson(
+      path.join(options.outputDir, 'usage', 'workspace-summary.json'),
+      usageBundle.summary
+    );
     await writeJson(
       path.join(options.outputDir, 'usage', 'workspace-timeline.json'),
       usageBundle.timelines
     );
     usageExported = true;
   } catch (error) {
-    warnings.push(
-      `Workspace usage export failed: ${formatErrorMessage(error)}`
-    );
+    warnings.push(`Workspace usage export failed: ${formatErrorMessage(error)}`);
   }
 
   const manifest: ExportManifest = {

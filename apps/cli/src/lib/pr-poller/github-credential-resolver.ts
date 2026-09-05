@@ -1,8 +1,5 @@
 import { execFile } from 'node:child_process';
-import type {
-  CloudGithubTokenManager,
-  CloudGithubWriteTokenContext,
-} from '@lody/platform';
+import type { CloudGithubTokenManager, CloudGithubWriteTokenContext } from '@lody/platform';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -67,10 +64,7 @@ const defaultFetchGhUserId = (): Promise<string | null> =>
 
 export type GitHubCredentialResolverDeps = {
   /** Workspace-bound token manager; null disables the managed tier entirely. */
-  tokenManager: Pick<
-    CloudGithubTokenManager,
-    'getWriteTokenInfoForRepo' | 'invalidate'
-  > | null;
+  tokenManager: Pick<CloudGithubTokenManager, 'getWriteTokenInfoForRepo' | 'invalidate'> | null;
   /** Requester context for managed write tokens (per-workspace wiring, see M3). */
   writeTokenContext: CloudGithubWriteTokenContext;
   /** Workspace identity used only for the old-backend App-token fallback scope. */

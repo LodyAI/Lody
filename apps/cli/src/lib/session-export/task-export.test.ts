@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TaskSnapshot } from '@/lib/task-doc';
-import {
-  buildTaskIndexExportEntry,
-  formatTaskMarkdown,
-  sortTasksByCreatedAt,
-} from './task-export';
+import { buildTaskIndexExportEntry, formatTaskMarkdown, sortTasksByCreatedAt } from './task-export';
 
 const baseSnapshot = (overrides: Partial<TaskSnapshot> = {}): TaskSnapshot =>
   ({

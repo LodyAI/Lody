@@ -99,9 +99,7 @@ export const startDelegatedTask = async (
     },
   });
 
-  deps.logger.debug(
-    `[task-automation] started sessionId=${result.sessionId} for taskId=${taskId}`
-  );
+  deps.logger.debug(`[task-automation] started sessionId=${result.sessionId} for taskId=${taskId}`);
 
   await applyAgentTaskUpdate(
     deps.manager,

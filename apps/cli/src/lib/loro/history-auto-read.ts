@@ -47,7 +47,7 @@ export const attachAutoMarkLatestUserHistoryAsRead = (
       return;
     }
 
-    const history = next.history as SessionHistoryInput[] ?? [];
+    const history = (next.history as SessionHistoryInput[]) ?? [];
     const latestUserEntry = findLatestUserHistoryEntry(history);
     if (!latestUserEntry || resolveSessionHistoryStatus(latestUserEntry) !== 'pending') {
       return;
