@@ -27,6 +27,12 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
 
     const previousWorkspaceAuth = previousWorkspaceAuthRef.current;
     if (
+      previousWorkspaceAuth &&
+      previousWorkspaceAuth.authSessionId !== authSessionId &&
+      previousWorkspaceAuth.workspaceId !== workspaceId
+    ) {
+      clearBillingOverviewCache(previousWorkspaceAuth.workspaceId);
+    } else if (
       previousWorkspaceAuth?.workspaceId === workspaceId &&
       previousWorkspaceAuth.authSessionId !== authSessionId
     ) {

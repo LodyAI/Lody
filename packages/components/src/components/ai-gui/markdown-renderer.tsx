@@ -1183,12 +1183,27 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       return undefined;
     }
 
-    const markedDiagrams = new Set<HTMLElement>();
+    const markedDiagrams = new Map<
+      HTMLElement,
+      { role: string | null; tabIndex: string | null; ariaLabel: string | null }
+    >();
     const clearMarkedDiagrams = () => {
-      for (const diagram of markedDiagrams) {
-        diagram.removeAttribute('role');
-        diagram.removeAttribute('tabindex');
-        diagram.removeAttribute('aria-label');
+      for (const [diagram, attributes] of markedDiagrams) {
+        if (attributes.role == null) {
+          diagram.removeAttribute('role');
+        } else {
+          diagram.setAttribute('role', attributes.role);
+        }
+        if (attributes.tabIndex == null) {
+          diagram.removeAttribute('tabindex');
+        } else {
+          diagram.setAttribute('tabindex', attributes.tabIndex);
+        }
+        if (attributes.ariaLabel == null) {
+          diagram.removeAttribute('aria-label');
+        } else {
+          diagram.setAttribute('aria-label', attributes.ariaLabel);
+        }
       }
       markedDiagrams.clear();
     };
@@ -1200,10 +1215,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     const markDiagramsOpenable = () => {
       clearMarkedDiagrams();
       root.querySelectorAll<HTMLElement>(MERMAID_DIAGRAM_SELECTOR).forEach((diagram) => {
+        markedDiagrams.set(diagram, {
+          role: diagram.getAttribute('role'),
+          tabIndex: diagram.getAttribute('tabindex'),
+          ariaLabel: diagram.getAttribute('aria-label'),
+        });
         diagram.setAttribute('role', 'button');
         diagram.setAttribute('tabindex', '0');
         diagram.setAttribute('aria-label', openDiagramLabel);
-        markedDiagrams.add(diagram);
       });
     };
 

@@ -94,4 +94,23 @@ describe('useBillingOverviewPreload', () => {
     expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
     expect(readBillingOverviewCache('workspace-1', 'session-2')).toBeNull();
   });
+
+  it('clears the previous workspace cache when the session changes during a workspace switch', async () => {
+    useAppCapability.mockReturnValue(true);
+    writeBillingOverviewCache('workspace-1', 'session-1', OPTIMISTIC_BILLING_OVERVIEW);
+
+    await act(async () => {
+      root.render(createElement(Probe, { workspaceId: 'workspace-1' }));
+    });
+    expect(readBillingOverviewCache('workspace-1', 'session-1')).toMatchObject(
+      OPTIMISTIC_BILLING_OVERVIEW
+    );
+
+    currentAuthSessionId = 'session-2';
+    await act(async () => {
+      root.render(createElement(Probe, { workspaceId: 'workspace-2' }));
+    });
+
+    expect(readBillingOverviewCache('workspace-1', 'session-1')).toBeNull();
+  });
 });
