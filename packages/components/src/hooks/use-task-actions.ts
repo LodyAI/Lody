@@ -448,7 +448,7 @@ export function useTaskActions() {
         return;
       }
       const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore.getState().history.find((item) => item.id === entryId)
+        sessionStore.historyWriter.read(entryId)
       );
       if (!entry) {
         return;

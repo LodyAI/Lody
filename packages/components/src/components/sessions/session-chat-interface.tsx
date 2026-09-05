@@ -87,7 +87,7 @@ import {
   buildConversationMarkdown,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
-  countBillableSessionTurns,
+  countPendingQueuedUserTurns,
   deriveSessionPullRequestReadiness,
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
@@ -296,6 +296,24 @@ import {
 } from '@/lib/session-chat-search';
 import { useIncrementalSearchBlocks } from '@/hooks/use-incremental-search-blocks';
 import {
+  useConversationIndexRows,
+  useConversationTail,
+  useConversationVersion,
+  useTurn,
+} from '@/hooks/use-conversation-view';
+import {
+  collectConversationConfigSources,
+  collectHydratedRange,
+  countUserTurns,
+} from '@/lib/conversation-view';
+import {
+  latestGoalFromFacts,
+  latestProposedPlanFromFacts,
+  permissionRequestsFromFacts,
+  schedulingEntriesFromFacts,
+  useSessionTurnFacts,
+} from './session-turn-facts';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -391,7 +409,7 @@ import {
   getDurationSinceMs,
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
-import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
+import type { AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
 import {
@@ -405,7 +423,6 @@ import {
 } from '@/lib/session-workspace-path';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
-  findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
 import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
@@ -505,7 +522,9 @@ const getSessionAnalyticsProject = (project: {
 // counts assistant turns; `duration_ms` spans the first turn start to the last
 // turn end; `permission_wait_ms` sums the per-turn waits.
 const summarizeSessionEndTiming = (
-  history: readonly SessionHistory[] | undefined
+  history:
+    | readonly Pick<SessionHistory, 'role' | 'startedAt' | 'timestamp' | 'endedAt' | 'permissionWaitMs'>[]
+    | undefined
 ): {
   turn_count: number;
   duration_ms: number | null;
@@ -564,62 +583,6 @@ const summarizeSessionEndTiming = (
     first_to_last_turn_ms: positiveOrNull(firstToLastTurnMs),
     permission_wait_ms: sawPermissionWait ? Math.round(permissionWaitTotal) : null,
   };
-};
-
-type PermissionScanEntry = {
-  requestId: string;
-  requestKind: 'ask_user_question' | 'tool_permission';
-  toolKind: ToolKind | null;
-  hasOutcome: boolean;
-  decision: 'allow' | 'deny' | 'cancelled' | 'other';
-};
-
-// Flatten every tool-call permission request currently in history so the
-// permission funnel (shown -> responded) can be derived from CRDT state. Done
-// by diffing snapshots (see the effect) rather than instrumenting the response
-// handler in floating-permission-request.tsx: that component is owned elsewhere,
-// and CRDT-derived state also covers permissions resolved on another client.
-const scanPermissionRequests = (
-  history: readonly SessionHistory[] | undefined
-): PermissionScanEntry[] => {
-  if (!history?.length) return [];
-  const entries: PermissionScanEntry[] = [];
-  for (const historyEntry of history) {
-    if (historyEntry.role !== 'assistant') continue;
-    const rawItems: unknown = historyEntry.items;
-    if (!Array.isArray(rawItems)) continue;
-    for (const rawItem of rawItems) {
-      const item = rawItem as MessageContent;
-      if (!item || item.type !== 'tool_call') continue;
-      const permission = (item as ToolCallMessage).permissionRequest;
-      if (!permission?.requestId) continue;
-      const outcome = permission.outcome;
-      let decision: PermissionScanEntry['decision'] = 'other';
-      if (outcome) {
-        if (outcome.outcome === 'cancelled') {
-          decision = 'cancelled';
-        } else if (outcome.outcome === 'selected') {
-          const selected = permission.options.find((opt) => opt.optionId === outcome.optionId);
-          const kind = selected?.kind ?? '';
-          decision = kind.startsWith('allow')
-            ? 'allow'
-            : kind.startsWith('deny') || kind.startsWith('reject')
-              ? 'deny'
-              : 'other';
-        }
-      }
-      entries.push({
-        requestId: permission.requestId,
-        requestKind: isAskUserQuestionPermissionMeta(permission._meta)
-          ? 'ask_user_question'
-          : 'tool_permission',
-        toolKind: (item as ToolCallMessage).kind ?? null,
-        hasOutcome: Boolean(outcome),
-        decision,
-      });
-    }
-  }
-  return entries;
 };
 
 const countSearchBlockTypes = (blocks: readonly SessionSearchBlock[]): Record<string, number> => {
@@ -725,7 +688,7 @@ const resolveActivityFromItems = (items: MessageContent[]): AgentActivity => {
   return resolveActivityFromToolKind(lastToolKind);
 };
 
-const resolveActivityFromHistory = (history?: SessionHistory[]): AgentActivity => {
+const resolveActivityFromHistory = (history?: readonly SessionHistory[]): AgentActivity => {
   if (!history?.length) {
     return 'thinking';
   }
@@ -2052,6 +2015,7 @@ export const SessionChatInterface = memo(
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
       doc: sessionDoc,
+      history: conversationView,
       addHistory: addSessionHistory,
       pushMessageQueue,
       removeMessageQueueItem,
@@ -2066,22 +2030,38 @@ export const SessionChatInterface = memo(
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
     });
+    // History is read through the conversation view: the hydrated tail (which
+    // always reaches the latest user turn) for every "latest turn" reader, the
+    // index for counts and timing, and the per-turn fact table for the few
+    // readers that need something from anywhere in the conversation.
+    const conversationVersion = useConversationVersion(conversationView);
+    const { turns: sessionTailHistory, from: sessionTailFrom } = useConversationTail(
+      conversationView,
+      { extendToLastUserTurn: true }
+    );
+    const conversationConfigSources = useMemo(
+      () =>
+        conversationView ? collectConversationConfigSources(conversationView, sessionTailFrom) : [],
+      // `conversationVersion` is the change signal for the view's contents.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationVersion, conversationView, sessionTailFrom]
+    );
     const sessionConversationConfig = useMemo(
-      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
-      [sessionDoc?.history, sessionDoc?.mq]
+      () => resolveSessionConversationConfig(conversationConfigSources, sessionDoc?.mq ?? []),
+      [conversationConfigSources, sessionDoc?.mq]
     );
     const sessionConversationSourceFence = useMemo(
-      () => resolveSessionConversationSourceFence(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
-      [sessionDoc?.history, sessionDoc?.mq]
+      () => resolveSessionConversationSourceFence(conversationConfigSources, sessionDoc?.mq ?? []),
+      [conversationConfigSources, sessionDoc?.mq]
     );
     const sessionRuntimeConfig = useMemo(
       () =>
         resolveSessionAcpRuntimeConfig(
-          sessionDoc?.history ?? [],
+          sessionTailHistory,
           sessionDoc?.mq ?? [],
           sessionDoc?.acpRuntimeConfig
         ),
-      [sessionDoc?.acpRuntimeConfig, sessionDoc?.history, sessionDoc?.mq]
+      [sessionDoc?.acpRuntimeConfig, sessionTailHistory, sessionDoc?.mq]
     );
     // `sourceConfigKey` identifies the durable turn selected by the resolver,
     // so there is no need to hash its mode/model/option values separately.
@@ -2414,7 +2394,7 @@ export const SessionChatInterface = memo(
       [waitUntilSynced]
     );
 
-    const sessionHistoryLength = sessionDoc?.history?.length ?? 0;
+    const sessionHistoryLength = conversationView?.turnCount ?? 0;
     const conversationPreparationSignalRef = useRef<SessionConversationPreparationState | null>(
       null
     );
@@ -2596,10 +2576,10 @@ export const SessionChatInterface = memo(
       return null;
     }, [liveSessionStatus, session.createdAt, t]);
 
-    const sessionHistory = useMemo(
-      () => (sessionDoc?.history as SessionHistory[] | undefined) ?? [],
-      [sessionDoc?.history]
-    );
+    /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
+    const sessionHistory = sessionTailHistory;
+    const turnFacts = useSessionTurnFacts(conversationView);
+    const conversationIndexRows = useConversationIndexRows(conversationView);
     const [lastCompletedAssistantTarget, setLastCompletedAssistantTarget] = useState<{
       sessionId: SessionId;
       messageId: string | null;
@@ -2643,23 +2623,25 @@ export const SessionChatInterface = memo(
     // persisted. Serialize to a key so the input area only re-renders when the
     // derived set actually changes (not on every streaming token).
     const scheduledTasksKey = useMemo(
-      () => JSON.stringify(collectPendingScheduledTasksFromHistory(sessionHistory)),
-      [sessionHistory]
+      () =>
+        JSON.stringify(
+          collectPendingScheduledTasksFromHistory(schedulingEntriesFromFacts(turnFacts.ordered))
+        ),
+      [turnFacts.ordered]
     );
     const pendingScheduledTasks = useMemo(
       () => JSON.parse(scheduledTasksKey) as PendingScheduledTask[],
       [scheduledTasksKey]
     );
     const legacySession = session as SessionLegacyMetaFields;
-    const latestGoal = useMemo(
-      () =>
-        resolveVisibleSessionGoal(
-          sessionHistory,
-          legacySession.latestGoal,
-          session.dismissedGoalThreadId
-        ),
-      [legacySession.latestGoal, session.dismissedGoalThreadId, sessionHistory]
-    );
+    const latestGoal = useMemo(() => {
+      const goalItem = latestGoalFromFacts(turnFacts.ordered);
+      return resolveVisibleSessionGoal(
+        goalItem ? [{ items: [goalItem] as never }] : [],
+        legacySession.latestGoal,
+        session.dismissedGoalThreadId
+      );
+    }, [legacySession.latestGoal, session.dismissedGoalThreadId, turnFacts.ordered]);
     const isGoalActive = isSessionGoalActive(latestGoal);
     // The existing prompt bridge is Codex-specific. Other providers may publish
     // neutral goal snapshots, but their advertised `_session/goal` extension is
@@ -2761,8 +2743,11 @@ export const SessionChatInterface = memo(
       [sessionDoc?.mq]
     );
     const billableSessionTurnCount = useMemo(
-      () => countBillableSessionTurns({ history: sessionHistory, queue: messageQueue }),
-      [messageQueue, sessionHistory]
+      () =>
+        (conversationView ? countUserTurns(conversationView) : 0) +
+        countPendingQueuedUserTurns(messageQueue),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationVersion, conversationView, messageQueue]
     );
     const handleOpenBillingSettings = useCallback(() => {
       captureSessionEvent('session/free_turn_limit_upgrade_clicked');
@@ -3001,7 +2986,7 @@ export const SessionChatInterface = memo(
         t,
       ]
     );
-    const searchBlocks = useIncrementalSearchBlocks(sessionHistory, isSearchOpen);
+    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen);
     const normalizedSearchQuery = useMemo(
       () => normalizeSessionSearchQuery(deferredSearchQuery),
       [deferredSearchQuery]
@@ -3078,7 +3063,7 @@ export const SessionChatInterface = memo(
     const openSearch = useCallback(() => {
       if (!isSearchOpen) {
         captureSessionEvent('session/search_opened', {
-          history_count: sessionHistory.length,
+          history_count: sessionHistoryLength,
           searchable_block_count: searchBlocks.length,
           source: 'conversation',
         });
@@ -3090,7 +3075,7 @@ export const SessionChatInterface = memo(
       focusSearchInput,
       isSearchOpen,
       searchBlocks.length,
-      sessionHistory.length,
+      sessionHistoryLength,
     ]);
 
     const closeSearch = useCallback(() => {
@@ -3293,7 +3278,8 @@ export const SessionChatInterface = memo(
     }, [activeSearchResult, isSearchOpen]);
 
     const handleCopyConversationHistory = useCallback(async () => {
-      if (!sessionDoc?.history?.length) {
+      const turnCount = conversationView?.turnCount ?? 0;
+      if (!conversationView || turnCount === 0) {
         captureSessionEvent('session/history_copy_failed', {
           reason: 'empty_history',
           history_count: 0,
@@ -3302,14 +3288,19 @@ export const SessionChatInterface = memo(
         return;
       }
 
+      // Export needs every turn: hydrate the whole conversation for the
+      // duration of the copy, then let the view evict it again.
+      await conversationView.ensureRange(0, turnCount);
       try {
         const { markdown, stats } = buildConversationMarkdown({
-          history: sessionDoc.history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+          history: collectHydratedRange(conversationView, 0, turnCount) as Parameters<
+            typeof buildConversationMarkdown
+          >[0]['history'],
           title: session.title ?? undefined,
         });
         await navigator.clipboard.writeText(markdown);
         captureSessionEvent('session/history_copy_succeeded', {
-          history_count: sessionDoc.history.length,
+          history_count: turnCount,
           prompt_length: stats.chars,
           estimated_tokens: stats.estimatedTokens,
           over_budget: stats.overBudget,
@@ -3323,15 +3314,17 @@ export const SessionChatInterface = memo(
         console.error('Failed to copy conversation history', error);
         captureSessionEvent('session/history_copy_failed', {
           reason: 'clipboard_error',
-          history_count: sessionDoc.history.length,
+          history_count: turnCount,
           error_name: error instanceof Error ? error.name : typeof error,
           error_message: error instanceof Error ? error.message : String(error),
         });
         toast.error(
           t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
         );
+      } finally {
+        conversationView.release(0, turnCount);
       }
-    }, [captureSessionEvent, session.title, sessionDoc?.history, t]);
+    }, [captureSessionEvent, conversationView, session.title, t]);
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
     // being mounted is not evidence the user saw this conversation: only the
@@ -3364,8 +3357,8 @@ export const SessionChatInterface = memo(
     const canStopAgent =
       (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
     const latestCompletedProposedPlan = useMemo(
-      () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
-      [sessionDoc?.history]
+      () => latestProposedPlanFromFacts(turnFacts.ordered),
+      [turnFacts.ordered]
     );
     const isCodexPlanSession = session.agentType === 'codex';
     const isProposedPlanDecisionPending =
@@ -3451,7 +3444,7 @@ export const SessionChatInterface = memo(
       return { kind: 'github', repoFullName: fallbackRepo, branch: sessionBranch };
     }, [session.isWorktree, session.project, session.repoFullName, sessionBranch]);
     const trackUserInterruptEnd = useCallback(() => {
-      const timing = summarizeSessionEndTiming(sessionDoc?.history as SessionHistory[] | undefined);
+      const timing = summarizeSessionEndTiming(conversationIndexRows);
       capturePostHogEvent(postHog, 'session/end_user_interrupt', {
         session_id: session.id,
         workspace_id: workspaceId ?? null,
@@ -3474,7 +3467,7 @@ export const SessionChatInterface = memo(
       session.id,
       session.machineId,
       session.repoFullName,
-      sessionDoc?.history,
+      conversationIndexRows,
       sessionProject,
       workspaceId,
     ]);
@@ -3969,7 +3962,7 @@ export const SessionChatInterface = memo(
 
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
-      history: sessionDoc?.history,
+      history: sessionHistory,
       canRetry:
         sessionDocReady &&
         !isAgentBusy &&
@@ -4193,8 +4186,8 @@ export const SessionChatInterface = memo(
           return;
         }
         const roomId = getSessionRoomId(session.id);
-        const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-        const historyIndex = historyId ? history.findIndex((entry) => entry.id === historyId) : -1;
+        const historyIndex =
+          historyId && conversationView ? conversationView.indexOf(historyId) : -1;
         // Use empty string as "cleared" — undefined is skipped by upsertDocMeta merge
         void runtime.writer.upsertDocMeta(roomId, {
           pinnedHistoryId: historyId ?? '',
@@ -4205,7 +4198,7 @@ export const SessionChatInterface = memo(
           previous_pinned_history_id: session.pinnedHistoryId || null,
         });
       },
-      [captureSessionEvent, runtime, session.id, session.pinnedHistoryId, sessionDoc?.history]
+      [captureSessionEvent, conversationView, runtime, session.id, session.pinnedHistoryId]
     );
 
     const pinnedHistoryId = session.pinnedHistoryId || null;
@@ -4222,37 +4215,27 @@ export const SessionChatInterface = memo(
       [pinnedHistoryId, handlePinMessage]
     );
 
-    const sessionHistoryForPin = useMemo(() => {
-      const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-      return history.map((h) => {
-        const rawItems: unknown = h.items;
-        const items = Array.isArray(rawItems) ? rawItems : [];
-        return {
-          id: h.id,
-          role: h.role,
-          items,
-          status: h.status,
-          read: h.read ?? false,
-          timestamp: h.timestamp,
-          endedAt: h.endedAt,
-          userId: h.userId,
-          modelInfo: h.modelInfo,
-          fileDiff: h.fileDiff,
-          finished: h.finished,
-          plan: h.plan,
-        };
-      });
-    }, [sessionDoc?.history]);
+    // The pinned turn is hydrated on demand through the view; nothing else
+    // needs the whole history for the pin banner.
+    const pinnedTurn = useTurn(conversationView, pinnedHistoryId);
+    const pinnedMessage = useMemo<SessionHistoryParsed | null>(() => {
+      if (!pinnedTurn) return null;
+      const rawItems: unknown = pinnedTurn.items;
+      return {
+        ...pinnedTurn,
+        items: Array.isArray(rawItems) ? rawItems : [],
+        read: pinnedTurn.read ?? false,
+      } as SessionHistoryParsed;
+    }, [pinnedTurn]);
 
     const handleScrollToMessage = useCallback(
       (historyId: string) => {
-        const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-        const index = history.findIndex((h) => h.id === historyId);
+        const index = conversationView?.indexOf(historyId) ?? -1;
         if (index >= 0) {
           chatStreamRef.current?.scrollToIndex(index);
         }
       },
-      [sessionDoc?.history]
+      [conversationView]
     );
 
     const createPrPrompt = t('sessions.prompts.createPr', CREATE_PR_PROMPT);
@@ -4835,8 +4818,7 @@ export const SessionChatInterface = memo(
     // a card to this client.
     useEffect(() => {
       if (hideMessageArea) return undefined;
-      const history = sessionDoc?.history as SessionHistory[] | undefined;
-      const scanned = scanPermissionRequests(history);
+      const scanned = permissionRequestsFromFacts(turnFacts.ordered);
       if (scanned.length === 0) return undefined;
       const state = permissionRequestStateRef.current;
 
@@ -4879,7 +4861,7 @@ export const SessionChatInterface = memo(
         }
       }
       return undefined;
-    }, [hideMessageArea, postHog, sessionAnalyticsProperties, sessionDoc?.history]);
+    }, [hideMessageArea, postHog, sessionAnalyticsProperties, turnFacts.ordered]);
 
     const handleStop = useCallback(async () => {
       if (!workspaceId) {
@@ -5582,7 +5564,8 @@ export const SessionChatInterface = memo(
               headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
             })
         : undefined;
-    const permissionSessionHistory = sessionDoc?.history as Parameters<
+    // Pending permission requests live in the active (latest) assistant turn.
+    const permissionSessionHistory = sessionHistory as unknown as Parameters<
       typeof FloatingPermissionRequest
     >[0]['sessionHistory'];
     const shouldReplaceComposerWithPermission = hasPendingPermissionRequest(
@@ -5778,7 +5761,7 @@ export const SessionChatInterface = memo(
             <>
               <SessionPin
                 pinnedHistoryId={pinnedHistoryId}
-                history={sessionHistoryForPin}
+                pinnedMessage={pinnedMessage}
                 onUnpin={handleUnpin}
                 onScrollToMessage={handleScrollToMessage}
               />
@@ -5835,7 +5818,7 @@ export const SessionChatInterface = memo(
                           ref={chatStreamRef}
                           sessionId={session?.id}
                           workspaceId={workspaceId}
-                          sessionDoc={sessionDoc}
+                          view={conversationView}
                           sessionCreatedAt={session?.createdAt}
                           dividerLabel={sessionDividerLabel}
                           className="h-full"

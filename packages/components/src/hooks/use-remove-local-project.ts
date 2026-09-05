@@ -1,3 +1,4 @@
+import { resolveActiveAssistantTurnIdFromIndex } from '@/lib/conversation-view';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +11,6 @@ import {
   getServerNow,
   isActiveSessionStatus,
   machineFlockKeys,
-  resolveActiveAssistantTurnId,
   type LocalProjectId,
   type LocalProjectMeta,
   type LocalProjectWorktreeCleanupPreflightResult,
@@ -150,7 +150,7 @@ export function useRemoveLocalProject() {
             const sessionId = session.id as SessionId;
             const activeAssistantTurnId = await runtime.withSessionStore(
               sessionId,
-              (sessionStore) => resolveActiveAssistantTurnId(sessionStore.getState().history)
+              (sessionStore) => resolveActiveAssistantTurnIdFromIndex(sessionStore.history)
             );
             if (!activeAssistantTurnId) return;
             await requestSessionCancel(sessionId, activeAssistantTurnId);

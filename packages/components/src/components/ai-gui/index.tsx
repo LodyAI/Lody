@@ -4,14 +4,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   type MutableRefObject,
   type ReactNode,
 } from 'react';
 import type {
-  SessionDoc,
   SessionFilePayload,
-  SessionHistory,
   SessionHistoryParsed,
   SessionId,
   SessionInputBlock,
@@ -28,32 +25,16 @@ import {
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
 } from './view';
-import { buildChatStreamItems, type BuildChatStreamItemsCache } from './build-chat-stream-items';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
+import { useConversationVersion } from '@/hooks/use-conversation-view';
+import { findLastIndex, type ConversationView } from '@/lib/conversation-view';
 import { useCloudQuery } from '@lody/platform/react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type {
   SessionForkDestination,
   SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
-
-const emptyHistory = [] as SessionDoc['history'];
-const CHAT_STREAM_ITEMS_CACHE_LIMIT = 20;
-const chatStreamItemsCacheBySessionId = new Map<SessionId, BuildChatStreamItemsCache>();
-
-function getChatStreamItemsCache(sessionId: SessionId): BuildChatStreamItemsCache | undefined {
-  return chatStreamItemsCacheBySessionId.get(sessionId);
-}
-
-function setChatStreamItemsCache(sessionId: SessionId, cache: BuildChatStreamItemsCache): void {
-  chatStreamItemsCacheBySessionId.delete(sessionId);
-  chatStreamItemsCacheBySessionId.set(sessionId, cache);
-  while (chatStreamItemsCacheBySessionId.size > CHAT_STREAM_ITEMS_CACHE_LIMIT) {
-    const oldestSessionId = chatStreamItemsCacheBySessionId.keys().next().value;
-    if (oldestSessionId === undefined) break;
-    chatStreamItemsCacheBySessionId.delete(oldestSessionId);
-  }
-}
 
 export type {
   AssistantMessageAction,
@@ -62,10 +43,12 @@ export type {
   EmptySessionItem,
   GoalCommand,
   MessageFileDiffEntriesByTurn,
+  PlaceholderSessionItem,
   SessionChatStreamHandle,
   SessionChatStreamViewProps,
   SessionChatUser,
   SessionMessageItem,
+  VisibleTurnRange,
 } from './view';
 
 export { MessageRowView, SessionChatStreamView } from './view';
@@ -74,7 +57,8 @@ export { MarkdownRenderer, type MarkdownRendererSize } from './markdown-renderer
 export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
-  sessionDoc: SessionDoc;
+  /** The session's turns; null while the store is loading. */
+  view: ConversationView | null;
   sessionCreatedAt?: string;
   dividerLabel?: string;
   className?: string;
@@ -158,7 +142,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     {
       sessionId,
       workspaceId,
-      sessionDoc,
+      view,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
       className,
@@ -190,19 +174,14 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     },
     ref
   ) => {
-    const sessionHistory = (sessionDoc.history as SessionHistory[]) ?? emptyHistory;
-    const chatStreamItemsCacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
-    if (chatStreamItemsCacheRef.current === undefined) {
-      chatStreamItemsCacheRef.current = getChatStreamItemsCache(sessionId);
-    }
-    const { items, lastAssistantMessageId, lastCompletedAssistantMessageId, cache } = useMemo(
-      () => buildChatStreamItems(sessionHistory, sessionId, chatStreamItemsCacheRef.current),
-      [sessionHistory, sessionId]
-    );
-    chatStreamItemsCacheRef.current = cache;
-    useEffect(() => {
-      setChatStreamItemsCache(sessionId, cache);
-    }, [cache, sessionId]);
+    const version = useConversationVersion(view);
+    const {
+      items,
+      lastAssistantMessageId,
+      lastCompletedAssistantMessageId,
+      onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
+      onOutlinePreviewRound: handleOutlinePreviewRound,
+    } = useConversationStreamItems(view, sessionId);
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
     }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
@@ -226,11 +205,11 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const hasNavigateSession = onNavigateSession !== undefined;
     const hasForkLastAssistant = onForkLastAssistant !== undefined;
     const lastUserMessageId = useMemo(() => {
-      for (let index = sessionHistory.length - 1; index >= 0; index -= 1) {
-        if (sessionHistory[index]?.role === 'user') return sessionHistory[index]?.id ?? null;
-      }
-      return null;
-    }, [sessionHistory]);
+      if (!view) return null;
+      const index = findLastIndex(view, (row) => row.role === 'user');
+      return index >= 0 ? (view.index(index)?.id ?? null) : null;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [view, version]);
 
     const renderMessageRow = useCallback(
       ({
@@ -294,6 +273,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}
+        onVisibleTurnRangeChange={handleVisibleTurnRangeChange}
+        onOutlinePreviewRound={handleOutlinePreviewRound}
       />
     );
   }

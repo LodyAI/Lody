@@ -109,7 +109,9 @@ const streamingTurn: SessionHistoryParsed = {
   ],
 };
 
-const items: ChatStreamItem[] = [{ type: 'message', sessionId, message: streamingTurn } as const];
+const items: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: streamingTurn, turnIndex: 0 } as const,
+];
 
 /**
  * Finished turn: the "Worked for …" chevron, the edited-files card, and the
@@ -142,7 +144,7 @@ const finishedTurn: SessionHistoryParsed = {
 };
 
 const finishedItems: ChatStreamItem[] = [
-  { type: 'message', sessionId, message: finishedTurn } as const,
+  { type: 'message', sessionId, message: finishedTurn, turnIndex: 0 } as const,
 ];
 
 export const DesktopStreamingTurn: Story = {
@@ -371,7 +373,7 @@ const planModeTurn: SessionHistoryParsed = {
 };
 
 const planModeItems: ChatStreamItem[] = [
-  { type: 'message', sessionId, message: planModeTurn } as const,
+  { type: 'message', sessionId, message: planModeTurn, turnIndex: 0 } as const,
 ];
 
 /** Story-only guide at the column's content edge. */
@@ -441,7 +443,7 @@ const planExitOutcomeTurn = (
 const outcomeStory = (message: SessionHistoryParsed, height = 'h-[320px]'): Story => ({
   args: {
     sessionId,
-    items: [{ type: 'message', sessionId, message } as const],
+    items: [{ type: 'message', sessionId, message, turnIndex: 0 } as const],
     renderMessageRow,
   },
   globals: { theme: 'dark' },
@@ -449,7 +451,7 @@ const outcomeStory = (message: SessionHistoryParsed, height = 'h-[320px]'): Stor
     <WithRuntime>
       <div className={cn('relative w-full bg-background', height)}>
         <SessionChatStreamView
-          items={[{ type: 'message', sessionId, message } as const]}
+          items={[{ type: 'message', sessionId, message, turnIndex: 0 } as const]}
           sessionId={sessionId}
           renderMessageRow={renderMessageRow}
           lastAssistantMessageId={message.id}
@@ -612,7 +614,9 @@ const parityTurns: SessionHistoryParsed[] = [
 export const DesktopPlanAdapterParity: Story = {
   args: {
     sessionId,
-    items: parityTurns.map((message) => ({ type: 'message', sessionId, message }) as const),
+    items: parityTurns.map(
+      (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+    ),
     renderMessageRow,
   },
   globals: { theme: 'dark' },
@@ -620,7 +624,9 @@ export const DesktopPlanAdapterParity: Story = {
     <WithRuntime>
       <div className="relative h-[1100px] w-full bg-background">
         <SessionChatStreamView
-          items={parityTurns.map((message) => ({ type: 'message', sessionId, message }) as const)}
+          items={parityTurns.map(
+            (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+          )}
           sessionId={sessionId}
           renderMessageRow={renderMessageRow}
         />

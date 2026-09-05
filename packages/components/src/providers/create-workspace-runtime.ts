@@ -69,6 +69,18 @@ import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import {
+  CONTROL_PLANE_IGNORED_ROOT_KEYS,
+  createControlPlaneDoc,
+  createConversationViewFromDoc,
+  createConversationViewFromHistory,
+  createHistoryWriter,
+  createMirrorHistoryWriter,
+  isConversationViewEnabled,
+  sessionControlPlaneSchema,
+  type ConversationView,
+  type HistoryWriter,
+} from '@/lib/conversation-view';
+import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
   type WorkspaceTransportRoute,
@@ -79,6 +91,7 @@ import { LoroDoc, EphemeralStore } from 'loro-crdt';
 import {
   WorkspaceRuntime,
   type PreviewVisualCommentDocStore,
+  type SessionDocState,
   type SessionDocStore,
   type TaskDocStore,
 } from '@/atoms/runtime';
@@ -3621,16 +3634,46 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Open persisted doc immediately - this reads from local IndexedDB
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
+    const sessionDoc = persistedDoc.doc as LoroDoc;
 
-    const mirror = new Mirror({
-      doc: persistedDoc.doc as LoroDoc,
-      schema: sessionDocSchema,
-      // Tolerate root keys written by peers running a newer schema version.
-      ignoreUnknownProperties: true,
-      // Plan is now stored per-turn on history entries, not at root level
-      initialState: { session: { id: sessionId }, history: [] },
-      debug: false,
-    });
+    // Two Mirrors are never built here: either the control-plane Mirror that
+    // ignores `history` (turns come from a windowed `ConversationView` over
+    // the raw doc), or — with the rollback flag off — the old full Mirror
+    // fronted by a fully hydrated view adapter. Either way the store's public
+    // surface is the same.
+    let mirror: Mirror<typeof sessionControlPlaneSchema> | Mirror<typeof sessionDocSchema>;
+    let history: ConversationView;
+    let historyWriter: HistoryWriter;
+    if (isConversationViewEnabled()) {
+      const controlPlaneMirror = new Mirror({
+        doc: createControlPlaneDoc(sessionDoc, { ignoredRootKeys: CONTROL_PLANE_IGNORED_ROOT_KEYS }),
+        schema: sessionControlPlaneSchema,
+        // Tolerate root keys written by peers running a newer schema version.
+        ignoreUnknownProperties: true,
+        initialState: { session: { id: sessionId } },
+        debug: false,
+      });
+      mirror = controlPlaneMirror;
+      history = createConversationViewFromDoc(sessionDoc, { sessionId });
+      historyWriter = createHistoryWriter(sessionDoc, history);
+    } else {
+      const fullMirror = new Mirror({
+        doc: sessionDoc,
+        schema: sessionDocSchema,
+        // Tolerate root keys written by peers running a newer schema version.
+        ignoreUnknownProperties: true,
+        // Plan is now stored per-turn on history entries, not at root level
+        initialState: { session: { id: sessionId }, history: [] },
+        debug: false,
+      });
+      mirror = fullMirror;
+      history = createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => (fullMirror.getState().history ?? []) as never,
+        subscribe: (listener) => fullMirror.subscribe(() => listener()),
+      });
+      historyWriter = createMirrorHistoryWriter(fullMirror as never);
+    }
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
     // Track subscription for cleanup
@@ -3760,15 +3803,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         syncTracker.subscribeSyncState((state) => {
           listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
         }),
-      getState: () => mirror.getState(),
+      getState: () => mirror.getState() as SessionDocState,
       setState: (updater) => {
         mirror.setState(updater as never);
       },
-      subscribe: (listener) => mirror.subscribe(listener),
+      subscribe: (listener) => mirror.subscribe(listener as never),
+      history,
+      historyWriter,
       dispose: () => {
         disposed = true;
         stopSyncNow();
         syncTracker.dispose();
+        history.dispose();
         mirror.dispose();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {

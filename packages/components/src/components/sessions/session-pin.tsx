@@ -8,7 +8,8 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
 
 interface SessionPinProps {
   pinnedHistoryId: string | null;
-  history: SessionHistoryParsed[];
+  /** The pinned user turn, hydrated by the caller through the conversation view. */
+  pinnedMessage: SessionHistoryParsed | null;
   onUnpin: () => void;
   onScrollToMessage?: (historyId: string) => void;
 }
@@ -28,16 +29,18 @@ function getTextFromHistory(entry: SessionHistoryParsed): string {
  */
 export const SessionPin = memo(function SessionPin({
   pinnedHistoryId,
-  history,
+  pinnedMessage,
   onUnpin,
   onScrollToMessage,
 }: SessionPinProps) {
   const { t } = useTranslation();
 
   const pinnedEntry = useMemo(() => {
-    if (!pinnedHistoryId) return null;
-    return history.find((h) => h.id === pinnedHistoryId && h.role === 'user') ?? null;
-  }, [pinnedHistoryId, history]);
+    if (!pinnedHistoryId || !pinnedMessage) return null;
+    return pinnedMessage.id === pinnedHistoryId && pinnedMessage.role === 'user'
+      ? pinnedMessage
+      : null;
+  }, [pinnedHistoryId, pinnedMessage]);
 
   const pinnedText = useMemo(() => {
     if (!pinnedEntry) return '';

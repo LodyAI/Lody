@@ -3643,6 +3643,8 @@
   "settings.experimental.enableHelper": "Show features that are still being built. They can change or break.",
   "settings.experimental.reviewAgent": "Review agent",
   "settings.experimental.reviewAgentHelper": "Let a review agent check a branch, hand fixes back to the session, and merge once CI is green. You choose per session.",
+  "settings.developer.conversationView": "Windowed conversation rendering",
+  "settings.developer.conversationViewHelper": "Open long conversations by hydrating only the visible turns. Turn off to fall back to loading the whole history; applies to conversations opened afterwards.",
   "settings.review.title": "Review agent",
   "settings.review.machineConfigHelper": "Choose the reviewer used by sessions on each machine.",
   "settings.review.machineTableLabel": "Reviewer configuration by machine",

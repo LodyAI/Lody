@@ -2,6 +2,11 @@ import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import {
+  createConversationDerivation,
+  type ConversationView,
+  type DeriveTurnFact,
+} from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
   SessionFileChangeEntry,
@@ -80,6 +85,33 @@ function normalizeHistoryEntryFileDiffs(entry: SessionHistoryEntryInput): FileDi
     const normalized = normalizeFileDiff(rawDiff);
     return normalized === undefined ? [] : [normalized];
   });
+}
+
+/** What the fallback summary needs from a turn; derived per turn object. */
+type DiffInputEntry = { id: string; role: string; fileDiff: unknown };
+
+const deriveDiffInputEntry: DeriveTurnFact<DiffInputEntry> = (turn) => ({
+  id: turn.id,
+  role: turn.role,
+  fileDiff: turn.fileDiff,
+});
+
+/**
+ * Per-turn diff inputs for the whole conversation in order, from a fact table
+ * over the view: turns the background pass has not reached yet are absent and
+ * appear as the pass completes.
+ */
+function collectDiffInputs(
+  view: ConversationView,
+  facts: ReadonlyMap<string, DiffInputEntry>
+): DiffInputEntry[] {
+  const entries: DiffInputEntry[] = [];
+  for (let i = 0; i < view.turnCount; i += 1) {
+    const row = view.index(i);
+    const fact = row ? facts.get(row.id) : undefined;
+    if (fact) entries.push(fact);
+  }
+  return entries;
 }
 
 export function computeSessionDiffInputsFingerprint(history: SessionHistoryInput): string {
@@ -378,6 +410,7 @@ export function useSessionDiffSummary(
     let acquiredStore = false;
     let releaseSync: (() => void) | null = null;
     let unsubscribe: (() => void) | null = null;
+    let derivation: ReturnType<typeof createConversationDerivation<DiffInputEntry>> | null = null;
 
     historyRef.current = undefined;
     diffInputsFingerprintRef.current = undefined;
@@ -401,7 +434,8 @@ export function useSessionDiffSummary(
         }
         releaseSync = store.acquireSync();
 
-        const initialHistory = store.getState().history;
+        derivation = createConversationDerivation(store.history, deriveDiffInputEntry);
+        const initialHistory = collectDiffInputs(store.history, derivation.facts) as never;
         historyRef.current = initialHistory;
         diffInputsFingerprintRef.current = computeSessionDiffInputsFingerprint(initialHistory);
         setDiffInputsVersion((prev) => prev + 1);
@@ -427,18 +461,23 @@ export function useSessionDiffSummary(
             // ignore
           });
 
-        unsubscribe = store.subscribe((nextState) => {
-          const nextFingerprint = computeSessionDiffInputsFingerprint(nextState.history);
+        const activeDerivation = derivation;
+        let frame: number | null = null;
+        const applyDerivedHistory = () => {
+          frame = null;
+          if (cancelled) return;
+          const nextHistory = collectDiffInputs(store.history, activeDerivation.facts) as never;
+          const nextFingerprint = computeSessionDiffInputsFingerprint(nextHistory);
           if (nextFingerprint === diffInputsFingerprintRef.current) {
             return;
           }
           diffInputsFingerprintRef.current = nextFingerprint;
-          historyRef.current = nextState.history;
+          historyRef.current = nextHistory;
           setDiffInputsVersion((prev) => prev + 1);
           if (!shouldUpdateFallbackSummary()) {
             return;
           }
-          const nextSummary = buildSessionDiffSummary(nextState.history);
+          const nextSummary = buildSessionDiffSummary(nextHistory);
           setState((prev) => {
             if (areSessionDiffSummariesEqual(prev.summary, nextSummary)) {
               if (prev.source === 'fallback') {
@@ -456,6 +495,10 @@ export function useSessionDiffSummary(
               unavailableMessage: undefined,
             };
           });
+        };
+        // Facts change at token rate while a turn streams; refresh once per frame.
+        unsubscribe = activeDerivation.subscribe(() => {
+          if (frame === null) frame = requestAnimationFrame(applyDerivedHistory);
         });
       } catch (error) {
         console.error('Failed to load session diff summary', { sessionId, error });
@@ -464,6 +507,7 @@ export function useSessionDiffSummary(
 
     return () => {
       cancelled = true;
+      derivation?.dispose();
       if (unsubscribe) {
         unsubscribe();
       }

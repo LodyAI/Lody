@@ -93,6 +93,7 @@ const openedConversationItems: ChatStreamItem[] = [
   {
     type: 'message',
     sessionId: openedSessionId,
+    turnIndex: 0,
     message: {
       id: 'storybook-opened-user-turn',
       role: 'user',

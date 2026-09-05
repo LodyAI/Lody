@@ -3,12 +3,17 @@ import {
   getServerNow,
   getSessionRoomId,
   type MessageQueueItem,
+  type PermissionOutcome,
   type PreviewVisualCommentDocInput,
-  type SessionDocMeta,
+  type SessionHistory,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
-import type { PreviewVisualCommentDocStore, SessionDocStore } from '../atoms/runtime';
+import type {
+  PreviewVisualCommentDocStore,
+  SessionDocDraft,
+  SessionDocStore,
+} from '../atoms/runtime';
 import type { WorkspaceWriter } from './workspace-writer';
 
 // # WorkspaceWriter implementation
@@ -77,9 +82,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
         withSessionStore(sessionId, (store) => {
-          store.setState((draft: SessionDocMeta) => {
-            draft.history.push(entry as SessionDocMeta['history'][number]);
-          });
+          store.historyWriter.append(entry as unknown as SessionHistory);
         }),
       ]);
       void dispatch;
@@ -120,9 +123,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionTurn(sessionId, entry, dispatch) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        store.historyWriter.append(entry as unknown as SessionHistory);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -131,45 +132,28 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionHistory(sessionId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        store.historyWriter.append(entry as unknown as SessionHistory);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          const history = draft.history as SessionDocMeta['history'];
-          const idx = history.findIndex((h) => (h as { id?: string }).id === entryId);
-          if (idx < 0) return;
-          history[idx] = entry as SessionDocMeta['history'][number];
-        });
+        // Unknown id is a no-op, as the Mirror findIndex short-circuit was.
+        store.historyWriter.replace(entryId, entry as unknown as SessionHistory);
       });
     },
 
-    async respondSessionPermission(sessionId, requestId, outcome) {
+    async respondSessionPermission(sessionId, requestId, outcome, options) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          for (const entry of draft.history as SessionDocMeta['history']) {
-            const items = (entry as { items?: unknown[] }).items;
-            if (!Array.isArray(items)) continue;
-            for (const item of items) {
-              const pr = (item as { permissionRequest?: { requestId?: string; outcome?: unknown } })
-                .permissionRequest;
-              if (pr && pr.requestId === requestId) {
-                pr.outcome = outcome;
-                return;
-              }
-            }
-          }
+        store.historyWriter.respondPermission(requestId, outcome as unknown as PermissionOutcome, {
+          turnId: options?.turnId,
         });
       });
     },
 
     async enqueueSessionMessage(sessionId, item) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = [...mq, item as MessageQueueItem];
         });
@@ -179,7 +163,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async removeSessionMessage(sessionId, itemId) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
@@ -189,7 +173,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async updateSessionMessage(sessionId, itemId, patch) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
             item.$cid === itemId
@@ -203,7 +187,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
           const ordered: MessageQueueItem[] = [];

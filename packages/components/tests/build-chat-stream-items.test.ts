@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { buildChatStreamItems as buildChatStreamItemsFromView } from '../src/components/ai-gui/build-chat-stream-items';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 
 const sessionId = 'session-test' as SessionId;
+
+/** The builder over a fully hydrated view of `history`, as the rollback path feeds it. */
+const buildChatStreamItems = (
+  history: readonly SessionHistory[],
+  id: SessionId,
+  previousCache?: Parameters<typeof buildChatStreamItemsFromView>[2]
+) =>
+  buildChatStreamItemsFromView(
+    createConversationViewFromHistory({ sessionId: id, getHistory: () => history, subscribe: () => () => {} }),
+    id,
+    previousCache
+  );
 
 const entry = (partial: {
   id: string;

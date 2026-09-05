@@ -808,7 +808,7 @@ const buildHistory = (
 };
 
 const toStreamItems = (sessionId: SessionId, messages: SessionHistoryParsed[]) =>
-  messages.map((message) => ({ type: 'message', sessionId, message }) as const);
+  messages.map((message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const);
 
 const renderMessageRow = ({
   message,

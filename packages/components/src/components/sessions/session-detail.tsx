@@ -238,6 +238,7 @@ import {
 } from '@/lib/session-file-provider-open-result';
 import { canOpenHistoricalSessionDiffs } from '@/lib/session-file-provider';
 import { useSessionDoc, useSessionDocSyncState } from '@/hooks/use-session-doc';
+import { useConversationTail } from '@/hooks/use-conversation-view';
 import { useDelayedFlag } from '@/hooks/use-delayed-flag';
 import { isSyncingRoomSyncState } from '@/lib/room-sync-state';
 import {
@@ -462,7 +463,10 @@ function PendingWorktreeForkObserver({
   onCompleted: () => void;
   onFailed: (message: string) => void;
 }) {
-  const { doc, ready } = useSessionDoc(targetSessionId, { syncEnabled: true });
+  const { doc, history, ready } = useSessionDoc(targetSessionId, { syncEnabled: true });
+  // The fork service appends the origin notice as the LAST entry of the cloned
+  // history, so the always-hydrated tail is where it shows up.
+  const { turns: tail } = useConversationTail(history);
   const terminalRef = useRef(false);
   useEffect(() => {
     if (!ready || terminalRef.current) return;
@@ -472,7 +476,7 @@ function PendingWorktreeForkObserver({
       onFailed(operation.data.error?.message ?? 'Unable to create the fork worktree');
       return;
     }
-    const completed = doc.history.some((entry) =>
+    const completed = tail.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
       )
@@ -481,7 +485,7 @@ function PendingWorktreeForkObserver({
       terminalRef.current = true;
       onCompleted();
     }
-  }, [doc.forkOperation, doc.history, onCompleted, onFailed, ready]);
+  }, [doc.forkOperation, tail, onCompleted, onFailed, ready]);
   return null;
 }
 

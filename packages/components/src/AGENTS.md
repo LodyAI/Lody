@@ -2,6 +2,33 @@
 
 Parent `AGENTS.md` files also apply.
 
+## Session turns have one read path and one write path
+
+A session document's `history` is the one piece of state that grows without
+bound, so it is never mirrored into memory as an array. Everything goes through
+`SessionDocStore`:
+
+- **Read** `store.history` — a `ConversationView`: `index(i)` for the always-present
+  per-turn row, `turn(i)` for a hydrated turn, `ensureRange`/`release` to hold a
+  window. In React use `useSessionDoc().history`, `useConversationTail`,
+  `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
+- **Write** `store.historyWriter` — `append`, `replace`, `respondPermission`,
+  and `read` for the read-modify-write flows. It authors the same containers a
+  Mirror write produced, byte for byte.
+
+`getState()` has no `history` key and `setState` receives a draft without one,
+so the ordinary spellings of a second path do not compile. What types cannot
+close is a deliberate escape — a cast that puts the key back, or reaching past
+the store into the raw `LoroDoc` — and
+`tests/no-materialized-history-in-components.test.ts` fails on those. Only
+`lib/conversation-view` (and the rollback branch that builds its adapter from
+the old full Mirror) may touch the raw list; that exemption list is asserted to
+be exact.
+
+Materializing the list anywhere else restores the cost this design removes: a
+2,400-turn conversation opens in ~48 ms through the view and ~3.8 s through a
+full Mirror, and a streamed token costs 0.01 ms instead of 14.9 ms.
+
 ## Lightweight hosted entries
 
 - Public/auth entry points that bypass the full product router import route-agnostic
