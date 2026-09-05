@@ -15,12 +15,13 @@ Runtime output is written below ignored `e2e/artifacts/` directories.
 Daily regression sets `LODY_E2E_RECORD_VIDEO=1`. Playwright records each
 scenario independently at 640x360, deletes the recording after a clean pass,
 and retains `failure.webm` after an assertion or teardown failure. The
-read-only Daily job uploads all evidence as one Actions artifact. A separate
-trusted reconciler validates the failure index and each video, then attaches up
-to one independently retryable comment per failed scenario on the durable Daily
-failure Issue. Oversized, missing, symbolic-link, and unexpected-path files are
-never attached; the workflow run remains linked for complete trace and log
-retrieval.
+read-only Daily job uploads all evidence as one suite-qualified Actions artifact.
+A separate trusted reconciler validates the failure index and each video, then
+attaches up to one independently retryable comment per failed scenario on the
+durable Daily failure Issue. Only a successful `full` artifact can resolve that
+Issue; a successful `smoke` run does not cover prior P1 failures. Oversized,
+missing, symbolic-link, and unexpected-path files are never attached; the
+workflow run remains linked for complete trace and log retrieval.
 
 Acceptance rounds additionally contain `result.json`, `manifest.json`, and a
 successful `checkpoint.png` for every selected scenario. Supplied before/after

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { findOwnedDailyFailureIssue, hasCompleteOwnedComment } from './e2e-daily-policy.mjs';
+import {
+  canCloseDailyFailureIssue,
+  findDailyEvidenceArtifact,
+  findOwnedDailyFailureIssue,
+  hasCompleteOwnedComment,
+} from './e2e-daily-policy.mjs';
 
 const bot = { login: 'github-actions[bot]', type: 'Bot' };
 const outsider = { login: 'outside-reporter', type: 'User' };
@@ -53,4 +58,51 @@ void test('retries a bot comment until its video reference was uploaded', () => 
 void test('accepts one bot-owned summary comment when no video exists', () => {
   const marker = '<!-- desktop-e2e-daily-failure-run:123:summary -->';
   assert.equal(hasCompleteOwnedComment([{ body: marker, user: bot }], marker, 0), true);
+});
+
+void test('identifies the suite from the exact Daily evidence artifact', () => {
+  assert.deepEqual(
+    findDailyEvidenceArtifact([{ id: 7, name: 'desktop-e2e-daily-full-123', expired: false }], 123),
+    {
+      artifact: { id: 7, name: 'desktop-e2e-daily-full-123', expired: false },
+      suite: 'full',
+    }
+  );
+  assert.equal(
+    findDailyEvidenceArtifact([{ id: 8, name: 'desktop-e2e-daily-smoke-123', expired: false }], 123)
+      ?.suite,
+    'smoke'
+  );
+});
+
+void test('treats legacy Daily artifacts as evidence without assuming their suite', () => {
+  assert.equal(
+    findDailyEvidenceArtifact([{ id: 9, name: 'desktop-e2e-daily-123', expired: false }], 123)
+      ?.suite,
+    'unknown'
+  );
+});
+
+void test('rejects ambiguous and expired Daily evidence artifacts', () => {
+  assert.equal(
+    findDailyEvidenceArtifact(
+      [
+        { id: 7, name: 'desktop-e2e-daily-full-123', expired: false },
+        { id: 8, name: 'desktop-e2e-daily-smoke-123', expired: false },
+      ],
+      123
+    ),
+    undefined
+  );
+  assert.equal(
+    findDailyEvidenceArtifact([{ id: 7, name: 'desktop-e2e-daily-full-123', expired: true }], 123),
+    undefined
+  );
+});
+
+void test('only a successful full Daily can close the shared failure Issue', () => {
+  assert.equal(canCloseDailyFailureIssue('success', 'full'), true);
+  assert.equal(canCloseDailyFailureIssue('success', 'smoke'), false);
+  assert.equal(canCloseDailyFailureIssue('success', 'unknown'), false);
+  assert.equal(canCloseDailyFailureIssue('failure', 'full'), false);
 });

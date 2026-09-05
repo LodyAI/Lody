@@ -163,7 +163,6 @@ async function runReviewIteration(
   await review.show();
   await review.openChangedFile(SECONDARY_REVIEW_DIFF_PATH, repository.changedPaths);
   const active = captureActive ? await captureActive() : null;
-  await review.closeActiveDiff();
   await review.closeChangesPanel();
   await session.archiveAndDeleteSession(prompt);
   return active;

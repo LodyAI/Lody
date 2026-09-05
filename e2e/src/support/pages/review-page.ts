@@ -131,17 +131,17 @@ export class ReviewPage {
       await existingTab.click();
     } else {
       const emptyStateButton = this.sidePanel.getByRole('button', {
-        name: /^(All Changes|全部变更)$/u,
+        name: /^(All Changes|全部变更)$/iu,
       });
       if (await emptyStateButton.isVisible()) {
         await emptyStateButton.click();
       } else {
         await this.sidePanel.getByRole('button', { name: /^(Add panel|添加面板)$/u }).click();
-        await this.page.getByRole('menuitem', { name: /^(All Changes|全部变更)$/u }).click();
+        await this.page.getByRole('menuitem', { name: /^(All Changes|全部变更)$/iu }).click();
       }
     }
 
-    await expect(this.activeSidePanelTab()).toContainText(/^(All Changes|全部变更)$/u);
+    await expect(this.activeSidePanelTab()).toContainText(/^(All Changes|全部变更)$/iu);
     for (const path of expectedPaths) {
       await expect(this.changeRow(path)).toBeVisible({ timeout: 60_000 });
     }
@@ -150,7 +150,7 @@ export class ReviewPage {
   async openChangedFile(path: string, expectedPaths: readonly string[]): Promise<void> {
     await this.openChangesPanel(expectedPaths);
     await this.changeRow(path).click();
-    await expect(this.activeSidePanelTab()).toContainText(/^(All Changes|全部变更)$/u);
+    await expect(this.activeSidePanelTab()).toContainText(/^(All Changes|全部变更)$/iu);
 
     const readyDiffs = this.sidePanel.locator('[data-section-id="diff-viewer"]');
     await expect(readyDiffs).toHaveCount(expectedPaths.length, { timeout: 60_000 });
@@ -175,24 +175,19 @@ export class ReviewPage {
     ).toBeVisible();
   }
 
-  async closeActiveDiff(): Promise<void> {
-    const activeTab = this.activeSidePanelTab();
-    await expect(activeTab).toContainText(/^(All Changes|全部变更)$/u);
-    await activeTab.getByRole('button', { name: /^(Close All Changes|关闭\s*全部变更)$/u }).click();
-    await expect(this.sidePanel.locator('[data-section-id="diff-viewer"]')).toHaveCount(0);
-  }
-
   async closeChangesPanel(): Promise<void> {
     const activeTab = this.activeSidePanelTab();
-    await expect(activeTab).toContainText(/^(All Changes|全部变更)$/u);
-    await activeTab.getByRole('button', { name: /^(Close All Changes|关闭\s*全部变更)$/u }).click();
+    await expect(activeTab).toContainText(/^(All Changes|全部变更)$/iu);
+    await activeTab
+      .getByRole('button', { name: /^(Close All Changes|关闭\s*全部变更)$/iu })
+      .click();
     await expect(this.allChangesTabs()).toHaveCount(0);
     await expect(this.sidePanel.locator('[data-id^="change:"]')).toHaveCount(0);
     await expect(this.sidePanel.locator('[data-section-id="diff-viewer"]')).toHaveCount(0);
   }
 
   private allChangesTabs(): Locator {
-    return this.sidePanel.locator('[role="tab"]').filter({ hasText: /^(All Changes|全部变更)$/u });
+    return this.sidePanel.locator('[role="tab"]').filter({ hasText: /^(All Changes|全部变更)$/iu });
   }
 
   private activeSidePanelTab(): Locator {

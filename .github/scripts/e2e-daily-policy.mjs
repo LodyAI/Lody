@@ -32,6 +32,26 @@ export function hasCompleteOwnedComment(comments, marker, expectedVideos) {
   });
 }
 
+export function findDailyEvidenceArtifact(artifacts, runId) {
+  const supported = new Map([
+    [`desktop-e2e-daily-full-${runId}`, 'full'],
+    [`desktop-e2e-daily-smoke-${runId}`, 'smoke'],
+    [`desktop-e2e-daily-${runId}`, 'unknown'],
+  ]);
+  const matches = artifacts.filter(
+    (artifact) => !artifact.expired && supported.has(String(artifact.name ?? ''))
+  );
+  if (matches.length !== 1) return undefined;
+  return {
+    artifact: matches[0],
+    suite: supported.get(matches[0].name),
+  };
+}
+
+export function canCloseDailyFailureIssue(conclusion, suite) {
+  return conclusion === 'success' && suite === 'full';
+}
+
 function parseCliArgs(argv) {
   if (argv[0] !== 'comment-complete') throw new Error('Expected comment-complete command');
   const values = new Map();

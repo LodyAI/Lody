@@ -49,7 +49,6 @@ When('用户切换大型 diff 并隐藏再恢复 Review', async function (this: 
 });
 
 Then('关闭 Review 和 Session 后相关视图被释放', async function (this: LodyWorld) {
-  await this.reviewPage!.closeActiveDiff();
   await this.reviewPage!.closeChangesPanel();
   await this.sessionPage!.archiveAndDeleteSession(this.activeAcpEvent!);
   await this.harness!.capturePostGcSnapshot();

@@ -58,6 +58,8 @@ also applies.
   and retains one `failure.webm` per failed scenario. The read-only runner only
   uploads evidence; a trusted default-branch reconciler validates and attaches
   every bounded WebM to an independently retryable Daily failure Issue comment.
+  Only a successful full Daily may close that Issue; smoke success never clears
+  failure state that can include P1 coverage.
 - Acceptance is a separate immutable round. It captures successful user-visible
   checkpoints and metrics for human review; a later repair creates a new round.
 - Scout is a separate non-blocking soak lane. It may reuse this harness and Page

@@ -29,9 +29,34 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      - name: Find Daily evidence
+        id: evidence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const policy = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/e2e-daily-policy.mjs`
+            )
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+              per_page: 100
+            })
+            const evidence = policy.findDailyEvidenceArtifact(
+              artifacts,
+              context.payload.workflow_run.id
+            )
+            core.setOutput('available', String(Boolean(evidence)))
+            core.setOutput('suite', evidence?.suite ?? 'unknown')
+            core.setOutput('artifact-name', evidence?.artifact.name ?? '')
+            if (!evidence) core.warning('No unique, unexpired Daily evidence artifact is available.')
+
       - name: Reconcile Daily failure Issue
         id: issue
         uses: actions/github-script@v7
+        env:
+          DAILY_SUITE: ${{ steps.evidence.outputs.suite }}
         with:
           script: |
             const policy = await import(
@@ -48,7 +73,7 @@ jobs:
             })
             const existing = policy.findOwnedDailyFailureIssue(issues, marker)
 
-            if (conclusion === 'success') {
+            if (policy.canCloseDailyFailureIssue(conclusion, process.env.DAILY_SUITE)) {
               if (existing?.state === 'open') {
                 const runUrl = context.payload.workflow_run.html_url
                 await github.rest.issues.createComment({
@@ -65,6 +90,13 @@ jobs:
                   state_reason: 'completed'
                 })
               }
+              core.setOutput('report', 'false')
+              return
+            }
+            if (conclusion === 'success') {
+              core.notice(
+                `Daily ${process.env.DAILY_SUITE} succeeded without covering the full failure state.`
+              )
               core.setOutput('report', 'false')
               return
             }
@@ -102,30 +134,11 @@ jobs:
             core.setOutput('issue-number', String(issueNumber))
             core.setOutput('report', 'true')
 
-      - name: Find Daily evidence
-        if: steps.issue.outputs.report == 'true'
-        id: evidence
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.payload.workflow_run.id,
-              per_page: 100
-            })
-            const expectedName = `desktop-e2e-daily-${context.payload.workflow_run.id}`
-            const artifact = artifacts.find((candidate) =>
-              !candidate.expired && candidate.name === expectedName
-            )
-            core.setOutput('available', String(Boolean(artifact)))
-            if (!artifact) core.warning(`No unexpired ${expectedName} artifact is available.`)
-
       - name: Download Daily evidence
         if: steps.issue.outputs.report == 'true' && steps.evidence.outputs.available == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: desktop-e2e-daily-${{ github.event.workflow_run.id }}
+          name: ${{ steps.evidence.outputs.artifact-name }}
           path: daily-evidence
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
