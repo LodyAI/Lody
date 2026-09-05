@@ -34,6 +34,10 @@ const explicitlyExternal = new Set([
   // cannot be inlined. Kept external and staged into the Electron app like the
   // other external runtime deps (apps/electron/scripts/cli-native-deps.mjs).
   'tinypool',
+  // @vscode/ripgrep resolves its binary out of a sibling per-platform package by
+  // `require.resolve`. Inlining that call would resolve it against the bundle,
+  // where no such package exists, so the shim must stay external and be staged.
+  '@vscode/ripgrep',
 ]);
 
 export default defineConfig({
