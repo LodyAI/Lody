@@ -81,6 +81,11 @@ arrive: context/message-flow.md "Upstream".
   answer before giving up on the upstream turn's response: the Codex adapter drains
   session notifications before refusing, so the turn's response routinely wins that
   race and would otherwise mask the refusal.
+  Registry Cursor opts into cursor-agent's clean model ids via
+  `clientCapabilities._meta.parameterizedModelPicker` at initialize; the gate is
+  registry identity (`cliType: 'registry'` and `agentType: 'cursor'`), never a
+  same-named custom or builtin config. Downstream capability consumers stay
+  provider-neutral.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
   `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Unbounded concurrent Codex starts
@@ -235,6 +240,17 @@ arrive: context/message-flow.md "Upstream".
   non-blocking cache update before the first prompt. Machine Flock writes ignore
   `fetchedAt` when comparing entries, so unchanged runtime capabilities do not
   commit or sync.
+  Registry Cursor's per-model option catalog (`AcpCapabilityCacheEntry.configOptionsByModel`)
+  comes only from an explicit `machine/acp-capabilities-refresh` probe calling
+  `cursor/list_available_models` once after `session/new`; real sessions never fetch it.
+  JSON-RPC `-32601` means no catalog; any other failure fails the probe with
+  `[ACP_CAPABILITIES_INCOMPLETE]` so the settings test button can retry. Omitting
+  `configOptionsByModel` on a Machine Flock write preserves the stored catalog for the
+  same `sourceVersion`, and the unchanged-entry comparison includes it. Never enumerate
+  models through `session/set_config_option`: it rewrites the user's global Cursor config.
+  `resolveAcpConfigOptionsForModel` in `@lody/shared` is the one composition rule: an
+  option owned by any model's catalog entry is per-model, and `model`/`mode` options
+  always come from the snapshot.
 - `login-shell-env.ts` — login-shell env capture for spawned agents.
 - Builtin Claude owns session title generation through ACP
   `session_info_update`; `AgentClient` forwards those titles and `MessageHandler`

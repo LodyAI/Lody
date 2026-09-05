@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
+import { Brain, ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getAllAgentConfigAtom } from '@/atoms';
@@ -195,6 +195,7 @@ function MobileRunConfigSheetRows({
     permissionModeSelectors,
     modeSelectors,
     thoughtLevelSelectors,
+    thoughtToggleSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -662,6 +663,25 @@ function MobileRunConfigSheetRows({
           }
         />
       ) : null}
+
+      {thoughtToggleSelectors.map((selector) => (
+        <ToggleRow
+          key={selector.configId}
+          icon={<Brain className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />}
+          label={selector.label}
+          checked={resolveOnOffConfigOptionEnabled(
+            selector,
+            configOptionValues?.[selector.configId]
+          )}
+          ariaLabel={selector.label}
+          onCheckedChange={() =>
+            onConfigOptionChange?.(
+              selector.configId,
+              toggleOnOffConfigOptionValue(selector, configOptionValues?.[selector.configId])
+            )
+          }
+        />
+      ))}
 
       {fastSelector ? (
         <ToggleRow

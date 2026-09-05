@@ -7,8 +7,10 @@ import { PlatformContext } from '@lody/platform/react';
 import {
   type AgentConfigId,
   type AgentConfigMeta,
+  type AcpConfigOptionSummary,
   type MachineId,
   getAgentConfigRoomId,
+  resolveAcpConfigOptionsForModel,
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
@@ -34,6 +36,7 @@ const machineId = 'machine-storybook' as MachineId;
 const codexId = 'agent-codex' as AgentConfigId;
 const grokId = 'agent-grok' as AgentConfigId;
 const deepseekId = 'agent-deepseek' as AgentConfigId;
+const cursorId = 'agent-cursor' as AgentConfigId;
 
 const storyPlatform = createLocalPlatformProvider({
   session: createStaticStore({
@@ -87,6 +90,16 @@ const agents: AgentConfigMeta[] = [
     env: {},
   },
 ];
+
+const cursorAgent: AgentConfigMeta = {
+  id: cursorId,
+  machineId,
+  name: 'Cursor',
+  description: 'Registry Cursor agent',
+  cliType: 'registry',
+  agentType: 'cursor',
+  env: {},
+};
 
 const modelOptions: AcpSessionSelectOption[] = [
   { value: 'gpt-5.5', label: '5.5', description: 'Latest frontier Codex model' },
@@ -194,6 +207,107 @@ const grokSelectors: AcpConfigOptionSelector[] = [
     ],
   },
 ];
+
+const cursorThinking: AcpConfigOptionSummary = {
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'true',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+};
+const cursorEffort: AcpConfigOptionSummary = {
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'high', name: 'High' },
+  ],
+};
+const cursorContext: AcpConfigOptionSummary = {
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+};
+const cursorFast: AcpConfigOptionSummary = {
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'true', name: 'On' },
+    { value: 'false', name: 'Off' },
+  ],
+};
+const cursorReasoning: AcpConfigOptionSummary = {
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'minimal',
+  options: [
+    { value: 'minimal', name: 'Minimal' },
+    { value: 'full', name: 'Full' },
+  ],
+};
+const cursorModel: AcpConfigOptionSummary = {
+  id: 'model',
+  name: 'Model',
+  category: 'model',
+  type: 'select',
+  currentValue: 'a',
+  options: [
+    { value: 'a', name: 'A' },
+    { value: 'b', name: 'B' },
+  ],
+};
+const cursorCatalogEntry = {
+  configOptions: [cursorModel, cursorThinking, cursorEffort, cursorContext, cursorFast],
+  configOptionsByModel: {
+    a: [cursorThinking, cursorEffort, cursorContext, cursorFast],
+    b: [cursorReasoning],
+  },
+};
+const cursorModelOptions: AcpSessionSelectOption[] = [
+  { value: 'a', label: 'A' },
+  { value: 'b', label: 'B' },
+];
+
+function selectorsFromCatalog(modelId: string): AcpConfigOptionSelector[] {
+  return (resolveAcpConfigOptionsForModel(cursorCatalogEntry, modelId) ?? []).map((option) =>
+    option.type === 'boolean'
+      ? {
+          type: 'boolean' as const,
+          configId: option.id,
+          label: option.name,
+          category: option.category,
+          currentValue: option.currentValue === true,
+          options: [] as [],
+        }
+      : {
+          type: 'select' as const,
+          configId: option.id,
+          label: option.name,
+          category: option.category,
+          currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
+          options: option.options.map((entry) => ({
+            value: entry.value,
+            label: entry.name,
+            description: entry.description,
+          })),
+        }
+  );
+}
 
 function StoryShell({
   isEmptyConversation,
@@ -355,6 +469,46 @@ function DeepSeekWarningShell() {
   );
 }
 
+function CursorCatalogShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(agentConfigMetaCacheAtom, {
+      [getAgentConfigRoomId(cursorAgent.id)]: cursorAgent,
+    });
+    return next;
+  }, []);
+  const [model, setModel] = useState('a');
+  const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>({
+    thinking: 'true',
+    effort: 'low',
+    context: 'default',
+    fast: 'false',
+  });
+  const catalogSelectors = selectorsFromCatalog(model);
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh items-end bg-background p-8">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+          <DesktopRunConfigMenu
+            agentSelection={{ agentId: cursorId, machineId }}
+            availableAgentConfigs={[cursorAgent]}
+            agentLocked
+            modelOptions={cursorModelOptions}
+            selectedModelId={model}
+            onModelChange={setModel}
+            configOptionSelectors={catalogSelectors}
+            configOptionValues={values}
+            onConfigOptionChange={(id, value) =>
+              setValues((previous) => ({ ...previous, [id]: value }))
+            }
+          />
+        </div>
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-8">
@@ -401,4 +555,8 @@ export const MachineScope: Story = {
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },
   render: () => <EmptyMachineScopeShell />,
+};
+export const RegistryCursorCatalog: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <CursorCatalogShell />,
 };
