@@ -45,7 +45,7 @@ const makeHarness = async (options?: {
   materializationWritesBeforeFailure?: boolean;
   materializationWritesDocBeforeFailure?: boolean;
   materializeTargetOverride?: () => Promise<void>;
-  operationKind?: 'session_create' | 'session_chat';
+  operationKind?: 'session_create' | 'session_create_many' | 'session_chat';
   failProgressHistoryWrites?: boolean;
   progressHistoryFailures?: number;
   targetDocSync?: () => Promise<{
@@ -116,10 +116,15 @@ const makeHarness = async (options?: {
     },
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-      const next = update(histories.get(sessionId) ?? []);
+      const current = histories.get(sessionId) ?? [];
+      const next = update(current);
+      const progressItems = (history: SessionHistoryInput[]) =>
+        history.flatMap(
+          (entry) => entry.items?.filter((item) => item.type === 'operation_progress') ?? []
+        );
       if (
         sessionId === requesterSessionId &&
-        next.some((entry) => entry.items?.some((item) => item.type === 'operation_progress')) &&
+        JSON.stringify(progressItems(next)) !== JSON.stringify(progressItems(current)) &&
         (options?.failProgressHistoryWrites === true || remainingProgressHistoryFailures > 0)
       ) {
         remainingProgressHistoryFailures = Math.max(0, remainingProgressHistoryFailures - 1);
@@ -1348,6 +1353,66 @@ describe('LodyOperationCoordinator', () => {
       },
     ]);
   });
+
+  it.each([false, true])(
+    'only suppresses batch fallback cards with complete coverage (%s)',
+    async (completeCoverage) => {
+      const harness = await makeHarness({
+        operationKind: 'session_create_many',
+        failProgressHistoryWrites: true,
+      });
+      const targets = [
+        { sessionId: 'batch-child-a' as SessionId, userTurnId: 'batch-turn-a' },
+        { sessionId: harness.targetSessionId, userTurnId: 'turn-1' },
+      ];
+      const results = targets.map((target) => ({
+        status: 'succeeded' as const,
+        target,
+        assistantTurnId: `assistant:${target.userTurnId}`,
+      }));
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        store.updateItems(harness.requesterSessionId, 'review-round-1', results);
+        store.finish(harness.requesterSessionId, 'review-round-1', {
+          type: 'result',
+          value: { items: results },
+        });
+      } finally {
+        store.close();
+      }
+      harness.histories.set(harness.requesterSessionId, [
+        {
+          id: 'operation-progress:requester-1:review-round-1',
+          role: 'system',
+          timestamp: '2026-07-20T00:00:00.000Z',
+          fileDiff: [],
+          items: [
+            {
+              type: 'operation_progress',
+              operationId: 'review-round-1',
+              operationKind: 'session_create_many',
+              items: targets
+                .slice(0, completeCoverage ? 2 : 1)
+                .map((target) => ({ target, status: 'created' })),
+            },
+          ],
+        },
+      ]);
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      harness.coordinator.stop();
+      const completion = harness.histories
+        .get(harness.requesterSessionId)
+        ?.flatMap((entry) => entry.items ?? [])
+        .find((item) => item.type === 'operation_completion');
+      expect(completion?.type).toBe('operation_completion');
+      if (completion?.type !== 'operation_completion') throw new Error('Missing completion');
+      expect(completion.progressMessageId).toBe(
+        completeCoverage ? 'operation-progress:requester-1:review-round-1' : undefined
+      );
+      expect(completion.completion).toMatchObject({ type: 'result', value: { items: results } });
+    }
+  );
 
   it('links operation completion to existing create progress history', async () => {
     const harness = await makeHarness({
