@@ -1,3 +1,5 @@
+import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
+import { createLocalPagedFileSource } from './paged-file-source';
 import {
   CODE_COLLAB_V2_TEXT_LIMITS,
   type CodeCollabFileSourceState,
@@ -54,7 +56,7 @@ export type CodeCollabSessionFileProviderRuntime = {
   previewFile(
     path: string,
     knownDigest?: FilePreviewV3Digest
-  ): Promise<FilePreviewV3Response | null>;
+  ): Promise<FilePreviewV3Response | LocalFilePreviewResource | null>;
   /** Retained for `saveText`'s digest bookkeeping and older provider callers. */
   openText(path: string): Promise<CodeCollabV2OpenTextOk | CodeCollabV2Error | null>;
   refreshText(
@@ -360,6 +362,34 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         filePreviewErrorCodeToUnavailableReason(response.code),
         response.message ?? response.code
       );
+    }
+    if (response.status === 'resource') {
+      // Paged content must never seed save-text's full-document conflict cache.
+      for (const key of new Set([
+        path,
+        response.path,
+        ...(cached?.cacheKeys ?? []),
+        ...(this.openCache.get(response.path)?.cacheKeys ?? []),
+      ]))
+        this.openCache.delete(key);
+      return {
+        status: 'ready',
+        entry: {
+          ...indexed,
+          path: response.path,
+          fileId: response.path,
+          kind: response.kind,
+          sizeBytes: response.sizeBytes,
+          readonly: true,
+        },
+        snapshot:
+          response.kind === 'text'
+            ? {
+                kind: 'paged-text',
+                source: createLocalPagedFileSource(response.url, response.sizeBytes),
+              }
+            : { kind: 'binary', url: response.url },
+      };
     }
     if (response.status === 'unchanged') {
       return {

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
@@ -14,19 +19,16 @@ afterEach(() => {
 describe('createWorkspaceMachineRpcFacade', () => {
   it('uses the local-only IPC preview method without creating a cloud client', async () => {
     const invoke = vi.fn(async () => ({
-      ok: true as const,
-      result: {
-        status: 'ok' as const,
-        v: 3 as const,
-        path: '/Users/me/Documents/notes.md',
-        external: true,
-        digest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-        kind: 'text' as const,
-        content: { encoding: 'utf8-plain' as const, text: '# Note\n', rawBytes: 7 },
-        format: { eol: 'lf' as const },
-        sizeBytes: 7,
-        readonly: true,
-      },
+      status: 'ok' as const,
+      v: 3 as const,
+      path: '/Users/me/Documents/notes.md',
+      external: true,
+      digest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      kind: 'text' as const,
+      content: { encoding: 'utf8-plain' as const, text: '# Note\n', rawBytes: 7 },
+      format: { eol: 'lf' as const },
+      sizeBytes: 7,
+      readonly: true,
     }));
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
@@ -35,6 +37,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
         resolvePlaneForMachine: vi.fn(async () => 'local'),
@@ -49,15 +52,44 @@ describe('createWorkspaceMachineRpcFacade', () => {
       })
     ).resolves.toMatchObject({ status: 'ok', external: true, readonly: true });
     expect(invoke).toHaveBeenCalledWith(
-      'machineRpc.send',
+      'machineRpc.previewFile',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
-        method: 'file/preview-local',
+        method: 'file/resolve-local',
         params: { v: 3, sessionId, path: '/Users/me/Documents/notes.md' },
       })
     );
     expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('reports an unsupported local daemon without requesting resource IO or cloud fallback', async () => {
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () => {
+          throw new Error('Unexpected IPC');
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () => undefined,
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud IO');
+      },
+    });
+    expect(
+      await facade.requestFilePreview(localMachineId, { sessionId, path: 'large.txt' })
+    ).toMatchObject({
+      status: 'error',
+      retryable: false,
+      message: expect.stringContaining('does not support file resources'),
+    });
   });
 
   it('does not fall back to a cloud preview while Electron local routing is unresolved', async () => {
@@ -69,6 +101,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => null,
         resolvePlaneForMachine: vi.fn(async () => {
@@ -102,6 +135,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
         resolvePlaneForMachine: vi.fn(async () => 'local'),
@@ -148,6 +182,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const getMachineRpcClient = vi.fn();
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
         resolvePlaneForMachine: vi.fn(async () => 'local'),
@@ -187,6 +222,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const getMachineRpcClient = vi.fn(async () => ({ requestSessionCancel }) as never);
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'cloud',
         resolvePlaneForMachine: vi.fn(async () => 'cloud'),

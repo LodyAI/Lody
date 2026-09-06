@@ -86,7 +86,7 @@ describe('local Machine RPC', () => {
       params: { sessionId: 'session-1', endpointId: 'endpoint-1' },
     },
     {
-      method: 'file/preview-local',
+      method: 'file/resolve-local',
       params: { v: 3, sessionId: 'session-1', path: '/Users/me/Documents/notes.md' },
     },
   ])('accepts $method requests', ({ method, params }) => {

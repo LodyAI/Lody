@@ -6584,14 +6584,9 @@ export class MessageHandler {
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
-      case 'file/preview-local':
+      case 'file/resolve-local':
         await assertOwner(request.params.sessionId as SessionId);
-        // Same machine: no wire to protect, so the read is not held to the
-        // remote transport's size budget.
-        return await this.filePreviewService.previewFile(request.params, {
-          allowArbitraryPaths: true,
-          sameMachine: true,
-        });
+        return await this.filePreviewService.resolveLocalFile(request.params);
       case 'session/get-active-invocation-context': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);

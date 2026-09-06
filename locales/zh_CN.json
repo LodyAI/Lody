@@ -3859,5 +3859,10 @@
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.openFailed": "无法打开该文件。",
   "sessions.fileActions.more": "文件操作",
-  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。"
+  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。",
+  "sessions.fileViewer.paged": "大文件 · 只读",
+  "sessions.fileViewer.previousPage": "上一页",
+  "sessions.fileViewer.nextPage": "下一页",
+  "sessions.fileViewer.page": "页码",
+  "sessions.fileViewer.pageUnavailable": "文件已更改或无法读取，请重新打开预览。"
 }
