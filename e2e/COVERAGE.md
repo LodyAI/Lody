@@ -16,9 +16,10 @@ Backlog rows are evidence-backed gaps, not executable or promised scenarios.
 
 ## Active P1 journeys
 
-| Stable id         | Journey                                       | Renderer                    | Electron / IPC           | Bundled CLI        | Durable state                           | External wire |
-| ----------------- | --------------------------------------------- | --------------------------- | ------------------------ | ------------------ | --------------------------------------- | ------------- |
-| `LODY-REVIEW-001` | Open, hide, and switch a synthetic large diff | Large diff Review lifecycle | Real window and diff RPC | Real owned runtime | Synthetic project and Session lifecycle | Scripted ACP  |
+| Stable id              | Journey                                                  | Renderer                    | Electron / IPC                                     | Bundled CLI                   | Durable state                                        | External wire |
+| ---------------------- | -------------------------------------------------------- | --------------------------- | -------------------------------------------------- | ----------------------------- | ---------------------------------------------------- | ------------- |
+| `LODY-RELIABILITY-001` | Survive a Loro status broadcast racing Renderer disposal | Real Renderer disposal      | Loro status broadcast and post-race responsiveness | Real owned runtime disconnect | No fatal log for an expected Renderer lifecycle race | None          |
+| `LODY-REVIEW-001`      | Open, hide, and switch a synthetic large diff            | Large diff Review lifecycle | Real window and diff RPC                           | Real owned runtime            | Synthetic project and Session lifecycle              | Scripted ACP  |
 
 ## Evidence-backed backlog
 

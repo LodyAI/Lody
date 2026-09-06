@@ -31,7 +31,9 @@ import { setupApplicationMenu } from './menu'
 import { isRendererReloadShortcut } from './reload-shortcut'
 import {
   flushElectronMainErrorReporting,
-  installElectronMainErrorReporting
+  installElectronMainErrorReporting,
+  installElectronMainExitTraceLogging,
+  persistElectronMainExitTrace
 } from './posthog-error-reporting'
 import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import { PublicBrowserService } from './services/public-browser-service'
@@ -88,6 +90,14 @@ type E2EBootDiagnostic = { stage: string; error?: string }
 type E2EGlobal = typeof globalThis & {
   __LODY_E2E_BOOT_DIAGNOSTIC__?: E2EBootDiagnostic
   __LODY_E2E_WRITE_HEAP_SNAPSHOT__?: (path: string) => string
+  __LODY_E2E_ARM_LORO_RENDERER_SEND_RACE__?: () => void
+  __LODY_E2E_TRIGGER_LORO_NETWORK_JITTER__?: () => Promise<{
+    baselineRendererCount: number
+    disconnected: boolean
+    raceTriggered: boolean
+    remainingRendererCount: number
+    targetDestroyed: boolean
+  }>
 }
 
 if (IS_E2E) {
@@ -111,6 +121,8 @@ function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void
   }
   console.info(DEEP_LINK_DEBUG_PREFIX, message)
 }
+
+installElectronMainExitTraceLogging()
 
 app.setName(PRODUCT_NAME)
 if (process.platform === 'linux') {
@@ -199,9 +211,47 @@ if (hasSingleInstanceLock) {
       }
     })
     const terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
+    let rendererSendRaceWindow: BrowserWindow | null = null
+    let rendererSendRaceTriggered = false
+    let rendererCountBeforeRace = 0
     const loroDataPlaneRelay = new LoroDataPlaneRelay(
-      getLocalLoroDataPlaneSocketPath(mainPlatformKind)
+      getLocalLoroDataPlaneSocketPath(mainPlatformKind),
+      undefined,
+      IS_E2E
+        ? (sender, channel) => {
+            if (
+              channel !== 'loro.status' ||
+              !rendererSendRaceWindow ||
+              sender !== rendererSendRaceWindow.webContents
+            ) {
+              return
+            }
+            const target = rendererSendRaceWindow
+            rendererSendRaceWindow = null
+            rendererSendRaceTriggered = true
+            target.destroy()
+          }
+        : undefined
     )
+    if (IS_E2E) {
+      ;(globalThis as E2EGlobal).__LODY_E2E_ARM_LORO_RENDERER_SEND_RACE__ = () => {
+        rendererCountBeforeRace = loroDataPlaneRelay.getAttachedRendererCountForE2E()
+        rendererSendRaceTriggered = false
+        const target = new BrowserWindow({ show: false })
+        loroDataPlaneRelay.attachSender(target.webContents)
+        rendererSendRaceWindow = target
+      }
+      ;(globalThis as E2EGlobal).__LODY_E2E_TRIGGER_LORO_NETWORK_JITTER__ = async () => {
+        const disconnected = await loroDataPlaneRelay.triggerNetworkJitterForE2E()
+        return {
+          baselineRendererCount: rendererCountBeforeRace,
+          disconnected,
+          raceTriggered: rendererSendRaceTriggered,
+          remainingRendererCount: loroDataPlaneRelay.getAttachedRendererCountForE2E(),
+          targetDestroyed: rendererSendRaceWindow === null
+        }
+      }
+    }
     loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
 
     const appUpdaterService = new AppUpdaterService({
@@ -346,7 +396,10 @@ if (hasSingleInstanceLock) {
   void appReady.catch((error: unknown) => {
     recordE2EBootDiagnostic('failed', error)
     console.error('[Electron] Fatal error while creating the main window', error)
-    if (!IS_E2E) app.exit(1)
+    if (!IS_E2E) {
+      persistElectronMainExitTrace(error, 'main-window-startup')
+      app.exit(1)
+    }
   })
 }
 
