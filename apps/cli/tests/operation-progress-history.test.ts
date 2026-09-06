@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { Loro } from 'loro-crdt';
+import { Mirror } from 'loro-mirror';
+import { sessionDocSchema } from '@lody/shared';
 
 import type {
   LodyOperationItemResult,
@@ -351,5 +354,78 @@ it.each(['failed', 'cancelled'] as const)(
     history = [];
     await upsertOperationProgressHistory(doc, baseOperation([terminal]), now);
     expect(history).toEqual([]);
+  }
+);
+
+it.each(['succeeded', 'failed', 'cancelled'] as const)(
+  'persists created/running/%s through the real Loro history validator and snapshot reload',
+  async (terminalStatus) => {
+    const doc = new Loro();
+    const mirror = new Mirror({
+      doc,
+      schema: sessionDocSchema,
+      initialState: { session: { id: 'requester-1' as SessionId }, history: [], mq: [] },
+      throwOnValidationError: true,
+      validateOnUpdate: true,
+      strict: false,
+    });
+    const sessionDoc = {
+      updateHistory: async (updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        mirror.setState((state) => ({ ...state, history: updater(state.history) }));
+      },
+    };
+    const target = { sessionId: 'child-1' as SessionId, userTurnId: 'child-turn-1' };
+    const operation = baseOperation([{ status: 'active', target, inputDurable: true }]);
+    const now = () => Date.parse('2026-01-01T00:00:01.000Z');
+    try {
+      for (const status of ['created', 'running', terminalStatus] as const) {
+        const item: LodyOperationItemResult =
+          status === 'succeeded'
+            ? { status, target, assistantTurnId: 'child-answer' }
+            : status === 'failed'
+              ? {
+                  status,
+                  target,
+                  error: { code: 'TARGET_FAILED', message: 'Failed', retryable: false },
+                }
+              : status === 'cancelled'
+                ? { status, target }
+                : { status: 'active', target, inputDurable: true };
+        const updated = { ...operation, items: [item] };
+        await upsertOperationProgressHistory(
+          sessionDoc,
+          updated,
+          now,
+          new Map([[getOperationProgressTargetKey(target), status]])
+        );
+        const revivedDoc = new Loro();
+        revivedDoc.import(doc.export({ mode: 'snapshot' }));
+        const revived = new Mirror({
+          doc: revivedDoc,
+          schema: sessionDocSchema,
+          throwOnValidationError: true,
+          strict: false,
+        });
+        try {
+          expect(revived.getState().history).toHaveLength(1);
+          expect(revived.getState().history[0]).toMatchObject({
+            id: getOperationProgressTurnId(operation.requesterSessionId, operation.operationId),
+            role: 'system',
+            items: [
+              {
+                type: 'operation_progress',
+                operationId: operation.operationId,
+                operationKind: 'session_create_many',
+                items: [{ target, status }],
+              },
+            ],
+          });
+        } finally {
+          revived.dispose();
+        }
+      }
+    } finally {
+      mirror.dispose();
+    }
   }
 );
