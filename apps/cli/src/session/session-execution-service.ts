@@ -1079,6 +1079,9 @@ export class SessionExecutionService {
     if (!authorization || typeof authorization.verifyAccess !== 'function') {
       throw new Error('Account switch authorization is required.');
     }
+    // Local dispatch verifies this operator; synced session ownership is not authority.
+    const requesterUserId = this.deps.userId;
+    if (!requesterUserId) throw new Error('Account switch operator identity is unavailable.');
     // Bind all later checks and writes to the exact request admitted at entry.
     const switchRequest = Object.freeze({
       sessionId: request.sessionId,
@@ -1181,8 +1184,8 @@ export class SessionExecutionService {
         });
         const resident = this.deps.sessionManager.getSession(sessionId);
         const user =
-          resident?.getGitIdentityForUser?.(meta.userId) ??
-          (await this.deps.resolveAccountSwitchUser?.(meta.userId));
+          resident?.getGitIdentityForUser?.(requesterUserId) ??
+          (await this.deps.resolveAccountSwitchUser?.(requesterUserId));
         if (!user)
           throw new Error('Session user identity is unavailable; retry the account switch.');
         conversation = resolveSessionConversationConfig(await doc.getHistory());
@@ -1190,7 +1193,7 @@ export class SessionExecutionService {
           sessionId,
           workspaceId: this.deps.workspaceId,
           machineId: meta.machineId,
-          requesterUserId: meta.userId,
+          requesterUserId,
           userName: user.name,
           userEmail: user.email,
           agentConfigId: meta.agentConfigId,

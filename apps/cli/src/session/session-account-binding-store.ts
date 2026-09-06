@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { AccountProfileIdSchema, type SessionMeta } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { z } from 'zod';
 
 export type SessionAccountScope = { workspaceId: string; machineId: string; sessionId: string };
@@ -47,7 +47,7 @@ function bindingPath(scope: SessionAccountScope): string {
   const key = createHash('sha256')
     .update(JSON.stringify([scope.workspaceId, scope.machineId, scope.sessionId]))
     .digest('hex');
-  return path.join(os.homedir(), '.lody', 'session-account-bindings', `${key}.json`);
+  return path.join(getLodyDataDir(), 'session-account-bindings', `${key}.json`);
 }
 /** Local files are the authority. Synced session metadata is only a display mirror. */
 export async function getSessionAccountBinding(

@@ -220,6 +220,33 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('rejects account handoff without a local operator before reading or launching a session', async () => {
+    const resolveAccountSwitchUser = vi.fn(async () => ({
+      name: 'Unavailable Operator',
+      email: 'unavailable@example.com',
+    }));
+    const deps = createBaseDeps({ userId: '', resolveAccountSwitchUser });
+    const service = new SessionExecutionService(deps);
+    await expect(
+      service.switchAccount(
+        {
+          sessionId: 'protected-session' as SessionId,
+          accountProfileId: 'system-default',
+          requestId: 'missing-operator',
+        },
+        allowAccountSwitch
+      )
+    ).rejects.toThrow('Account switch operator identity is unavailable.');
+    expect(deps.workspaceDocument.repo.getDocMeta).not.toHaveBeenCalled();
+    expect(deps.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+    expect(deps.workspaceDocument.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(deps.workspaceDocument.persistPendingChanges).not.toHaveBeenCalled();
+    expect(resolveAccountSwitchUser).not.toHaveBeenCalled();
+    expect(deps.sessionManager.getSession).not.toHaveBeenCalled();
+    expect(deps.sessionManager.createSession).not.toHaveBeenCalled();
+    expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
+  });
+
   it.each(['missing', 'forged', 'denied', 'indeterminate', 'outage'])(
     'rejects %s account-switch authority before any session read or mutation',
     async (outcome) => {
@@ -312,6 +339,7 @@ describe('SessionExecutionService', () => {
     'model-unavailable',
     'access-revoked',
     'access-outage',
+    'forged-owner',
   ])('runs the account handoff through the existing manager with %s outcome', async (outcome) => {
     vi.mocked(setSessionAccountBinding).mockClear();
     const profiles = await import('../src/agent/account-profiles');
@@ -378,7 +406,11 @@ describe('SessionExecutionService', () => {
         },
       },
     };
-    let resident: unknown = { hasActiveToolExecution: () => false };
+    let resident: unknown = {
+      hasActiveToolExecution: () => false,
+      getGitIdentityForUser: (userId: string) =>
+        userId === meta.userId ? { name: 'Session Owner', email: 'owner@example.com' } : null,
+    };
     const stop = vi.fn(async () => {
       resident = null;
       return 'terminated';
@@ -387,6 +419,9 @@ describe('SessionExecutionService', () => {
       expect(meta.accountProfileId).toBeUndefined();
       expect(meta.acpSessionId).toBe(oldId);
       expect(config).toMatchObject({
+        requesterUserId: 'local-operator',
+        userName: 'Local Operator',
+        userEmail: 'operator@example.com',
         accountProfileId,
         workdir: '/existing/worktree',
         resume: true,
@@ -404,7 +439,11 @@ describe('SessionExecutionService', () => {
       return candidate;
     });
     const deps = createBaseDeps({
-      resolveAccountSwitchUser: async () => ({ name: 'User', email: 'user@example.com' }),
+      userId: 'local-operator',
+      resolveAccountSwitchUser: async (userId) => {
+        expect(userId).toBe('local-operator');
+        return { name: 'Local Operator', email: 'operator@example.com' };
+      },
       sessionManager: {
         getSession: () => resident,
         getPendingSession: () => null,
@@ -436,6 +475,7 @@ describe('SessionExecutionService', () => {
         },
         {
           verifyAccess: async () => {
+            if (outcome === 'forged-owner') meta = { ...meta, userId: 'forged-victim' };
             if (preflightComplete && outcome === 'access-outage')
               throw new Error('access service unavailable');
             return preflightComplete

@@ -19,8 +19,8 @@ specs/session-orchestration.md.
   config; missing-email placeholders are not identities.
 - Account switch needs local dispatch plus an out-of-band verifier before
   reads and handoff; never trust serialized requester/source.
-- `session-account-binding-store.ts` scopes durable account/native pairs by workspace,
-  machine and session. Synced account fields and receipts are display-only.
+- `session-account-binding-store.ts` uses the installation data root and
+  workspace/machine/session keys. Synced fields and receipts are display-only.
   Restart/fork/edit and helpers resolve it. Missing managed records
   and corrupt files fail closed; legacy defaults preserve `system-default`.
 
