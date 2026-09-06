@@ -5,9 +5,7 @@ Child directories (`sessions/`, `mobile/`, `chat/`, `settings/`, …) own their 
 
 ## Sidebar and session rows
 
-Files: `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`,
-`sidebar-*.tsx`, `sessions/session-list-rows.ts`, `lib/session-opened-by-tree.ts`.
-Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/components-sidebar-session-tree.md).
+Ownership and explanations: [README.md](README.md).
 
 - Sidebar rows are sessions, not Tasks.
 - EVERY desktop session row is a drag source for a session mention
@@ -73,7 +71,6 @@ Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/compone
 
 ## Entry points, drafts, and layout
 
-- Chat landing: `chat/chat-landing.tsx`.
 - Child-tab drafts send through the same accept unit as every other first message:
   `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta plus the first
   user turn together via `startSession` and only then promotes the draft tab;
@@ -83,20 +80,15 @@ Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/compone
   composer text crosses the promotion via the input draft cache, not a component ref.
   `archiveSession` falls back to the rendered meta cache when the repo read lags
   hydration, and a close failure surfaces a toast — never a silent no-op.
-- Desktop update prompt: `sidebar-update-banner.tsx` plus `update-changelog-dialog.tsx`,
-  driven by the pure selectors in `lib/electron-update-banner.ts`. The changelog opens
-  in-app; remote release notes render as sanitized Markdown with raw HTML off. The
-  website is only the no-notes fallback, through `getChangelogUrl` and
+- Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
+  missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.
 - `AgentActivityIndicator`, `ZoomableImageViewer`, and Electron image preview
   copy/save keep their own rules in [shared/AGENTS.md](shared/AGENTS.md);
   `ZoomableImageViewer` is the ONE image viewer, so never add a second one.
-- `web-workspace-layout.tsx` owns the top and side safe-area inset for every desktop
-  surface (`getWebWorkspaceLayoutRootClassName`): the iPad native shell renders the
-  DESKTOP layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
-  `viewport-fit=cover`. It stops at the sides — the bottom inset belongs to the surface
-  against it (the composer shell pads itself by `env(safe-area-inset-bottom)`), and the
-  mobile layout insets per surface.
+- `web-workspace-layout.tsx` owns top/side safe-area insets for desktop surfaces,
+  including the iPad native shell. The bottom inset belongs to the adjacent surface
+  (the composer uses `env(safe-area-inset-bottom)`); mobile insets per surface.
 
 ## Local projects
 
