@@ -365,7 +365,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       await proc.terminate(true);
       if (await waitForExit()) return;
       throw new Error(
-        `Session process did not exit within ${EXIT_TIMEOUT_MS}ms after forced termination`
+        `Session process did not exit within ${EXIT_TIMEOUT_MS}ms after forced termination`,
+        { cause: error }
       );
     }
     if (await waitForExit()) return;
