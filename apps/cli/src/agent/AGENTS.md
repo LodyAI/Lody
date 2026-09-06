@@ -17,6 +17,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   provider startup translation belongs in the adapter. `session/set_config_option`
   switches live sessions; successful selection becomes replacement
   startup state.
+- Cache session `_meta.lody.modelReasoningEfforts`; Codex `model[effort]` only.
 - Config projections consume confirmed session setup and
   `set_config_option` responses, not just `config_option_update` notifications. A
   present `configOptions` — empty array included — is the full snapshot; only an
