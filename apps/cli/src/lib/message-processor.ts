@@ -21,6 +21,9 @@ interface ProcessorEvents {
  */
 export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly queue: ConcurrentQueue<MessageQueueKey>;
+  // Authentication starts can wait for human input while occupying every main
+  // slot. Reserve bounded capacity for the messages that release those waits.
+  private readonly authenticationContinuations = new ConcurrentQueue<MessageQueueKey>(1);
   private isStopped = false;
   private static readonly QUEUE_WAIT_WARNING_MS = 10_000;
   private static readonly PROCESSING_WARNING_MS = 30_000;
@@ -56,20 +59,20 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       this.logger.warn(
         `Message still waiting in queue type=${message.type} sessionId=${
           sessionId || 'N/A'
-        } queuedFor=${Date.now() - queuedAt}ms active=${this.queue.active} waiting=${
-          this.queue.waiting
-        }`
+        } queuedFor=${Date.now() - queuedAt}ms active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
       );
     }, MessageProcessor.QUEUE_WAIT_WARNING_MS);
     waitWarning.unref?.();
 
     this.logger.debug(
-      `Enqueued message type=${message.type} sessionId=${sessionId || 'N/A'} active=${
-        this.queue.active
-      } waiting=${this.queue.waiting}`
+      `Enqueued message type=${message.type} sessionId=${sessionId || 'N/A'} active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
     );
 
-    void this.queue.enqueue(queueKey, async () => {
+    const queue =
+      message.type === 'machine/acp-authenticate' && message.action !== 'start'
+        ? this.authenticationContinuations
+        : this.queue;
+    void queue.enqueue(queueKey, async () => {
       const startTime = Date.now();
       started = true;
       clearInterval(waitWarning);
@@ -81,9 +84,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         this.logger.warn(
           `Message still processing type=${message.type} sessionId=${
             sessionId || 'N/A'
-          } runningFor=${Date.now() - startTime}ms active=${this.queue.active} waiting=${
-            this.queue.waiting
-          }`
+          } runningFor=${Date.now() - startTime}ms active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
         );
       }, MessageProcessor.PROCESSING_WARNING_MS);
       processingWarning.unref?.();
@@ -92,9 +93,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         this.logger.debug(
           `Processing message type=${message.type} sessionId=${
             sessionId || 'N/A'
-          } queueWait=${startTime - queuedAt}ms active=${this.queue.active} waiting=${
-            this.queue.waiting
-          }`
+          } queueWait=${startTime - queuedAt}ms active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
         );
 
         await handler(message);
@@ -125,14 +124,14 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    * 获取当前活跃的 session 数量
    */
   getActiveSessions(): number {
-    return this.queue.active;
+    return this.queue.active + this.authenticationContinuations.active;
   }
 
   /**
    * 获取队列中等待的任务数量
    */
   getQueueSize(): number {
-    return this.queue.waiting;
+    return this.queue.waiting + this.authenticationContinuations.waiting;
   }
 
   /**
@@ -148,10 +147,10 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   async drain(): Promise<void> {
     this.logger.debug(
-      `Draining MessageProcessor: active=${this.queue.active} waiting=${this.queue.waiting}`
+      `Draining MessageProcessor: active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
     );
 
-    await this.queue.drain();
+    await Promise.all([this.queue.drain(), this.authenticationContinuations.drain()]);
     this.emit('queue:drained');
   }
 
@@ -161,10 +160,15 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   async drainWithTimeout(timeoutMs: number): Promise<void> {
     this.logger.debug(
-      `Draining MessageProcessor (timeout=${timeoutMs}ms): active=${this.queue.active} waiting=${this.queue.waiting}`
+      `Draining MessageProcessor (timeout=${timeoutMs}ms): active=${this.getActiveSessions()} waiting=${this.getQueueSize()}`
     );
 
-    const completed = await this.queue.drainWithTimeout(timeoutMs);
+    const completed = (
+      await Promise.all([
+        this.queue.drainWithTimeout(timeoutMs),
+        this.authenticationContinuations.drainWithTimeout(timeoutMs),
+      ])
+    ).every(Boolean);
 
     if (completed) {
       this.emit('queue:drained');
@@ -202,6 +206,15 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   private extractQueueKey(message: QueuedControlMessage): MessageQueueKey | null {
     switch (message.type) {
+      case 'machine/acp-authenticate':
+        return message.action === 'start'
+          ? null
+          : JSON.stringify([
+              'authentication-continuation',
+              message.workspaceId,
+              message.machineId,
+              message.authenticationRequestId,
+            ]);
       case 'session/create':
       case 'session/chat':
         return `session:${message.sessionId}:main`;

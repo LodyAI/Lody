@@ -11,6 +11,8 @@ import type {
   SessionAccountSwitchResponse,
 } from '@lody/shared';
 import { MessageHandler, type MessageDispatchContext } from '../src/lib/message-handler';
+import { MessageProcessor } from '../src/lib/message-processor';
+import type { Logger } from '../src/utils/logger';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 
 const profiles = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn() }));
@@ -287,6 +289,76 @@ describe('account operation source authorization', () => {
     expect(await pending).toEqual(success);
     expect(h.resumeAfterAuthentication).not.toHaveBeenCalled();
   });
+
+  it.each(['cancel', 'submit-code', 'submit-input'] as const)(
+    'dispatches local %s while login holds the main queue, preserving source authorization',
+    async (action) => {
+      vi.useFakeTimers();
+      const h = harness();
+      let complete: ((response: MachineAcpAuthenticateResponse) => void) | undefined;
+      const pending = new Promise<MachineAcpAuthenticateResponse>((resolve) => {
+        complete = resolve;
+      });
+      h.authenticate.mockImplementation(async (message) =>
+        message.action === 'start' ? pending : { ...success, requestId: message.requestId }
+      );
+      const logger: Logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        success: vi.fn(),
+        debug: vi.fn(),
+        setLevel: vi.fn(),
+        child: () => logger,
+        close: async () => {},
+        setDebug: vi.fn(),
+      };
+      const processor = new MessageProcessor(logger, 1);
+      const localReplies: unknown[] = [];
+      const remoteReplies: unknown[] = [];
+      const localContext: MessageDispatchContext = {
+        source: 'local',
+        send: (reply) => localReplies.push(reply),
+      };
+      const remoteContext: MessageDispatchContext = {
+        source: 'runtime',
+        send: (reply) => remoteReplies.push(reply),
+      };
+      const control: MachineAcpAuthenticateRequest = {
+        ...start,
+        requestId: 'continuation',
+        action,
+        authenticationRequestId: start.requestId,
+        ...(action === 'submit-code' ? { authorizationCode: 'synthetic-code' } : {}),
+        ...(action === 'submit-input'
+          ? { interactionId: 'form', authenticationInput: 'synthetic-input' }
+          : {}),
+      } as MachineAcpAuthenticateRequest;
+      try {
+        processor.enqueue(start, (message) => h.handler.handleMessage(message, localContext));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.authenticate.mock.calls.map(([message]) => message.action)).toEqual(['start']);
+        processor.enqueue(control, (message) => h.handler.handleMessage(message, remoteContext));
+        processor.enqueue(control, (message) => h.handler.handleMessage(message, localContext));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(remoteReplies).toEqual([
+          expect.objectContaining({ success: false, disposition: 'error' }),
+        ]);
+        expect(localReplies).toEqual([{ ...success, requestId: 'continuation' }]);
+        expect(h.authenticate.mock.calls.map(([message]) => message.action)).toEqual([
+          'start',
+          action,
+        ]);
+        expect(processor.getActiveSessions()).toBe(1);
+      } finally {
+        complete?.(success);
+        await processor.drain();
+        vi.useRealTimers();
+      }
+      expect(h.resumeAfterAuthentication).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    }
+  );
 
   it('preserves legacy default provider authentication and setup resumption', async () => {
     const h = harness();
