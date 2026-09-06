@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import {
-  Bot,
-  Check,
-  ListChecks,
-  Monitor,
-  ShieldAlert,
-  Zap,
-} from 'lucide-react';
+import { Bot, Check, ListChecks, Monitor, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   classifyPermissionModeFace,
@@ -271,7 +264,9 @@ export function TaskAgentRunConfigMenu({
     [configOptionSelectors]
   );
 
-  const modelConfigSelector = ordered.modelSelectors[0] as AcpSelectConfigOptionSelector | undefined;
+  const modelConfigSelector = ordered.modelSelectors[0] as
+    | AcpSelectConfigOptionSelector
+    | undefined;
   // The Reasoning row binds the effort ladder when there is one; a lone thinking
   // toggle keeps that row. Any other toggle-shaped thought option stays visible
   // as a provider-defined select, since this menu has no dedicated toggle rows.
@@ -583,11 +578,7 @@ export function TaskAgentRunConfigMenu({
                   />
                 }
                 label={entry.name}
-                description={
-                  entry.online
-                    ? undefined
-                    : t('tasks.slots.offline', 'Offline')
-                }
+                description={entry.online ? undefined : t('tasks.slots.offline', 'Offline')}
                 selected={entry.machineId === machineFilterId}
                 onSelect={() => setMachineFilterId(entry.machineId)}
               />
@@ -677,10 +668,7 @@ export function TaskAgentRunConfigMenu({
 
         {modelPickerOptions.length > 0 ? (
           <DropdownMenuSub>
-            <ValueSubTrigger
-              label={t('chat.runConfig.modelLabel', 'Model')}
-              value={modelLabel}
-            />
+            <ValueSubTrigger label={t('chat.runConfig.modelLabel', 'Model')} value={modelLabel} />
             <DropdownMenuSubContent
               className={tasksMenuClassName('max-w-80')}
               style={{
@@ -735,10 +723,7 @@ export function TaskAgentRunConfigMenu({
               label={t('chat.runConfig.reasoningLabel', 'Reasoning')}
               value={thinkingLabel}
             />
-            <DropdownMenuSubContent
-              className={tasksMenuClassName()}
-              style={tasksMenuSurfaceStyle}
-            >
+            <DropdownMenuSubContent className={tasksMenuClassName()} style={tasksMenuSurfaceStyle}>
               {thinkingSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
@@ -798,9 +783,7 @@ export function TaskAgentRunConfigMenu({
           </DropdownMenuSub>
         ) : null}
 
-        {(planSelector || fastSelector) && value?.agentConfigId ? (
-          <DropdownMenuSeparator />
-        ) : null}
+        {(planSelector || fastSelector) && value?.agentConfigId ? <DropdownMenuSeparator /> : null}
         {planSelector && value?.agentConfigId ? (
           <ToggleItem
             icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}

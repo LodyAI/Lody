@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   buildPendingUserHistoryEntry,
   buildSessionPreparationRunConfig,
@@ -99,7 +99,10 @@ import {
   SessionCreateBillingError,
   useSessionActions,
 } from '@/hooks/use-session-actions';
-import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
+import {
+  useChatLandingDefaults,
+  useRestoreChatLandingAgentRole,
+} from '@/hooks/use-chat-landing-defaults';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
@@ -190,6 +193,7 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
+import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
 import {
   extractIssuePRMentionsFromText,
@@ -201,6 +205,10 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
+import {
+  buildChatLandingDraftKey,
+  chatLandingAppliedResetKeyAtomFamily,
+} from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -955,6 +963,12 @@ function WorkspaceChatLanding({
   const [sessionState, setSessionState] = useAtom(
     chatLandingSessionStateAtomFamily(chatLandingStateKey)
   );
+  /**
+   * Scope for the attachment draft and the reserved session id. Unlike the
+   * prompt text this is workspace-scoped, because an uploaded image/file is
+   * addressable only inside the workspace it was uploaded to.
+   */
+  const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateKey, workspaceSlug);
   const prompt = sessionState.prompt;
   const [draftActivityRevision, setDraftActivityRevision] = useState(0);
   const pastedTextDrafts = useMemo(
@@ -1279,7 +1293,7 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
     resetSessionId: resetDraftSessionId,
-  } = useChatLandingDraftSession();
+  } = useChatLandingDraftSession(chatLandingDraftKey);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const {
     imageItems,
@@ -1293,6 +1307,7 @@ function WorkspaceChatLanding({
     clearPendingImages,
     buildInputBlocks,
   } = useChatLandingImageDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     isMobile,
@@ -1311,13 +1326,15 @@ function WorkspaceChatLanding({
     clearPendingFiles,
     buildFileInputBlocks,
   } = useChatLandingFileDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     machineId: selectedMachineId,
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
-  const lastAppliedResetDraftKeyRef = useRef<string | null>(null);
+  const draftStore = useStore();
+  const appliedResetKeyAtom = chatLandingAppliedResetKeyAtomFamily(chatLandingDraftKey);
 
   useEffect(() => {
     if (!resetDraftKey) {
@@ -1325,10 +1342,10 @@ function WorkspaceChatLanding({
     }
 
     const scopedResetKey = `${chatLandingStateKey ?? 'anonymous'}:${resetDraftKey}`;
-    if (lastAppliedResetDraftKeyRef.current === scopedResetKey) {
+    if (draftStore.get(appliedResetKeyAtom) === scopedResetKey) {
       return;
     }
-    lastAppliedResetDraftKeyRef.current = scopedResetKey;
+    draftStore.set(appliedResetKeyAtom, scopedResetKey);
     if (resetDraftOnKeyChange) {
       setSessionState({ prompt: '', pastedTextDrafts: [] });
     }
@@ -1337,9 +1354,11 @@ function WorkspaceChatLanding({
     clearPendingFiles();
     resetDraftSessionId();
   }, [
+    appliedResetKeyAtom,
     chatLandingStateKey,
     clearPendingFiles,
     clearPendingImages,
+    draftStore,
     resetDraftSessionId,
     resetDraftKey,
     resetDraftOnKeyChange,
@@ -1400,11 +1419,11 @@ function WorkspaceChatLanding({
   );
 
   // Auto-focus textarea on mount (desktop only)
-  const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
+  const mobileKeyboardRef = useRef(usesMobileKeyboardAction);
+  mobileKeyboardRef.current = usesMobileKeyboardAction;
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (!isMobileRef.current) {
+      if (!mobileKeyboardRef.current) {
         promptTextareaRef.current?.focus();
       }
     });
@@ -1601,6 +1620,16 @@ function WorkspaceChatLanding({
   /* Whether the stored Role has been resolved yet. Until it has, the composer
      has no opinion to persist — see `selectedAgentRoleId` on the defaults hook. */
   const [agentRoleRestored, setAgentRoleRestored] = useState(false);
+  /* An explicit user selection ends a pending restore so the deferred `onSelect`
+     cannot overwrite it, and lets the persist effect record the user's choice. */
+  const settleAgentRoleRestore = useCallback(() => setAgentRoleRestored(true), []);
+  const handleUserAgentConfigChange = useCallback(
+    (selection: AgentSelection) => {
+      settleAgentRoleRestore();
+      setSelectedAgent(selection);
+    },
+    [settleAgentRoleRestore]
+  );
   /* The Role editor is a Dialog, so it is hosted OUT here rather than inside the
      run-config dropdown: a Dialog rendered in menu content unmounts with the
      menu the moment it opens. */
@@ -1669,14 +1698,18 @@ function WorkspaceChatLanding({
     machine: selectedMachine,
   });
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
-  const { selectedModeId, selectedModelId, configOptionValues } =
-    useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
-      cliType: selectedConfig?.cliType,
-      agentType: selectedConfig?.agentType,
-    });
+  const {
+    selectedModeId,
+    selectedModelId,
+    configOptionValues,
+    configOptionSelectors: resolvedConfigOptionSelectors,
+  } = useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+  });
   const dispatchConfigOptionValues = useMemo(
-    () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-    [configOptionSelectors, configOptionValues]
+    () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
+    [configOptionValues, resolvedConfigOptionSelectors]
   );
   const selectedRateLimits =
     selectedConfig &&
@@ -1778,15 +1811,20 @@ function WorkspaceChatLanding({
       return;
     }
     setPendingRecentRunConfig(null);
-    if (
+    const appliedModelId =
       pendingRecentRunConfig.modelId &&
       modelOptions.some((option) => option.value === pendingRecentRunConfig.modelId)
-    ) {
-      setSelectedModelName(pendingRecentRunConfig.modelId);
+        ? pendingRecentRunConfig.modelId
+        : undefined;
+    if (appliedModelId) {
+      setSelectedModelName(appliedModelId);
     }
     for (const { configId, value } of resolveApplicableConfigOptionValues(
       pendingRecentRunConfig,
-      configOptionSelectors
+      configOptionSelectors,
+      // The selectors still describe the model this entry replaces, so its
+      // effort must not be validated against the outgoing model's ladder.
+      { switchesModel: appliedModelId !== undefined && appliedModelId !== selectedModelId }
     )) {
       handleConfigOptionChange(configId, value);
     }
@@ -1797,6 +1835,7 @@ function WorkspaceChatLanding({
     modelOptions,
     pendingRecentRunConfig,
     selectedAgent,
+    selectedModelId,
     sessionConfigSelection.edits.model,
     setSelectedModelName,
   ]);
@@ -1869,7 +1908,10 @@ function WorkspaceChatLanding({
             const nextSelection = cycleProviderSelections.find(
               (selection) => selection.agentId === agentId
             );
-            if (nextSelection) setSelectedAgent(nextSelection);
+            if (nextSelection) {
+              settleAgentRoleRestore();
+              setSelectedAgent(nextSelection);
+            }
           },
         }
       : null,
@@ -1916,6 +1958,7 @@ function WorkspaceChatLanding({
   // ── Handle explicit machine change: auto-select an agent owned by the new machine ──
   const handleMachineChange = useCallback(
     (machineId: MachineId) => {
+      settleAgentRoleRestore();
       machineChangedByUserRef.current = true;
       setSelectedMachineId(machineId);
       if (contextType === 'local') {
@@ -1946,7 +1989,13 @@ function WorkspaceChatLanding({
         setSelectedAgent(null);
       }
     },
-    [contextType, executorConfigs, handleSelectedLocalProjectChange, selectedAgent]
+    [
+      contextType,
+      executorConfigs,
+      handleSelectedLocalProjectChange,
+      selectedAgent,
+      settleAgentRoleRestore,
+    ]
   );
 
   const createNewMachinePairing = useCallback(async () => {
@@ -3255,10 +3304,9 @@ function WorkspaceChatLanding({
         promptTextareaRef.current?.blur();
         setMobileNewChatOpen(false);
       }
-      await navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug, sessionId },
-      });
+      await navigate(
+        getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
+      );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
         user_id: userId ?? null,
@@ -3496,6 +3544,7 @@ function WorkspaceChatLanding({
   );
   const handleAgentRoleSelect = useCallback(
     (roleId: AgentRoleId | null) => {
+      settleAgentRoleRestore();
       // Leaving a Role clears the NAME, not the configuration: the values it
       // seeded are now the user's own, and silently rolling them back would
       // undo choices they never asked to undo.
@@ -3513,7 +3562,7 @@ function WorkspaceChatLanding({
       setSelectedAgent({ agentId: role.agentConfigId, machineId: role.machineId });
       setAgentRolePreference({ roleId: role.id, token: agentRolePreferenceTokenRef.current });
     },
-    [composerAgentRoleItems]
+    [composerAgentRoleItems, settleAgentRoleRestore]
   );
 
   /* Creating a Role from the composer opens on the configuration already in
@@ -3573,33 +3622,15 @@ function WorkspaceChatLanding({
     workspaceAgentRoles,
   ]);
 
-  /* Restore the last-used Role once, and only once the catalog can answer.
-     Until the workspace document has synced, "not in the list" means "not
-     loaded yet", so giving up then would silently drop the stored Role. */
-  useEffect(() => {
-    if (agentRoleRestored || !defaultsReady) return;
-    const storedRoleId = readChatLandingDefaults(workspaceId)?.agentRoleId as
-      | AgentRoleId
-      | undefined;
-    if (!storedRoleId) {
-      setAgentRoleRestored(true);
-      return;
-    }
-    const item = composerAgentRoleItems.find((entry) => entry.role.id === storedRoleId);
-    if (!item) {
-      if (agentRolesSynced) setAgentRoleRestored(true);
-      return;
-    }
-    setAgentRoleRestored(true);
-    handleAgentRoleSelect(storedRoleId);
-  }, [
-    agentRoleRestored,
-    agentRolesSynced,
-    composerAgentRoleItems,
-    defaultsReady,
-    handleAgentRoleSelect,
+  useRestoreChatLandingAgentRole({
     workspaceId,
-  ]);
+    defaultsReady,
+    restored: agentRoleRestored,
+    setRestored: setAgentRoleRestored,
+    items: composerAgentRoleItems,
+    catalogSynced: agentRolesSynced,
+    onSelect: handleAgentRoleSelect,
+  });
   const agentRolePinsPermissionMode = useMemo(() => {
     if (!activeAgentRole) return false;
     const { source } = resolvePermissionModeFace({
@@ -3643,6 +3674,7 @@ function WorkspaceChatLanding({
   );
   const handleRecentRunConfigSelect = useCallback(
     (id: string) => {
+      settleAgentRoleRestore();
       const record = recentRunConfigRecords.find((entry) => getRecentRunConfigKey(entry) === id);
       if (!record) return;
       // Recorded AS a Role: re-apply the Role, not the values it set. Those
@@ -3662,7 +3694,12 @@ function WorkspaceChatLanding({
       setSelectedAgent({ agentId: config.id, machineId: config.machineId });
       setPendingRecentRunConfig(record);
     },
-    [handleAgentRoleSelect, recentRunConfigAgentConfigs, recentRunConfigRecords]
+    [
+      handleAgentRoleSelect,
+      recentRunConfigAgentConfigs,
+      recentRunConfigRecords,
+      settleAgentRoleRestore,
+    ]
   );
 
   const desktopMachineOptions = useMemo(
@@ -3763,7 +3800,7 @@ function WorkspaceChatLanding({
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
           }}
-          onAgentConfigChange={setSelectedAgent}
+          onAgentConfigChange={handleUserAgentConfigChange}
           modelOptions={modelOptions}
           selectedModelId={selectedModelId}
           onModelChange={setSelectedModelName}
@@ -4066,7 +4103,7 @@ function WorkspaceChatLanding({
             agentSelection={selectedAgent}
             allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
             agentLocked={false}
-            onAgentConfigChange={setSelectedAgent}
+            onAgentConfigChange={handleUserAgentConfigChange}
             modelOptions={modelOptions}
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelName}

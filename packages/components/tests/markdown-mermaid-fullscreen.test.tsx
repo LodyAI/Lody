@@ -64,6 +64,7 @@ const MERMAID_MARKDOWN = [
   '  U->>K: Start whole-run task',
   '```',
 ].join('\n');
+const PLAIN_MARKDOWN = 'Just ordinary text.';
 
 const viewer = () => document.body.querySelector('[data-testid="mermaid-diagram-viewer"]');
 const viewerSurface = () =>
@@ -145,10 +146,13 @@ describe('mermaid full-screen viewer', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  const renderMarkdown = async () => {
+  const renderMarkdown = async (text = MERMAID_MARKDOWN) => {
     await act(async () => {
-      root?.render(createElement(MarkdownRenderer, { text: MERMAID_MARKDOWN }));
+      root?.render(createElement(MarkdownRenderer, { text }));
     });
+    if (!text.includes('```mermaid')) {
+      return null;
+    }
     await flushUntil(() => Boolean(container?.querySelector('[data-streamdown="mermaid"] svg')));
     const diagram = container?.querySelector<HTMLElement>('[data-streamdown="mermaid"]');
     expect(diagram).toBeTruthy();
@@ -250,5 +254,15 @@ describe('mermaid full-screen viewer', () => {
     });
 
     expect(viewer()).toBeTruthy();
+  });
+
+  it('removes diagram button semantics when the markdown rerenders without Mermaid', async () => {
+    await renderMarkdown();
+    expect(container?.querySelector('[aria-label="Open diagram"]')).toBeTruthy();
+
+    await renderMarkdown(PLAIN_MARKDOWN);
+
+    expect(container?.querySelector('[data-streamdown="mermaid"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Open diagram"]')).toBeNull();
   });
 });

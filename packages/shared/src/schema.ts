@@ -741,9 +741,18 @@ export type PendingScheduledTask = {
   /** Stable id: cron job id, or a fixed key for the session's single pending wakeup. */
   id: string;
   kind: 'cron' | 'wakeup';
-  /** When this task set entry was last recorded, epoch ms. */
+  /**
+   * When this task set entry was last recorded, epoch ms. For calls persisted with
+   * `recordedAtMs` this is the tool call's own first-sighting stamp (the true creation
+   * moment); older history falls back to the owning turn's START — never its `endedAt`,
+   * which merged cron-fire turns can push past a one-shot's fire minute.
+   */
   createdAtMs: number;
-  /** Wakeup fire time (epoch ms). Absent for cron jobs (they use a schedule expression). */
+  /**
+   * Wakeup fire time (epoch ms); also the runtime-committed fire time of a one-shot cron
+   * whose CronCreate output carried a `nextFireAt` line. Absent for recurring cron jobs
+   * (they resolve from their schedule expression relative to now).
+   */
   scheduledForMs?: number;
   /** Cron schedule expression / human-readable schedule string. */
   humanSchedule?: string;

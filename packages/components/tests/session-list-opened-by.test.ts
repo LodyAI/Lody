@@ -290,17 +290,20 @@ describe('SessionList opened-by rendering', () => {
     ).toBe('false');
   });
 
-  it('shows the working spinner instead of the disclosure on a working opener', () => {
+  it('keeps the disclosure on a working opener and marks status at the row end', () => {
     renderList([
       makeRow({ sessionId: 'opener', isWorking: true }),
       makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener' }),
     ]);
 
-    const openerSlot = container
-      ?.querySelector('[data-sidebar-session-id="opener"]')
-      ?.querySelector('[data-session-row-leading-slot]');
-    expect(openerSlot?.querySelector('[data-session-working-spinner]')).not.toBeNull();
-    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).toBeNull();
+    const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
+    const openerSlot = opener?.querySelector('[data-session-row-leading-slot]');
+    // The leading slot is the tree's, unconditionally: status no longer evicts it.
+    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
+    expect(openerSlot?.querySelector('[data-session-row-indicator]')).toBeNull();
+
+    const openerEnd = opener?.querySelector('[data-session-row-end-slot]');
+    expect(openerEnd?.querySelector('[data-session-working-spinner]')).not.toBeNull();
   });
 
   it('keeps collapse reachable from the context menu while the opener is working', () => {
@@ -326,51 +329,70 @@ describe('SessionList opened-by rendering', () => {
     expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
   });
 
-  it('hides tree connectors on an active child and keeps them on an idle child', () => {
+  it('keeps tree connectors on an active child and moves its status to the row end', () => {
+    // The regression this locks: a working or unread child used to drop its ├/└,
+    // so the rows a user actually watches were the ones that lost their nesting.
     renderList(makeOpenerGroupRows());
 
+    const rowOf = (sessionId: string) =>
+      container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);
     const slotOf = (sessionId: string) =>
-      container
-        ?.querySelector(`[data-sidebar-session-id="${sessionId}"]`)
-        ?.querySelector('[data-session-row-leading-slot]');
+      rowOf(sessionId)?.querySelector('[data-session-row-leading-slot]');
+    const endOf = (sessionId: string) =>
+      rowOf(sessionId)?.querySelector('[data-session-row-end-slot]');
 
-    const idleSlot = slotOf('opened-1');
-    expect(idleSlot?.querySelector('[data-session-row-indicator]')).toBeNull();
-    expect(idleSlot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
+    for (const sessionId of ['opened-1', 'opened-2', 'opened-3']) {
+      const slot = slotOf(sessionId);
+      expect(slot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
+      expect(slot?.querySelector('[data-session-row-indicator]')).toBeNull();
+    }
 
-    const workingSlot = slotOf('opened-2');
-    expect(workingSlot?.querySelector('[data-session-tree-connector]')).toBeNull();
-    expect(workingSlot?.querySelector('[data-session-working-spinner]')).not.toBeNull();
-
-    const unreadSlot = slotOf('opened-3');
-    expect(unreadSlot?.querySelector('[data-session-tree-connector]')).toBeNull();
-    expect(unreadSlot?.querySelector('[data-session-row-indicator] span')).not.toBeNull();
+    expect(endOf('opened-1')?.querySelector('[data-session-row-indicator]')).toBeNull();
+    expect(endOf('opened-2')?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(endOf('opened-3')?.querySelector('[data-session-row-indicator] span')).not.toBeNull();
   });
 
-  it('hides the opener disclosure for an unread or waiting opener, not just a working one', () => {
-    // The disclosure branch REPLACES the indicator, so gating only on
-    // `isWorking` makes an unread opener render a chevron and silently lose its
-    // unread dot. Every status that would draw a mark has to take the node.
+  it('keeps the disclosure AND the status mark for an unread or waiting opener', () => {
+    // The two no longer compete for one node, so neither may be dropped: the
+    // disclosure stays at the leading edge and the status mark at the row end.
     for (const status of [{ hasUnreadMessages: true }, { isWaitingPermission: true }] as const) {
       renderList([
         makeRow({ sessionId: 'opener', ...status }),
         makeRow({ sessionId: 'opened-1', openedBySessionId: 'opener' }),
       ]);
 
-      const openerSlot = container
-        ?.querySelector('[data-sidebar-session-id="opener"]')
-        ?.querySelector('[data-session-row-leading-slot]');
-      expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).toBeNull();
-      // The status mark it would otherwise have lost.
-      expect(openerSlot?.querySelector('[data-session-row-indicator]')?.children.length).toBe(1);
+      const opener = container?.querySelector('[data-sidebar-session-id="opener"]');
+      const openerSlot = opener?.querySelector('[data-session-row-leading-slot]');
+      expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
+      expect(
+        opener?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')?.children
+          .length
+      ).toBe(1);
 
-      // The tree itself is untouched — only the affordance yields.
       expect(
         container
           ?.querySelector('[data-sidebar-session-id="opened-1"]')
           ?.querySelectorAll('[data-session-tree-connector]')
       ).toHaveLength(2);
     }
+  });
+
+  it('drops the resting metric cluster while a row carries a status', () => {
+    // "Only status at the right edge": the diff numbers a running row would
+    // otherwise show are what made the end slot compete with the status mark.
+    renderList([
+      makeRow({ sessionId: 'idle', addedLines: 12, deletedLines: 3 }),
+      makeRow({ sessionId: 'busy', addedLines: 12, deletedLines: 3, isWorking: true }),
+    ]);
+
+    const endOf = (sessionId: string) =>
+      container
+        ?.querySelector(`[data-sidebar-session-id="${sessionId}"]`)
+        ?.querySelector('[data-session-row-end-slot]');
+
+    expect(endOf('idle')?.textContent).toContain('+12');
+    expect(endOf('busy')?.textContent).not.toContain('+12');
+    expect(endOf('busy')?.querySelector('[data-session-working-spinner]')).not.toBeNull();
   });
 
   it('renders an active opened session as the selected row', () => {

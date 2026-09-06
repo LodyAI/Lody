@@ -28,6 +28,15 @@ Root and `apps/cli/AGENTS.md` instructions apply.
   the workspace catalog; no driving-Turn mention authorization is required. Resolve its target,
   Prompt prefix, revision, and concrete run config before Operation acceptance. Recovery uses
   the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
+- Session orchestration derives its human identity from the active execution runtime populated
+  by the dispatch payload, not from the daemon credential, Session owner, or observed history.
+  An absent active runtime fails closed; never reconstruct invocation identity from history.
+  Freeze the source Turn id and invoking user with every accepted Operation. Store the user
+  once as `requesterUserId` and the causal Turn as `sourceTurnId`. The
+  Operation's requester Session id already identifies the source Session, and a single-value
+  actor tag adds no information. Recovery uses the Operation's owner Machine plus current
+  authorization; it does not freeze the daemon account that originally accepted the Operation.
+  Every MCP Session path rejects a runtime invocation without userId.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
   and run-config fields but remove them before resolution: the current Role row is authoritative

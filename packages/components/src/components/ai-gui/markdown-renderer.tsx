@@ -1179,12 +1179,47 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   // observer is installed only for text that actually fences a diagram.
   useEffect(() => {
     const root = containerRef.current;
-    if (!root || !hasMermaidBlock) {
+    if (!root) {
+      return undefined;
+    }
+
+    const markedDiagrams = new Map<
+      HTMLElement,
+      { role: string | null; tabIndex: string | null; ariaLabel: string | null }
+    >();
+    const clearMarkedDiagrams = () => {
+      for (const [diagram, attributes] of markedDiagrams) {
+        if (attributes.role == null) {
+          diagram.removeAttribute('role');
+        } else {
+          diagram.setAttribute('role', attributes.role);
+        }
+        if (attributes.tabIndex == null) {
+          diagram.removeAttribute('tabindex');
+        } else {
+          diagram.setAttribute('tabindex', attributes.tabIndex);
+        }
+        if (attributes.ariaLabel == null) {
+          diagram.removeAttribute('aria-label');
+        } else {
+          diagram.setAttribute('aria-label', attributes.ariaLabel);
+        }
+      }
+      markedDiagrams.clear();
+    };
+    if (!hasMermaidBlock) {
+      clearMarkedDiagrams();
       return undefined;
     }
 
     const markDiagramsOpenable = () => {
+      clearMarkedDiagrams();
       root.querySelectorAll<HTMLElement>(MERMAID_DIAGRAM_SELECTOR).forEach((diagram) => {
+        markedDiagrams.set(diagram, {
+          role: diagram.getAttribute('role'),
+          tabIndex: diagram.getAttribute('tabindex'),
+          ariaLabel: diagram.getAttribute('aria-label'),
+        });
         diagram.setAttribute('role', 'button');
         diagram.setAttribute('tabindex', '0');
         diagram.setAttribute('aria-label', openDiagramLabel);
@@ -1194,7 +1229,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     markDiagramsOpenable();
     const observer = new MutationObserver(markDiagramsOpenable);
     observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      clearMarkedDiagrams();
+    };
   }, [hasMermaidBlock, openDiagramLabel]);
   const components = useMemo(
     () =>

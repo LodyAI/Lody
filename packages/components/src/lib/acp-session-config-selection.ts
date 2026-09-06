@@ -2,7 +2,8 @@ import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared'
 import {
   buildAcpSelectorOptions,
   isConfigOptionValueValid,
-  normalizeCodexReasoningEffortSelectors,
+  isThoughtLevelSelector,
+  normalizeReasoningEffortSelectors,
   type AcpConfigOptionSelector,
   type AcpSelectorTarget,
 } from '@/components/shared/acp-selector-options';
@@ -166,12 +167,16 @@ export type AcpSessionSelectorOptionsInput = {
   defaultModeId: string | null;
   defaultModelId: string | null;
   configOptionSelectors: AcpConfigOptionSelector[];
+  /** Per-model reasoning-effort ladders when the capability source publishes them. */
+  modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
 export type ResolvedAcpSessionConfigSelection = {
   selectedModeId: string | null;
   selectedModelId: string | null;
   configOptionValues: Record<string, AcpConfigOptionValue>;
+  /** Selectors re-normalized for the RESOLVED model; dispatch filtering must use these, not the candidate-model input ones. */
+  configOptionSelectors: AcpConfigOptionSelector[];
 };
 
 const isSelectValueValid = (
@@ -236,6 +241,7 @@ export const resolveAcpSessionConfigSelection = (
     defaultModeId,
     defaultModelId,
     configOptionSelectors,
+    modelReasoningEfforts,
   } = selectorOptions;
 
   const selectedModeId = resolveSelectField(
@@ -254,13 +260,15 @@ export const resolveAcpSessionConfigSelection = (
     defaultModelId,
     capabilityAuthority
   );
-  const selectors = target
-    ? normalizeCodexReasoningEffortSelectors(configOptionSelectors, {
-        cliType: target.cliType,
-        agentType: target.agentType,
-        selectedModelId,
-      })
-    : configOptionSelectors;
+  let selectors = configOptionSelectors;
+  if (target) {
+    selectors = normalizeReasoningEffortSelectors(selectors, {
+      cliType: target.cliType,
+      agentType: target.agentType,
+      modelReasoningEfforts,
+      selectedModelId,
+    });
+  }
 
   const runtimeTable = runtimePreferences?.configOptionValues;
   const baseTable = runtimeTable ?? preferences.configOptionValues ?? {};
@@ -305,16 +313,39 @@ export const resolveAcpSessionConfigSelection = (
     }
   }
 
-  return { selectedModeId, selectedModelId, configOptionValues };
+  return {
+    selectedModeId,
+    selectedModelId,
+    configOptionValues,
+    configOptionSelectors: selectors,
+  };
 };
 
+/**
+ * Keeps the values the given selectors still offer.
+ *
+ * `switchesModel` says the caller applies these values together with a new
+ * model. Reasoning effort is per model and the selectors still describe the
+ * OUTGOING one, so validating the effort here would drop a value the incoming
+ * model does offer (Grok 4.5 has no `xhigh`, Grok 4.6 does). It passes through
+ * instead, and the selection resolution re-validates it against the resolved
+ * model.
+ */
 export const filterAcpSessionConfigOptionValues = (
   values: Record<string, AcpConfigOptionValue> | undefined,
-  selectors: readonly AcpConfigOptionSelector[]
+  selectors: readonly AcpConfigOptionSelector[],
+  options: { switchesModel?: boolean } = {}
 ): Record<string, AcpConfigOptionValue> => {
   const filtered: Record<string, AcpConfigOptionValue> = {};
   for (const selector of selectors) {
     const value = values?.[selector.configId];
+    if (value === undefined) {
+      continue;
+    }
+    if (options.switchesModel === true && isThoughtLevelSelector(selector)) {
+      filtered[selector.configId] = value;
+      continue;
+    }
     if (isConfigOptionValueValid(selector, value)) {
       filtered[selector.configId] = value;
     }
@@ -326,11 +357,17 @@ export const filterAcpSessionConfigOptionValues = (
  * The config option values a target may keep or dispatch: only what the composed selectors of
  * the model it names publish and accept. Durable pickers call it when their model changes so a
  * previous model's keys are not persisted, and session starts call it so they are not dispatched.
+ * An unavailable cache cannot disprove a stored selection; keep it until capabilities arrive.
  */
 export const filterAcpSessionConfigOptionValuesForTarget = (
   target: AcpSelectorTarget
-): Record<string, AcpConfigOptionValue> =>
-  filterAcpSessionConfigOptionValues(
+): Record<string, AcpConfigOptionValue> => {
+  const selectors = buildAcpSelectorOptions(target);
+  if (selectors.capabilityAuthority === 'unavailable') {
+    return { ...target.configOptionValues };
+  }
+  return filterAcpSessionConfigOptionValues(
     target.configOptionValues,
-    buildAcpSelectorOptions(target).configOptionSelectors
+    selectors.configOptionSelectors
   );
+};

@@ -2,71 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Ground truth for the rewrite: specs/code-collab-v2.md.
-The old v1 host/runtime/CRDT capture implementation has been removed from this
-directory.
-
-## Current files
-
-- `code-collab-v2-service.ts` — the unified CLI Code Collab v2 service. It resolves
-  owner/child workspace roots through `message-handler.ts`, treats relative paths as
-  file ids, enforces path/text/payload limits, handles open/refresh/save conflicts,
-  publishes file tree/current All Changes, and opens current or turn-scoped diffs.
-  Git All Changes uses the owner base; non-Git uses local diff evidence only when a
-  trustworthy base exists.
-  Shared file tree/All Changes uses owner-session Flock stream
-  `<workspace-id>:fi:<master-session-id>` (one row per path). A row whose path key
-  carries U+FFFD came from a byte stream decoded across a chunk boundary, not from
-  a scan; it is its own LWW key, so a correct republish cannot overwrite it. The
-  shared helpers hide it on read and delete it on the next write — do not "restore"
-  such rows. Successful changes or
-  targeted repairs advance signal stream `<workspace-id>:fis:<master-session-id>`;
-  the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron invalidate
-  and refresh its Machine RPC snapshot. Both streams have 180-day TTL and must not
-  enter repo meta. Root activation and terminal turn refresh may mirror only compact
-  aggregate add/del `diffStats`; watcher refreshes stay Flock-only, and PR sessions
-  retain committed compare totals.
-  Fleet-level `WorkspaceWatchCoordinator` owns best-effort invalidation: runtimes share
-  one child and one recursive watcher per canonical root. Only Code Collab RPC use extends
-  idle ownership. Startup/restart/coverage gaps trigger authoritative full refresh; there
-  is no per-directory fallback. Verify worker changes with the emitted
-  `dist/code-collab-watch-worker.js` handshake/shutdown smoke. Its credential-safe env
-  allowlist must preserve `ELECTRON_RUN_AS_NODE`: packaged Electron uses `Lody Helper`
-  as Node, and dropping the flag launches a second GUI app instead of the worker.
-  - `save-text` never throws on a changed file: if the disk content is too large,
-    binary, or invalid UTF-8 it returns a `digest_mismatch` conflict (with the disk
-    digest via streaming when the file is too large to read) instead of an error, so
-    the guest's unsaved edits survive. See `readDiskStateForSave`.
-- `code-collab-v2-diff-store.ts` / `turn-diff-store-worker.ts` — CLI adapter and mandatory
-  production Worker for local ACP turn evidence. The adapter returns per-turn `FileDiff`
-  and `getLatestText` heads. `message-handler.ts` passes the associated user-history
-  timestamp/order key for turn/GC order and calibrated recorded time separately. The
-  adapter injects `getServerNow()` so worker startup, retention reads, and
-  background/manual GC stay on the same calibrated clock as persisted turn timestamps.
-  The adapter allocates
-  one durable attempt-start head proof and advances each path only when its `newText`
-  matches current disk. Missing emitted workers are fatal. Storage/FastCDC/GC invariants
-  live in [packages/turn-diff-store/AGENTS.md](../../../../../packages/turn-diff-store/AGENTS.md).
-- `file-index-scan-worker.ts` / `file-index-scan-pool.ts` — off-main-thread directory
-  scanning and full file-index state refresh. In Git worktrees, scanning prefers
-  `git ls-files` only for recursive scans and synthesizes lazy parent directories;
-  non-recursive directory refresh stays on FS scanning because Git does not record
-  empty directories. Fallback FS scanning is path-only and must not read file
-  contents to classify text/binary/size. Root init/full/turn refresh should use
-  the worker `full-state` path when available so file listing and fileIndex
-  building stay off the main thread. For Git worktrees, the worker computes
-  Git-backed All Changes; for non-Git/no-Git workspaces, the worker first requests
-  service-provided All Changes, then `code-collab-v2-service.ts` supplies diff-store
-  state for the second worker call. `code-collab-v2-service.ts` still owns in-memory
-  state replacement and Flock publish.
-- `code-collab-v2-service.test.ts` — focused tests for path validation, digest
-  conflicts, refresh behavior, compression limits, shared state publishing, current
-  diff opening, and unsupported LSP responses.
-- `code-collab-publish-repair.test.ts` — file-index initial reconcile and owner-scoped
-  publication repair/backoff tests.
-- `code-collab-v2-diff-store.test.ts` — focused adapter tests for exact snapshots,
-  path scoping, chaining, and retention GC. Package-level dedup/refcount/size-GC tests
-  live in `packages/turn-diff-store/tests`.
+Ground truth for the rewrite: specs/code-collab-v2.md. The old v1
+host/runtime/CRDT capture implementation has been removed from this directory.
+File-by-file responsibilities: [README.md](README.md).
 
 ## Invariants
 
@@ -80,6 +18,40 @@ directory.
   `getLatestText`. Resolve direct old evidence before loading a bounded path head.
   ACP-covered paths skip gap-fill; missing pre-images fail loudly.
   Badge and clickable content both derive from these exact events, never Git stats.
+- The mandatory production Worker `turn-diff-store-worker.ts` must exist: missing
+  emitted workers are fatal. The diff-store adapter injects `getServerNow()` so
+  worker startup, retention reads, and background/manual GC stay on the same
+  calibrated clock as persisted turn timestamps; it allocates one durable
+  attempt-start head proof and advances a path only when its `newText` matches
+  current disk.
+- Shared file tree/All Changes uses owner-session Flock stream
+  `<workspace-id>:fi:<master-session-id>` (one row per path); successful changes or
+  targeted repairs advance signal stream `<workspace-id>:fis:<master-session-id>`,
+  and the named Flock bridge in `apps/cli/src/lib/loro/doc.ts` lets Electron
+  invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
+  must not enter repo meta. Root activation and terminal turn refresh may mirror only
+  compact aggregate add/del `diffStats`; watcher refreshes stay Flock-only, and PR
+  sessions retain committed compare totals.
+- A file-index row whose path key carries U+FFFD came from a byte stream decoded
+  across a chunk boundary, not from a scan; it is its own LWW key, so a correct
+  republish cannot overwrite it. The shared helpers hide it on read and delete it on
+  the next write — do not "restore" such rows.
+- Only Code Collab RPC use extends `WorkspaceWatchCoordinator` idle ownership.
+  Startup/restart/coverage gaps trigger authoritative full refresh; there is no
+  per-directory fallback. Verify worker changes with the emitted
+  `dist/code-collab-watch-worker.js` handshake/shutdown smoke. Its credential-safe env
+  allowlist must preserve `ELECTRON_RUN_AS_NODE`: packaged Electron uses `Lody Helper`
+  as Node, and dropping the flag launches a second GUI app instead of the worker.
+- `save-text` never throws on a changed file: if the disk content is too large,
+  binary, or invalid UTF-8 it returns a `digest_mismatch` conflict (with the disk
+  digest via streaming when the file is too large to read) instead of an error, so
+  the guest's unsaved edits survive. See `readDiskStateForSave`.
+- In Git worktrees, scanning prefers `git ls-files` only for recursive scans and
+  synthesizes lazy parent directories; non-recursive directory refresh stays on FS
+  scanning because Git does not record empty directories. Fallback FS scanning is
+  path-only and must not read file contents to classify text/binary/size. Root
+  init/full/turn refresh should use the worker `full-state` path when available so
+  file listing and fileIndex building stay off the main thread.
 - Machine RPC is the integration boundary. Local/Electron direct transport can be
   added below that RPC abstraction, but file operations still route to the single CLI
   service. In particular, local `code-collab/get-file-index` scans/builds the initial

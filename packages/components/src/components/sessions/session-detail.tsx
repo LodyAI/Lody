@@ -25,6 +25,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
+import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
   buildPendingUserHistoryEntry,
@@ -701,6 +702,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
   const isZenLayoutMode = useAtomValue(zenLayoutModeAtom);
@@ -1192,11 +1194,11 @@ const SessionDetail = ({
       const capability =
         sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
+        getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionFork === true
       );
     },
-    [sessionMachine?.acpCapabilities]
+    [sessionMachine]
   );
   const canForkSessionToWorktree = useCallback(
     (target: SessionMeta): boolean => {
@@ -1210,11 +1212,11 @@ const SessionDetail = ({
       const capability =
         sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
+        getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionForkWorktree === true
       );
     },
-    [sessionMachine?.acpCapabilities]
+    [sessionMachine]
   );
   const handleForkAssistant = useCallback(
     async (
@@ -5098,6 +5100,9 @@ const SessionDetail = ({
               >
                 <SessionChatInterface
                   ref={(el) => setChatTabRef(tabSession.id, el)}
+                  claimNavigationFocus={
+                    isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+                  }
                   session={tabSession}
                   workspaceSession={activeSession}
                   className="h-full"
@@ -5728,6 +5733,8 @@ const SessionDetail = ({
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
       ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
+      claimNavigationFocus:
+        isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
       className: 'h-full',

@@ -903,6 +903,7 @@ describe('LodyOperationCoordinator', () => {
       expect(harness.histories.get(harness.requesterSessionId)).toEqual([
         expect.objectContaining({
           role: 'system',
+          userId: 'user-1',
           items: [
             expect.objectContaining({
               type: 'operation_completion',

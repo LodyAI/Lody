@@ -254,31 +254,31 @@ const cursorCatalogEntry = {
     ],
   },
 };
-const cursorSelectors: AcpConfigOptionSelector[] = (
-  resolveAcpConfigOptionsForModel(cursorCatalogEntry, 'a') ?? []
-).map((option) =>
-  option.type === 'boolean'
-    ? {
-        type: 'boolean' as const,
-        configId: option.id,
-        label: option.name,
-        category: option.category,
-        currentValue: option.currentValue === true,
-        options: [] as [],
-      }
-    : {
-        type: 'select' as const,
-        configId: option.id,
-        label: option.name,
-        category: option.category,
-        currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
-        options: option.options.map((entry) => ({
-          value: entry.value,
-          label: entry.name,
-          description: entry.description,
-        })),
-      }
-);
+const cursorSelectorsForModel = (modelId: string | null): AcpConfigOptionSelector[] =>
+  (resolveAcpConfigOptionsForModel(cursorCatalogEntry, modelId ?? undefined) ?? []).map((option) =>
+    option.type === 'boolean'
+      ? {
+          type: 'boolean' as const,
+          configId: option.id,
+          label: option.name,
+          category: option.category,
+          currentValue: option.currentValue === true,
+          options: [] as [],
+        }
+      : {
+          type: 'select' as const,
+          configId: option.id,
+          label: option.name,
+          category: option.category,
+          currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
+          options: option.options.map((entry) => ({
+            value: entry.value,
+            label: entry.name,
+            description: entry.description,
+          })),
+        }
+  );
+const cursorSelectors = cursorSelectorsForModel('a');
 const cursorModelOptions: AcpSessionSelectOption[] = [
   { value: 'a', label: 'A' },
   { value: 'b', label: 'B' },
@@ -314,8 +314,7 @@ function StoryShell({
 }) {
   const store = useMemo(() => {
     const s = createStore();
-    const catalog =
-      session.agentConfigId === cursorAgent.id ? [...agents, cursorAgent] : agents;
+    const catalog = session.agentConfigId === cursorAgent.id ? [...agents, cursorAgent] : agents;
     s.set(
       agentConfigMetaCacheAtom,
       Object.fromEntries(catalog.map((a) => [getAgentConfigRoomId(a.id), a]))
@@ -357,7 +356,9 @@ function StoryShell({
           modeOptions={[]}
           selectedModeId={null}
           onModeChange={fn()}
-          configOptionSelectors={selectors}
+          configOptionSelectors={
+            session.agentConfigId === cursorAgent.id ? cursorSelectorsForModel(model) : selectors
+          }
           configOptionValues={values}
           onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           agentRoles={

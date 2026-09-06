@@ -6,7 +6,7 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'jotai';
 import { SessionList } from '../src/components/session-list';
-import { SessionPrIcon, SessionRowLeadingSlot } from '../src/components/sidebar-row-shared';
+import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
 
 const PR_STATUS_CASES = [
@@ -357,9 +357,8 @@ describe('SessionList PR badge', () => {
 
     flushSync(() => {
       root?.render(
-        React.createElement(SessionRowLeadingSlot, {
+        React.createElement(SidebarRowEndSlot, {
           isWorking: true,
-          menuLabel: 'More actions',
         })
       );
     });
@@ -374,10 +373,9 @@ describe('SessionList PR badge', () => {
 
     flushSync(() => {
       root?.render(
-        React.createElement(SessionRowLeadingSlot, {
+        React.createElement(SidebarRowEndSlot, {
           isWorking: false,
           hasUnreadMessages: true,
-          menuLabel: 'More actions',
         })
       );
     });

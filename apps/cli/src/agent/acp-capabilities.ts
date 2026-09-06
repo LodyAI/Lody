@@ -1,5 +1,4 @@
 import {
-  type AcpConfigOptionSummary,
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
@@ -16,6 +15,7 @@ import {
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
 import { fetchCursorModelCatalog } from '@/agent/cursor-acp';
+import type { AcpCapabilityCatalogWrite } from '@/lib/loro/doc';
 
 export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
@@ -27,12 +27,21 @@ export type FetchAcpCapabilitiesOptions = {
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
-  configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
+  /**
+   * Registry Cursor catalog write for `updateAcpCapabilities`:
+   * a map replaces the stored catalog, `null` clears it after a confirmed
+   * JSON-RPC `-32601`, and the field is omitted for non-Cursor agents so the
+   * stored catalog is inherited.
+   */
+  configOptionsByModel?: AcpCapabilityCatalogWrite;
 };
 
 /**
  * Spawns a temporary ACP agent to discover the capabilities returned by session/new.
  * The agent is killed as soon as the NewSessionResponse has been normalized.
+ * Registry Cursor also fetches `cursor/list_available_models`: a catalog map
+ * replaces the stored one, a confirmed `-32601` becomes `null` so the write
+ * clears a stale catalog, and any other catalog failure rejects the probe.
  */
 export async function fetchAcpCapabilities(
   cliType: AgentConfigCliType,
@@ -95,9 +104,10 @@ export async function fetchAcpCapabilities(
     const normalized = normalizeAcpSessionCapabilities(sessionResponse, {
       sessionFork: client.supportsSessionFork?.() === true,
       acknowledgedSteer: client.supportsAcknowledgedSteer(),
+      agent: { cliType, agentType },
     });
     const configOptionsByModel = isRegistryCursorAgent({ cliType, agentType })
-      ? await fetchCursorModelCatalog({ client, signal: options.signal, logger })
+      ? ((await fetchCursorModelCatalog({ client, signal: options.signal, logger })) ?? null)
       : undefined;
     return {
       ...normalized,

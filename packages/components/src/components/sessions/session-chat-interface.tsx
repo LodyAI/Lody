@@ -1723,6 +1723,7 @@ export function SessionSearchBar({
 }
 
 interface SessionChatInterfaceProps {
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
   className?: string;
@@ -1917,6 +1918,7 @@ export const SessionChatInterface = memo(
       hideMessageArea = false,
       syncEnabled = !hideMessageArea,
       isVisible = true,
+      claimNavigationFocus,
       isExternalHistoryRefreshing = false,
       externalHistoryProviderLabel,
       onNavigateToComment,
@@ -2129,6 +2131,7 @@ export const SessionChatInterface = memo(
       machineFlockRows,
       modeOptions,
       modelOptions,
+      modelReasoningEfforts,
       sessionMachine,
     } = useSessionAcpSelectorContext({
       machineId: session.machineId,
@@ -2147,6 +2150,7 @@ export const SessionChatInterface = memo(
         defaultModelId,
         modeOptions,
         modelOptions,
+        modelReasoningEfforts,
       }),
       [
         capabilityAuthority,
@@ -2155,6 +2159,7 @@ export const SessionChatInterface = memo(
         defaultModelId,
         modeOptions,
         modelOptions,
+        modelReasoningEfforts,
       ]
     );
     const { selectedModeId, selectedModelId, configOptionValues } =
@@ -2898,8 +2903,8 @@ export const SessionChatInterface = memo(
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
-        return getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-          capability?.sessionFork === true
+        return getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionFork === true
           ? userMessage.id
           : null;
       }
@@ -2914,7 +2919,7 @@ export const SessionChatInterface = memo(
       session.cliType,
       session.isArchived,
       sessionHistory,
-      sessionMachine?.acpCapabilities,
+      sessionMachine,
     ]);
     const handleEditLastUser = useCallback(
       async (message: SessionHistoryParsed, text: string): Promise<boolean> => {
@@ -4005,11 +4010,7 @@ export const SessionChatInterface = memo(
         });
         const accepted = await handleSendMessage(inputBlocks, currentAgentRole);
         if (accepted) {
-          // Supersede the abandoned delivery attempt. The ordinary send clears
-          // the missing-history marker, and without a terminal status the stale
-          // pending entry would become dispatchable again (duplicating the just
-          // resent content). 'canceled' is the truthful terminal state and also
-          // hides the row's not-delivered label independent of the marker.
+          // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
             await updateHistoryEntry(userTurnId, (entry) => ({
               ...entry,
@@ -5993,6 +5994,7 @@ export const SessionChatInterface = memo(
                       the bottom surface; chat queue is bypassed for the same reason. */}
                   {shouldReplaceComposerWithPermission ? null : (
                     <SessionChatInputArea
+                      claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
                       ref={inputAreaRef}
                       session={session}
                       sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}

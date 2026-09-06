@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "failureClass", "summary", "ablation"],
+  "properties": {
+    "status": { "enum": ["ready", "blocked"] },
+    "failureClass": {
+      "enum": ["none", "product-defect", "test-capability", "infra"]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "ablation": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "search", "replacement", "expectedFailure"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 300 },
+            "search": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "replacement": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "expectedFailure": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ready" } } },
+      "then": {
+        "properties": {
+          "failureClass": { "const": "none" },
+          "ablation": { "type": "object" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "blocked" } } },
+      "then": {
+        "properties": {
+          "failureClass": {
+            "enum": ["product-defect", "test-capability", "infra"]
+          },
+          "ablation": { "type": "null" }
+        }
+      }
+    }
+  ]
+}

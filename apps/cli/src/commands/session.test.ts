@@ -4,9 +4,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  machineFlockKeys,
+  type AgentConfigId,
   getMachineFlockDocId,
   getSessionRoomId,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
   type AgentConfigMeta,
   type LocalProjectGitState,
   type MachineId,
@@ -16,6 +21,7 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import * as commandRuntime from '@/lib/command-runtime';
 import {
   createLocalProjectBranchSelector,
   normalizeLocalProjectRootPath,
@@ -46,11 +52,14 @@ import {
   resolveOpenedBySessionRelation,
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
+  resolveSessionRequester,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
   resolveRenameArgs,
   resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
+  resolveSessionCreateDispatchConfig,
+  readAgentAcpCapability,
   resolveLocalProjectBranchForCreate,
   resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
@@ -115,6 +124,185 @@ const createMachineMeta = (overrides: Partial<MachineMeta> = {}): MachineMeta =>
   ...overrides,
 });
 
+describe('readAgentAcpCapability', () => {
+  const setup = (options: { legacy?: boolean; missing?: boolean; current?: boolean } = {}) => {
+    const configId = 'cursor-config' as AgentConfigId;
+    const machine = createMachineMeta({
+      protocolCapabilities: options.legacy ? undefined : CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const legacyEntry: AcpCapabilityCacheEntry = {
+      cliType: 'registry',
+      agentType: 'cursor',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      sourceVersion: 'cursor@test',
+      modes: [],
+      models: [],
+      fetchedAt: 1,
+    };
+    const freshEntry: AcpCapabilityCacheEntry = {
+      ...legacyEntry,
+      sourceVersion: 'cursor@test+parameterized-model-picker',
+      fetchedAt: 2,
+      configOptionsByModel: { model: [] },
+    };
+    let entry = options.missing ? undefined : options.current ? freshEntry : legacyEntry;
+    let observer: (() => void) | undefined;
+    let joined = false;
+    const manager = {
+      syncFlockDocOrThrow: async () => undefined,
+      repo: {
+        getDocMeta: async () => ({ meta: machine }),
+        openFlockDoc: async () => ({
+          flock: {
+            subscribe: (callback: () => void) => {
+              observer = callback;
+              return () => {
+                observer = undefined;
+              };
+            },
+            scan: () =>
+              entry ? [{ key: machineFlockKeys.acpCapability(configId), value: entry }] : [],
+          },
+          joinRoom: async () => {
+            joined = true;
+            return {
+              unsubscribe: () => {
+                joined = false;
+              },
+            };
+          },
+        }),
+      },
+    } as unknown as Parameters<typeof readAgentAcpCapability>[0]['manager'];
+    const args: Parameters<typeof readAgentAcpCapability>[0] = {
+      auth: {
+        machineId: machine.id,
+        machineName: 'Test Machine',
+        token: 'synthetic-token',
+        userId: 'test-user',
+        userName: 'Test User',
+        userEmail: 'test@example.invalid',
+      },
+      manager,
+      workspaceId: 'workspace-id' as WorkspaceId,
+      machineId: machine.id,
+      agentConfigId: configId,
+      agent: legacyEntry,
+    };
+    const response = {
+      type: 'machine/acp-capabilities-refresh_response' as const,
+      machineId: machine.id,
+      configId,
+      cliType: 'registry' as const,
+      agentType: 'cursor',
+      success: true,
+      capability: { ...freshEntry, configOptionsByModel: undefined },
+    };
+    return {
+      args,
+      response,
+      legacyEntry,
+      freshEntry,
+      released: () => !joined && observer === undefined,
+      publish: () => {
+        entry = freshEntry;
+        observer?.();
+      },
+    };
+  };
+
+  it.each([false, true])(
+    'automatically refreshes stale or missing Cursor rows (missing=%s)',
+    async (missing) => {
+      const fixture = setup({ missing });
+      const dispatch = vi
+        .spyOn(commandRuntime, 'dispatchLocalControl')
+        .mockImplementation(async (request) => {
+          expect(request).toMatchObject({
+            type: 'machine/acp-capabilities-refresh',
+            configId: 'cursor-config',
+          });
+          fixture.publish();
+          return [fixture.response];
+        });
+      try {
+        await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(fixture.freshEntry);
+        expect(fixture.released()).toBe(true);
+      } finally {
+        dispatch.mockRestore();
+      }
+    }
+  );
+
+  it.each([false, true])('reads a current row without probing (legacy=%s)', async (legacy) => {
+    const fixture = setup({ legacy, current: !legacy });
+    const dispatch = vi
+      .spyOn(commandRuntime, 'dispatchLocalControl')
+      .mockRejectedValue(new Error('unexpected probe'));
+    try {
+      await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(
+        legacy ? fixture.legacyEntry : fixture.freshEntry
+      );
+    } finally {
+      dispatch.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    'rejects stale dispatch after an unsuccessful refresh (rpcFailed=%s)',
+    async (rpcFailed) => {
+      vi.useFakeTimers();
+      const fixture = setup();
+      const dispatch = vi.spyOn(commandRuntime, 'dispatchLocalControl').mockResolvedValue([
+        {
+          ...fixture.response,
+          success: !rpcFailed,
+          ...(rpcFailed ? { error: 'synthetic probe failure' } : {}),
+        },
+      ]);
+      try {
+        const rejection = expect(readAgentAcpCapability(fixture.args)).rejects.toThrow(
+          'Automatic Cursor capability refresh'
+        );
+        await vi.runAllTimersAsync();
+        await rejection;
+        expect(fixture.released()).toBe(true);
+      } finally {
+        dispatch.mockRestore();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('waits for a full Flock row arriving after the refresh ACK', async () => {
+    const fixture = setup();
+    const ack = Promise.withResolvers<void>();
+    const dispatch = vi
+      .spyOn(commandRuntime, 'dispatchLocalControl')
+      .mockImplementation(async () => {
+        ack.resolve();
+        return [fixture.response];
+      });
+    try {
+      let settled = false;
+      const reading = readAgentAcpCapability(fixture.args).then((entry) => {
+        settled = true;
+        return entry;
+      });
+      await ack.promise;
+      // Let the reader consume the ACK and observe the still-stale snapshot.
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(fixture.released()).toBe(false);
+      fixture.publish();
+      await expect(reading).resolves.toEqual(fixture.freshEntry);
+      expect(fixture.released()).toBe(true);
+    } finally {
+      dispatch.mockRestore();
+    }
+  });
+});
+
 const createAcpCapability = (): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
   agentType: 'codex',
@@ -142,7 +330,146 @@ const createAcpCapability = (): AcpCapabilityCacheEntry => ({
   fetchedAt: 1,
 });
 
+const cursorThinkingSelect = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorEffortSelect = (
+  values: readonly string[],
+  currentValue: string
+): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue,
+  options: values.map((value) => ({ value, name: value })),
+});
+
+const cursorFastSelect = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'Off' },
+    { value: 'true', name: 'On' },
+  ],
+});
+
+const cursorContextSelect = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'default',
+  options: [{ value: 'default', name: 'Default' }],
+});
+
+const createCursorAcpCapability = (): AcpCapabilityCacheEntry => ({
+  cliType: 'custom',
+  agentType: 'cursor',
+  modes: [],
+  models: [],
+  configOptions: [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: 'opus',
+      options: [
+        { value: 'opus', name: 'Opus' },
+        { value: 'sonnet', name: 'Sonnet' },
+        { value: 'gemini', name: 'Gemini' },
+        { value: 'gpt', name: 'GPT' },
+      ],
+    },
+    cursorThinkingSelect(),
+    cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+    cursorFastSelect(),
+    cursorContextSelect(),
+  ],
+  configOptionsByModel: {
+    opus: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
+      cursorFastSelect(),
+      cursorContextSelect(),
+    ],
+    sonnet: [
+      cursorThinkingSelect(),
+      cursorEffortSelect(['low', 'medium', 'high', 'max'], 'medium'),
+    ],
+    gemini: [cursorEffortSelect(['minimal', 'low', 'medium', 'high'], 'medium')],
+    gpt: [
+      {
+        id: 'reasoning',
+        name: 'Reasoning',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'low',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'extra-high', name: 'Extra high' },
+        ],
+      },
+      cursorFastSelect(),
+    ],
+    empty: [],
+  },
+  fetchedAt: 1,
+});
+
 describe('session command helpers', () => {
+  it.each([{ modelId: 'gpt' }, { configOptionValues: { model: 'gpt' } }])(
+    'maps semantic effort against the inherited model: %j',
+    (inherited) => {
+      const resolved = resolveSessionCreateDispatchConfig(
+        { runConfig: { reasoningEffort: 'extra-high' } },
+        inherited,
+        createCursorAcpCapability()
+      );
+      expect(resolved.modelId).toBe('gpt');
+      expect(resolved.configOptionValues).toMatchObject({ reasoning: 'extra-high' });
+      expect(resolved.configOptionValues).not.toHaveProperty('effort');
+      expect(resolved.inheritSessionDefaults).toBe(false);
+    }
+  );
+
+  it('rejects Fast when the inherited model does not support it', () => {
+    expect(() =>
+      resolveSessionCreateDispatchConfig(
+        { runConfig: { fastMode: true } },
+        { modelId: 'sonnet' },
+        createCursorAcpCapability()
+      )
+    ).toThrow(/does not offer a fast mode option/);
+  });
+
+  it('lets an explicit model replace inherited model options before semantic mapping', () => {
+    const resolved = resolveSessionCreateDispatchConfig(
+      { runConfig: { modelId: 'gpt', reasoningEffort: 'extra-high' } },
+      { modelId: 'opus', configOptionValues: { model: 'opus', effort: 'max', fast: 'true' } },
+      createCursorAcpCapability()
+    );
+    expect(resolved.modelId).toBe('gpt');
+    expect(resolved.configOptionValues).toMatchObject({ reasoning: 'extra-high' });
+    expect(resolved.configOptionValues).not.toHaveProperty('model');
+    expect(resolved.configOptionValues).not.toHaveProperty('effort');
+  });
+
   it('uses one hard Meta read across request validation and accepted create materialization', async () => {
     const syncMetaOrThrow = vi.fn(async () => undefined);
     const manager = { syncMetaOrThrow };
@@ -347,6 +674,19 @@ describe('session command helpers', () => {
     );
   });
 
+  it('keeps delegated requester identity separate from the authenticated executor', () => {
+    const delegatedRequester = { userId: 'collaborator-b' };
+    expect(
+      resolveSessionRequester({ userId: 'machine-owner-a' }, undefined, delegatedRequester)
+    ).toEqual({ userId: 'collaborator-b', isDelegated: true });
+    expect(
+      resolveSessionRequester({ userId: 'machine-owner-c' }, undefined, delegatedRequester)
+    ).toEqual({ userId: 'collaborator-b', isDelegated: true });
+    expect(() =>
+      resolveSessionRequester({ userId: 'machine-owner-a' }, 'someone-else', delegatedRequester)
+    ).toThrow('Requester identity must match the delegated Session requester.');
+  });
+
   it('keeps Session ownership separate from the authenticated requester', () => {
     expect(resolveSessionCreateOwnerUserId('machine-owner', 'session-owner')).toBe('session-owner');
     expect(resolveSessionCreateOwnerUserId('machine-owner', '   ')).toBe('machine-owner');
@@ -543,6 +883,48 @@ describe('session command helpers', () => {
     expect(() =>
       validateTurnModeAndModel({ modeId: 'plan', modelId: 'model-b' }, capability)
     ).not.toThrow();
+  });
+
+  it('validates turn config option values against the target model catalog', () => {
+    const capability = createCursorAcpCapability();
+    expect(() =>
+      validateTurnConfigOptionValues({ effort: 'max' }, capability, undefined, 'gemini')
+    ).toThrow(/Allowed values/);
+    expect(() =>
+      validateTurnConfigOptionValues({ fast: 'true' }, capability, undefined, 'sonnet')
+    ).toThrow('Unknown ACP config option for the selected agent: fast.');
+    expect(() =>
+      validateTurnConfigOptionValues({ thinking: 'true' }, capability, undefined, 'sonnet')
+    ).not.toThrow();
+  });
+
+  it('drops inherited options that the explicit target model catalog rejects', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { modelId: 'opus', configOptionValues: { fast: 'true', effort: 'xhigh' } },
+        createCursorAcpCapability(),
+        { targetModelId: 'sonnet' }
+      )
+    ).toEqual({ modelId: 'opus' });
+  });
+
+  it('filters inherited options against the inherited model when no create target is given', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { modelId: 'sonnet', configOptionValues: { fast: 'true' } },
+        createCursorAcpCapability()
+      )
+    ).toEqual({ modelId: 'sonnet' });
+  });
+
+  it('removes a superseded inherited model option when create names a different model', () => {
+    expect(
+      filterCompatibleInheritedTurnConfig(
+        { configOptionValues: { model: 'opus', thinking: 'true' } },
+        createCursorAcpCapability(),
+        { targetModelId: 'sonnet' }
+      )
+    ).toEqual({ configOptionValues: { thinking: 'true' } });
   });
 
   it('sorts sessions with invalid createdAt timestamps deterministically', () => {

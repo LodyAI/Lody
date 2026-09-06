@@ -20,7 +20,9 @@ export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSumm
     if (!configId || !cliType || !agentType) return [];
     const key = getAcpCapabilityCacheKey(configId);
     const capability = machine?.acpCapabilities?.[key];
-    if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, runtimeOverrides)) {
+    if (
+      !isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, runtimeOverrides, machine)
+    ) {
       return [];
     }
     return capability.availableCommands ?? [];

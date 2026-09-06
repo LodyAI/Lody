@@ -236,7 +236,9 @@ describe('orderAcpConfigOptionSelectors', () => {
     ).toEqual(['thinking']);
     expect(
       mapIds(
-        orderAcpConfigOptionSelectors([makeToggleSelect('thinking', ['off', 'on'], 'thought_level')])
+        orderAcpConfigOptionSelectors([
+          makeToggleSelect('thinking', ['off', 'on'], 'thought_level'),
+        ])
       ).thoughtToggle
     ).toEqual(['thinking']);
   });

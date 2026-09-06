@@ -33,6 +33,10 @@ import {
   formatSessionQuotaRejection,
   FREE_SESSION_TURN_LIMIT,
   isBillingQuotaExempt,
+  isAcpCapabilityCacheEntryCurrent,
+  isRegistryCursorAgent,
+  machineSupportsCursorParameterizedModelPicker,
+  MachineAcpCapabilitiesRefreshResponseSchema,
   getAcpCapabilityCacheKey,
   getBuiltinDefaultModeId,
   getMachineFlockAcpCapabilities,
@@ -49,6 +53,8 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  resolveAcpConfigOptionsForModel,
+  resolveAcpTargetModelId,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -97,9 +103,11 @@ import {
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
 import { LoroDocumentManager, type SessionDocument } from '@/lib/loro/doc';
+import { withTimeout } from '@/lib/loro/timeout-utils';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import {
   canRequestMachineForCliToken,
+  canUseMachineForCliToken,
   type WorkspaceBillingEntitlement,
   listWorkspaceGitHubRepositoriesForCliToken,
   listWorkspacesForToken,
@@ -126,6 +134,15 @@ import { getCliHttpFetch } from '@/utils/http-transport';
 
 type CommonOptions = CommonCommandOptions;
 
+export type DelegatedSessionRequester = {
+  userId: string;
+};
+
+type ResolvedSessionRequester = {
+  userId: string;
+  isDelegated: boolean;
+};
+
 export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
 export const DEFAULT_SESSION_HISTORY_LIMIT = 50;
@@ -145,10 +162,8 @@ export type CreateOptions = CommonOptions &
     currentSessionId?: SessionId;
     defaultMachineId?: MachineId;
     requesterUserId?: string;
-    /**
-     * Trusted Session attribution supplied by an internal caller. Access checks
-     * must continue to use requesterUserId, which is bound to CLI auth.
-     */
+    /** Trusted human requester supplied by a delegated internal caller. */
+    delegatedRequester?: DelegatedSessionRequester;
     sessionOwnerUserId?: string;
     parent?: string;
     useCurrentSessionAsParent?: boolean;
@@ -1362,7 +1377,17 @@ export function applyAgentRunConfigSelection(
   if (!hasAgentRunConfigSelection(runConfig)) {
     return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
   }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const modelId =
+    runConfig.modelId ??
+    resolveAcpTargetModelId({
+      modelId: rest.modelId,
+      configOptionValues: rest.configOptionValues,
+      configOptions: capability?.configOptions,
+    });
+  const resolved = resolveAgentRunConfigSelection(
+    { ...runConfig, ...(modelId ? { modelId } : {}) },
+    capability
+  );
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
@@ -1474,16 +1499,25 @@ export function validateTurnConfigOptionValues(
    * capability's `configOptions` only describe the probed model, so re-checking
    * them here would reject values that are valid for the target model.
    */
-  skipIds?: ReadonlySet<string>
+  skipIds?: ReadonlySet<string>,
+  modelId?: string | null
 ): void {
   const entries = Object.entries(values ?? {}).filter(([id]) => !skipIds?.has(id));
   if (entries.length === 0) {
     return;
   }
-  if (!capability?.configOptions) {
+  const targetModelId = resolveAcpTargetModelId({
+    modelId,
+    configOptionValues: values,
+    configOptions: capability?.configOptions,
+  });
+  const configOptions = capability
+    ? resolveAcpConfigOptionsForModel(capability, targetModelId)
+    : undefined;
+  if (!configOptions) {
     throw new Error('ACP config options are unavailable for the selected agent.');
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(configOptions.map((option) => [option.id, option]));
   for (const [id, value] of entries) {
     const option = optionsById.get(id);
     if (!option) {
@@ -1498,12 +1532,21 @@ export function validateTurnConfigOptionValues(
 
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string | null
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  const resolvedTargetModelId = resolveAcpTargetModelId({
+    modelId: targetModelId,
+    configOptionValues: values,
+    configOptions: capability?.configOptions,
+  });
+  const configOptions = capability
+    ? resolveAcpConfigOptionsForModel(capability, resolvedTargetModelId)
+    : undefined;
+  if (!values || !configOptions) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(configOptions.map((option) => [option.id, option]));
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
@@ -1547,18 +1590,58 @@ export function validateTurnModeAndModel(
   }
 }
 
+/** Drop a superseded inherited `model` option so a Turn does not name two models. */
+function dropSupersededInheritedModelOption(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  explicitModelId: string | null | undefined
+): Record<string, string | boolean> | undefined {
+  if (!values) {
+    return undefined;
+  }
+  if (typeof explicitModelId !== 'string' || explicitModelId === '') {
+    return values;
+  }
+  const modelOption = capability?.configOptions?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  if (modelOption === undefined) {
+    return values;
+  }
+  const inheritedModel = values[modelOption.id];
+  if (typeof inheritedModel !== 'string' || inheritedModel === explicitModelId) {
+    return values;
+  }
+  const next = { ...values };
+  delete next[modelOption.id];
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 export function filterCompatibleInheritedTurnConfig(
   config: ResolvedTurnDispatchConfig | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  options?: { targetModelId?: string | null }
 ): ResolvedTurnDispatchConfig | undefined {
   if (!config) {
     return undefined;
   }
   const supportedModes = getSupportedTurnSelectorIds(capability, 'mode');
   const supportedModels = getSupportedTurnSelectorIds(capability, 'model');
-  const configOptionValues = filterCompatibleTurnConfigOptionValues(
-    config.configOptionValues,
-    capability
+  const inheritedModelId =
+    typeof config.modelId === 'string' && supportedModels.has(config.modelId)
+      ? config.modelId
+      : undefined;
+  const targetModelId =
+    options?.targetModelId ||
+    inheritedModelId ||
+    resolveAcpTargetModelId({
+      configOptionValues: config.configOptionValues,
+      configOptions: capability?.configOptions,
+    });
+  const configOptionValues = dropSupersededInheritedModelOption(
+    filterCompatibleTurnConfigOptionValues(config.configOptionValues, capability, targetModelId),
+    capability,
+    options?.targetModelId
   );
   return {
     ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
@@ -1568,15 +1651,22 @@ export function filterCompatibleInheritedTurnConfig(
   };
 }
 
-async function readAgentAcpCapability(args: {
+/** Call only after authorizing the target Machine. Cursor migration refreshes automatically. */
+export async function readAgentAcpCapability(args: {
+  auth: AuthContext;
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   agentConfigId?: AgentConfigMeta['id'];
+  agent: Pick<AgentConfigMeta, 'cliType' | 'agentType'>;
 }): Promise<AcpCapabilityCacheEntry | undefined> {
   if (!args.agentConfigId) {
     return undefined;
   }
+  const configId = args.agentConfigId;
+  const machine = (await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId)))?.meta as
+    | MachineMeta
+    | undefined;
   await syncMachineFlockDocsForRead(
     args.manager,
     args.workspaceId,
@@ -1586,10 +1676,79 @@ async function readAgentAcpCapability(args: {
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
-  const capabilities = getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-  );
-  return capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
+  const readCurrent = () => {
+    const entry = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[getAcpCapabilityCacheKey(configId)];
+    return entry?.cliType === args.agent.cliType &&
+      entry.agentType === args.agent.agentType &&
+      isAcpCapabilityCacheEntryCurrent(entry, machine)
+      ? entry
+      : undefined;
+  };
+  const current = readCurrent();
+  if (
+    current ||
+    !isRegistryCursorAgent(args.agent) ||
+    !machineSupportsCursorParameterizedModelPicker(machine)
+  ) {
+    return current;
+  }
+
+  // The ACK can precede publication, and its compatibility payload omits the
+  // catalog. Subscribe before probing and wait for the complete current Flock row.
+  let resolveCurrent!: (entry: AcpCapabilityCacheEntry) => void;
+  const currentRow = new Promise<AcpCapabilityCacheEntry>((resolve) => {
+    resolveCurrent = resolve;
+  });
+  const observeCurrent = () => {
+    const entry = readCurrent();
+    if (entry) resolveCurrent(entry);
+  };
+  const unsubscribeFlock = handle.flock.subscribe(observeCurrent);
+  let disposed = false;
+  let room: Awaited<ReturnType<typeof handle.joinRoom>> | undefined;
+  const joining = handle.joinRoom().then((subscription) => {
+    if (disposed) subscription.unsubscribe();
+    else room = subscription;
+  });
+  try {
+    await withTimeout(
+      joining,
+      8_000,
+      'Automatic Cursor capability refresh could not join its Flock room.'
+    );
+    const response =
+      args.machineId === args.auth.machineId
+        ? MachineAcpCapabilitiesRefreshResponseSchema.parse(
+            (
+              await dispatchLocalControl({
+                type: 'machine/acp-capabilities-refresh',
+                machineId: args.machineId,
+                workspaceId: args.workspaceId,
+                configId,
+              })
+            ).find((message) => message.type === 'machine/acp-capabilities-refresh_response')
+          )
+        : await withMachineRpcClient(args, (client) =>
+            client.requestMachineAcpCapabilitiesRefresh({ configId, timeoutMs: 120_000 })
+          );
+    if (!response?.success) {
+      throw new Error(
+        `Automatic Cursor capability refresh failed: ${response?.error ?? 'no response'}`
+      );
+    }
+    observeCurrent();
+    return await withTimeout(
+      currentRow,
+      8_000,
+      'Automatic Cursor capability refresh did not provide a current capability row.'
+    );
+  } finally {
+    disposed = true;
+    unsubscribeFlock();
+    room?.unsubscribe();
+  }
 }
 
 export function resolveTurnDispatchConfigFromInputConfig(
@@ -1886,15 +2045,39 @@ export async function readSessionMachineAccess(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   requesterUserId?: string;
+  delegatedRequester?: DelegatedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserId,
+    args.delegatedRequester
+  );
+  return await readResolvedSessionMachineAccess({
+    auth: args.auth,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    requester,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+}
+
+async function readResolvedSessionMachineAccess(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requester: ResolvedSessionRequester;
+  localProjectId?: string;
+}): Promise<MachineAccessCheckResult> {
   try {
-    return await canRequestMachineForCliToken({
+    const readAccess = args.requester.isDelegated
+      ? canUseMachineForCliToken
+      : canRequestMachineForCliToken;
+    return await readAccess({
       token: args.auth.token,
       workspaceId: args.workspaceId,
       machineId: args.machineId,
-      requesterUserId,
+      requesterUserId: args.requester.userId,
       ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
     });
   } catch (error) {
@@ -1908,10 +2091,10 @@ async function assertMachineAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<void> {
-  const access = await readSessionMachineAccess(args);
+  const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
     throw new Error(`Machine access denied for ${args.machineId}: ${access.reason}`);
   }
@@ -2060,6 +2243,28 @@ export function resolveSessionCommandRequesterUserId(
   return auth.userId;
 }
 
+export function resolveSessionRequester(
+  auth: Pick<AuthContext, 'userId'>,
+  requesterUserId?: string,
+  delegatedRequester?: DelegatedSessionRequester
+): ResolvedSessionRequester {
+  if (!delegatedRequester) {
+    return {
+      userId: resolveSessionCommandRequesterUserId(auth, requesterUserId),
+      isDelegated: false,
+    };
+  }
+  const delegatedUserId = normalizeCliValue(delegatedRequester.userId);
+  if (!delegatedUserId) {
+    throw new Error('Delegated Session requester must identify a user.');
+  }
+  const requested = normalizeCliValue(requesterUserId);
+  if (requested !== undefined && requested !== delegatedUserId) {
+    throw new Error('Requester identity must match the delegated Session requester.');
+  }
+  return { userId: delegatedUserId, isDelegated: true };
+}
+
 export function resolveSessionCreateOwnerUserId(
   requesterUserId: string,
   sessionOwnerUserId?: string
@@ -2096,16 +2301,16 @@ async function listAuthorizedMachineMetasForCreate(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machines: readonly MachineMeta[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<MachineMeta[]> {
   const rows = await Promise.all(
     args.machines.map(async (machine) => ({
       machine,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: machine.id,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
       }),
     }))
   );
@@ -2122,16 +2327,16 @@ async function filterAuthorizedLocalProjectsForCreate<
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjects: readonly T[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<T[]> {
   const rows = await Promise.all(
     args.localProjects.map(async (project) => ({
       project,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: args.machineId,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
         localProjectId: project.id,
       }),
     }))
@@ -2148,7 +2353,7 @@ async function resolveTargetMachineForCreate(args: {
   auth: AuthContext;
   machineSelector?: string;
   defaultMachineId?: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   parentSessionId?: SessionId;
 }): Promise<MachineMeta> {
   const machines = await listMachineMetasForWorkspace(args.manager);
@@ -2159,7 +2364,7 @@ async function resolveTargetMachineForCreate(args: {
     auth: args.auth,
     workspaceId: args.workspaceId,
     machines,
-    requesterUserId: args.requesterUserId,
+    requester: args.requester,
   });
   if (authorizedMachines.length === 0) {
     throw new Error('No authorized machines are available in this workspace.');
@@ -2249,12 +2454,12 @@ async function assertGitHubRepoAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   repoFullName: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<void> {
   const repos = await listWorkspaceGitHubRepositoriesForCliToken({
     token: args.auth.token,
     workspaceId: args.workspaceId,
-    requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+    requesterUserId: args.requesterUserId,
     enabledOnly: true,
   });
   const normalized = args.repoFullName.toLowerCase();
@@ -2269,7 +2474,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<
   | { success: true; state: Awaited<ReturnType<typeof getLocalProjectGitStateAtRootPath>> }
   | { success: false; error: string; message?: string }
@@ -2290,7 +2495,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
     async (client) =>
       await client.requestLocalProjectGitState({
         localProjectId: args.localProjectId as LocalProjectId,
-        requestedByUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+        requestedByUserId: args.requesterUserId,
         timeoutMs: 30_000,
       })
   );
@@ -2395,13 +2600,13 @@ export function resolveLocalProjectCreateGitContext(args: {
 async function listWorkspaceGitHubRepositoriesBestEffort(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<{ fullName: string }[]> {
   try {
     return await listWorkspaceGitHubRepositoriesForCliToken({
       token: args.auth.token,
       workspaceId: args.workspaceId,
-      requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+      requesterUserId: args.requesterUserId,
       enabledOnly: true,
     });
   } catch (error) {
@@ -2420,7 +2625,7 @@ async function resolveLocalProjectCreateGitContextOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
   requestedBranch?: string;
   useWorktree?: boolean;
 }): Promise<LocalProjectCreateGitContext> {
@@ -2453,7 +2658,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   auth: AuthContext,
   machineId: MachineId,
   selector: string,
-  requesterUserId: string | undefined,
+  requester: ResolvedSessionRequester,
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
@@ -2469,7 +2674,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     workspaceId,
     machineId,
     localProjects,
-    requesterUserId,
+    requester,
   });
   if (authorizedLocalProjects.length === 0) {
     throw new Error('No authorized local projects are available on the target machine.');
@@ -2498,7 +2703,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     machineId,
     localProjectId: project.id,
     localRootPath: project.rootPath,
-    requesterUserId,
+    requesterUserId: requester.userId,
     requestedBranch,
     useWorktree,
   });
@@ -2570,14 +2775,12 @@ async function resolveCreateContext(args: {
   workspace: WorkspaceSummary;
   manager: LoroDocumentManager;
   options: CreateOptions;
+  requester: ResolvedSessionRequester;
   skipMachineAvailabilityCheck?: boolean;
 }): Promise<ResolvedCreateContext> {
   const workspaceId = args.workspace.id as WorkspaceId;
   const agentSelector = resolveCreateAgentSelector(args.options);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.options.requesterUserId
-  );
+  const requesterUserId = args.requester.userId;
   const parentSelector = normalizeCliValue(args.options.parent);
   const currentSessionId = resolveCreateCurrentSessionId(args.options);
   if (parentSelector && args.options.useCurrentSessionAsParent === true) {
@@ -2622,14 +2825,14 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     machineSelector: args.options.machine,
     defaultMachineId: args.options.defaultMachineId,
-    requesterUserId,
+    requester: args.requester,
     parentSessionId,
   });
   await assertMachineAccess({
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
     await ensureTargetMachineOnline({
@@ -2686,7 +2889,7 @@ async function resolveCreateContext(args: {
       args.auth,
       targetMachine.id,
       normalizedLocalProject,
-      requesterUserId,
+      args.requester,
       requestedBranch,
       args.options.worktree === true
     );
@@ -2696,7 +2899,7 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
   });
 
@@ -2728,8 +2931,14 @@ export async function validateSessionCreateOptions(args: {
    */
   dispatchConfig?: ResolvedTurnDispatchConfig;
 }): Promise<ResolvedTurnDispatchConfig> {
-  const resolved = await resolveCreateContext(args);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.options.requesterUserId,
+    args.options.delegatedRequester
+  );
+  const resolved = await resolveCreateContext({ ...args, requester });
   return await resolveEffectiveSessionCreateDispatchConfig({
+    auth: args.auth,
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
     agentConfig: resolved.agentConfig,
@@ -2739,6 +2948,7 @@ export async function validateSessionCreateOptions(args: {
 }
 
 async function resolveEffectiveSessionCreateDispatchConfig(args: {
+  auth: AuthContext;
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   agentConfig: AgentConfigMeta;
@@ -2766,27 +2976,50 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     inheritedDispatchConfig?.configOptionValues !== undefined;
   const capability = needsCapability
     ? await readAgentAcpCapability({
+        auth: args.auth,
+        agent: args.agentConfig,
         manager: args.manager,
         workspaceId: args.workspaceId,
         machineId: args.agentConfig.machineId,
         agentConfigId: args.agentConfig.id,
       })
     : undefined;
-  const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
+  return withBuiltinDefaultTurnMode(
+    resolveSessionCreateDispatchConfig(dispatchConfig, inheritedDispatchConfig, capability),
+    args.agentConfig
+  );
+}
+
+export function resolveSessionCreateDispatchConfig(
+  dispatchConfig: ResolvedTurnDispatchConfig,
+  inheritedDispatchConfig: ResolvedTurnDispatchConfig | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
+): ResolvedTurnDispatchConfig {
+  const modelOption = capability?.configOptions?.find((option) => option.category === 'model');
+  const optionModelId = modelOption && dispatchConfig.configOptionValues?.[modelOption.id];
+  const explicitModelId =
+    dispatchConfig.runConfig?.modelId ??
+    dispatchConfig.modelId ??
+    (typeof optionModelId === 'string' ? optionModelId : undefined);
+  const merged = mergeTurnDispatchConfig(
+    { ...dispatchConfig, modelId: explicitModelId },
+    filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability, {
+      targetModelId: explicitModelId,
+    })
+  );
+  const requested = applyAgentRunConfigSelection(
+    { ...merged, runConfig: dispatchConfig.runConfig },
+    capability
+  );
   validateTurnModeAndModel(requested.config, capability);
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
     capability,
-    requested.validatedConfigIds
+    requested.validatedConfigIds,
+    requested.config.modelId
   );
   return {
-    ...withBuiltinDefaultTurnMode(
-      mergeTurnDispatchConfig(
-        requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
-      ),
-      args.agentConfig
-    ),
+    ...requested.config,
     inheritSessionDefaults: false,
   };
 }
@@ -2915,12 +3148,17 @@ export async function createSessionResult(
       sessionId: options.sessionId,
     });
   }
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, options.requesterUserId);
+  const requester = resolveSessionRequester(
+    auth,
+    options.requesterUserId,
+    options.delegatedRequester
+  );
+  const requesterUserId = requester.userId;
   const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
     requesterUserId,
     options.sessionOwnerUserId
   );
-  const resolved = await resolveCreateContext({ auth, workspace, manager, options });
+  const resolved = await resolveCreateContext({ auth, workspace, manager, options, requester });
   const {
     targetMachine,
     agentConfig,
@@ -2931,6 +3169,7 @@ export async function createSessionResult(
     taskId,
   } = resolved;
   const effectiveDispatchConfig = await resolveEffectiveSessionCreateDispatchConfig({
+    auth,
     manager,
     workspaceId: workspace.id as WorkspaceId,
     agentConfig,
@@ -3087,12 +3326,30 @@ export async function validateSessionChatTarget(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requesterUserIdOverride?: string;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserIdOverride,
+    args.delegatedRequester
+  );
+  return await validateSessionChatTargetForRequester({
+    auth: args.auth,
+    workspace: args.workspace,
+    manager: args.manager,
+    sessionId: args.sessionId,
+    requester,
+  });
+}
+
+async function validateSessionChatTargetForRequester(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  requester: ResolvedSessionRequester;
 }): Promise<SessionMeta> {
   await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.requesterUserIdOverride
-  );
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -3101,7 +3358,7 @@ export async function validateSessionChatTarget(args: {
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
   });
   await ensureTargetMachineOnline({
@@ -3129,7 +3386,8 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-  }
+  },
+  delegatedRequester?: DelegatedSessionRequester
 ): Promise<{
   sessionId: SessionId;
   machineId: MachineId;
@@ -3137,23 +3395,31 @@ export async function sendSessionChatResult(
   userTurnId: string;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, requesterUserIdOverride);
-  const session = await validateSessionChatTarget({
+  const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
+  const requesterUserId = requester.userId;
+  const session = await validateSessionChatTargetForRequester({
     auth,
     workspace,
     manager,
     sessionId,
-    requesterUserIdOverride,
+    requester,
   });
   if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
     const capability = await readAgentAcpCapability({
+      auth,
+      agent: session,
       manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
       agentConfigId: session.agentConfigId,
     });
     validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
+    validateTurnConfigOptionValues(
+      dispatchConfig.configOptionValues,
+      capability,
+      undefined,
+      dispatchConfig.modelId
+    );
   }
   const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
 
@@ -3970,6 +4236,7 @@ const sessionCancelCommand = new Command('cancel')
             auth,
             workspaceId,
             machineId: session.machineId,
+            requester: resolveSessionRequester(auth),
             localProjectId:
               session.project?.kind === 'local' ? session.project.localProjectId : undefined,
           });

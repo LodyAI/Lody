@@ -798,9 +798,9 @@ export const CombinedMentionTextarea = React.forwardRef<
         });
     }, [externalMentions, internalMentions]);
 
-    const [instanceKey, setInstanceKey] = React.useState(0);
     const prevValueRef = React.useRef(value);
-    const shouldRefocusRef = React.useRef(false);
+    const [hydrationKey, setHydrationKey] = React.useState(0);
+    const [menuOpen, setMenuOpen] = React.useState(false);
 
     // A draft swap, applied during render so the outgoing draft's ranges are
     // never painted over the incoming text — not even for one frame. Remounting
@@ -810,45 +810,35 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (renderedDraftKey !== draftKey) {
       setRenderedDraftKey(draftKey);
       setInternalMentions([]);
-      setInstanceKey((k) => k + 1);
+      setMenuOpen(false);
       // The swap is not an edit, so it must not read as one: an incoming empty
       // draft would otherwise trip the cleared-input reset below and report the
       // *new* draft's ranges as emptied.
       prevValueRef.current = value;
     }
 
+    // Clearing content resets data and re-arms hydration, not the input DOM.
+    // Replacing the textarea here loses browser focus and breaks submission's
+    // disabled → enabled handoff. Only a different draft replaces the tree.
     React.useEffect(() => {
       const prevValue = prevValueRef.current;
       prevValueRef.current = value;
       if (!resetOnEmpty) return;
       if (prevValue !== '' && value === '') {
-        // Track whether the textarea had focus before the reset so we can restore it
-        const textarea = ref && typeof ref === 'object' && 'current' in ref ? ref.current : null;
-        if (textarea && document.activeElement === textarea) {
-          shouldRefocusRef.current = true;
-        }
         setInternalMentions([]);
         handleMentionValuesChange([]);
         onExternalMentionsChange?.([]);
         onMentionRangesChange?.([]);
-        setInstanceKey((k) => k + 1);
+        setMenuOpen(false);
+        setHydrationKey((k) => k + 1);
       }
     }, [
       handleMentionValuesChange,
       onExternalMentionsChange,
       onMentionRangesChange,
-      ref,
       resetOnEmpty,
       value,
     ]);
-
-    // Re-focus the textarea after the Mention tree remounts due to instanceKey change
-    React.useEffect(() => {
-      if (!shouldRefocusRef.current) return;
-      shouldRefocusRef.current = false;
-      const textarea = ref && typeof ref === 'object' && 'current' in ref ? ref.current : null;
-      textarea?.focus();
-    }, [instanceKey, ref]);
 
     const enableCommandMentions = Boolean(availableCommands && availableCommands.length > 0);
     const hasExternalMentionSupport =
@@ -902,7 +892,9 @@ export const CombinedMentionTextarea = React.forwardRef<
 
     return (
       <Mention
-        key={instanceKey}
+        key={draftKey}
+        open={value !== '' && menuOpen}
+        onOpenChange={setMenuOpen}
         triggers={triggers}
         trigger={triggers[0] ?? '@'}
         inputValue={value}
@@ -918,50 +910,52 @@ export const CombinedMentionTextarea = React.forwardRef<
         loop
         className="w-full"
       >
-        <FileMentionHydrator
-          text={value}
-          getKnownPaths={getKnownFileTokens}
-          enabled={enableFileMentions}
-        />
-        {persistedMentions && persistedMentions.length > 0 ? (
-          <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
-        ) : null}
-        <SessionMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={sessionItems}
-          enabled={enableSessionMentions}
-        />
-        <AgentRoleMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={agentRoleItems}
-          enabled={enableAgentRoleMentions}
-        />
-        {mentionActionsRef ? (
-          <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
-        ) : null}
-        {enableSkillMentions ? (
-          <SkillMentionHydrator
+        <React.Fragment key={hydrationKey}>
+          <FileMentionHydrator
             text={value}
-            knownTokens={knownSkillTokens}
-            enabled={skillsActive}
+            getKnownPaths={getKnownFileTokens}
+            enabled={enableFileMentions}
           />
-        ) : null}
-        {enableIssueMentions ? (
-          <>
-            <IssuePrMentionHydrator
+          {persistedMentions && persistedMentions.length > 0 ? (
+            <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
+          ) : null}
+          <SessionMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={sessionItems}
+            enabled={enableSessionMentions}
+          />
+          <AgentRoleMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={agentRoleItems}
+            enabled={enableAgentRoleMentions}
+          />
+          {mentionActionsRef ? (
+            <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
+          ) : null}
+          {enableSkillMentions ? (
+            <SkillMentionHydrator
               text={value}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
+              knownTokens={knownSkillTokens}
+              enabled={skillsActive}
             />
-            <IssuePrMentionTitleHint
-              repoFullName={githubRepoFullName}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
-            />
-          </>
-        ) : null}
+          ) : null}
+          {enableIssueMentions ? (
+            <>
+              <IssuePrMentionHydrator
+                text={value}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions}
+              />
+              <IssuePrMentionTitleHint
+                repoFullName={githubRepoFullName}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions}
+              />
+            </>
+          ) : null}
+        </React.Fragment>
         <MentionLabel className="sr-only">{label}</MentionLabel>
         <MentionInput
           ref={ref}

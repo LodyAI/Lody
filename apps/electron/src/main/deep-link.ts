@@ -80,6 +80,10 @@ export function handleDeepLink(url: string): void {
 
 export function acquireSingleInstanceLock(): boolean {
   const deepLinkFromArgv = extractDeepLinkFromArgv(process.argv)
+  if (!app.isPackaged && process.env.LODY_E2E === '1') {
+    logAuthDebug('skipping single-instance lock for isolated Electron E2E')
+    return true
+  }
   const gotSingleInstanceLock = app.requestSingleInstanceLock()
   logAuthDebug('requestSingleInstanceLock completed', {
     gotSingleInstanceLock,

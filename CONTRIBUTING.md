@@ -68,6 +68,13 @@ This variable is optional. Never commit the generated data or credentials.
 
 ## Submitting Changes
 
+For changes to important behavior or architecture, follow the
+[document maintenance workflow](./.agents/README.md). Specs explain intent and require explicit human
+review. Significant decisions belong in an Agent Note; routine styling and local
+fixes normally need only a PR explanation. You may contribute in either English
+or Chinese; maintainers can arrange the counterpart after merge. Invariants
+continue to live in the nearest `AGENTS.md`.
+
 1. Create a clearly named branch from the latest code.
 2. Keep changes focused; avoid unrelated formatting or refactoring.
 3. Add or update tests for behavior changes, and make sure the existing tests pass.

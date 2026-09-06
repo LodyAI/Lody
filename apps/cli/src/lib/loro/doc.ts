@@ -1522,7 +1522,7 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal; configOptionsByModel?: Record<string, AcpConfigOptionSummary[]> } = {}
+    options: UpdateAcpCapabilitiesOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -3109,6 +3109,21 @@ const getAliveDocMeta = async <Meta>(repo: LoroRepo, roomId: string): Promise<Me
 
 type MachineMetaPatch = Partial<MachineMeta> & Pick<MachineMeta, 'id'>;
 
+/**
+ * Catalog write command carried by `updateAcpCapabilities`:
+ * - omitted / `undefined`: the write did not observe the catalog; inherit the stored
+ *   one for the same config and CLI/agent identity, across `sourceVersion` changes;
+ * - `null`: an observation confirmed the agent publishes no catalog (`-32601`); clear it;
+ * - a map, including `{}`: replace it.
+ * `null` is consumed before the entry is built and never reaches the Flock row or the wire.
+ */
+export type AcpCapabilityCatalogWrite = Record<string, AcpConfigOptionSummary[]> | null;
+
+export type UpdateAcpCapabilitiesOptions = {
+  signal?: AbortSignal;
+  configOptionsByModel?: AcpCapabilityCatalogWrite;
+};
+
 const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry): string =>
   JSON.stringify({
     cliType: entry.cliType,
@@ -3209,7 +3224,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal; configOptionsByModel?: Record<string, AcpConfigOptionSummary[]> } = {}
+    options: UpdateAcpCapabilitiesOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
@@ -3228,13 +3243,16 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
-    // omitted keeps the stored catalog for the same sourceVersion
+    // See AcpCapabilityCatalogWrite: null clears, a map replaces, omitted inherits for
+    // the same agent identity regardless of sourceVersion.
     const configOptionsByModel =
-      options.configOptionsByModel !== undefined
-        ? options.configOptionsByModel
-        : existing && existing.sourceVersion === sourceVersion
-          ? existing.configOptionsByModel
-          : undefined;
+      options.configOptionsByModel === null
+        ? undefined
+        : options.configOptionsByModel !== undefined
+          ? options.configOptionsByModel
+          : existing && existing.cliType === cliType && existing.agentType === agentType
+            ? existing.configOptionsByModel
+            : undefined;
     const entry: AcpCapabilityCacheEntry = {
       cliType,
       agentType,

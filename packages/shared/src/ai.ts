@@ -12,6 +12,10 @@ import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
+  machineSupportsCursorParameterizedModelPicker,
+  type MachineProtocolCapabilityCarrier,
+} from './machine-protocol-capabilities';
+import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
 } from './deepseek-harness';
@@ -277,7 +281,11 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+// 7: entries probed before the legacy `model[effort]` derivation became
+// Codex-only carry a bogus ladder for every agent that spells other variants
+// with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
+// per-model effort picker would rebuild that model's ladder from it.
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -336,22 +344,33 @@ export const isRegistryCursorAgent = (identity: {
 }): boolean => identity.cliType === 'registry' && identity.agentType === 'cursor';
 
 /**
- * Appended to registry Cursor's capability source version once the client declares
- * `parameterizedModelPicker`. Rows probed before the opt-in describe exploded variant
- * model ids the agent no longer advertises and carry no per-model catalog, so a row
- * without the marker is never current.
+ * Appended to registry Cursor's capability source version once the daemon declares
+ * `parameterizedModelPicker`. On a machine that advertises the
+ * `cursorParameterizedModelPicker` protocol capability, a registry Cursor row without
+ * the marker was probed before the opt-in: it describes exploded variant model ids the
+ * agent no longer advertises and carries no per-model catalog, so it is never current.
+ * A machine without that capability still launches Cursor in legacy variants mode, and
+ * its unmarked rows are the correct description of what it runs.
  */
 export const CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX =
   '+parameterized-model-picker';
 
+/**
+ * The daemon that owns the capability row, as a `protocolCapabilities` carrier
+ * (`MachineMeta` / `MachineViewMeta`). Missing capabilities mean legacy.
+ */
+export type AcpCapabilityMachine = MachineProtocolCapabilityCarrier | null | undefined;
+
 export const isAcpCapabilityCacheEntryCurrent = (
-  entry: AcpCapabilityCacheEntry | undefined
+  entry: AcpCapabilityCacheEntry | undefined,
+  machine: AcpCapabilityMachine
 ): entry is AcpCapabilityCacheEntry => {
   if (entry?.cacheVersion !== ACP_CAPABILITY_CACHE_VERSION) {
     return false;
   }
   if (
     isRegistryCursorAgent(entry) &&
+    machineSupportsCursorParameterizedModelPicker(machine) &&
     entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true
   ) {
     return false;
@@ -361,9 +380,10 @@ export const isAcpCapabilityCacheEntryCurrent = (
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): entry is AcpCapabilityCacheEntry => {
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return false;
   }
   const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
@@ -372,9 +392,10 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
 
 export const getAcpCapabilityCacheEntryAuthority = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityAuthority => {
-  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides)) {
+  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides, machine)) {
     return 'unavailable';
   }
   return entry.provenance === 'runtime' ? 'authoritative' : 'provisional';
@@ -387,12 +408,13 @@ export type AcpCapabilityCacheStaleReason =
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
-  expectedSourceVersion: string
+  expectedSourceVersion: string,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityCacheStaleReason | undefined => {
   if (!entry) {
     return 'missing';
   }
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return 'cache-version-mismatch';
   }
   if (entry.sourceVersion !== expectedSourceVersion) {
@@ -426,6 +448,8 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
+  modelReasoningEfforts?: Record<string, string[]>;
 };
 
 /** Codex mode that routes approval requests to a model reviewer subagent. */
@@ -943,6 +967,10 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: GROK_STATIC_MODES,
     models: GROK_STATIC_MODELS,
     configOptions: GROK_STATIC_CONFIG_OPTIONS,
+    modelReasoningEfforts: {
+      'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+      'grok-4.5': ['high', 'medium', 'low'],
+    },
   },
   deepseek: {
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
@@ -962,6 +990,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelReasoningEfforts
+    ? {
+        modelReasoningEfforts: Object.fromEntries(
+          Object.entries(capabilities.modelReasoningEfforts).map(([modelId, efforts]) => [
+            modelId,
+            [...efforts],
+          ])
+        ),
+      }
+    : {}),
 });
 
 /**
@@ -1502,6 +1540,15 @@ export type MessageContent =
        * for scheduling tool calls; see `collectPendingScheduledTasksFromHistory`.
        */
       schedulingTimeZone?: string;
+      /**
+       * Epoch ms when this tool call was first persisted by the machine that ran it.
+       * Only set for scheduling tool calls: the turn entry's timestamps are NOT a safe
+       * proxy for the creation moment (cron-fire follow-up turns are runtime-internal
+       * steers, so one history entry can aggregate several runtime turns and its
+       * `endedAt` keeps advancing past a one-shot's fire minute). See
+       * `collectPendingScheduledTasksFromHistory`.
+       */
+      recordedAtMs?: number;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];

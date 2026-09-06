@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   getMachineFlockDocId,
+  isRegistryCursorAgent,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
@@ -581,7 +582,10 @@ export async function resyncMachineFlockRows(
     syncedRemote: syncResult.syncedRemote,
     version,
   });
-  if (options.refreshedCapability) {
+  // Cursor's RPC response omits the per-model catalog for older clients. Only
+  // the complete Flock row can distinguish a successful observation from a
+  // confirmed catalog clear; overlaying or merging the response loses that fact.
+  if (options.refreshedCapability && !isRegistryCursorAgent(options.refreshedCapability.value)) {
     const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
     notifyMachineFlockRowsCache(cacheKey, {
       rows: {

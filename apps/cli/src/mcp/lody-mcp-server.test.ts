@@ -13,7 +13,6 @@ import {
   type AgentRole,
   type AgentRoleId,
   type MachineId,
-  type SessionHistoryInput,
   type SessionId,
   type SessionTurnInputConfig,
   type WorkspaceId,
@@ -79,25 +78,12 @@ const {
   getSessionContext,
   resolveOperationStorePathForContext,
   resolveUploadPath,
-  resolveInvokingHistoryInput,
+  buildInvocationIdentity,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
-
-const historyTurn = (
-  id: string,
-  role: SessionHistoryInput['role'],
-  chainDepth?: number
-): SessionHistoryInput => ({
-  id,
-  role,
-  timestamp: '2026-07-20T00:00:00.000Z',
-  items: [],
-  fileDiff: [],
-  ...(chainDepth === undefined ? {} : { inputConfig: { chainDepth } }),
-});
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -287,14 +273,13 @@ describe('session MCP input schemas', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('anchors continuation depth before a later queued human input', () => {
-    const completion = historyTurn('operation-completion', 'system', 5);
-    const executingAssistant = historyTurn('assistant:continuation', 'assistant');
-    const queuedHumanInput = historyTurn('queued-human', 'user', 0);
-
-    expect(resolveInvokingHistoryInput([completion, executingAssistant, queuedHumanInput])).toBe(
-      completion
-    );
+  it('derives delegated identity from the exact driving Turn', () => {
+    expect(
+      buildInvocationIdentity({ id: 'source-turn', userId: 'collaborator-b', inputConfig: {} })
+    ).toEqual({ userId: 'collaborator-b', sourceTurnId: 'source-turn' });
+    expect(() =>
+      buildInvocationIdentity({ id: 'legacy-turn', userId: ' ', inputConfig: {} })
+    ).toThrow('has no authenticated human identity');
   });
 
   it('uses stable ids and rejects legacy selector names', () => {
@@ -477,8 +462,11 @@ describe('session MCP input schemas', () => {
     );
     bindMcpCreateContext(
       options,
-      { userId: 'machine-owner' },
-      { machineId: 'machine-id', userId: 'session-owner' }
+      {
+        userId: 'collaborator-b',
+        sourceTurnId: 'source-turn',
+      },
+      { machineId: 'machine-id' }
     );
 
     expect(options).toMatchObject({
@@ -487,8 +475,7 @@ describe('session MCP input schemas', () => {
       machine: 'machine-id',
       agentConfig: 'agent-config-id',
       useCurrentSessionAsParent: true,
-      requesterUserId: 'machine-owner',
-      sessionOwnerUserId: 'session-owner',
+      delegatedRequester: { userId: 'collaborator-b' },
       defaultMachineId: 'machine-id',
     });
   });
