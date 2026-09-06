@@ -18,25 +18,78 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
+const claudeAuthOverrides = (
+  [
+    ['CLAUDE_SECURESTORAGE_CONFIG_DIR', ''],
+    ['CLAUDE_CODE_OAUTH_TOKEN', 'synthetic-token'],
+    ['CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', '3'],
+    ['CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR', '4'],
+    ['CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'synthetic-refresh'],
+    ['CLAUDE_CODE_OAUTH_SCOPES', 'user:inference'],
+    ['CLAUDE_CODE_HOST_CREDS_FILE', '/another-account/host.json'],
+    ['CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST', '1'],
+    ['CLAUDE_CODE_HOST_AUTH_ENV_VAR', 'OTHER_AUTH'],
+    ['CLAUDE_CODE_CUSTOM_OAUTH_URL', 'https://example.test'],
+    ['CLAUDE_CODE_OAUTH_CLIENT_ID', 'another-client'],
+  ] as const
+).flatMap(([key, value]) => [
+  [key, value],
+  [key.toLowerCase().replace('claude', 'Claude'), value],
+]);
+
 describe('provider account isolation', () => {
-  it('leaves legacy and explicit System Default environments identical without touching paths', async () => {
-    const env = {
-      CODEX_HOME: '/native/missing',
-      CLAUDE_CONFIG_DIR: '/native/claude',
-      ANTHROPIC_API_KEY: 'synthetic',
-    };
-    for (const accountProfileId of [undefined, 'system-default']) {
-      expect(
-        await resolveAccountProfileEnv({
-          cliType: 'builtin',
-          agentType: 'codex',
-          accountProfileId,
-          env,
-          profilesRoot: '/does-not-exist',
-        })
-      ).toBe(env);
+  it.each(['codex', 'claude'])(
+    'leaves legacy and explicit System Default %s environments identical without touching paths',
+    async (agentType) => {
+      const env = Object.freeze({
+        ...Object.fromEntries(claudeAuthOverrides),
+        CODEX_HOME: '/native/missing',
+        CLAUDE_CONFIG_DIR: '/native/claude',
+        ANTHROPIC_API_KEY: 'synthetic',
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: '',
+      });
+      for (const accountProfileId of [undefined, 'system-default']) {
+        expect(
+          await resolveAccountProfileEnv({
+            cliType: 'builtin',
+            agentType,
+            accountProfileId,
+            env,
+            profilesRoot: '/does-not-exist',
+          })
+        ).toBe(env);
+      }
     }
-  });
+  );
+
+  it.each(claudeAuthOverrides)(
+    'removes inherited Claude authentication override %s from managed accounts',
+    async (key, value) => {
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'claude',
+        profilesRoot: await temporaryRoot(),
+      };
+      const profile = await createAccountProfile({ ...input, label: 'Isolated' });
+      const original = Object.freeze({
+        [key]: value,
+        CLAUDE_CONFIG_DIR: '/default-account',
+        PATH: '/bin',
+      });
+      const env = await resolveAccountProfileEnv({
+        ...input,
+        accountProfileId: profile.accountProfileId,
+        env: original,
+      });
+      expect(env[key]).toBeUndefined();
+      expect(env.CLAUDE_CONFIG_DIR).toBe(
+        path.join(input.profilesRoot, 'claude', profile.accountProfileId, 'home')
+      );
+      expect(original[key]).toBe(value);
+      expect(original.CLAUDE_CONFIG_DIR).toBe('/default-account');
+      expect(env.PATH).toBe('/bin');
+    }
+  );
 
   it.each(['codex', 'claude'])(
     'authenticates %s accounts into empty independent homes without changing native state',

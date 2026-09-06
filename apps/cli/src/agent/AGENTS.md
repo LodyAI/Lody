@@ -49,9 +49,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
-- `account-profiles.ts` resolves local ids after env merging. Missing ids preserve System Default
-  native auth/config. Extra Codex/Claude profiles own isolated homes; never copy native credentials
-  or fall back on a missing profile. Auth, status and title launches use the same binding.
+- `account-profiles.ts`: resolve local ids after env merge; missing ids keep native System Default.
+  Codex/Claude auth/status/title share each isolated profile home; never copy credentials or fall back
+  on missing ids. Strip inherited Claude credential-store/auth overrides only for managed profiles.
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
   prefetch, override, and interactive-auth flows, and launch the pinned closure, not the
   all-in-one `@deepseek-ai/dsh` CLI. Credentials stay in the agent config environment;

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getRateLimitEntryKey, getSessionRoomId } from '@lody/shared';
+import type { CliType, SessionId, SessionMeta } from '@lody/shared';
+import type { RateLimit } from 'acp-extension-core';
 import type {
   MachineAccountProfilesRequest,
   MachineAccountProfilesResponse,
@@ -18,6 +21,12 @@ vi.mock('../src/agent/account-profiles', async (importOriginal) => ({
 }));
 
 type HandlerHost = {
+  persistAccountRateLimit(
+    sessionId: SessionId,
+    accountProfileId: string,
+    cliType: CliType,
+    limits: RateLimit
+  ): Promise<void>;
   handleMessage: MessageHandler['handleMessage'];
   handleAccountProfiles(
     message: MachineAccountProfilesRequest,
@@ -331,6 +340,83 @@ describe('account operation source authorization', () => {
     });
     expect(await h.handler.authenticateMachineAcpAndResumeSetup(cancel, {}, remote)).toMatchObject({
       disposition: 'not-running',
+    });
+  });
+});
+
+describe('account quota event attribution', () => {
+  const quota = (usedPercent: number, limitId = 'codex'): RateLimit => ({
+    limitId,
+    scope: { providerId: 'codex' },
+    planName: null,
+    windows: [{ usedPercent, windowDurationSeconds: 18_000, resetsAtEpochSeconds: null }],
+  });
+
+  function quotaHarness() {
+    const state = new Map<string, Partial<SessionMeta>>([
+      [getSessionRoomId('session-b'), { accountProfileId: 'account-old' }],
+      [getSessionRoomId('session-c'), { accountProfileId: 'account-c' }],
+    ]);
+    const handler = Object.assign(Object.create(MessageHandler.prototype), {
+      workspaceDocument: {
+        getOrCreateSessionDoc: async (sessionId: SessionId) => ({
+          getMetaState: async () => state.get(getSessionRoomId(sessionId)),
+        }),
+        repo: {
+          upsertDocMeta: async (roomId: string, patch: Partial<SessionMeta>) => {
+            state.set(roomId, { ...state.get(roomId), ...patch });
+          },
+        },
+      },
+    }) as HandlerHost;
+    return { handler, state };
+  }
+
+  it('rejects a late old-account event after handoff and accepts the committed account', async () => {
+    const { handler, state } = quotaHarness();
+    await handler.persistAccountRateLimit('session-b', 'account-old', 'codex', quota(90));
+    expect(state.get(getSessionRoomId('session-b'))?.accountRateLimits).toEqual({
+      accountProfileId: 'account-old',
+      limits: { [getRateLimitEntryKey('codex', 'codex')]: quota(90) },
+    });
+
+    // The handoff commits the new account and clears the previous account's quota.
+    state.set(getSessionRoomId('session-b'), {
+      accountProfileId: 'account-new',
+      accountRateLimits: undefined,
+    });
+    await handler.persistAccountRateLimit('session-b', 'account-old', 'codex', quota(100));
+    expect(state.get(getSessionRoomId('session-b'))).toEqual({
+      accountProfileId: 'account-new',
+      accountRateLimits: undefined,
+    });
+
+    await handler.persistAccountRateLimit('session-b', 'account-new', 'codex', quota(20));
+    await handler.persistAccountRateLimit('session-b', 'account-old', 'codex', quota(100));
+    expect(state.get(getSessionRoomId('session-b'))?.accountRateLimits).toEqual({
+      accountProfileId: 'account-new',
+      limits: { [getRateLimitEntryKey('codex', 'codex')]: quota(20) },
+    });
+  });
+
+  it('keeps another session quota unchanged while the switched session receives events', async () => {
+    const { handler, state } = quotaHarness();
+    await handler.persistAccountRateLimit('session-c', 'account-c', 'codex', quota(35));
+    const otherSession = structuredClone(state.get(getSessionRoomId('session-c')));
+    state.set(getSessionRoomId('session-b'), { accountProfileId: 'account-new' });
+
+    await handler.persistAccountRateLimit('session-b', 'account-new', 'codex', quota(10));
+    await handler.persistAccountRateLimit('session-b', 'account-new', 'codex', quota(15, 'spark'));
+    await handler.persistAccountRateLimit('session-b', 'account-old', 'codex', quota(100));
+    await handler.persistAccountRateLimit('session-c', 'account-new', 'codex', quota(100));
+
+    expect(state.get(getSessionRoomId('session-c'))).toEqual(otherSession);
+    expect(state.get(getSessionRoomId('session-b'))?.accountRateLimits).toEqual({
+      accountProfileId: 'account-new',
+      limits: {
+        [getRateLimitEntryKey('codex', 'codex')]: quota(10),
+        [getRateLimitEntryKey('codex', 'spark')]: quota(15, 'spark'),
+      },
     });
   });
 });
