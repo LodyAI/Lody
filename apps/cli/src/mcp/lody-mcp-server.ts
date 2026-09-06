@@ -72,6 +72,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
+  type StoredLodyOperation,
   type SessionTurnInputConfig,
   REVIEW_SEVERITY_VALUES,
   REVIEW_VERDICT_VALUES,
@@ -141,6 +142,7 @@ import {
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
+import { upsertOperationProgressHistory } from '@/orchestration/operation-progress-history';
 import { publishTaskProposal } from '@/mcp/task-proposal';
 import { version as cliVersion } from '@/pkg';
 import { uploadTaskImages } from '@/lib/task-image-upload';
@@ -2380,6 +2382,20 @@ const markOperationItemInputDurable = (item: LodyOperationItemResult): LodyOpera
 const snapshotOperation = (requesterSessionId: SessionId, operationId: string): Promise<unknown> =>
   withOperationStore((store) => store.snapshot(store.get(requesterSessionId, operationId)));
 
+const persistCreateOperationProgress = async (
+  manager: LoroDocumentManager,
+  operation: StoredLodyOperation
+): Promise<void> => {
+  if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
+  try {
+    const sessionDoc = await manager.getOrCreateSessionDoc(operation.requesterSessionId);
+    await upsertOperationProgressHistory(sessionDoc, operation);
+  } catch {
+    // Progress cards are durable UI state, not Operation lifecycle authority.
+    // The daemon coordinator will repair/retry from the Operation store.
+  }
+};
+
 const assertDifferentMcpSession = (
   source: Pick<SessionMeta, 'id'>,
   target: Pick<SessionMeta, 'id'>
@@ -2704,6 +2720,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       )
     );
     if (retry) {
+      await persistCreateOperationProgress(manager, retry);
       return await withOperationStore((store) => store.snapshot(retry));
     }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
@@ -2757,6 +2774,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         { materializationClaimToken }
       )
     );
+    await persistCreateOperationProgress(manager, accepted.operation);
     if (accepted.operation.state === 'finished') {
       return await withOperationStore((store) => store.snapshot(accepted.operation));
     }
@@ -2790,7 +2808,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       ) {
         throw new Error('Create result did not preserve preallocated target ids.');
       }
-      await withOperationStore((store) =>
+      const durableOperation = await withOperationStore((store) =>
         store.markItemInputDurable(
           ctx.sessionId as SessionId,
           args.operationId!,
@@ -2798,6 +2816,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           materializationClaimToken
         )
       );
+      await persistCreateOperationProgress(manager, durableOperation);
       captureSessionCommandEvent(
         'session_create_succeeded',
         {
@@ -3154,6 +3173,7 @@ const startSessionCreateManyOperation = async (
       )
     );
     if (retry) {
+      await persistCreateOperationProgress(manager, retry);
       return await withOperationStore((store) => store.snapshot(retry));
     }
     const isMachineOnline = makeMachineOnlineLookupForMcp(manager, ctx);
@@ -3282,6 +3302,7 @@ const startSessionCreateManyOperation = async (
         { materializationClaimToken }
       )
     );
+    await persistCreateOperationProgress(manager, accepted.operation);
     if (accepted.operation.state === 'finished') {
       return await withOperationStore((store) => store.snapshot(accepted.operation));
     }
@@ -3324,7 +3345,7 @@ const startSessionCreateManyOperation = async (
             options,
             targetDispatchConfigs[index] ?? resolved.dispatchConfig
           );
-          await withOperationStore((store) =>
+          const durableOperation = await withOperationStore((store) =>
             store.markItemInputDurable(
               ctx.sessionId as SessionId,
               args.operationId,
@@ -3332,6 +3353,7 @@ const startSessionCreateManyOperation = async (
               materializationClaimToken
             )
           );
+          await persistCreateOperationProgress(manager, durableOperation);
           captureSessionCommandEvent(
             'session_create_succeeded',
             {

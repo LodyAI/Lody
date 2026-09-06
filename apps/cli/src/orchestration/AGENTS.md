@@ -59,6 +59,13 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
 - Delivery never writes user dispatch pointers. Pending user input wins every
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
+- Create Operations may also maintain one stable `role: system` `operation_progress`
+  Turn in the requester Session. It is presentation-only durable UI state, never
+  agent input or a dispatch pointer. Only emit navigable target cards for materialized
+  target Session/UserTurn evidence (or an already-published target), merge status
+  monotonically by exact target, and treat progress write failures as repairable: they
+  must not fail Operation acceptance, target materialization, cancellation, finalization,
+  delivery, or best-effort target cancel.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

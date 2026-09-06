@@ -18,8 +18,12 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row. Include it in sticky counts and every
-  scroll target; never overlay or persist it. A `session_create` completion
-  renders one card per successful target and reads only that target's title.
+  scroll target; never overlay or persist it. Create Operation `operation_progress`
+  rows render a navigable card per materialized target and update in place. Status
+  belongs to the Operation's exact target Turn, never later Session activity; only
+  the title subscribes to target metadata. A completion with `progressMessageId`
+  renders its summary without duplicating target cards; legacy completions retain
+  successful-target cards.
 
 ## Turn Folding And Layout
 

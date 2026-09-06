@@ -16,6 +16,7 @@ import {
   type LodyOperationItemResult,
   type MachineId,
   type MessageContent,
+  type OperationProgressStatus,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
@@ -35,6 +36,12 @@ import type { SessionExecutionService } from '@/session/session-execution-servic
 import type { SessionUserResolver } from '@/session/session-user-resolver';
 
 import { getLodyOperationStorePath, LodyOperationStore } from './operation-store';
+import {
+  getOperationProgressTargetKey,
+  getOperationProgressTurnId,
+  upsertOperationProgressHistory,
+  type OperationProgressStatusByTarget,
+} from './operation-progress-history';
 
 type TargetSubscription = {
   unsubscribe: () => void;
@@ -324,7 +331,7 @@ export class LodyOperationCoordinator {
       );
     } catch (error) {
       if (!isAtDeadline()) throw error;
-      this.withStore((store) =>
+      const failedOperation = this.withStore((store) =>
         store.finish(operation.requesterSessionId, operation.operationId, {
           type: 'error',
           error: makeLodyError(
@@ -336,24 +343,99 @@ export class LodyOperationCoordinator {
           ),
         })
       );
+      await this.writeOperationProgress(failedOperation);
       this.clearDeadline(operation);
       this.clearOperationMaterializationRetries(operation);
       return;
     }
     const changed = JSON.stringify(items) !== JSON.stringify(operation.items);
+    let latestOperation = operation;
     if (changed) {
-      this.withStore((store) =>
+      latestOperation = this.withStore((store) =>
         store.updateItems(operation.requesterSessionId, operation.operationId, items)
       );
+      await this.writeOperationProgress(latestOperation);
+    } else {
+      await this.writeOperationProgress(latestOperation);
     }
     if (items.every((item) => item.status !== 'active')) {
       const completion: LodyOperationCompletion = { type: 'result', value: { items } };
-      this.withStore((store) =>
+      latestOperation = this.withStore((store) =>
         store.finish(operation.requesterSessionId, operation.operationId, completion)
       );
+      await this.writeOperationProgress(latestOperation);
       this.clearDeadline(operation);
       this.clearOperationMaterializationRetries(operation);
     }
+  }
+
+  private async writeOperationProgress(operation: StoredLodyOperation): Promise<void> {
+    try {
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
+      const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
+        getSessionRoomId(operation.requesterSessionId)
+      );
+      if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) return;
+      const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
+        operation.requesterSessionId
+      );
+      const statusByTarget = await this.collectOperationProgressTargetStatuses(operation);
+      await upsertOperationProgressHistory(sessionDoc, operation, this.now, statusByTarget);
+    } catch (error) {
+      this.options.logger.warn(
+        `[orchestration] Progress update failed for ${operation.operationId}; retrying on a later wake: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private async collectOperationProgressTargetStatuses(
+    operation: StoredLodyOperation
+  ): Promise<OperationProgressStatusByTarget> {
+    const statuses = new Map<string, OperationProgressStatus>();
+    await this.mapItemsWithConcurrency(operation.items, 5, async (item) => {
+      if (!('target' in item) || !item.target) return;
+      if (item.status === 'active' && !item.inputDurable) return;
+      const target = item.target;
+      const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
+        getSessionRoomId(target.sessionId)
+      );
+      if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) return;
+      const meta = metaRecord.meta as SessionMeta;
+      const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
+        target.sessionId
+      );
+      const history = await sessionDoc.getHistory();
+      const userTurn = history.find(
+        (entry) => entry.id === target.userTurnId && entry.role === 'user'
+      );
+      if (!userTurn) return;
+      const key = getOperationProgressTargetKey(target);
+      if (userTurn.status === 'failed') {
+        statuses.set(key, 'failed');
+        return;
+      }
+      if (userTurn.status === 'canceled') {
+        statuses.set(key, 'cancelled');
+        return;
+      }
+      if (terminalAssistantFor(history, target.userTurnId)) {
+        statuses.set(key, 'succeeded');
+        return;
+      }
+      const execution = this.options.executionService.getExecutionSnapshot(target.sessionId);
+      if (
+        execution.activeTurnId === `assistant:${target.userTurnId}` ||
+        meta.processingUserMsgId === target.userTurnId ||
+        userTurn.status === 'processing'
+      ) {
+        statuses.set(key, 'running');
+        return;
+      }
+      statuses.set(key, 'created');
+    });
+    return statuses;
   }
 
   private async reconcileItem(
@@ -814,6 +896,10 @@ export class LodyOperationCoordinator {
     const operation = this.withStore((store) =>
       store.get(delivery.requesterSessionId, delivery.operationId)
     );
+    // Progress is presentation-only, but pending Deliveries are the durable
+    // repair window after an Operation finished. Retry terminal progress here
+    // without letting failures block expiry, continuation, or consumption.
+    await this.writeOperationProgress(operation);
     if (this.now() >= Date.parse(operation.deadlineAt) + DELIVERY_EXPIRY_GRACE_MS) {
       this.consumeDelivery(delivery, reason, 'expired_stale');
       return;
@@ -985,11 +1071,13 @@ export class LodyOperationCoordinator {
     if (!operation.completion) {
       throw new Error(`Finished Operation ${operation.operationId} has no completion.`);
     }
+    const progressMessageId = this.findProgressMessageId(await sessionDoc.getHistory(), operation);
     const item: MessageContent = {
       type: 'operation_completion',
       deliveryId: delivery.deliveryId,
       operationId: operation.operationId,
       operationKind: operation.kind,
+      ...(progressMessageId ? { progressMessageId } : {}),
       completion: operation.completion,
       ...(!configAvailable
         ? {
@@ -1020,6 +1108,29 @@ export class LodyOperationCoordinator {
     await sessionDoc.updateHistory((history) =>
       history.some((entry) => entry.id === delivery.systemTurnId) ? history : [...history, turn]
     );
+  }
+
+  private findProgressMessageId(
+    history: SessionHistoryInput[],
+    operation: StoredLodyOperation
+  ): string | undefined {
+    if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') {
+      return undefined;
+    }
+    const progressMessageId = getOperationProgressTurnId(
+      operation.requesterSessionId,
+      operation.operationId
+    );
+    return history.some(
+      (entry) =>
+        entry.id === progressMessageId &&
+        entry.role === 'system' &&
+        entry.items?.some(
+          (item) => item.type === 'operation_progress' && item.operationId === operation.operationId
+        )
+    )
+      ? progressMessageId
+      : undefined;
   }
 
   private getContinuationEvidence(

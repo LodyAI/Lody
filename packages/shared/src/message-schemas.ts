@@ -3223,6 +3223,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       'session_chat',
       'session_chat_many',
     ]),
+    progressMessageId: z.string().trim().min(1).optional(),
     completion: z.unknown(),
     continuation: z
       .object({
@@ -3236,6 +3237,25 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       })
       .strict()
       .optional(),
+  }),
+  z.object({
+    type: z.literal('operation_progress'),
+    operationId: LodyOperationIdSchema,
+    operationKind: z.enum(['session_create', 'session_create_many']),
+    items: z.array(
+      z
+        .object({
+          target: z
+            .object({
+              sessionId: SessionIdSchema,
+              userTurnId: z.string().trim().min(1),
+            })
+            .strict(),
+          label: z.string().optional(),
+          status: z.enum(['created', 'running', 'succeeded', 'failed', 'cancelled']),
+        })
+        .strict()
+    ),
   }),
 ]);
 

@@ -1494,6 +1494,7 @@ export type MessageContent =
       meta?: SystemNoticeMeta[SystemNoticeName];
     }
   | OperationCompletionContent
+  | OperationProgressContent
   | {
       type: 'worktree_script';
       phase: WorktreeScriptPhase;
@@ -1600,4 +1601,4 @@ export type ACPSessionConfig = {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPSessionConfig>;
-import type { OperationCompletionContent } from './session-orchestration';
+import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

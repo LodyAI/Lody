@@ -45,6 +45,9 @@ const makeHarness = async (options?: {
   materializationWritesBeforeFailure?: boolean;
   materializationWritesDocBeforeFailure?: boolean;
   materializeTargetOverride?: () => Promise<void>;
+  operationKind?: 'session_create' | 'session_chat';
+  failProgressHistoryWrites?: boolean;
+  progressHistoryFailures?: number;
   targetDocSync?: () => Promise<{
     history?: SessionHistoryInput[];
     meta?: SessionMeta;
@@ -101,6 +104,7 @@ const makeHarness = async (options?: {
     ...(targetInputDurable ? ([[targetSessionId, targetMeta]] as const) : []),
   ]);
   const subscribers = new Map<SessionId, Set<() => void>>();
+  let remainingProgressHistoryFailures = options?.progressHistoryFailures ?? 0;
   const sessionDoc = (sessionId: SessionId) => ({
     mirror: {
       subscribe: (callback: () => void) => {
@@ -112,7 +116,16 @@ const makeHarness = async (options?: {
     },
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-      histories.set(sessionId, update(histories.get(sessionId) ?? []));
+      const next = update(histories.get(sessionId) ?? []);
+      if (
+        sessionId === requesterSessionId &&
+        next.some((entry) => entry.items?.some((item) => item.type === 'operation_progress')) &&
+        (options?.failProgressHistoryWrites === true || remainingProgressHistoryFailures > 0)
+      ) {
+        remainingProgressHistoryFailures = Math.max(0, remainingProgressHistoryFailures - 1);
+        throw new Error('progress history unavailable');
+      }
+      histories.set(sessionId, next);
     },
   });
   const flockRows = options?.machineAgentConfig
@@ -272,7 +285,7 @@ const makeHarness = async (options?: {
     requesterSessionId,
     requesterUserId: 'user-1',
     operationId: 'review-round-1',
-    kind: 'session_chat',
+    kind: options?.operationKind ?? 'session_chat',
     canonicalCommand: { sessionId: targetSessionId, prompt: 'work' },
     frozenContinuationConfig: {
       ...(options?.agentConfigId ? { agentConfigId: options.agentConfigId } : {}),
@@ -1182,6 +1195,186 @@ describe('LodyOperationCoordinator', () => {
               status: 'not_started',
               reason: expect.objectContaining({ code: 'CONFIGURATION_UNAVAILABLE' }),
             },
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('does not let progress write failures block operation finalization or delivery', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      failProgressHistoryWrites: true,
+    });
+    harness.histories.set(harness.targetSessionId, [
+      {
+        id: 'turn-1',
+        role: 'user',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [{ type: 'text', text: 'work' }],
+        fileDiff: [],
+        status: 'handled',
+      },
+      {
+        id: 'assistant:turn-1',
+        role: 'assistant',
+        userTurnId: 'turn-1',
+        timestamp: '2026-07-20T00:00:01.000Z',
+        items: [{ type: 'text', text: 'done' }],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const requesterHistory = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some((item) => item.type === 'operation_progress')
+      )
+    ).toBe(false);
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some(
+          (item) => item.type === 'operation_completion' && item.progressMessageId === undefined
+        )
+      )
+    ).toBe(true);
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1').state).toBe('finished');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('repairs terminal create progress during pending completion delivery', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      progressHistoryFailures: 2,
+    });
+    harness.histories.set(harness.targetSessionId, [
+      {
+        id: 'turn-1',
+        role: 'user',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [{ type: 'text', text: 'work' }],
+        fileDiff: [],
+        status: 'handled',
+      },
+      {
+        id: 'assistant:turn-1',
+        role: 'assistant',
+        userTurnId: 'turn-1',
+        timestamp: '2026-07-20T00:00:01.000Z',
+        items: [{ type: 'text', text: 'done' }],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const requesterHistory = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some((item) => item.type === 'operation_progress')
+      )
+    ).toBe(true);
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some(
+          (item) =>
+            item.type === 'operation_completion' &&
+            item.progressMessageId === 'operation-progress:requester-1:review-round-1'
+        )
+      )
+    ).toBe(true);
+  });
+
+  it('keeps durable create targets queued until exact target execution evidence is present', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      targetInputDurable: true,
+      acceptedInputDurable: true,
+      busy: true,
+      activeTurnId: 'assistant:unrelated-turn',
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const progress = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.id === 'operation-progress:requester-1:review-round-1');
+    expect(progress?.items).toEqual([
+      {
+        type: 'operation_progress',
+        operationId: 'review-round-1',
+        operationKind: 'session_create',
+        items: [{ target: { sessionId: 'target-1', userTurnId: 'turn-1' }, status: 'created' }],
+      },
+    ]);
+  });
+
+  it('marks create progress running only for the exact target turn', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      targetInputDurable: true,
+      acceptedInputDurable: true,
+      busy: true,
+      activeTurnId: 'assistant:turn-1',
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const progress = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.id === 'operation-progress:requester-1:review-round-1');
+    expect(progress?.items).toEqual([
+      {
+        type: 'operation_progress',
+        operationId: 'review-round-1',
+        operationKind: 'session_create',
+        items: [{ target: { sessionId: 'target-1', userTurnId: 'turn-1' }, status: 'running' }],
+      },
+    ]);
+  });
+
+  it('links operation completion to existing create progress history', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      agentConfigId: 'removed-agent-config',
+      configurationSyncSucceeds: true,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const history = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(history).toEqual([
+      expect.objectContaining({
+        id: 'operation-progress:requester-1:review-round-1',
+        role: 'system',
+        items: [expect.objectContaining({ type: 'operation_progress' })],
+      }),
+      expect.objectContaining({
+        id: 'operation-completion:requester-1:review-round-1',
+        role: 'system',
+        items: [
+          expect.objectContaining({
+            type: 'operation_completion',
+            progressMessageId: 'operation-progress:requester-1:review-round-1',
           }),
         ],
       }),
