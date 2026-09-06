@@ -34,6 +34,7 @@ describe('SessionGCManager', () => {
   let sessionActivities: Map<SessionId, number>;
   let activeTurns: Set<SessionId>;
   let activeGoals: Set<SessionId>;
+  let backgroundWork: ReturnType<typeof vi.fn>;
   let pendingUpdates: Set<SessionId>;
   let pendingUserWork: Set<SessionId>;
   let archiveInFlight: Set<SessionId>;
@@ -52,6 +53,7 @@ describe('SessionGCManager', () => {
     sessionActivities = new Map();
     activeTurns = new Set();
     activeGoals = new Set();
+    backgroundWork = vi.fn(async () => false);
     pendingUpdates = new Set();
     pendingUserWork = new Set();
     archiveInFlight = new Set();
@@ -87,6 +89,7 @@ describe('SessionGCManager', () => {
         getSessionLastActivity: (sessionId) => sessionActivities.get(sessionId),
         hasActiveTurn: (sessionId) => activeTurns.has(sessionId),
         hasActiveGoal: async (sessionId) => activeGoals.has(sessionId),
+        hasBackgroundWork: backgroundWork,
         hasPendingUpdates: (sessionId) => pendingUpdates.has(sessionId),
         hasPendingUserWork: async (sessionId) => pendingUserWork.has(sessionId),
         isArchiveInFlight: (sessionId) => archiveInFlight.has(sessionId),
@@ -106,6 +109,51 @@ describe('SessionGCManager', () => {
     );
   };
 
+  describe('background task eviction guard', () => {
+    it.each(['idle', 'pressure'] as const)(
+      'protects running tasks during %s eviction',
+      async (mode) => {
+        const manager = createManager({ idleTimeoutMs: 1000 });
+        const id = 'background' as SessionId;
+        sessionActivities.set(id, Date.now() - 60000);
+        backgroundWork.mockResolvedValue(true);
+        mockedGetMemoryPressureSnapshot.mockResolvedValue({
+          availableMemoryBytes: 500 * 1024 * 1024,
+          effectiveMemoryLimitBytes: 32 * 1024 ** 3,
+        });
+        if (mode === 'idle') await manager.sweep();
+        else await manager.evictForMemoryPressure();
+        expect(cleanMock).not.toHaveBeenCalled();
+      }
+    );
+
+    it('allows cleanup once background work completes', async () => {
+      const manager = createManager({ idleTimeoutMs: 1000 });
+      const id = 'background' as SessionId;
+      sessionActivities.set(id, Date.now() - 60000);
+      backgroundWork.mockResolvedValue(true);
+      await manager.sweep();
+      backgroundWork.mockResolvedValue(false);
+      await manager.sweep();
+      expect(cleanMock).toHaveBeenCalledWith(id);
+    });
+
+    it('rechecks background work before cleanup', async () => {
+      const manager = createManager({ idleTimeoutMs: 1000 });
+      sessionActivities.set('background' as SessionId, Date.now() - 60000);
+      backgroundWork.mockResolvedValueOnce(false).mockResolvedValue(true);
+      await manager.sweep();
+      expect(cleanMock).not.toHaveBeenCalled();
+    });
+
+    it('does not evict when background history cannot be read', async () => {
+      const manager = createManager({ idleTimeoutMs: 1000 });
+      sessionActivities.set('background' as SessionId, Date.now() - 60000);
+      backgroundWork.mockRejectedValue(new Error('history unavailable'));
+      await expect(manager.sweep()).rejects.toThrow('history unavailable');
+      expect(cleanMock).not.toHaveBeenCalled();
+    });
+  });
   describe('loadGCConfig', () => {
     it('returns default config with 20 minute timeout', () => {
       const config = loadGCConfig();

@@ -31,6 +31,7 @@ export interface TerminalManager {
   waitForTerminalExit(acpSessionId: string, terminalId: string): Promise<TerminalExitStatus>;
   killTerminal(acpSessionId: string, terminalId: string): Promise<void>;
   disposeAll?(acpSessionId: string): Promise<void>;
+  hasRunningTerminals?(): boolean;
 }
 
 interface TerminalState<THandle> {
@@ -62,6 +63,7 @@ const DEFAULT_TERMINAL_BYTE_LIMIT = 1024 * 1024; // 1MB of retained output
 
 abstract class BaseTerminalManager<THandle> implements TerminalManager {
   protected terminals = new Map<string, TerminalState<THandle>>();
+  private startingTerminals = 0;
   protected readonly logger: Logger;
   protected readonly sessionLabel: string;
   private readonly getActiveSessionId: () => string | null;
@@ -104,20 +106,33 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       },
     };
 
-    state.handle = await this.startProcess(
-      {
-        terminalId,
-        command,
-        args: args ?? [],
-        cwd,
-        env,
-      },
-      hooks
-    );
+    this.startingTerminals += 1;
+    try {
+      state.handle = await this.startProcess(
+        {
+          terminalId,
+          command,
+          args: args ?? [],
+          cwd,
+          env,
+        },
+        hooks
+      );
 
-    this.terminals.set(terminalId, state);
-    this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} started: ${command}`);
-    return terminalId;
+      this.terminals.set(terminalId, state);
+      this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} started: ${command}`);
+      return terminalId;
+    } finally {
+      this.startingTerminals -= 1;
+    }
+  }
+
+  hasRunningTerminals(): boolean {
+    if (this.startingTerminals > 0) return true;
+    for (const terminal of this.terminals.values()) {
+      if (!terminal.disposed && terminal.exitStatus === null) return true;
+    }
+    return false;
   }
 
   async terminalOutput(acpSessionId: string, terminalId: string) {

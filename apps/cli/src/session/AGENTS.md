@@ -254,6 +254,9 @@ the frozen identity. Never fall back to the Session owner when the driving Turn 
   drains. Shutdown closes session admission before awaiting work. The process boundary
   reserves a separate forced-cleanup deadline and sweeps retained workspace/preparation
   owners concurrently before exiting.
+  Idle and memory-pressure eviction preserve pending/running first-class background tasks
+  and ACP terminals until observed exit, including terminal startup. Retained output from
+  an exited terminal is not liveness. Raw cron fire times are not completion evidence.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
   Peek/claim are synchronous published-resource snapshots and must never delay cold
   fallback; peek never transfers ownership. A prepared resource may reuse its open

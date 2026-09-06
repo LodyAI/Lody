@@ -228,6 +228,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       agentCliType: this.config.agentCliType,
       agentType: this.config.agentType,
       startedAtMs: this.startedAtMs,
+      cleanup: this.cleanupState ? { ...this.cleanupState } : null,
       runtimeStatus:
         this.status === 'existing' || this.status === 'stopped' ? 'created' : this.status,
       accounting,
@@ -243,6 +244,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   private terminationPromise: Promise<void> | null = null;
+  private cleanupState: SessionMonitorRuntimeInfo['cleanup'] = null;
   private terminationForceRequested = false;
   private forceTerminationSignal: Promise<void> = Promise.resolve();
   private requestForceTermination: (() => void) | null = null;
@@ -262,11 +264,15 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     });
     if (force) this.requestForceTermination?.();
     this.status = 'stopping';
+    this.cleanupState = { state: 'running', attemptedAtMs: Date.now() };
     const termination = Promise.resolve().then(() => this.terminateOnce());
     this.terminationPromise = termination;
     void termination.then(
-      () => {},
       () => {
+        if (this.cleanupState) this.cleanupState.state = 'completed';
+      },
+      () => {
+        if (this.cleanupState) this.cleanupState.state = 'failed';
         if (this.terminationPromise === termination) this.terminationPromise = null;
       }
     );

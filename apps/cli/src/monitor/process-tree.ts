@@ -65,3 +65,35 @@ function resolveOwner(
   }
   return null;
 }
+
+/** Root identities are pinned for each observed session generation, never reused by PID alone. */
+export class ObservedProcessAttribution {
+  private readonly roots = new Map<string, number>();
+
+  assign(
+    entries: readonly ProcessTableEntry[],
+    roots: readonly (ProcessTreeRootSet & { startedAtMs: number | null })[]
+  ): Map<number, SessionId> {
+    const byPid = new Map(entries.map((entry) => [entry.pid, entry]));
+    const owners = new Map<number, SessionId>();
+    const currentKeys = new Set<string>();
+    for (const root of roots) {
+      for (const pid of root.rootPids) {
+        const key = `${root.sessionId}:${root.startedAtMs}:${pid}`;
+        currentKeys.add(key);
+        const entry = byPid.get(pid);
+        if (!entry) continue;
+        const pinned = this.roots.get(key);
+        if (pinned === undefined) this.roots.set(key, entry.startedAtMs);
+        if ((pinned ?? entry.startedAtMs) === entry.startedAtMs) owners.set(pid, root.sessionId);
+      }
+    }
+    for (const key of this.roots.keys()) if (!currentKeys.has(key)) this.roots.delete(key);
+    const result = new Map<number, SessionId>();
+    for (const entry of entries) {
+      const owner = resolveOwner(entry, byPid, owners);
+      if (owner) result.set(entry.pid, owner);
+    }
+    return result;
+  }
+}

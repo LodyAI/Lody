@@ -76,6 +76,26 @@ function createProcessHandle(terminate: SessionProcessHandle['terminate']): Sess
 }
 
 describe('Session terminate cleanup', () => {
+  it('reports failed cleanup and a new retry attempt without inferring success from status', async () => {
+    const session = createSession();
+    session.acpSessionId = 'acp-session-1' as ACPSessionId;
+    session.terminalManager = createTerminalManager({
+      disposeAll: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('synthetic disposal failure'))
+        .mockResolvedValue(undefined),
+    });
+    expect((await session.getMonitorRuntimeInfo()).cleanup).toBeNull();
+    const failed = session.terminate(true);
+    expect((await session.getMonitorRuntimeInfo()).cleanup?.state).toBe('running');
+    await expect(failed).rejects.toThrow('Session process termination failed');
+    const receipt = (await session.getMonitorRuntimeInfo()).cleanup;
+    expect(receipt?.state).toBe('failed');
+    await session.terminate(true);
+    expect((await session.getMonitorRuntimeInfo()).cleanup?.state).toBe('completed');
+    expect(receipt?.state).toBe('failed');
+  });
+
   it('shares pending termination and upgrades force without waiting for terminal disposal', async () => {
     const session = createSession();
     let finishDisposal = () => {};

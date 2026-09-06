@@ -12,12 +12,14 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
+  resourceHistory: 'resourceHistory',
 } as const;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const RESOURCE_HISTORY_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -52,7 +54,19 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.resourceHistory]: RESOURCE_HISTORY_PROTOCOL_VERSION,
 };
+
+/** Whether the daemon exposes recent observed resource samples over local Machine RPC. */
+export function machineSupportsResourceHistory(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.resourceHistory,
+    RESOURCE_HISTORY_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
 export function machineSupportsAcpAuthenticationInteractionsProtocol(

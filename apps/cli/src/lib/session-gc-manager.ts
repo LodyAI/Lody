@@ -97,6 +97,8 @@ export interface SessionGCDeps {
   hasActiveTurn: (sessionId: SessionId) => boolean;
   /** Whether the session has an active background goal that still needs its ACP runtime */
   hasActiveGoal: (sessionId: SessionId) => boolean | Promise<boolean>;
+  /** Latest task snapshots still need this session runtime, including scheduled tasks. */
+  hasBackgroundWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   hasPendingUpdates: (sessionId: SessionId) => boolean;
   hasPendingUserWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   isArchiveInFlight: (sessionId: SessionId) => boolean;
@@ -661,7 +663,7 @@ export class SessionGCManager {
   /**
    * Check if a session is eligible for cleanup.
    * A session is NOT eligible if it has an active turn, active goal,
-   * pending updates, pending user work, or archive in flight.
+   * background work, pending updates, pending user work, or archive in flight.
    */
   private async isEligibleForCleanup(sessionId: SessionId): Promise<boolean> {
     if (this.deps.hasActiveTurn(sessionId)) {
@@ -669,6 +671,10 @@ export class SessionGCManager {
     }
 
     if (await this.deps.hasActiveGoal(sessionId)) {
+      return false;
+    }
+
+    if (await this.deps.hasBackgroundWork(sessionId)) {
       return false;
     }
 

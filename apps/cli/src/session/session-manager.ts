@@ -350,6 +350,7 @@ export type SessionMonitorRuntimeInfo = {
   agentType: string;
   startedAtMs: number;
   runtimeStatus: 'created' | 'failed' | 'running' | 'stopping' | 'terminated';
+  cleanup?: { state: 'running' | 'failed' | 'completed'; attemptedAtMs: number } | null;
   accounting: SessionResourceAccounting;
 };
 
