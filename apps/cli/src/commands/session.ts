@@ -989,20 +989,24 @@ async function syncMachineFlockDocsForReadBestEffort(
   workspaceId: WorkspaceId,
   machineIds: readonly MachineId[],
   reason: string
-): Promise<void> {
+): Promise<Map<MachineId, string>> {
   const logger = getLogger('session');
+  const syncErrors = new Map<MachineId, string>();
   await Promise.all(
     Array.from(new Set(machineIds)).map(async (machineId) => {
       try {
         await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], reason);
       } catch (error) {
+        const message = formatErrorMessage(error);
+        syncErrors.set(machineId, message);
         logger.warn(
           `Machine Flock freshness sync did not complete (${reason}:${machineId}); ` +
-            `continuing with the local replica: ${formatErrorMessage(error)}`
+            `continuing with the local replica: ${message}`
         );
       }
     })
   );
+  return syncErrors;
 }
 
 export async function resolveLocalProjectRefOrThrow(
@@ -1013,12 +1017,22 @@ export async function resolveLocalProjectRefOrThrow(
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForReadBestEffort(manager, workspaceId, [machineId], 'session.local-projects');
+  const syncErrors = await syncMachineFlockDocsForReadBestEffort(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.local-projects'
+  );
+  const syncError = syncErrors.get(machineId);
+  const syncErrorSuffix = syncError ? ` Flock freshness sync failed: ${syncError}` : '';
+  const withSyncError = (message: string): string => `${message}${syncErrorSuffix}`;
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
   if (localProjects.length === 0) {
-    throw new Error('No local project is registered on this machine for the target workspace.');
+    throw new Error(
+      withSyncError('No local project is registered on this machine for the target workspace.')
+    );
   }
 
   const normalizedSelector = normalizeCliValue(selector);
@@ -1030,9 +1044,11 @@ export async function resolveLocalProjectRefOrThrow(
 
   if (matches.length === 0) {
     throw new Error(
-      `Local project not found: ${normalizedSelector}. Candidates: ${localProjects
-        .map((project) => `${project.name} (${project.id})`)
-        .join(', ')}`
+      withSyncError(
+        `Local project not found: ${normalizedSelector}. Candidates: ${localProjects
+          .map((project) => `${project.name} (${project.id})`)
+          .join(', ')}`
+      )
     );
   }
   if (matches.length > 1) {
@@ -2201,8 +2217,13 @@ async function listAgentConfigsForMachine(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
   machineId: MachineId
-): Promise<AgentConfigMeta[]> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.agent-configs');
+): Promise<{ configs: AgentConfigMeta[]; syncError?: string }> {
+  const syncErrors = await syncMachineFlockDocsForReadBestEffort(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.agent-configs'
+  );
   const configs = await listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
   configs.sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name);
@@ -2211,7 +2232,8 @@ async function listAgentConfigsForMachine(
     }
     return left.id.localeCompare(right.id);
   });
-  return configs;
+  const syncError = syncErrors.get(machineId);
+  return { configs, ...(syncError ? { syncError } : {}) };
 }
 
 export function selectDefaultAgentConfigForCreate(
@@ -2244,9 +2266,17 @@ async function resolveAgentConfigForCreate(args: {
   selector?: string;
   currentSession?: SessionMeta;
 }): Promise<AgentConfigMeta> {
-  const configs = await listAgentConfigsForMachine(args.manager, args.workspaceId, args.machineId);
+  const { configs, syncError } = await listAgentConfigsForMachine(
+    args.manager,
+    args.workspaceId,
+    args.machineId
+  );
   if (configs.length === 0) {
-    throw new Error(`No agent config exists on machine ${args.machineId}.`);
+    throw new Error(
+      `No agent config exists on machine ${args.machineId}.${
+        syncError ? ` Flock freshness sync failed: ${syncError}` : ''
+      }`
+    );
   }
   const selector =
     normalizeCliValue(args.selector) ?? normalizeCliValue(process.env.LODY_AGENT_CONFIG_ID);
@@ -2478,12 +2508,22 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForReadBestEffort(manager, workspaceId, [machineId], 'session.local-projects');
+  const syncErrors = await syncMachineFlockDocsForReadBestEffort(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.local-projects'
+  );
+  const syncError = syncErrors.get(machineId);
+  const syncErrorSuffix = syncError ? ` Flock freshness sync failed: ${syncError}` : '';
+  const withSyncError = (message: string): string => `${message}${syncErrorSuffix}`;
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
   if (localProjects.length === 0) {
-    throw new Error('No local project is registered on the target machine for this workspace.');
+    throw new Error(
+      withSyncError('No local project is registered on the target machine for this workspace.')
+    );
   }
   const authorizedLocalProjects = await filterAuthorizedLocalProjectsForCreate({
     auth,
@@ -2502,9 +2542,11 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   const matches = selectLocalProjectsBySelector(authorizedLocalProjects, normalizedSelector);
   if (matches.length === 0) {
     throw new Error(
-      `Local project not found on ${machineId}: ${normalizedSelector}. Candidates: ${authorizedLocalProjects
-        .map((project) => `${project.name} (${project.id})`)
-        .join(', ')}`
+      withSyncError(
+        `Local project not found on ${machineId}: ${normalizedSelector}. Candidates: ${authorizedLocalProjects
+          .map((project) => `${project.name} (${project.id})`)
+          .join(', ')}`
+      )
     );
   }
   if (matches.length > 1) {
