@@ -191,6 +191,32 @@ describe('DesktopRunConfigMenu role face', () => {
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
+  it('shows missing model metadata without offering invented reasoning levels', async () => {
+    const view = await render({
+      selectedModelId: 'gpt-6-astra',
+      configOptionSelectors: [
+        {
+          configId: 'reasoning_effort',
+          label: 'Reasoning',
+          category: 'thought_level',
+          type: 'select',
+          options: [],
+          currentValue: '',
+          perModel: true,
+          hasDefault: false,
+          availability: 'unknown',
+        },
+      ],
+      configOptionValues: { reasoning_effort: 'high' },
+    });
+    const content = await openMenu(view);
+    const status = content.querySelector('[role="status"]');
+    expect(status?.textContent).toContain('Reasoning levels not confirmed');
+    expect(status?.textContent).toContain('Saved selection: high');
+    expect(status?.textContent).toContain('Settings');
+    expect(status?.querySelector('button')).toBeNull();
+  });
+
   it('leads the menu with the Role row, above the rows a Role answers', async () => {
     const view = await render({
       agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },

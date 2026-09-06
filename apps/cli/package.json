@@ -26,6 +26,7 @@
     "bench:acp-history": "vitest bench tests/acp-history.bench.ts",
     "bench:turn-diff-store": "pnpm --filter @lody/turn-diff-store bench",
     "test:e2e": "LODY_E2E=1 vitest run",
+    "test:acp-live": "pnpm --dir ../.. --filter acp-extension-core build && pnpm --dir ../.. --filter acp-extension-codex build && pnpm --dir ../.. --filter acp-extension-claude build && tsgo --noEmit -p tsconfig.acp-live.json && LODY_E2E=1 LODY_LIVE_ACP=1 vitest run tests/e2e/acp-runtime-contract.e2e.test.ts --maxWorkers=1",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

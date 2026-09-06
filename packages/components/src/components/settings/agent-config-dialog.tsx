@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -39,7 +40,7 @@ import {
 } from '@lody/shared';
 import {
   buildAllConfigOptionSelectors,
-  isConfigOptionValueValid,
+  canRetainAcpConfigOptionValue,
   type AcpConfigOptionSelector,
   type AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
@@ -1317,6 +1318,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       cliType: formData.cliType,
       agentType: formData.agentType,
       selectedModelId: selectedTitleModelId,
+      configOptionValues: formData.titleGeneration?.configOptionValues,
       runtimeOverrides: formData.runtimeOverrides,
       machine,
     });
@@ -1329,6 +1331,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     capabilitiesReady,
     acpProvidesSessionTitle,
     selectedTitleModelId,
+    formData.titleGeneration?.configOptionValues,
   ]);
 
   // Capability refresh is a real runtime probe. The dialog never starts it just
@@ -1441,22 +1444,24 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   useEffect(() => {
     if (isPreset) return;
     if (titleSelectors.length === 0 || titleDefaultsAppliedRef.current) return;
-    titleDefaultsAppliedRef.current = true;
-    const summaries = titleSelectors.map((sel) => ({
-      id: sel.configId,
-      name: sel.label,
-      description: sel.description,
-      category: sel.category,
-      type: sel.type,
-      currentValue: sel.currentValue,
-      options: sel.options.map((o) => ({ value: o.value, name: o.label ?? o.value })),
-    }));
+    const summaries = titleSelectors
+      .filter((sel) => sel.hasDefault !== false)
+      .map((sel) => ({
+        id: sel.configId,
+        name: sel.label,
+        description: sel.description,
+        category: sel.category,
+        type: sel.type,
+        currentValue: sel.currentValue,
+        options: sel.options.map((o) => ({ value: o.value, name: o.label ?? o.value })),
+      }));
     const defaults = computeTitleGenerationDefaults(
       formData.cliType,
       formData.agentType,
       summaries
     );
     if (Object.keys(defaults).length === 0) return;
+    titleDefaultsAppliedRef.current = true;
     const existing = formData.titleGeneration?.configOptionValues ?? {};
     const merged = { ...defaults, ...existing };
     if (Object.keys(existing).length === Object.keys(merged).length) return;
@@ -1480,7 +1485,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       const value = values[selector.configId];
       return (
         value !== undefined &&
-        !isConfigOptionValueValid(selector, value) &&
+        !canRetainAcpConfigOptionValue(selector, value) &&
         value !== selector.currentValue
       );
     });
@@ -1493,7 +1498,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         const value = currentValues[selector.configId];
         if (
           value !== undefined &&
-          !isConfigOptionValueValid(selector, value) &&
+          !canRetainAcpConfigOptionValue(selector, value) &&
           value !== selector.currentValue
         ) {
           if (nextValues === currentValues) nextValues = { ...currentValues };
@@ -3204,6 +3209,8 @@ function TitleGenerationFields({
     <div className="space-y-2 pt-1">
       {selectors.map((sel) => {
         const stored = values?.[sel.configId];
+        if (sel.availability)
+          return <AcpControlAvailability key={sel.configId} selector={sel} value={stored} />;
         if (sel.type === 'boolean') {
           const isEnabled = (stored ?? sel.currentValue) === true;
           return (

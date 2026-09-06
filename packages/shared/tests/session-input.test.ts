@@ -15,7 +15,11 @@ import {
   resolveSessionConversationSourceFence,
   resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
-import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
+import {
+  deriveTurnInputConfigForNewTurn,
+  normalizeSessionTurnInputConfig,
+  SessionFileBlockSchema,
+} from '../src/message-schemas';
 import { sessionDocSchema } from '../src/schema';
 import type {
   CommentReferencePayload,
@@ -937,5 +941,112 @@ describe('session-input helpers', () => {
     } finally {
       mirror.dispose();
     }
+  });
+});
+
+describe('one-time acceptance of a wider permission', () => {
+  const base = {
+    inputBlocks: [{ type: 'text' as const, text: 'ship it' }],
+    cliType: 'builtin' as const,
+    agentType: 'claude',
+    modeId: 'plan',
+  };
+  const accepted = [
+    { controlId: 'permission-mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+  ];
+
+  it('writes the flag only into the turn that carries it', () => {
+    expect(
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: accepted })
+        .acceptWiderPermissions
+    ).toEqual(accepted);
+  });
+
+  it('leaves an ordinary send — including a plain resend — without it', () => {
+    // Nothing outside the one dispatch may set it: an omitted, false, or
+    // undefined flag must never become an acceptance the next turn inherits.
+    expect(buildSessionTurnInputConfig(base).acceptWiderPermissions).toBeUndefined();
+    expect(
+      buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: undefined })
+        .acceptWiderPermissions
+    ).toBeUndefined();
+  });
+
+  it('does not travel to a turn derived from another one', () => {
+    // Edit-and-resend mints a new userTurnId and a new prompt. The acceptance
+    // was given for the ORIGINAL prompt, so carrying it would let the edited
+    // one past the stop without ever asking — a bypass built out of a spread.
+    const acceptedTurn = buildSessionTurnInputConfig({
+      ...base,
+      acceptWiderPermissions: accepted,
+    });
+    expect(acceptedTurn.acceptWiderPermissions).toEqual(accepted);
+
+    const edited = deriveTurnInputConfigForNewTurn(acceptedTurn, {
+      prompt: 'ship something else',
+      inputBlocks: [{ type: 'text', text: 'ship something else' }],
+    });
+    expect(edited.acceptWiderPermissions).toBeUndefined();
+    // Everything else the original turn ran with is still carried.
+    expect(edited.modeId).toBe('plan');
+    expect(edited.prompt).toBe('ship something else');
+
+    // The same-turn path is untouched: a status rewrite or a transport retry is
+    // still the turn the user accepted.
+    expect(
+      normalizeSessionTurnInputConfig({ ...acceptedTurn, _lodyDeliveryKind: 'steer' })
+        ?.acceptWiderPermissions
+    ).toEqual(accepted);
+  });
+
+  it('survives the normalizer every transport runs it through', () => {
+    // Direct RPC, `session/dispatch-turn`, steer, the Loro history readback and
+    // queue promotion all rebuild the config through this one function, so a
+    // field it does not copy never reaches the daemon — however carefully the
+    // client set it.
+    expect(
+      normalizeSessionTurnInputConfig(
+        buildSessionTurnInputConfig({ ...base, acceptWiderPermissions: accepted })
+      )?.acceptWiderPermissions
+    ).toEqual(accepted);
+
+    // One-time semantics survive the round trip too: only an explicit `true` is
+    // carried, so nothing can read an acceptance out of a turn that made none.
+    expect(
+      normalizeSessionTurnInputConfig(buildSessionTurnInputConfig(base))?.acceptWiderPermissions
+    ).toBeUndefined();
+    // Bounded and deduplicated, both by the whole triple: a list that outgrows
+    // the bound reads as NO acceptance rather than a truncated one, and a
+    // repeated disclosure does not consume the budget.
+    const entry = (n: number) => ({
+      controlId: `control-${n}`,
+      requestedModeId: 'plan',
+      effectiveModeId: 'auto',
+    });
+    expect(
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermissions: Array.from({ length: 9 }, (_unused, index) => entry(index)),
+      })?.acceptWiderPermissions
+    ).toBeUndefined();
+    expect(
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermissions: [entry(0), entry(0), entry(1)],
+      })?.acceptWiderPermissions
+    ).toEqual([entry(0), entry(1)]);
+
+    // A malformed or partial acceptance reads as no acceptance: one that cannot
+    // name the control and both values would be a blanket one.
+    expect(
+      normalizeSessionTurnInputConfig({ ...base, acceptWiderPermissions: true })
+        ?.acceptWiderPermissions
+    ).toBeUndefined();
+    expect(
+      normalizeSessionTurnInputConfig({
+        ...base,
+        acceptWiderPermissions: [{ requestedModeId: 'plan', effectiveModeId: 'auto' }],
+      })?.acceptWiderPermissions
+    ).toBeUndefined();
   });
 });

@@ -2,10 +2,79 @@ import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
+  type DeclaredModelCapabilities,
 } from '@lody/shared';
 import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
+
+/**
+ * Bounds for the agent's self-declared model catalog.
+ *
+ * `_meta` is whatever the other side put there, and this one gets persisted and
+ * fanned out to every client of the workspace, so it is bounded before it is
+ * believed. Numbers are generous for a real catalog and small for a payload:
+ * an agent publishing more models than this is not describing itself.
+ */
+const DECLARED_MODEL_LIMITS = {
+  models: 64,
+  modelIdLength: 128,
+  effortValues: 16,
+  effortValueLength: 64,
+} as const;
+
+const zDeclaredModelCapabilities = z.object({
+  _meta: z
+    .object({
+      lody: z
+        .object({
+          modelCapabilities: z
+            .object({
+              version: z.literal(1),
+              producerRevision: z.string().trim().min(1).max(128).optional(),
+              models: z
+                .record(
+                  z.string().trim().min(1).max(DECLARED_MODEL_LIMITS.modelIdLength),
+                  z.object({
+                    effortValues: z
+                      .array(z.string().trim().min(1).max(DECLARED_MODEL_LIMITS.effortValueLength))
+                      .max(DECLARED_MODEL_LIMITS.effortValues)
+                      .optional(),
+                    fastMode: z.boolean().optional(),
+                  })
+                )
+                .refine((models) => Object.keys(models).length <= DECLARED_MODEL_LIMITS.models),
+            })
+            .nullish(),
+        })
+        .nullish(),
+    })
+    .nullish(),
+});
+
+/**
+ * Reads the agent's own per-model statement, or nothing.
+ *
+ * An unknown `version`, a shape that does not parse, or a catalog past the
+ * bounds is ignored WHOLE rather than partially: half a catalog would answer
+ * "this model has no fast mode" for models the agent simply could not fit.
+ */
+export function readDeclaredModelCapabilities(
+  sessionResponse: unknown,
+  receivedAt: number
+): DeclaredModelCapabilities | undefined {
+  const parsed = zDeclaredModelCapabilities.safeParse(sessionResponse);
+  const declared = parsed.success ? parsed.data._meta?.lody?.modelCapabilities : undefined;
+  if (!declared || Object.keys(declared.models).length === 0) {
+    return undefined;
+  }
+  return {
+    version: 1,
+    models: declared.models,
+    receivedAt,
+    ...(declared.producerRevision ? { producerRevision: declared.producerRevision } : {}),
+  };
+}
 
 export type AcpCapabilitiesResult = {
   modes: Array<{ id: string; name: string; description?: string }>;
@@ -15,6 +84,8 @@ export type AcpCapabilitiesResult = {
   sessionFork: boolean;
   acknowledgedSteer: boolean;
   modelReasoningEfforts?: Record<string, string[]>;
+  measuredForModelId?: string;
+  declaredModelCapabilities?: DeclaredModelCapabilities;
 };
 
 function isSelectGroup(item: unknown): item is SessionConfigSelectGroup {
@@ -151,7 +222,11 @@ type AcpSessionCapabilitiesResponse = {
 /** Extract cacheable capabilities from a real ACP new/load/resume session response. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
-  lifecycleCapabilities: { sessionFork?: boolean; acknowledgedSteer?: boolean } = {}
+  lifecycleCapabilities: {
+    sessionFork?: boolean;
+    acknowledgedSteer?: boolean;
+    receivedAt?: number;
+  } = {}
 ): AcpCapabilitiesResult {
   const modes = (sessionResponse.modes?.availableModes ?? []).map((mode) => ({
     id: mode.id,
@@ -176,6 +251,18 @@ export function normalizeAcpSessionCapabilities(
     legacyModels.map((model) => model.modelId)
   );
 
+  // What the snapshot is a snapshot OF, stored rather than left to each reader
+  // to infer from the model option's `currentValue`.
+  const modelOptionValue = modelOption?.currentValue;
+  const measuredForModelId =
+    typeof modelOptionValue === 'string'
+      ? modelOptionValue
+      : (readLegacySessionModelState(sessionResponse)?.currentModelId ?? undefined);
+  const declaredModelCapabilities = readDeclaredModelCapabilities(
+    sessionResponse,
+    lifecycleCapabilities.receivedAt ?? Date.now()
+  );
+
   return {
     modes,
     models,
@@ -184,5 +271,7 @@ export function normalizeAcpSessionCapabilities(
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     ...(modelReasoningEfforts ? { modelReasoningEfforts } : {}),
+    ...(measuredForModelId ? { measuredForModelId } : {}),
+    ...(declaredModelCapabilities ? { declaredModelCapabilities } : {}),
   };
 }

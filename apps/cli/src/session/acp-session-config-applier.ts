@@ -1,9 +1,10 @@
 import {
-  ACP_PLAN_PERMISSION_MODE_ID,
-  ACP_REASONING_EFFORT_CONFIG_ID,
+  ACP_CONFIG_OPTION_OFF_VALUE,
+  ACP_CONFIG_OPTION_ON_VALUE,
   isAcpFastModeConfigId,
+  isAcpPermissionWiderThanRequested,
+  type AcceptedWiderPermission,
   isAcpPlanModeConfigOption,
-  isAcpThoughtLevelConfigOption,
   isSensitiveAcpConfigOptionId,
   type ACPSessionId,
   type AcpConfigOptionValue,
@@ -56,6 +57,8 @@ export type AcpSessionRunConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Differences disclosed and accepted for this turn, each matched exactly. */
+  acceptWiderPermissions?: AcceptedWiderPermission[];
 };
 
 type AcpSessionRunConfigApplyResult = {
@@ -65,27 +68,63 @@ type AcpSessionRunConfigApplyResult = {
   warningSelections: string[];
   /** Agent-confirmed state after applying the requested selections. */
   runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
+  /**
+   * The agent's own reported state says this turn would run with MORE
+   * permission than it asked for. Present only on that contradiction — never
+   * from a snapshot, never when either mode is unranked, never when the agent
+   * reported nothing to compare.
+   */
+  permissionEscalation?: AcceptedWiderPermission;
 };
 
-function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
-  return config.agentType === 'codex' || config.agentType === 'claude';
-}
-
-function isKnownRunConfigOption(
-  configId: string,
-  agentConfigOptions: ReadonlyArray<{ id: string; category?: string | null }>
+/** A boolean toggle and an `on`/`off` select express the same choice. */
+function configValuesMatch(
+  requested: AcpConfigOptionValue,
+  effective: AcpConfigOptionValue | undefined
 ): boolean {
-  if (
-    configId === ACP_REASONING_EFFORT_CONFIG_ID ||
-    isAcpFastModeConfigId(configId) ||
-    isAcpPlanModeConfigOption({ id: configId })
-  ) {
+  if (requested === effective) {
     return true;
   }
-  const option = agentConfigOptions.find((candidate) => candidate.id === configId);
-  return option
-    ? isAcpThoughtLevelConfigOption({ id: option.id, category: option.category ?? undefined })
-    : false;
+  const toggle = (value: boolean): string =>
+    value ? ACP_CONFIG_OPTION_ON_VALUE : ACP_CONFIG_OPTION_OFF_VALUE;
+  if (typeof requested === 'boolean' && typeof effective === 'string') {
+    return effective === toggle(requested);
+  }
+  if (typeof requested === 'string' && typeof effective === 'boolean') {
+    return requested === toggle(effective);
+  }
+  return false;
+}
+
+/** One requested selection, judged against the agent's own answer for it. */
+type AppliedSelection = {
+  /** Diagnostic label, already redacted for sensitive ids. */
+  label: string;
+  requested: AcpConfigOptionValue;
+  /** How to read the agent's state for this selection once everything is applied. */
+  source: { kind: 'mode' } | { kind: 'model' } | { kind: 'configOption'; configId: string };
+  /** The agent threw while applying it. */
+  rejected: boolean;
+};
+
+/**
+ * Whether the agent's post-apply state contradicts what the turn asked for.
+ *
+ * A rejection alone does not answer this, in either direction. Codex ACCEPTS
+ * `fast-mode` on a model without a fast speed tier and then simply omits the
+ * option from the state it publishes — the turn runs at normal speed and
+ * nothing threw — so the published state is the only evidence Fast is not on.
+ * Conversely a rejected selection that is already effective changed nothing and
+ * is not worth a notice. Only where the agent published nothing to compare
+ * against does the failed call remain the sole signal.
+ */
+function divergesFromAgentState(args: {
+  requested: AcpConfigOptionValue;
+  effective: AcpConfigOptionValue | undefined;
+  known: boolean;
+  rejected: boolean;
+}): boolean {
+  return args.known ? !configValuesMatch(args.requested, args.effective) : args.rejected;
 }
 
 export async function applyAcpSessionRunConfig(args: {
@@ -116,17 +155,10 @@ export async function applyAcpSessionRunConfig(args: {
   }
 
   const rejectedSelections: string[] = [];
-  const warningSelections: string[] = [];
+  const appliedSelections: AppliedSelection[] = [];
   let confirmedLegacyModeId: string | undefined;
   let confirmedLegacyModelId: string | undefined;
   const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
-  const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
-  const recordRejection = (selection: string, suppressWarning: boolean): void => {
-    rejectedSelections.push(selection);
-    if (!suppressWarning) {
-      warningSelections.push(selection);
-    }
-  };
   const modeConfigId =
     agentConfigOptions.find((option) => option.category === 'mode')?.id ?? 'mode';
   const modelConfigId =
@@ -135,77 +167,120 @@ export async function applyAcpSessionRunConfig(args: {
   const targetModelId =
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
-  if (config.modeId) {
+  const applyMode = async (value: string, label: string): Promise<void> => {
+    let rejected = false;
     try {
-      await agentClient.setSessionMode?.(acpSessionId, config.modeId);
-      confirmedLegacyModeId = config.modeId;
+      await agentClient.setSessionMode?.(acpSessionId, value);
+      confirmedLegacyModeId = value;
     } catch (error) {
-      recordRejection(
-        `mode=${JSON.stringify(config.modeId)}`,
-        suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
-      );
-      logger.debug(
-        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
-      );
+      rejected = true;
+      rejectedSelections.push(label);
+      logger.debug(`[${sessionId}] Failed to set ACP mode ${label}: ${String(error)}`);
     }
-  }
+    appliedSelections.push({ label, requested: value, source: { kind: 'mode' }, rejected });
+  };
+
+  const applyModel = async (value: string, label: string): Promise<void> => {
+    let rejected = false;
+    try {
+      await agentClient.unstable_setSessionModel?.(acpSessionId, value);
+      confirmedLegacyModelId = value;
+    } catch (error) {
+      rejected = true;
+      rejectedSelections.push(label);
+      logger.debug(`[${sessionId}] Failed to set ACP model ${label}: ${String(error)}`);
+    }
+    appliedSelections.push({ label, requested: value, source: { kind: 'model' }, rejected });
+  };
+
+  const applyConfigOption = async (
+    configId: string,
+    value: AcpConfigOptionValue
+  ): Promise<void> => {
+    const label = `${configId}=${formatAcpConfigValueForLog(configId, value)}`;
+    let rejected = false;
+    try {
+      await agentClient.setSessionConfigOption(acpSessionId, configId, value);
+    } catch (error) {
+      rejected = true;
+      rejectedSelections.push(label);
+      logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
+    }
+    appliedSelections.push({
+      label,
+      requested: value,
+      source: { kind: 'configOption', configId },
+      rejected,
+    });
+  };
+
+  /* Every shape a permission control arrives in. Agents publish it three ways:
+     the legacy `session/set_mode` selector, a `category: 'mode'` config option,
+     and an explicit `category: '_permission'` one (Grok's `permission_mode`).
+     Matching only the first two let a requested `ask` run as `always-approve`
+     with nothing but a warning. */
+  const permissionConfigIds = new Set(
+    agentConfigOptions
+      .filter((option) => option.category === 'mode' || option.category === '_permission')
+      .map((option) => option.id)
+  );
+
+  /**
+   * Permission-bearing controls go LAST, and that ordering is load-bearing.
+   *
+   * Claude rebuilds the available permission modes on every model switch and
+   * downgrades the current one to `default` when the new model does not support
+   * it — so a mode applied before the model is silently widened by the model
+   * that follows it. Applying the model and the ordinary options first, then the
+   * permission-bearing ones, means the last word belongs to what the user asked
+   * for. `applyPromptConfig` runs before `prompt`, so the state read below is
+   * still taken before the agent can act on it.
+   */
+  const isPermissionBearing = (configId: string): boolean =>
+    configId === modeConfigId ||
+    permissionConfigIds.has(configId) ||
+    isAcpPlanModeConfigOption({ id: configId });
+  const configOptionEntryFor = (configId: string): AcpConfigOptionValue | undefined =>
+    configOptionEntries.find(([id]) => id === configId)?.[1];
+
+  const duplicateModelValue = configOptionEntryFor(modelConfigId);
   if (config.modelId) {
-    try {
-      await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
-      confirmedLegacyModelId = config.modelId;
-    } catch (error) {
-      recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
-      logger.debug(
-        `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
-      );
-    }
+    await applyModel(config.modelId, `model=${JSON.stringify(config.modelId)}`);
+  } else if (typeof duplicateModelValue === 'string') {
+    await applyModel(
+      duplicateModelValue,
+      `${modelConfigId}=${formatAcpConfigValueForLog(modelConfigId, duplicateModelValue)}`
+    );
   }
 
   for (const [configId, value] of configOptionEntries) {
-    if (configId === modeConfigId) {
-      if (!config.modeId && typeof value === 'string') {
-        try {
-          await agentClient.setSessionMode?.(acpSessionId, value);
-          confirmedLegacyModeId = value;
-        } catch (error) {
-          logger.debug(
-            `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-      }
-      continue;
-    }
-    if (configId === modelConfigId) {
-      if (!config.modelId && typeof value === 'string') {
-        try {
-          await agentClient.unstable_setSessionModel?.(acpSessionId, value);
-          confirmedLegacyModelId = value;
-        } catch (error) {
-          logger.debug(
-            `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-      }
+    if (configId === modeConfigId || configId === modelConfigId || isPermissionBearing(configId)) {
       continue;
     }
     if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
       continue;
     }
-    try {
-      await agentClient.setSessionConfigOption(acpSessionId, configId, value);
-    } catch (error) {
-      recordRejection(
-        `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
-        suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
-      );
-      logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
+    await applyConfigOption(configId, value);
+  }
+
+  for (const [configId, value] of configOptionEntries) {
+    if (configId === modeConfigId || !isPermissionBearing(configId)) {
+      continue;
     }
+    await applyConfigOption(configId, value);
+  }
+
+  // An explicit `config.modeId` outranks the duplicate config-option entry, and
+  // is judged in its place: losing a precedence contest is not the agent
+  // disagreeing.
+  const duplicateModeValue = configOptionEntryFor(modeConfigId);
+  if (config.modeId) {
+    await applyMode(config.modeId, `mode=${JSON.stringify(config.modeId)}`);
+  } else if (typeof duplicateModeValue === 'string') {
+    await applyMode(
+      duplicateModeValue,
+      `${modeConfigId}=${formatAcpConfigValueForLog(modeConfigId, duplicateModeValue)}`
+    );
   }
 
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
@@ -213,11 +288,18 @@ export async function applyAcpSessionRunConfig(args: {
     acpSessionId,
     agentClient.getConfigOptions()
   );
-  if (confirmedLegacyModeId) {
+  // A `session/set_mode` that did not throw is an acknowledgement, not proof of
+  // the resulting state: the agent may change the mode again while applying the
+  // rest of the turn (Claude downgrades it on an unsupported model switch). So
+  // it only FILLS a mode the agent's own state does not report — never
+  // overwrites one, which would report the request back as if it were the
+  // outcome and leave every mode divergence invisible.
+  if (confirmedLegacyModeId && runtimeConfigPatch.modeId === undefined) {
     runtimeConfigPatch.modeId = confirmedLegacyModeId;
     if (
       !isSensitiveAcpConfigOptionId(modeConfigId) &&
-      agentConfigOptions.some((option) => option.id === modeConfigId)
+      agentConfigOptions.some((option) => option.id === modeConfigId) &&
+      runtimeConfigPatch.configOptionValues?.[modeConfigId] === undefined
     ) {
       runtimeConfigPatch.configOptionValues = {
         ...runtimeConfigPatch.configOptionValues,
@@ -228,9 +310,113 @@ export async function applyAcpSessionRunConfig(args: {
   if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
     runtimeConfigPatch.modelId = confirmedLegacyModelId;
   }
+
+  // An agent that publishes no config options at all answered nothing here, and
+  // the effective table deliberately omits sensitive ids, so neither can be read
+  // as "the agent dropped it".
+  const publishesConfigOptions = agentConfigOptions.length > 0;
+  const effectiveConfigOptionValues = runtimeConfigPatch.configOptionValues ?? {};
+  const warningSelections = appliedSelections
+    .filter((selection) => {
+      const effective =
+        selection.source.kind === 'mode'
+          ? runtimeConfigPatch.modeId
+          : selection.source.kind === 'model'
+            ? runtimeConfigPatch.modelId
+            : effectiveConfigOptionValues[selection.source.configId];
+      const known =
+        selection.source.kind === 'configOption'
+          ? publishesConfigOptions && !isSensitiveAcpConfigOptionId(selection.source.configId)
+          : effective !== undefined;
+      return divergesFromAgentState({
+        requested: selection.requested,
+        effective,
+        known,
+        rejected: selection.rejected,
+      });
+    })
+    .map((selection) => selection.label);
+
+  /* Every permission-bearing selection this turn made, against the value the
+     agent reports for it after everything has been applied. The effective side
+     is the agent's own state: `runtimeConfigPatch.modeId` is only filled from a
+     `set_mode` acknowledgement when the agent reports no mode of its own (in
+     which case the two are equal and nothing fires), and the config table comes
+     straight from what the agent published. So this cannot be triggered by a
+     snapshot, by a stale cache, or by an unconfirmed request. */
+  const accepted = config.acceptWiderPermissions ?? [];
+  const findPermissionEscalation = (): AcceptedWiderPermission | undefined => {
+    for (const selection of appliedSelections) {
+      if (
+        selection.source.kind === 'model' ||
+        (selection.source.kind === 'configOption' &&
+          !isPermissionBearing(selection.source.configId))
+      ) {
+        continue;
+      }
+      const controlId = selection.source.kind === 'mode' ? modeConfigId : selection.source.configId;
+      const effective =
+        selection.source.kind === 'mode'
+          ? runtimeConfigPatch.modeId
+          : effectiveConfigOptionValues[controlId];
+      if (
+        typeof selection.requested !== 'string' ||
+        typeof effective !== 'string' ||
+        !isAcpPermissionWiderThanRequested(selection.requested, effective)
+      ) {
+        continue;
+      }
+      /* Only differences the user was actually shown are skipped, each matched
+         exactly, and the scan CONTINUES. A bare "accepted" would also wave through a difference they
+         never saw: the agent may have moved further still by the time the turn
+         re-runs (`plan → auto` accepted, `plan → always-approve` live), and a
+         second permission control may have widened alongside the one in the
+         notice. Either way this is a new, undisclosed escalation, and it gets
+         its own accurate stop. */
+      if (
+        accepted.some(
+          (entry) =>
+            entry.controlId === controlId &&
+            entry.requestedModeId === selection.requested &&
+            entry.effectiveModeId === effective
+        )
+      ) {
+        continue;
+      }
+      return { controlId, requestedModeId: selection.requested, effectiveModeId: effective };
+    }
+    return undefined;
+  };
+  const permissionEscalation = findPermissionEscalation();
+  if (permissionEscalation) {
+    logger.debug(
+      `[${sessionId}] Permission not applied for ${permissionEscalation.controlId}: requested ${permissionEscalation.requestedModeId}, effective ${permissionEscalation.effectiveModeId}`
+    );
+  }
+
   return {
     rejectedSelections,
     warningSelections,
     runtimeConfigPatch,
+    ...(permissionEscalation ? { permissionEscalation } : {}),
   };
+}
+
+/**
+ * The agent's own state reports a wider permission than the turn requested.
+ *
+ * Thrown before `prompt`, so the turn never runs. Carries both mode ids so the
+ * failure notice can name them and offer the one-time informed downgrade.
+ */
+export class AcpPermissionNotAppliedError extends Error {
+  constructor(
+    readonly controlId: string,
+    readonly requestedModeId: string,
+    readonly effectiveModeId: string
+  ) {
+    super(
+      `The agent did not apply the requested permission mode "${requestedModeId}" and would run with "${effectiveModeId}", which allows more than was asked for.`
+    );
+    this.name = 'AcpPermissionNotAppliedError';
+  }
 }

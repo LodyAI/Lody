@@ -648,174 +648,192 @@ describe('buildAcpSelectorOptions', () => {
     ]);
   });
 
-  it.each(['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark', 'gpt-5.6-other'])(
-    'hides max and ultra for %s and falls back to medium',
-    (selectedModelId) => {
-      const configOptions = codexModelAndReasoningOptions('ultra', [
-        { value: 'low', name: 'low' },
-        { value: 'medium', name: 'medium' },
-        { value: 'high', name: 'high' },
-        { value: 'max', name: 'max' },
-        { value: 'ultra', name: 'ultra' },
-      ]);
-      const options = buildAcpSelectorOptions({
-        configId: agentConfigId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(configOptions),
-      });
-
-      const selector = options.configOptionSelectors.find(
-        (candidate) => candidate.configId === 'reasoning_effort'
-      );
-      expect(selector).toMatchObject({ currentValue: 'medium' });
-      expect(selector?.options.map((option) => option.value)).toEqual(['low', 'medium', 'high']);
-      const cachedReasoningOption = configOptions.find(
-        (option) => option.id === 'reasoning_effort'
-      );
-      expect(cachedReasoningOption?.options.map((option) => option.value)).toEqual([
-        'low',
-        'medium',
-        'high',
-        'max',
-        'ultra',
-      ]);
-    }
-  );
-
-  it('falls back to the first visible effort when medium is unavailable', () => {
+  it('does not invent Astra tiers from another model snapshot', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
       agentType: 'codex',
-      selectedModelId: 'gpt-5.6-other',
-      machine: codexMachineWithConfigOptions(
-        codexModelAndReasoningOptions('max', [
-          { value: 'low', name: 'low' },
-          { value: 'high', name: 'high' },
-          { value: 'max', name: 'max' },
-        ])
-      ),
-    });
-
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === 'reasoning_effort'
-    );
-    expect(selector).toMatchObject({ currentValue: 'low' });
-    expect(selector?.options.map((option) => option.value)).toEqual(['low', 'high']);
-  });
-
-  it.each(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
-    'adds missing max and ultra options for %s',
-    (selectedModelId) => {
-      const options = buildAcpSelectorOptions({
-        configId: agentConfigId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(
-          codexModelAndReasoningOptions('medium', [
-            { value: 'low', name: 'low' },
-            { value: 'medium', name: 'medium' },
-          ])
-        ),
-      });
-
-      const selector = options.configOptionSelectors.find(
-        (candidate) => candidate.configId === 'reasoning_effort'
-      );
-      expect(selector?.options).toEqual([
-        { value: 'low', label: 'low', description: undefined },
-        { value: 'medium', label: 'medium', description: undefined },
-        {
-          value: 'max',
-          label: 'Max',
-          description: 'Maximum reasoning depth for the hardest problems',
-        },
-        {
-          value: 'ultra',
-          label: 'Ultra',
-          description: 'Maximum reasoning with automatic task delegation',
-        },
-      ]);
-    }
-  );
-
-  it.each(['medium', 'max', 'ultra'])(
-    'offers only max for Luna when the cached effort is %s',
-    (currentValue) => {
-      const target = {
-        configId: agentConfigId,
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-        selectedModelId: 'gpt-5.6-luna',
-        machine: codexMachineWithConfigOptions(
-          codexModelAndReasoningOptions(currentValue, [
-            { value: 'medium', name: 'medium' },
-            { value: 'ultra', name: 'ultra' },
-          ])
-        ),
-      };
-      for (const selectors of [
-        buildAcpSelectorOptions(target).configOptionSelectors,
-        buildAllConfigOptionSelectors(target),
-      ]) {
-        const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
-        expect(selector?.options.map((option) => option.value)).toEqual(['medium', 'max']);
-        expect(selector?.currentValue).toBe(currentValue === 'max' ? 'max' : 'medium');
-      }
-    }
-  );
-
-  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
-    'preserves advertised extended effort metadata for %s and appends only missing options',
-    (selectedModelId) => {
-      const selectors = buildAllConfigOptionSelectors({
-        configId: agentConfigId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        selectedModelId,
-        machine: codexMachineWithConfigOptions(
-          codexModelAndReasoningOptions('max', [
-            { value: 'low', name: 'low' },
-            { value: 'max', name: 'maximum', description: 'Upstream maximum' },
-          ])
-        ),
-      });
-
-      const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
-      expect(selector?.options).toEqual([
-        { value: 'low', label: 'low', description: undefined },
-        { value: 'max', label: 'maximum', description: 'Upstream maximum' },
-        {
-          value: 'ultra',
-          label: 'Ultra',
-          description: 'Maximum reasoning with automatic task delegation',
-        },
-      ]);
-    }
-  );
-
-  it('does not grant extended efforts to near-match model ids', () => {
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      selectedModelId: 'gpt-5.6-sol-preview',
+      selectedModelId: 'gpt-6-astra',
+      configOptionValues: { reasoning_effort: 'high' },
       machine: codexMachineWithConfigOptions(
         codexModelAndReasoningOptions('medium', [
-          { value: 'medium', name: 'medium' },
-          { value: 'max', name: 'max' },
-          { value: 'ultra', name: 'ultra' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
         ])
       ),
     });
+    expect(
+      options.configOptionSelectors.find((s) => s.configId === 'reasoning_effort')
+    ).toMatchObject({
+      availability: 'unknown',
+      currentValue: 'high',
+      options: [],
+      hasDefault: false,
+    });
+  });
 
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === 'reasoning_effort'
-    );
-    expect(selector?.options.map((option) => option.value)).toEqual(['medium']);
+  it('uses the selected model declaration even when the snapshot has no effort control', () => {
+    const machine = codexMachineWithConfigOptions([
+      codexModelAndReasoningOptions('medium', [])[0]!,
+    ]);
+    const capability = machine.acpCapabilities![agentConfigId]!;
+    capability.declaredModelCapabilities = {
+      version: 1,
+      receivedAt: Date.now(),
+      models: {
+        'gpt-6-astra': { effortValues: ['low', 'high', 'ultra'], fastMode: true },
+        'gpt-5.6-terra': { effortValues: ['medium', 'max'], fastMode: false },
+      },
+    };
+    const target = {
+      configId: agentConfigId,
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      machine,
+    };
+    const astra = buildAcpSelectorOptions({ ...target, selectedModelId: 'gpt-6-astra' });
+    expect(
+      astra.configOptionSelectors
+        .find((s) => s.configId === 'reasoning_effort')
+        ?.options.map((o) => o.value)
+    ).toEqual(['low', 'high', 'ultra']);
+    expect(astra.configOptionSelectors.find((s) => s.configId === 'fast-mode')).toMatchObject({
+      type: 'boolean',
+      hasDefault: false,
+    });
+    const terra = buildAcpSelectorOptions({ ...target, selectedModelId: 'gpt-5.6-terra' });
+    expect(
+      terra.configOptionSelectors
+        .find((s) => s.configId === 'reasoning_effort')
+        ?.options.map((o) => o.value)
+    ).toEqual(['medium', 'max']);
+    expect(terra.configOptionSelectors.some((s) => s.configId === 'fast-mode')).toBe(false);
+    expect(
+      buildAllConfigOptionSelectors({ ...target, selectedModelId: 'gpt-6-astra' }).find(
+        (s) => s.configId === 'reasoning_effort'
+      )
+    ).toEqual(astra.configOptionSelectors.find((s) => s.configId === 'reasoning_effort'));
+  });
+
+  it('recovers legacy Terra efforts while Astra metadata remains unknown', () => {
+    const machine = codexMachineWithConfigOptions([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'gpt-6-astra',
+        options: [{ value: 'gpt-5.6-terra', name: 'Terra' }],
+      },
+    ]);
+    machine.acpCapabilities![agentConfigId]!.modelReasoningEfforts = {
+      'gpt-5.6-terra': ['low', 'high'],
+    };
+    const target = {
+      configId: agentConfigId,
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      machine,
+    };
+    const astra = buildAcpSelectorOptions(target);
+    expect(astra.modelOptions.map((o) => o.value)).toContain('gpt-6-astra');
+    expect(
+      astra.configOptionSelectors.find((s) => s.configId === 'reasoning_effort')?.availability
+    ).toBe('unknown');
+    const terra = buildAcpSelectorOptions({ ...target, selectedModelId: 'gpt-5.6-terra' });
+    expect(
+      terra.configOptionSelectors
+        .find((s) => s.configId === 'reasoning_effort')
+        ?.options.map((o) => o.value)
+    ).toEqual(['low', 'high']);
+  });
+
+  it('retains same-model snapshot labels without extending their advertised values', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-5.6-sol',
+      machine: codexMachineWithConfigOptions(
+        codexModelAndReasoningOptions('medium', [
+          { value: 'medium', name: 'Balanced' },
+          { value: 'high', name: 'Deep' },
+        ])
+      ),
+    });
+    expect(
+      options.configOptionSelectors.find((s) => s.configId === 'reasoning_effort')
+    ).toMatchObject({
+      currentValue: 'medium',
+      options: [
+        { value: 'medium', label: 'Balanced' },
+        { value: 'high', label: 'Deep' },
+      ],
+    });
+  });
+
+  it('marks an unlisted static model unknown instead of borrowing static efforts', () => {
+    const options = buildAcpSelectorOptions({
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'future-model',
+    });
+    expect(options.modelOptions.find((o) => o.value === 'future-model')).toMatchObject({
+      disabled: true,
+    });
+    expect(
+      options.configOptionSelectors.find((s) => s.configId === 'reasoning_effort')
+    ).toMatchObject({ availability: 'unknown', options: [] });
+  });
+
+  it('does not offer expired declarations or turn an empty declaration into unknown', () => {
+    const machine = codexMachineWithConfigOptions([
+      codexModelAndReasoningOptions('medium', [])[0]!,
+    ]);
+    const capability = machine.acpCapabilities![agentConfigId]!;
+    capability.declaredModelCapabilities = {
+      version: 1,
+      receivedAt: 0,
+      models: { 'gpt-6-astra': { effortValues: ['ultra'] } },
+    };
+    const target = {
+      configId: agentConfigId,
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      selectedModelId: 'gpt-6-astra',
+      machine,
+    };
+    expect(
+      buildAcpSelectorOptions(target).configOptionSelectors.find(
+        (s) => s.configId === 'reasoning_effort'
+      )
+    ).toMatchObject({ availability: 'unknown', options: [] });
+    capability.declaredModelCapabilities = {
+      version: 1,
+      receivedAt: Date.now(),
+      models: { 'gpt-6-astra': { effortValues: [] } },
+    };
+    expect(
+      buildAcpSelectorOptions(target).configOptionSelectors.find(
+        (s) => s.configId === 'reasoning_effort'
+      )
+    ).toMatchObject({ availability: 'unsupported', options: [] });
+  });
+
+  it('keeps a requested Fast mode visible when support is unknown', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-6-astra',
+      configOptionValues: { 'fast-mode': true },
+      machine: codexMachineWithConfigOptions([codexModelAndReasoningOptions('medium', [])[0]!]),
+    });
+    expect(options.configOptionSelectors.find((s) => s.configId === 'fast-mode')).toMatchObject({
+      availability: 'unknown',
+      type: 'boolean',
+      hasDefault: false,
+    });
   });
 
   it('leaves non-Codex and non-reasoning selectors unchanged', () => {

@@ -1522,7 +1522,11 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal } = {}
+    options: {
+      signal?: AbortSignal;
+      measuredForModelId?: string;
+      declaredModelCapabilities?: AcpCapabilityCacheEntry['declaredModelCapabilities'];
+    } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -3120,6 +3124,17 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     models: entry.models,
     configOptions: entry.configOptions,
     modelReasoningEfforts: entry.modelReasoningEfforts,
+    measuredForModelId: entry.measuredForModelId,
+    // Content, not freshness: `receivedAt` is deliberately excluded so a
+    // re-probe that learns nothing new does not rewrite the row, while a
+    // catalog that actually changed does.
+    declaredModelCapabilities: entry.declaredModelCapabilities
+      ? {
+          version: entry.declaredModelCapabilities.version,
+          models: entry.declaredModelCapabilities.models,
+          producerRevision: entry.declaredModelCapabilities.producerRevision,
+        }
+      : undefined,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -3208,7 +3223,11 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
-    options: { signal?: AbortSignal } = {}
+    options: {
+      signal?: AbortSignal;
+      measuredForModelId?: string;
+      declaredModelCapabilities?: AcpCapabilityCacheEntry['declaredModelCapabilities'];
+    } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
@@ -3221,6 +3240,14 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       name: model.name ?? model.modelId,
       description: model.description ?? undefined,
     }));
+    const handle = await this.openMachineFlockDoc();
+    options.signal?.throwIfAborted();
+    const capabilityKey = getAcpCapabilityCacheKey(configId);
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[capabilityKey];
+    const existingDeclared =
+      existing?.sourceVersion === sourceVersion ? existing.declaredModelCapabilities : undefined;
     const entry: AcpCapabilityCacheEntry = {
       cliType,
       agentType,
@@ -3238,14 +3265,17 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0
           ? modelReasoningEfforts
           : undefined,
+      ...(options.measuredForModelId ? { measuredForModelId: options.measuredForModelId } : {}),
+      // A refresh that carries no declaration keeps the one already stored: the
+      // agent has not retracted it, this probe simply did not hear it (an older
+      // adapter, a failed catalog fetch). Only a NEW declaration replaces it.
+      ...((options.declaredModelCapabilities ?? existingDeclared)
+        ? {
+            declaredModelCapabilities: options.declaredModelCapabilities ?? existingDeclared,
+          }
+        : {}),
       fetchedAt: getServerNow(),
     };
-    const handle = await this.openMachineFlockDoc();
-    options.signal?.throwIfAborted();
-    const capabilityKey = getAcpCapabilityCacheKey(configId);
-    const existing = getMachineFlockAcpCapabilities(
-      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-    )[capabilityKey];
     if (
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===

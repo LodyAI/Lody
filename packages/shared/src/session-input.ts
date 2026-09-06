@@ -1,3 +1,4 @@
+import type { AcceptedWiderPermission } from './ai';
 import type {
   ACPSessionConfig,
   AcpConfigOptionValue,
@@ -628,6 +629,8 @@ export const buildSessionTurnInputConfig = (args: {
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
   taskToolsEnabled?: boolean;
+  /** Differences disclosed and accepted for THIS turn only. */
+  acceptWiderPermissions?: AcceptedWiderPermission[];
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
@@ -648,6 +651,9 @@ export const buildSessionTurnInputConfig = (args: {
         ? args.configOptionValues
         : undefined,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
+    ...(args.acceptWiderPermissions?.length
+      ? { acceptWiderPermissions: args.acceptWiderPermissions }
+      : {}),
     ...(args.taskToolsEnabled !== undefined
       ? { taskToolsEnabled: args.taskToolsEnabled === true }
       : {}),

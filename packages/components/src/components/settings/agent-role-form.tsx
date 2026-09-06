@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { lazy, Suspense, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -100,7 +101,13 @@ export function AgentRoleForm({
   const configOptionSelectors = selectorOptions
     ? selectAuthorableAgentRoleConfigOptions(selectorOptions.configOptionSelectors)
     : [];
-  const capabilitiesUnavailable = selectorOptions?.capabilityAuthority === 'unavailable';
+  /* Run-config controls are shown only for capabilities the AGENT reported.
+     `provisional` ones come from the built-in static tables, and a control drawn
+     from those reads as a choice while `applyAgentRoleRunConfigDefaults` refuses
+     to seed it — a boolean would render Off and save as unset, so the Role would
+     promise a configuration the user never picked. The existing copy already
+     says what to do: open the agent once, then edit the Role. */
+  const capabilitiesUnreported = selectorOptions?.capabilityAuthority !== 'authoritative';
   const hasError = (code: AgentRoleFormError) => errors.includes(code);
 
   return (
@@ -223,8 +230,8 @@ export function AgentRoleForm({
             title={t('settings.agentRoles.form.sectionRunConfig')}
             hint={t('settings.agentRoles.form.sectionRunConfigHint')}
           >
-            {capabilitiesUnavailable || !selectorOptions ? (
-              <FormMessage tone="warning">
+            {capabilitiesUnreported || !selectorOptions ? (
+              <FormMessage tone={hasError('run_config_unavailable') ? 'error' : 'warning'}>
                 {t('settings.agentRoles.form.capabilitiesUnavailable')}
               </FormMessage>
             ) : (
@@ -449,7 +456,7 @@ function ValueSelect({
 }: {
   label: string;
   value: string | null;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; disabled?: boolean }[];
   onChange: (value: string) => void;
 }) {
   return (
@@ -459,7 +466,7 @@ function ValueSelect({
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}
           </SelectItem>
         ))}
@@ -478,6 +485,7 @@ function ConfigOptionField({
   onChange: (value: string | boolean) => void;
 }) {
   const fieldId = useId();
+  if (selector.availability) return <AcpControlAvailability selector={selector} value={value} />;
   if (selector.type === 'boolean') {
     return (
       <div className="flex items-center justify-between gap-4">

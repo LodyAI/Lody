@@ -261,28 +261,189 @@ Two things the dev build does deliberately, both load-bearing:
   mapping onto each agent's advertised option ids (also the source of truth for the
   web selectors), `applyAgentRunConfigSelection` in `src/commands/session.ts` applies it
   once the target agent's cached capabilities are read, and
-  `validateSessionCreateOptions({ dispatchConfig })` rejects unsupported selections
-  before the Operation is accepted. `lody_session_create_options` publishes the valid
+  `validateSessionCreateOptions({ dispatchConfig })` resolves the effective dispatch
+  config before the Operation is accepted (it no longer rejects on capability
+  evidence — see the snapshot invariant below). `lody_session_create_options` publishes the valid
   values per agent config as `runConfig`. Its default response is sparse: online Machines,
   one default/current agent config, the current local project, and no GitHub repository
   fetch. Agent configs/local projects/repos expand only through their query inputs.
   Durable create acceptance stores each target's resolved effective dispatch config;
   recovery must use it instead of inheriting again from mutable requester history.
-- INVARIANT: reasoning effort and fast mode are per MODEL. An ACP probe's
-  `configOptions` only describe the model that was current at probe time — agents
-  rebuild those options on every model switch and then REJECT a value the new model
-  does not support. `acp-capability-normalization.ts` recovers the model-independent
-  view into `AcpCapabilityCacheEntry.modelReasoningEfforts` from agents that also
-  publish the legacy `model[effort]` list (Codex); effort is validated against the
-  TARGET model and the ids so validated come back as `validatedConfigIds`, which
-  `validateTurnConfigOptionValues(..., skipIds)` must skip (the probed model's list
-  would wrongly reject them). What cannot be checked offline is dispatched as
-  requested. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
-  for model, reasoning effort, Fast, or Plan are not promoted to visible
-  `agent_warning` notices, while other rejected selections still are. Compatibility exception: Claude
-  Fable models omit the Fast mode option, so an explicit `fast=false` is skipped as
-  an already-effective no-op; `fast=true` must still be dispatched and retained in debug
-  diagnostics if rejected.
+- INVARIANT: a capability snapshot never rejects a run config. `configOptions`
+  describes the model that was current when it was captured — and every created
+  session rewrites it (`scheduleCreatedSessionCapabilityUpdate`), so it describes
+  whichever model ran last. Neither a missing option, nor a value outside the list
+  it recorded, nor an unseen model/mode id is evidence about the model a turn
+  selects. `validateTurnConfigOptionValues` therefore rejects only what no model
+  could carry: a value the option's own declared TYPE forbids. Everything else is
+  dispatched and reconciled against the state the agent publishes.
+  Do not reintroduce a `validatedConfigIds`-style exemption set, nor an offline
+  classification of what "could not be confirmed": both only made sense while the
+  snapshot could reject. With rejection gone there is nothing to exempt, and a
+  classification nobody reads is not a diagnostic — the runtime divergence
+  comparison is the report.
+  INHERITANCE is the one place that still drops:
+  `filterInheritedTurnConfigOptionValues` keeps an uncataloged key only when
+  `isAcpPerModelConfigId` recognises it. A value carried forward from an older
+  turn is not a request — nobody asked for it on this turn — so a removed or
+  renamed option would otherwise ride the Session lineage forever: every new
+  Session inherits it, the agent rejects it, and that config becomes the next
+  inheritance source, with no surface anywhere to clear it. The same rule applies
+  when there is no capability at all; an explicit request is always available, so
+  a missing snapshot must not become a licence to carry every historical key.
+  Explicit `--config-option` and frozen Operation requests keep going out
+  unchanged — that split is the whole point.
+  The one thing that still fails loudly is a missing wire BINDING — no snapshot
+  option and no agent convention for how to spell a control, so there is no
+  request to send and an invented id would be a silent no-op. That is a different
+  statement from "unsupported" and must be worded as such.
+  `acp-capability-normalization.ts` still recovers `modelReasoningEfforts` from the
+  legacy `model[effort]` list (Codex): a published per-model breakdown describes
+  models the snapshot itself does not. It never rejects one.
+  A DECLARED catalog is the same kind of evidence, said explicitly. An adapter may
+  attach `_meta.lody.modelCapabilities` (`{ version: 1, models: { <modelId>:
+  { effortValues?, fastMode? } } }`) to its `session/new` response, which is what
+  lets a surface answer "does Luna support Fast?" while the probe ran on a model
+  that has no fast tier — `measuredForModelId` records which model the snapshot is
+  actually about. It is advisory in one direction only: it may report a control a
+  snapshot never carried, and it never grants permission, never authorizes a value,
+  and never rejects one. A model it does not name is UNKNOWN, not unsupported, so
+  the declaration is read whole or ignored whole (`readDeclaredModelCapabilities`):
+  half a catalog past the 64-model bound would answer "no fast mode" for models the
+  agent simply could not fit. It is freshness-gated — a TTL plus a `sourceVersion`
+  that must equal the entry's own, because a declaration heard from one adapter
+  build says nothing about the next one. Storage has two rules that are easy to
+  undo: a later probe that heard no declaration must NOT clear one already stored
+  for the same `sourceVersion` (an ordinary refresh does not re-elicit `_meta`), and
+  the write-dedup key must include the declared content, or the first declaration to
+  arrive alongside an otherwise unchanged snapshot is silently dropped.
+  Client side: a Role may be seeded only from `authoritative` capabilities —
+  `provisional` means the built-in static tables, and seeding from those persists a
+  guess as a durable promise. Nor may it be SAVED without one: a Role is its run
+  config and pins the permission mode, so `validateAgentRoleForm` refuses a new
+  Role while capabilities are unreported (`run_config_unavailable`), keyed on
+  CREATION rather than on the value being empty: the chat landing and the input
+  area both create a Role from what the composer currently shows, and under
+  `provisional` capabilities those are the static tables' own defaults — a
+  non-empty run config nobody chose. Editing an existing Role stays open, so its
+  owner can rename it while the machine is offline. The composer keeps stored keys its selector catalog
+  does not cover; only a present runtime table (the agent's live state) owns the
+  whole key set. Runtime rejections remain in debug diagnostics; what becomes a visible
+  `agent_warning` is DIVERGENCE — the state the agent publishes after applying the
+  turn's config contradicts what was requested. A rejection is not that signal in
+  either direction: Codex accepts `fast-mode` on a model with no fast speed tier and
+  then omits the option from its published state, so the state is the only evidence
+  Fast is off, while a rejected value that was already effective changed nothing and
+  must stay silent. Only where the agent published no config options at all (or for a
+  sensitive id, which the runtime state deliberately omits) does the failed call
+  remain the sole signal. Do not restore a per-agent suppression list: it silenced
+  exactly the per-model controls users most need told about. Compatibility exception:
+  Claude Fable models omit the Fast mode option, so an explicit `fast=false` is
+  skipped as an already-effective no-op and is judged for neither; `fast=true` must
+  still be dispatched and retained in debug diagnostics if rejected.
+- INVARIANT: permission-bearing config (the mode option, plan/collaboration mode)
+  is applied LAST, after the model and the ordinary options. Claude rebuilds the
+  available permission modes on a model switch and downgrades the current one to
+  `default` when the new model lacks it, so a mode set before the model is
+  silently widened by the model that follows. `applyPromptConfig` runs before
+  `prompt`, so the state read after applying is still taken before the agent acts.
+  A successful `session/set_mode` is an acknowledgement, not proof of the resulting
+  state: it may only FILL a mode the agent's own state does not report, never
+  overwrite one — echoing the request back as the outcome makes every mode
+  divergence invisible. Divergence is reported, not blocked: no run-config
+  mismatch may prevent Session creation or prompt submission, and Agent Roles and
+  frozen Operations behave exactly like ordinary preferences at run time,
+  differing only in warning wording and follow-up marking. A Role that would run
+  diverged is surfaced, not refused — an upgrade must never turn a Role that used
+  to run into one that fails.
+  EXCEPTION, and the only one: when the agent's own reported final state says the
+  turn would run with MORE permission than it asked for, the turn fails before
+  `prompt` (`AcpPermissionNotAppliedError` → `permission_not_applied`). By the
+  time a warning about that is readable the agent may already have edited files,
+  so this is the one divergence a notice cannot cover. It fires only on a live
+  contradiction. Permission arrives in THREE shapes and all three are checked:
+  the legacy `session/set_mode` selector, a `category: 'mode'` config option, and
+  an explicit `category: '_permission'` one (Grok's `permission_mode`, values
+  `ask`/`auto`/`always-approve`). Matching only the first two let a requested
+  `ask` run as `always-approve` with nothing but a warning. Each requested
+  permission-bearing value is compared against the agent's reported value for
+  THAT control; `isAcpPermissionWiderThanRequested` requires BOTH values to be
+  ranked among the builtin ones and the effective one to be strictly wider, and
+  the effective value is read from the agent's published state — a snapshot, a
+  stale cache, an unranked third-party mode, an unconfirmed request, or a
+  NARROWER outcome must never stop a turn. The rank table covers only values the
+  repo adapts (Codex, Claude, Grok `ask`/`auto`/`always-approve`, DeepSeek
+  Harness `read-only`/`workspace-write`/`danger-full-access`); adding an agent
+  means adding its values there, or its escalations go unseen. The way out is explicit and
+  per-turn: `SessionTurnInputConfig.acceptWiderPermission` is informed
+  acceptance carried by one resend, never inherited and never a default, and it
+  suppresses the stop while still reporting the mismatch. It NAMES the exact
+  difference that was disclosed — `{ controlId, requestedModeId,
+  effectiveModeId }`, written from the failure notice's own meta — because a
+  bare boolean also accepts differences the user never saw: the agent may have
+  moved further by the time the turn re-runs (`plan → auto` accepted, `plan →
+  always-approve` live), and a second permission control may have widened
+  alongside the one in the notice (Grok carries both a mode selector and an
+  explicit `_permission` one). The applier skips ONLY exact triple matches and
+  keeps scanning the remaining permission selections, so anything undisclosed
+  stops the turn again with its own accurate notice.
+  It is a LIST (`acceptWiderPermissions`) because those differences are
+  disclosed one stop at a time: two controls widening at once produce two
+  notices, and a replay carrying only the newest acceptance would drop the
+  previous one and land back on the first — the user alternates between two
+  notices with no way through. A retry therefore inherits the acceptances
+  already on the turn it is replaying, re-validated, and appends the current
+  notice's triple. Accumulating grants nothing extra, because every entry is
+  still matched exactly. An ordinary send, edit-and-resend and any prompt-derived
+  turn clear the whole set; a same-turn transport retry keeps it. Do not match on the values
+  alone, and do not treat a rank ceiling as equivalent across different
+  permission controls. The notice meta and the acceptance share ONE schema
+  (`AcceptedWiderPermissionSchema`): the client reads the meta and writes it
+  straight back, and Zod strips undeclared keys, so a second declaration drops a
+  field on every history read — the action then disappears from a failure the
+  daemon reported correctly. A malformed or pre-triple `permission` degrades to
+  absent rather than failing the parse, so the notice still renders and simply
+  offers no acceptance. That resend replays the
+  STOPPED turn: prompt, mode, model, config values, Role, `mcpServerIds`
+  (including an explicit empty selection), `taskToolsEnabled` and
+  `issuePRMentions` all come from its frozen `inputConfig`, never from the
+  composer — pairing an old prompt with tool reach the user has since changed
+  would hand it permissions that turn never had. Those fields travel as ONE
+  required `TurnScopedOverrides` carrier through every send route (direct,
+  queue, guide), because each route rebuilds the turn config from composer
+  state: a route that forwarded three of four silently produced a turn with no
+  acceptance, which the daemon stopped again. Required, not optional, so a new
+  route fails to compile rather than dropping it. The same field must survive
+  every REBUILD on the way to the daemon, and there are three hand-written ones:
+  `normalizeSessionTurnInputConfig` (which direct RPC, `session/dispatch-turn`,
+  steer, the Loro history readback and queue promotion all run the config
+  through), the dispatch watcher's two `acpSessionConfig` constructions, and
+  queue promotion's `buildSessionTurnInputConfig` call. A rebuild that omits it
+  stops the very turn the user just accepted. Each copies ONLY an explicit
+  `true`: `false` and absent are the same answer, and neither may be written
+  back as something a later turn could read. `buildCliHistoryInputConfig` is the
+  deliberate exception — CLI and MCP turns never carry an acceptance, and it
+  must not become inheritable there.
+  The mirror image is just as load-bearing: making the field survive rebuilds
+  also made it copyable. Any derivation that mints a new `userTurnId` or changes
+  the prompt/input blocks — edit-and-resend, queue-item editing, the Operation
+  completion turn, history replay import — must drop it, through
+  `deriveTurnInputConfigForNewTurn` wherever the type allows. The acceptance was
+  given for ONE prompt; carrying it onto another is a permission bypass built
+  out of a spread, and `{...original, ...replacement}` is that spread: a
+  replacement that merely LACKS the field does not overwrite a present one. The
+  DAEMON enforces this, not the client — edit-and-resend rebuilds server-side,
+  so a correct client is not what makes it safe. Same-turn rewrites (status,
+  `_lodyDeliveryKind`, transport retry) are not copies and keep it. The
+  `overrides` parameter cannot re-add the field, and speculative preparation
+  configs do not carry it at all.
+  The notice names the turn it stopped (`permission.userTurnId`) and the client
+  matches by that id. Reading "the nearest user entry above the notice" instead
+  attaches the acceptance to whatever landed last — another client's turn, or an
+  edit-and-resend that rewrote history between the failure and the notice — and
+  if that prompt makes the same permission selection it runs with an acceptance
+  nobody gave it. Adjacency remains only as the fallback for notices written
+  before the field existed.
 - MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
   (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
   `session history --all`. `session_list` and `session_status_many` derive busy/idle from
@@ -437,3 +598,11 @@ first. Managed runtime artifact pins and checksums live in
 external distribution responsibilities. Observed per-agent edit-evidence behavior and
 the ACP protocol reference are documented in `context/acp-protocol.md` and
 `context/acp-agent-edit-evidence.md`.
+
+The authenticated ACP contract smoke test is explicitly opt-in: `pnpm --filter lody test:acp-live`, with absolute `CODEX_PATH` and
+`CLAUDE_CODE_EXECUTABLE` pointing at the native versions being checked. It rebuilds
+both adapters and typechecks the probe separately because ordinary CLI typechecking
+excludes tests. It uses temporary workspaces and synthetic prompts, consumes provider
+quota, and is not part of the deterministic offline suite. Never commit its raw logs.
+A passing smoke test covers advertised config transitions and plain-text output, not
+all tools, recovery, cancellations, or every provider-side model execution.

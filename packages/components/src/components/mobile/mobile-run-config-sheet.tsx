@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from '../shared/acp-control-availability';
 import { useMemo, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -606,7 +607,12 @@ function MobileRunConfigSheetRows({
         </RunConfigRow>
       ) : null}
 
-      {thinkingSelector && thinkingOptions.length > 0 ? (
+      {thinkingSelector?.availability ? (
+        <AcpControlAvailability
+          selector={thinkingSelector}
+          value={configOptionValues?.[thinkingSelector.configId]}
+        />
+      ) : thinkingSelector && thinkingOptions.length > 0 ? (
         <RunConfigRow label={reasoningLabel}>
           <MobileInlinePicker<string>
             id="run-config-reasoning"
@@ -663,7 +669,12 @@ function MobileRunConfigSheetRows({
         />
       ) : null}
 
-      {fastSelector ? (
+      {fastSelector?.availability ? (
+        <AcpControlAvailability
+          selector={fastSelector}
+          value={configOptionValues?.[fastSelector.configId]}
+        />
+      ) : fastSelector ? (
         <ToggleRow
           icon={<Zap className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />}
           label={fastRowLabel}

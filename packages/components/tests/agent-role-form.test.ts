@@ -217,6 +217,27 @@ describe('building a role from the form', () => {
 });
 
 describe('run config defaults', () => {
+  it('never seeds a synthetic default or authorizes an unavailable control', () => {
+    const options = selectorOptions({
+      configOptionSelectors: [
+        {
+          configId: 'fast-mode',
+          label: 'Fast',
+          type: 'boolean',
+          options: [],
+          currentValue: false,
+          perModel: true,
+          hasDefault: false,
+          availability: 'unknown',
+        },
+      ],
+    });
+    expect(applyAgentRoleRunConfigDefaults(formValue(), options).configOptionValues).toEqual({});
+    expect(
+      findAgentRoleRunConfigIssues({ configOptionValues: { 'fast-mode': true } }, options)
+    ).toEqual([{ kind: 'option_value_unsupported', configId: 'fast-mode', value: 'true' }]);
+  });
+
   it('writes the agent own defaults into the unset fields', () => {
     expect(
       applyAgentRoleRunConfigDefaults(formValue({ modelId: null }), selectorOptions())
@@ -263,6 +284,14 @@ describe('run config defaults', () => {
 });
 
 describe('run config compatibility', () => {
+  it('does not authorize a model merely retained for display', () => {
+    const options = selectorOptions();
+    options.modelOptions.push({ value: 'unlisted', label: 'Unlisted', disabled: true });
+    expect(findAgentRoleRunConfigIssues({ modelId: 'unlisted' }, options)).toEqual([
+      { kind: 'model_unsupported', value: 'unlisted' },
+    ]);
+  });
+
   it('reports every setting the agent no longer publishes', () => {
     expect(
       findAgentRoleRunConfigIssues(

@@ -1012,45 +1012,48 @@ describe('AgentConfigDialog', () => {
     expect(findSignInAgainButton()).toBeUndefined();
   });
 
-  it('saves a normalized title reasoning effort after the title model changes', async () => {
-    const onSubmit = vi.fn(async () => {});
-    const config = {
-      id: codexConfigId,
-      machineId,
-      name: 'Codex',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      env: {},
-      titleGeneration: {
-        configOptionValues: {
-          model: 'gpt-5.6-other',
-          reasoning_effort: 'ultra',
-        },
-      },
-    } as AgentConfigMeta;
-
-    await renderDialog({ kind: 'edit', config }, createCodexMachine(), onSubmit);
-
-    expect(document.body.textContent).toContain('Title generation');
-
-    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Save'
-    );
-    expect(saveButton).toBeDefined();
-    await act(async () => {
-      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
+  it.each(['gpt-5.6-other', 'gpt-6-astra'])(
+    'preserves the explicit title model %s and its effort across metadata changes',
+    async (model) => {
+      const onSubmit = vi.fn(async () => {});
+      const config = {
+        id: codexConfigId,
+        machineId,
+        name: 'Codex',
+        description: undefined,
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
         titleGeneration: {
           configOptionValues: {
-            model: 'gpt-5.6-other',
-            reasoning_effort: 'medium',
+            model,
+            reasoning_effort: 'ultra',
           },
         },
-      })
-    );
-  });
+      } as AgentConfigMeta;
+
+      await renderDialog({ kind: 'edit', config }, createCodexMachine(), onSubmit);
+
+      expect(document.body.textContent).toContain('Title generation');
+
+      const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => button.textContent?.trim() === 'Save'
+      );
+      expect(saveButton).toBeDefined();
+      await act(async () => {
+        saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          titleGeneration: {
+            configOptionValues: {
+              model,
+              reasoning_effort: 'ultra',
+            },
+          },
+        })
+      );
+    }
+  );
 });

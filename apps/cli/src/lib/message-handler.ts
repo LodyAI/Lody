@@ -63,6 +63,7 @@ import {
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
+  type ChatFailedMeta,
   type ChatFailedReason,
   type ProjectRef,
   type SessionPreparationCancelSpec,
@@ -319,6 +320,7 @@ import { AutoPromptRunner } from '@/session/auto-prompt-runner';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
+  AcpPermissionNotAppliedError,
   type AcpSessionRunConfig,
 } from '@/session/acp-session-config-applier';
 import {
@@ -1680,7 +1682,8 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     reason: ChatFailedReason,
     message?: string,
-    code?: ChatFailedCode
+    code?: ChatFailedCode,
+    permission?: ChatFailedMeta['permission']
   ): Promise<void> {
     // Failure notices append to the history list; order them after the user
     // turn entry for RPC fast-path turns (no-op when no gate is pending).
@@ -1693,6 +1696,7 @@ export class MessageHandler {
       meta: {
         reason,
         ...(code ? { code } : {}),
+        ...(permission ? { permission } : {}),
         message,
       },
     };
@@ -1722,11 +1726,12 @@ export class MessageHandler {
       basedOnUserTurnId?: string;
     }
   ): Promise<void> {
-    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
-      session,
-      config,
-      logger: this.logger,
-    });
+    const { runtimeConfigPatch, warningSelections, permissionEscalation } =
+      await applyAcpSessionRunConfig({
+        session,
+        config,
+        logger: this.logger,
+      });
 
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
@@ -1741,13 +1746,27 @@ export class MessageHandler {
       });
     }
 
+    /* The one divergence that stops a turn. Everything else — model, effort,
+       fast — runs and reports, because the worst case is a slower or costlier
+       turn. Running with MORE permission than the user asked for is not that:
+       by the time a warning is readable the agent may already have edited
+       files. The turn fails here, before `prompt`, and the user re-sends with
+       an explicit one-time acceptance if they want it anyway. */
+    if (permissionEscalation) {
+      throw new AcpPermissionNotAppliedError(
+        permissionEscalation.controlId,
+        permissionEscalation.requestedModeId,
+        permissionEscalation.effectiveModeId
+      );
+    }
+
     if (warningSelections.length > 0) {
       // Not awaited: this is reporting, and the prompt hot path must not block
       // on a history write.
       void this.recordAgentWarning(session.sessionId, {
-        message: `The agent rejected part of the requested run configuration (${warningSelections.join(
+        message: `The agent did not apply part of the requested run configuration (${warningSelections.join(
           ', '
-        )}) and is using its own values instead. Reasoning effort and fast mode depend on the selected model.`,
+        )}) and is running with its own values instead. Reasoning effort and fast mode depend on the selected model.`,
         source: 'configWarning',
       });
     }
@@ -3128,8 +3147,8 @@ export class MessageHandler {
         notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
           await this.notifySessionCompleted(sessionId, userId, occurrenceId),
       },
-      recordChatFailure: async (sessionDoc, reason, message, code) =>
-        await this.recordChatFailure(sessionDoc, reason, message, code),
+      recordChatFailure: async (sessionDoc, reason, message, code, permission) =>
+        await this.recordChatFailure(sessionDoc, reason, message, code, permission),
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,

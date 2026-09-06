@@ -51,6 +51,9 @@ const historyFixture = (): SessionHistoryInput[] => [
       configOptionValues: {
         collaboration_mode: 'plan',
       },
+      acceptWiderPermissions: [
+        { controlId: 'mode', requestedModeId: 'plan', effectiveModeId: 'auto' },
+      ],
     },
   },
   {
@@ -225,6 +228,20 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it("does not carry the original turn's permission acceptance onto the new prompt", async () => {
+    // The client already drops it, but a rule the daemon does not enforce is a
+    // rule the next client forgets: the replacement config only LACKS the field,
+    // and a missing key does not overwrite a present one in a spread.
+    const harness = createHarness({ active: true });
+
+    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: true });
+
+    const replacement = harness.getHistory().at(-1);
+    expect(replacement?.inputConfig).not.toHaveProperty('acceptWiderPermissions');
+    // The rest of the original turn's config still carries over.
+    expect(replacement?.inputConfig).toMatchObject({ modelId: 'model-1' });
   });
 
   it('leaves the active turn untouched when provider fork fails', async () => {

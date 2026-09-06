@@ -1,3 +1,4 @@
+import { AcpControlAvailability } from './acp-control-availability';
 import type { ReactNode } from 'react';
 import { Check, ListChecks, Zap, ZapOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -47,26 +48,33 @@ const renderConfigSelector = (
     values,
     onChange,
   }: RenderConfigSelectorOptions
-) => (
-  <AcpSessionSelect
-    key={selector.configId}
-    tone={tone}
-    variant={variant}
-    className={className}
-    contentClassName={contentClassName}
-    value={resolveConfigOptionValue(selector, values?.[selector.configId]) as string}
-    onChange={(value) => onChange?.(selector.configId, value)}
-    options={selector.options}
-    placeholder={placeholder ?? selector.label}
-    disabled={!onChange || selector.options.length === 0}
-    align="start"
-    showDescription
-    icon={icon}
-    iconOnly={iconOnly}
-    ariaLabel={selector.label}
-    triggerTitle={selector.label}
-  />
-);
+) =>
+  selector.availability ? (
+    <AcpControlAvailability
+      key={selector.configId}
+      selector={selector}
+      value={values?.[selector.configId]}
+    />
+  ) : (
+    <AcpSessionSelect
+      key={selector.configId}
+      tone={tone}
+      variant={variant}
+      className={className}
+      contentClassName={contentClassName}
+      value={resolveConfigOptionValue(selector, values?.[selector.configId]) as string}
+      onChange={(value) => onChange?.(selector.configId, value)}
+      options={selector.options}
+      placeholder={placeholder ?? selector.label}
+      disabled={!onChange || selector.options.length === 0}
+      align="start"
+      showDescription
+      icon={icon}
+      iconOnly={iconOnly}
+      ariaLabel={selector.label}
+      triggerTitle={selector.label}
+    />
+  );
 
 const renderBooleanToggle = (
   selector: AcpBooleanConfigOptionSelector,
@@ -114,6 +122,14 @@ const renderFastModeToggle = (
     onChange?: (configId: string, value: AcpConfigOptionValue) => void;
   }
 ) => {
+  if (selector.availability)
+    return (
+      <AcpControlAvailability
+        key={selector.configId}
+        selector={selector}
+        value={values?.[selector.configId]}
+      />
+    );
   const value = resolveOnOffConfigOptionEnabled(selector, values?.[selector.configId]);
   const disabled = !onChange;
   const Icon = value ? Zap : ZapOff;

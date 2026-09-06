@@ -74,6 +74,7 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom } from '@/atoms/runtime';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
+import type { PermissionRetryControl } from '@/lib/permission-not-applied-retry';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -1814,6 +1815,7 @@ export const MessageRowView = memo(function MessageRowView({
   onEdit,
   onResendUndelivered,
   capacityRetry,
+  permissionRetry,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
 }: {
   message: SessionHistoryParsed;
@@ -1822,6 +1824,7 @@ export const MessageRowView = memo(function MessageRowView({
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
+  permissionRetry?: PermissionRetryControl;
   user?: SessionChatUser;
   conversationFontSize?: ConversationFontSize;
 }) {
@@ -1843,6 +1846,7 @@ export const MessageRowView = memo(function MessageRowView({
         sessionId={sessionId}
         onNavigateSession={onNavigateSession}
         capacityRetry={capacityRetry}
+        permissionRetry={permissionRetry}
       />
     );
   }
@@ -1876,11 +1880,13 @@ const SystemMessageRowView = ({
   sessionId,
   onNavigateSession,
   capacityRetry,
+  permissionRetry,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
+  permissionRetry?: PermissionRetryControl;
 }) => {
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const systemItems = message.items.flatMap((item, itemIndex) =>
@@ -1909,6 +1915,7 @@ const SystemMessageRowView = ({
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
             capacityRetry={capacityRetry}
+            permissionRetry={permissionRetry}
           />
         ) : item.type === 'worktree_script' ? (
           <WorktreeScriptNoticeView
@@ -2085,18 +2092,25 @@ const SystemNoticeView = ({
   sessionId,
   onNavigateSession,
   capacityRetry,
+  permissionRetry,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
+  permissionRetry?: PermissionRetryControl;
 }) => {
   const { t } = useTranslation();
 
   switch (notice.name) {
     case 'chat_failed':
       return (
-        <ChatFailedNoticeView notice={notice} sessionId={sessionId} capacityRetry={capacityRetry} />
+        <ChatFailedNoticeView
+          notice={notice}
+          sessionId={sessionId}
+          capacityRetry={capacityRetry}
+          permissionRetry={permissionRetry}
+        />
       );
     case 'agent_warning':
       return <AgentWarningNoticeView notice={notice} />;
@@ -2213,10 +2227,12 @@ const ChatFailedNoticeView = ({
   notice,
   sessionId,
   capacityRetry,
+  permissionRetry,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
+  permissionRetry?: PermissionRetryControl;
 }) => {
   const { t } = useTranslation();
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
@@ -2292,6 +2308,21 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.turnPrePromptFailed',
           'Failed before the agent could start'
         );
+      case 'permission_not_applied': {
+        const permission = (
+          notice.meta as { permission?: { requestedModeId?: string; effectiveModeId?: string } }
+        )?.permission;
+        return permission?.requestedModeId && permission.effectiveModeId
+          ? t(
+              'sessions.systemNotices.chatFailed.permissionNotAppliedDetail',
+              'Stopped before running: this turn asked for "{{requested}}" but the agent reported "{{effective}}", which allows more',
+              { requested: permission.requestedModeId, effective: permission.effectiveModeId }
+            )
+          : t(
+              'sessions.systemNotices.chatFailed.permissionNotApplied',
+              'The agent did not apply the requested permission mode, so the turn was stopped before it ran'
+            );
+      }
       case 'message_delivery_failed':
         return t(
           'sessions.systemNotices.chatFailed.messageDeliveryFailed',
@@ -2459,6 +2490,26 @@ const ChatFailedNoticeView = ({
       </button>
     ) : null;
 
+  /* Naming both permissions is the point: "run anyway" would hide which one the
+     turn is about to run with. The ids are what the agent and the composer both
+     use, so they are what the user can match against. */
+  const permissionAction = permissionRetry ? (
+    <button
+      type="button"
+      className="inline-flex h-7 shrink-0 items-center rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+      disabled={permissionRetry.pending || !permissionRetry.canRetry}
+      onClick={permissionRetry.retry}
+    >
+      {permissionRetry.pending
+        ? t('sessions.systemNotices.chatFailed.permissionRunning', 'Starting…')
+        : t(
+            'sessions.systemNotices.chatFailed.permissionRunOnce',
+            'Run once with "{{effective}}"',
+            { effective: permissionRetry.disclosed.effectiveModeId }
+          )}
+    </button>
+  ) : null;
+
   return (
     <div className="space-y-2 py-1 @[640px]:pl-3">
       {/* Tapping the notice opens a modal instead of a hover tooltip: a tooltip
@@ -2478,6 +2529,7 @@ const ChatFailedNoticeView = ({
           <div className={rowClassName}>{noticeBody}</div>
         )}
         {retryAction}
+        {permissionAction}
       </div>
       {hasDetail ? (
         <ChatFailedDetailDialog

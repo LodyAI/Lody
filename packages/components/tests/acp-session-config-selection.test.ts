@@ -40,7 +40,7 @@ describe('ACP session config derivation', () => {
     ).toBe('gpt-5.6-sol');
   });
 
-  it('replaces an invalid preference only after authoritative validation', () => {
+  it('does not replace an unlisted model even after a runtime probe', () => {
     const inputs = { edits: emptyEdits, preferences: { modelId: 'removed-model' } };
     expect(resolveAcpSessionConfigSelection(inputs, baseOptions).selectedModelId).toBe(
       'removed-model'
@@ -50,7 +50,7 @@ describe('ACP session config derivation', () => {
         ...baseOptions,
         capabilityAuthority: 'authoritative',
       }).selectedModelId
-    ).toBe('gpt-5.5');
+    ).toBe('removed-model');
   });
 
   it('derives fresh defaults but preserves explicit user selections', () => {
@@ -74,46 +74,59 @@ describe('ACP session config derivation', () => {
       resolveAcpSessionConfigSelection({ edits: edited, preferences: {} }, authoritative)
         .selectedModelId
     ).toBe('gpt-5.5');
-    // An INVALID user edit falls through the chain under authoritative caps.
+    // An unlisted user choice is still explicit intent, not permission to substitute.
     const invalidEdit: AcpSessionUserConfigEdits = { model: { value: 'gone' }, configOptions: {} };
     expect(
       resolveAcpSessionConfigSelection({ edits: invalidEdit, preferences: {} }, authoritative)
         .selectedModelId
-    ).toBe('gpt-5.6-sol');
+    ).toBe('gone');
   });
 
-  it('keeps unknown config keys provisionally and removes them authoritatively', () => {
+  it('keeps a stored per-model value the catalog omits, and drops other unknown keys', () => {
+    // A catalog captured under a model with no fast tier: it carries the
+    // ordinary option but not `fast-mode`.
     const selectors = [
       {
-        configId: 'fast-mode',
-        label: 'Fast mode',
+        configId: 'approval_policy',
+        label: 'Approval policy',
         type: 'select' as const,
-        currentValue: 'off',
+        currentValue: 'on-request',
         options: [
-          { value: 'off', label: 'Off' },
-          { value: 'on', label: 'On' },
+          { value: 'on-request', label: 'On request' },
+          { value: 'never', label: 'Never' },
         ],
       },
     ];
     const inputs = {
       edits: emptyEdits,
       preferences: {
-        configOptionValues: { future_option: 'enabled', 'fast-mode': 'future-value' },
+        configOptionValues: {
+          approval_policy: 'never',
+          'fast-mode': true,
+          future_option: 'enabled',
+        },
       },
     };
+
+    // Non-authoritative keeps stored values verbatim, as before.
     expect(
       resolveAcpSessionConfigSelection(inputs, {
         ...baseOptions,
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ future_option: 'enabled', 'fast-mode': 'future-value' });
+    ).toEqual({ approval_policy: 'never', 'fast-mode': true, future_option: 'enabled' });
+
+    // Authoritative means the catalog is the agent's own — of ONE model. It
+    // omits `fast-mode` because the probed model had no fast tier, so an Agent
+    // Role pinning Fast keeps its value; `future_option` is simply stale and
+    // has no per-model excuse, so it goes.
     expect(
       resolveAcpSessionConfigSelection(inputs, {
         ...baseOptions,
         capabilityAuthority: 'authoritative',
         configOptionSelectors: selectors,
       }).configOptionValues
-    ).toEqual({ 'fast-mode': 'off' });
+    ).toEqual({ approval_policy: 'never', 'fast-mode': true });
   });
 
   it('applies the runtime baseline over non-user fields', () => {
@@ -251,12 +264,7 @@ describe('ACP session config derivation', () => {
     }
   });
 
-  it('normalizes model-dependent selectors against the RESOLVED model', () => {
-    /* An authoritative capability refresh removed the persisted extended Codex
-       model (`gpt-5.6-sol`). The selector catalog was built for that stale
-       CANDIDATE, so the reasoning selector still carries the extended tiers —
-       without re-normalization, `max` would stay valid and dispatchable after
-       the model resolved to one that does not support it. */
+  it('keeps the selected model and effort when a later catalog omits the model', () => {
     const staleNormalizedReasoningSelector = {
       configId: 'reasoning_effort',
       label: 'Reasoning effort',
@@ -287,10 +295,40 @@ describe('ACP session config derivation', () => {
       },
       { cliType: 'builtin', agentType: 'codex' }
     );
-    expect(resolved.selectedModelId).toBe('gpt-5.5');
-    // `max` is not a reasoning tier of the resolved model: the stale
-    // preference falls through to the normalized selector's own value.
-    expect(resolved.configOptionValues.reasoning_effort).toBe('medium');
+    expect(resolved.selectedModelId).toBe('gpt-5.6-sol');
+    expect(resolved.configOptionValues.reasoning_effort).toBe('max');
+  });
+
+  it('does not seed synthetic defaults and keeps explicit values through unknown metadata', () => {
+    const selectors = [
+      {
+        configId: 'reasoning_effort',
+        label: 'Reasoning',
+        type: 'select' as const,
+        options: [],
+        currentValue: '',
+        perModel: true,
+        hasDefault: false,
+        availability: 'unknown' as const,
+      },
+    ];
+    const options = {
+      ...baseOptions,
+      capabilityAuthority: 'authoritative' as const,
+      configOptionSelectors: selectors,
+    };
+    expect(
+      resolveAcpSessionConfigSelection({ edits: emptyEdits, preferences: {} }, options)
+        .configOptionValues
+    ).toEqual({});
+    const requested = { reasoning_effort: 'high', 'fast-mode': true };
+    expect(
+      resolveAcpSessionConfigSelection(
+        { edits: emptyEdits, preferences: { configOptionValues: requested } },
+        options
+      ).configOptionValues
+    ).toEqual(requested);
+    expect(filterAcpSessionConfigOptionValues(requested, selectors)).toEqual(requested);
   });
 
   it('builds unvalidated candidates from the same chain', () => {
@@ -320,12 +358,14 @@ describe('ACP session config derivation', () => {
         ],
       },
     ];
+    // An uncataloged PER-MODEL id survives to dispatch; other uncataloged keys
+    // do not, and a cataloged one whose value the selector rejects does not.
     expect(
       filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' },
+        { 'fast-mode': true, collaboration_mode: 'plan', future_option: 'enabled' },
         selectors
       )
-    ).toEqual({ collaboration_mode: 'plan' });
+    ).toEqual({ 'fast-mode': true, collaboration_mode: 'plan' });
     expect(
       filterAcpSessionConfigOptionValues(
         { 'plan-mode': 'on', collaboration_mode: 'invalid' },
