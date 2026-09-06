@@ -5947,15 +5947,17 @@ export const SessionChatInterface = memo(
                     agentType: session.agentType,
                     config: sessionAgentConfig,
                   }) ? (
-                    <SessionAccountSelector
-                      key={session.id}
-                      machineId={session.machineId}
-                      sessionId={session.id}
-                      agentType={session.agentType}
-                      configId={session.agentConfigId}
-                      accountProfileId={session.accountProfileId}
-                      busy={isAgentBusy}
-                    />
+                    <ConversationColumn>
+                      <SessionAccountSelector
+                        key={session.id}
+                        machineId={session.machineId}
+                        sessionId={session.id}
+                        agentType={session.agentType}
+                        configId={session.agentConfigId}
+                        accountProfileId={session.accountProfileId}
+                        busy={isAgentBusy}
+                      />
+                    </ConversationColumn>
                   ) : null}
                   <SessionInfoBar
                     status={statusStripState}
