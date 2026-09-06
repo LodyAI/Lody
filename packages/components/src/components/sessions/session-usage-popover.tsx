@@ -147,41 +147,54 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
         </PopoverTrigger>
         <PopoverContent
           side="top"
-          align="start"
+          align="end"
           sideOffset={8}
           aria-label={t('sessions.usage.title', 'Usage')}
-          className="w-[min(17rem,calc(100vw-1rem))] rounded-xl p-3 shadow-lg"
+          className="w-[min(20rem,calc(100vw-1rem))] rounded-xl border-border/70 p-4 shadow-lg"
         >
+          <h2 className="mb-4 text-sm font-semibold leading-5 text-foreground">
+            {t('sessions.usage.title', 'Usage')}
+          </h2>
           {isContextCompacting ? (
-            <div className="space-y-2">
-              <div className="text-[11px] font-medium text-muted-foreground">
+            <section aria-label={t('sessions.usage.context', 'Context')} className="space-y-2">
+              <h3 className="text-[13px] font-medium leading-5 text-foreground">
                 {t('sessions.usage.context', 'Context')}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-foreground">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+              </h3>
+              <div className="flex items-center gap-2 text-xs leading-5 text-muted-foreground">
+                <Loader2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin" />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
-            </div>
+            </section>
           ) : context ? (
-            <UsageMeter
-              label={t('sessions.usage.context', 'Context')}
-              value={context.usedPercentage}
-              detail={`${formatCompactNumber(context.usedTokens, intlLocale)} / ${formatCompactNumber(
-                context.contextWindow,
-                intlLocale
-              )}`}
-            />
+            <section aria-label={t('sessions.usage.context', 'Context')}>
+              <UsageMeter
+                label={t('sessions.usage.context', 'Context')}
+                value={context.usedPercentage}
+                detail={`${formatCompactNumber(context.usedTokens, intlLocale)} / ${formatCompactNumber(
+                  context.contextWindow,
+                  intlLocale
+                )}`}
+              />
+            </section>
           ) : null}
 
           {(context || isContextCompacting) && hasRateLimitDetails ? (
-            <Separator className="my-2.5 bg-border/60" />
+            <Separator className="my-4 bg-border/60" />
           ) : null}
 
           {hasRateLimitDetails ? (
-            <div className="space-y-2.5">
-              <div className="truncate text-[11px] font-medium text-muted-foreground">
-                {resolvedModelLabel}
-              </div>
+            <section
+              aria-label={t('sessions.usage.accountLimits', 'Account limits')}
+              className="space-y-3"
+            >
+              <header className="space-y-0.5">
+                <h3 className="text-[13px] font-medium leading-5 text-foreground">
+                  {t('sessions.usage.accountLimits', 'Account limits')}
+                </h3>
+                <p className="break-words text-xs leading-5 text-muted-foreground">
+                  {resolvedModelLabel}
+                </p>
+              </header>
               {hasRateLimit ? (
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
@@ -196,7 +209,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                   />
                 ))
               ) : (
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs leading-5 text-muted-foreground">
                   {t(
                     'sessions.usage.unavailable',
                     'The provider did not report usage for this plan'
@@ -204,12 +217,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 </div>
               )}
               {wallet ? (
-                <div className="space-y-1 border-t border-border/60 pt-2 text-[11px]">
+                <div className="space-y-2 border-t border-border/60 pt-3 text-xs leading-5">
                   <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">
                       {t('sessions.usage.extraBalance', 'Extra usage balance')}
                     </span>
-                    <span className="font-mono tabular-nums">
+                    <span className="shrink-0 tabular-nums">
                       {formatMoney(wallet.balanceCents, wallet.currency, i18n.language)}
                     </span>
                   </div>
@@ -217,7 +230,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                     <span className="text-muted-foreground">
                       {t('sessions.usage.monthlySpend', 'Monthly spend')}
                     </span>
-                    <span className="font-mono tabular-nums">
+                    <span className="shrink-0 tabular-nums">
                       {formatMoney(wallet.monthlyUsedCents, wallet.currency, i18n.language)}
                       {wallet.monthlyChargeLimitEnabled
                         ? ` / ${formatMoney(
@@ -230,7 +243,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                   </div>
                 </div>
               ) : null}
-            </div>
+            </section>
           ) : null}
 
           {/* Codex only, and only while a forecast is in force: why the limits
@@ -312,17 +325,20 @@ function UsageMeter({
 
   return (
     <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-3 text-[11px] leading-4">
-        <span className="font-medium text-foreground/85">{label}</span>
-        <span className="shrink-0 font-mono tabular-nums text-muted-foreground">{valueLabel}</span>
+      <div className="flex items-baseline justify-between gap-3 text-[13px] leading-5">
+        <span className="font-medium text-foreground">{label}</span>
+        <span className="shrink-0 tabular-nums text-foreground">{valueLabel}</span>
       </div>
       <Progress
         value={value}
         aria-label={`${label}: ${valueLabel}`}
-        className="mt-1 h-1 bg-foreground/10 [&>div]:bg-foreground/55"
+        className={cn(
+          'mt-2 h-1.5 bg-foreground/10',
+          value >= 100 ? '[&>div]:bg-destructive' : '[&>div]:bg-foreground/55'
+        )}
       />
       {detail ? (
-        <div className="mt-1 truncate text-[10px] leading-3.5 text-muted-foreground/75">
+        <div className="mt-1.5 min-h-5 text-xs leading-5 tabular-nums text-muted-foreground">
           {detail}
         </div>
       ) : null}

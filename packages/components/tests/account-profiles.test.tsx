@@ -70,7 +70,94 @@ async function render(node: React.ReactNode) {
   await act(async () => root.render(node));
   return element;
 }
+function accountTrigger(element: HTMLElement): HTMLButtonElement {
+  const trigger = element.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  if (!trigger) throw new Error('Account menu trigger is missing');
+  return trigger;
+}
+async function key(element: Element, value: string) {
+  await act(async () => {
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })
+    );
+  });
+}
+async function openMenu(element: HTMLElement) {
+  const trigger = accountTrigger(element);
+  trigger.focus();
+  await key(trigger, 'Enter');
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+}
+function menuItem(label: string): HTMLElement {
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
+    (candidate) => candidate.textContent?.startsWith(label)
+  );
+  if (!item) throw new Error(`Account menu item ${label} is missing`);
+  return item;
+}
+async function chooseAccount(label: string) {
+  await act(async () => menuItem(label).click());
+}
+async function closeMenu() {
+  const menu = document.querySelector('[role="menu"]');
+  if (!menu) throw new Error('Account menu is missing');
+  await key(menu, 'Escape');
+}
 describe('account controls', () => {
+  it('opens with the keyboard and exposes identity and selected account in the menu', async () => {
+    mocks.list.mockResolvedValue({ success: true, profiles });
+    mocks.switch.mockResolvedValue({ success: true });
+    const element = await render(<SessionAccountSelector {...target} />);
+    const trigger = accountTrigger(element);
+    expect(trigger.textContent).toBe('System Default');
+    expect(trigger.getAttribute('aria-label')).toBe('Account: System Default');
+    await openMenu(element);
+    const current = menuItem('System Default');
+    expect(current.getAttribute('aria-checked')).toBe('true');
+    expect(current.textContent).toContain('work@example.com');
+    expect(current.textContent).toContain('Signed in');
+    const next = menuItem('Account B');
+    expect(next.getAttribute('aria-checked')).toBe('false');
+    next.focus();
+    await key(next, 'Enter');
+    expect(mocks.switch).toHaveBeenCalledWith(
+      expect.objectContaining({ accountProfileId: 'account-b' })
+    );
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger.textContent).toBe('System Default');
+    await openMenu(element);
+    await closeMenu();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps the current account and prevents another selection while a switch is pending', async () => {
+    const response = Promise.withResolvers<{ success: boolean }>();
+    mocks.list.mockResolvedValue({ success: true, profiles });
+    mocks.switch.mockReturnValue(response.promise);
+    const element = await render(<SessionAccountSelector {...target} />);
+    const trigger = accountTrigger(element);
+    await openMenu(element);
+    await chooseAccount('Account B');
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+    expect(trigger.textContent).toBe('System Default');
+    expect(element.querySelector('[role="status"]')?.textContent).toBe('Switching account…');
+    await act(async () => response.resolve({ success: true }));
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.textContent).toBe('System Default');
+    expect(element.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('keeps the menu disabled until account status has loaded', async () => {
+    const response = Promise.withResolvers<{ success: boolean; profiles: typeof profiles }>();
+    mocks.list.mockReturnValue(response.promise);
+    const element = await render(<SessionAccountSelector {...target} />);
+    expect(accountTrigger(element).disabled).toBe(true);
+    expect(accountTrigger(element).getAttribute('aria-busy')).toBe('true');
+    await act(async () => response.resolve({ success: true, profiles }));
+    expect(accountTrigger(element).disabled).toBe(false);
+  });
+
   it('coalesces mounted siblings and does not probe disabled selectors', async () => {
     mocks.list.mockResolvedValue({ success: true, profiles });
     const element = await render(
@@ -85,8 +172,10 @@ describe('account controls', () => {
       </>
     );
     expect(mocks.list).toHaveBeenCalledTimes(1);
-    expect(element.querySelectorAll('option[value="account-b"]')).toHaveLength(2);
-    expect(element.querySelectorAll('select')[2]?.disabled).toBe(true);
+    expect(element.querySelectorAll('button[aria-haspopup="menu"]')).toHaveLength(3);
+    expect(
+      element.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')[2]?.disabled
+    ).toBe(true);
   });
 
   it('publishes a Settings authentication refresh to an already mounted selector', async () => {
@@ -112,24 +201,21 @@ describe('account controls', () => {
       ],
     });
     await act(async () => authProps.onAuthenticated());
-    expect(element.querySelector('select option[value="new-account"]')?.textContent).toBe(
-      'New account'
-    );
+    await openMenu(element);
+    expect(menuItem('New account')).toBeDefined();
   });
   it('keeps the durable binding visible when a switch fails', async () => {
     mocks.list.mockResolvedValue({ success: true, profiles });
     mocks.switch.mockResolvedValue({ success: false, error: 'Target auth invalid' });
     const element = await render(<SessionAccountSelector {...target} />);
-    const select = element.querySelector('select')!;
-    expect(select.value).toBe('system-default');
-    await act(async () => {
-      select.value = 'account-b';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const trigger = accountTrigger(element);
+    expect(trigger.textContent).toBe('System Default');
+    await openMenu(element);
+    await chooseAccount('Account B');
     expect(mocks.switch).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'session-1', accountProfileId: 'account-b' })
     );
-    expect(select.value).toBe('system-default');
+    expect(trigger.textContent).toBe('System Default');
     expect(element.textContent).toContain('Target auth invalid');
   });
   it('renders the existing native login once directly under System Default', async () => {
@@ -169,8 +255,9 @@ describe('account controls', () => {
     await act(async () => root.render(<SessionAccountSelector {...target} />));
     await act(async () => root.render(<SessionAccountSelector {...target} agentType="claude" />));
     await act(async () => oldResponse.resolve({ success: true, profiles }));
-    expect(element.textContent).toContain('claude@example.com');
-    expect(element.textContent).not.toContain('work@example.com');
+    await openMenu(element);
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain('claude@example.com');
+    expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('work@example.com');
   });
   it('does not retain selectable profiles from a target whose replacement failed to load', async () => {
     mocks.list.mockResolvedValueOnce({ success: true, profiles });
@@ -183,10 +270,12 @@ describe('account controls', () => {
       element.remove();
     };
     await act(async () => root.render(<SessionAccountSelector {...target} />));
-    expect(element.textContent).toContain('Account B');
+    await openMenu(element);
+    expect(menuItem('Account B')).toBeDefined();
+    await closeMenu();
     await act(async () => root.render(<SessionAccountSelector {...target} agentType="claude" />));
     expect(element.textContent).not.toContain('Account B');
-    expect(element.querySelector('select')?.value).toBe('system-default');
+    expect(accountTrigger(element).textContent).toBe('System Default');
     expect(element.textContent).toContain('New provider status failed');
   });
 
@@ -208,12 +297,10 @@ describe('account controls', () => {
     mocks.list.mockResolvedValue({ success: true, profiles });
     mocks.switch.mockResolvedValue({ success: true, accountProfileId: 'account-b' });
     const element = await render(<SessionAccountSelector {...target} />);
-    const select = element.querySelector('select')!;
-    await act(async () => {
-      select.value = 'account-b';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(select.value).toBe('system-default');
+    const trigger = accountTrigger(element);
+    await openMenu(element);
+    await chooseAccount('Account B');
+    expect(trigger.textContent).toBe('System Default');
     expect(element.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -223,14 +310,13 @@ describe('account controls', () => {
     const element = await render(
       <SessionAccountSelector {...target} accountProfileId="deleted-account" />
     );
-    const select = element.querySelector('select')!;
-    expect(select.value).toBe('deleted-account');
+    const trigger = accountTrigger(element);
+    expect(trigger.textContent).toBe('Unavailable account');
     expect(element.textContent).toContain('Unavailable account');
-    await act(async () => {
-      select.value = 'system-default';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(select.value).toBe('deleted-account');
+    await openMenu(element);
+    expect(menuItem('Unavailable account').getAttribute('aria-checked')).toBe('true');
+    await chooseAccount('System Default');
+    expect(trigger.textContent).toBe('Unavailable account');
     expect(element.textContent).toContain('Could not switch account');
     expect(mocks.switch).toHaveBeenCalledWith(
       expect.objectContaining({ accountProfileId: 'system-default' })
@@ -239,7 +325,7 @@ describe('account controls', () => {
   it('disables switching during an active request', async () => {
     mocks.list.mockResolvedValue({ success: true, profiles });
     const element = await render(<SessionAccountSelector {...target} busy />);
-    expect(element.querySelector('select')?.disabled).toBe(true);
+    expect(accountTrigger(element).disabled).toBe(true);
     expect(mocks.switch).not.toHaveBeenCalled();
   });
   it('starts added account login only in its isolated profile', async () => {

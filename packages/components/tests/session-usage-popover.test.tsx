@@ -99,6 +99,58 @@ describe('SessionUsagePopover', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
+  it('separates session context from account limits with accessible labeled sections', async () => {
+    await renderUsage({
+      contextWindowUsage: { size: 128_000, used: 32_000 },
+      rateLimits,
+    });
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const popover = document.body.querySelector('[aria-label="Usage"]');
+    expect(popover?.querySelector('h2')?.textContent).toBe('Usage');
+    const context = popover?.querySelector('section[aria-label="Context"]');
+    const account = popover?.querySelector('section[aria-label="Account limits"]');
+    expect(context?.textContent).toContain('25% used');
+    expect(context?.textContent).toContain('32K / 128K');
+    expect(context?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(
+      '25'
+    );
+    expect(account?.textContent).toContain('Account limits');
+    expect(account?.textContent).toContain('Weekly');
+    expect(account?.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe(
+      'Weekly: 29% used'
+    );
+  });
+
+  it('replaces account quota details with the supplied account snapshot and preserves exhaustion', async () => {
+    await renderUsage({ rateLimits, showRateLimitWithoutContext: true });
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await renderUsage({
+      showRateLimitWithoutContext: true,
+      rateLimits: {
+        [getRateLimitEntryKey('codex', 'codex')]: {
+          limitId: 'codex',
+          scope: { providerId: 'codex' },
+          windows: [
+            { usedPercent: 100, windowDurationSeconds: 18_000, resetsAtEpochSeconds: null },
+          ],
+        },
+      },
+    });
+    const account = document.body.querySelector('section[aria-label="Account limits"]');
+    expect(account?.textContent).toContain('5 hours');
+    expect(account?.textContent).toContain('100% used');
+    expect(account?.textContent).not.toContain('Weekly');
+    expect(account?.textContent).not.toContain('29%');
+    expect(account?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(
+      '100'
+    );
+  });
+
   it('shows Fable weekly as a distinct meter beside shared quotas', async () => {
     await renderUsage({
       agentType: 'claude',
