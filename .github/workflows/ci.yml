@@ -52,6 +52,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Test Node adapter integration
+        env:
+          LODY_WINDOWS_SUPERVISOR_INTEGRATION: '1'
         run: pnpm --dir apps/cli exec vitest run src/utils/windows-owned-process.integration.test.ts
       - name: Upload native supervisor
         uses: actions/upload-artifact@v4
@@ -59,6 +61,45 @@ jobs:
           name: windows-process-supervisor-win32-${{ matrix.arch }}
           path: apps/cli/dist/windows-process-supervisor-win32-${{ matrix.arch }}.exe
           if-no-files-found: error
+  windows-supervisor-package:
+    name: Windows supervisor npm package
+    needs: windows-supervisor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build CLI JavaScript before ingesting native artifacts
+        run: pnpm --dir apps/cli build
+      - name: Download both tested Windows supervisors
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-process-supervisor-win32-*
+          merge-multiple: true
+          path: apps/cli/dist
+      - name: Pack without publishing
+        run: pnpm --dir apps/cli pack --pack-destination "$RUNNER_TEMP/supervisor-package"
+      - name: Verify both architectures and launcher in npm archive
+        shell: bash
+        run: |
+          archive=$(find "$RUNNER_TEMP/supervisor-package" -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$archive"
+          tar -tzf "$archive" > "$RUNNER_TEMP/supervisor-package/contents.txt"
+          for asset in windows-process-supervisor-win32-x64.exe windows-process-supervisor-win32-arm64.exe windows-process-launcher.js; do
+            grep -Fx -- "package/dist/$asset" "$RUNNER_TEMP/supervisor-package/contents.txt"
+          done
   static:
     name: Static checks
     runs-on: ubuntu-latest

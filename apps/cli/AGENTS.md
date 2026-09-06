@@ -98,6 +98,10 @@ Two things the dev build does deliberately, both load-bearing:
   CI artifacts directly into `apps/cli/dist`, then run `pnpm --dir apps/cli pack`.
   Do not rebuild/clean JS after ingestion or commit generated executables. The CI
   Windows matrix executes native ownership tests on each architecture before upload.
+  The dependent Linux package job consumes both same-run artifacts after the JS
+  build, runs prepack, and checks both executables plus the launcher in the npm archive.
+  Native launcher integration tests require LODY_WINDOWS_SUPERVISOR_INTEGRATION=1;
+  the Windows CI matrix sets it explicitly. Default unit runs do not invoke MSVC.
 
 - Read context/local-agent-ownership.md
   before changing local ports/sockets, daemon PID state, Electron/daemon startup,

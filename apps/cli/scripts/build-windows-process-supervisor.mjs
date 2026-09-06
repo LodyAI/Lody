@@ -70,8 +70,14 @@ const sdkInclude = newestDirectory(
     )
 );
 const sdkVersion = path.basename(sdkInclude);
+const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
 const buildEnv = {
   ...process.env,
+  [pathKey]: [
+    path.dirname(compiler),
+    path.join(sdkRoot, 'bin', sdkVersion, process.arch),
+    process.env[pathKey] ?? '',
+  ].join(path.delimiter),
   INCLUDE: [
     path.join(toolset, 'include'),
     ...['ucrt', 'shared', 'um'].map((part) => path.join(sdkInclude, part)),

@@ -43,7 +43,7 @@ export default defineConfig({
     topLevelAwait(),
     {
       name: 'windows-process-supervisor',
-      closeBundle() {
+      writeBundle() {
         buildWindowsSupervisor({ directory: path.resolve(__dirname, 'dist') });
       },
     },
