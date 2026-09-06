@@ -36,15 +36,21 @@ Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/compone
   "simplify" that by rewriting `openedBySessionId` to the root: "Go to Opener Session"
   and the conversation's "Opened by" entry must land on the exact Tab that created it.
 - The opener and unrelated top-level rows keep the exact flat-list alignment. The shared
-  leading slot owns the node-centre affordance: an idle opener shows its disclosure at
-  rest and swaps it for ⋯ on row hover; an idle child shows ├/└ and swaps those for ⋯ in
-  the SAME 7px-centred position. STATUS OUTRANKS THE TREE on both sides: an active
-  (working / unread / waiting) child drops the trunk and elbow, and an active opener
-  drops its disclosure — never both. Gate the opener on the whole activity set, not just
-  `isWorking`, and keep the context menu's expand/collapse item wired to the same toggle
-  callback so a busy opener stays foldable. Only a child widens that slot from 14px to
-  26px, producing the 12px title indent without shifting the row background. Keep
-  connector geometry in `sidebar-row-shared.tsx`.
+  leading slot owns the node-centre affordance: an opener shows its disclosure at rest
+  and swaps it for ⋯ on row hover; a child shows ├/└ and swaps those for ⋯ in the SAME
+  7px-centred position. It draws the tree UNCONDITIONALLY — a working / unread / waiting
+  row must never lose its nesting, which is the whole point of moving status out of it.
+  Only a child widens that slot from 14px to 26px, producing the 12px title indent
+  without shifting the row background. Keep connector geometry in
+  `sidebar-row-shared.tsx`, and keep the context menu's expand/collapse item wired to the
+  same toggle callback.
+- Desktop row status (working / waiting / unread) belongs to the END slot
+  (`SessionRowStatusIndicator` inside `SidebarRowEndSlot`) and nowhere else. While a
+  status shows it REPLACES that slot's resting content — line diff, `Mergeable`, worktree
+  glyph, PR icon, mobile time — so the right edge is one 14px mark; the metrics stay one
+  hover away in the desktop info card. Pass the three flags to the end slot, never to the
+  leading slot. The mobile chat rows keep their own leading-node rule
+  ([mobile/AGENTS.md](mobile/AGENTS.md)); do not assume the two match.
 - The resolver needs `allActiveSessions`, so any new list must take it from the sidebar
   rather than re-deriving it from rows.
 - The tree never hides a Session: a missing, cross-section, cross-group, cycling, or

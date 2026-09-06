@@ -698,9 +698,6 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     >
       <div className="flex items-center gap-1.5">
         <SessionRowLeadingSlot
-          isWaitingPermission={isWaitingPermission}
-          isWorking={isWorking}
-          hasUnreadMessages={hasUnreadMessages}
           showMenuButton={hasContextMenuActions}
           menuLabel={moreActionsLabel}
           openedByTree={openedByTree}
@@ -733,6 +730,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             has one, with a faint worktree glyph just to its left; the Archive
             button replaces it on desktop hover. */}
         <SidebarRowEndSlot
+          isWaitingPermission={isWaitingPermission}
+          isWorking={isWorking}
+          hasUnreadMessages={hasUnreadMessages}
           restIcon={
             showPr || showWorktreeIcon ? (
               <span className="flex items-center gap-1.5">
