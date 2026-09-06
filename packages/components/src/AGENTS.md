@@ -62,7 +62,9 @@ Parent `AGENTS.md` files also apply.
   that is no longer advertised keeps the Role listed with its reason and removes it
   from mention and composer selection. Missing or stale capability data stays unknown;
   never migrate a saved selection or substitute the agent's default to make it available.
-  Restoring the last-used Role retains its saved id while availability is unknown.
+  Restoring the last-used Role retains its saved id while availability is unknown,
+  and an explicit user selection during that window ends the pending restore instead
+  of being overwritten by it.
 
 ## ACP authentication
 

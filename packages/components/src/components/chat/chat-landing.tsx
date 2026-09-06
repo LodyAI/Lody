@@ -1620,6 +1620,16 @@ function WorkspaceChatLanding({
   /* Whether the stored Role has been resolved yet. Until it has, the composer
      has no opinion to persist — see `selectedAgentRoleId` on the defaults hook. */
   const [agentRoleRestored, setAgentRoleRestored] = useState(false);
+  /* An explicit user selection ends a pending restore so the deferred `onSelect`
+     cannot overwrite it, and lets the persist effect record the user's choice. */
+  const settleAgentRoleRestore = useCallback(() => setAgentRoleRestored(true), []);
+  const handleUserAgentConfigChange = useCallback(
+    (selection: AgentSelection) => {
+      settleAgentRoleRestore();
+      setSelectedAgent(selection);
+    },
+    [settleAgentRoleRestore]
+  );
   /* The Role editor is a Dialog, so it is hosted OUT here rather than inside the
      run-config dropdown: a Dialog rendered in menu content unmounts with the
      menu the moment it opens. */
@@ -1898,7 +1908,10 @@ function WorkspaceChatLanding({
             const nextSelection = cycleProviderSelections.find(
               (selection) => selection.agentId === agentId
             );
-            if (nextSelection) setSelectedAgent(nextSelection);
+            if (nextSelection) {
+              settleAgentRoleRestore();
+              setSelectedAgent(nextSelection);
+            }
           },
         }
       : null,
@@ -1945,6 +1958,7 @@ function WorkspaceChatLanding({
   // ── Handle explicit machine change: auto-select an agent owned by the new machine ──
   const handleMachineChange = useCallback(
     (machineId: MachineId) => {
+      settleAgentRoleRestore();
       machineChangedByUserRef.current = true;
       setSelectedMachineId(machineId);
       if (contextType === 'local') {
@@ -1975,7 +1989,13 @@ function WorkspaceChatLanding({
         setSelectedAgent(null);
       }
     },
-    [contextType, executorConfigs, handleSelectedLocalProjectChange, selectedAgent]
+    [
+      contextType,
+      executorConfigs,
+      handleSelectedLocalProjectChange,
+      selectedAgent,
+      settleAgentRoleRestore,
+    ]
   );
 
   const createNewMachinePairing = useCallback(async () => {
@@ -3524,6 +3544,7 @@ function WorkspaceChatLanding({
   );
   const handleAgentRoleSelect = useCallback(
     (roleId: AgentRoleId | null) => {
+      settleAgentRoleRestore();
       // Leaving a Role clears the NAME, not the configuration: the values it
       // seeded are now the user's own, and silently rolling them back would
       // undo choices they never asked to undo.
@@ -3541,7 +3562,7 @@ function WorkspaceChatLanding({
       setSelectedAgent({ agentId: role.agentConfigId, machineId: role.machineId });
       setAgentRolePreference({ roleId: role.id, token: agentRolePreferenceTokenRef.current });
     },
-    [composerAgentRoleItems]
+    [composerAgentRoleItems, settleAgentRoleRestore]
   );
 
   /* Creating a Role from the composer opens on the configuration already in
@@ -3653,6 +3674,7 @@ function WorkspaceChatLanding({
   );
   const handleRecentRunConfigSelect = useCallback(
     (id: string) => {
+      settleAgentRoleRestore();
       const record = recentRunConfigRecords.find((entry) => getRecentRunConfigKey(entry) === id);
       if (!record) return;
       // Recorded AS a Role: re-apply the Role, not the values it set. Those
@@ -3672,7 +3694,12 @@ function WorkspaceChatLanding({
       setSelectedAgent({ agentId: config.id, machineId: config.machineId });
       setPendingRecentRunConfig(record);
     },
-    [handleAgentRoleSelect, recentRunConfigAgentConfigs, recentRunConfigRecords]
+    [
+      handleAgentRoleSelect,
+      recentRunConfigAgentConfigs,
+      recentRunConfigRecords,
+      settleAgentRoleRestore,
+    ]
   );
 
   const desktopMachineOptions = useMemo(
@@ -3773,7 +3800,7 @@ function WorkspaceChatLanding({
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
           }}
-          onAgentConfigChange={setSelectedAgent}
+          onAgentConfigChange={handleUserAgentConfigChange}
           modelOptions={modelOptions}
           selectedModelId={selectedModelId}
           onModelChange={setSelectedModelName}
@@ -4076,7 +4103,7 @@ function WorkspaceChatLanding({
             agentSelection={selectedAgent}
             allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
             agentLocked={false}
-            onAgentConfigChange={setSelectedAgent}
+            onAgentConfigChange={handleUserAgentConfigChange}
             modelOptions={modelOptions}
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelName}

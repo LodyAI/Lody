@@ -15,7 +15,12 @@ import {
 } from '@/lib/chat-landing-defaults';
 type LocalProjectSelection = { machineId: MachineId; localProjectId: LocalProjectId };
 
-/** Restore only after both the catalog and the bound agent's capabilities can answer. */
+/**
+ * Restore only after both the catalog and the bound agent's capabilities can answer.
+ * The caller must complete restoration (`setRestored(true)`) on any explicit user
+ * selection while the stored Role is still unknown; otherwise the deferred
+ * `onSelect` would overwrite that selection.
+ */
 export function useRestoreChatLandingAgentRole({
   workspaceId,
   defaultsReady,

@@ -118,6 +118,7 @@ describe('chat landing agent session defaults', () => {
 
 describe('chat landing saved Role restoration', () => {
   const workspaceId = 'ws-role-restoration';
+  const otherRoleId = 'other-role' as AgentRoleId;
   const savedRole: AgentRole = {
     v: 1,
     id: 'saved-role' as AgentRoleId,
@@ -170,7 +171,31 @@ describe('chat landing saved Role restoration', () => {
       catalogSynced: true,
       onSelect: setSelectedRoleId,
     });
-    return <output data-restored={restored} data-role={selectedRoleId ?? ''} />;
+    return (
+      <>
+        <output data-restored={restored} data-role={selectedRoleId ?? ''} />
+        <button
+          type="button"
+          data-action="pick-other"
+          onClick={() => {
+            setRestored(true);
+            setSelectedRoleId(otherRoleId);
+          }}
+        >
+          Pick other
+        </button>
+        <button
+          type="button"
+          data-action="clear"
+          onClick={() => {
+            setRestored(true);
+            setSelectedRoleId(null);
+          }}
+        >
+          Clear
+        </button>
+      </>
+    );
   }
 
   function render(availability: ComposerAgentRoleItem['availability']) {
@@ -208,6 +233,30 @@ describe('chat landing saved Role restoration', () => {
     render({ kind: 'unknown' });
     render({ kind: 'unavailable', reason: 'model_unsupported' });
     expect(container.querySelector('output')?.dataset.restored).toBe('true');
+    expect(container.querySelector('output')?.dataset.role).toBe('');
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBeNull();
+  });
+
+  it('keeps a Role the user picked while the saved Role was still unknown', () => {
+    render({ kind: 'unknown' });
+    act(() => {
+      container.querySelector<HTMLButtonElement>('[data-action="pick-other"]')?.click();
+    });
+    expect(container.querySelector('output')?.dataset.restored).toBe('true');
+    expect(container.querySelector('output')?.dataset.role).toBe(otherRoleId);
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBe(otherRoleId);
+
+    render({ kind: 'available' });
+    expect(container.querySelector('output')?.dataset.role).toBe(otherRoleId);
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBe(otherRoleId);
+  });
+
+  it('keeps a cleared Role selection made while the saved Role was still unknown', () => {
+    render({ kind: 'unknown' });
+    act(() => {
+      container.querySelector<HTMLButtonElement>('[data-action="clear"]')?.click();
+    });
+    render({ kind: 'available' });
     expect(container.querySelector('output')?.dataset.role).toBe('');
     expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBeNull();
   });
