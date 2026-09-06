@@ -136,6 +136,8 @@ type RunningAuthentication = {
   cancelled: boolean;
   timedOut: boolean;
   terminating: boolean;
+  cleanupPromise?: Promise<void>;
+  cleanupFailed?: boolean;
   workflowFinished?: boolean;
   acceptsAuthorizationCode: boolean;
   authorizationCodeSubmitted: boolean;
@@ -872,15 +874,16 @@ export class AcpAuthenticationManager {
           logger: this.logger,
           logPrefix: '[acp-auth]',
           getStderrTail: () => lastStderrTail,
+          shouldRetryError: () => !running.abortController.signal.aborted && !running.cleanupFailed,
           attempt: async ({ args }) => {
+            running.abortController.signal.throwIfAborted();
             if (
-              running.child &&
-              running.child.exitCode == null &&
-              running.child.signalCode == null
+              running.cleanupFailed ||
+              running.terminating ||
+              (running.child && running.child.exitCode == null && running.child.signalCode == null)
             ) {
               throw new Error('Previous authentication process cleanup is incomplete');
             }
-            running.abortController.signal.throwIfAborted();
             lastStderrTail = '';
             options.onProgress?.({ status: 'starting' });
             const child = spawnAcpProcess({
@@ -1096,13 +1099,7 @@ export class AcpAuthenticationManager {
               running.pendingInteraction?.resolve({ action: 'cancel' });
               running.pendingInteraction = undefined;
               startupMonitor.dispose();
-              await shutdownLocalAcpAgent({
-                agentProcess: child,
-                logger: this.logger,
-                sessionLabel: `acp-auth:${options.agentType}:protocol`,
-                exitTimeoutMs: this.terminationGraceMs,
-              });
-              if (running.child === child) running.child = undefined;
+              await this.cleanupAuthentication(options.agentType, running, 'protocol');
             }
           },
         })
@@ -1120,6 +1117,8 @@ export class AcpAuthenticationManager {
     const child = running.child;
     if (
       running.workflowFinished &&
+      !running.terminating &&
+      !running.cleanupFailed &&
       (!child || child.exitCode != null || child.signalCode != null) &&
       this.runningByAgentType.get(agentType) === running
     ) {
@@ -1143,22 +1142,42 @@ export class AcpAuthenticationManager {
     // Protocol authentication spans launch preparation, a JSON-RPC wait, and
     // possibly a second process, so the signal is raised even with no child yet.
     running.abortController.abort();
-    if (running.terminating || !running.child) return;
+    void this.cleanupAuthentication(agentType, running, reason).catch((error: unknown) => {
+      this.logger.debug(
+        `[acp-auth] Failed to terminate authentication process: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
+  private cleanupAuthentication(
+    agentType: string,
+    running: RunningAuthentication,
+    reason: string
+  ): Promise<void> {
+    if (running.cleanupPromise) return running.cleanupPromise;
+    const child = running.child;
+    if (!child) return Promise.resolve();
     running.terminating = true;
-    void shutdownLocalAcpAgent({
-      agentProcess: running.child,
+    const cleanup = shutdownLocalAcpAgent({
+      agentProcess: child,
       logger: this.logger,
       sessionLabel: `acp-auth:${agentType}:${reason}`,
       exitTimeoutMs: this.terminationGraceMs,
     })
+      .then(() => {
+        running.cleanupFailed = false;
+        if (running.child === child) running.child = undefined;
+      })
       .catch((error: unknown) => {
-        this.logger.debug(
-          `[acp-auth] Failed to terminate authentication process: ${formatErrorMessage(error)}`
-        );
+        running.cleanupFailed = true;
+        throw error;
       })
       .finally(() => {
         running.terminating = false;
+        running.cleanupPromise = undefined;
         this.releaseFinishedAuthentication(agentType, running);
       });
+    running.cleanupPromise = cleanup;
+    return cleanup;
   }
 }

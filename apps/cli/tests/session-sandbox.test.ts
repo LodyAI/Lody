@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ChildProcess } from 'child_process';
@@ -179,6 +180,31 @@ class FakeCgroupFs {
 }
 
 describe('session sandbox', () => {
+  it.skipIf(process.platform !== 'win32')(
+    'cleans a buffered real spawn failure without signaling a nonexistent child',
+    async () => {
+      const factory = createSessionSandboxFactory({
+        logger: createSilentLogger(),
+        deps: {
+          platform: 'win32',
+          spawnProcess: realSpawn,
+          configureExecutionProcess: vi.fn(async () => {}),
+        },
+      });
+      const sandbox = await factory('windows-spawn-failure' as SessionId);
+      const handle = await sandbox.spawn(`lody-missing-${randomUUID()}.exe`, [], {
+        cwd: process.cwd(),
+        stdio: 'ignore',
+      });
+      const failure = await new Promise<Error>((resolve) => handle.onError(resolve));
+      expect(failure).toMatchObject({ code: 'ENOENT' });
+      const kill = vi.spyOn(handle.child, 'kill');
+      await handle.terminate(false);
+      await sandbox.terminate(true);
+      expect(kill).not.toHaveBeenCalled();
+      expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [] });
+    }
+  );
   it('awaits Windows child exit through the retained handle', async () => {
     const child = new FakeChildProcess(1234);
     const spawnProcess = vi.fn(() => child as unknown as ChildProcess) as typeof realSpawn;

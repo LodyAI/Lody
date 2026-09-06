@@ -35,7 +35,7 @@ function fixture(entries: ReturnType<typeof runtime>[]) {
   const runtimes = new Map(entries.map((entry) => [entry.workspace.id, entry]));
   const workspaceWatchCoordinator = { dispose: vi.fn(async () => {}) };
   const cloudPort = { dispose: vi.fn(async () => {}) };
-  const terminalPtyService = { closeAll: vi.fn() };
+  const terminalPtyService = { closeAll: vi.fn(), stopAdmission: vi.fn() };
   const fleet: LodyFleet = Object.assign(Object.create(LodyFleet.prototype), {
     runtimes,
     stopped: false,
@@ -54,6 +54,24 @@ function fixture(entries: ReturnType<typeof runtime>[]) {
 }
 
 describe('fleet process shutdown ownership', () => {
+  it('aggregates forced PTY failure after also attempting workspace cleanup', async () => {
+    const entry = runtime('force-failures');
+    const ptyFailure = new Error('PTY kill refused');
+    const workspaceFailure = new Error('workspace force refused');
+    entry.lody.forceTerminateSessions.mockRejectedValueOnce(workspaceFailure);
+    const { fleet, terminalPtyService } = fixture([entry]);
+    terminalPtyService.closeAll.mockImplementationOnce(() => {
+      throw ptyFailure;
+    });
+    await expect(fleet.forceTerminateSessions()).rejects.toMatchObject({
+      errors: [ptyFailure, workspaceFailure],
+    });
+    expect(terminalPtyService.stopAdmission).toHaveBeenCalledOnce();
+    expect(entry.lody.forceTerminateSessions).toHaveBeenCalledOnce();
+    await fleet.forceTerminateSessions();
+    expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(2);
+  });
+
   it('starts force cleanup across workspaces while graceful cleanup is hung', async () => {
     const first = runtime('first');
     const second = runtime('second');
@@ -85,7 +103,7 @@ describe('fleet process shutdown ownership', () => {
     first.lody.forceTerminateSessions.mockRejectedValue(new Error('refused'));
     const { fleet, runtimes } = fixture([first, second]);
     await expect(fleet.forceTerminateSessions()).rejects.toThrow(
-      'Forced workspace process cleanup failed'
+      'Forced fleet process cleanup failed'
     );
     expect(second.lody.forceTerminateSessions).toHaveBeenCalledTimes(1);
     expect(runtimes.size).toBe(2);
@@ -152,13 +170,33 @@ it('reports independent PTY and workspace failures together and permits retry', 
   const workspaceFailure = new Error('workspace failure');
   const ptyFailure = new Error('PTY failure');
   entry.lody.cleanup.mockRejectedValueOnce(workspaceFailure);
-  const { fleet, terminalPtyService } = fixture([entry]);
+  const { fleet, runtimes, terminalPtyService } = fixture([entry]);
   terminalPtyService.closeAll.mockImplementationOnce(() => {
     throw ptyFailure;
   });
   await expect(fleet.shutdown()).rejects.toMatchObject({ errors: [workspaceFailure, ptyFailure] });
+  expect(runtimes.get(entry.workspace.id)).toBe(entry);
   await fleet.shutdown();
+  expect(entry.lody.cleanup).toHaveBeenCalledTimes(2);
+  expect(runtimes.size).toBe(0);
   expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(2);
+});
+
+it('waits for admitted terminal opens before the PTY close snapshot even if a workspace fails', async () => {
+  let finishEndpoint = () => {};
+  const endpoint = new Promise<void>((resolve) => {
+    finishEndpoint = resolve;
+  });
+  vi.mocked(stopLocalTerminalServer).mockReturnValueOnce(endpoint);
+  const entry = runtime('pending-terminal');
+  entry.lody.cleanup.mockRejectedValueOnce(new Error('workspace failure'));
+  const { fleet, terminalPtyService } = fixture([entry]);
+  const shutdown = expect(fleet.shutdown()).rejects.toThrow('Workspace cleanup failed');
+  await vi.waitFor(() => expect(entry.lody.cleanup).toHaveBeenCalledOnce());
+  expect(terminalPtyService.closeAll).not.toHaveBeenCalled();
+  finishEndpoint();
+  await shutdown;
+  expect(terminalPtyService.closeAll).toHaveBeenCalledOnce();
 });
 
 it('attempts every eligible shared disposer even when an earlier disposer fails', async () => {

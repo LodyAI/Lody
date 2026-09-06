@@ -29,6 +29,9 @@ type TerminalSocketState = {
 let terminalServer: net.Server | null = null;
 let activeSocketPath: string | null = null;
 let terminalServerStart: Promise<void> | null = null;
+let terminalServerStop: Promise<void> | null = null;
+let acceptingMessages = false;
+const pendingMessages = new Set<Promise<void>>();
 // Tracks live client connections so shutdown can destroy them immediately.
 // `net.Server.close()` only stops accepting new connections and otherwise waits
 // for every open connection to end on its own; the Electron terminal relay holds
@@ -236,6 +239,7 @@ async function handleMessage(
 }
 
 export async function startLocalTerminalServer(config: LocalTerminalServerConfig): Promise<void> {
+  if (terminalServerStop) await terminalServerStop;
   if (terminalServer) {
     return;
   }
@@ -243,6 +247,7 @@ export async function startLocalTerminalServer(config: LocalTerminalServerConfig
     return await terminalServerStart;
   }
 
+  acceptingMessages = true;
   terminalServerStart = startLocalTerminalServerInner(config).finally(() => {
     terminalServerStart = null;
   });
@@ -257,6 +262,10 @@ async function startLocalTerminalServerInner(config: LocalTerminalServerConfig):
   await removeStaleUnixSocket(socketPath, 'local_terminal_socket_in_use');
 
   const server = net.createServer((socket) => {
+    if (!acceptingMessages) {
+      socket.destroy();
+      return;
+    }
     let buffer = '';
     // One decoder per connection: a pasted multi-byte character can land on a
     // socket chunk boundary, and per-chunk `toString('utf8')` would turn it into
@@ -269,6 +278,7 @@ async function startLocalTerminalServerInner(config: LocalTerminalServerConfig):
     });
 
     socket.on('data', (chunk) => {
+      if (!acceptingMessages) return;
       buffer += decodeChunk(chunk);
       // Compare char length (O(1)) rather than re-scanning the whole buffer with
       // Buffer.byteLength on every chunk (O(n²) across a large multi-chunk paste).
@@ -312,7 +322,12 @@ async function startLocalTerminalServerInner(config: LocalTerminalServerConfig):
             continue;
           }
 
-          void handleMessage(config, socket, state, parsed.data);
+          const pending = handleMessage(config, socket, state, parsed.data);
+          pendingMessages.add(pending);
+          void pending.then(
+            () => pendingMessages.delete(pending),
+            () => pendingMessages.delete(pending)
+          );
         }
         newlineIndex = buffer.indexOf('\n');
       }
@@ -358,10 +373,25 @@ async function startLocalTerminalServerInner(config: LocalTerminalServerConfig):
   });
 }
 
-export async function stopLocalTerminalServer(): Promise<void> {
-  if (!terminalServer) {
-    return;
-  }
+export function stopLocalTerminalServer(): Promise<void> {
+  acceptingMessages = false;
+  if (terminalServerStop) return terminalServerStop;
+  const stop = stopLocalTerminalServerInner();
+  terminalServerStop = stop;
+  void stop.then(
+    () => {
+      if (terminalServerStop === stop) terminalServerStop = null;
+    },
+    () => {
+      if (terminalServerStop === stop) terminalServerStop = null;
+    }
+  );
+  return stop;
+}
+
+async function stopLocalTerminalServerInner(): Promise<void> {
+  // A shutdown that races listen must also close that newly created listener.
+  await terminalServerStart?.catch(() => undefined);
 
   const server = terminalServer;
   const socketPath = activeSocketPath;
@@ -378,8 +408,12 @@ export async function stopLocalTerminalServer(): Promise<void> {
   activeClientSockets.clear();
 
   await new Promise<void>((resolve) => {
-    server.close(() => resolve());
+    if (server) server.close(() => resolve());
+    else resolve();
   });
+  // Destroying a socket does not cancel an already admitted open awaiting its
+  // workdir. Drain those handlers before the fleet snapshots and closes PTYs.
+  await Promise.allSettled(pendingMessages);
   if (socketPath && process.platform !== 'win32' && fs.existsSync(socketPath)) {
     fs.unlinkSync(socketPath);
   }

@@ -110,6 +110,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
+  private agentCreationInProgress = false;
   private terminalDisposal: {
     manager: TerminalManager;
     sessionId: string;
@@ -312,7 +313,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       }
     }
 
-    // Kill both processes and wait for them to actually exit before proceeding.
+    // On Windows the OS signal terminates immediately; closeSession above is
+    // the graceful ACP phase. Kill both processes and observe their actual exit.
     // This prevents OS-level process leaks where SIGTERM is sent but the process
     // outlives this function (and all tracking of it).
     const processResults = await Promise.allSettled([
@@ -593,6 +595,18 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    if (this.agentCreationInProgress || this.agentProcess) {
+      throw new Error('Previous agent ownership must be released before another launch');
+    }
+    this.agentCreationInProgress = true;
+    try {
+      return await this.createAgentOnce(callbacks);
+    } finally {
+      this.agentCreationInProgress = false;
+    }
+  }
+
+  private async createAgentOnce(callbacks: CreateAgentConfig): Promise<string> {
     const assertRunning = () => {
       if (this.status === 'stopping' || this.status === 'terminated') {
         throw new Error('Cannot launch agent while session is stopping');
@@ -674,7 +688,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         this.logger.debug(
           `[${this.sessionId}] ACP agent process exited with code ${code} signal ${signal}`
         );
-        this.agentProcess = null;
+        if (this.agentProcess === agentProcessHandle) this.agentProcess = null;
         void agentProcessHandle
           .inspectExit(code, signal)
           .then((violation) => {

@@ -99,6 +99,18 @@ describe('terminateWindowsChildProcess', () => {
     expect(child.eventNames()).toEqual([]);
   });
 
+  it('does not accept EINVAL without subsequent terminal lifecycle evidence', async () => {
+    vi.useFakeTimers();
+    const child = fixture();
+    child.kill = vi.fn(() => {
+      throw Object.assign(new Error('invalid handle'), { code: 'EINVAL' });
+    });
+    const termination = terminateWindowsChildProcess(child, true, { timeoutMs: 25 });
+    const rejected = expect(termination).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(25);
+    await rejected;
+    expect(child.eventNames()).toEqual([]);
+  });
   it.each([0, -1, NaN, Infinity, 2_147_483_648])(
     'rejects invalid timeout %s before signaling',
     async (timeoutMs) => {

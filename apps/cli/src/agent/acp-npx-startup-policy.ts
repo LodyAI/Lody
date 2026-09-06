@@ -30,6 +30,8 @@ export type RunNpxStartupWithRecoveryOptions<T> = {
   logPrefix: string;
   attempt(input: NpxStartupAttemptInput): Promise<T>;
   getStderrTail(): string;
+  /** Stop before error classification/cache recovery when the caller cannot safely retry. */
+  shouldRetryError?: (error: unknown) => boolean;
   cleanupFailedAttempt?: () => Promise<void>;
   startupTimeouts?: AcpStartupTimeoutOptions;
   coldInitTimeoutMs?: number;
@@ -147,6 +149,7 @@ export async function runNpxStartupWithRecovery<T>(
         startupTimeouts,
       });
     } catch (error) {
+      if (options.shouldRetryError?.(error) === false) throw error;
       if (attempt >= maxAttempts) {
         throw error;
       }

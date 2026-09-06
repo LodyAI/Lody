@@ -24,6 +24,11 @@ control-plane path is DEPRECATED; do not add functionality to it.
   endpoint errors, even when a workspace cleanup fails. Retain failed workspace owners
   and their shared watcher/cloud dependencies for retry; dispose shared services only
   once no workspace owner remains, attempting every eligible disposer before rejecting.
+  Close terminal endpoint admission and await its admitted opens before snapshotting the
+  PTY pool: destroying the client socket does not cancel an awaited workdir resolution.
+  Pool admission closes synchronously and is rechecked after workdir resolution. Forced
+  cleanup kills existing PTYs independently of that drain, attempts every PTY despite
+  kill errors, and retains failed records for retry; a late resolver must never spawn.
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud
   clients, endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort`

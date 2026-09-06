@@ -532,14 +532,24 @@ export class LodyFleet {
 
   async forceTerminateSessions(): Promise<void> {
     this.stopped = true;
+    this.terminalPtyService.stopAdmission();
+    const terminalFailures: unknown[] = [];
+    // A workdir resolver can remain pending indefinitely. Existing PTYs must
+    // still receive forced cleanup without waiting for the endpoint drain.
+    try {
+      this.terminalPtyService.closeAll();
+    } catch (error) {
+      terminalFailures.push(error);
+    }
     const results = await Promise.allSettled(
       Array.from(this.runtimes.values(), (runtime) => runtime.lody.forceTerminateSessions())
     );
-    const failures = results.flatMap((result) =>
-      result.status === 'rejected' ? [result.reason] : []
-    );
+    const failures = [
+      ...terminalFailures,
+      ...results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+    ];
     if (failures.length > 0)
-      throw new AggregateError(failures, 'Forced workspace process cleanup failed');
+      throw new AggregateError(failures, 'Forced fleet process cleanup failed');
   }
 
   shutdown(): Promise<void> {
@@ -554,6 +564,7 @@ export class LodyFleet {
 
   private async runShutdown(): Promise<void> {
     this.stopped = true;
+    this.terminalPtyService.stopAdmission();
     this.stopRuntimeStateLoop();
     this.memoryPressure.stop();
     if (this.prStatusPoller) {
@@ -563,9 +574,9 @@ export class LodyFleet {
     // Stop accepting local work before draining workspace runtimes. Endpoint
     // teardown must not sit behind slow agent/session cleanup, and the owning
     // Host lease remains held until this shutdown barrier completes.
+    const localTerminalShutdown = Promise.allSettled([stopLocalTerminalServer()]);
     const localServicesStopped = Promise.allSettled([
       stopLocalIpcSocketServers(),
-      stopLocalTerminalServer(),
       stopLocalLoroDataPlaneServer(),
       stopLodyMcpHttpServer(),
     ]);
@@ -607,6 +618,7 @@ export class LodyFleet {
       result.status === 'rejected' ? [result.reason] : []
     );
     const workspaceCleanupFailed = cleanupFailures.length > 0;
+    const terminalShutdownResults = await localTerminalShutdown;
     // PTYs are independent of workspace document flush/retry. A retained failed
     // runtime must not keep these processes alive just because its cleanup failed.
     try {
@@ -630,7 +642,7 @@ export class LodyFleet {
       }
     }
 
-    for (const result of await localServicesStopped) {
+    for (const result of [...terminalShutdownResults, ...(await localServicesStopped)]) {
       if (result.status === 'rejected') {
         cleanupFailures.push(result.reason);
         this.logger.debug(

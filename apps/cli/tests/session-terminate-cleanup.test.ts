@@ -401,9 +401,50 @@ it('propagates failed startup cleanup and retains ownership for shutdown', async
   expect(spawn).toHaveBeenCalledTimes(1);
   // @ts-expect-error - verifying retained ownership after failure
   expect(session.agentProcess).toBe(handle);
+  await expect(
+    session.createAgent({
+      cliType: 'registry',
+      agentType: 'opencode',
+      command: 'opencode',
+      args: ['acp'],
+    } as Parameters<Session['createAgent']>[0])
+  ).rejects.toThrow('Previous agent ownership');
+  expect(spawn).toHaveBeenCalledTimes(1);
+  // @ts-expect-error - the failed retry cannot replace the original live owner
+  expect(session.agentProcess).toBe(handle);
   handle.terminate = vi.fn(async () => {
     handle.child.exitCode = 0;
   });
   await session.terminate(true);
   expect(handle.terminate).toHaveBeenCalledWith(true);
+});
+
+it('serializes agent launch admission before the sandbox publishes a handle', async () => {
+  const session = createSession();
+  let entered = () => {};
+  const spawning = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release = (_handle: SessionProcessHandle) => {};
+  // @ts-expect-error - injecting the async owned spawn boundary
+  const spawn = vi.spyOn(session.sandbox, 'spawn').mockImplementation(() => {
+    entered();
+    return new Promise<SessionProcessHandle>((resolve) => {
+      release = resolve;
+    });
+  });
+  const callbacks = {
+    cliType: 'registry',
+    agentType: 'opencode',
+    command: 'opencode',
+    args: ['acp'],
+  } as Parameters<Session['createAgent']>[0];
+  const first = session.createAgent(callbacks);
+  const rejected = expect(first).rejects.toThrow();
+  await spawning;
+  await expect(session.createAgent(callbacks)).rejects.toThrow('Previous agent ownership');
+  expect(spawn).toHaveBeenCalledOnce();
+  release(createProcessHandle(async () => {}));
+  await rejected;
+  await session.terminate(true);
 });

@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AcpTimeoutError } from './agent-client';
 import {
@@ -358,6 +358,36 @@ describe('inspectNpxInstallState', () => {
 });
 
 describe('runNpxStartupWithRecovery', () => {
+  it.each(['cleanup failed', 'cancelled'])(
+    'preserves nonretryable %s without reading stale stderr or retrying',
+    async (message) => {
+      const failure = new Error(message);
+      const attempt = vi.fn(async () => {
+        throw failure;
+      });
+      const stderr = vi.fn(() => 'Cannot find module');
+      const cleanup = vi.fn();
+      await expect(
+        runNpxStartupWithRecovery({
+          command: 'npx',
+          args: npxArgs(),
+          env: { npm_config_cache: '/cache' },
+          logger,
+          logPrefix: '[test]',
+          npxCacheIo: makeIo({}),
+          npxCacheRoots: ['/cache/_npx'],
+          attempt,
+          getStderrTail: stderr,
+          cleanupFailedAttempt: cleanup,
+          shouldRetryError: () => false,
+        })
+      ).rejects.toBe(failure);
+      expect(attempt).toHaveBeenCalledOnce();
+      expect(stderr).not.toHaveBeenCalled();
+      expect(cleanup).not.toHaveBeenCalled();
+    }
+  );
+
   it('uses the cold npx init timeout when the install is missing', async () => {
     const attempts: NpxStartupAttemptInput[] = [];
     const io = makeIo({});

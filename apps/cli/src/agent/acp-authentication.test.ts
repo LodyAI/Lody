@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import * as acpRunner from './acp-runner';
 
 vi.mock('@/utils/windows-child-process', () => ({
   terminateWindowsChildProcess: async (child: ChildProcess) => {
@@ -51,6 +52,52 @@ function createDeferred<T>() {
 }
 
 describe('AcpAuthenticationManager', () => {
+  it.each(['success', 'failure'] as const)(
+    'retains authentication ownership after root exit until %s cleanup settles',
+    async (outcome) => {
+      const child = createFakeChild();
+      const cleanup = createDeferred<void>();
+      const failure = new Error('client shutdown failed');
+      const shutdown = vi
+        .spyOn(acpRunner, 'shutdownLocalAcpAgent')
+        .mockImplementationOnce(async () => {
+          await cleanup.promise;
+          if (outcome === 'failure') throw failure;
+        })
+        .mockResolvedValue(undefined);
+      const spawnProcess = vi.fn(() => child);
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: spawnProcess as never,
+        resolveLoginShellEnv: async () => ({}),
+      });
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        runtimeOverrides: { codexPath: '/test/codex' },
+      };
+      const authentication = manager.authenticate({ requestId: 'owned', ...input });
+      await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledOnce());
+      manager.cancel('owned');
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      await expect(authentication).resolves.toMatchObject({ disposition: 'cancelled' });
+      expect(manager.getAgentType('owned')).toBe('codex');
+      await expect(manager.authenticate({ requestId: 'overlap', ...input })).resolves.toMatchObject(
+        { success: false, error: 'Codex authentication is already running' }
+      );
+      manager.cancel('owned');
+      expect(shutdown).toHaveBeenCalledOnce();
+      cleanup.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (outcome === 'failure') {
+        expect(manager.getAgentType('owned')).toBe('codex');
+        manager.cancel('owned');
+      }
+      await vi.waitFor(() => expect(manager.getAgentType('owned')).toBeUndefined());
+      expect(shutdown).toHaveBeenCalledTimes(outcome === 'failure' ? 2 : 1);
+    }
+  );
+
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -335,62 +382,74 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it('reports protocol cleanup failure and retains the login owner until cancellation retry exits', async () => {
-    const child = createFakeChild();
-    const originalKill = child.kill;
-    child.kill = vi.fn(() => {
-      throw new Error('cleanup failed');
-    });
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    acp
-      .agent({ name: 'cleanup-test' })
-      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-        protocolVersion: params.protocolVersion,
-        authMethods: [{ id: 'oauth', name: 'OAuth' }],
-      }))
-      .onRequest(acp.methods.agent.authenticate, async () => ({}))
-      .connect(
-        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
-      );
-    const spawnProcess = vi.fn(() => child);
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      spawnProcess: spawnProcess as never,
-      resolveLoginShellEnv: async () => ({}),
-      terminationGraceMs: 2,
-    });
-    const input = {
-      cliType: 'custom' as const,
-      agentType: 'cleanup-test',
-      customAcp: { command: '/test/custom-acp', args: [] },
-    };
-    const progress = vi.fn();
-    await expect(
-      manager.authenticate({ requestId: 'cleanup-1', ...input, onProgress: progress })
-    ).resolves.toMatchObject({ success: false, disposition: 'error' });
-    expect(progress).not.toHaveBeenCalledWith({ status: 'authenticated' });
-    expect(manager.getAgentType('cleanup-1')).toBe('cleanup-test');
-    await expect(manager.authenticate({ requestId: 'cleanup-2', ...input })).resolves.toMatchObject(
-      { success: false, error: 'cleanup-test authentication is already running' }
-    );
-    expect(spawnProcess).toHaveBeenCalledOnce();
-    manager.cancel('cleanup-1');
-    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledTimes(2));
-    // Allow the rejected teardown's finally to make the same owner retryable.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(manager.getAgentType('cleanup-1')).toBe('cleanup-test');
-    child.kill = originalKill;
-    manager.cancel('cleanup-1');
-    await vi.waitFor(() => expect(manager.getAgentType('cleanup-1')).toBeUndefined());
-    expect(originalKill).toHaveBeenCalled();
-    expect(manager.cancel('cleanup-1')).toEqual({ success: true, disposition: 'not-running' });
-    stdin.destroy();
-    stdout.destroy();
-    child.stderr.destroy();
-  });
+  it.each(['direct', 'npx'] as const)(
+    'reports %s protocol cleanup failure and retains the login owner until cancellation retry exits',
+    async (launcher) => {
+      const child = createFakeChild();
+      const originalKill = child.kill;
+      child.kill = vi.fn(() => {
+        throw new Error('cleanup failed');
+      });
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      acp
+        .agent({ name: 'cleanup-test' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+          protocolVersion: params.protocolVersion,
+          authMethods: [{ id: 'oauth', name: 'OAuth' }],
+        }))
+        .onRequest(acp.methods.agent.authenticate, async () => {
+          child.stderr?.emit('data', 'Error: Cannot find module auth-startup-dependency');
+          return {};
+        })
+        .connect(
+          acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+        );
+      const spawnProcess = vi.fn(() => child);
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: spawnProcess as never,
+        resolveLoginShellEnv: async () => ({}),
+        terminationGraceMs: 2,
+      });
+      const input = {
+        cliType: 'custom' as const,
+        agentType: 'cleanup-test',
+        customAcp:
+          launcher === 'npx'
+            ? { command: 'npx', args: ['--yes', '@lody-test/auth-cleanup-incomplete@0.0.0'] }
+            : { command: '/test/custom-acp', args: [] },
+      };
+      const progress = vi.fn();
+      await expect(
+        manager.authenticate({ requestId: 'cleanup-1', ...input, onProgress: progress })
+      ).resolves.toMatchObject({ success: false, disposition: 'error', error: 'cleanup failed' });
+      expect(progress).not.toHaveBeenCalledWith({ status: 'authenticated' });
+      expect(manager.getAgentType('cleanup-1')).toBe('cleanup-test');
+      await expect(
+        manager.authenticate({ requestId: 'cleanup-2', ...input })
+      ).resolves.toMatchObject({
+        success: false,
+        error: 'cleanup-test authentication is already running',
+      });
+      expect(spawnProcess).toHaveBeenCalledOnce();
+      manager.cancel('cleanup-1');
+      await vi.waitFor(() => expect(child.kill).toHaveBeenCalledTimes(2));
+      // Allow the rejected teardown's finally to make the same owner retryable.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(manager.getAgentType('cleanup-1')).toBe('cleanup-test');
+      child.kill = originalKill;
+      manager.cancel('cleanup-1');
+      await vi.waitFor(() => expect(manager.getAgentType('cleanup-1')).toBeUndefined());
+      expect(originalKill).toHaveBeenCalled();
+      expect(manager.cancel('cleanup-1')).toEqual({ success: true, disposition: 'not-running' });
+      stdin.destroy();
+      stdout.destroy();
+      child.stderr.destroy();
+    }
+  );
   it('bridges request-scoped ACP form elicitation for a custom provider', async () => {
     const child = createFakeChild();
     const stdin = new PassThrough();

@@ -63,6 +63,7 @@ export interface TerminalPtyServiceApi {
   resize(terminalId: string, cols: number, rows: number): void;
   close(terminalId: string): void;
   closeSession(sessionId: string): void;
+  stopAdmission(): void;
   closeAll(): void;
   onEvent(handler: (event: TerminalServerEvent) => void): () => void;
 }
@@ -147,6 +148,7 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
   private readonly records = new Map<string, TerminalRecord>();
   private readonly sessionIndex = new Map<string, Set<string>>();
   private readonly pendingSessionOpens = new Map<string, number>();
+  private admissionClosed = false;
   private readonly handlers = new Set<(event: TerminalServerEvent) => void>();
 
   constructor(options: TerminalPtyServiceOptions) {
@@ -171,10 +173,12 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
   }
 
   async open(params: TerminalOpenParams): Promise<TerminalOpenResult> {
+    if (this.admissionClosed) throw new Error('terminal_service_stopping');
     const sessionId = params.sessionId as SessionId;
     this.reserveSessionOpen(params.sessionId);
     try {
       const cwd = await this.resolveSessionWorkdir(sessionId);
+      if (this.admissionClosed) throw new Error('terminal_service_stopping');
       const terminalId = randomUUID();
       const shell = resolveShellCommand();
       const terminal = loadPty().spawn(shell.file, shell.args, {
@@ -273,11 +277,22 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
     }
   }
 
+  stopAdmission(): void {
+    this.admissionClosed = true;
+  }
+
   closeAll(): void {
     const ids = [...this.records.keys()];
+    const failures: unknown[] = [];
     for (const terminalId of ids) {
-      this.closeIfPresent(terminalId);
+      try {
+        this.records.get(terminalId)?.pty.kill();
+      } catch (error) {
+        // Retain ownership for retry, and still attempt every other terminal.
+        failures.push(error);
+      }
     }
+    if (failures.length) throw new AggregateError(failures, 'Terminal PTY cleanup failed');
   }
 
   onEvent(handler: (event: TerminalServerEvent) => void): () => void {
@@ -304,7 +319,8 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
       this.logger.debug(
         `[terminal] failed to close terminalId=${terminalId}: ${formatErrorMessage(error)}`
       );
-      this.removeRecord(terminalId);
+      // Session-termination callbacks must not throw, but failed kills still
+      // need an owner so fleet closeAll/forced cleanup can retry them.
     }
   }
 
