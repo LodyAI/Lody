@@ -99,7 +99,10 @@ import {
   SessionCreateBillingError,
   useSessionActions,
 } from '@/hooks/use-session-actions';
-import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
+import {
+  useChatLandingDefaults,
+  useRestoreChatLandingAgentRole,
+} from '@/hooks/use-chat-landing-defaults';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
@@ -3598,33 +3601,15 @@ function WorkspaceChatLanding({
     workspaceAgentRoles,
   ]);
 
-  /* Restore the last-used Role once, and only once the catalog can answer.
-     Until the workspace document has synced, "not in the list" means "not
-     loaded yet", so giving up then would silently drop the stored Role. */
-  useEffect(() => {
-    if (agentRoleRestored || !defaultsReady) return;
-    const storedRoleId = readChatLandingDefaults(workspaceId)?.agentRoleId as
-      | AgentRoleId
-      | undefined;
-    if (!storedRoleId) {
-      setAgentRoleRestored(true);
-      return;
-    }
-    const item = composerAgentRoleItems.find((entry) => entry.role.id === storedRoleId);
-    if (!item) {
-      if (agentRolesSynced) setAgentRoleRestored(true);
-      return;
-    }
-    setAgentRoleRestored(true);
-    handleAgentRoleSelect(storedRoleId);
-  }, [
-    agentRoleRestored,
-    agentRolesSynced,
-    composerAgentRoleItems,
-    defaultsReady,
-    handleAgentRoleSelect,
+  useRestoreChatLandingAgentRole({
     workspaceId,
-  ]);
+    defaultsReady,
+    restored: agentRoleRestored,
+    setRestored: setAgentRoleRestored,
+    items: composerAgentRoleItems,
+    catalogSynced: agentRolesSynced,
+    onSelect: handleAgentRoleSelect,
+  });
   const agentRolePinsPermissionMode = useMemo(() => {
     if (!activeAgentRole) return false;
     const { source } = resolvePermissionModeFace({

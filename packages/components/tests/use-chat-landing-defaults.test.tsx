@@ -3,14 +3,21 @@
 import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentConfigId, MachineId } from '@lody/shared';
+import type { AgentConfigId, AgentRole, AgentRoleId, MachineId } from '@lody/shared';
 import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
 } from '../src/hooks/use-acp-session-config-selection';
-import { useChatLandingDefaults } from '../src/hooks/use-chat-landing-defaults';
-import { writeChatLandingDefaults } from '../src/lib/chat-landing-defaults';
+import {
+  useChatLandingDefaults,
+  useRestoreChatLandingAgentRole,
+} from '../src/hooks/use-chat-landing-defaults';
+import {
+  readChatLandingDefaults,
+  writeChatLandingDefaults,
+} from '../src/lib/chat-landing-defaults';
+import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { agentDefaultsCache, persistAgentSessionDefaults } from '../src/lib/local-storage-cache';
 
 (
@@ -106,6 +113,103 @@ describe('chat landing agent session defaults', () => {
       );
     });
     expect(container.querySelector('output')?.dataset.model).toBe('gpt-5.5');
+  });
+});
+
+describe('chat landing saved Role restoration', () => {
+  const workspaceId = 'ws-role-restoration';
+  const savedRole: AgentRole = {
+    v: 1,
+    id: 'saved-role' as AgentRoleId,
+    revision: 1,
+    name: 'Reviewer',
+    ownerUserId: 'user-1',
+    visibility: 'private',
+    machineId,
+    agentConfigId: agentId,
+    runConfig: { modelId: 'supported-model' },
+    promptPrefix: 'Review the requested change.',
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const noop = () => {};
+  let container: HTMLDivElement;
+  let root: Root;
+
+  function RoleRestoreProbe({ items }: { items: ComposerAgentRoleItem[] }) {
+    const [restored, setRestored] = useState(false);
+    const [selectedRoleId, setSelectedRoleId] = useState<AgentRoleId | null>(null);
+    const { defaultsReady } = useChatLandingDefaults({
+      workspaceId,
+      shouldRestoreContextType: false,
+      contextType: 'chat',
+      setContextType: noop,
+      executorConfigs: [],
+      machines: new Map(),
+      selectableMachines: new Map(),
+      visibleMachinesLoading: false,
+      docMetaCacheReady: true,
+      selectedAgent: null,
+      setSelectedAgent: noop,
+      selectedMachineId: null,
+      setSelectedRepo: noop,
+      selectedBranch: null,
+      setSelectedBranch: noop,
+      selectedLocalProject: null,
+      setSelectedLocalProject: noop,
+      selectedLocalBranch: null,
+      setSelectedLocalBranch: noop,
+      selectedAgentRoleId: restored ? selectedRoleId : undefined,
+    });
+    useRestoreChatLandingAgentRole({
+      workspaceId,
+      defaultsReady,
+      restored,
+      setRestored,
+      items,
+      catalogSynced: true,
+      onSelect: setSelectedRoleId,
+    });
+    return <output data-restored={restored} data-role={selectedRoleId ?? ''} />;
+  }
+
+  function render(availability: ComposerAgentRoleItem['availability']) {
+    act(() => {
+      root.render(<RoleRestoreProbe items={[{ role: savedRole, availability }]} />);
+    });
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    writeChatLandingDefaults(workspaceId, { agentRoleId: savedRole.id });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('retains the saved Role while capabilities are unknown and restores it when they arrive', () => {
+    render({ kind: 'unknown' });
+    expect(container.querySelector('output')?.dataset.restored).toBe('false');
+    expect(container.querySelector('output')?.dataset.role).toBe('');
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBe(savedRole.id);
+
+    render({ kind: 'available' });
+    expect(container.querySelector('output')?.dataset.restored).toBe('true');
+    expect(container.querySelector('output')?.dataset.role).toBe(savedRole.id);
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBe(savedRole.id);
+  });
+
+  it('finishes restoration without selecting a Role whose saved model is unsupported', () => {
+    render({ kind: 'unknown' });
+    render({ kind: 'unavailable', reason: 'model_unsupported' });
+    expect(container.querySelector('output')?.dataset.restored).toBe('true');
+    expect(container.querySelector('output')?.dataset.role).toBe('');
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBeNull();
   });
 });
 

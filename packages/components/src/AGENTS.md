@@ -57,6 +57,12 @@ Parent `AGENTS.md` files also apply.
   Luna exposes Max only. Keep this aligned with the ACP model catalog; a model version
   threshold cannot represent per-model differences, and cached efforts may belong to
   a different selected model.
+- Role availability uses `resolveAgentRoleAvailability` with the bound agent's current
+  capability cache, including its runtime override identity. A stored model or mode
+  that is no longer advertised keeps the Role listed with its reason and removes it
+  from mention and composer selection. Missing or stale capability data stays unknown;
+  never migrate a saved selection or substitute the agent's default to make it available.
+  Restoring the last-used Role retains its saved id while availability is unknown.
 
 ## ACP authentication
 

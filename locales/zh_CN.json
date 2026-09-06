@@ -3814,6 +3814,8 @@
   "settings.agentRoles.unavailable.machineUnknown": "你无法访问它所在的机器",
   "settings.agentRoles.unavailable.agentConfigMissing": "它绑定的 Agent 配置已不存在",
   "settings.agentRoles.unavailable.agentConfigMismatch": "它绑定的 Agent 配置属于另一台机器",
+  "settings.agentRoles.unavailable.modelUnsupported": "它保存的模型已不受支持，请编辑角色重新选择模型",
+  "settings.agentRoles.unavailable.modeUnsupported": "它保存的模式已不受支持，请编辑角色重新选择模式",
   "settings.agentRoles.form.name": "名称",
   "settings.agentRoles.form.sectionTarget": "运行位置",
   "settings.agentRoles.form.sectionTargetHint": "角色绑定一台机器和一个 Agent 配置。任一不可用时，角色会停止出现在提及菜单中，而不会改到别处运行。",

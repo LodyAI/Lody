@@ -3814,6 +3814,8 @@
   "settings.agentRoles.unavailable.machineUnknown": "its machine is not available to you",
   "settings.agentRoles.unavailable.agentConfigMissing": "its agent config no longer exists",
   "settings.agentRoles.unavailable.agentConfigMismatch": "its agent config belongs to another machine",
+  "settings.agentRoles.unavailable.modelUnsupported": "its saved model is no longer supported; edit the role to choose another model",
+  "settings.agentRoles.unavailable.modeUnsupported": "its saved mode is no longer supported; edit the role to choose another mode",
   "settings.agentRoles.form.name": "Name",
   "settings.agentRoles.form.sectionTarget": "Where it runs",
   "settings.agentRoles.form.sectionTargetHint": "A role binds one machine and one agent config. If either becomes unavailable the role stops being mentionable instead of running somewhere else.",
