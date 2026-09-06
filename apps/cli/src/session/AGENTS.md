@@ -99,7 +99,7 @@ specs/session-orchestration.md.
   failed receipt, and keep retries idempotent.
 - Fork recovery fail-closes using ONLY local markers under
   `withForkOperationLock`; never enumerate rooms/open docs to discover candidates or `cleanSessionDoc`
-  an unowned doc. Journal same-worktree bindings through commit.
+  an unowned doc. Mark before same-worktree preparation; journal through commit.
 - Edit/resend prepares `forkAtTurn` (`session/new` for first User), cancels the exact turn and awaits
   release. Journal before history/meta flush, promote after; recovery matches local source/target
   history hashes. Pending journals block resume; failed rollback keeps them.

@@ -136,7 +136,12 @@ deliberately does not capture: it streams and would grow unbounded.
 
 ### Fork saga recovery
 
-Same-worktree forks journal the placeholder and cloned-history checkpoints before publishing
+Same-worktree forks record an installation-local operation marker before saving the initial
+binding or placeholder. The preparing binding blocks resume until the native fork completes.
+Recovery deletes only an empty, incomplete owned target before releasing its binding.
+A committed local native-session binding proves completion; otherwise nonempty history must
+match the local journal's target checkpoint. Unmatched history remains blocked and preserved.
+After native startup, forks journal the placeholder and cloned-history checkpoints before publishing
 the candidate account/native-session binding. The final binding is promoted only after the
 history and metadata flush succeeds. Restart recovery matches the durable history against the
 local journal, preserving the selected account and refusing an unmatched checkpoint. Failed

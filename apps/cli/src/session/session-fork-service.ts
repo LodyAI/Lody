@@ -7,10 +7,14 @@ import {
   resolveSessionAccountMeta,
   beginSessionAccountEdit,
   commitSessionAccountEdit,
-  rollbackSessionAccountEdit,
   abandonSessionAccountEdit,
+  createSessionAccountForkBinding,
+  assertSessionAccountForkBindingOwned,
+  getSessionAccountForkBindingState,
+  clearSessionAccountBindingForOperation,
 } from './session-account-binding-store';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
   getServerNow,
@@ -43,6 +47,7 @@ import {
   withForkOperationLock,
   type SessionForkOperationMarker,
   type SessionForkOperationStore,
+  type SameWorktreeForkOperationMarker,
 } from './session-fork-operation-store';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
@@ -57,7 +62,7 @@ type WorktreeForkPreparedInput = {
   sourceTitle: string;
   targetDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>;
   targetMeta: SessionMeta;
-  marker: SessionForkOperationMarker;
+  marker: Exclude<SessionForkOperationMarker, SameWorktreeForkOperationMarker>;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
@@ -267,11 +272,19 @@ export class SessionForkService {
     const candidateRoomIds = new Set(
       candidates.map((marker) => getSessionRoomId(marker.targetSessionId as SessionId))
     );
-    const aliveRoomIds = new Set(
-      await listAliveRoomIds(this.deps.workspaceDocument, (roomId) =>
-        candidateRoomIds.has(roomId)
-      ).catch(() => [])
-    );
+    let aliveRoomIds: Set<string>;
+    try {
+      aliveRoomIds = new Set(
+        await listAliveRoomIds(this.deps.workspaceDocument, (roomId) =>
+          candidateRoomIds.has(roomId)
+        )
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        `[session-fork] Could not verify target existence: ${formatErrorMessage(error)}`
+      );
+      return;
+    }
 
     await mapWithConcurrency(candidates, FORK_RECOVERY_CONCURRENCY, async (candidate) => {
       const targetSessionId = candidate.targetSessionId as SessionId;
@@ -279,7 +292,10 @@ export class SessionForkService {
         await withForkOperationLock(targetSessionId, async () => {
           // Re-read under the lock: an accept/retry may have rewritten the
           // marker while this sweep waited on the directory-listing snapshot.
-          const marker = await this.deps.forkOperationStore.read(targetSessionId);
+          const marker = await this.deps.forkOperationStore.read(
+            targetSessionId,
+            candidate.kind === 'same-worktree' ? candidate.kind : undefined
+          );
           if (!marker || marker.operationId !== candidate.operationId) {
             return;
           }
@@ -306,6 +322,10 @@ export class SessionForkService {
     marker: SessionForkOperationMarker,
     aliveRoomIds: ReadonlySet<string>
   ): Promise<void> {
+    if (marker.kind === 'same-worktree') {
+      await this.recoverSameWorktreeFork(marker, aliveRoomIds);
+      return;
+    }
     const targetSessionId = marker.targetSessionId as SessionId;
     const roomId = getSessionRoomId(targetSessionId);
     if (!aliveRoomIds.has(roomId)) {
@@ -464,6 +484,58 @@ export class SessionForkService {
     }
   }
 
+  private async recoverSameWorktreeFork(
+    marker: SameWorktreeForkOperationMarker,
+    aliveRoomIds: ReadonlySet<string>
+  ): Promise<void> {
+    const targetSessionId = marker.targetSessionId as SessionId;
+    const roomId = getSessionRoomId(targetSessionId);
+    const scope = {
+      workspaceId: this.deps.workspaceId,
+      machineId: this.deps.machineId,
+      sessionId: targetSessionId,
+    };
+    const bindingState = await getSessionAccountForkBindingState(
+      scope,
+      marker.operationId,
+      marker.accountProfileId
+    );
+    if (bindingState === 'missing' || bindingState === 'committed') {
+      // A missing binding grants no deletion authority. A committed local native
+      // binding proves the clone was durable, regardless of later history edits.
+      await this.deps.forkOperationStore.clear(targetSessionId, 'same-worktree');
+      return;
+    }
+    if (aliveRoomIds.has(roomId)) {
+      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+      const history = await targetDoc.getHistory();
+      if (history.length > 0) {
+        const meta = await targetDoc.getMetaState();
+        if (!meta) throw new Error('Completed fork metadata is unavailable.');
+        const resolved = await resolveSessionAccountMeta(
+          scope,
+          meta,
+          createSessionAccountEditRecovery(this.deps.workspaceDocument, targetSessionId)
+        );
+        if (!resolved.acpSessionId)
+          throw new Error('Completed fork native identity is unavailable.');
+        await this.deps.forkOperationStore.clear(targetSessionId, 'same-worktree');
+        return;
+      }
+      await this.deps.sessionManager.terminateSession(targetSessionId, true);
+      await this.deps.workspaceDocument.repo.deleteDoc(roomId);
+    }
+    // A prior deletion may only exist in memory after its flush failed. Retry
+    // durability even when the room is already absent before removing its guard.
+    await this.deps.workspaceDocument.persistPendingChanges('session-fork-rollback');
+    await clearSessionAccountBindingForOperation(
+      scope,
+      marker.operationId,
+      marker.accountProfileId
+    );
+    await this.deps.forkOperationStore.clear(targetSessionId, 'same-worktree');
+  }
+
   private async forkInner(spec: SessionForkSpec): Promise<SessionForkResponse> {
     const { sourceSessionId, targetSessionId } = spec;
     const accountScope = {
@@ -513,6 +585,23 @@ export class SessionForkService {
 
     const targetRoomId = getSessionRoomId(targetSessionId);
     const worktreeFork = spec.targetContext?.kind === 'new-worktree';
+    if (!worktreeFork) {
+      await withForkOperationLock(targetSessionId, async () => {
+        const marker = await this.deps.forkOperationStore.read(targetSessionId, 'same-worktree');
+        if (
+          !marker ||
+          marker.kind !== 'same-worktree' ||
+          marker.workspaceId !== this.deps.workspaceId ||
+          marker.machineId !== this.deps.machineId ||
+          this.activeOperations.has(marker.operationId)
+        )
+          return;
+        const alive = new Set(
+          await listAliveRoomIds(this.deps.workspaceDocument, (roomId) => roomId === targetRoomId)
+        );
+        await this.recoverSameWorktreeFork(marker, alive);
+      });
+    }
     // These four reads are independent, and two of them are slow: the merged
     // agent-config lookup scans the machine flock and user resolution is a
     // Convex query. Awaiting them in sequence put their sum on the fork click
@@ -879,24 +968,41 @@ export class SessionForkService {
     };
 
     let targetPrepared = false;
-    const accountEditOperationId = `session-fork:${targetSessionId}`;
+    const accountEditOperationId = `session-fork:${targetSessionId}:${randomUUID()}`;
     let accountEditStarted = false;
+    let preparationRecorded = false;
+    const accountProfileId = source.accountProfileId ?? 'system-default';
     try {
-      if (await getSessionAccountBinding(accountScope))
-        throw new Error('Target local account binding already exists.');
-      await setSessionAccountBinding(
-        {
+      const targetDoc = await withForkOperationLock(targetSessionId, async () => {
+        if (await this.deps.forkOperationStore.read(targetSessionId, 'same-worktree'))
+          throw new Error('Target session id has an unresolved fork marker.');
+        if (await getSessionAccountBinding(accountScope))
+          throw new Error('Target local account binding already exists.');
+        await this.deps.forkOperationStore.record({
+          kind: 'same-worktree',
+          version: 1,
           workspaceId: this.deps.workspaceId,
           machineId: this.deps.machineId,
-          sessionId: targetSessionId,
-        },
-        { accountProfileId: source.accountProfileId ?? 'system-default' }
-      );
-      accountBindingCreated = true;
-      await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, targetMeta);
-      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
-      await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
-      targetPrepared = true;
+          targetSessionId,
+          operationId: accountEditOperationId,
+          createdAt: targetMeta.createdAt,
+          title: forkTitle,
+          accountProfileId,
+        });
+        preparationRecorded = true;
+        this.activeOperations.add(accountEditOperationId);
+        await createSessionAccountForkBinding(
+          accountScope,
+          accountEditOperationId,
+          accountProfileId
+        );
+        accountBindingCreated = true;
+        await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, targetMeta);
+        const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+        await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
+        targetPrepared = true;
+        return doc;
+      });
 
       try {
         await this.deps.sessionManager.createSession(
@@ -944,27 +1050,33 @@ export class SessionForkService {
           null
         );
       }
+      const forkedAcpSessionId = targetSession.acpSessionId;
       try {
-        const committedMeta = {
-          acpSessionId: targetSession.acpSessionId,
-          status: SessionStatusFactory.idle(),
-        };
-        // The native fork id must not become authoritative before cloned history
-        // is durable. Recovery matches either the prepared placeholder or the
-        // cloned checkpoint even if repo metadata persisted ahead of the doc.
-        await beginSessionAccountEdit(accountScope, {
-          operationId: accountEditOperationId,
-          sourceMeta: targetMeta,
-          targetMeta: committedMeta,
-          sourceHistory: await targetDoc.getHistory(),
-          targetHistory: historyResult.history,
+        await withForkOperationLock(targetSessionId, async () => {
+          const committedMeta = {
+            acpSessionId: forkedAcpSessionId,
+            status: SessionStatusFactory.idle(),
+          };
+          // The native fork id must not become authoritative before cloned history
+          // is durable. Recovery matches either the prepared placeholder or the
+          // cloned checkpoint even if repo metadata persisted ahead of the doc.
+          await beginSessionAccountEdit(accountScope, {
+            operationId: accountEditOperationId,
+            sourceMeta: targetMeta,
+            targetMeta: committedMeta,
+            sourceHistory: await targetDoc.getHistory(),
+            targetHistory: historyResult.history,
+          });
+          accountEditStarted = true;
+          await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, committedMeta);
+          await targetDoc.updateHistory(() => historyResult.history);
+          await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
+          await commitSessionAccountEdit(accountScope, accountEditOperationId);
+          accountEditStarted = false;
+          await this.deps.forkOperationStore
+            .clear(targetSessionId, 'same-worktree')
+            .catch(() => {});
         });
-        accountEditStarted = true;
-        await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, committedMeta);
-        await targetDoc.updateHistory(() => historyResult.history);
-        await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
-        await commitSessionAccountEdit(accountScope, accountEditOperationId);
-        accountEditStarted = false;
       } catch (error) {
         throw new SessionForkOperationError(
           'TARGET_WRITE_FAILED',
@@ -985,13 +1097,24 @@ export class SessionForkService {
         await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       }
       try {
-        await this.deps.workspaceDocument.repo.deleteDoc(targetRoomId);
-        await this.deps.workspaceDocument.persistPendingChanges('session-fork-rollback');
-        // Keep a pending journal until deletion is durable. If rollback fails,
-        // restart recovery must still decide from the surviving history.
-        if (accountEditStarted)
-          await rollbackSessionAccountEdit(accountScope, accountEditOperationId);
-        if (accountBindingCreated) await clearSessionAccountBinding(accountScope);
+        await withForkOperationLock(targetSessionId, async () => {
+          if (!preparationRecorded) return;
+          const owned = await assertSessionAccountForkBindingOwned(
+            accountScope,
+            accountEditOperationId,
+            accountProfileId
+          );
+          if (owned) {
+            await this.deps.workspaceDocument.repo.deleteDoc(targetRoomId);
+            await this.deps.workspaceDocument.persistPendingChanges('session-fork-rollback');
+            await clearSessionAccountBindingForOperation(
+              accountScope,
+              accountEditOperationId,
+              accountProfileId
+            );
+          }
+          await this.deps.forkOperationStore.clear(targetSessionId, 'same-worktree');
+        });
       } catch (cleanupError) {
         this.deps.logger.warn(
           `Could not finish failed fork cleanup: ${formatErrorMessage(cleanupError)}`
@@ -1014,6 +1137,8 @@ export class SessionForkService {
         }`
       );
       return sessionForkFailure(spec, publicError.code, publicError.message);
+    } finally {
+      this.activeOperations.delete(accountEditOperationId);
     }
   }
 

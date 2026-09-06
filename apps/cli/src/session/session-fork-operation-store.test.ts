@@ -37,6 +37,7 @@ describe('file session fork operation store', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     rmSync(tempHome, { recursive: true, force: true });
   });
@@ -45,6 +46,41 @@ describe('file session fork operation store', () => {
     const store = createFileSessionForkOperationStore();
     await store.record(marker);
     expect(await store.list()).toEqual([marker]);
+  });
+
+  it('isolates same-worktree markers by installation while preserving legacy worktree discovery', async () => {
+    const store = createFileSessionForkOperationStore();
+    await store.record(marker);
+    const firstRoot = path.join(tempHome, 'first-installation');
+    vi.stubEnv('LODY_DATA_DIR', firstRoot);
+    const same = {
+      kind: 'same-worktree' as const,
+      version: 1 as const,
+      workspaceId: marker.workspaceId,
+      machineId: marker.machineId,
+      targetSessionId: 'same-target',
+      operationId: 'unique-attempt',
+      createdAt: marker.createdAt,
+      title: marker.title,
+      accountProfileId: 'system-default',
+    };
+    await store.record(same);
+    expect(await store.read('same-target' as SessionId, 'same-worktree')).toEqual(same);
+    vi.stubEnv('LODY_DATA_DIR', path.join(tempHome, 'second-installation'));
+    expect(await store.list()).toEqual([marker]);
+    expect(await store.read('same-target' as SessionId, 'same-worktree')).toBeNull();
+    await store.clear('same-target' as SessionId, 'same-worktree');
+    vi.stubEnv('LODY_DATA_DIR', firstRoot);
+    expect(await store.read('same-target' as SessionId, 'same-worktree')).toEqual(same);
+  });
+
+  it('does not read or clear a different marker kind when roots coincide', async () => {
+    vi.stubEnv('LODY_DATA_DIR', path.join(tempHome, '.lody'));
+    const store = createFileSessionForkOperationStore();
+    await store.record(marker);
+    expect(await store.read(marker.targetSessionId as SessionId, 'same-worktree')).toBeNull();
+    await store.clear(marker.targetSessionId as SessionId, 'same-worktree');
+    expect(await store.read(marker.targetSessionId as SessionId)).toEqual(marker);
   });
 
   it('overwrites the marker for the same target session', async () => {

@@ -15,6 +15,10 @@ import {
   rollbackSessionAccountEdit,
   abandonSessionAccountEdit,
   hashSessionAccountEditHistory,
+  createSessionAccountForkBinding,
+  assertSessionAccountForkBindingOwned,
+  clearSessionAccountBindingForOperation,
+  getSessionAccountForkBindingState,
 } from './session-account-binding-store';
 const scope = { workspaceId: 'workspace', machineId: 'machine', sessionId: 'session' };
 const managed = '00000000-0000-4000-8000-00000000000b';
@@ -26,6 +30,45 @@ beforeEach(async () => {
   vi.spyOn(os, 'homedir').mockReturnValue(directory);
   vi.stubEnv('LODY_PLATFORM', undefined);
   vi.stubEnv('LODY_DATA_DIR', undefined);
+});
+
+describe('fork preparation ownership', () => {
+  it('blocks resume and generic mutations until the owning fork stages its history journal', async () => {
+    await createSessionAccountForkBinding(scope, 'fork-owner', managed);
+    expect(await assertSessionAccountForkBindingOwned(scope, 'fork-owner', managed)).toBe(true);
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('fork preparation recovery');
+    await expect(
+      resolveSessionAccountMeta(scope, meta({ accountProfileId: managed }))
+    ).rejects.toThrow('fork preparation recovery');
+    await expect(
+      setSessionAccountBinding(scope, { accountProfileId: 'system-default' })
+    ).rejects.toThrow('fork preparation recovery');
+    await expect(updateSessionAccountNativeId(scope, 'wrong' as ACPSessionId)).rejects.toThrow(
+      'fork preparation recovery'
+    );
+    await expect(clearSessionAccountBinding(scope)).rejects.toThrow('fork preparation recovery');
+    await clearSessionAccountBindingForOperation(scope, 'fork-owner', managed);
+    expect(await getSessionAccountBinding(scope)).toBeNull();
+  });
+
+  it('preserves foreign operations, profiles and unowned bindings during marker cleanup', async () => {
+    await createSessionAccountForkBinding(scope, 'fork-owner', managed);
+    await expect(
+      clearSessionAccountBindingForOperation(scope, 'other-owner', managed)
+    ).rejects.toThrow('does not own');
+    await expect(
+      clearSessionAccountBindingForOperation(scope, 'fork-owner', 'system-default')
+    ).rejects.toThrow('does not own');
+    await expect(createSessionAccountForkBinding(scope, 'other-owner', managed)).rejects.toThrow(
+      'already exists'
+    );
+    await clearSessionAccountBindingForOperation(scope, 'fork-owner', managed);
+    await setSessionAccountBinding(scope, { accountProfileId: managed });
+    await expect(
+      clearSessionAccountBindingForOperation(scope, 'fork-owner', managed)
+    ).rejects.toThrow('does not own');
+    expect(await getSessionAccountBinding(scope)).toEqual({ accountProfileId: managed });
+  });
 });
 
 describe('durable account edit journal', () => {
@@ -71,6 +114,57 @@ describe('durable account edit journal', () => {
       targetHistory,
     });
   }
+  it.each(['recovery', 'rollback'] as const)(
+    'allows ordinary edit %s to restore a completed fork source checkpoint',
+    async (mode) => {
+      await createSessionAccountForkBinding(scope, 'fork-owner', managed);
+      expect(await getSessionAccountForkBindingState(scope, 'fork-owner', managed)).toBe(
+        'preparing'
+      );
+      await beginSessionAccountEdit(scope, {
+        operationId: 'fork-owner',
+        sourceMeta: meta({ accountProfileId: managed, acpSessionId: undefined }),
+        targetMeta: sourceMeta,
+        sourceHistory: [],
+        targetHistory: sourceHistory,
+      });
+      await commitSessionAccountEdit(scope, 'fork-owner');
+      expect(await getSessionAccountForkBindingState(scope, 'fork-owner', managed)).toBe(
+        'committed'
+      );
+      await beginSessionAccountEdit(scope, {
+        operationId: 'ordinary-edit',
+        sourceMeta,
+        targetMeta,
+        sourceHistory,
+        targetHistory,
+      });
+      await expect(
+        assertSessionAccountForkBindingOwned(scope, 'fork-owner', managed)
+      ).rejects.toThrow('does not own');
+      await expect(getSessionAccountForkBindingState(scope, 'fork-owner', managed)).rejects.toThrow(
+        'does not own'
+      );
+      await expect(
+        clearSessionAccountBindingForOperation(scope, 'fork-owner', managed)
+      ).rejects.toThrow('does not own');
+      if (mode === 'recovery') {
+        abandonSessionAccountEdit(scope, 'ordinary-edit');
+        const recovered = await resolveSessionAccountMeta(scope, sourceMeta, {
+          readHistory: async () => sourceHistory,
+          writeMeta: async () => {},
+          persist: async () => {},
+        });
+        expect(recovered.acpSessionId).toBe(sourceMeta.acpSessionId);
+      } else {
+        await rollbackSessionAccountEdit(scope, 'ordinary-edit');
+      }
+      expect(await getSessionAccountBinding(scope)).toEqual({
+        accountProfileId: managed,
+        acpSessionId: sourceMeta.acpSessionId,
+      });
+    }
+  );
   it('blocks all ordinary consumers and competing writers until the active edit commits', async () => {
     await stage();
     const readHistory = vi.fn(async () => targetHistory);

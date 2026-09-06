@@ -105,7 +105,13 @@ const pendingEditSchema = z
     targetHistoryHash: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
-const recordSchema = bindingSchema.extend({ pendingEdit: pendingEditSchema.optional() }).strict();
+const recordSchema = bindingSchema
+  .extend({
+    pendingEdit: pendingEditSchema.optional(),
+    forkOperationId: z.string().min(1).optional(),
+    forkPreparing: z.literal(true).optional(),
+  })
+  .strict();
 type BindingRecord = z.infer<typeof recordSchema>;
 const activeEdits = new Map<string, string>();
 const locks = new Map<string, Promise<void>>();
@@ -190,9 +196,11 @@ async function readRecord(scope: SessionAccountScope): Promise<BindingRecord | n
   return recordSchema.parse(JSON.parse(content));
 }
 function requireCommitted(record: BindingRecord | null): SessionAccountBinding | null {
+  if (record?.forkPreparing)
+    throw new Error('Session fork preparation recovery is required before continuing.');
   if (record?.pendingEdit)
     throw new Error('Session account edit recovery is required before continuing.');
-  return record as SessionAccountBinding | null;
+  return record ? (bindingSchema.strip().parse(record) as SessionAccountBinding) : null;
 }
 export async function getSessionAccountBinding(
   scope: SessionAccountScope
@@ -249,6 +257,78 @@ export async function setSessionAccountBinding(
     await writeRecord(scope, bindingSchema.parse(binding));
   });
 }
+
+/** The caller first persists an installation-local fork marker under the target lock. */
+export async function createSessionAccountForkBinding(
+  scope: SessionAccountScope,
+  operationId: string,
+  accountProfileId: string
+): Promise<void> {
+  await withBindingLock(scope, async () => {
+    if (await readRecord(scope)) throw new Error('Target local account binding already exists.');
+    await writeRecord(scope, {
+      accountProfileId: AccountProfileIdSchema.parse(accountProfileId),
+      forkOperationId: operationId,
+      forkPreparing: true,
+    });
+  });
+}
+
+function requireForkOwner(
+  record: BindingRecord | null,
+  operationId: string,
+  accountProfileId: string
+): boolean {
+  if (!record) return false;
+  if (
+    record.forkOperationId !== operationId ||
+    record.accountProfileId !== accountProfileId ||
+    (record.pendingEdit && record.pendingEdit.operationId !== operationId)
+  )
+    throw new Error('The fork marker does not own this session account binding.');
+  return true;
+}
+
+export async function assertSessionAccountForkBindingOwned(
+  scope: SessionAccountScope,
+  operationId: string,
+  accountProfileId: string
+): Promise<boolean> {
+  return await withBindingLock(scope, async () =>
+    requireForkOwner(await readRecord(scope), operationId, accountProfileId)
+  );
+}
+
+export async function getSessionAccountForkBindingState(
+  scope: SessionAccountScope,
+  operationId: string,
+  accountProfileId: string
+): Promise<'missing' | 'preparing' | 'pending' | 'committed'> {
+  return await withBindingLock(scope, async () => {
+    const record = await readRecord(scope);
+    if (!requireForkOwner(record, operationId, accountProfileId) || !record) return 'missing';
+    if (record.pendingEdit) return 'pending';
+    if (record.forkPreparing) return 'preparing';
+    if (!requireCommitted(record)?.acpSessionId)
+      throw new Error('Completed fork native identity is unavailable.');
+    return 'committed';
+  });
+}
+
+/** Only after the marker-owned target deletion has been persisted under its fork lock. */
+export async function clearSessionAccountBindingForOperation(
+  scope: SessionAccountScope,
+  operationId: string,
+  accountProfileId: string
+): Promise<void> {
+  await withBindingLock(scope, async () => {
+    if (!requireForkOwner(await readRecord(scope), operationId, accountProfileId)) return;
+    const active = activeEdits.get(bindingPath(scope));
+    if (active && active !== operationId) throw new Error('A different account edit is active.');
+    await rm(bindingPath(scope), { force: true });
+    activeEdits.delete(bindingPath(scope));
+  });
+}
 function resolveCommittedMeta(
   meta: SessionMeta,
   binding: SessionAccountBinding | null
@@ -286,7 +366,12 @@ export async function beginSessionAccountEdit(
   }
 ): Promise<void> {
   await withBindingLock(scope, async () => {
-    const source = resolveCommittedMeta(edit.sourceMeta, requireCommitted(await readRecord(scope)));
+    const record = await readRecord(scope);
+    const binding =
+      record?.forkPreparing && record.forkOperationId === edit.operationId
+        ? (bindingSchema.strip().parse(record) as SessionAccountBinding)
+        : requireCommitted(record);
+    const source = resolveCommittedMeta(edit.sourceMeta, binding);
     if (
       source.accountProfileId !== (edit.sourceMeta.accountProfileId ?? 'system-default') ||
       source.acpSessionId !== edit.sourceMeta.acpSessionId
@@ -313,6 +398,9 @@ export async function beginSessionAccountEdit(
       throw new Error('Session account edit requires distinct history checkpoints.');
     await writeRecord(scope, {
       ...sourceBinding,
+      ...(record?.forkOperationId === edit.operationId
+        ? { forkOperationId: record.forkOperationId }
+        : {}),
       pendingEdit: {
         operationId: edit.operationId,
         sourceBinding,
@@ -332,14 +420,25 @@ async function finishSessionAccountEdit(
   target: boolean
 ): Promise<void> {
   await withBindingLock(scope, async () => {
-    const pending = (await readRecord(scope))?.pendingEdit;
+    const record = await readRecord(scope);
+    const pending = record?.pendingEdit;
     if (
       !pending ||
       pending.operationId !== operationId ||
       activeEdits.get(bindingPath(scope)) !== operationId
     )
       throw new Error('Session account edit operation is no longer active.');
-    await writeRecord(scope, target ? pending.targetBinding : pending.sourceBinding, true);
+    await writeRecord(
+      scope,
+      {
+        ...(target ? pending.targetBinding : pending.sourceBinding),
+        ...(record?.forkOperationId ? { forkOperationId: record.forkOperationId } : {}),
+        ...(!target && record?.forkOperationId === pending.operationId
+          ? { forkPreparing: true as const }
+          : {}),
+      },
+      true
+    );
     activeEdits.delete(bindingPath(scope));
   });
 }
@@ -372,6 +471,8 @@ export async function resolveSessionAccountMeta(
       throw new Error('Session account edit recovery is required before continuing.');
     const hash = hashSessionAccountEditHistory(await recovery.readHistory());
     const target = hash === pending.targetHistoryHash;
+    if (!target && record.forkOperationId === pending.operationId)
+      throw new Error('Session fork preparation recovery is required before continuing.');
     if (!target && hash !== pending.sourceHistoryHash)
       throw new Error('Session account edit recovery cannot match the durable history checkpoint.');
     const patch = editMeta(
@@ -382,7 +483,14 @@ export async function resolveSessionAccountMeta(
     await recovery.persist();
     if (hashSessionAccountEditHistory(await recovery.readHistory()) !== hash)
       throw new Error('Session history changed during account edit recovery.');
-    await writeRecord(scope, binding, true);
+    await writeRecord(
+      scope,
+      {
+        ...binding,
+        ...(record.forkOperationId ? { forkOperationId: record.forkOperationId } : {}),
+      },
+      true
+    );
     return resolveCommittedMeta({ ...meta, ...patch }, binding as SessionAccountBinding);
   });
 }
