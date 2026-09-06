@@ -13,6 +13,13 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   compatibility adapter, never in session consumers; normalized Core capabilities stay
   provider-neutral.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
+- Registry Cursor identity (`cliType: 'registry'` and `agentType: 'cursor'`, never a same-named
+  custom or builtin config) gates the `parameterizedModelPicker` opt-in, the
+  `CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX` marker, and the
+  `cursorParameterizedModelPicker` protocol capability. `isAcpCapabilityCacheEntryCurrent`
+  rejects an unmarked registry Cursor row only on a machine that advertises that capability; a
+  legacy daemon's unmarked rows stay current. Predicate, suffix, and capability are one binding
+  in `@lody/shared`; never re-derive them in the CLI.
 - Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
@@ -107,6 +114,14 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
+- Registry Cursor's per-model catalog (`configOptionsByModel`, background in
+  [README.md](README.md)) is the latest successful `cursor/list_available_models` observation
+  from the explicit probe or a created session, never enumerated through
+  `session/set_config_option` (it rewrites the user's global Cursor config). A confirmed
+  `-32601` clears it and any other failure keeps the stored catalog; the write contract lives
+  in `../lib/loro/AGENTS.md`. `machine/acp-capabilities-refresh_response.capability` omits the
+  catalog: clients parse it through a strict schema, and the Flock row reader tolerates unknown
+  fields. `resolveAcpConfigOptionsForModel` in `@lody/shared` is the one composition rule.
 - Builtin Claude owns session titles through ACP `session_info_update`; store them only after
   `sanitizeLodyInternalInstructions`, and never start `title-generator.ts`'s isolated session
   for Claude. For Codex accept only `explicit` `_meta.lody.titleSource` names, ignore its

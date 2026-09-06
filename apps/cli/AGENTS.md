@@ -57,7 +57,12 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 - INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
   describe only the model current at probe time. Validate effort against the TARGET model using
   `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
-  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
+  `validateTurnConfigOptionValues`. When the cache carries `configOptionsByModel` (registry
+  Cursor), mapping, turn validation, and inherited-default filtering read the TARGET model's
+  composed options through `resolveAcpConfigOptionsForModel`; inherited defaults are filtered
+  against the MERGED target model, and an explicit create `modelId` drops a parent's superseded
+  `model` option so the frozen Turn names one model. Dispatch what cannot be checked offline
+  as requested. Keep
   runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
   never become visible `agent_warning` notices, while other rejections still do. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.

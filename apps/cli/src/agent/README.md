@@ -164,6 +164,29 @@ per-model reasoning-effort ladders on that session response as
 Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
 is a context window). Vendor model `_meta` never enters the CLI.
 
+### Registry Cursor per-model catalog
+
+Registry Cursor (`cliType: 'registry'` and `agentType: 'cursor'`) declares
+`clientCapabilities._meta.parameterizedModelPicker` at initialize (`agent-client.ts`), so
+cursor-agent advertises clean model ids and rebuilds thinking/effort/context/fast per model.
+Because a `session/new` snapshot describes only the model current at that moment,
+`cursor-acp.ts` fetches every model's options through the side-effect-free
+`cursor/list_available_models` ext method once after `session/new` and stores them as
+`AcpCapabilityCacheEntry.configOptionsByModel` (`[]` = a known model without options; a
+missing key = unknown model). Both the explicit `machine/acp-capabilities-refresh` probe and
+every created real session (inside the non-blocking cache update, on the live connection)
+make that observation. JSON-RPC `-32601` means the agent publishes no catalog and travels as
+`null` to the write, which clears a stored one; a validation failure, timeout, or abort fails
+the probe with `[ACP_CAPABILITIES_INCOMPLETE]` so the Settings Test action can retry, while a
+session logs it and omits the field so the stored catalog is inherited (write contract in
+`../lib/loro/AGENTS.md`). `resolveAcpConfigOptionsForModel` in `@lody/shared` composes the
+snapshot with the selected model's entry. The opt-in also changes the advertised model ids,
+so `getAcpCapabilitySourceVersion` appends `CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX`
+and the daemon advertises the `cursorParameterizedModelPicker` protocol capability; a
+client requires the suffix only on a machine that advertises the capability, because a
+daemon without it still runs Cursor in variants mode and its unmarked rows describe what it
+launches.
+
 ### Session titles
 
 Builtin Claude owns session title generation through ACP `session_info_update`. Builtin Codex
