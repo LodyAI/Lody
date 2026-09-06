@@ -2018,9 +2018,13 @@ const OperationCompletionView = ({
                   })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="px-1 text-xs text-muted-foreground">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
@@ -2057,9 +2061,13 @@ const OperationCompletionView = ({
             })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
