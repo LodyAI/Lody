@@ -1214,6 +1214,7 @@ const AcpCapabilityCacheEntrySchema = z
     models: z.array(AcpModelSchema),
     configOptions: z.array(AcpConfigOptionSummarySchema).optional(),
     modelReasoningEfforts: z.record(z.string(), z.array(z.string())).optional(),
+    configOptionsByModel: z.record(z.string(), z.array(AcpConfigOptionSummarySchema)).optional(),
     availableCommands: z
       .array(
         z
