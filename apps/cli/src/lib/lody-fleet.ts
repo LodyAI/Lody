@@ -156,6 +156,7 @@ export class LodyFleet {
   private readonly workspaceWatchCoordinator: WorkspaceWatchCoordinator;
 
   private readonly runtimes = new Map<string, WorkspaceRuntimeState>();
+  private shutdownPromise: Promise<void> | null = null;
   private readonly reviewCredentialResolvers = new Map<string, GitHubCredentialResolver>();
   private readonly startInFlight = new Map<string, Promise<void>>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
@@ -529,8 +530,29 @@ export class LodyFleet {
     });
   }
 
-  async shutdown(): Promise<void> {
-    if (this.stopped) return;
+  async forceTerminateSessions(): Promise<void> {
+    this.stopped = true;
+    const results = await Promise.allSettled(
+      Array.from(this.runtimes.values(), (runtime) => runtime.lody.forceTerminateSessions())
+    );
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Forced workspace process cleanup failed');
+  }
+
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    const pending = this.runShutdown();
+    this.shutdownPromise = pending;
+    void pending.catch(() => {
+      if (this.shutdownPromise === pending) this.shutdownPromise = null;
+    });
+    return pending;
+  }
+
+  private async runShutdown(): Promise<void> {
     this.stopped = true;
     this.stopRuntimeStateLoop();
     this.memoryPressure.stop();
@@ -560,23 +582,32 @@ export class LodyFleet {
     this.unsubscribeWorkspaces = null;
 
     const runtimes = Array.from(this.runtimes.values());
-    this.runtimes.clear();
-    for (const runtime of runtimes) {
-      try {
-        await runtime.lody.cleanup();
-        runtime.unsubscribeTerminalCleanup();
-        await runtime.prPollerWorkspace?.dispose();
-        await runtime.taskAutomation?.dispose();
-        await runtime.reviewAutomation?.dispose();
-      } catch (error) {
-        runtime.unsubscribeTerminalCleanup();
-        this.logger.debug(
-          `[fleet] Failed to cleanup workspace runtime ${runtime.workspace.id}: ${formatErrorMessage(
-            error
-          )}`
-        );
-      }
-    }
+    const cleanupResults = await Promise.allSettled(
+      runtimes.map(async (runtime) => {
+        try {
+          await runtime.lody.cleanup();
+          runtime.unsubscribeTerminalCleanup();
+          await runtime.prPollerWorkspace?.dispose();
+          await runtime.taskAutomation?.dispose();
+          await runtime.reviewAutomation?.dispose();
+          if (this.runtimes.get(runtime.workspace.id) === runtime)
+            this.runtimes.delete(runtime.workspace.id);
+        } catch (error) {
+          runtime.unsubscribeTerminalCleanup();
+          this.logger.debug(
+            `[fleet] Failed to cleanup workspace runtime ${runtime.workspace.id}: ${formatErrorMessage(
+              error
+            )}`
+          );
+          throw error;
+        }
+      })
+    );
+    const cleanupFailures = cleanupResults.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (cleanupFailures.length > 0)
+      throw new AggregateError(cleanupFailures, 'Workspace cleanup failed');
     await this.workspaceWatchCoordinator.dispose();
     await this.cloudPort.dispose();
 

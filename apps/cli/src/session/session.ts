@@ -242,17 +242,51 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
-  async terminate(force: boolean = false): Promise<void> {
+  private terminationPromise: Promise<void> | null = null;
+  private terminationForceRequested = false;
+  private forceTerminationSignal: Promise<void> = Promise.resolve();
+  private requestForceTermination: (() => void) | null = null;
+
+  terminate(force: boolean = false): Promise<void> {
+    if (this.terminationPromise) {
+      if (force) {
+        this.terminationForceRequested = true;
+        this.requestForceTermination?.();
+      }
+      return this.terminationPromise;
+    }
+    if (this.status === 'terminated') return Promise.resolve();
+    this.terminationForceRequested = force;
+    this.forceTerminationSignal = new Promise<void>((resolve) => {
+      this.requestForceTermination = resolve;
+    });
+    if (force) this.requestForceTermination?.();
+    this.status = 'stopping';
+    const termination = Promise.resolve().then(() => this.terminateOnce());
+    this.terminationPromise = termination;
+    void termination.then(
+      () => {},
+      () => {
+        if (this.terminationPromise === termination) this.terminationPromise = null;
+      }
+    );
+    return termination;
+  }
+
+  private async terminateOnce(): Promise<void> {
+    const force = this.terminationForceRequested;
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
     const failures: unknown[] = [];
     // Exit callbacks may release these references during terminal/ACP disposal.
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
+    let terminalDisposal: Promise<void> | undefined;
 
     if (this.acpSessionId && this.terminalManager.disposeAll) {
       try {
-        await this.disposeTerminalsWithDeadline(this.acpSessionId);
+        terminalDisposal = this.disposeTerminalsWithDeadline(this.acpSessionId);
+        await Promise.race([terminalDisposal, this.forceTerminationSignal]);
       } catch (error) {
         failures.push(error);
         this.logger.debug(
@@ -263,9 +297,12 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       }
     }
 
-    if (!force && this.acpSessionId && this.agentClient?.isCreated()) {
+    if (!this.terminationForceRequested && this.acpSessionId && this.agentClient?.isCreated()) {
       try {
-        await this.agentClient.closeSession(this.acpSessionId);
+        await Promise.race([
+          this.agentClient.closeSession(this.acpSessionId),
+          this.forceTerminationSignal,
+        ]);
       } catch (error) {
         this.logger.debug(
           `[${this.sessionId}] Failed to close ACP session during terminate: ${formatErrorMessage(
@@ -279,15 +316,33 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // This prevents OS-level process leaks where SIGTERM is sent but the process
     // outlives this function (and all tracking of it).
     const processResults = await Promise.allSettled([
-      this.killAndWait(activeProcess, force),
-      this.killAndWait(agentProcess, force),
+      this.killAndWait(activeProcess, this.terminationForceRequested),
+      this.killAndWait(agentProcess, this.terminationForceRequested),
     ]);
     for (const result of processResults) {
       if (result.status === 'rejected') failures.push(result.reason);
     }
+    if (terminalDisposal && this.terminationForceRequested) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          terminalDisposal,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error('Terminal disposal incomplete after forced cleanup')),
+              5_000
+            );
+          }),
+        ]);
+      } catch (error) {
+        failures.push(error);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
     try {
-      await this.sandbox.terminate(force);
+      await this.sandbox.terminate(this.terminationForceRequested);
     } catch (error) {
       failures.push(error);
       this.logger.debug(
@@ -348,6 +403,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             () => reject(new Error('Terminal disposal timed out after 30000ms')),
             30_000
           );
+          void this.forceTerminationSignal.then(() => clearTimeout(timer));
         }),
       ]);
     } finally {
@@ -372,7 +428,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     if (hasExited()) return;
 
     const EXIT_TIMEOUT_MS = 5_000;
-    const waitForExit = (): Promise<boolean> => {
+    const waitForExit = (interruptible = false): Promise<boolean> => {
       if (hasExited()) return Promise.resolve(true);
       return new Promise<boolean>((resolve) => {
         let settled = false;
@@ -385,6 +441,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           resolve(exited);
         };
         const timer = setTimeout(() => finish(hasExited()), EXIT_TIMEOUT_MS);
+        if (interruptible) void this.forceTerminationSignal.then(() => finish(hasExited()));
         unsubscribe = proc.onExit(() => finish(true));
         // onExit may replay an already observed exit synchronously.
         if (settled) unsubscribe();
@@ -405,7 +462,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         { cause: error }
       );
     }
-    if (await waitForExit()) return;
+    if (
+      await Promise.race([
+        waitForExit(!force),
+        ...(force ? [] : [this.forceTerminationSignal.then(() => false)]),
+      ])
+    )
+      return;
     if (!force) {
       this.logger.debug(
         `[${this.sessionId}] Process did not exit within ${EXIT_TIMEOUT_MS}ms of SIGTERM; escalating to SIGKILL`
@@ -530,8 +593,15 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    const assertRunning = () => {
+      if (this.status === 'stopping' || this.status === 'terminated') {
+        throw new Error('Cannot launch agent while session is stopping');
+      }
+    };
+    assertRunning();
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
     const loginShellEnv = await getLoginShellEnv();
+    assertRunning();
     callbacks.abortSignal?.throwIfAborted();
     const env = withLodyNpmCacheForNpx(
       callbacks.command,
@@ -584,6 +654,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       let agentProcessHandle: SessionProcessHandle;
       try {
         callbacks.abortSignal?.throwIfAborted();
+        assertRunning();
         agentProcessHandle = await this.sandbox.spawn(callbacks.command, callbacks.args ?? [], {
           cwd: this.getWorkdir(),
           env,
@@ -594,6 +665,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         throw error;
       }
       const agentProcess = agentProcessHandle.child;
+      if (this.status === 'stopping' || this.status === 'terminated') {
+        await this.killAndWait(agentProcessHandle, true);
+        throw new Error('Agent launch cancelled by session shutdown');
+      }
 
       this.agentProcess = agentProcessHandle;
       lastAgentProcessHandle = agentProcessHandle;

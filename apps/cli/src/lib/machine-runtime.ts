@@ -231,6 +231,13 @@ export class MachineRuntime {
     });
   }
 
+  async forceTerminateSessions(): Promise<void> {
+    this.gcManager?.stop();
+    this.messageProcessor.stop();
+    this.handler?.cancelPendingPermissionRequests();
+    await this.sessionManager?.forceTerminateSessions();
+  }
+
   async cleanup(): Promise<void> {
     this.options.workspaceDocument.clearMachineMonitorProvider();
     this.resourceMonitor = null;

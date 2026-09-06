@@ -76,6 +76,41 @@ function createProcessHandle(terminate: SessionProcessHandle['terminate']): Sess
 }
 
 describe('Session terminate cleanup', () => {
+  it('shares pending termination and upgrades force without waiting for terminal disposal', async () => {
+    const session = createSession();
+    let finishDisposal = () => {};
+    let startedDisposal = () => {};
+    const started = new Promise<void>((resolve) => {
+      startedDisposal = resolve;
+    });
+    session.acpSessionId = 'acp-session-1' as ACPSessionId;
+    session.terminalManager = createTerminalManager({
+      disposeAll: () => {
+        startedDisposal();
+        return new Promise<void>((resolve) => {
+          finishDisposal = resolve;
+        });
+      },
+    });
+    let processKilled = () => {};
+    const killed = new Promise<void>((resolve) => {
+      processKilled = resolve;
+    });
+    const handle = createProcessHandle(async (force) => {
+      expect(force).toBe(true);
+      handle.child.exitCode = 0;
+      processKilled();
+    });
+    (session as unknown as { agentProcess: SessionProcessHandle }).agentProcess = handle;
+    const first = session.terminate(false);
+    await started;
+    const second = session.terminate(true);
+    expect(second).toBe(first);
+    await killed;
+    finishDisposal();
+    await first;
+    expect(session.acpSessionId).toBeNull();
+  });
   it('disposes ACP terminals before closing the ACP session on graceful terminate', async () => {
     const disposeAll = vi.fn(async () => {});
     const closeSession = vi.fn(async () => true);

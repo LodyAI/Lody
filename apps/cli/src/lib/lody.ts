@@ -294,6 +294,10 @@ export class Lody {
     );
   }
 
+  async forceTerminateSessions(): Promise<void> {
+    await this.runtime.forceTerminateSessions();
+  }
+
   cleanup = async () => {
     this.cleanedUp = true;
     if (this.builtinAgentConfigRetryTimer) {

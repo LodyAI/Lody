@@ -452,6 +452,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
   private readonly cleanupOwnedSessions = new WeakSet<Session>();
+  private shuttingDown = false;
+
+  private assertSessionAdmission(sessionId?: SessionId): void {
+    if (this.shuttingDown) throw new Error('Session manager is shutting down');
+    const resident = sessionId ? this.sessions.get(sessionId) : undefined;
+    if (resident && this.cleanupOwnedSessions.has(resident)) {
+      throw new Error('Session cleanup must complete before replacement');
+    }
+  }
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
@@ -613,6 +622,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async createSession(config: SessionConfig, agentStart?: AgentStartConfig): Promise<ISession> {
+    this.assertSessionAdmission(config.sessionId);
     if (!config.assumeDocExisting) {
       const sessionId = await this.workspaceDocument.createSession(
         config.machineId,
@@ -624,6 +634,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
 
     const sessionId = config.sessionId;
+    this.assertSessionAdmission(sessionId);
     if (!sessionId) {
       throw new Error('SessionId is required to create a session');
     }
@@ -1040,6 +1051,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       session = new Session(config, this.logger, provisionalWorkdir, sandbox);
       sandbox = null;
       session.ghTokenInjected = ghTokenInjected;
+      this.assertSessionAdmission(sessionId);
       this.preparationSessions.set(sessionId, session);
       await this.rebalanceSessionSandboxes();
       signal.throwIfAborted();
@@ -2044,6 +2056,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     let session: Session;
     if (preparedSession) {
+      this.assertSessionAdmission(config.sessionId);
       session = preparedSession;
       if (workdir) {
         session.setWorkdir(workdir);
@@ -2051,10 +2064,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.preparationSessions.delete(config.sessionId!);
     } else {
       const sandbox = await this.sessionSandboxFactory(config.sessionId!);
+      try {
+        this.assertSessionAdmission(config.sessionId);
+      } catch (error) {
+        await sandbox.cleanup();
+        throw error;
+      }
       this.logger.debug(`[${config.sessionId}] Session sandbox: ${sandbox.description}`);
       session = new Session(config, this.logger, workdir, sandbox);
     }
     this.registerSessionEvents(session);
+    this.assertSessionAdmission(config.sessionId);
     this.sessions.set(config.sessionId!, session);
     await this.rebalanceSessionSandboxes();
     return session;
@@ -2073,7 +2093,35 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.logger.debug(`[${sessionId}] Session terminated`);
   }
 
+  async forceTerminateSessions(): Promise<void> {
+    this.shuttingDown = true;
+    this.preparationRecoveryGeneration += 1;
+    this.detachPreparationRecovery?.();
+    this.detachPreparationRecovery = null;
+    // Expire preparation leases synchronously, without waiting ahead of process kills.
+    void this.preparationService.disposeAll().catch((error: unknown) => {
+      this.logger.error(`Preparation cleanup failed: ${formatErrorMessage(error)}`);
+    });
+    const targets = new Set([...this.sessions.values(), ...this.preparationSessions.values()]);
+    const results = await Promise.allSettled(
+      [...targets].map(async (session) => {
+        this.cleanupOwnedSessions.add(session);
+        await session.terminate(true);
+        if (this.sessions.get(session.sessionId) === session)
+          this.sessions.delete(session.sessionId);
+        if (this.preparationSessions.get(session.sessionId) === session)
+          this.preparationSessions.delete(session.sessionId);
+        this.cleanupOwnedSessions.delete(session);
+      })
+    );
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length) throw new AggregateError(failures, 'Forced session cleanup failed');
+  }
+
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {
+    this.shuttingDown = true;
     this.preparationRecoveryGeneration += 1;
     this.detachPreparationRecovery?.();
     this.detachPreparationRecovery = null;
@@ -2120,7 +2168,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   getSession(sessionId: SessionId): ISession | null {
-    return this.sessions.get(sessionId) ?? null;
+    const session = this.sessions.get(sessionId);
+    return session && !this.cleanupOwnedSessions.has(session) ? session : null;
   }
 
   async resolveSessionWorkdir(sessionId: SessionId): Promise<string> {

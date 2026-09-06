@@ -1,6 +1,8 @@
 import type { Logger } from '@/utils/logger';
 
 export const START_SHUTDOWN_TIMEOUT_MS = 15_000;
+export const START_FORCE_SHUTDOWN_TIMEOUT_MS = 15_000;
+export const START_TELEMETRY_SHUTDOWN_TIMEOUT_MS = 2_000;
 
 type ShutdownExit = (code: number) => void;
 export type StartShutdownRequest =
@@ -21,9 +23,13 @@ export interface StartShutdownControllerOptions {
   signals: NodeJS.Signals[];
   logger: Logger;
   shutdown: () => Promise<void>;
+  /** Bypass graceful drains and start owned process cleanup concurrently. */
+  forceShutdown?: () => Promise<void>;
   flushTelemetry: () => Promise<void>;
   exit: ShutdownExit;
   timeoutMs?: number;
+  forceTimeoutMs?: number;
+  telemetryTimeoutMs?: number;
 }
 
 const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
@@ -60,6 +66,28 @@ export function createStartShutdownController(
   let isShuttingDown = false;
   let exitRequested = false;
   let shutdownTimeout: NodeJS.Timeout | null = null;
+  let forcedShutdown: Promise<void> | null = null;
+  let resolveFinished: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    resolveFinished = resolve;
+  });
+
+  const withinDeadline = async (action: () => Promise<void>, milliseconds: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve().then(action),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Shutdown phase deadline exceeded')),
+            milliseconds
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const clearShutdownTimeout = () => {
     if (!shutdownTimeout) {
@@ -86,13 +114,17 @@ export function createStartShutdownController(
     unregister();
 
     try {
-      await options.flushTelemetry();
+      await withinDeadline(
+        options.flushTelemetry,
+        options.telemetryTimeoutMs ?? START_TELEMETRY_SHUTDOWN_TIMEOUT_MS
+      );
     } catch (error) {
       options.logger.debug(
         `Telemetry shutdown failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     } finally {
       options.exit(code);
+      resolveFinished();
     }
   };
 
@@ -100,11 +132,27 @@ export function createStartShutdownController(
     request: { signal?: NodeJS.Signals; exitCode: number },
     reason: string
   ) => {
+    if (forcedShutdown) return forcedShutdown;
     options.logger.warn(reason);
-    await exitAfterTelemetry(request.exitCode || getExitCodeForSignal(request.signal));
+    clearShutdownTimeout();
+    forcedShutdown = Promise.resolve().then(async () => {
+      if (options.forceShutdown) {
+        try {
+          await withinDeadline(
+            options.forceShutdown,
+            options.forceTimeoutMs ?? START_FORCE_SHUTDOWN_TIMEOUT_MS
+          );
+        } catch {
+          options.logger.warn('Forced process cleanup did not complete successfully before exit');
+        }
+      }
+      await exitAfterTelemetry(request.exitCode || getExitCodeForSignal(request.signal) || 1);
+    });
+    return forcedShutdown;
   };
 
   const shutdown = async (request?: StartShutdownRequest) => {
+    if (exitRequested) return finished;
     const normalized = normalizeShutdownRequest(request);
     if (isShuttingDown) {
       await forceExit(
@@ -131,15 +179,23 @@ export function createStartShutdownController(
       );
     }, timeoutMs);
 
-    try {
-      await options.shutdown();
-    } catch (error) {
-      options.logger.error(
-        `Shutdown error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    } finally {
-      await exitAfterTelemetry(normalized.exitCode);
-    }
+    const graceful = Promise.resolve().then(async () => {
+      try {
+        await options.shutdown();
+      } catch (error) {
+        options.logger.error(
+          `Shutdown error: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+        await forceExit(
+          normalized,
+          'Graceful shutdown failed; attempting forced process cleanup...'
+        );
+      } finally {
+        if (forcedShutdown) await forcedShutdown;
+        else await exitAfterTelemetry(normalized.exitCode);
+      }
+    });
+    await Promise.race([graceful, finished]);
   };
 
   return {

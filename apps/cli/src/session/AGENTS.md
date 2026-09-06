@@ -250,6 +250,10 @@ the frozen identity. Never fall back to the Session owner when the driving Turn 
   teardown; a root exit is not successful cleanup. Remove only the exact successfully
   terminated instance. Terminal release reports observed exit only, retains failed releases,
   and Session bounds terminal disposal before continuing process termination.
+  Concurrent termination shares one attempt; force requests upgrade it and bypass graceful
+  drains. Shutdown closes session admission before awaiting work. The process boundary
+  reserves a separate forced-cleanup deadline and sweeps retained workspace/preparation
+  owners concurrently before exiting.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
   Peek/claim are synchronous published-resource snapshots and must never delay cold
   fallback; peek never transfers ownership. A prepared resource may reuse its open

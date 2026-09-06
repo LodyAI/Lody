@@ -297,3 +297,79 @@ describe('start shutdown controller', () => {
     expect(exits).toEqual([130]);
   });
 });
+
+it('reserves forced cleanup before exit even when graceful shutdown remains stuck', async () => {
+  vi.useFakeTimers();
+  const force = createDeferred();
+  const exit = vi.fn();
+  const forceShutdown = vi.fn(() => force.promise);
+  const controller = createStartShutdownController({
+    signals: [],
+    logger: createTestLogger(),
+    shutdown: () => new Promise(() => {}),
+    forceShutdown,
+    flushTelemetry: async () => {},
+    exit,
+    timeoutMs: 15,
+    forceTimeoutMs: 15,
+  });
+  const result = controller.shutdown('SIGTERM');
+  await vi.advanceTimersByTimeAsync(15);
+  expect(forceShutdown).toHaveBeenCalledTimes(1);
+  expect(exit).not.toHaveBeenCalled();
+  force.resolve();
+  await result;
+  expect(exit).toHaveBeenCalledWith(143);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('bounds force cleanup and telemetry when both remain stuck', async () => {
+  vi.useFakeTimers();
+  const exit = vi.fn();
+  const controller = createStartShutdownController({
+    signals: [],
+    logger: createTestLogger(),
+    shutdown: () => new Promise(() => {}),
+    forceShutdown: () => new Promise(() => {}),
+    flushTelemetry: () => new Promise(() => {}),
+    exit,
+    timeoutMs: 15,
+    forceTimeoutMs: 15,
+    telemetryTimeoutMs: 2,
+  });
+  const result = controller.shutdown('SIGTERM');
+  await vi.advanceTimersByTimeAsync(31);
+  expect(exit).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await result;
+  expect(exit).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('does not let late graceful completion bypass the forced phase', async () => {
+  vi.useFakeTimers();
+  const graceful = createDeferred();
+  const force = createDeferred();
+  const exit = vi.fn();
+  const forceShutdown = vi.fn(() => force.promise);
+  const controller = createStartShutdownController({
+    signals: [],
+    logger: createTestLogger(),
+    shutdown: () => graceful.promise,
+    forceShutdown,
+    flushTelemetry: async () => {},
+    exit,
+    timeoutMs: 15,
+  });
+  const first = controller.shutdown('SIGINT');
+  await vi.advanceTimersByTimeAsync(15);
+  const second = controller.shutdown('SIGINT');
+  graceful.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(exit).not.toHaveBeenCalled();
+  expect(forceShutdown).toHaveBeenCalledTimes(1);
+  force.resolve();
+  await Promise.all([first, second]);
+  expect(exit).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});

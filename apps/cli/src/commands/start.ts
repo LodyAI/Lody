@@ -618,6 +618,7 @@ async function startAgentService(
   const shutdownController = createStartShutdownController({
     signals: shutdownSignals,
     logger,
+    forceShutdown: async () => await fleet.forceTerminateSessions(),
     shutdown: async () => {
       unregisterSupervisorControl();
       unregisterProcessCleanup();

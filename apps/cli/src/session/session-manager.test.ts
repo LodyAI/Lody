@@ -187,6 +187,32 @@ const createSessionInner = async (
   ).createSessionInner(config, undefined, preparedWorktree);
 
 describe('SessionManager cleanup phases', () => {
+  it('closes admission before waiting for preparation cleanup', async () => {
+    const workspaceDocument = createWorkspaceDocument(new Map());
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const internals = manager as unknown as { preparationService: { disposeAll(): Promise<void> } };
+    const held = deferred<void>();
+    vi.spyOn(internals.preparationService, 'disposeAll').mockReturnValue(held.promise);
+    const cleanup = manager.cleanUp();
+    await expect(
+      manager.createSession({
+        sessionId: 'late-session' as SessionId,
+        assumeDocExisting: true,
+      } as SessionConfig)
+    ).rejects.toThrow('shutting down');
+    held.resolve();
+    await cleanup;
+  });
   const cleanupFixture = () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(
@@ -241,12 +267,54 @@ describe('SessionManager cleanup phases', () => {
     await assertion;
     expect(sessions.has(successId)).toBe(false);
     expect(sessions.get(failureId)).toBe(failedSession);
+    expect(manager.getSession(failureId)).toBeNull();
+    await expect(
+      manager.createSession({ sessionId: failureId, assumeDocExisting: true } as SessionConfig)
+    ).rejects.toThrow('shutting down');
     failureEvents.emit('exit', { sessionId: failureId, exitCode: 0 });
     expect(sessions.get(failureId)).toBe(failedSession);
     expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
     await manager.cleanUp();
     expect(sessions.size).toBe(0);
     expect(workspaceDocument.cleanUp).toHaveBeenCalledOnce();
+  });
+
+  it('force sweeps registered and preparing sessions without waiting for preparation disposal', async () => {
+    const { manager, sessions } = cleanupFixture();
+    const internals = manager as unknown as {
+      preparationSessions: Map<SessionId, ISession>;
+      preparationService: { disposeAll(): Promise<void> };
+    };
+    const preparationDisposal = deferred<void>();
+    vi.spyOn(internals.preparationService, 'disposeAll').mockReturnValue(
+      preparationDisposal.promise
+    );
+    const terminated: string[] = [];
+    const residentId = 'force-resident' as SessionId;
+    const preparingId = 'force-preparing' as SessionId;
+    sessions.set(residentId, {
+      sessionId: residentId,
+      terminate: async () => {
+        terminated.push('resident');
+      },
+    } as unknown as ISession);
+    internals.preparationSessions.set(preparingId, {
+      sessionId: preparingId,
+      terminate: async () => {
+        terminated.push('preparing');
+      },
+    } as unknown as ISession);
+    await manager.forceTerminateSessions();
+    expect(terminated.sort()).toEqual(['preparing', 'resident']);
+    expect(sessions.size).toBe(0);
+    expect(internals.preparationSessions.size).toBe(0);
+    await expect(
+      manager.createSession({
+        sessionId: 'new' as SessionId,
+        assumeDocExisting: true,
+      } as SessionConfig)
+    ).rejects.toThrow('shutting down');
+    preparationDisposal.resolve();
   });
 
   it('preserves replacement and newly registered sessions during an in-flight cleanup', async () => {
