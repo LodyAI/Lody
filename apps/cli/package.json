@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "pnpm run prepare:acp-adapters && node scripts/dev-build.mjs && node --enable-source-maps dist-dev/index.js",
     "dev:build": "node scripts/dev-build.mjs",
+    "prepack": "node scripts/windows-supervisor-artifacts.mjs verify-package",
     "build": "pnpm run clean && pnpm run prepare:acp-adapters && pnpm run typecheck && pnpm run build:bundle && pnpm run copy:dsh-presets && pnpm run check:published-bundle-imports && pnpm run copy:wasm",
     "build:watch": "pnpm run prepare:review-assets && vite build --watch",
     "build:bundle": "pnpm run prepare:review-assets && vite build",

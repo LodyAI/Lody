@@ -1,3 +1,4 @@
+import { spawnOwnedProcess } from '@/utils/windows-owned-process';
 import { ChildProcess, type SpawnOptions } from 'child_process';
 import * as fs from 'fs/promises';
 import path from 'path';
@@ -151,7 +152,7 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   platform: process.platform,
   cgroupMount: DEFAULT_CGROUP_MOUNT,
   fs,
-  spawnProcess: spawn,
+  spawnProcess: spawnOwnedProcess,
   readSelfCgroupPath: async () => {
     const content = (await fs.readFile('/proc/self/cgroup', 'utf8')) as string;
     const line = content
@@ -236,7 +237,7 @@ export function createSessionResourceLimitError(
 }
 
 export function createNoopSessionSandbox(
-  spawnProcess: typeof spawn = spawn,
+  spawnProcess: typeof spawn = spawnOwnedProcess,
   description: string = 'noop'
 ): SessionSandbox {
   return new NoopSessionSandbox(

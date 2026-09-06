@@ -1,3 +1,4 @@
+import { spawnOwnedProcess } from '@/utils/windows-owned-process';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import spawn from 'cross-spawn';
@@ -428,7 +429,7 @@ export async function probeBuiltinAuthentication(
   if (hasBuiltinEnvAuthentication(options.agentType, env)) {
     return { status: 'unknown' };
   }
-  const child = (options.spawnProcess ?? spawn)(launch.command, launch.args, {
+  const child = (options.spawnProcess ?? spawnOwnedProcess)(launch.command, launch.args, {
     cwd: os.homedir(),
     env,
     stdio: 'ignore',
@@ -524,7 +525,7 @@ export class AcpAuthenticationManager {
       1,
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS
     );
-    this.spawnProcess = options.spawnProcess ?? spawn;
+    this.spawnProcess = options.spawnProcess ?? spawnOwnedProcess;
     this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
   }
 

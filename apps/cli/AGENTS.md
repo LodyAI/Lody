@@ -86,6 +86,19 @@ Two things the dev build does deliberately, both load-bearing:
 
 ## Process lifecycle
 
+- Windows owned processes require the flat `windows-process-launcher.js` and
+  `windows-process-supervisor-win32-{x64,arm64}.exe` next to the CLI entries.
+  The adapter maps the known `chunks/` build directory to that root. Both Vite
+  and development builds compile the host architecture on Windows after JS output;
+  developers need Visual Studio C++ tools, but installed users never compile.
+  Missing supervisor artifacts must fail closed, never launch an unowned process.
+- npm `prepack` validates BOTH Windows PE architectures regardless of publisher OS.
+  After the final JS build (which cleans `dist`), download the matching commit's
+  `windows-process-supervisor-win32-x64` and `windows-process-supervisor-win32-arm64`
+  CI artifacts directly into `apps/cli/dist`, then run `pnpm --dir apps/cli pack`.
+  Do not rebuild/clean JS after ingestion or commit generated executables. The CI
+  Windows matrix executes native ownership tests on each architecture before upload.
+
 - Read context/local-agent-ownership.md
   before changing local ports/sockets, daemon PID state, Electron/daemon startup,
   Supervisor retries, or Worker shutdown. Health probes are observation only and

@@ -2,6 +2,7 @@ import { builtinModules } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import { buildWindowsSupervisor } from './scripts/windows-supervisor-artifacts.mjs';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
 
@@ -37,7 +38,16 @@ const explicitlyExternal = new Set([
 ]);
 
 export default defineConfig({
-  plugins: [wasm(), topLevelAwait()],
+  plugins: [
+    wasm(),
+    topLevelAwait(),
+    {
+      name: 'windows-process-supervisor',
+      closeBundle() {
+        buildWindowsSupervisor({ directory: path.resolve(__dirname, 'dist') });
+      },
+    },
+  ],
   define: inlineEnv,
   resolve: {
     alias: {
@@ -71,6 +81,7 @@ export default defineConfig({
       // better-sqlite3 external, just like the main CLI entry.
       input: {
         index: path.resolve(__dirname, 'src/index.ts'),
+        'windows-process-launcher': path.resolve(__dirname, 'src/windows-process-launcher.ts'),
         'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),

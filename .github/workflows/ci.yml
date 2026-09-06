@@ -19,6 +19,46 @@ env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
 
 jobs:
+  windows-supervisor:
+    name: Windows supervisor (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - name: Compile native supervisor
+        run: node apps/cli/scripts/build-windows-process-supervisor.mjs --arch ${{ matrix.arch }} --out-dir apps/cli/dist
+      - name: Test native ownership and packaging validation
+        run: node --test apps/cli/native/windows-process-supervisor.test.mjs apps/cli/scripts/windows-supervisor-artifacts.test.mjs
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test Node adapter integration
+        run: pnpm --dir apps/cli exec vitest run src/utils/windows-owned-process.integration.test.ts
+      - name: Upload native supervisor
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-process-supervisor-win32-${{ matrix.arch }}
+          path: apps/cli/dist/windows-process-supervisor-win32-${{ matrix.arch }}.exe
+          if-no-files-found: error
   static:
     name: Static checks
     runs-on: ubuntu-latest

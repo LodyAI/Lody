@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+import { stageWindowsSupervisor } from '../../cli/scripts/windows-supervisor-artifacts.mjs'
 import { installEmbeddedNodePtyBinding, installEmbeddedSqliteBinding } from './cli-native-deps.mjs'
 
 // electron-builder Arch enum (electron-builder/out/index Arch).
@@ -18,6 +20,12 @@ export default async function beforePack(context) {
         `universal builds would need one binding per slice.`
     )
   }
+  stageWindowsSupervisor({
+    sourceDirectory: fileURLToPath(new URL('../../cli/dist/', import.meta.url)),
+    destinationDirectory: fileURLToPath(new URL('../resources/cli/', import.meta.url)),
+    platform,
+    arch: archName
+  })
   installEmbeddedSqliteBinding({ platform, arch: archName })
   installEmbeddedNodePtyBinding({ platform, arch: archName })
 }

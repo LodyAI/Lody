@@ -128,6 +128,13 @@ Root `AGENTS.md` also applies.
 
 ## Embedded CLI and native dependencies
 
+- Windows CLI staging requires a flat `windows-process-launcher.js` and a PE-validated
+  `windows-process-supervisor-win32-<target arch>.exe`. `beforePack` builds the exact
+  target on Windows (including cross-architecture builds) or requires its downloaded
+  CI artifact in `apps/cli/dist` on other hosts; `afterPack` validates the unpacked
+  files even when the runtime probe cannot run on that host. Missing target tools or
+  artifacts fail packaging. Never add end-user compilation or unowned launch fallback.
+
 - The embedded CLI launches built JavaScript only; there is no source-loader/Jiti
   fallback. Development and packaged builds must use the same output layout.
 - `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be

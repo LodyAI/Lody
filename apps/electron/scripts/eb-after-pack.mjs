@@ -1,3 +1,4 @@
+import { assertWindowsSupervisorArtifacts } from '../../cli/scripts/windows-supervisor-artifacts.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -105,6 +106,9 @@ export default async function afterPack(context) {
     throw new Error(`[embedded-cli] missing expected path: ${cliEntry}`)
   }
   assertPackagedDeepSeekAssets(packedCliDir)
+  if (platform === 'win32') {
+    assertWindowsSupervisorArtifacts({ directory: packedCliDir, architectures: [archName] })
+  }
   // beforePack staged both native bindings for this exact target, so mirror their
   // staged-relative locations rather than guessing the per-platform file names here.
   const nativeTarget = { platform: platform === 'mas' ? 'darwin' : platform, arch: archName }

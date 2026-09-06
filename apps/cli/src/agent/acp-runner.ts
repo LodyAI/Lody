@@ -1,3 +1,4 @@
+import { spawnOwnedProcess } from '@/utils/windows-owned-process';
 import spawn from 'cross-spawn';
 import { type ChildProcess } from 'child_process';
 import os from 'os';
@@ -291,7 +292,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     command = command ?? launch.command;
     args = args ?? launch.args;
   }
-  const spawnFn = options.spawnImpl ?? spawn;
+  const spawnFn = options.spawnImpl ?? spawnOwnedProcess;
 
   return spawnFn(command, args, {
     cwd: options.workdir,

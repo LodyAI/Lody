@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertWindowsSupervisorArtifacts } from '../../cli/scripts/windows-supervisor-artifacts.mjs'
 
 import {
   installEmbeddedNodePtyBinding,
@@ -48,6 +49,10 @@ if (!fs.existsSync(sourceDir)) {
   throw new Error(
     `CLI dist-dev not found at ${sourceDir}. Run \`pnpm --dir apps/cli run dev:build\` first.`
   )
+}
+
+if (process.platform === 'win32') {
+  assertWindowsSupervisorArtifacts({ directory: sourceDir, architectures: [process.arch] })
 }
 
 fs.rmSync(destDir, { recursive: true, force: true })
