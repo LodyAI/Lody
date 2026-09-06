@@ -60,6 +60,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the
   listener after settlement, and treats only the final response as completion.
+- Account IPC deadlines must outlive CLI work: profile listing gets 30 seconds
+  for its 15-second probe budget; handoff gets 300 seconds for validation and restart.
 - The public browser (`services/public-browser-service.ts`) has NO network guard:
   no resolver check, no per-request hostname policy — only engine routing, so a
   loopback address is refused here and sent to Managed Preview. The view is a

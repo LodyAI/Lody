@@ -72,6 +72,10 @@ const CLI_ELECTRON_SESSION_TOKEN_ENV = 'LODY_ELECTRON_SESSION_TOKEN'
 // See apps/cli/src/commands/start.ts:ELECTRON_SESSION_USER_ID_ENV for rationale.
 const CLI_ELECTRON_SESSION_USER_ID_ENV = 'LODY_ELECTRON_SESSION_USER_ID'
 const LOCAL_SESSION_CONTROL_TIMEOUT_MS = 10_000
+// Profile status probes share a 15s CLI budget; leave time for IPC and profile reads.
+const LOCAL_SESSION_CONTROL_ACCOUNT_PROFILES_TIMEOUT_MS = 30_000
+// Handoff includes provider validation, teardown, startup, and possible continuation.
+const LOCAL_SESSION_CONTROL_ACCOUNT_SWITCH_TIMEOUT_MS = 300_000
 const LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS = 120_000
 // Downloading + unpacking a registry agent binary can take minutes on a slow
 // link, so the local-control request must outlive the default before falling
@@ -132,6 +136,12 @@ function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['t
 }
 
 function resolveLocalSessionControlTimeoutMs(type: LocalSessionControlRequest['type']): number {
+  if (type === 'machine/account-profiles') {
+    return LOCAL_SESSION_CONTROL_ACCOUNT_PROFILES_TIMEOUT_MS
+  }
+  if (type === 'session/account-switch') {
+    return LOCAL_SESSION_CONTROL_ACCOUNT_SWITCH_TIMEOUT_MS
+  }
   if (type === 'machine/acp-capabilities-refresh') {
     return LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS
   }
