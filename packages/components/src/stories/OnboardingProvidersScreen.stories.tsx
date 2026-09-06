@@ -231,8 +231,11 @@ export const DownloadingRuntime: Story = {
 /**
  * The three escalation tiers side by side. A wait that just started names its
  * stage; one past the measured threshold adds the seconds it has taken; one
- * past the exceptional threshold stops calling itself ordinary and says so,
- * without inventing any progress it does not have.
+ * past the exceptional threshold stops calling itself ordinary, says so, and
+ * offers the pasteable report — without inventing any progress it does not
+ * have. Kimi's row is the case that forced the copy to be request-scoped: the
+ * setup has run a full minute, but the handshake it is in may have started a
+ * second ago, so nothing on that row may claim the stage took the time.
  */
 export const WaitEscalation: Story = {
   args: {

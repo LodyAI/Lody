@@ -2,7 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Loader2,
+  Plus,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -74,6 +83,9 @@ import {
   resolveInitialOnboardingProviderStatus,
   type OnboardingProviderStatus,
 } from '../provider-status';
+import { collectErrorBoundaryEnvironment } from '@/lib/error-boundary-report';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { buildProviderWaitReport } from '../provider-wait-report';
 import {
   agentRuntimeReadinessFromActivity,
   createProviderTestRunRegistry,
@@ -422,7 +434,7 @@ export function ProvidersScreenView({
                           {t('common.edit', 'Edit')}
                         </Button>
                         {activity ? (
-                          <ProviderActivityAction activity={activity} />
+                          <ProviderActivityAction activity={activity} config={config} />
                         ) : status !== 'needs-auth' ? (
                           <Button
                             variant={status === 'passed' ? 'ghost' : 'outline'}
@@ -1336,7 +1348,13 @@ function useProviderWaitEscalation(activity: ProviderTestActivity | undefined): 
  * badge beside it names the stage, so the two together read as "Starting · 14s"
  * — and, once the wait is `exceptional`, as "Taking longer · 74s".
  */
-function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }) {
+function ProviderActivityAction({
+  activity,
+  config,
+}: {
+  activity: ProviderTestActivity;
+  config: AgentConfigMeta;
+}) {
   const { t } = useTranslation();
   const percent = getProviderTestActivityPercent(activity);
   const runtimeFailed = activity.phase === 'runtime-failed';
@@ -1354,7 +1372,55 @@ function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }
     return t('onboarding.providers.workingAction', 'Working');
   })();
 
-  return <ProviderProgressButton percent={percent} label={label} />;
+  const handleCopyReport = useCallback(() => {
+    const report = buildProviderWaitReport({
+      agentName: config.name,
+      cliType: config.cliType,
+      agentType: config.agentType,
+      phase: activity.phase,
+      elapsedSeconds,
+      percent,
+      environment: collectErrorBoundaryEnvironment(),
+    });
+    void writeTextToClipboard(report).then((ok) => {
+      if (ok) {
+        toast.success(t('onboarding.providers.slowWaitCopied', 'Setup details copied'));
+        return;
+      }
+      // Copying can be blocked (insecure context, no gesture). Say so rather
+      // than leaving the user believing they have something to paste.
+      console.error('[onboarding] Could not copy provider setup details to the clipboard');
+      toast.error(
+        t('onboarding.providers.slowWaitCopyFailed', 'Could not copy setup details'),
+        { description: report }
+      );
+    });
+  }, [activity.phase, config, elapsedSeconds, percent, t]);
+
+  // The escalation's real ask is "tell someone". A wait this long ends in the
+  // chat, and the three things we would have to ask for there — which stage,
+  // how long, which build — are the three things the user cannot see. So the
+  // exceptional tier hands them one block to paste. It is also the tier's only
+  // pointer-independent affordance: the tooltip beside it is hover-only.
+  const copyable = !runtimeFailed && escalation === 'exceptional';
+
+  return (
+    <>
+      <ProviderProgressButton percent={percent} label={label} />
+      {copyable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          aria-label={t('onboarding.providers.slowWaitCopy', 'Copy setup details')}
+          title={t('onboarding.providers.slowWaitCopy', 'Copy setup details')}
+          onClick={handleCopyReport}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </>
+  );
 }
 
 function getProviderTestActivityPercent(activity?: ProviderTestActivity): number | null {
@@ -1405,10 +1471,14 @@ function ProviderStatusBadge({
     // attention, but nothing has failed". No new progress is invented, and
     // the elapsed counter beside it keeps the wait measurable.
     const exceptional = !runtimeFailed && escalation === 'exceptional';
+    // Request-scoped, exactly like the counter beside it. The badge no longer
+    // names a stage here on purpose: the timer measures the whole setup, so a
+    // sentence about the current stage would attach the elapsed number to work
+    // that may have started a second ago. The stage still travels — in the
+    // copyable report, where it is diagnostic data rather than a claim.
     const slowDetail = t(
       'onboarding.providers.slowWaitDetail',
-      '{{stage}} is still running. A first run may have to download and unpack the agent. You can continue — Lody keeps working on this in the background.',
-      { stage: stageLabel }
+      'Agent setup is still running. A first run may have to download and unpack the agent. You can continue — Lody keeps working on this in the background.'
     );
     const badge = (
       <Badge
