@@ -17,7 +17,7 @@ import {
 const agentConfigId = 'config-1' as AgentConfigId;
 
 const machineWithCapabilities = (acpCapabilities: MachineViewMeta['acpCapabilities']) =>
-  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities'>;
+  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'>;
 
 const codexMachineWithConfigOptions = (configOptions: AcpConfigOptionSummary[]) =>
   machineWithCapabilities({

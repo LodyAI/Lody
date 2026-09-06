@@ -6,7 +6,9 @@ import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION,
   CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
+  MACHINE_PROTOCOL_CAPABILITIES,
   getAcpCapabilityCacheKey,
   getLodyMachinePresenceKey,
   machineFlockKeys,
@@ -117,7 +119,13 @@ describe('useAgentRoleAvailability', () => {
     return null;
   }
 
-  function publishCapability(entry?: AcpCapabilityCacheEntry) {
+  function publishCapability(
+    entry?: AcpCapabilityCacheEntry,
+    protocolCapabilities: MachineViewMeta['protocolCapabilities'] | null = {
+      [MACHINE_PROTOCOL_CAPABILITIES.cursorParameterizedModelPicker]:
+        CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION,
+    }
+  ) {
     visibleMachines.machines = new Map([
       [
         machineId,
@@ -128,6 +136,7 @@ describe('useAgentRoleAvailability', () => {
           os: 'linux',
           sessions: [],
           raceLimits: {},
+          ...(protocolCapabilities === null ? {} : { protocolCapabilities }),
           acpCapabilities: entry ? { [getAcpCapabilityCacheKey(configId)]: entry } : {},
         },
       ],
@@ -222,5 +231,22 @@ describe('useAgentRoleAvailability', () => {
       availability: { kind: 'available' },
       mentionableIds: [savedRole.id],
     });
+  });
+
+  it('treats an unmarked registry Cursor row as current only on a legacy daemon', async () => {
+    const unmarked = { ...capability(), sourceVersion: 'synthetic-cursor' };
+    const savedRole = role({ modelId: currentModelId });
+    await publishAgentConfig();
+
+    publishCapability(unmarked, null);
+    await render(savedRole);
+    expect(snapshot).toEqual({
+      availability: { kind: 'available' },
+      mentionableIds: [savedRole.id],
+    });
+
+    publishCapability(unmarked);
+    await render(savedRole);
+    expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
   });
 });

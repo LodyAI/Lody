@@ -683,24 +683,30 @@ export function ProvidersScreen({
   // so they must never produce a Verified badge. Don't downgrade an explicit
   // 'failed' / 'passed'. A current activity is stored separately and must not
   // erase the last known result while a re-test is in flight.
-  // Depend on the cache map directly: `localMachine` identity rebuilds whenever
-  // the visible-machine index recomputes, which would re-fire this effect for
-  // unrelated reasons.
+  // Depend on the cache map and protocol set directly: `localMachine` identity
+  // rebuilds whenever the visible-machine index recomputes, which would re-fire
+  // this effect for unrelated reasons.
   const acpCapabilities = localMachine?.acpCapabilities;
+  const protocolCapabilities = localMachine?.protocolCapabilities;
   useEffect(() => {
     setTestStatuses((prev) => {
       let next = prev;
       for (const config of localConfigs) {
         const existing = prev[config.id];
         if (existing === 'failed' || existing === 'passed') continue;
-        if (resolveInitialOnboardingProviderStatus(config, acpCapabilities) === 'passed') {
+        if (
+          resolveInitialOnboardingProviderStatus(config, {
+            acpCapabilities,
+            protocolCapabilities,
+          }) === 'passed'
+        ) {
           if (next === prev) next = { ...prev };
           next[config.id] = 'passed';
         }
       }
       return next;
     });
-  }, [localConfigs, acpCapabilities]);
+  }, [localConfigs, acpCapabilities, protocolCapabilities]);
 
   // If the local machine never arrives, silently restart the CLI once and
   // give it another window to reconnect. If it still doesn't show up, surface

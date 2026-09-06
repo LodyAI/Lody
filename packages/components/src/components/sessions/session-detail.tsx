@@ -1194,11 +1194,11 @@ const SessionDetail = ({
       const capability =
         sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
+        getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionFork === true
       );
     },
-    [sessionMachine?.acpCapabilities]
+    [sessionMachine]
   );
   const canForkSessionToWorktree = useCallback(
     (target: SessionMeta): boolean => {
@@ -1212,11 +1212,11 @@ const SessionDetail = ({
       const capability =
         sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
       return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
+        getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionForkWorktree === true
       );
     },
-    [sessionMachine?.acpCapabilities]
+    [sessionMachine]
   );
   const handleForkAssistant = useCallback(
     async (

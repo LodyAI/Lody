@@ -12,6 +12,10 @@ import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
+  machineSupportsCursorParameterizedModelPicker,
+  type MachineProtocolCapabilityCarrier,
+} from './machine-protocol-capabilities';
+import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
 } from './deepseek-harness';
@@ -340,22 +344,33 @@ export const isRegistryCursorAgent = (identity: {
 }): boolean => identity.cliType === 'registry' && identity.agentType === 'cursor';
 
 /**
- * Appended to registry Cursor's capability source version once the client declares
- * `parameterizedModelPicker`. Rows probed before the opt-in describe exploded variant
- * model ids the agent no longer advertises and carry no per-model catalog, so a row
- * without the marker is never current.
+ * Appended to registry Cursor's capability source version once the daemon declares
+ * `parameterizedModelPicker`. On a machine that advertises the
+ * `cursorParameterizedModelPicker` protocol capability, a registry Cursor row without
+ * the marker was probed before the opt-in: it describes exploded variant model ids the
+ * agent no longer advertises and carries no per-model catalog, so it is never current.
+ * A machine without that capability still launches Cursor in legacy variants mode, and
+ * its unmarked rows are the correct description of what it runs.
  */
 export const CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX =
   '+parameterized-model-picker';
 
+/**
+ * The daemon that owns the capability row, as a `protocolCapabilities` carrier
+ * (`MachineMeta` / `MachineViewMeta`). Missing capabilities mean legacy.
+ */
+export type AcpCapabilityMachine = MachineProtocolCapabilityCarrier | null | undefined;
+
 export const isAcpCapabilityCacheEntryCurrent = (
-  entry: AcpCapabilityCacheEntry | undefined
+  entry: AcpCapabilityCacheEntry | undefined,
+  machine: AcpCapabilityMachine
 ): entry is AcpCapabilityCacheEntry => {
   if (entry?.cacheVersion !== ACP_CAPABILITY_CACHE_VERSION) {
     return false;
   }
   if (
     isRegistryCursorAgent(entry) &&
+    machineSupportsCursorParameterizedModelPicker(machine) &&
     entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true
   ) {
     return false;
@@ -365,9 +380,10 @@ export const isAcpCapabilityCacheEntryCurrent = (
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): entry is AcpCapabilityCacheEntry => {
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return false;
   }
   const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
@@ -376,9 +392,10 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
 
 export const getAcpCapabilityCacheEntryAuthority = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityAuthority => {
-  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides)) {
+  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides, machine)) {
     return 'unavailable';
   }
   return entry.provenance === 'runtime' ? 'authoritative' : 'provisional';
@@ -391,12 +408,13 @@ export type AcpCapabilityCacheStaleReason =
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
-  expectedSourceVersion: string
+  expectedSourceVersion: string,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityCacheStaleReason | undefined => {
   if (!entry) {
     return 'missing';
   }
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return 'cache-version-mismatch';
   }
   if (entry.sourceVersion !== expectedSourceVersion) {

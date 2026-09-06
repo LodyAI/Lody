@@ -201,7 +201,7 @@ export type AcpSelectorTarget = {
   selectedModelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   runtimeOverrides?: BuiltinRuntimeOverrides;
-  machine?: Pick<MachineViewMeta, 'acpCapabilities'> | null;
+  machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'> | null;
 };
 
 /**
@@ -223,8 +223,18 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
   if (target.configId) {
     const key = getAcpCapabilityCacheKey(target.configId);
     const capability = target.machine?.acpCapabilities?.[key];
-    if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
-      const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
+    if (
+      isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(
+        capability,
+        target.runtimeOverrides,
+        target.machine
+      )
+    ) {
+      const authority = getAcpCapabilityCacheEntryAuthority(
+        capability,
+        target.runtimeOverrides,
+        target.machine
+      );
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
         return { authority, configOptions: capability.configOptions, modelReasoningEfforts };

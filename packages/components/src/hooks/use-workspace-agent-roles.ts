@@ -107,11 +107,14 @@ export function useAgentRoleAvailability(
     for (const config of agentConfigs) {
       if (!config.machineId) continue;
       agentConfigMachineIds.set(config.id, config.machineId);
-      const capability = machines.get(config.machineId)?.acpCapabilities?.[
-        getAcpCapabilityCacheKey(config.id)
-      ];
+      const machine = machines.get(config.machineId);
+      const capability = machine?.acpCapabilities?.[getAcpCapabilityCacheKey(config.id)];
       if (
-        isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, config.runtimeOverrides)
+        isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(
+          capability,
+          config.runtimeOverrides,
+          machine
+        )
       ) {
         agentConfigCapabilities.set(config.id, capability);
       }
