@@ -449,6 +449,16 @@
         font-size: 13px;
         overflow-wrap: anywhere;
       }
+      /* Folded measurements are subordinate evidence, not another card. */
+      .visual-candidates .visual-measurements {
+        padding: 0 0 0 12px;
+        border-bottom: 0;
+        border-left: 1px solid var(--border);
+      }
+      .visual-candidates .visual-measurements summary {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
       .visual-overlay {
         position: relative;
         margin-top: 12px;
@@ -602,15 +612,15 @@
         <label
           >Evidence
           <select id="visual-evidence-filter">
-            <option value="review">Review candidates · peer ≥ 2</option>
+            <option value="review">Review queue · peer ≥ 2 + top singletons</option>
             <option value="all">All raw deviations</option>
           </select></label
         >
         <a href="visual-repetition.json">完整 discovery JSON</a>
         <p class="meta">
           排序仅供 review；不进入 ledger / gate。红框为候选，绿框为 dominant，橙框为
-          peers，绿线为预期坐标；pitch 是间距，仅标记目标。默认合并同一 atom 的重复边界测量；
-          完整原始结果见 JSON。
+          peers，绿线为预期坐标；pitch 是间距，仅标记目标。默认合并同一 atom 的重复边界测量，
+          并对孤立（peer = 1）候选按 capture 取分数最高的若干条；完整原始结果见 JSON。
         </p>
         <div id="visual-candidates"></div>
         <button type="button" id="visual-more">显示更多</button>
@@ -654,9 +664,8 @@
         [...candidates]
           .sort((a, b) => b.deviation.score - a.deviation.score)
           .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
-      const reviewVisualCandidates = rankVisualCandidates(
-        rawVisualCandidates
-          .filter(({ deviation }) => deviation.peerSupport >= 2)
+      const foldedVisualCandidates = [
+        ...rawVisualCandidates
           .reduce((unique, candidate) => {
             // Start/end/center are three views of one edge question. Keep pitch
             // separate because it measures spacing along the series axis.
@@ -664,17 +673,57 @@
             const measureFamily = deviation.measure === 'pitch' ? 'pitch' : 'edge';
             const key = `${capture.captureId}\u0000${atom.id}\u0000${deviation.axis}\u0000${measureFamily}`;
             const previous = unique.get(key);
-            if (!previous || previous.deviation.score < deviation.score) unique.set(key, candidate);
+            if (previous) previous.measurements.push(deviation);
+            else unique.set(key, { ...candidate, measurements: [deviation] });
             return unique;
           }, new Map())
-          .values()
+          .values(),
+      ];
+      /**
+       * How many isolated candidates one capture may put in the default queue.
+       *
+       * This is an attention policy, not discovery semantics: nothing is
+       * promoted, no threshold decides truth, and every deviation stays in
+       * `visual-repetition.json` and under "All raw deviations". But the two
+       * failure modes are asymmetric and both real. `peerSupport === 1` is
+       * what the scorer ranks HIGHEST — one box alone off its series edge is
+       * the shape of an actual defect — so a `peer >= 2` default queue hides
+       * exactly the candidates the ranking believes in most. Isolated
+       * candidates are also the bulk of a recall-first universe, and tipping
+       * all of them in is the same as having no queue at all. So the
+       * best-scoring few per capture come in, ordered by the score the miner
+       * already computed, and the rest stay one dropdown away. Per capture
+       * rather than per report, because a budget drained by one noisy screen
+       * would hide a quiet screen's only candidate.
+       */
+      const VISUAL_SINGLETON_REVIEW_BUDGET = 5;
+      const singletonBudgetSpent = new Map();
+      const reviewVisualCandidates = rankVisualCandidates(
+        foldedVisualCandidates.filter((candidate) => {
+          // A card counts as isolated only if EVERY measurement folded into it
+          // is. One peer-supported measurement keeps the card unconditionally,
+          // which preserves the previous default queue whole.
+          if (candidate.measurements.some((measurement) => measurement.peerSupport >= 2))
+            return true;
+          const spent = singletonBudgetSpent.get(candidate.capture.captureId) ?? 0;
+          if (spent >= VISUAL_SINGLETON_REVIEW_BUDGET) return false;
+          singletonBudgetSpent.set(candidate.capture.captureId, spent + 1);
+          return true;
+        })
       );
       const visualCandidates = rankVisualCandidates(rawVisualCandidates);
       document.getElementById('visual-summary').textContent =
-        `${visualCaptures.length} captures · ${visualCaptures.reduce((sum, capture) => sum + capture.atoms.length, 0)} atoms · ${reviewVisualCandidates.length} review candidates / ${visualCandidates.length} raw deviations · 每个 capture 独立计算，尚未跨 capture 确认`;
+        `${visualCaptures.length} captures · ${visualCaptures.reduce((sum, capture) => sum + capture.atoms.length, 0)} atoms · ${reviewVisualCandidates.length} review candidates / ${foldedVisualCandidates.length} grouped / ${visualCandidates.length} raw deviations · 孤立候选每 capture 上限 ${VISUAL_SINGLETON_REVIEW_BUDGET} 条 · 每个 capture 独立计算，尚未跨 capture 确认`;
       const visualList = document.getElementById('visual-candidates');
       const px = (value) => `${Number(value.toFixed(2))}px`;
-      function appendVisualCandidate({ capture, deviation, atom, atoms, rank }) {
+      function appendVisualCandidate({
+        capture,
+        deviation,
+        atom,
+        atoms,
+        rank,
+        measurements = [deviation],
+      }) {
         const card = document.createElement('details');
         const heading = document.createElement('summary');
         const signedDelta = deviation.value - deviation.expected;
@@ -696,6 +745,20 @@
           const labels = (ids) => ids.map((id) => `${atoms.get(id).label} (${id})`).join(' · ');
           witnesses.textContent = `Dominant: ${labels(deviation.dominantAtomIds)} / Peers: ${labels(deviation.peerAtomIds)}`;
           card.append(witnesses);
+          if (measurements.length > 1) {
+            const supporting = document.createElement('details');
+            supporting.className = 'visual-measurements';
+            const summary = document.createElement('summary');
+            summary.textContent = `全部边界测量 (${measurements.length})`;
+            supporting.append(summary);
+            for (const measurement of measurements) {
+              const evidence = document.createElement('p');
+              evidence.className = 'evidence';
+              evidence.textContent = `${measurement.axis}-${measurement.measure} · expected ${px(measurement.expected)} · actual ${px(measurement.value)} · delta ${px(measurement.value - measurement.expected)} · dominant support ${measurement.dominantSupport} · peer support ${measurement.peerSupport} · score ${Number(measurement.score.toFixed(2))} · Dominant: ${labels(measurement.dominantAtomIds)} / Peers: ${labels(measurement.peerAtomIds)}`;
+              supporting.append(evidence);
+            }
+            card.append(supporting);
+          }
           if (!capture.screenshot || !capture.screenshotClip) {
             const missing = document.createElement('p');
             missing.className = 'evidence';

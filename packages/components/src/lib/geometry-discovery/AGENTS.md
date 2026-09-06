@@ -23,7 +23,8 @@ which destroys the recall it exists for.
 ## Grouping is visual. Never structural.
 
 Atoms are grouped by what RENDERS alike — the geometry-derived primitive kind, folded where
-the difference is not painted (`link`/`button`, `numeric-text`/`text`), and quantised height,
+the difference is not painted (`link`/`button`, `numeric-text`/`text`), and height clustered
+by distance to a fixed anchor (never hard rounding buckets),
 never content-sized width. Never key a group on row family, role, accessible name, or DOM
 ancestry.
 
@@ -44,6 +45,29 @@ run of intermediate values walk one level into the next and merge two indentatio
 into one expectation — the merged level then reads as internally perfect and the deviation
 disappears. Same failure the geometric row band avoids on Y.
 
+## Locality comes before orientation, and never becomes a partition
+
+A series is isolated first and its axis settled afterwards. Both orientations are
+hypothesised; a group is banded along each (centres within half a box share a band), a series
+takes at most ONE member per band, and lanes track across bands by nearest cross-axis
+distance bounded by the group's own band step. The wrong hypothesis then costs nothing — a
+toolbar collapses into one vertical band and dies as runs of one — and a run both produced is
+settled by its own spread. Asking a whole signature group for its axis is the failure this
+replaces: two side-by-side lists spread wider than either runs deep, so the page-wide answer
+was "horizontal", every grid row was mined as one series, and a regular grid manufactured a
+high-scoring Y deviation per row and a pitch deviation per column break.
+
+Locality bounds grouping; it must never delete membership. A lane of one is not a lane, it is
+one box that left, so a lone residual rejoins the nearest real series and is mined there at
+whatever delta it has. Without that, the rule would punish the clearest defects hardest: the
+further a box flies, the more certainly it would become its own lane and vanish. Two boxes
+agreeing on a position are left alone — that is a sparse column, not a defect.
+
+Do not keep only a series' best-agreeing alignment measure. `start`, `end` and `center` are
+three views, and a box that is only WIDER agrees on `start`; dropping the others buys silence
+on variable-width text by deleting real width drift. That text ambiguity is deliberate and
+stays unresolved here — no classifier, no typography model, no intent inference.
+
 ## Recall is the bias, and ranking is not filtering
 
 Nothing is dropped for looking weak. Candidates carry a `score` and are sorted; no
@@ -52,5 +76,18 @@ because without being told which level was intended it has to — it ranks low s
 falls as a level's own support rises, so a value two boxes share outranks one forty share.
 
 A missed misalignment is invisible forever; a false one costs a triage glance. Any tie
-breaks towards reporting more. Series orientation is measured rather than declared, and
-only the axis perpendicular to the run carries expectations worth mining.
+breaks towards reporting more. Only the axis perpendicular to a run carries expectations
+worth mining, plus pitch along it.
+
+## The report's default queue is attention, not truth
+
+`peerSupport` counts the DEVIATING level, so a singleton is what the scorer ranks highest —
+one box alone off its series edge. A `peer >= 2` default queue therefore hid the candidates
+the ranking believed in most, and showing every singleton is the same as having no queue. The
+template ranks, folds one atom's repeated edge measurements into one card (exposing every
+folded measurement and its witnesses), keeps every card with any peer support, and admits the
+best-scoring `VISUAL_SINGLETON_REVIEW_BUDGET` isolated cards PER CAPTURE — per capture, so a
+noisy screen cannot drain a quiet screen's only candidate. Never replace that budget with a
+confidence threshold. `visual-repetition.json` and "All raw deviations" keep everything; a
+candidate the budget withheld is unshown, never unfound, and neither an admitted nor a
+withheld one is a finding, ledger entry or gate verdict.

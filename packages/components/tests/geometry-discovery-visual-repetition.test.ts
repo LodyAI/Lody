@@ -24,6 +24,40 @@ function stackedRows(
   }));
 }
 
+/** A grid of one visual kind, `columns` wide, at a fixed pitch on both axes. */
+function grid(columns: number, rows: number, cell = { width: 40, height: 40 }): VisualAtom[] {
+  return Array.from({ length: rows }, (_unused, row) =>
+    Array.from({ length: columns }, (_ignored, column) => ({
+      id: `cell-${row}-${column}`,
+      kind: 'image',
+      xStart: 60 + column * 100,
+      xEnd: 60 + column * 100 + cell.width,
+      yStart: 40 + row * 60,
+      yEnd: 40 + row * 60 + cell.height,
+    }))
+  ).flat();
+}
+
+/** Two vertical lists that render alike, rendered beside each other. */
+function sideBySideLists(rows: number): VisualAtom[] {
+  return [40, 340].flatMap((left, list) =>
+    Array.from({ length: rows }, (_unused, row) => ({
+      id: `list-${list}-${row}`,
+      kind: 'image',
+      xStart: left,
+      xEnd: left + 24,
+      yStart: 50 + row * 70,
+      yEnd: 74 + row * 70,
+    }))
+  );
+}
+
+function shiftX(atoms: readonly VisualAtom[], id: string, offset: number): VisualAtom[] {
+  return atoms.map((atom) =>
+    atom.id === id ? { ...atom, xStart: atom.xStart + offset, xEnd: atom.xEnd + offset } : atom
+  );
+}
+
 function leftEdgeDeviations(atoms: readonly VisualAtom[]) {
   return mineVisualDeviations(atoms).filter(
     (deviation) => deviation.axis === 'x' && deviation.measure === 'start'
@@ -31,6 +65,41 @@ function leftEdgeDeviations(atoms: readonly VisualAtom[]) {
 }
 
 describe('mineVisualDeviations', () => {
+  it('finds a singleton offset across fractional height rounding boundaries', () => {
+    const atoms = stackedRows([24, 24, 24, 28]).map((atom, index) => ({
+      ...atom,
+      yEnd: atom.yStart + (index < 2 ? 15.49 : 15.51),
+    }));
+    for (const ordered of [atoms, [...atoms].reverse()]) {
+      expect(leftEdgeDeviations(ordered)).toEqual([
+        expect.objectContaining({
+          atomId: 'row-3',
+          expected: 24,
+          value: 28,
+          dominantSupport: 3,
+          peerSupport: 1,
+        }),
+      ]);
+    }
+  });
+
+  it('does not chain distinct heights through intermediate boxes', () => {
+    const atoms = stackedRows([24, 24, 24, 80, 80, 80]).map((atom, index) => ({
+      ...atom,
+      yEnd: atom.yStart + [15, 15.5, 16, 16.5, 17, 17.5][index]!,
+    }));
+    expect(leftEdgeDeviations(atoms)).toEqual([]);
+    expect(leftEdgeDeviations([...atoms].reverse())).toEqual([]);
+  });
+
+  it('keeps different heights separate when height tolerance is zero', () => {
+    const atoms = stackedRows([24, 24, 24, 28]).map((atom, index) => ({
+      ...atom,
+      yEnd: atom.yStart + (index < 2 ? 15 : 15.5),
+    }));
+    expect(mineVisualDeviations(atoms, { heightTolerance: 0 })).toEqual([]);
+  });
+
   it('reports the rows a series leaves off its own left edge', () => {
     // The reported shape: the run starts and ends on one edge and a block in
     // the middle sits elsewhere. Nothing declares which edge is correct; the
@@ -114,5 +183,129 @@ describe('mineVisualDeviations', () => {
 
     expect(pitch.map((deviation) => deviation.atomId)).toEqual(['row-3']);
     expect(pitch[0]).toMatchObject({ expected: 80, value: 111 });
+  });
+
+  it('reports the one row that left, with nothing to share the blame with', () => {
+    // The shape the scorer ranks highest: peer support of one. It has to reach
+    // the reviewer, so the report's default queue may not filter on peers.
+    const deviations = leftEdgeDeviations(stackedRows([100, 100, 100, 108, 100, 100]));
+
+    expect(deviations).toEqual([
+      expect.objectContaining({
+        atomId: 'row-3',
+        expected: 100,
+        value: 108,
+        dominantSupport: 5,
+        peerSupport: 1,
+      }),
+    ]);
+  });
+
+  it('reads a regular grid as its own rows and columns, not as one flat series', () => {
+    // Orientation used to come from the whole signature group's page-wide
+    // spread, so a grid was mined as a single horizontal series: every row
+    // then deviated on Y and every column break on pitch, all of it scored
+    // high by the very spread that caused it. Rows and columns are isolated
+    // before orientation is settled, so a grid that agrees with itself is
+    // silent — the same guarantee a single regular column already had.
+    expect(mineVisualDeviations(grid(3, 6))).toEqual([]);
+  });
+
+  it('still finds one cell out of line inside a grid', () => {
+    const deviations = mineVisualDeviations(shiftX(grid(3, 6), 'cell-2-1', 8));
+
+    expect(deviations.map((deviation) => deviation.atomId)).toEqual([
+      'cell-2-1',
+      'cell-2-1',
+      'cell-2-1',
+    ]);
+    expect(deviations[0]).toMatchObject({
+      axis: 'x',
+      expected: 160,
+      value: 168,
+      // Compared against its own column, never against the neighbouring ones.
+      dominantSupport: 5,
+      seriesSize: 6,
+    });
+  });
+
+  it('keeps two side-by-side lists vertical instead of reading across them', () => {
+    expect(mineVisualDeviations(sideBySideLists(6))).toEqual([]);
+  });
+
+  it('finds a misaligned row inside one of two side-by-side lists', () => {
+    const deviations = mineVisualDeviations(shiftX(sideBySideLists(6), 'list-1-3', 8));
+
+    expect(deviations.map((deviation) => deviation.atomId)).toEqual([
+      'list-1-3',
+      'list-1-3',
+      'list-1-3',
+    ]);
+    // Its own column is the expectation, not the list on the other side.
+    expect(deviations[0]).toMatchObject({ expected: 340, value: 348 });
+  });
+
+  it.each([8, 16, 20, 28, 200])(
+    'keeps a box that flew %ipx out of its series inside that series',
+    (offset) => {
+      // The failure this guards is the tempting one: cut the series into
+      // spatial neighbourhoods and the clearest defects — the ones that flew
+      // furthest — are the ones cut loose and lost. Suspicion has to rise with
+      // the offset, never fall off a locality boundary.
+      const deviations = leftEdgeDeviations(stackedRows([100, 100, 100, 100 + offset, 100, 100]));
+
+      expect(deviations).toEqual([
+        expect.objectContaining({ atomId: 'row-3', expected: 100, value: 100 + offset }),
+      ]);
+    }
+  );
+
+  it('sees a box that is only wider, whose left edge agrees', () => {
+    // Width drift lives entirely in `end` and `center`. Keeping only the
+    // best-agreeing measure per series would silence variable-width text and
+    // this real defect in the same stroke, so all three are mined.
+    const rows = stackedRows([100, 100, 100, 100, 100, 100]).map((atom, index) => ({
+      ...atom,
+      xEnd: atom.xEnd + (index === 3 ? 8 : 0),
+    }));
+
+    const measures = mineVisualDeviations(rows).filter(
+      (deviation) => deviation.atomId === 'row-3'
+    );
+
+    expect(measures.map((deviation) => deviation.measure).sort()).toEqual(['center', 'end']);
+    expect(leftEdgeDeviations(rows)).toEqual([]);
+  });
+
+  it('reads the same layout the same way wherever it sits on the page', () => {
+    const atoms = shiftX(grid(3, 6), 'cell-4-2', 9);
+    const translated = atoms.map((atom) => ({
+      ...atom,
+      xStart: atom.xStart + 1000,
+      xEnd: atom.xEnd + 1000,
+      yStart: atom.yStart + 777,
+      yEnd: atom.yEnd + 777,
+    }));
+
+    expect(mineVisualDeviations(translated).map((deviation) => deviation.delta)).toEqual(
+      mineVisualDeviations(atoms).map((deviation) => deviation.delta)
+    );
+  });
+
+  it('absorbs sub-pixel jitter and ranks one input one way', () => {
+    const jittered = grid(3, 6).map((atom, index) => {
+      const noise = ((index % 5) - 2) * 0.2;
+      return {
+        ...atom,
+        xStart: atom.xStart + noise,
+        xEnd: atom.xEnd + noise,
+        yStart: atom.yStart - noise,
+        yEnd: atom.yEnd - noise,
+      };
+    });
+
+    expect(mineVisualDeviations(jittered)).toEqual([]);
+    const anomalous = shiftX(jittered, 'cell-3-0', 12);
+    expect(mineVisualDeviations(anomalous)).toEqual(mineVisualDeviations(anomalous));
   });
 });

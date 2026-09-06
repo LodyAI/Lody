@@ -90,6 +90,18 @@ const DEFAULTS = {
   seriesBreakRatio: 3,
 } as const;
 
+type Axis = 'x' | 'y';
+
+const CROSS_AXIS = { x: 'y', y: 'x' } as const satisfies Record<Axis, Axis>;
+
+function centerOn(atom: VisualAtom, axis: Axis): number {
+  return axis === 'y' ? (atom.yStart + atom.yEnd) / 2 : (atom.xStart + atom.xEnd) / 2;
+}
+
+function extentOn(atom: VisualAtom, axis: Axis): number {
+  return axis === 'y' ? atom.yEnd - atom.yStart : atom.xEnd - atom.xStart;
+}
+
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -105,17 +117,6 @@ function normalizeKind(kind: string): string {
   if (kind === 'link') return 'button';
   if (kind === 'numeric-text') return 'text';
   return kind;
-}
-
-/**
- * Width is left out on purpose. A row's label is as wide as its text, so
- * keying on width would split one visual series into one group per string
- * length and leave nothing to compare.
- */
-function visualSignature(atom: VisualAtom, heightTolerance: number): string {
-  const height = atom.yEnd - atom.yStart;
-  const bucket = heightTolerance > 0 ? Math.round(height / heightTolerance) : height;
-  return `${normalizeKind(atom.kind)}|h${bucket}`;
 }
 
 type Level = { readonly values: number[]; readonly atoms: VisualAtom[]; anchor: number };
@@ -155,7 +156,7 @@ function scoreLevels(
   levels: readonly Level[],
   seriesSize: number,
   signature: string,
-  axis: 'x' | 'y',
+  axis: Axis,
   measure: VisualDeviationMeasure,
   levelTolerance: number
 ): VisualDeviation[] {
@@ -194,22 +195,21 @@ function scoreLevels(
 }
 
 /**
- * Splits one signature group into runs that read as a single series. Members
- * are ordered along the series axis and cut where the gap jumps far past the
- * run's own median gap.
+ * Splits one already-isolated lane into the runs that read as a single series.
+ * Members are ordered along the series axis and cut where the gap jumps far
+ * past the run's own median gap — a date header may interrupt a list without
+ * ending it; a screen of empty space ends it.
  */
 function splitIntoSeries(
   atoms: readonly VisualAtom[],
-  axis: 'x' | 'y',
+  axis: Axis,
   breakRatio: number,
   minimumLength: number
 ): VisualAtom[][] {
-  const center = (atom: VisualAtom) =>
-    axis === 'y' ? (atom.yStart + atom.yEnd) / 2 : (atom.xStart + atom.xEnd) / 2;
-  const ordered = [...atoms].sort((left, right) => center(left) - center(right));
+  const ordered = [...atoms].sort((left, right) => centerOn(left, axis) - centerOn(right, axis));
   const gaps: number[] = [];
   for (let index = 1; index < ordered.length; index += 1) {
-    gaps.push(center(ordered[index]!) - center(ordered[index - 1]!));
+    gaps.push(centerOn(ordered[index]!, axis) - centerOn(ordered[index - 1]!, axis));
   }
   if (gaps.length === 0) return [];
   const typicalGap = median(gaps);
@@ -228,16 +228,104 @@ function splitIntoSeries(
 }
 
 /**
- * Orientation is measured, not declared: whichever axis the boxes spread along
- * is the series axis, and the expectations worth mining are the ones
- * perpendicular to it. Mining the series axis itself would only rediscover
- * that a list advances down the page.
+ * Orientation of one ALREADY ISOLATED run, and only used to settle a run both
+ * hypotheses below produced. Asking it of a whole signature group instead is
+ * the failure this replaces: two side-by-side lists spread further across the
+ * page than either list runs down it, so the page-wide answer was "horizontal"
+ * — and every row of a grid was then mined as if it were one series, which
+ * manufactures a high-scoring Y deviation per row and a pitch deviation per
+ * column break out of a layout that is completely regular.
  */
-function seriesAxis(atoms: readonly VisualAtom[]): 'x' | 'y' {
-  const xs = atoms.map((atom) => (atom.xStart + atom.xEnd) / 2);
-  const ys = atoms.map((atom) => (atom.yStart + atom.yEnd) / 2);
-  const spread = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
-  return spread(ys) >= spread(xs) ? 'y' : 'x';
+function seriesAxis(atoms: readonly VisualAtom[]): Axis {
+  const spread = (axis: Axis) => {
+    const centers = atoms.map((atom) => centerOn(atom, axis));
+    return Math.max(...centers) - Math.min(...centers);
+  };
+  return spread('y') >= spread('x') ? 'y' : 'x';
+}
+
+type Lane = { readonly atoms: VisualAtom[]; readonly across: number[]; anchor: number };
+
+/**
+ * Isolates the lanes a signature group renders as, under one axis hypothesis.
+ *
+ * Bands are the group's own steps along the hypothesised axis: boxes whose
+ * centres sit within half a box of each other occupy one band, so a column
+ * list has one member per band and a grid row has all of its cells in one. A
+ * series may hold at most ONE member per band, which is what a reader means by
+ * "this list runs downwards" — and is what makes the wrong hypothesis free: a
+ * horizontal toolbar collapses into a single vertical band and its vertical
+ * reading dies as runs of one, without anything having to declare an axis.
+ *
+ * Lanes then track across bands by nearest cross-axis distance, bounded by the
+ * group's own band step. The scale comes from the layout, not a constant: a box
+ * that drifted sideways by less than one step of the series it sits in is still
+ * in that series, while two lists a whole column apart are not one zigzag. A
+ * lane anchors on the median of its members rather than its last one, for the
+ * same reason levels grow to an anchor — a drifting cross-axis chain would
+ * otherwise walk one column into the next.
+ */
+function laneSeries(group: readonly VisualAtom[], axis: Axis, minimumLength: number): VisualAtom[][] {
+  const bands = buildLevels(
+    group.map((atom) => ({ atom, value: centerOn(atom, axis) })),
+    median(group.map((atom) => extentOn(atom, axis))) / 2
+  );
+  // A lane holds at most one atom per band, so fewer bands than a series needs
+  // members means this axis cannot carry a series at all.
+  if (bands.length < Math.max(minimumLength, 2)) return [];
+  const step = median(bands.slice(1).map((band, index) => band.anchor - bands[index]!.anchor));
+  if (!(step > 0)) return [];
+
+  const cross = CROSS_AXIS[axis];
+  const lanes: Lane[] = [];
+  for (const band of bands) {
+    const unplaced = new Set(band.atoms);
+    const claimed = new Set<Lane>();
+    const pairs = lanes
+      .flatMap((lane) =>
+        band.atoms.map((atom) => ({
+          lane,
+          atom,
+          distance: Math.abs(centerOn(atom, cross) - lane.anchor),
+        }))
+      )
+      .filter((pair) => pair.distance <= step)
+      .sort((left, right) => left.distance - right.distance || (left.atom.id < right.atom.id ? -1 : 1));
+    for (const { lane, atom } of pairs) {
+      if (claimed.has(lane) || !unplaced.has(atom)) continue;
+      claimed.add(lane);
+      unplaced.delete(atom);
+      lane.atoms.push(atom);
+      lane.across.push(centerOn(atom, cross));
+      lane.anchor = median(lane.across);
+    }
+    for (const atom of band.atoms) {
+      if (!unplaced.has(atom)) continue;
+      const across = centerOn(atom, cross);
+      lanes.push({ atoms: [atom], across: [across], anchor: across });
+    }
+  }
+
+  const series = lanes.filter((lane) => lane.atoms.length >= minimumLength);
+  if (series.length === 0) return [];
+  // Recall fallback, and the reason locality here is not a partition. A lane of
+  // one is not evidence of a lane; it is one box that left. Left alone, the
+  // bound above would punish the clearest defects hardest — the further a box
+  // flies from its series, the more certainly it becomes its own lane and
+  // disappears — so a lone residual rejoins the nearest real series and is
+  // mined there at whatever delta it actually has. Two boxes agreeing on a
+  // position are left alone: that is a sparse column, and folding it back
+  // would report a whole second column as broken.
+  for (const lane of lanes) {
+    if (lane.atoms.length !== 1 || series.includes(lane)) continue;
+    const nearest = series.reduce((best, candidate) =>
+      Math.abs(lane.anchor - candidate.anchor) < Math.abs(lane.anchor - best.anchor)
+        ? candidate
+        : best
+    );
+    nearest.atoms.push(lane.atoms[0]!);
+  }
+  return series.map((lane) => lane.atoms);
 }
 
 export function mineVisualDeviations(
@@ -249,19 +337,48 @@ export function mineVisualDeviations(
   const heightTolerance = options.heightTolerance ?? DEFAULTS.heightTolerance;
   const seriesBreakRatio = options.seriesBreakRatio ?? DEFAULTS.seriesBreakRatio;
 
-  const groups = new Map<string, VisualAtom[]>();
+  const kinds = new Map<string, VisualAtom[]>();
   for (const atom of atoms) {
-    const signature = visualSignature(atom, heightTolerance);
-    const group = groups.get(signature);
+    const kind = normalizeKind(atom.kind);
+    const group = kinds.get(kind);
     if (group) group.push(atom);
-    else groups.set(signature, [atom]);
+    else kinds.set(kind, [atom]);
   }
+  // Height uses the same fixed-anchor distance rule as coordinates: a rounding
+  // boundary must not split nearly identical boxes. Content-sized width stays
+  // out of grouping so different label lengths can still be compared.
+  const groups = [...kinds].flatMap(([kind, members]) =>
+    buildLevels(
+      members.map((atom) => ({ atom, value: atom.yEnd - atom.yStart })),
+      heightTolerance
+    ).map((level) => [`${kind}|h${level.anchor}`, level.atoms] as const)
+  );
 
   const deviations: VisualDeviation[] = [];
   for (const [signature, group] of groups) {
     if (group.length < minimumSeriesLength) continue;
-    const axis = seriesAxis(group);
-    for (const run of splitIntoSeries(group, axis, seriesBreakRatio, minimumSeriesLength)) {
+
+    // Both orientations are hypothesised and the layout answers. A group that
+    // reads only one way loses the other to runs shorter than a series; a grid
+    // legitimately reads both ways, and its columns and rows are then each
+    // mined against themselves instead of against each other.
+    const runs = new Map<string, { axis: Axis; atoms: VisualAtom[] }>();
+    for (const axis of ['y', 'x'] as const) {
+      for (const lane of laneSeries(group, axis, minimumSeriesLength)) {
+        for (const run of splitIntoSeries(lane, axis, seriesBreakRatio, minimumSeriesLength)) {
+          const key = JSON.stringify(
+            run
+              .map((atom) => atom.id)
+              .sort()
+          );
+          // A run both hypotheses found is one series seen twice; its own
+          // spread, measured locally, says which way it runs.
+          if (!runs.has(key) || seriesAxis(run) === axis) runs.set(key, { axis, atoms: run });
+        }
+      }
+    }
+
+    for (const { axis, atoms: run } of runs.values()) {
       const edges =
         axis === 'y'
           ? ([
@@ -291,11 +408,9 @@ export function mineVisualDeviations(
 
       // Irregular spacing is the same kind of defect seen along the series
       // axis, and the series is already ordered, so it costs nothing to mine.
-      const along = (atom: VisualAtom) =>
-        axis === 'y' ? (atom.yStart + atom.yEnd) / 2 : (atom.xStart + atom.xEnd) / 2;
       const pitchEntries = run.slice(1).map((atom, index) => ({
         atom,
-        value: along(atom) - along(run[index]!),
+        value: centerOn(atom, axis) - centerOn(run[index]!, axis),
       }));
       if (pitchEntries.length >= minimumSeriesLength) {
         deviations.push(
