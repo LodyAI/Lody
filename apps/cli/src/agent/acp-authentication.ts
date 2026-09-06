@@ -43,6 +43,7 @@ import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { withLodyNpmCacheForNpx } from './npx-cache';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
+import { prepareManagedClaudeAuthentication } from './managed-claude-authentication';
 import {
   acquireAccountProfileUse,
   acquireAccountProfileAuthentication,
@@ -459,8 +460,15 @@ async function probeBuiltinAuthenticationWithAccountLease(
       () => probeCodexAccount(options, launch, env)
     );
   }
+  const authenticationCwd = await prepareManagedClaudeAuthentication({
+    agentType: options.agentType,
+    accountProfileId: options.accountProfileId,
+    executable: launch.command,
+    env,
+    signal: options.signal,
+  });
   const child = (options.spawnProcess ?? spawn)(launch.command, launch.args, {
-    cwd: os.homedir(),
+    cwd: authenticationCwd,
     env,
     stdio: options.accountStatusOnly ? ['ignore', 'pipe', 'ignore'] : 'ignore',
     windowsHide: true,
@@ -810,6 +818,16 @@ export class AcpAuthenticationManager {
       const preparationInterruption = interruptedResult();
       if (preparationInterruption) return preparationInterruption;
 
+      const authenticationCwd = await prepareManagedClaudeAuthentication({
+        agentType: options.agentType,
+        accountProfileId: options.accountProfileId,
+        executable: launch.command,
+        env,
+        signal: running.abortController.signal,
+      });
+      const settingsInterruption = interruptedResult();
+      if (settingsInterruption) return settingsInterruption;
+
       options.onProgress?.({ status: 'starting' });
       const startingInterruption = interruptedResult();
       if (startingInterruption) return startingInterruption;
@@ -817,7 +835,7 @@ export class AcpAuthenticationManager {
         launch.command,
         accountProfileAuthenticationArgs(options, launch.args),
         {
-          cwd: os.homedir(),
+          cwd: authenticationCwd,
           env,
           stdio: ['pipe', 'pipe', 'pipe'],
           detached: process.platform !== 'win32',

@@ -52,6 +52,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - `account-profiles.ts`: resolve local ids after env merge; missing ids keep native System Default.
   Codex/Claude auth/status/title share each isolated profile home; never copy credentials or fall back
   on missing ids. Strip inherited Claude credential-store/auth overrides only for managed profiles.
+  Managed Claude also checks resolved project/local/policy settings before provider operations;
+  native login/status preflight runs in an isolated child with the selected profile as cwd.
+  Fail closed on auth overrides or uninspectable policy helpers without logging settings values.
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
   prefetch, override, and interactive-auth flows, and launch the pinned closure, not the
   all-in-one `@deepseek-ai/dsh` CLI. Credentials stay in the agent config environment;

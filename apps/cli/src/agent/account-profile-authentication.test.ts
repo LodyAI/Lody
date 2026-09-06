@@ -15,6 +15,15 @@ import {
   validateAccountProfile,
 } from './account-profiles';
 import { startLocalAcpAgent } from './acp-runner';
+import { prepareManagedClaudeAuthentication } from './managed-claude-authentication';
+
+vi.mock('./managed-claude-authentication', () => ({
+  prepareManagedClaudeAuthentication: vi.fn(async (input) =>
+    input.agentType === 'claude' && input.accountProfileId
+      ? input.env.CLAUDE_CONFIG_DIR
+      : os.homedir()
+  ),
+}));
 
 const logger: Logger = {
   info() {},
@@ -51,6 +60,40 @@ function childProcess() {
 }
 
 describe('account authentication provider boundary', () => {
+  it('does not spawn native status or login after a settings preflight rejection', async () => {
+    const profilesRoot = await root();
+    const input = { cliType: 'builtin' as const, agentType: 'claude', profilesRoot };
+    const profile = await createAccountProfile({ ...input, label: 'Guarded' });
+    const selected = {
+      ...input,
+      accountProfileId: profile.accountProfileId,
+      runtimeOverrides: { claudeCodeExecutable: '/verified/claude' },
+    };
+    const spawnProcess = vi.fn();
+    vi.mocked(prepareManagedClaudeAuthentication).mockRejectedValueOnce(
+      new Error('Settings rejected')
+    );
+    await expect(
+      probeBuiltinAuthentication({
+        ...selected,
+        logger,
+        spawnProcess: spawnProcess as never,
+        resolveLoginShellEnv: async () => ({}),
+      })
+    ).rejects.toThrow('Settings rejected');
+    vi.mocked(prepareManagedClaudeAuthentication).mockRejectedValueOnce(
+      new Error('Settings rejected')
+    );
+    const manager = new AcpAuthenticationManager(logger, {
+      spawnProcess: spawnProcess as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    await expect(
+      manager.authenticate({ ...selected, requestId: 'settings-rejected' })
+    ).resolves.toMatchObject({ success: false, disposition: 'error' });
+    expect(spawnProcess).not.toHaveBeenCalled();
+    acquireAccountProfileUse(selected)();
+  });
   it.each(['claude', 'codex'] as const)(
     'rejects a duplicate request id for another %s account without disturbing the original login',
     async (secondAgentType) => {
