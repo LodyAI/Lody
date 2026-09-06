@@ -8,22 +8,44 @@ lives in its `README.md`.
 ## One mention, five stages
 
 1. **Trigger and menu.** `@` opens the two-level menu; `$`, `#`, and `/` keep
-   their direct behavior. `enableAtMentions` decides what `@` can reach, and it
-   gates both trigger registration and whether `<Mention>` mounts at all — a
-   source missing from that list silently degrades the composer to a plain
-   textarea and drops its type.
+   their direct behavior. `enableAtMentions` decides what `@` can reach and
+   gates trigger registration. The mention tree now mounts independently of
+   that list so pasted URL references work without another configured source.
 2. **Candidates.** Each category builds and caps its own rows. A row is a
    registered collection item that arrow-key movement walks, so an uncapped source
    degrades navigation, not just render time. Ranking the file index is the
    expensive one, which is why `getCandidates` must stay lazy and a bare `@` calls
    none of them.
 3. **Commit.** The candidate's `insertText` is what the user sees in the prompt;
-   the committed *range* is what carries structured identity (a session id, a Role
+   the committed _range_ is what carries structured identity (a session id, a Role
    id) that no text form could.
 4. **Draft persistence and hydration.** Ranges are stored beside the draft, and
    rebuilding them from text is only a fallback.
 5. **Before send.** One hook rewrites the ranges that need rewriting, and the
    resulting spans are frozen into the message.
+
+The candidate owns its prompt spelling: files use `@path`, issues and PRs use
+`#123`, skills use `$token`, and commands use `/cmd`. Selecting them through `@`
+does not change those forms. Directory navigation writes `@dir/` to descend;
+committing the directory writes `@dir`. Candidate detail fields pass translated
+text directly to the renderer. The Agent Role detail exception uses
+`sessions/agent-role-detail-pane.tsx`, shared with the Role submenu.
+
+## URL and browser references
+
+Native pasted URLs keep their original text and gain ranges after the input
+commit. Generic URL decoration and GitHub repository specialization therefore
+reuse native selection, copying, and undo. Removing decoration keeps the URL
+readable. Clicking a range or pressing Alt+Enter at its boundary opens the same
+actions. Recognition is bounded to paste/redo insertions rather than scanning
+every edit or a collapsed pasted-text attachment.
+
+The browser toolbar and `@` category insert the current page's logical URL with
+its machine/session identity and optional title. These are snapshots: navigating
+the page later does not change a sent reference. Preview capability query
+parameters are excluded from the snapshot. Activation routes back to the owning
+browser's navigation and approval pipeline, while discovery uses already-known
+browser state without requesting page metadata or content.
 
 ## Ranking
 
@@ -44,6 +66,10 @@ bill a mention aimed somewhere else. The fetch timestamp rides on the cached ent
 stored beside the entry instead, every reload would look unfetched and refetch on
 the first `@`.
 
+Explicit refresh gestures pass `refresh({ force: true })`; ordinary activation
+uses `ISSUE_PR_FRESH_FOR_MS`. The cache entry carries its fetch timestamp so
+IndexedDB restoration does not mistake already-loaded data for an unasked source.
+
 ## Drafts, hydration, and the reasons behind them
 
 A mention that had to be rebuilt from text needed its source loaded, so it spent
@@ -51,7 +77,7 @@ every return looking like plain text — and never came back at all if the sourc
 never loaded. Hence persistence of the narrow `PersistedMentionRange`: the live
 range carries callbacks, which `JSON.stringify` writes as `{}`.
 
-`mergeHydratedMentions` rejects an *overlapping* range, not just an exact
+`mergeHydratedMentions` rejects an _overlapping_ range, not just an exact
 duplicate, because a session and a path are now the same shape: two sources can
 each claim `@fix-ci` at different ends, and only rejecting overlaps keeps the
 restored range authoritative.
@@ -70,8 +96,7 @@ default and reads storage in `onMount`, so latching at mount latches `''` and th
 
 A session mention commits as a plain `@<title-slug>`: the old `session:` marker
 was only ever an anchor for the before-send rewrite, and the user had to read it.
-It is still the only type whose displayed text differs from what the agent
-receives.
+Its displayed token differs from the id-bearing instruction the agent receives.
 
 Dropping the marker is why hydration has to break a tie:
 `hydrateSessionMentionsFromText` skips any token the file source already knows.
