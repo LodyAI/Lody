@@ -113,13 +113,10 @@ mobile surfaces. Background for the rules below:
 
 ## Provider account profiles
 
-Codex/Claude account controls and background requests require the machine's
-account-profiles capability. System Default follows native CLI auth; UI never
-writes credentials or optimistically changes a session binding. Additional-account
-quota must match the durable session account id; never fall back to machine-wide
-System Default quota. Preserve legacy login controls. Account management and
-switching require local Electron IPC; remote Machine RPC cannot authenticate
-the requester and must not be a fallback. Render account controls only after the
-runtime confirms a local IPC route. Hidden surfaces must not initiate profile
-status work; matching active surfaces share status requests and invalidate cached
-status after account creation or authentication.
+Codex/Claude account UI and requests require the account-profiles capability and
+a runtime-confirmed local Electron IPC route. Remote Machine RPC cannot authenticate
+requesters; never fall back to it. System Default uses native CLI auth; preserve
+legacy login. UI never writes credentials or changes bindings optimistically.
+Additional-account quota must match the durable account id, never machine-wide
+System Default quota. Hidden surfaces must not load status. Active surfaces share
+status requests and invalidate cached status after account creation or login.
