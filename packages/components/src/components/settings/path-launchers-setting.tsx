@@ -99,9 +99,9 @@ export function PathLaunchersSettings({
     ids: Set<string>;
   } | null>(null);
   useEffect(() => {
-    if (!isElectron) return;
+    if (!isElectron) return undefined;
     const services = getIpcServices();
-    if (!services) return;
+    if (!services) return undefined;
 
     let cancelled = false;
     const launchers = buildPathLauncherProbes(
