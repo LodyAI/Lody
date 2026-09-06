@@ -106,16 +106,18 @@ describe('ShellTerminalManager', () => {
   });
 });
 
-function releaseFixture(handles: SessionProcessHandle[]) {
+function releaseFixture(handles: SessionProcessHandle[], spawn?: SessionSandbox['spawn']) {
   const sandbox: SessionSandbox = {
     enabled: false,
     description: 'test',
     applyLimits: async () => {},
-    spawn: vi.fn(async () => {
-      const handle = handles.shift();
-      if (!handle) throw new Error('no handle');
-      return handle;
-    }),
+    spawn:
+      spawn ??
+      vi.fn(async () => {
+        const handle = handles.shift();
+        if (!handle) throw new Error('no handle');
+        return handle;
+      }),
     terminate: async () => {},
     cleanup: async () => {},
   };
@@ -343,4 +345,94 @@ it('finishes disposal when a pending terminal launch rejects', async () => {
   const disposal = manager.disposeAll('acp-1');
   failSpawn(new Error('launch failed'));
   await Promise.all([start, disposal]);
+});
+
+it('protects a pending terminal start and live watch until its observed exit', async () => {
+  const owned = observedHandle();
+  let finishStart: (handle: SessionProcessHandle) => void = () => {
+    throw new Error('Start promise not initialized');
+  };
+  const starting = new Promise<SessionProcessHandle>((resolve) => {
+    finishStart = resolve;
+  });
+  const manager = releaseFixture([], () => starting);
+  expect(manager.hasRunningTerminals()).toBe(false);
+
+  const creation = manager.createTerminal('acp-1', 'node', ['--watch', 'server.js']);
+  expect(manager.hasRunningTerminals()).toBe(true);
+  finishStart(owned.handle);
+  const id = await creation;
+  expect(manager.hasRunningTerminals()).toBe(true);
+  expect((await manager.terminalOutput('acp-1', id)).exitStatus).toBeNull();
+
+  owned.exit(0);
+  expect(manager.hasRunningTerminals()).toBe(false);
+  // The terminal remains addressable for output. Its mere presence cannot pin GC.
+  expect((await manager.terminalOutput('acp-1', id)).exitStatus).toEqual({
+    exitCode: 0,
+    signal: undefined,
+  });
+  expect(owned.unsubscribe).not.toHaveBeenCalled();
+});
+
+it('clears the background guard when terminal startup rejects', async () => {
+  let rejectStart: (error: Error) => void = () => {
+    throw new Error('Start promise not initialized');
+  };
+  const starting = new Promise<SessionProcessHandle>((_, reject) => {
+    rejectStart = reject;
+  });
+  const manager = releaseFixture([], () => starting);
+  const creation = manager.createTerminal('acp-1', 'watch');
+  const rejected = expect(creation).rejects.toThrow('spawn rejected');
+  expect(manager.hasRunningTerminals()).toBe(true);
+  rejectStart(new Error('spawn rejected'));
+  await rejected;
+  expect(manager.hasRunningTerminals()).toBe(false);
+});
+
+it('keeps another pending start protected when one terminal startup fails', async () => {
+  const owned = observedHandle();
+  let finishStart: (handle: SessionProcessHandle) => void = () => {
+    throw new Error('Start promise not initialized');
+  };
+  const starting = new Promise<SessionProcessHandle>((resolve) => {
+    finishStart = resolve;
+  });
+  const manager = releaseFixture([], async (command) => {
+    if (command === 'bad-watch') throw new Error('spawn rejected');
+    return starting;
+  });
+  const creation = manager.createTerminal('acp-1', 'good-watch');
+  await expect(manager.createTerminal('acp-1', 'bad-watch')).rejects.toThrow('spawn rejected');
+  expect(manager.hasRunningTerminals()).toBe(true);
+  finishStart(owned.handle);
+  await creation;
+  expect(manager.hasRunningTerminals()).toBe(true);
+  owned.exit(0);
+  expect(manager.hasRunningTerminals()).toBe(false);
+});
+
+it('protects live terminal work through MessageHandler before consulting empty history', async () => {
+  const { MessageHandler } = await import('../src/lib/message-handler');
+  const { SessionIdSchema } = await import('@lody/shared');
+  const owned = observedHandle();
+  const terminalManager = releaseFixture([owned.handle]);
+  const id = await terminalManager.createTerminal('acp-1', 'watch');
+  const getHistory = vi.fn(async () => []);
+  const receiver = {
+    sessionManager: { getSession: () => ({ terminalManager }) },
+    workspaceDocument: { getOrCreateSessionDoc: async () => ({ getHistory }) },
+  };
+  const sessionId = SessionIdSchema.parse('watch-session');
+  await expect(MessageHandler.prototype.hasBackgroundWork.call(receiver, sessionId)).resolves.toBe(
+    true
+  );
+  expect(getHistory).not.toHaveBeenCalled();
+  owned.exit(0);
+  await expect(MessageHandler.prototype.hasBackgroundWork.call(receiver, sessionId)).resolves.toBe(
+    false
+  );
+  expect(getHistory).toHaveBeenCalledOnce();
+  expect((await terminalManager.terminalOutput('acp-1', id)).exitStatus?.exitCode).toBe(0);
 });

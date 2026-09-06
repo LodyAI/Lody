@@ -1,3 +1,4 @@
+import { hasBackgroundWorkFromHistory } from './session-background-work';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -6551,6 +6552,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/get-resource-history':
+        throw new Error('Resource history is served by the machine runtime');
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);
@@ -9929,6 +9932,19 @@ export class MessageHandler {
     // pointers unequal on purpose, and a raw comparison would pin the session
     // in memory forever.
     return hasPendingUserTurnActivation(meta);
+  }
+
+  /** Observed terminal liveness and persisted tasks protect background work. */
+  async hasBackgroundWork(sessionId: SessionId): Promise<boolean> {
+    if (this.sessionManager.getSession(sessionId)?.terminalManager.hasRunningTerminals?.()) {
+      return true;
+    }
+    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const history = await sessionDoc.getHistory();
+    return (
+      hasBackgroundWorkFromHistory(history) ||
+      this.sessionManager.getSession(sessionId)?.terminalManager.hasRunningTerminals?.() === true
+    );
   }
 
   /**

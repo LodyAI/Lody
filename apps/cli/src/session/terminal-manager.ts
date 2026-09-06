@@ -31,6 +31,7 @@ export interface TerminalManager {
   waitForTerminalExit(acpSessionId: string, terminalId: string): Promise<TerminalExitStatus>;
   killTerminal(acpSessionId: string, terminalId: string): Promise<void>;
   disposeAll?(acpSessionId: string): Promise<void>;
+  hasRunningTerminals?(): boolean;
 }
 
 interface TerminalState<THandle> {
@@ -132,6 +133,14 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       this.pendingStarts.delete(pendingStart);
       finishStart();
     }
+  }
+
+  hasRunningTerminals(): boolean {
+    if (this.pendingStarts.size > 0) return true;
+    for (const terminal of this.terminals.values()) {
+      if (!terminal.disposed && terminal.exitStatus === null) return true;
+    }
+    return false;
   }
 
   async terminalOutput(acpSessionId: string, terminalId: string) {

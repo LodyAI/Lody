@@ -343,6 +343,14 @@ export class MachineRuntime {
   async dispatchLocalMachineRpc(
     message: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResponse> {
+    if (message.method === 'machine/get-resource-history') {
+      if (message.ownerSessionId) {
+        return { ok: false, error: 'Machine resource history requires workspace-level access' };
+      }
+      return this.resourceMonitor
+        ? { ok: true, result: this.resourceMonitor.getHistory() }
+        : { ok: false, error: 'Resource monitor stopped' };
+    }
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message);
   }
@@ -359,6 +367,7 @@ export class MachineRuntime {
       getSessionLastActivity: (sessionId) => handler.getLastActivity(sessionId),
       hasActiveTurn: (sessionId) => handler.hasActiveTurn(sessionId),
       hasActiveGoal: async (sessionId) => await handler.hasActiveGoal(sessionId),
+      hasBackgroundWork: async (sessionId) => await handler.hasBackgroundWork(sessionId),
       hasPendingUpdates: (sessionId) => handler.hasPendingUpdates(sessionId),
       hasPendingUserWork: async (sessionId) => await handler.hasPendingUserWork(sessionId),
       isArchiveInFlight: (sessionId) => handler.isArchiveInFlight(sessionId),

@@ -162,6 +162,10 @@ control-plane path is DEPRECATED; do not add functionality to it.
   frames and MUST sample without a cloud transport. Cloud observers/snapshots attach
   only after the authorized remote bridge attaches and detach on offline/revocation.
   Sampling is observer-lease driven; never start OS probes permanently or persist snapshots.
+  Recent resource history retains only bounded observed samples in memory. The local
+  `machine/get-resource-history` Machine RPC reads that buffer without probing; negotiate
+  `resourceHistory` v1. History is workspace-scoped and excludes command lines/environment.
+  PID/start-time attribution is diagnostic only and never authorizes process termination.
 - Machine Flock writes for this CLI's own machine must be local-first: after `repo.flush()`,
   call `LoroDocumentManager.markMachineFlockDocDirty(...)` (or pass the manager as the
   sync scheduler) instead of awaiting `handle.syncOnce()` in the user/RPC request path.

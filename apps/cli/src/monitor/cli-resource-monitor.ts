@@ -12,7 +12,10 @@ import type { SessionManager, SessionMonitorRuntimeInfo } from '@/session/sessio
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { MemoryPressureSnapshotSource } from './memory-pressure-sampler';
-import { aggregateProcessTreeUsage } from './process-tree';
+import { aggregateProcessTreeUsage, ObservedProcessAttribution } from './process-tree';
+import { ResourceHistory } from './resource-history';
+import type { MachineResourceHistory } from '@lody/shared';
+import type { ProcessTableEntry } from './process-table';
 import { logicalCpuCount, readProcessTable } from './process-table';
 import {
   sumResourceUsage,
@@ -38,6 +41,12 @@ type Baseline = { sampledAtMs: number; cpuTimeMicros: number };
 
 export class CliResourceMonitor {
   private readonly instanceId = uuidv4();
+  private readonly history: ResourceHistory;
+  private readonly attribution = new ObservedProcessAttribution();
+
+  getHistory(): MachineResourceHistory {
+    return this.history.read();
+  }
   private readonly sessionBaselines = new Map<SessionId, Baseline>();
   private cliBaseline: Baseline | null = null;
   private deviceCpuBaseline: DeviceCpuTimeSample | null = null;
@@ -48,9 +57,29 @@ export class CliResourceMonitor {
     private readonly stateSource: SessionMonitorStateSource,
     private readonly memoryPressure: MemoryPressureSnapshotSource,
     private readonly logger: Logger
-  ) {}
+  ) {
+    this.history = new ResourceHistory(machineId, this.instanceId);
+  }
 
   async sample(): Promise<MachineMonitorSnapshot> {
+    try {
+      return await this.sampleOnce();
+    } catch (error) {
+      this.history.append({
+        sampledAtMs: Date.now(),
+        source: 'unavailable',
+        cliControlPlane: null,
+        memoryKind: process.platform === 'win32' ? 'working-set-sum' : 'rss-sum',
+        processes: [],
+        sessions: [],
+        processesTruncated: false,
+        sessionsTruncated: false,
+      });
+      throw error;
+    }
+  }
+
+  private async sampleOnce(): Promise<MachineMonitorSnapshot> {
     const sampledAtMs = Date.now();
     const updatedAtMs = getServerNow();
     const cpuCount = logicalCpuCount();
@@ -58,6 +87,8 @@ export class CliResourceMonitor {
     const deviceCpuCores = toDeviceCpuCores(deviceCpuSample, this.deviceCpuBaseline, cpuCount);
     this.deviceCpuBaseline = deviceCpuSample;
     const warnings: string[] = [];
+    let historySource: 'available' | 'unavailable' | 'not-sampled' = 'not-sampled';
+    let historyProcesses: ProcessTableEntry[] = [];
     const [sessions, memoryPressure] = await Promise.all([
       this.sessionManager.listMonitorSessions(),
       this.memoryPressure.getLatest(),
@@ -81,6 +112,8 @@ export class CliResourceMonitor {
     if (processTreeSessions.length > 0 || process.platform === 'darwin') {
       try {
         const processTable = await readProcessTable();
+        historySource = 'available';
+        historyProcesses = processTable.entries;
         processMemoryKind = processTable.memoryKind;
         warnings.push(...processTable.warnings);
         if (processTable.memoryKind === 'physical-footprint-sum') {
@@ -98,6 +131,7 @@ export class CliResourceMonitor {
           }))
         );
       } catch (error) {
+        historySource = 'unavailable';
         warnings.push('process_table_unavailable');
         this.logger.debug(
           `Machine monitor process-table probe failed: ${formatErrorMessage(error)}`
@@ -159,7 +193,7 @@ export class CliResourceMonitor {
       sessions.map((session) => session.accounting.kind).filter((kind) => kind !== 'unavailable')
     );
 
-    return {
+    const snapshot: MachineMonitorSnapshot = {
       kind: 'snapshot',
       protocolVersion: 1,
       machineId: this.machineId,
@@ -185,6 +219,40 @@ export class CliResourceMonitor {
       sessionsTruncated,
       warnings,
     };
+    const owners = this.attribution.assign(
+      historyProcesses,
+      processTreeSessions.map((session) => ({
+        sessionId: session.sessionId,
+        startedAtMs: session.startedAtMs,
+        rootPids: session.accounting.kind === 'process-tree' ? session.accounting.rootPids : [],
+      }))
+    );
+    this.history.append({
+      sampledAtMs,
+      source: historySource,
+      cliControlPlane,
+      memoryKind: processMemoryKind,
+      processesTruncated: false,
+      sessionsTruncated,
+      processes: historyProcesses
+        .filter((entry) => entry.pid === process.pid || owners.has(entry.pid))
+        .map((entry) => ({
+          pid: entry.pid,
+          startedAtMs: entry.startedAtMs,
+          sessionId: owners.get(entry.pid) ?? null,
+          memoryBytes: entry.memoryBytes,
+          cpuTimeMicros: entry.cpuTimeMicros,
+        })),
+      sessions: visibleSessions.map((session) => ({
+        sessionId: session.sessionId,
+        parentSessionId: session.parentSessionId,
+        status: session.status,
+        resource: session.resource,
+        cleanup:
+          sessions.find((runtime) => runtime.sessionId === session.sessionId)?.cleanup ?? null,
+      })),
+    });
+    return snapshot;
   }
 
   private buildSessionSnapshot(args: {

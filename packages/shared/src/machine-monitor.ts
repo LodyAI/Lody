@@ -118,6 +118,63 @@ const MachineMonitorResourceUsageSchema = z.object({
   quality: z.enum(['exact-process', 'exact-cgroup', 'estimated-tree', 'unavailable']),
 });
 
+export const MachineResourceHistorySchema = z
+  .object({
+    type: z.literal('machine/resource-history'),
+    machineId: z.string().min(1),
+    instanceId: z.string().min(1),
+    collectedWhileObserved: z.literal(true),
+    samples: z
+      .array(
+        z
+          .object({
+            sampledAtMs: z.number().finite().nonnegative(),
+            source: z.enum(['available', 'unavailable', 'not-sampled']),
+            cliControlPlane: MachineMonitorResourceUsageSchema.nullable(),
+            memoryKind: z.enum(['rss-sum', 'physical-footprint-sum', 'working-set-sum']),
+            processesTruncated: z.boolean(),
+            sessionsTruncated: z.boolean(),
+            processes: z
+              .array(
+                z
+                  .object({
+                    pid: z.number().int().positive(),
+                    startedAtMs: z.number().finite().nonnegative(),
+                    sessionId: z.string().nullable(),
+                    memoryBytes: z.number().finite().nonnegative(),
+                    cpuTimeMicros: z.number().finite().nonnegative(),
+                  })
+                  .strict()
+              )
+              .max(256),
+            sessions: z
+              .array(
+                z
+                  .object({
+                    sessionId: z.string(),
+                    parentSessionId: z.string().nullable(),
+                    status: z.string(),
+                    cleanup: z
+                      .object({
+                        state: z.enum(['running', 'failed', 'completed']),
+                        attemptedAtMs: z.number().finite().nonnegative(),
+                      })
+                      .strict()
+                      .nullable(),
+                    resource: MachineMonitorResourceUsageSchema,
+                  })
+                  .strict()
+              )
+              .max(100),
+          })
+          .strict()
+      )
+      .max(120),
+  })
+  .strict();
+
+export type MachineResourceHistory = z.infer<typeof MachineResourceHistorySchema>;
+
 const AcpSessionMonitorSnapshotSchema = z.object({
   sessionId: SessionIdSchema,
   parentSessionId: SessionIdSchema.nullable(),
