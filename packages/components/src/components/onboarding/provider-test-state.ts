@@ -126,6 +126,32 @@ export function agentRuntimeReadinessFromActivity(
   return { readiness: 'arriving', percent: null };
 }
 
+/**
+ * How a wait presents once it stops being routine.
+ *
+ * - `normal` — name the stage and nothing else. A counter under a few seconds
+ *   only teaches the user to watch a number that was never going to matter.
+ * - `measured` — show elapsed time. The wait has run long enough that the user
+ *   wants it bounded, and a number they can watch is what bounds it.
+ * - `exceptional` — say so. Past here a stage name over a rising number reads
+ *   as the UI insisting everything is fine; the honest move is to admit the
+ *   wait has left the normal range. Not by inventing progress — by changing
+ *   what the interface is willing to claim.
+ */
+export type ProviderWaitEscalation = 'normal' | 'measured' | 'exceptional';
+
+/** Elapsed seconds at which a wait starts showing its number. */
+export const PROVIDER_WAIT_MEASURED_AFTER_SECONDS = 10;
+
+/** Elapsed seconds at which a wait stops presenting itself as ordinary. */
+export const PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS = 60;
+
+export function providerWaitEscalation(elapsedSeconds: number): ProviderWaitEscalation {
+  if (elapsedSeconds >= PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS) return 'exceptional';
+  if (elapsedSeconds >= PROVIDER_WAIT_MEASURED_AFTER_SECONDS) return 'measured';
+  return 'normal';
+}
+
 export type ProviderTestRun = {
   id: number;
   signal: AbortSignal;
@@ -136,6 +162,11 @@ export type ProviderTestRunRegistry = ReturnType<typeof createProviderTestRunReg
 /**
  * Tracks one current probe per config. Starting, editing, or deleting a config
  * invalidates its previous run so a late response can never overwrite newer UI.
+ *
+ * Not committing a result and cancelling the work behind it are two different
+ * decisions, so they have two different methods. `invalidate` is for a probe
+ * that became meaningless — its config was edited, deleted, or replaced — and
+ * aborts. `detachAll` is for leaving the screen, and does not.
  */
 export function createProviderTestRunRegistry() {
   let nextId = 0;
@@ -164,8 +195,16 @@ export function createProviderTestRunRegistry() {
       current.get(configId)?.controller.abort();
       current.delete(configId);
     },
-    invalidateAll(): void {
-      for (const entry of current.values()) entry.controller.abort();
+    /**
+     * Stop committing every run's result, but let the requests themselves run.
+     *
+     * Unmount is not a reason to abandon a recovery the machine is already
+     * executing. A refresh writes durable capabilities, and the machine drops
+     * the work when its last consumer leaves — so aborting here is what made
+     * "continue past this step" silently also mean "give up on this agent",
+     * at exactly the moment a slow first run makes moving on most attractive.
+     */
+    detachAll(): void {
       current.clear();
     },
   };

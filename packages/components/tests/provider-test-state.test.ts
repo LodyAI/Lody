@@ -6,6 +6,9 @@ import {
   agentRuntimeReadinessFromProgress,
   createProviderTestRunRegistry,
   providerTestActivityFromProgress,
+  providerWaitEscalation,
+  PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS,
+  PROVIDER_WAIT_MEASURED_AFTER_SECONDS,
 } from '../src/components/onboarding/provider-test-state';
 
 const configId = 'provider-1' as AgentConfigId;
@@ -75,6 +78,21 @@ describe('createProviderTestRunRegistry', () => {
     expect(registry.finish(configId, completed)).toBe(true);
     expect(registry.finish(configId, completed)).toBe(false);
   });
+
+  it('detaches without aborting, so leaving the step does not cancel the work', () => {
+    // Leaving the provider step must stop the screen committing a result it can
+    // no longer show, and nothing more. The machine drops a refresh once its
+    // last consumer leaves, so aborting here would make "continue" quietly mean
+    // "abandon this agent" — the opposite of what the UI offers at that moment.
+    const registry = createProviderTestRunRegistry();
+    const detached = registry.start(configId);
+
+    registry.detachAll();
+
+    expect(detached.signal.aborted).toBe(false);
+    expect(registry.isCurrent(configId, detached)).toBe(false);
+    expect(registry.finish(configId, detached)).toBe(false);
+  });
 });
 
 describe('agentRuntimeReadinessFromProgress', () => {
@@ -138,5 +156,32 @@ describe('agentRuntimeReadinessFromActivity', () => {
       readiness: 'cold',
       percent: null,
     });
+  });
+});
+
+describe('providerWaitEscalation', () => {
+  it('says only the stage name while a wait is still ordinary', () => {
+    expect(providerWaitEscalation(0)).toBe('normal');
+    expect(providerWaitEscalation(PROVIDER_WAIT_MEASURED_AFTER_SECONDS - 1)).toBe('normal');
+  });
+
+  it('starts measuring once the wait is long enough to want bounded', () => {
+    expect(providerWaitEscalation(PROVIDER_WAIT_MEASURED_AFTER_SECONDS)).toBe('measured');
+    expect(providerWaitEscalation(PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS - 1)).toBe('measured');
+  });
+
+  it('admits the wait left the normal range instead of holding the stage name', () => {
+    // The second escalation is the whole point of having tiers: past here a
+    // stage name over a rising number is the interface insisting nothing is
+    // wrong, so the tone has to change rather than the number growing alone.
+    expect(providerWaitEscalation(PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS)).toBe('exceptional');
+    expect(providerWaitEscalation(600)).toBe('exceptional');
+  });
+
+  it('escalates in order, so a tier can never be skipped or reversed', () => {
+    expect(PROVIDER_WAIT_MEASURED_AFTER_SECONDS).toBeGreaterThan(0);
+    expect(PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS).toBeGreaterThan(
+      PROVIDER_WAIT_MEASURED_AFTER_SECONDS
+    );
   });
 });

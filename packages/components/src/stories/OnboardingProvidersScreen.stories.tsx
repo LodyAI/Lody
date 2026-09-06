@@ -4,6 +4,8 @@ import { fn } from 'storybook/test';
 import type { AgentConfigId, AgentConfigMeta, MachineId } from '@lody/shared';
 import {
   OnboardingBackdrop,
+  PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS,
+  PROVIDER_WAIT_MEASURED_AFTER_SECONDS,
   ProvidersScreenView,
   type ProviderTestActivity,
   type ProviderTestStatus,
@@ -222,6 +224,32 @@ export const DownloadingRuntime: Story = {
       [kimiConfig.id]: { phase: 'extracting-runtime' },
     },
     selectedProviderId: codexConfig.id,
+    noLocalMachine: false,
+  },
+};
+
+/**
+ * The three escalation tiers side by side. A wait that just started names its
+ * stage; one past the measured threshold adds the seconds it has taken; one
+ * past the exceptional threshold stops calling itself ordinary and says so,
+ * without inventing any progress it does not have.
+ */
+export const WaitEscalation: Story = {
+  args: {
+    configs: [claudeConfig, codexConfig, kimiConfig],
+    testStatuses: {},
+    testActivities: {
+      [claudeConfig.id]: { phase: 'probing-provider', startedAtMs: Date.now() },
+      [codexConfig.id]: {
+        phase: 'probing-provider',
+        startedAtMs: Date.now() - PROVIDER_WAIT_MEASURED_AFTER_SECONDS * 1000,
+      },
+      [kimiConfig.id]: {
+        phase: 'probing-provider',
+        startedAtMs: Date.now() - PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS * 1000,
+      },
+    },
+    selectedProviderId: kimiConfig.id,
     noLocalMachine: false,
   },
 };

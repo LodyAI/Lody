@@ -78,8 +78,10 @@ import {
   agentRuntimeReadinessFromActivity,
   createProviderTestRunRegistry,
   providerTestActivityFromProgress,
+  providerWaitEscalation,
   type AgentRuntimeReadiness,
   type ProviderTestActivity,
+  type ProviderWaitEscalation,
 } from '../provider-test-state';
 import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
@@ -733,9 +735,13 @@ export function ProvidersScreen({
     [clearTestActivity]
   );
 
+  // Detach, never abort: leaving this step stops the screen from committing a
+  // result it can no longer show, but the machine keeps working. The refresh
+  // writes durable capabilities, so a recovery that outlives the step still
+  // finishes the job the user asked for.
   useEffect(
     () => () => {
-      testRunsRef.current.invalidateAll();
+      testRunsRef.current.detachAll();
     },
     []
   );
@@ -1303,39 +1309,44 @@ function useElapsedSeconds(startedAtMs: number | null): number {
 }
 
 /**
- * How long a wait has to run before it is worth putting a number on it.
+ * The escalation tier a row's wait has reached, and the seconds behind it.
  *
- * A counter is not free. "Starting · 3s" reassures; "Starting · 87s" applies
- * pressure, and a normal handshake is over long before anyone wants to measure
- * it. Measuring is what you need once a wait has already begun to look
- * abnormal, so the seconds stay hidden until then and an ordinary start reads
- * as plain "Starting".
+ * The badge and the action both read this, so the tone the row takes and the
+ * number it shows can never disagree about which tier the wait is in. Only a
+ * denominator-free stage escalates: a download already answers "how much
+ * longer" with a percentage, and a runtime that has failed is not waiting.
  */
-const ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS = 10;
+function useProviderWaitEscalation(activity: ProviderTestActivity | undefined): {
+  escalation: ProviderWaitEscalation;
+  elapsedSeconds: number;
+} {
+  const percent = getProviderTestActivityPercent(activity);
+  const measurable = activity !== undefined && percent === null && activity.phase !== 'runtime-failed';
+  const elapsedSeconds = useElapsedSeconds(measurable ? (activity.startedAtMs ?? null) : null);
+  return { escalation: providerWaitEscalation(elapsedSeconds), elapsedSeconds };
+}
 
 /**
  * The in-flight action for a row.
  *
  * A download has a denominator, so the button fills and reads as a percentage.
  * Every other stage — the ACP handshake above all — has none, and inventing one
- * would be a lie. Past {@link ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS} it reports
- * elapsed time instead, which is what turns an open-ended wait into a wait the
- * user can measure. The badge beside it names the stage, so the two together
- * read as "Starting · 14s".
+ * would be a lie. Once the wait is `measured` it reports elapsed time instead,
+ * which is what turns an open-ended wait into a wait the user can measure. The
+ * badge beside it names the stage, so the two together read as "Starting · 14s"
+ * — and, once the wait is `exceptional`, as "Taking longer · 74s".
  */
 function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }) {
   const { t } = useTranslation();
   const percent = getProviderTestActivityPercent(activity);
   const runtimeFailed = activity.phase === 'runtime-failed';
-  const elapsedSeconds = useElapsedSeconds(
-    percent === null && !runtimeFailed ? (activity.startedAtMs ?? null) : null
-  );
+  const { escalation, elapsedSeconds } = useProviderWaitEscalation(activity);
   const label = (() => {
     if (percent !== null) return `${percent}%`;
     // Never label an already-failed runtime as ongoing work while the durable
     // reason is still in flight.
     if (runtimeFailed) return t('onboarding.providers.failedAction', 'Failed');
-    if (elapsedSeconds >= ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS) {
+    if (escalation !== 'normal') {
       return t('onboarding.providers.workingSeconds', '{{seconds}}s', {
         seconds: elapsedSeconds,
       });
@@ -1362,8 +1373,9 @@ function ProviderStatusBadge({
   failureReason?: string;
 }) {
   const { t } = useTranslation();
+  const { escalation } = useProviderWaitEscalation(activity);
   if (activity) {
-    const label = (() => {
+    const stageLabel = (() => {
       switch (activity.phase) {
         case 'checking-runtime':
           return t('onboarding.providers.activityChecking', 'Checking');
@@ -1387,18 +1399,48 @@ function ProviderStatusBadge({
     // A runtime that already reported a failure must not keep wearing the
     // in-progress tone; the final response still owns the durable reason.
     const runtimeFailed = activity.phase === 'runtime-failed';
-    return (
+    // Second escalation. The row stops naming the stage as if this were a
+    // normal run and says what is actually true — the wait left the usual
+    // range — in the amber this screen already uses for "needs your
+    // attention, but nothing has failed". No new progress is invented, and
+    // the elapsed counter beside it keeps the wait measurable.
+    const exceptional = !runtimeFailed && escalation === 'exceptional';
+    const slowDetail = t(
+      'onboarding.providers.slowWaitDetail',
+      '{{stage}} is still running. A first run may have to download and unpack the agent. You can continue — Lody keeps working on this in the background.',
+      { stage: stageLabel }
+    );
+    const badge = (
       <Badge
         variant="outline"
+        // The badge is not focusable, so the tooltip is a hover-only detail.
+        // The acknowledgement itself must reach assistive tech regardless.
+        aria-label={exceptional ? slowDetail : undefined}
         className={cn(
           'shrink-0 whitespace-nowrap text-[10px]',
           runtimeFailed
             ? 'border-destructive/40 bg-destructive/8 text-destructive'
-            : 'border-primary/35 bg-primary/8 text-primary'
+            : exceptional
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              : 'border-primary/35 bg-primary/8 text-primary'
         )}
       >
-        {label}
+        {exceptional ? t('onboarding.providers.activitySlow', 'Taking longer') : stageLabel}
       </Badge>
+    );
+    if (!exceptional) return badge;
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>{badge}</TooltipTrigger>
+          <TooltipContent side="top" className="max-w-80 px-3 py-2">
+            <div className="font-medium">
+              {t('onboarding.providers.slowWaitTitle', 'This is taking longer than usual')}
+            </div>
+            <div className="mt-1 break-words text-xs text-muted-foreground">{slowDetail}</div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
   if (status === 'passed') {
