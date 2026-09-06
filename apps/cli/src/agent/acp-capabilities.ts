@@ -3,6 +3,7 @@ import {
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
+  isRegistryCursorAgent,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { shutdownLocalAcpAgent, startLocalAcpAgent } from '@/agent/acp-runner';
@@ -14,7 +15,7 @@ import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
-import { fetchCursorModelCatalog, isRegistryCursorAgent } from '@/agent/cursor-acp';
+import { fetchCursorModelCatalog } from '@/agent/cursor-acp';
 
 export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';

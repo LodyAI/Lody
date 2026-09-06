@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   type AgentConfigCliType,
+  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
   DEEPSEEK_HARNESS_BASE_URL_ENV,
   type BuiltinRuntimeOverrides,
   type CliType,
@@ -14,6 +15,7 @@ import {
   getRegistryAcpLaunchKind,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
+  isRegistryCursorAgent,
   REGISTRY_ACP_AGENTS,
   type RegistryAcpAgent,
   type RegistryNpxDistribution,
@@ -236,7 +238,10 @@ export function getAcpCapabilitySourceVersion(
     return `registry:${input.agentType}:unknown`;
   }
 
-  return `${agent.id}@${agent.version}`;
+  const registrySourceVersion = `${agent.id}@${agent.version}`;
+  return isRegistryCursorAgent({ cliType: 'registry', agentType: agent.id })
+    ? `${registrySourceVersion}${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`
+    : registrySourceVersion;
 }
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {

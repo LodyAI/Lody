@@ -85,7 +85,14 @@ arrive: context/message-flow.md "Upstream".
   `clientCapabilities._meta.parameterizedModelPicker` at initialize; the gate is
   registry identity (`cliType: 'registry'` and `agentType: 'cursor'`), never a
   same-named custom or builtin config. Downstream capability consumers stay
-  provider-neutral.
+  provider-neutral. The opt-in changes what the agent advertises, so
+  `getAcpCapabilitySourceVersion` appends
+  `CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX` to registry Cursor's
+  source version and `isAcpCapabilityCacheEntryCurrent` rejects a registry Cursor
+  row without it: rows probed before the opt-in (exploded variant ids, no catalog)
+  are never authoritative, and the first session or refresh rewrites them.
+  Predicate and suffix are one binding in `@lody/shared` `ai.ts`; never re-derive
+  either in the CLI.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
   `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Unbounded concurrent Codex starts

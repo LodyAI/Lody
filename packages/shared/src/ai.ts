@@ -326,9 +326,38 @@ export type AcpCapabilityCacheEntry = {
 
 export const getAcpCapabilityCacheKey = (configId: AgentConfigId): string => configId;
 
+/**
+ * Identity, not command line, decides the Cursor opt-in: a custom or builtin config that
+ * happens to launch the same binary keeps standard ACP behaviour.
+ */
+export const isRegistryCursorAgent = (identity: {
+  cliType: AgentConfigCliType | null | undefined;
+  agentType: string | null | undefined;
+}): boolean => identity.cliType === 'registry' && identity.agentType === 'cursor';
+
+/**
+ * Appended to registry Cursor's capability source version once the client declares
+ * `parameterizedModelPicker`. Rows probed before the opt-in describe exploded variant
+ * model ids the agent no longer advertises and carry no per-model catalog, so a row
+ * without the marker is never current.
+ */
+export const CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX =
+  '+parameterized-model-picker';
+
 export const isAcpCapabilityCacheEntryCurrent = (
   entry: AcpCapabilityCacheEntry | undefined
-): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
+): entry is AcpCapabilityCacheEntry => {
+  if (entry?.cacheVersion !== ACP_CAPABILITY_CACHE_VERSION) {
+    return false;
+  }
+  if (
+    isRegistryCursorAgent(entry) &&
+    entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true
+  ) {
+    return false;
+  }
+  return true;
+};
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,

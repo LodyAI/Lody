@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  CURSOR_LIST_AVAILABLE_MODELS_METHOD,
-  fetchCursorModelCatalog,
-  isRegistryCursorAgent,
-} from './cursor-acp';
+import { CURSOR_LIST_AVAILABLE_MODELS_METHOD, fetchCursorModelCatalog } from './cursor-acp';
 
 type CatalogClient = {
   requestExtMethod: ReturnType<typeof vi.fn>;
@@ -113,15 +109,6 @@ const rejectWhenAborted = (signal: AbortSignal | undefined): Promise<Record<stri
     }
     signal.addEventListener('abort', rejectAbort, { once: true });
   });
-
-describe('isRegistryCursorAgent', () => {
-  it('is true only for registry Cursor identity', () => {
-    expect(isRegistryCursorAgent({ cliType: 'registry', agentType: 'cursor' })).toBe(true);
-    expect(isRegistryCursorAgent({ cliType: 'custom', agentType: 'cursor' })).toBe(false);
-    expect(isRegistryCursorAgent({ cliType: 'builtin', agentType: 'claude' })).toBe(false);
-    expect(isRegistryCursorAgent({ cliType: undefined, agentType: undefined })).toBe(false);
-  });
-});
 
 describe('fetchCursorModelCatalog', () => {
   afterEach(() => {
