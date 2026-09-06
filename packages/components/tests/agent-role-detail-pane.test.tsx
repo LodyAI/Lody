@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   AGENT_ROLE_VERSION,
+  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
   type AcpConfigOptionSummary,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -139,6 +140,7 @@ describe('AgentRoleDetailPane', () => {
           agentType: 'cursor',
           cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
           provenance: 'runtime',
+          sourceVersion: `cursor@2026.08.31${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`,
           modes: [],
           models: [],
           configOptions: [

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
+  isRegistryCursorAgent,
   type AcpConfigOptionSummary,
   type AgentConfigId,
   type MachineViewMeta,
@@ -125,6 +127,12 @@ const cursorCapabilityEntry = (
   agentType,
   cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
   provenance: 'runtime',
+  // A registry Cursor row is current only when probed after the picker opt-in.
+  ...(isRegistryCursorAgent({ cliType, agentType })
+    ? {
+        sourceVersion: `cursor@2026.08.31${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`,
+      }
+    : {}),
   modes: [],
   models: [],
   configOptions: cursorSnapshotOptions(),
