@@ -442,41 +442,66 @@ export class SessionForkService {
     const meta = isLoroRepoDocDeleted(record)
       ? undefined
       : (record?.meta as SessionMeta | undefined);
-    const needsRepair = operation !== undefined || !meta?.acpSessionId;
-    if (!needsRepair) {
-      await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
-      return;
-    }
+    const recoveredMeta: SessionMeta = {
+      id: targetSessionId,
+      machineId: marker.machineId as MachineId,
+      createdAt: marker.createdAt,
+      lastMessageAt: getServerNow(),
+      title: marker.title,
+      titleSource: 'generated',
+      userId: marker.cleanup.requesterUserId,
+      status: SessionStatusFactory.idle(),
+      isArchived: false,
+      cliType: marker.cleanup.cliType,
+      agentType: marker.cleanup.agentType,
+      agentConfigId: marker.cleanup.agentConfigId as AgentConfigId,
+      project: marker.cleanup.project as ProjectRef,
+      repoFullName: marker.cleanup.repoFullName,
+      baseBranch: marker.cleanup.branch,
+      ...(marker.branchName ? { branchName: marker.branchName } : {}),
+      isWorktree: true,
+      ...meta,
+      ...(!meta?.acpSessionId && meta?.status?.type === 'initializing'
+        ? { status: SessionStatusFactory.idle() }
+        : {}),
+    };
+    // Account identity is installation-local, never a marker or synced-meta
+    // authority. Resolve before clearing the flag so a pending/corrupt binding
+    // leaves the operation recoverable. The binding may also have the native id
+    // even when the final metadata write never landed.
+    const resolvedMeta = await resolveSessionAccountMeta(
+      {
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId: targetSessionId,
+      },
+      recoveredMeta
+    );
+    const hasStaleQuota =
+      meta?.accountRateLimits != null &&
+      meta.accountRateLimits.accountProfileId !== resolvedMeta.accountProfileId;
+    const needsMetaRepair =
+      !meta?.acpSessionId ||
+      meta.accountProfileId !== resolvedMeta.accountProfileId ||
+      meta.acpSessionId !== resolvedMeta.acpSessionId ||
+      hasStaleQuota;
     if (operation) {
       // The flag clear itself did not persist — clear it now or the client's
       // observer reaches neither terminal branch and waits forever.
       targetDoc.setForkOperation(undefined);
     }
-    if (!meta?.acpSessionId) {
-      // The ACP session id is unrecoverable; leaving it absent means the next
-      // prompt starts a fresh ACP session against the cloned history.
-      const republishedMeta: SessionMeta = {
-        id: targetSessionId,
-        machineId: marker.machineId as MachineId,
-        createdAt: marker.createdAt,
-        lastMessageAt: getServerNow(),
-        title: marker.title,
-        titleSource: 'generated',
-        userId: marker.cleanup.requesterUserId,
-        status: SessionStatusFactory.idle(),
-        isArchived: false,
-        cliType: marker.cleanup.cliType,
-        agentType: marker.cleanup.agentType,
-        agentConfigId: marker.cleanup.agentConfigId as AgentConfigId,
-        project: marker.cleanup.project as ProjectRef,
-        repoFullName: marker.cleanup.repoFullName,
-        baseBranch: marker.cleanup.branch,
-        ...(marker.branchName ? { branchName: marker.branchName } : {}),
-        isWorktree: true,
-      };
-      await this.deps.workspaceDocument.repo.upsertDocMeta(roomId, republishedMeta);
+    if (needsMetaRepair) {
+      // If the native id did not reach the local binding either, it remains
+      // absent and the next prompt starts a fresh ACP session on this account.
+      await this.deps.workspaceDocument.repo.upsertDocMeta(roomId, {
+        ...resolvedMeta,
+        ...(hasStaleQuota ? { accountRateLimits: null } : {}),
+      });
     }
     try {
+      // A previous recovery attempt may have repaired only the in-memory state
+      // before its flush failed. Even an already-correct mirror must be flushed
+      // before releasing the marker that makes those writes recoverable.
       await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
     } catch {

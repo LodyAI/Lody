@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { validateAccountProfile } from './account-profiles';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -935,7 +936,74 @@ describe('probeBuiltinAuthentication', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
+
+  it.each(['input', 'inherited', 'login-shell'] as const)(
+    'allows a System Default handoff using resolved %s environment authentication',
+    async (source) => {
+      vi.stubEnv('ANTHROPIC_API_KEY', source === 'inherited' ? 'synthetic-test-value' : undefined);
+      const spawnProcess = vi.fn();
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'claude',
+        accountProfileId: 'system-default',
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
+        ...(source === 'input' ? { env: { ANTHROPIC_API_KEY: 'synthetic-test-value' } } : {}),
+        resolveLoginShellEnv: async () =>
+          source === 'login-shell' ? { ANTHROPIC_API_KEY: 'synthetic-test-value' } : {},
+        logger: createSilentLogger(),
+        spawnProcess,
+      };
+      await expect(
+        probeBuiltinAuthentication({ ...input, accountStatusOnly: true })
+      ).resolves.toEqual({
+        status: 'unknown',
+        reason: 'environment-authentication',
+      });
+      await expect(validateAccountProfile(input)).resolves.toBeUndefined();
+      // Ordinary capability probes keep their existing contract and defer to ACP.
+      await expect(probeBuiltinAuthentication(input)).resolves.toEqual({ status: 'unknown' });
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['missing', 'unknown', 'timeout'] as const)(
+    'rejects a System Default handoff when native authentication is %s without environment authentication',
+    async (outcome) => {
+      for (const key of Object.keys(process.env)) {
+        if (/^(ANTHROPIC_|CLAUDE_CODE_USE_|AWS_BEARER_TOKEN_BEDROCK)/.test(key))
+          vi.stubEnv(key, undefined);
+      }
+      if (outcome === 'timeout') vi.useFakeTimers();
+      const child = createFakeChild();
+      const started = createDeferred<void>();
+      const spawnProcess = vi.fn(() => {
+        started.resolve();
+        if (outcome !== 'timeout') {
+          queueMicrotask(() => {
+            child.exitCode = outcome === 'missing' ? 1 : 0;
+            child.emit('exit', child.exitCode, null);
+          });
+        }
+        return child;
+      });
+      const validation = validateAccountProfile({
+        cliType: 'builtin',
+        agentType: 'claude',
+        accountProfileId: 'system-default',
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
+        resolveLoginShellEnv: async () => ({}),
+        logger: createSilentLogger(),
+        spawnProcess: spawnProcess as never,
+        statusProbeTimeoutMs: 25,
+      });
+      const rejected = expect(validation).rejects.toThrow('authentication could not be verified');
+      await started.promise;
+      if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+    }
+  );
 
   it('recognizes an authenticated Claude credential store', async () => {
     const child = createFakeChild();

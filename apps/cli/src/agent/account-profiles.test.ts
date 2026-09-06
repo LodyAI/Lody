@@ -1,12 +1,27 @@
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { probeBuiltinAuthentication } from './acp-authentication';
+import type { Logger } from '@/utils/logger';
 import {
   accountProfileAuthenticationArgs,
   createAccountProfile,
   resolveAccountProfileEnv,
+  validateAccountProfile,
 } from './account-profiles';
+
+vi.mock('./acp-authentication', () => ({ probeBuiltinAuthentication: vi.fn() }));
+const logger: Logger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  success: () => {},
+  debug: () => {},
+  setLevel: () => {},
+  child: () => logger,
+  close: async () => {},
+};
 
 const roots: string[] = [];
 async function temporaryRoot() {
@@ -15,7 +30,63 @@ async function temporaryRoot() {
   return root;
 }
 afterEach(async () => {
+  vi.resetAllMocks();
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
+});
+
+describe('account handoff validation', () => {
+  it.each([undefined, 'system-default'])(
+    'accepts the resolved environment-authentication reason only for System Default (%s)',
+    async (accountProfileId) => {
+      vi.mocked(probeBuiltinAuthentication).mockResolvedValue({
+        status: 'unknown',
+        reason: 'environment-authentication',
+      });
+      await expect(
+        validateAccountProfile({
+          cliType: 'builtin',
+          agentType: 'claude',
+          accountProfileId,
+          logger,
+        })
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each(['unknown', 'environment-authentication', 'unauthenticated'] as const)(
+    'rejects managed accounts with %s status even when ambient API authentication is configured',
+    async (status) => {
+      vi.mocked(probeBuiltinAuthentication).mockResolvedValue(
+        status === 'unauthenticated'
+          ? { status: 'unauthenticated', authMethods: [] }
+          : status === 'environment-authentication'
+            ? { status: 'unknown', reason: 'environment-authentication' }
+            : { status: 'unknown' }
+      );
+      await expect(
+        validateAccountProfile({
+          cliType: 'builtin',
+          agentType: 'claude',
+          accountProfileId: '00000000-0000-4000-8000-000000000001',
+          env: { ANTHROPIC_API_KEY: 'synthetic-test-value' },
+          logger,
+        })
+      ).rejects.toThrow('authentication could not be verified');
+    }
+  );
+
+  it('rejects unexplained unknown System Default status despite raw input credentials', async () => {
+    vi.mocked(probeBuiltinAuthentication).mockResolvedValue({ status: 'unknown' });
+    await expect(
+      validateAccountProfile({
+        cliType: 'builtin',
+        agentType: 'claude',
+        accountProfileId: 'system-default',
+        env: { ANTHROPIC_API_KEY: 'synthetic-test-value' },
+        logger,
+      })
+    ).rejects.toThrow('authentication could not be verified');
+  });
 });
 
 const claudeAuthOverrides = (

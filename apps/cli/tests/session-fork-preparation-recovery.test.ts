@@ -21,6 +21,7 @@ import {
   getSessionAccountBinding,
   hashSessionAccountEditHistory,
   resolveSessionAccountMeta,
+  setSessionAccountBinding,
 } from '../src/session/session-account-binding-store';
 import { createSessionAccountEditRecovery } from '../src/session/session-account-edit-recovery';
 import {
@@ -153,6 +154,163 @@ async function openWorkspace() {
     workspaceDocument,
   };
 }
+
+describe('new-worktree fork account recovery across SQLite reopen', () => {
+  it.each(
+    ['system-default', managedProfile].flatMap((profile) =>
+      (
+        [
+          'history-before-native-id',
+          'history-after-native-id',
+          'placeholder-meta',
+          'stale-meta',
+          'failed-repair-flush',
+        ] as const
+      ).map((checkpoint) => ({ profile, checkpoint }))
+    )
+  )(
+    'restores the local $profile account mirror after $checkpoint',
+    async ({ profile, checkpoint }) => {
+      const initial = await openWorkspace();
+      const marker: SessionForkOperationMarker = {
+        kind: 'new-worktree',
+        version: 1,
+        workspaceId: scope.workspaceId,
+        machineId: scope.machineId,
+        targetSessionId: targetId,
+        operationId,
+        createdAt: '2026-09-06T00:00:02.000Z',
+        title: '(fork) Synthetic source',
+        branchName: 'lody/synthetic-fork',
+        cleanup: {
+          project: { kind: 'local', localProjectId: 'synthetic-project' },
+          requesterUserId: 'synthetic-user',
+          agentConfigId: 'synthetic-config',
+          cliType: 'builtin',
+          agentType: 'codex',
+          branch: 'main',
+        },
+      };
+      const nativeId = checkpoint === 'history-before-native-id' ? undefined : 'local-fork-native';
+      const binding = {
+        accountProfileId: profile,
+        ...(nativeId ? { acpSessionId: nativeId } : {}),
+      };
+      await initial.markerStore.record(marker);
+      await setSessionAccountBinding(scope, binding);
+      const target = await initial.document(targetId);
+      const cloned = cloneHistoryThroughTurn(
+        sourceHistory,
+        'assistant-source',
+        sourceId,
+        'Synthetic source',
+        targetId
+      );
+      if (!cloned) throw new Error('Synthetic source must have a fork point');
+      target.setForkOperation({
+        id: operationId,
+        sourceSessionId: sourceId,
+        sourceTurnId: 'assistant-source',
+        requestedByUserId: 'synthetic-user',
+        targetContext: 'new-worktree',
+        capturedHeadSha: 'a'.repeat(40),
+        state: 'preparing',
+        phase: 'committing',
+        createdAt: marker.createdAt,
+        updatedAt: marker.createdAt,
+      });
+      await target.updateHistory(() => cloned.history);
+      if (checkpoint !== 'history-before-native-id') {
+        target.setForkOperation(undefined);
+        target.setForkOperation(undefined);
+        expect((await target.getDocState())?.forkOperation).toBeUndefined();
+      }
+      const wrongProfile = profile === 'system-default' ? managedProfile : 'system-default';
+      if (checkpoint === 'stale-meta' || checkpoint === 'placeholder-meta') {
+        await initial.repo.upsertDocMeta(getSessionRoomId(targetId), {
+          ...sessionMeta(targetId, wrongProfile),
+          title: 'Preserve this edited title',
+          ...(checkpoint === 'stale-meta'
+            ? { acpSessionId: 'untrusted-synced-native', status: SessionStatusFactory.running() }
+            : { status: SessionStatusFactory.initializing() }),
+          accountRateLimits: { accountProfileId: wrongProfile, limits: {} },
+        });
+      }
+      await initial.repo.flush();
+      await initial.close();
+
+      const recovered = await openWorkspace();
+      if (checkpoint === 'failed-repair-flush') {
+        const retryPersistEntered = Promise.withResolvers<void>();
+        const releaseRetryPersist = Promise.withResolvers<void>();
+        const persist = recovered.workspaceDocument.persistPendingChanges;
+        let firstAttempt = true;
+        vi.spyOn(recovered.workspaceDocument, 'persistPendingChanges').mockImplementation(
+          async () => {
+            if (firstAttempt) {
+              firstAttempt = false;
+              throw new Error('Synthetic recovered fork metadata persistence failure');
+            }
+            retryPersistEntered.resolve();
+            await releaseRetryPersist.promise;
+            await persist();
+          }
+        );
+        await recovered.service.recoverPendingForks();
+        expect(await recovered.markerStore.read(targetId)).toEqual(marker);
+        expect((await recovered.document(targetId)).getForkOperation()).toBeUndefined();
+        await expect((await recovered.document(targetId)).getMetaState()).resolves.toMatchObject({
+          accountProfileId: profile,
+          acpSessionId: nativeId,
+        });
+        const retry = recovered.service.recoverPendingForks();
+        try {
+          expect(
+            await Promise.race([
+              retryPersistEntered.promise.then(() => 'persist-entered'),
+              retry.then(() => 'recovery-returned'),
+            ])
+          ).toBe('persist-entered');
+          expect(await recovered.markerStore.read(targetId)).toEqual(marker);
+        } finally {
+          releaseRetryPersist.resolve();
+          await retry;
+        }
+      } else {
+        await recovered.service.recoverPendingForks();
+      }
+      expect(recovered.errors).toEqual([]);
+      expect(recovered.worktreeCleanup).not.toHaveBeenCalled();
+      expect(recovered.opened).toEqual([targetId]);
+      expect(await recovered.markerStore.list()).toEqual([]);
+      expect(await getSessionAccountBinding(scope)).toEqual(binding);
+      expect((await recovered.document(targetId)).getForkOperation()).toBeUndefined();
+      await recovered.close();
+
+      const durable = await openWorkspace();
+      const durableDoc = await durable.document(targetId);
+      expect((await durableDoc.getDocState())?.forkOperation).toBeUndefined();
+      // This exact profile discriminator gates account-scoped quota updates and
+      // drives the account selector; the native id comes from the same local pair.
+      const durableMeta = await durableDoc.getMetaState();
+      expect(durableMeta?.accountProfileId).toBe(profile);
+      expect(durableMeta?.acpSessionId).toBe(nativeId);
+      expect(durableMeta?.title).toBe(
+        checkpoint === 'stale-meta' || checkpoint === 'placeholder-meta'
+          ? 'Preserve this edited title'
+          : marker.title
+      );
+      expect(durableMeta?.status).toEqual(
+        checkpoint === 'stale-meta' ? SessionStatusFactory.running() : SessionStatusFactory.idle()
+      );
+      expect(durableMeta?.accountRateLimits ?? null).toBeNull();
+      expect(hashSessionAccountEditHistory(await durableDoc.getHistory())).toBe(
+        hashSessionAccountEditHistory(cloned.history)
+      );
+      expect(await getSessionAccountBinding(scope)).toEqual(binding);
+    }
+  );
+});
 
 describe('same-workspace fork preparation recovery across SQLite reopen', () => {
   it.each(

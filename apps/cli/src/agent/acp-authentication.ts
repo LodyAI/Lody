@@ -179,7 +179,7 @@ type AcpAuthenticationManagerOptions = {
 export type BuiltinAuthenticationProbeResult =
   | { status: 'authenticated'; identity?: string }
   | { status: 'unauthenticated'; authMethods: readonly AuthMethod[] }
-  | { status: 'unknown' };
+  | { status: 'unknown'; reason?: 'environment-authentication' };
 
 export type ProbeBuiltinAuthenticationOptions = {
   cliType: AgentConfigCliType;
@@ -452,7 +452,11 @@ async function probeBuiltinAuthenticationWithAccountLease(
   });
   options.signal?.throwIfAborted();
   if (hasBuiltinEnvAuthentication(options.agentType, env)) {
-    return { status: 'unknown' };
+    // Native status cannot verify environment-backed providers. Keep the UI's
+    // unknown status, but distinguish this supported launch path for handoffs.
+    return options.accountStatusOnly
+      ? { status: 'unknown', reason: 'environment-authentication' }
+      : { status: 'unknown' };
   }
   if (options.agentType === 'codex' && options.accountStatusOnly) {
     return withAcpSessionStartSlot(

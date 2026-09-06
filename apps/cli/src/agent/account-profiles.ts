@@ -228,6 +228,14 @@ export async function validateAccountProfile(
 ): Promise<void> {
   const { probeBuiltinAuthentication } = await import('./acp-authentication');
   const result = await probeBuiltinAuthentication({ ...input, accountStatusOnly: true });
+  if (
+    input.cliType === 'builtin' &&
+    (input.agentType === 'codex' || input.agentType === 'claude') &&
+    !isManagedAccountProfile(input.accountProfileId) &&
+    result.status === 'unknown' &&
+    result.reason === 'environment-authentication'
+  )
+    return;
   if (result.status !== 'authenticated')
     throw new Error('Target account authentication could not be verified. Sign in and retry.');
 }

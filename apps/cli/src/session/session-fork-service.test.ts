@@ -989,7 +989,7 @@ describe('SessionForkService fork operation recovery', () => {
     expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
     expect(harness.targetDoc.setForkOperation).not.toHaveBeenCalled();
     expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
-    expect(harness.persistPendingChanges).not.toHaveBeenCalled();
+    expect(harness.persistPendingChanges).toHaveBeenCalledWith('session-fork-commit');
     expect(harness.markers).toEqual([]);
   });
 
@@ -1040,6 +1040,26 @@ describe('SessionForkService fork operation recovery', () => {
     expect(harness.targetDoc.setForkOperation).toHaveBeenLastCalledWith(undefined);
     expect(harness.persistPendingChanges).toHaveBeenCalledWith('session-fork-commit');
     expect(harness.markers).toEqual([]);
+  });
+
+  it('retains the operation and marker when the local account binding cannot be resolved', async () => {
+    const harness = createForkHarness(undefined, {
+      forkOperation: preparingOperation,
+      targetHistory: [forkOriginNotice],
+      markers: [staleMarker],
+      aliveRoomIds: [getSessionRoomId(targetSessionId)],
+    });
+    vi.mocked(resolveSessionAccountMeta).mockRejectedValueOnce(
+      new Error('Session account edit recovery is required before continuing.')
+    );
+
+    await harness.service.recoverPendingForks();
+
+    expect(harness.targetDoc.getForkOperation()).toEqual(preparingOperation);
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
+    expect(harness.persistPendingChanges).not.toHaveBeenCalled();
+    expect(harness.markers).toEqual([staleMarker]);
   });
 
   it('republishes meta even when the flag clear did land but meta did not', async () => {
