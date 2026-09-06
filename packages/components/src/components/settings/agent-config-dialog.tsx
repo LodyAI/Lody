@@ -67,6 +67,8 @@ import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { useLocalAccountProfilesRoute } from '@/hooks/use-local-account-profiles-route';
+import { getAccountProfileStatusStore } from './account-profile-status';
 import { Button } from '@/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
@@ -1067,6 +1069,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         }) ||
         (authRequired && usesProtocolAuthentication)
       : authRequired && (isManagedBuiltin || usesProtocolAuthentication);
+  const hasLocalAccountProfilesRoute = useLocalAccountProfilesRoute(
+    machine.id,
+    open &&
+      showAuthenticationPanel &&
+      mode.kind === 'edit' &&
+      machineSupportsAccountProfilesProtocol(machine) &&
+      formData.cliType === 'builtin' &&
+      (formData.agentType === 'codex' || formData.agentType === 'claude') &&
+      Object.keys(formData.env).length === 0 &&
+      !resolvedBrandId
+  );
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1980,6 +1993,19 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         if (requiresBuiltinCreationVerification) {
           setVerifiedBuiltinContext(builtinVerificationContext);
         }
+        if (
+          hasLocalAccountProfilesRoute &&
+          workspaceRuntime &&
+          formData.cliType === 'builtin' &&
+          (formData.agentType === 'codex' || formData.agentType === 'claude')
+        ) {
+          void getAccountProfileStatusStore(workspaceRuntime, {
+            workspaceId: workspaceRuntime.workspaceId,
+            machineId: machine.id,
+            configId: agentConfigId,
+            agentType: formData.agentType,
+          }).refresh({ invalidate: true });
+        }
       }}
     />
   );
@@ -2250,7 +2276,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 }
                 icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                {mode.kind === 'edit' &&
+                {hasLocalAccountProfilesRoute &&
+                mode.kind === 'edit' &&
                 machineSupportsAccountProfilesProtocol(machine) &&
                 formData.cliType === 'builtin' &&
                 (formData.agentType === 'codex' || formData.agentType === 'claude') &&

@@ -1,13 +1,18 @@
 import type { ReactNode } from 'react';
 import { AccountProfileList } from './account-profile-list';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import type { AccountProfileSummary, AgentConfigId, MachineId, SessionId } from '@lody/shared';
+import type { AgentConfigId, MachineId, SessionId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { Button } from '@/ui/button';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import {
+  EMPTY_ACCOUNT_PROFILE_STATUS,
+  getAccountProfileStatusStore,
+  type AccountProfileStatusStore,
+} from './account-profile-status';
 
 type AccountTarget = {
   machineId: MachineId;
@@ -15,58 +20,62 @@ type AccountTarget = {
   configId: AgentConfigId;
 };
 
-export function useAccountProfiles(target: AccountTarget) {
+const subscribeToNoStatus = () => () => {};
+const getEmptyStatus = () => EMPTY_ACCOUNT_PROFILE_STATUS;
+
+export function useAccountProfiles(target: AccountTarget, enabled = true) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const [profileSnapshot, setProfileSnapshot] = useState<{
-    key: string;
-    profiles: AccountProfileSummary[];
+  const [operationError, setOperationError] = useState<{
+    store: AccountProfileStatusStore | null;
+    value: string | null;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
-  const requestStateRef = useRef({ revision: 0 });
   const { machineId, agentType, configId } = target;
-  const targetKey = JSON.stringify([workspaceId, machineId, agentType, configId]);
-  const profiles = profileSnapshot?.key === targetKey ? profileSnapshot.profiles : [];
+  const store = useMemo(
+    () =>
+      enabled && runtime && workspaceId
+        ? getAccountProfileStatusStore(runtime, { workspaceId, machineId, agentType, configId })
+        : null,
+    [enabled, runtime, workspaceId, machineId, agentType, configId]
+  );
+  const snapshot = useSyncExternalStore(
+    store?.subscribe ?? subscribeToNoStatus,
+    store?.getSnapshot ?? getEmptyStatus,
+    getEmptyStatus
+  );
+  const setError = useCallback(
+    (value: string | null) => setOperationError({ store, value }),
+    [store]
+  );
   const refresh = useCallback(async () => {
-    if (!runtime || !workspaceId) return;
-    const requestState = requestStateRef.current;
-    const requestRevision = ++requestState.revision;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await runtime.requestAccountProfiles({
-        type: 'machine/account-profiles',
-        workspaceId,
-        machineId,
-        cliType: 'builtin',
-        agentType,
-        configId,
-        requestId: crypto.randomUUID(),
-        action: 'list',
-      });
-      if (requestRevision !== requestState.revision) return;
-      if (!response?.success)
-        throw new Error(
-          response?.error ?? t('agents.accounts.statusUnavailable', 'Account status is unavailable')
-        );
-      setProfileSnapshot({ key: targetKey, profiles: response.profiles ?? [] });
-    } catch (cause) {
-      if (requestRevision !== requestState.revision) return;
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (requestRevision === requestState.revision) setLoading(false);
-    }
-  }, [runtime, workspaceId, machineId, agentType, configId, t, targetKey]);
+    setOperationError(null);
+    await store?.refresh({ force: true });
+  }, [store]);
+  const refreshAfterMutation = useCallback(async () => {
+    setOperationError(null);
+    await store?.refresh({ invalidate: true });
+  }, [store]);
   useEffect(() => {
-    const requestState = requestStateRef.current;
-    void refresh();
-    return () => {
-      requestState.revision++;
-    };
-  }, [refresh]);
-  return { runtime, workspaceId, profiles, error, setError, loading, refresh };
+    void store?.refresh();
+  }, [store]);
+  const error =
+    operationError?.store === store && operationError.value !== null
+      ? operationError.value
+      : snapshot.error
+        ? (snapshot.error.message ??
+          t('agents.accounts.statusUnavailable', 'Account status is unavailable'))
+        : null;
+  return {
+    runtime,
+    workspaceId,
+    profiles: snapshot.profiles,
+    error,
+    setError,
+    loading: snapshot.loading,
+    refresh,
+    refreshAfterMutation,
+  };
 }
 
 export function AccountProfilesPanel(
@@ -76,8 +85,16 @@ export function AccountProfilesPanel(
   }
 ) {
   const { t } = useTranslation();
-  const { runtime, workspaceId, profiles, error, setError, loading, refresh } =
-    useAccountProfiles(target);
+  const {
+    runtime,
+    workspaceId,
+    profiles,
+    error,
+    setError,
+    loading,
+    refresh,
+    refreshAfterMutation,
+  } = useAccountProfiles(target);
   const [loginProfile, setLoginProfile] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const add = async () => {
@@ -107,7 +124,7 @@ export function AccountProfilesPanel(
           !profiles.some((existing) => existing.accountProfileId === profile.accountProfileId)
       );
       if (added) setLoginProfile(added.accountProfileId);
-      await refresh();
+      await refreshAfterMutation();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -149,7 +166,7 @@ export function AccountProfilesPanel(
           compact
           onAuthenticated={async () => {
             setLoginProfile(null);
-            await refresh();
+            await refreshAfterMutation();
           }}
         />
       )}
@@ -158,15 +175,29 @@ export function AccountProfilesPanel(
 }
 
 export function SessionAccountSelector(
-  target: AccountTarget & { sessionId: SessionId; accountProfileId?: string; busy?: boolean }
+  target: AccountTarget & {
+    sessionId: SessionId;
+    accountProfileId?: string;
+    busy?: boolean;
+    enabled?: boolean;
+  }
 ) {
   const { t } = useTranslation();
-  const { runtime, workspaceId, profiles, error, setError, loading, refresh } =
-    useAccountProfiles(target);
+  const { runtime, workspaceId, profiles, error, setError, loading, refresh } = useAccountProfiles(
+    target,
+    target.enabled
+  );
   const [switching, setSwitching] = useState(false);
   const currentId = target.accountProfileId ?? 'system-default';
   const change = async (accountProfileId: string) => {
-    if (!runtime || !workspaceId || switching || target.busy || accountProfileId === currentId)
+    if (
+      !runtime ||
+      !workspaceId ||
+      target.enabled === false ||
+      switching ||
+      target.busy ||
+      accountProfileId === currentId
+    )
       return;
     setSwitching(true);
     setError(null);
@@ -197,7 +228,7 @@ export function SessionAccountSelector(
           className="rounded border bg-input-field px-2 py-1"
           aria-label={t('agents.accounts.account', 'Account')}
           value={currentId}
-          disabled={loading || switching || target.busy}
+          disabled={target.enabled === false || loading || switching || target.busy}
           onChange={(event) => void change(event.target.value)}
         >
           {!profiles.some((profile) => profile.accountProfileId === currentId) && (

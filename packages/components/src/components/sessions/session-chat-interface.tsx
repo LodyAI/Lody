@@ -1,5 +1,6 @@
 import { machineSupportsAccountProfilesProtocol } from '@lody/shared';
 import { SessionAccountSelector } from '../settings/account-profiles';
+import { useLocalAccountProfilesRoute } from '@/hooks/use-local-account-profiles-route';
 import {
   startTransition,
   forwardRef,
@@ -2224,6 +2225,20 @@ export const SessionChatInterface = memo(
     const sessionAgentConfig = useMemo(
       () => agentConfigs.find((config) => config.id === session.agentConfigId),
       [agentConfigs, session.agentConfigId]
+    );
+    const hasLocalAccountProfilesRoute = useLocalAccountProfilesRoute(
+      session.machineId,
+      isVisible &&
+        machineSupportsAccountProfilesProtocol(sessionMachine) &&
+        session.cliType === 'builtin' &&
+        (session.agentType === 'codex' || session.agentType === 'claude') &&
+        !!session.agentConfigId &&
+        !!sessionAgentConfig &&
+        canShowSubscriptionRateLimits({
+          cliType: session.cliType,
+          agentType: session.agentType,
+          config: sessionAgentConfig,
+        })
     );
     // Same guard as the rate limits below: wait for the config to resolve, then
     // judge on the full provider identity. `cliType`/`agentType` alone would let
@@ -5937,7 +5952,8 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                  {machineSupportsAccountProfilesProtocol(sessionMachine) &&
+                  {hasLocalAccountProfilesRoute &&
+                  machineSupportsAccountProfilesProtocol(sessionMachine) &&
                   session.cliType === 'builtin' &&
                   (session.agentType === 'codex' || session.agentType === 'claude') &&
                   session.agentConfigId &&
@@ -5956,6 +5972,7 @@ export const SessionChatInterface = memo(
                         configId={session.agentConfigId}
                         accountProfileId={session.accountProfileId}
                         busy={isAgentBusy}
+                        enabled={isVisible}
                       />
                     </ConversationColumn>
                   ) : null}

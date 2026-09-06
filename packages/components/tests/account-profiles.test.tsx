@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId, SessionId } from '@lody/shared';
 import {
   SessionAccountSelector,
@@ -12,15 +12,15 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   switch: vi.fn(),
   loginProps: vi.fn(),
+  runtime: {},
 }));
 vi.mock('../src/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('../src/atoms/workspace-context', () => ({ currentWorkspaceIdAtom: 'workspace' }));
 vi.mock('jotai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('jotai')>();
-  const runtime = { requestAccountProfiles: mocks.list, requestSessionAccountSwitch: mocks.switch };
   return {
     ...actual,
-    useAtomValue: (atom: string) => (atom === 'runtime' ? runtime : 'workspace-1'),
+    useAtomValue: (atom: string) => (atom === 'runtime' ? mocks.runtime : 'workspace-1'),
   };
 });
 vi.mock('react-i18next', () => {
@@ -52,6 +52,9 @@ const profiles = [
   { accountProfileId: 'account-b', label: 'Account B', status: 'authenticated' },
 ];
 let cleanup: (() => Promise<void>) | undefined;
+beforeEach(() => {
+  mocks.runtime = { requestAccountProfiles: mocks.list, requestSessionAccountSwitch: mocks.switch };
+});
 afterEach(async () => {
   await cleanup?.();
   vi.clearAllMocks();
@@ -68,6 +71,51 @@ async function render(node: React.ReactNode) {
   return element;
 }
 describe('account controls', () => {
+  it('coalesces mounted siblings and does not probe disabled selectors', async () => {
+    mocks.list.mockResolvedValue({ success: true, profiles });
+    const element = await render(
+      <>
+        <SessionAccountSelector {...target} />
+        <SessionAccountSelector {...target} sessionId={'session-2' as SessionId} />
+        <SessionAccountSelector
+          {...target}
+          machineId={'hidden-machine' as MachineId}
+          enabled={false}
+        />
+      </>
+    );
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    expect(element.querySelectorAll('option[value="account-b"]')).toHaveLength(2);
+    expect(element.querySelectorAll('select')[2]?.disabled).toBe(true);
+  });
+
+  it('publishes a Settings authentication refresh to an already mounted selector', async () => {
+    mocks.list.mockResolvedValue({ success: true, profiles });
+    const element = await render(
+      <>
+        <AccountProfilesPanel {...target} />
+        <SessionAccountSelector {...target} />
+      </>
+    );
+    const signIn = [...element.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Sign in'
+    );
+    expect(signIn).toBeDefined();
+    await act(async () => signIn?.click());
+    const authProps = mocks.loginProps.mock.calls.at(-1)?.[0];
+    expect(authProps).toBeDefined();
+    mocks.list.mockResolvedValue({
+      success: true,
+      profiles: [
+        ...profiles,
+        { accountProfileId: 'new-account', label: 'New account', status: 'authenticated' },
+      ],
+    });
+    await act(async () => authProps.onAuthenticated());
+    expect(element.querySelector('select option[value="new-account"]')?.textContent).toBe(
+      'New account'
+    );
+  });
   it('keeps the durable binding visible when a switch fails', async () => {
     mocks.list.mockResolvedValue({ success: true, profiles });
     mocks.switch.mockResolvedValue({ success: false, error: 'Target auth invalid' });

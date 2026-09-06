@@ -119,4 +119,7 @@ writes credentials or optimistically changes a session binding. Additional-accou
 quota must match the durable session account id; never fall back to machine-wide
 System Default quota. Preserve legacy login controls. Account management and
 switching require local Electron IPC; remote Machine RPC cannot authenticate
-the requester and must not be a fallback.
+the requester and must not be a fallback. Render account controls only after the
+runtime confirms a local IPC route. Hidden surfaces must not initiate profile
+status work; matching active surfaces share status requests and invalidate cached
+status after account creation or authentication.
