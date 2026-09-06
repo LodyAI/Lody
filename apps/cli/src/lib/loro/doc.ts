@@ -1241,7 +1241,7 @@ export class LoroDocumentManager {
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
-    if (existing) {
+    if (existing && !existing.isDestroyed) {
       return existing;
     }
 
@@ -1256,6 +1256,20 @@ export class LoroDocumentManager {
     // open a fresh handle; otherwise the unload could evict the document that
     // the newly activated SessionDocument is about to retain.
     const initPromise = this.withLocalDocOwnership(docId, async () => {
+      const stale = this.sessions.get(sessionId);
+      if (stale) {
+        if (!stale.isDestroyed) return stale;
+        // Failed destruction may have already detached the room. Never expose
+        // that wrapper: retry teardown before opening a new repo handle.
+        await stale.destroy({ preserveStatus: true });
+        if (this.sessions.get(sessionId) === stale) this.sessions.delete(sessionId);
+        const replacement = this.sessions.get(sessionId);
+        if (replacement) {
+          if (replacement.isDestroyed)
+            throw new Error('Replacement session document requires cleanup');
+          return replacement;
+        }
+      }
       const sessionDoc = new SessionDocument(
         this.repo,
         sessionId,
@@ -1671,23 +1685,31 @@ export class LoroDocumentManager {
     sessionId: SessionId,
     options: { preserveStatus?: boolean } = {}
   ): Promise<void> {
-    // Also await any in-flight init for this session
+    // Await initialization separately: only init failure means nothing to clean.
+    // A destroy failure must propagate and leave the exact wrapper owned for retry.
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
+      const existing = this.sessions.get(sessionId);
+      let doc: SessionDocument | undefined;
       try {
-        const doc = await pending;
-        await doc.destroy({ preserveStatus: options.preserveStatus });
-        this.sessions.delete(sessionId);
+        doc = await pending;
       } catch {
-        // Init failed — nothing to clean up
+        // A recovery attempt can fail while its destroyed wrapper stays owned.
+        doc = existing;
       }
-      this.pendingSessionDocs.delete(sessionId);
+      if (doc) {
+        await doc.destroy({ preserveStatus: options.preserveStatus });
+        if (this.sessions.get(sessionId) === doc) this.sessions.delete(sessionId);
+      }
+      if (this.pendingSessionDocs.get(sessionId) === pending)
+        this.pendingSessionDocs.delete(sessionId);
+      return;
     }
 
     const sessionDoc = this.sessions.get(sessionId);
     if (sessionDoc) {
       await sessionDoc.destroy({ preserveStatus: options.preserveStatus });
-      this.sessions.delete(sessionId);
+      if (this.sessions.get(sessionId) === sessionDoc) this.sessions.delete(sessionId);
     }
   }
 }
@@ -1750,6 +1772,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private destroyed = false;
+  private pendingDestroy: Promise<void> | undefined;
 
   get isDestroyed(): boolean {
     return this.destroyed;
@@ -3061,7 +3084,20 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     });
   }
 
-  async destroy(options: { preserveStatus?: boolean } = {}) {
+  destroy(options: { preserveStatus?: boolean } = {}): Promise<void> {
+    if (this.pendingDestroy) return this.pendingDestroy;
+    const pending = this.destroyOnce(options);
+    this.pendingDestroy = pending;
+    const release = () => {
+      if (this.pendingDestroy === pending) this.pendingDestroy = undefined;
+    };
+    // A failed unload stays retryable, but concurrent callers must never start
+    // a second unload that could outlive the replacement document's creation.
+    void pending.then(release, release);
+    return pending;
+  }
+
+  private async destroyOnce(options: { preserveStatus?: boolean }) {
     if (!this.mirror) {
       return;
     }

@@ -210,6 +210,57 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it.each(['startSession', 'continueSession'] as const)(
+    '%s waits for GC before document access and excludes GC until its failure unwinds',
+    async (method) => {
+      const documentGate = createDeferred();
+      const documentOpened = createDeferred();
+      const getOrCreateSessionDoc = vi.fn(async () => {
+        documentOpened.resolve();
+        await documentGate.promise;
+        throw new Error('document unavailable');
+      });
+      const deps = createBaseDeps({
+        workspaceDocument: { getOrCreateSessionDoc } as unknown as LoroDocumentManager,
+      });
+      const service = new SessionExecutionService(deps);
+      const sessionId = 'gc-direct-operation' as SessionId;
+      const release = service.tryAcquireGCCleanupLease(sessionId);
+      expect(release).not.toBeNull();
+      const operation = service[method]({ sessionId, acpSessionConfig: {} } as Parameters<
+        typeof service.startSession
+      >[0] &
+        Parameters<typeof service.continueSession>[0]);
+      const result = expect(operation).rejects.toThrow('document unavailable');
+      await Promise.resolve();
+      expect(getOrCreateSessionDoc).not.toHaveBeenCalled();
+      release!();
+      release!();
+      await documentOpened.promise;
+      expect(service.tryAcquireGCCleanupLease(sessionId)).toBeNull();
+      documentGate.resolve();
+      await result;
+      const next = service.tryAcquireGCCleanupLease(sessionId);
+      expect(next).not.toBeNull();
+      next!();
+    }
+  );
+
+  it('reserves direct operation ownership synchronously before its first continuation', async () => {
+    const deps = createBaseDeps({});
+    vi.mocked(deps.workspaceDocument.getOrCreateSessionDoc).mockRejectedValue(new Error('no doc'));
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'gc-before-continuation' as SessionId;
+    const operation = service.continueSession({ sessionId } as Parameters<
+      typeof service.continueSession
+    >[0]);
+    expect(service.tryAcquireGCCleanupLease(sessionId)).toBeNull();
+    await expect(operation).rejects.toThrow('no doc');
+    const release = service.tryAcquireGCCleanupLease(sessionId);
+    expect(release).not.toBeNull();
+    release!();
+  });
+
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),

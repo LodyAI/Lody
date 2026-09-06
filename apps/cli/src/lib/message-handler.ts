@@ -10040,27 +10040,73 @@ export class MessageHandler {
    * Clean all transient state for a session.
    * Called by GC manager when a session has been idle or evicted under memory pressure.
    */
-  async cleanSessionForGC(sessionId: SessionId): Promise<void> {
-    this.logger.debug(`[GC] Cleaning session ${sessionId}`);
+  captureGCCleanupGuard(sessionId: SessionId): () => boolean {
+    const runtime = this.sessionManager.getSession(sessionId);
+    const sessionDoc = this.workspaceDocument.sessions.get(sessionId);
+    const mirror = sessionDoc?.mirror;
+    // Mirror.getState returns its immutable current state, not getHistory's
+    // normalized copy. Identity changes invalidate this eligibility read without
+    // another history scan or a retained per-session cache.
+    const state = mirror?.getState();
+    const metadata = this.workspaceDocument.repo.getMeta();
+    // Metadata is a separate Flock room. Its version is a fresh plain object,
+    // so compare sorted clock values, not the object identity or history mirror.
+    const metadataVersion = () =>
+      JSON.stringify(
+        Object.entries(metadata.version())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([peer, clock]) => [peer, clock?.physicalTime, clock?.logicalCounter])
+      );
+    const version = metadataVersion();
+    return () =>
+      this.sessionManager.getSession(sessionId) === runtime &&
+      this.workspaceDocument.sessions.get(sessionId) === sessionDoc &&
+      sessionDoc?.mirror === mirror &&
+      mirror?.getState() === state &&
+      this.workspaceDocument.repo.getMeta() === metadata &&
+      metadataVersion() === version &&
+      !this.sessionDispatchWatcher.hasPendingDispatch(sessionId) &&
+      !this.hasActiveTurn(sessionId) &&
+      !this.hasPendingUpdates(sessionId) &&
+      !this.isArchiveInFlight(sessionId) &&
+      runtime?.terminalManager.hasRunningTerminals?.() !== true;
+  }
 
-    // 1. Clear active presence
-    this.clearSessionActivePresence(sessionId);
+  async cleanSessionForGC(sessionId: SessionId, isCurrent: () => boolean): Promise<boolean> {
+    if (!isCurrent()) return false;
+    this.logger.debug(`[GC] Cleaning session ${sessionId}`);
 
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session cleaned by GC');
 
-    // 2. Terminate session process first — if later steps throw, the process
-    //    is already gone and the session stays tracked for retry/cleanup.
-    if (this.sessionManager.hasSession(sessionId)) {
-      await this.sessionManager.terminateSession(sessionId, true);
+    // The preview close may yield to a new turn, terminal, goal or replacement.
+    // No await may separate this guard from terminateSession: it synchronously
+    // invokes Session.terminate, which closes admission before its first await.
+    if (!isCurrent()) return false;
+    const releaseDispatch = this.sessionDispatchWatcher.tryAcquireGCCleanupLease(sessionId);
+    if (!releaseDispatch) return false;
+    let releaseExecution: (() => void) | null = null;
+    let releaseManager: (() => void) | null = null;
+    try {
+      releaseExecution = this.executionService.tryAcquireGCCleanupLease(sessionId);
+      if (!releaseExecution) return false;
+      releaseManager = this.sessionManager.tryAcquireGCCleanupLease(sessionId);
+      if (!releaseManager || !isCurrent()) return false;
+      const termination = this.sessionManager.terminateSession(sessionId, true);
+      this.clearSessionActivePresence(sessionId);
+      await termination;
+
+      // Dispatch, direct turn writes and replacement creation stay excluded
+      // across document destruction's awaits. Newly arriving RPC/meta work is
+      // retained by the watcher and resumes against a fresh doc after release.
+      await this.workspaceDocument.cleanSessionDoc(sessionId);
+      this.store.deleteSession(sessionId);
+
+      this.logger.debug(`[GC] Session ${sessionId} cleaned`);
+      return true;
+    } finally {
+      releaseManager?.();
+      releaseExecution?.();
+      releaseDispatch();
     }
-
-    // 3. Clean Loro documents (main memory savings)
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
-
-    // 4. Drop transient tracking last — only after all cleanup succeeded,
-    //    so getTrackedSessionIds() can still see it for retry if steps above throw.
-    this.store.deleteSession(sessionId);
-
-    this.logger.debug(`[GC] Session ${sessionId} cleaned`);
   }
 }

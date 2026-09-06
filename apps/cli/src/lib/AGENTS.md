@@ -260,6 +260,12 @@ control-plane path is DEPRECATED; do not add functionality to it.
   (`pressureRecheckAttempts`) because reclaim returns cache in milliseconds. Eviction is bounded
   per call (`maxEvictionsPerCall`) because the caller awaits it on the prompt hot path. The
   threshold is a safety MARGIN, never "what a turn needs" — do not phrase it that way to users.
+  GC eligibility captures runtime, history-mirror and metadata-version identity before awaited
+  reads, then checks again immediately before termination. Inspection errors protect only the
+  affected session. Cleanup holds dispatch, execution and manager admission leases through
+  document teardown and transient-store deletion.
+  Release manager and execution first, then dispatch so deferred RPC/meta work opens fresh state.
+  Direct start/continue/steer must reserve execution admission before accessing session documents.
 - `provider-setup-manager.ts` owns durable default managed-builtin creation;
   setup rows with executable runtime overrides are invalid. The future
   config stays under `['providerSetup', configId]` while runtime/auth/live-probe

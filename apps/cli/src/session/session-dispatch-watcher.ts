@@ -371,6 +371,8 @@ export class SessionDispatchWatcher {
    * Separate from `sessionCheckChains` so cancels are not blocked by long dispatches.
    */
   private readonly cancelCheckChains = new Map<SessionId, Promise<void>>();
+  private readonly activeSessionWatchReconciles = new Map<SessionId, number>();
+  private readonly gcCleanupLeases = new Map<SessionId, { dispatch: boolean; cancel: boolean }>();
 
   /**
    * Tracks the last `meta.lastCanceledTurn` value we have already processed per session.
@@ -492,6 +494,7 @@ export class SessionDispatchWatcher {
     this.sessionCheckChains.clear();
     this.cancelCheckChains.clear();
     this.cancelSeenTurn.clear();
+    this.gcCleanupLeases.clear();
     this.rpcTurnStash.clear();
     this.turnSourceHints.clear();
     this.rpcTurnOfferSubscribers.clear();
@@ -547,6 +550,11 @@ export class SessionDispatchWatcher {
    * are coalesced: exactly one follow-up check will run after the current one finishes.
    */
   enqueueSessionCheck(sessionId: SessionId, options: SessionCheckOptions = {}): Promise<void> {
+    const cleanup = this.gcCleanupLeases.get(sessionId);
+    if (cleanup) {
+      cleanup.dispatch = true;
+      return Promise.resolve();
+    }
     // Tests may drive an as-yet-unstarted watcher directly (generation 0). Once
     // a production watcher has ever started, every check is generation-bound,
     // including RPC/access callbacks that happen to enqueue after stop().
@@ -733,6 +741,42 @@ export class SessionDispatchWatcher {
     return (this.rpcTurnStash.get(sessionId)?.size ?? 0) > 0 || this.accessFibers.has(sessionId);
   }
 
+  /** Hold dispatch admission through GC's process, document and transient-state cleanup. */
+  tryAcquireGCCleanupLease(sessionId: SessionId): (() => void) | null {
+    if (
+      (this.lifecycleGeneration > 0 && !this.started) ||
+      this.gcCleanupLeases.has(sessionId) ||
+      this.sessionCheckChains.has(sessionId) ||
+      this.cancelCheckChains.has(sessionId) ||
+      this.activeSessionWatchReconciles.has(sessionId) ||
+      this.pendingMetadataSessionIds.has(sessionId) ||
+      this.hasPendingDispatch(sessionId)
+    )
+      return null;
+
+    const lease = { dispatch: false, cancel: false };
+    const generation = this.lifecycleGeneration;
+    this.gcCleanupLeases.set(sessionId, lease);
+    return () => {
+      if (this.gcCleanupLeases.get(sessionId) !== lease) return;
+      this.gcCleanupLeases.delete(sessionId);
+      // A successful cleanup evicted this mirror; a failed cleanup can safely
+      // reattach it. Never keep a subscription to a destroyed SessionDocument.
+      this.watchedSessions.get(sessionId)?.unsubscribe();
+      this.watchedSessions.delete(sessionId);
+      if (generation !== this.lifecycleGeneration) return;
+      if (this.started) {
+        // Reconcile metadata first so idle sessions stay unloaded and pending
+        // RPC/meta/cancel work opens and subscribes to the current document.
+        this.enqueueMetadataReconcile(sessionId);
+      } else if (generation === 0) {
+        // Match direct, not-yet-started watcher checks used by local callers.
+        if (lease.dispatch) void this.enqueueSessionCheck(sessionId);
+        if (lease.cancel) void this.enqueueCancelCheck(sessionId);
+      }
+    };
+  }
+
   /** Drop expired stashed RPC turns across all sessions (bounded cleanup). */
   private sweepExpiredRpcTurns(): void {
     const now = Date.now();
@@ -844,6 +888,11 @@ export class SessionDispatchWatcher {
 
   /** Enqueue a cancel check (separate chain from dispatch — see class doc). */
   private enqueueCancelCheck(sessionId: SessionId, lifecycleGeneration?: number): Promise<void> {
+    const cleanup = this.gcCleanupLeases.get(sessionId);
+    if (cleanup) {
+      cleanup.cancel = true;
+      return Promise.resolve();
+    }
     const previous = this.cancelCheckChains.get(sessionId) ?? Promise.resolve();
     const next = previous
       .catch(() => {})
@@ -879,6 +928,7 @@ export class SessionDispatchWatcher {
    * otherwise monopolize the event loop and retain all of their cloud rooms.
    */
   private enqueueMetadataReconcile(sessionId: SessionId): void {
+    if (this.gcCleanupLeases.has(sessionId)) return;
     // Reinsert so a fresh event moves ahead of stale catch-up work already in
     // the queue. The drain takes from the newest end in bounded batches.
     this.pendingMetadataSessionIds.delete(sessionId);
@@ -1124,6 +1174,11 @@ export class SessionDispatchWatcher {
     if (!isActive()) {
       return;
     }
+    if (this.gcCleanupLeases.has(sessionId)) return;
+    this.activeSessionWatchReconciles.set(
+      sessionId,
+      (this.activeSessionWatchReconciles.get(sessionId) ?? 0) + 1
+    );
     const roomId = getSessionRoomId(sessionId);
     let phase: SessionReconcilePhase = 'read-doc-meta';
     try {
@@ -1220,6 +1275,10 @@ export class SessionDispatchWatcher {
         )}`
       );
       throw error;
+    } finally {
+      const remaining = (this.activeSessionWatchReconciles.get(sessionId) ?? 1) - 1;
+      if (remaining === 0) this.activeSessionWatchReconciles.delete(sessionId);
+      else this.activeSessionWatchReconciles.set(sessionId, remaining);
     }
   }
 

@@ -57,7 +57,7 @@ import {
   ensureImplicitLocalWorkspace,
   loadOrCreateLocalIdentity,
 } from '../src/lib/cli-platform';
-import { LoroDocumentManager } from '../src/lib/loro/doc';
+import { LoroDocumentManager, SessionDocument } from '../src/lib/loro/doc';
 import { makeLocalWorkspaceCatalog } from '../src/lib/local-workspace-catalog';
 import type { Logger } from '../src/utils/logger';
 
@@ -482,6 +482,158 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
     }
   });
 
+  it('joins the original in-flight destruction before reopening the document', async () => {
+    const harness = await createHarness();
+    const { manager, sessionId } = harness;
+    const stale = await manager.getOrCreateSessionDoc(sessionId);
+    const entered = createDeferred();
+    const release = createDeferred();
+    const originalUnload = manager.repo.unloadDoc.bind(manager.repo);
+    const unload = vi.spyOn(manager.repo, 'unloadDoc').mockImplementationOnce(async (docId) => {
+      entered.resolve();
+      await release.promise;
+      await originalUnload(docId);
+    });
+    try {
+      const cleanup = manager.cleanSessionDoc(sessionId);
+      await entered.promise;
+      expect(stale.isDestroyed).toBe(true);
+      const opened = vi.fn();
+      const reopening = manager.getOrCreateSessionDoc(sessionId).then((doc) => {
+        opened();
+        return doc;
+      });
+      // Drain queued ownership work while the original unload is still blocked.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unload).toHaveBeenCalledOnce();
+      expect(opened).not.toHaveBeenCalled();
+      expect(manager.sessions.get(sessionId)).toBe(stale);
+      release.resolve();
+      await cleanup;
+      const fresh = await reopening;
+      expect(fresh).not.toBe(stale);
+      expect(fresh.isDestroyed).toBe(false);
+      expect(fresh.mirror).not.toBeNull();
+      expect(manager.sessions.get(sessionId)).toBe(fresh);
+      expect(unload).toHaveBeenCalledOnce();
+      expect((await fresh.getHistory()).map((entry) => entry.id)).toContain(harness.cliEntryId);
+    } finally {
+      release.resolve();
+      unload.mockRestore();
+      await harness.dispose();
+    }
+  });
+  it('keeps a failed destroyed wrapper private until coalesced teardown retry opens a fresh doc', async () => {
+    const harness = await createHarness();
+    const { manager, sessionId } = harness;
+    const stale = await manager.getOrCreateSessionDoc(sessionId);
+    const unload = vi
+      .spyOn(manager.repo, 'unloadDoc')
+      .mockRejectedValueOnce(new Error('first unload failed'))
+      .mockRejectedValueOnce(new Error('retry unload failed'));
+    try {
+      await expect(manager.cleanSessionDoc(sessionId)).rejects.toThrow('first unload failed');
+      expect(stale.isDestroyed).toBe(true);
+      expect(manager.sessions.get(sessionId)).toBe(stale);
+      await expect(manager.getOrCreateSessionDoc(sessionId)).rejects.toThrow('retry unload failed');
+      expect(manager.sessions.get(sessionId)).toBe(stale);
+      const retry = vi.spyOn(stale, 'destroy');
+      const [fresh, same] = await Promise.all([
+        manager.getOrCreateSessionDoc(sessionId),
+        manager.getOrCreateSessionDoc(sessionId),
+      ]);
+      expect(fresh).not.toBe(stale);
+      expect(same).toBe(fresh);
+      expect(fresh.isDestroyed).toBe(false);
+      expect(fresh.mirror).not.toBeNull();
+      expect(manager.sessions.get(sessionId)).toBe(fresh);
+      expect(stale.mirror).toBeNull();
+      expect(retry).toHaveBeenCalledExactlyOnceWith({ preserveStatus: true });
+      expect(unload).toHaveBeenCalledTimes(3);
+      expect((await fresh.getHistory()).map((entry) => entry.id)).toContain(harness.cliEntryId);
+    } finally {
+      unload.mockRestore();
+      await harness.dispose();
+    }
+  });
+
+  it.each(['reopen', 'cleanup'] as const)(
+    'preserves a replacement installed during %s teardown',
+    async (operation) => {
+      const harness = await createHarness();
+      const { manager, sessionId } = harness;
+      const stale = await manager.getOrCreateSessionDoc(sessionId);
+      try {
+        if (operation === 'reopen') {
+          const unload = vi
+            .spyOn(manager.repo, 'unloadDoc')
+            .mockRejectedValueOnce(new Error('unload failed'));
+          await expect(manager.cleanSessionDoc(sessionId)).rejects.toThrow('unload failed');
+          unload.mockRestore();
+        }
+        const originalDestroy = stale.destroy.bind(stale);
+        const replacement = new SessionDocument(
+          manager.repo,
+          sessionId,
+          (docId) => manager.unloadDocRoom(docId),
+          createSilentLogger()
+        );
+        vi.spyOn(stale, 'destroy').mockImplementationOnce(async (options) => {
+          await originalDestroy(options);
+          await replacement.init();
+          manager.sessions.set(sessionId, replacement);
+        });
+        if (operation === 'reopen') {
+          expect(await manager.getOrCreateSessionDoc(sessionId)).toBe(replacement);
+        } else {
+          await manager.cleanSessionDoc(sessionId);
+        }
+        expect(manager.sessions.get(sessionId)).toBe(replacement);
+        expect(replacement.isDestroyed).toBe(false);
+        expect(replacement.mirror).not.toBeNull();
+      } finally {
+        await harness.dispose();
+      }
+    }
+  );
+
+  it('propagates destruction failure after awaiting a pending initialization', async () => {
+    const harness = await createHarness();
+    const { manager } = harness;
+    const sessionId = 'pending-cleanup-failure' as SessionId;
+    const entered = createDeferred();
+    const release = createDeferred();
+    const originalInit = SessionDocument.prototype.init;
+    const init = vi.spyOn(SessionDocument.prototype, 'init').mockImplementationOnce(async function (
+      this: SessionDocument
+    ) {
+      await originalInit.call(this);
+      entered.resolve();
+      await release.promise;
+    });
+    const unload = vi
+      .spyOn(manager.repo, 'unloadDoc')
+      .mockRejectedValueOnce(new Error('pending unload failed'));
+    try {
+      const opening = manager.getOrCreateSessionDoc(sessionId);
+      await entered.promise;
+      const cleanup = manager.cleanSessionDoc(sessionId);
+      const rejected = expect(cleanup).rejects.toThrow('pending unload failed');
+      release.resolve();
+      const stale = await opening;
+      await rejected;
+      expect(stale.isDestroyed).toBe(true);
+      expect(manager.sessions.get(sessionId)).toBe(stale);
+      const fresh = await manager.getOrCreateSessionDoc(sessionId);
+      expect(fresh).not.toBe(stale);
+      expect(fresh.isDestroyed).toBe(false);
+    } finally {
+      release.resolve();
+      init.mockRestore();
+      unload.mockRestore();
+      await harness.dispose();
+    }
+  });
   it('lets a renderer update authored after session GC reach the CLI', async () => {
     const harness = await createHarness();
     try {

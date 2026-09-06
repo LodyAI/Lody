@@ -453,12 +453,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
   private readonly cleanupOwnedSessions = new WeakSet<Session>();
+  private readonly gcCleanupSessions = new Set<SessionId>();
   private shuttingDown = false;
 
   private assertSessionAdmission(sessionId?: SessionId): void {
     if (this.shuttingDown) throw new Error('Session manager is shutting down');
     const resident = sessionId ? this.sessions.get(sessionId) : undefined;
-    if (resident && this.cleanupOwnedSessions.has(resident)) {
+    if (
+      (sessionId && this.gcCleanupSessions.has(sessionId)) ||
+      (resident && this.cleanupOwnedSessions.has(resident))
+    ) {
       throw new Error('Session cleanup must complete before replacement');
     }
   }
@@ -2079,6 +2083,25 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.sessions.set(config.sessionId!, session);
     await this.rebalanceSessionSandboxes();
     return session;
+  }
+
+  /** Keeps replacement admission closed through GC's document and store cleanup. */
+  tryAcquireGCCleanupLease(sessionId: SessionId): (() => void) | null {
+    if (
+      this.shuttingDown ||
+      this.gcCleanupSessions.has(sessionId) ||
+      this.pendingSessionCreates.has(sessionId) ||
+      this.pendingTerminationPromises.has(sessionId) ||
+      this.preparationSessions.has(sessionId)
+    )
+      return null;
+    this.gcCleanupSessions.add(sessionId);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.gcCleanupSessions.delete(sessionId);
+    };
   }
 
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {

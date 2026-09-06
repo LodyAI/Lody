@@ -230,6 +230,33 @@ describe('SessionManager cleanup phases', () => {
     return { manager, workspaceDocument, sessions: internals.sessions };
   };
 
+  it('keeps GC admission closed after terminated removes the runtime until the outer lease releases', async () => {
+    const { manager, sessions } = cleanupFixture();
+    const sessionId = 'gc-lease' as SessionId;
+    const events = new EventEmitter();
+    const runtime = Object.assign(events, {
+      sessionId,
+      terminate: async () => events.emit('terminated', { sessionId, exitCode: 0 }),
+    }) as unknown as ISession;
+    (
+      manager as unknown as { registerSessionEvents(session: ISession): void }
+    ).registerSessionEvents(runtime);
+    sessions.set(sessionId, runtime);
+    const release = manager.tryAcquireGCCleanupLease(sessionId);
+    expect(release).not.toBeNull();
+    expect(manager.tryAcquireGCCleanupLease(sessionId)).toBeNull();
+    await manager.terminateSession(sessionId, true);
+    expect(manager.getSession(sessionId)).toBeNull();
+    await expect(manager.createSession(createSessionConfig({ sessionId }))).rejects.toThrow(
+      'cleanup must complete'
+    );
+    release!();
+    release!();
+    const next = manager.tryAcquireGCCleanupLease(sessionId);
+    expect(next).not.toBeNull();
+    next!();
+  });
+
   it('retains failed cleanup ownership, waits for all attempts, and retries before closing documents', async () => {
     const { manager, workspaceDocument, sessions } = cleanupFixture();
     const successId = 'cleanup-success' as SessionId;

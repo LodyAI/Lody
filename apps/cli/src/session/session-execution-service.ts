@@ -651,6 +651,8 @@ export class SessionExecutionService {
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
+  private readonly gcCleanupWaiters = new Map<SessionId, Promise<void>>();
+  private readonly gcProtectedOperations = new Map<SessionId, number>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
   // Serializes ownership mutations per session so prompt completion and steer
@@ -1042,6 +1044,42 @@ export class SessionExecutionService {
     };
   }
 
+  tryAcquireGCCleanupLease(sessionId: SessionId): (() => void) | null {
+    if (this.gcCleanupWaiters.has(sessionId) || this.gcProtectedOperations.has(sessionId))
+      return null;
+    const releaseRewrite = this.tryAcquireSessionRewriteBarrier(sessionId);
+    if (!releaseRewrite) return null;
+    let resolve!: () => void;
+    this.gcCleanupWaiters.set(
+      sessionId,
+      new Promise<void>((done) => {
+        resolve = done;
+      })
+    );
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.gcCleanupWaiters.delete(sessionId);
+      releaseRewrite();
+      resolve();
+    };
+  }
+
+  private async acquireGCProtectedOperation(sessionId: SessionId): Promise<() => void> {
+    // Direct start/continue/steer enter before document access. A cleanup that
+    // already owns the session finishes first; otherwise GC must defer to us.
+    while (this.gcCleanupWaiters.has(sessionId)) {
+      await this.gcCleanupWaiters.get(sessionId);
+    }
+    this.gcProtectedOperations.set(sessionId, (this.gcProtectedOperations.get(sessionId) ?? 0) + 1);
+    return () => {
+      const remaining = (this.gcProtectedOperations.get(sessionId) ?? 1) - 1;
+      if (remaining === 0) this.gcProtectedOperations.delete(sessionId);
+      else this.gcProtectedOperations.set(sessionId, remaining);
+    };
+  }
+
   tryAcquireSessionRewriteBarrier(sessionId: SessionId): (() => void) | null {
     if (
       this.rewriteBarrierSessions.has(sessionId) ||
@@ -1121,30 +1159,35 @@ export class SessionExecutionService {
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
   }): Promise<SessionSteerResponse> {
-    return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
-      const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
-      if (!releaseConflict) {
-        // Nothing was submitted, so this guide is still ours to run. Only the
-        // dispatch pointer is written: the history flip needs the lease we just
-        // failed to take, and dispatch honors the pointer on its own.
-        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-          canWriteHistory: false,
-        });
-        return {
-          type: 'session/steer_response',
-          sessionId: options.sessionId,
-          userTurnId: options.userTurnId,
-          applied: false,
-          disposition: 'busy',
-          error: 'The session history is being replaced.',
-        };
-      }
-      try {
-        return await this.steerSessionLocked(options);
-      } finally {
-        releaseConflict();
-      }
-    });
+    const releaseGCOperation = await this.acquireGCProtectedOperation(options.sessionId);
+    try {
+      return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
+        const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
+        if (!releaseConflict) {
+          // Nothing was submitted, so this guide is still ours to run. Only the
+          // dispatch pointer is written: the history flip needs the lease we just
+          // failed to take, and dispatch honors the pointer on its own.
+          await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+            canWriteHistory: false,
+          });
+          return {
+            type: 'session/steer_response',
+            sessionId: options.sessionId,
+            userTurnId: options.userTurnId,
+            applied: false,
+            disposition: 'busy',
+            error: 'The session history is being replaced.',
+          };
+        }
+        try {
+          return await this.steerSessionLocked(options);
+        } finally {
+          releaseConflict();
+        }
+      });
+    } finally {
+      releaseGCOperation();
+    }
   }
 
   private async steerSessionLocked(options: {
@@ -3304,22 +3347,29 @@ export class SessionExecutionService {
     message: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
-    const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
-    if (
-      dispatchOptions?.dispatchSource !== 'delivery' &&
-      (await this.markCancelledUserTurnBeforeOwner({
-        sessionId: message.sessionId,
-        sessionDoc: turn.options.sessionDoc,
-        userTurnId: message.userTurnId,
-      }))
-    ) {
-      return;
+    const releaseGCOperation = await this.acquireGCProtectedOperation(message.sessionId);
+    try {
+      const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
+      if (
+        dispatchOptions?.dispatchSource !== 'delivery' &&
+        (await this.markCancelledUserTurnBeforeOwner({
+          sessionId: message.sessionId,
+          sessionDoc: turn.options.sessionDoc,
+          userTurnId: message.userTurnId,
+        }))
+      ) {
+        return;
+      }
+      const body = dispatchOptions?.onTurnClaimed
+        ? (ctx: VisibleSessionTurnContext) =>
+            Effect.promise(dispatchOptions.onTurnClaimed!).pipe(
+              Effect.flatMap(() => turn.body(ctx))
+            )
+        : turn.body;
+      await this.runVisibleSessionTurn(turn.options, body);
+    } finally {
+      releaseGCOperation();
     }
-    const body = dispatchOptions?.onTurnClaimed
-      ? (ctx: VisibleSessionTurnContext) =>
-          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(Effect.flatMap(() => turn.body(ctx)))
-      : turn.body;
-    await this.runVisibleSessionTurn(turn.options, body);
   }
 
   private async prepareContinueSessionTurn(
@@ -4174,21 +4224,26 @@ export class SessionExecutionService {
     message: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
-    const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
-    const userTurnId =
-      typeof message.userTurnId === 'string' && message.userTurnId.trim()
-        ? message.userTurnId.trim()
-        : undefined;
-    if (
-      await this.markCancelledUserTurnBeforeOwner({
-        sessionId: message.sessionId,
-        sessionDoc: turn.options.sessionDoc,
-        userTurnId,
-      })
-    ) {
-      return;
+    const releaseGCOperation = await this.acquireGCProtectedOperation(message.sessionId);
+    try {
+      const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
+      const userTurnId =
+        typeof message.userTurnId === 'string' && message.userTurnId.trim()
+          ? message.userTurnId.trim()
+          : undefined;
+      if (
+        await this.markCancelledUserTurnBeforeOwner({
+          sessionId: message.sessionId,
+          sessionDoc: turn.options.sessionDoc,
+          userTurnId,
+        })
+      ) {
+        return;
+      }
+      await this.runVisibleSessionTurn(turn.options, turn.body);
+    } finally {
+      releaseGCOperation();
     }
-    await this.runVisibleSessionTurn(turn.options, turn.body);
   }
 
   private async prepareStartSessionTurn(

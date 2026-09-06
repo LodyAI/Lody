@@ -97,10 +97,12 @@ export interface SessionGCDeps {
   hasActiveTurn: (sessionId: SessionId) => boolean;
   /** Goals, live terminals and background tasks from one history snapshot. */
   hasProtectedWork: (sessionId: SessionId) => boolean | Promise<boolean>;
+  /** Synchronous runtime/history identity check captured before awaited eligibility reads. */
+  captureCleanupGuard: (sessionId: SessionId) => () => boolean;
   hasPendingUpdates: (sessionId: SessionId) => boolean;
   hasPendingUserWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   isArchiveInFlight: (sessionId: SessionId) => boolean;
-  cleanSession: (sessionId: SessionId) => Promise<void>;
+  cleanSession: (sessionId: SessionId, isCurrent: () => boolean) => Promise<boolean>;
   getSessionIds: () => SessionId[];
   memoryPressure: MemoryPressureSnapshotSource;
   logger: Logger;
@@ -369,14 +371,15 @@ export class SessionGCManager {
     let cleaned = 0;
     let skipped = 0;
     for (const { sessionId } of candidates) {
-      if (!(await this.isStillEligibleForGC(sessionId))) {
+      const isCurrent = await this.isStillEligibleForGC(sessionId);
+      if (!isCurrent) {
         skipped++;
         continue;
       }
 
       try {
-        await this.deps.cleanSession(sessionId);
-        cleaned++;
+        if (await this.deps.cleanSession(sessionId, isCurrent)) cleaned++;
+        else skipped++;
       } catch (error) {
         this.deps.logger.error(
           `[GC] Failed to clean session ${sessionId}: ${formatErrorMessage(error)}`
@@ -466,7 +469,8 @@ export class SessionGCManager {
         continue;
       }
 
-      if (!(await this.isEligibleForCleanup(sessionId))) {
+      const isCurrent = await this.isEligibleForCleanup(sessionId);
+      if (!isCurrent) {
         continue;
       }
 
@@ -474,7 +478,7 @@ export class SessionGCManager {
         this.deps.logger.debug(
           `[GC] Evicting session ${sessionId} (idle ${Math.round(idleMs / 1000)}s) due to memory pressure`
         );
-        await this.deps.cleanSession(sessionId);
+        if (!(await this.deps.cleanSession(sessionId, isCurrent))) continue;
         evictedSessionIds.push(sessionId);
         // Re-check memory after eviction
         memorySnapshot = await this.deps.memoryPressure.refresh();
@@ -667,54 +671,70 @@ export class SessionGCManager {
    * A session is NOT eligible if it has an active turn, active goal,
    * background work, pending updates, pending user work, or archive in flight.
    */
-  private async isEligibleForCleanup(sessionId: SessionId): Promise<boolean> {
-    if (this.deps.hasActiveTurn(sessionId)) {
-      return false;
-    }
-
+  private async isEligibleForCleanup(sessionId: SessionId): Promise<(() => boolean) | null> {
     try {
-      if (await this.deps.hasProtectedWork(sessionId)) return false;
+      const protectionUnchanged = this.deps.captureCleanupGuard(sessionId);
+      const lastActivity = this.deps.getSessionLastActivity(sessionId);
+      const isCurrent = () => {
+        try {
+          return (
+            protectionUnchanged() &&
+            this.deps.getSessionLastActivity(sessionId) === lastActivity &&
+            !this.deps.hasActiveTurn(sessionId) &&
+            !this.deps.hasPendingUpdates(sessionId) &&
+            !this.deps.isArchiveInFlight(sessionId)
+          );
+        } catch (error) {
+          this.deps.logger.warn(`[GC] Cannot recheck ${sessionId}: ${formatErrorMessage(error)}`);
+          return false;
+        }
+      };
+      if (this.deps.hasActiveTurn(sessionId)) {
+        return null;
+      }
+
+      if (await this.deps.hasProtectedWork(sessionId)) return null;
+
+      if (this.deps.hasPendingUpdates(sessionId)) {
+        return null;
+      }
+
+      if (await this.deps.hasPendingUserWork(sessionId)) {
+        return null;
+      }
+
+      if (this.deps.isArchiveInFlight(sessionId)) {
+        return null;
+      }
+
+      return isCurrent() ? isCurrent : null;
     } catch (error) {
-      // An unreadable session may still own work. Protect only that session so
-      // one history failure cannot prevent reclaiming every other idle runtime.
+      // Protect an unreadable session without aborting the remaining sweep.
       this.deps.logger.warn(
         `[GC] Cannot inspect protected work for ${sessionId}: ${formatErrorMessage(error)}`
       );
-      return false;
+      return null;
     }
-
-    if (this.deps.hasPendingUpdates(sessionId)) {
-      return false;
-    }
-
-    if (await this.deps.hasPendingUserWork(sessionId)) {
-      return false;
-    }
-
-    if (this.deps.isArchiveInFlight(sessionId)) {
-      return false;
-    }
-
-    return true;
   }
 
   /**
    * Re-check eligibility right before cleanup to guard against races.
    * Also verifies the session hasn't become active since candidate selection.
    */
-  private async isStillEligibleForGC(sessionId: SessionId): Promise<boolean> {
-    if (!(await this.isEligibleForCleanup(sessionId))) {
-      return false;
+  private async isStillEligibleForGC(sessionId: SessionId): Promise<(() => boolean) | null> {
+    const isCurrent = await this.isEligibleForCleanup(sessionId);
+    if (!isCurrent) {
+      return null;
     }
 
     const lastActivity = this.deps.getSessionLastActivity(sessionId);
     if (lastActivity !== undefined) {
       const idleMs = Date.now() - lastActivity;
       if (idleMs < this.config.idleTimeoutMs) {
-        return false;
+        return null;
       }
     }
 
-    return true;
+    return isCurrent() ? isCurrent : null;
   }
 }
