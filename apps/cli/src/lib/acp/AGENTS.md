@@ -74,3 +74,10 @@ first `await awaitTurnHistoryGate(sessionId)` — see
 `../../session/turn-history-gate.ts`. Add the same await to any NEW code path that
 appends or positions history entries during a turn; map-keyed status/meta writes stay
 ungated.
+
+A non-terminal `tool_call_update` reaches history only when it carries a non-empty
+`rawInput`, `_meta.claudeCode.toolResponse`, or a parseable `_meta.lody.task` —
+`filterNotificationsForHistory` in `history.ts`. A new `_meta.lody.*` carrier that needs
+mid-flight persistence must therefore ride a `tool_call` or a terminal update, or add its
+own clause there; otherwise it is dropped before the applier and unit tests that fabricate
+history will not catch it.

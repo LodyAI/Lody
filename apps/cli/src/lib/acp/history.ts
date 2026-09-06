@@ -8,6 +8,7 @@ import type {
 } from '@lody/shared';
 import {
   getServerNow,
+  parseLodyTaskMeta,
   sanitizeGoalObjective,
   truncateTerminalOutputForHistory,
 } from '@lody/shared';
@@ -834,8 +835,9 @@ const filterNotificationsForHistory = (
     }
     if (update.sessionUpdate !== 'tool_call_update') return true;
     // Tool call updates are often "full snapshots" (especially terminal output). Persisting all
-    // intermediate snapshots causes the CRDT history to blow up. We keep only terminal state
-    // transitions that represent a finished tool call.
+    // intermediate snapshots causes the CRDT history to blow up. We keep terminal state
+    // transitions, plus the non-terminal updates the applier extracts something durable
+    // from — the clauses below.
     if (update.status === 'completed' || update.status === 'failed') return true;
 
     // Claude Code sends rawInput in a tool_call_update (~14% of Bash calls, ~50% of Read/Grep,
@@ -857,6 +859,13 @@ const filterNotificationsForHistory = (
         }
       }
     }
+
+    // `lastToolName` rides only on task progress, so dropping non-terminal task snapshots
+    // left the panel unable to show the running tool. Reusing the applier's own parser
+    // makes the predicate exact — kept iff it will materialize a `subagent_task` item —
+    // and the cost stays bounded because `upsertSubagentTask` merges by `taskId` into one
+    // item, so a kept tick is a few small `LoroMap.set` ops rather than a new snapshot.
+    if (parseLodyTaskMeta(meta) !== null) return true;
 
     return false;
   };

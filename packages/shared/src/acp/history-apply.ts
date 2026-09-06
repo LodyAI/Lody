@@ -1740,7 +1740,29 @@ class NotificationOnHistoryApplier {
     if (idx >= 0) {
       const prev = items[idx] as Extract<MessageContent, { type: 'subagent_task' }>;
       // Later events win per field, earlier-only fields (subagentType/description) survive.
-      items[idx] = { ...mergeSubagentTaskPayload(prev, incoming), type: 'subagent_task' };
+      //
+      // A settled row ignores non-terminal snapshots entirely. `task_progress` reports
+      // `in_progress` and re-derives `taskKind`/`isBackgrounded` from state the producer
+      // has already pruned, so a tick landing after the terminal event would restart a
+      // finished spinner and badge it Background. Non-terminal snapshots only began
+      // reaching this merge when the history filter started keeping them.
+      const settled = prev.status === 'completed' || prev.status === 'failed';
+      const nonTerminal = incoming.status !== 'completed' && incoming.status !== 'failed';
+      if (settled && nonTerminal) return;
+
+      // `actor` is the task's identity, derived from `subagent_type` / `workflow_name` /
+      // `task_type`. `workflow_name` and `task_type` ride only `task_started`, and
+      // `subagent_type` reaches no event but `task_started` and `task_progress` — so
+      // every other event falls through to the producer's placeholder, and for a
+      // workflow every event after the first does. Because it is materialized
+      // unconditionally it is never absent, so the absence-based preservation this merge
+      // documents cannot protect it. This predates the filter change: the terminal event
+      // carries none of the three either, so it already clobbered a settled row.
+      items[idx] = {
+        ...mergeSubagentTaskPayload(prev, incoming),
+        ...(prev.actor !== undefined ? { actor: prev.actor } : {}),
+        type: 'subagent_task',
+      };
       this.changed = true;
       return;
     }

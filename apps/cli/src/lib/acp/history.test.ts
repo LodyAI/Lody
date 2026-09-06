@@ -372,6 +372,380 @@ describe('handleACPUpdateMessage', () => {
     });
   });
 
+  // The bundled Claude adapter publishes task lifecycle through `_meta.lody.task` on a
+  // `tool_call` (task_started) and non-terminal `tool_call_update`s (task_progress /
+  // task_updated). The fixtures below transcribe that update shape verbatim: no `rawInput`
+  // and no `_meta.claudeCode`, because that absence is what used to drop them from history.
+  const lodyTaskMeta = (task: Record<string, unknown>) => ({
+    lody: { task: { version: 1, kind: 'subagent', ...task } },
+  });
+
+  it('persists the shipped _meta.lody.task progress snapshot so lastToolName reaches the panel', async () => {
+    const { doc, readHistory } = createDoc();
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'task:task-1',
+            title: 'Explore: Find CLI startup behavior',
+            kind: 'think',
+            status: 'in_progress',
+            _meta: lodyTaskMeta({
+              taskId: 'task-1',
+              status: 'in_progress',
+              actor: 'Explore',
+              description: 'Find CLI startup behavior',
+            }),
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'task:task-1',
+            title: 'Explore: Find CLI startup behavior',
+            kind: 'think',
+            status: 'in_progress',
+            _meta: lodyTaskMeta({
+              taskId: 'task-1',
+              status: 'in_progress',
+              actor: 'Explore',
+              description: 'Find CLI startup behavior',
+              lastToolName: 'Read',
+              usage: { totalTokens: 100, toolUses: 2, durationMs: 500 },
+            }),
+          },
+        }),
+      ],
+      { getCurrentSessionTurnId: () => 'turn-1' }
+    );
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const task = items?.find(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    expect(task).toMatchObject({
+      taskId: 'task-1',
+      status: 'in_progress',
+      actor: 'Explore',
+      description: 'Find CLI startup behavior',
+      lastToolName: 'Read',
+      usage: { totalTokens: 100, toolUses: 2, durationMs: 500 },
+    });
+    // Lifecycle events never leak a raw tool call into history.
+    expect(items?.some((item) => item.type === 'tool_call')).toBe(false);
+  });
+
+  it('merges repeated _meta.lody.task progress into a single subagent_task item', async () => {
+    const { doc, readHistory } = createDoc();
+    // `task_progress.description` is required and activity-scoped — it changes on
+    // essentially every tick — so the fixture changes it too.
+    const progress = (lastToolName: string) =>
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: `task:task-2`,
+          title: `Explore: running ${lastToolName}`,
+          kind: 'think',
+          status: 'in_progress',
+          _meta: lodyTaskMeta({
+            taskId: 'task-2',
+            status: 'in_progress',
+            actor: 'Explore',
+            description: `running ${lastToolName}`,
+            lastToolName,
+          }),
+        },
+      });
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'task:task-2',
+            title: 'Explore: Auditing history',
+            kind: 'think',
+            status: 'in_progress',
+            _meta: lodyTaskMeta({
+              taskId: 'task-2',
+              status: 'in_progress',
+              actor: 'Explore',
+              description: 'Auditing history',
+            }),
+          },
+        }),
+        ...['Read', 'Bash', 'Grep'].map(progress),
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'task:task-2',
+            title: 'Explore: Auditing history',
+            kind: 'think',
+            status: 'completed',
+            _meta: lodyTaskMeta({
+              taskId: 'task-2',
+              status: 'completed',
+              actor: 'Explore',
+              summary: 'Audit done',
+            }),
+          },
+        }),
+      ],
+      { getCurrentSessionTurnId: () => 'turn-1' }
+    );
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const tasks = items?.filter((item) => item.type === 'subagent_task') ?? [];
+    // Keeping every tick costs no extra item: the applier merges in place by taskId.
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      taskId: 'task-2',
+      status: 'completed',
+      summary: 'Audit done',
+      // a progress tick's activity description wins and survives the terminal event,
+      // matching the legacy-carrier expectation pinned above
+      description: 'running Grep',
+      // the last progress tick wins, and survives the terminal event that omits it
+      lastToolName: 'Grep',
+    });
+  });
+
+  it('keeps a real workflow run named through the shipped adapter stream', async () => {
+    const { doc, readHistory } = createDoc();
+    // The six `_meta.lody.task` notifications of one workflow run, transcribed from a
+    // capture of the bundled adapter driven over ACP (Claude Code 2.1.258, the pinned
+    // runtime). Only `task_started` carries an identity source, so every later event
+    // falls through to the producer's placeholder.
+    const shippedStream = [
+      { status: 'in_progress', sessionUpdate: 'tool_call', task: { actor: 'e2e-probe', description: 'verify task lifecycle reaches history', kind: 'background', status: 'in_progress' } },
+      { status: 'in_progress', sessionUpdate: 'tool_call_update', task: { actor: 'Claude task', description: 'Check: checker', kind: 'background', lastToolName: 'checker', status: 'in_progress', summary: 'verify task lifecycle reaches history', usage: { durationMs: 33, toolUses: 0, totalTokens: 0 } } },
+      { status: 'in_progress', sessionUpdate: 'tool_call_update', task: { actor: 'Claude task', description: 'Check: checker', kind: 'background', lastToolName: 'checker', status: 'in_progress', summary: 'verify task lifecycle reaches history', usage: { durationMs: 1714, toolUses: 0, totalTokens: 26781 } } },
+      { status: 'completed', sessionUpdate: 'tool_call_update', task: { actor: 'Claude task', kind: 'background', status: 'completed' } },
+      { status: 'completed', sessionUpdate: 'tool_call_update', task: { actor: 'Claude task', kind: 'background', status: 'completed', summary: 'Dynamic workflow "verify task lifecycle reaches history" completed', usage: { durationMs: 1738, toolUses: 0, totalTokens: 26781 } } },
+    ].map((n) =>
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: n.sessionUpdate as 'tool_call' | 'tool_call_update',
+          toolCallId: 'task:w5ftatomx',
+          title: 'workflow',
+          kind: 'think',
+          status: n.status as 'in_progress' | 'completed',
+          _meta: lodyTaskMeta({
+            taskId: 'w5ftatomx',
+            parentToolCallId: 'toolu_01VGYjhBXHoAAc9a8dBx3Upu',
+            ...n.task,
+          }),
+        },
+      })
+    );
+
+    await handleACPUpdateMessage(doc, shippedStream, {
+      getCurrentSessionTurnId: () => 'turn-1',
+    });
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const task = items?.find(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    expect(task).toMatchObject({
+      taskId: 'w5ftatomx',
+      // the run keeps its own name; every event after the first says "Claude task"
+      actor: 'e2e-probe',
+      status: 'completed',
+      lastToolName: 'checker',
+      usage: { totalTokens: 26781 },
+    });
+    expect(task?.actor).not.toBe('Claude task');
+  });
+
+  it('ignores a non-terminal tick that lands after the task settled', async () => {
+    const { doc, readHistory } = createDoc();
+    const settledThenLateTick = [
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'task:task-6',
+          title: 'Explore: done',
+          kind: 'think',
+          status: 'completed',
+          _meta: lodyTaskMeta({
+            taskId: 'task-6',
+            status: 'completed',
+            kind: 'subagent',
+            actor: 'Explore',
+            summary: 'Explored',
+          }),
+        },
+      }),
+      // A tick whose registry entry the producer has already pruned re-derives
+      // `kind: 'background'`, which would badge a finished subagent Background.
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'task:task-6',
+          title: 'Claude task: running Grep',
+          kind: 'think',
+          status: 'in_progress',
+          _meta: lodyTaskMeta({
+            taskId: 'task-6',
+            status: 'in_progress',
+            kind: 'background',
+            actor: 'Claude task',
+            description: 'running Grep',
+            lastToolName: 'Grep',
+          }),
+        },
+      }),
+    ];
+
+    await handleACPUpdateMessage(doc, settledThenLateTick, {
+      getCurrentSessionTurnId: () => 'turn-1',
+    });
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const task = items?.find(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    expect(task).toMatchObject({
+      taskId: 'task-6',
+      status: 'completed',
+      summary: 'Explored',
+      actor: 'Explore',
+      taskKind: 'subagent',
+    });
+    expect(task?.isBackgrounded).not.toBe(true);
+    expect(task?.lastToolName).toBeUndefined();
+  });
+
+  it('does not let a late progress tick resurrect a settled subagent_task', async () => {
+    const { doc, readHistory } = createDoc();
+    const tick = (status: 'in_progress' | 'completed', extra: Record<string, unknown>) =>
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'task:task-5',
+          title: 'Explore: late tick',
+          kind: 'think',
+          status,
+          _meta: lodyTaskMeta({ taskId: 'task-5', status, actor: 'Explore', ...extra }),
+        },
+      });
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        tick('completed', { summary: 'All done' }),
+        // `claudeTaskStatus` reports `in_progress` for every task_progress, so a tick
+        // that lands after the terminal event would restart a finished spinner.
+        tick('in_progress', { description: 'running Grep', lastToolName: 'Grep' }),
+      ],
+      { getCurrentSessionTurnId: () => 'turn-1' }
+    );
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const tasks = items?.filter((item) => item.type === 'subagent_task') ?? [];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ taskId: 'task-5', status: 'completed', summary: 'All done' });
+  });
+
+  it('persists a backgrounding task_updated without letting it rename the task', async () => {
+    const { doc, readHistory } = createDoc();
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'task:task-3',
+            title: 'Explore: Initial prompt',
+            kind: 'think',
+            status: 'in_progress',
+            _meta: lodyTaskMeta({
+              taskId: 'task-3',
+              status: 'in_progress',
+              actor: 'Explore',
+              description: 'Initial prompt',
+            }),
+          },
+        }),
+        // A real `task_updated` carries only `{task_id, patch}`. A backgrounding patch is
+        // the one that changes something observable — the producer's actor chain still
+        // has no input and falls through to its placeholder.
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'task:task-3',
+            title: 'Claude task',
+            kind: 'think',
+            status: 'in_progress',
+            _meta: lodyTaskMeta({
+              taskId: 'task-3',
+              status: 'in_progress',
+              kind: 'background',
+              actor: 'Claude task',
+            }),
+          },
+        }),
+      ],
+      { getCurrentSessionTurnId: () => 'turn-1' }
+    );
+
+    const items = readHistory()[0]?.items as MessageContent[] | undefined;
+    const task = items?.find(
+      (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+        item.type === 'subagent_task'
+    );
+    // the backgrounding reaches history, and the earlier identity survives it
+    expect(task).toMatchObject({
+      taskId: 'task-3',
+      status: 'in_progress',
+      taskKind: 'background',
+      isBackgrounded: true,
+      actor: 'Explore',
+    });
+  });
+
+  it('keeps dropping an in-progress tool_call_update whose _meta carries no task snapshot', async () => {
+    const { doc, readHistory } = createDoc();
+
+    await handleACPUpdateMessage(
+      doc,
+      parseSessionNotification({
+        sessionId: 'acp-session',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'shell-9',
+          kind: 'execute',
+          status: 'in_progress',
+          rawOutput: { aggregated_output: 'x'.repeat(4096) },
+          _meta: { lody: { activity: 'running' } },
+        },
+      }),
+      { getCurrentSessionTurnId: () => 'turn-1' }
+    );
+
+    expect(readHistory()).toEqual([]);
+  });
+
   it('creates the explicit target assistant entry instead of appending to another open entry', async () => {
     const { doc, readHistory } = createDoc([
       {

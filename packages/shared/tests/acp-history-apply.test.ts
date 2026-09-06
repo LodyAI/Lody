@@ -89,6 +89,74 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  const taskUpdate = (
+    sessionUpdate: 'tool_call' | 'tool_call_update',
+    status: 'in_progress' | 'completed',
+    task: Record<string, unknown>
+  ) =>
+    makeNotification({
+      sessionUpdate,
+      toolCallId: 'task:t1',
+      title: 'task',
+      kind: 'think',
+      status,
+      _meta: { lody: { task: { version: 1, taskId: 't1', status, ...task } } },
+    });
+
+  it('keeps the task identity a later event cannot re-derive', () => {
+    // Only the first event carries an identity source; every later one falls through to
+    // the producer's placeholder, so later-wins would rename the task.
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        taskUpdate('tool_call', 'in_progress', { kind: 'background', actor: 'my-workflow' }),
+        taskUpdate('tool_call_update', 'in_progress', {
+          kind: 'background',
+          actor: 'Claude task',
+          lastToolName: 'checker',
+        }),
+        taskUpdate('tool_call_update', 'completed', {
+          kind: 'background',
+          actor: 'Claude task',
+          summary: 'done',
+        }),
+      ]
+    );
+    const task = history[0]?.items?.find((i) => i.type === 'subagent_task');
+    expect(task).toMatchObject({
+      taskId: 't1',
+      status: 'completed',
+      actor: 'my-workflow',
+      summary: 'done',
+      lastToolName: 'checker',
+    });
+  });
+
+  it('ignores a non-terminal snapshot that arrives after the task settled', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        taskUpdate('tool_call', 'in_progress', { kind: 'subagent', actor: 'Explore' }),
+        taskUpdate('tool_call_update', 'completed', { kind: 'subagent', actor: 'Explore', summary: 'done' }),
+        // a late tick reports in_progress and re-derives kind from a pruned registry
+        taskUpdate('tool_call_update', 'in_progress', {
+          kind: 'background',
+          actor: 'Claude task',
+          lastToolName: 'Grep',
+        }),
+      ]
+    );
+    const task = history[0]?.items?.find((i) => i.type === 'subagent_task');
+    expect(task).toMatchObject({
+      taskId: 't1',
+      status: 'completed',
+      summary: 'done',
+      taskKind: 'subagent',
+    });
+    expect((task as { isBackgrounded?: boolean } | undefined)?.isBackgrounded).not.toBe(true);
+    expect((task as { lastToolName?: string } | undefined)?.lastToolName).toBeUndefined();
+  });
+
   it('persists the provider turn id on the assistant entry', () => {
     const history = applyNotificationOnHistory(
       [],
