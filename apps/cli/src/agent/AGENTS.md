@@ -81,8 +81,11 @@ arrive: context/message-flow.md "Upstream".
   answer before giving up on the upstream turn's response: the Codex adapter drains
   session notifications before refusing, so the turn's response routinely wins that
   race and would otherwise mask the refusal.
-- `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
-  `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
+- `acp-runner.ts` — process spawn/restart around the client.
+  Auxiliary ACP shutdown shares one termination attempt per owned child, uses the
+  Windows process-tree cleanup helper, and reports termination failure; protocol
+  session-close failure must still proceed to process cleanup.
+  Spawn + initialize + `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
   `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Unbounded concurrent Codex starts
   each spawn a lody.exe adapter, a Codex app-server, and a lody.exe MCP child;
   they contend on `~/.codex` and freeze every in-flight session until Lody

@@ -35,6 +35,7 @@ class FakeChildProcess extends EventEmitter {
   pid: number;
   killed = false;
   exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
   readonly kill = vi.fn((_signal?: NodeJS.Signals) => {
@@ -178,6 +179,83 @@ class FakeCgroupFs {
 }
 
 describe('session sandbox', () => {
+  it('awaits recursive Windows termination and reports taskkill failure', async () => {
+    const child = new FakeChildProcess(1234);
+    const helper = new FakeChildProcess(5678);
+    const spawnProcess = vi.fn(
+      (command: string) => (command === 'taskkill' ? helper : child) as unknown as ChildProcess
+    ) as typeof realSpawn;
+    const factory = createSessionSandboxFactory({
+      logger: createSilentLogger(),
+      deps: { platform: 'win32', spawnProcess, configureExecutionProcess: vi.fn(async () => {}) },
+    });
+    const sandbox = await factory('windows-tree' as SessionId);
+    const handle = await sandbox.spawn('node', [], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: 'ignore',
+    });
+    const settled = vi.fn();
+    const termination = handle.terminate(true);
+    const result = termination.catch(settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    expect(spawnProcess).toHaveBeenLastCalledWith('taskkill', ['/PID', '1234', '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    helper.emit('close', 1, null);
+    await result;
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Windows process tree termination did not succeed' })
+    );
+  });
+
+  it('never reuses an exited Windows handle PID for tree termination', async () => {
+    const child = new FakeChildProcess(1234);
+    const spawnProcess = vi.fn(() => child as unknown as ChildProcess) as typeof realSpawn;
+    const factory = createSessionSandboxFactory({
+      logger: createSilentLogger(),
+      deps: { platform: 'win32', spawnProcess, configureExecutionProcess: vi.fn(async () => {}) },
+    });
+    const sandbox = await factory('windows-exited' as SessionId);
+    const handle = await sandbox.spawn('node', [], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: 'ignore',
+    });
+    child.signalCode = 'SIGTERM';
+    child.emit('exit', null, 'SIGTERM');
+    await handle.terminate(true);
+    await sandbox.terminate(true);
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it('attempts every Windows root when one taskkill fails and retains tracking for retry', async () => {
+    const first = new FakeChildProcess(1234);
+    const second = new FakeChildProcess(2345);
+    const spawnProcess = vi.fn((command: string, args: string[]) => {
+      if (command !== 'taskkill')
+        return (command === 'first' ? first : second) as unknown as ChildProcess;
+      const helper = new FakeChildProcess(5678);
+      queueMicrotask(() => helper.emit('close', args.includes('1234') ? 1 : 0, null));
+      return helper as unknown as ChildProcess;
+    }) as typeof realSpawn;
+    const factory = createSessionSandboxFactory({
+      logger: createSilentLogger(),
+      deps: { platform: 'win32', spawnProcess, configureExecutionProcess: vi.fn(async () => {}) },
+    });
+    const sandbox = await factory('windows-multiple' as SessionId);
+    for (const command of ['first', 'second']) {
+      await sandbox.spawn(command, [], { cwd: process.cwd(), env: {}, stdio: 'ignore' });
+    }
+    await expect(sandbox.terminate(true)).rejects.toThrow(
+      'Session process tree termination failed'
+    );
+    expect(spawnProcess).toHaveBeenCalledTimes(4);
+    expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [1234, 2345] });
+  });
+
   it('applies process resource profiles on Linux', async () => {
     const setPriority = vi.fn();
     const writeFile = vi.fn(async () => {});
@@ -639,7 +717,11 @@ describe('session sandbox', () => {
         },
       });
       const sandbox = await factory('session-capture-cap' as SessionId);
-      const handle = await sandbox.spawn('noisy', [], { cwd: process.cwd(), env: {}, captureOutput: true });
+      const handle = await sandbox.spawn('noisy', [], {
+        cwd: process.cwd(),
+        env: {},
+        captureOutput: true,
+      });
 
       let bytes = 0;
       let tail = '';

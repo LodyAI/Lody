@@ -8,6 +8,7 @@ import { type SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { applyExecutionProcessResourceProfile } from '@/utils/process-resource-profile';
+import { terminateWindowsProcessTree } from '@/utils/windows-process-tree';
 
 const DEFAULT_CGROUP_MOUNT = '/sys/fs/cgroup';
 const DEFAULT_SESSION_PARENT = 'lody-sessions';
@@ -285,7 +286,7 @@ export function calculateAutomaticSessionSandboxLimits(
 
 class NoopSessionSandbox implements SessionSandbox {
   readonly enabled = false;
-  private readonly trackedProcesses = new Map<number, { detached: boolean }>();
+  private readonly trackedProcesses = new Map<number, { child: ChildProcess; detached: boolean }>();
 
   constructor(
     private readonly deps: Pick<
@@ -330,7 +331,7 @@ class NoopSessionSandbox implements SessionSandbox {
       async () => null,
       async (force) => {
         if (typeof child.pid === 'number' && child.pid > 0) {
-          await this.terminateProcessTree(child.pid, force, detached);
+          await this.terminateProcessTree(child, force, detached);
           return;
         }
         await terminateChildProcessDirectly(child, force);
@@ -338,7 +339,7 @@ class NoopSessionSandbox implements SessionSandbox {
       { captureOutput, logger: this.logger }
     );
     if (typeof child.pid === 'number' && child.pid > 0) {
-      this.trackedProcesses.set(child.pid, { detached });
+      this.trackedProcesses.set(child.pid, { child, detached });
       const trackedPid = child.pid;
       const cleanupTrackedProcess = () => {
         this.trackedProcesses.delete(trackedPid);
@@ -352,9 +353,16 @@ class NoopSessionSandbox implements SessionSandbox {
   }
 
   async terminate(force: boolean = false): Promise<void> {
-    for (const [pid, processInfo] of this.trackedProcesses.entries()) {
-      await this.terminateProcessTree(pid, force, processInfo.detached);
+    const failures: unknown[] = [];
+    for (const { child, detached } of this.trackedProcesses.values()) {
+      try {
+        await this.terminateProcessTree(child, force, detached);
+      } catch (error) {
+        failures.push(error);
+      }
     }
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Session process tree termination failed');
   }
 
   async cleanup(): Promise<void> {
@@ -362,15 +370,17 @@ class NoopSessionSandbox implements SessionSandbox {
   }
 
   private async terminateProcessTree(
-    pid: number,
+    child: ChildProcess,
     force: boolean,
     detached: boolean
   ): Promise<void> {
     if (this.deps.platform === 'win32') {
-      await this.runWindowsTaskkill(pid, force);
+      await terminateWindowsProcessTree(child, force, { spawnProcess: this.deps.spawnProcess });
       return;
     }
 
+    const pid = child.pid;
+    if (pid === undefined) return;
     const signal = force ? 'SIGKILL' : 'SIGTERM';
     const targetPid = detached ? -pid : pid;
     try {
@@ -381,21 +391,6 @@ class NoopSessionSandbox implements SessionSandbox {
       }
       throw error;
     }
-  }
-
-  private async runWindowsTaskkill(pid: number, force: boolean): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const child = this.deps.spawnProcess(
-        'taskkill',
-        ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])],
-        {
-          stdio: 'ignore',
-          windowsHide: true,
-        }
-      );
-      child.once('error', reject);
-      child.once('close', () => resolve());
-    });
   }
 }
 

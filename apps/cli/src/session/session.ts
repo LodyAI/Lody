@@ -272,17 +272,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // Kill both processes and wait for them to actually exit before proceeding.
     // This prevents OS-level process leaks where SIGTERM is sent but the process
     // outlives this function (and all tracking of it).
-    await Promise.all([
+    const processResults = await Promise.allSettled([
       this.killAndWait(activeProcess, force),
       this.killAndWait(agentProcess, force),
     ]);
+    const failures: unknown[] = processResults.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
 
     try {
       await this.sandbox.terminate(force);
     } catch (error) {
+      failures.push(error);
       this.logger.debug(
         `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
       );
+    }
+
+    // Preserve ownership and stopping status when cleanup cannot be confirmed.
+    // A later terminate call can retry; do not discard the sandbox's tracked roots.
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'Session process termination failed');
     }
 
     try {
@@ -291,6 +301,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       this.logger.debug(
         `[${this.sessionId}] Failed to clean up sandbox state: ${formatErrorMessage(error)}`
       );
+      throw error;
     }
 
     this.activeProcess = null;
@@ -311,60 +322,64 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   /**
    * Kill a process and wait for it to actually exit.
    *
-   * With force=false: sends SIGTERM, waits up to SIGTERM_GRACE_MS, then
+   * With force=false: requests graceful termination, waits up to five seconds, then
    * escalates to SIGKILL if the process hasn't exited.
    * With force=true: sends SIGKILL directly.
    *
-   * Always awaits the actual OS process exit before returning, so callers can
-   * be certain no orphaned processes remain.
+   * Rejects if the direct process has not exited five seconds after forced
+   * termination. Direct-process exit does not prove descendant cleanup.
    */
   private async killAndWait(proc: SessionProcessHandle | null, force: boolean): Promise<void> {
     if (!proc?.child) return;
-
     const child = proc.child;
-    // Already exited — nothing to do.
-    // Note: child.killed only means a signal was *sent*, not that the process
-    // exited. Only exitCode !== null proves the process has actually terminated.
-    if (child.exitCode !== null) return;
+    const hasExited = () => child.exitCode != null || child.signalCode != null;
+    if (hasExited()) return;
 
-    const waitForExit = (): Promise<void> =>
-      new Promise<void>((resolve) => {
-        const unsubscribe = proc.onExit(() => {
+    const EXIT_TIMEOUT_MS = 5_000;
+    const waitForExit = (): Promise<boolean> => {
+      if (hasExited()) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        let unsubscribe = () => {};
+        const finish = (exited: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
           unsubscribe();
-          resolve();
-        });
-        // Guard: if the process exited between the check above and
-        // registering the listener, resolve immediately.
-        if (child.exitCode !== null) {
-          unsubscribe();
-          resolve();
-        }
+          resolve(exited);
+        };
+        const timer = setTimeout(() => finish(hasExited()), EXIT_TIMEOUT_MS);
+        unsubscribe = proc.onExit(() => finish(true));
+        // onExit may replay an already observed exit synchronously.
+        if (settled) unsubscribe();
+        else if (hasExited()) finish(true);
       });
+    };
 
-    if (force) {
+    try {
+      await proc.terminate(force);
+    } catch (error) {
+      // A refused graceful request can be retried forcibly only while the
+      // original root is still live. Its exit cannot erase a failed tree kill.
+      if (force || hasExited()) throw error;
       await proc.terminate(true);
-      await waitForExit();
-      return;
+      if (await waitForExit()) return;
+      throw new Error(
+        `Session process did not exit within ${EXIT_TIMEOUT_MS}ms after forced termination`
+      );
     }
-
-    // Graceful path: SIGTERM → wait → SIGKILL fallback
-    const SIGTERM_GRACE_MS = 5_000;
-    await proc.terminate(false);
-
-    const outcome = await Promise.race([
-      waitForExit().then(() => 'exited' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SIGTERM_GRACE_MS)),
-    ]);
-
-    if (outcome === 'timeout' && child.exitCode === null) {
+    if (await waitForExit()) return;
+    if (!force) {
       this.logger.debug(
-        `[${this.sessionId}] Process did not exit within ${SIGTERM_GRACE_MS}ms of SIGTERM; escalating to SIGKILL`
+        `[${this.sessionId}] Process did not exit within ${EXIT_TIMEOUT_MS}ms of SIGTERM; escalating to SIGKILL`
       );
       await proc.terminate(true);
-      await waitForExit();
+      if (await waitForExit()) return;
     }
+    throw new Error(
+      `Session process did not exit within ${EXIT_TIMEOUT_MS}ms after forced termination`
+    );
   }
-
   /**
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.

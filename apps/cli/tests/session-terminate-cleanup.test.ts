@@ -150,3 +150,160 @@ describe('Session terminate cleanup', () => {
     expect(session.agentProcess).toBeNull();
   });
 });
+
+describe('Session bounded process exit', () => {
+  it('recognizes signal-only exits without sending another termination', async () => {
+    const session = createSession();
+    const handle = createProcessHandle(vi.fn());
+    handle.child.signalCode = 'SIGTERM';
+    handle.terminate = vi.fn();
+    // @ts-expect-error - exercising private bounded process lifecycle
+    await session.killAndWait(handle, true);
+    expect(handle.terminate).not.toHaveBeenCalled();
+  });
+
+  it('rejects when a forced process never exits and removes its subscription', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = createSession();
+      const handle = createProcessHandle(vi.fn());
+      handle.terminate = vi.fn(async () => {});
+      const unsubscribe = vi.fn();
+      handle.onExit = vi.fn(() => unsubscribe);
+      // @ts-expect-error - exercising private bounded process lifecycle
+      const result = session.killAndWait(handle, true);
+      const rejected = expect(result).rejects.toThrow('after forced termination');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await rejected;
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds graceful waiting, escalates, and clears the expired subscription', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = createSession();
+      const handle = createProcessHandle(vi.fn());
+      handle.terminate = vi.fn(async (force) => {
+        if (force) handle.child.signalCode = 'SIGKILL';
+      });
+      const unsubscribe = vi.fn();
+      handle.onExit = vi.fn(() => unsubscribe);
+      // @ts-expect-error - exercising private bounded process lifecycle
+      const result = session.killAndWait(handle, false);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await result;
+      expect(handle.terminate).toHaveBeenNthCalledWith(1, false);
+      expect(handle.terminate).toHaveBeenNthCalledWith(2, true);
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cleans its deadline and subscription after synchronous exit replay', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = createSession();
+      const handle = createProcessHandle(vi.fn());
+      handle.terminate = vi.fn(async () => {});
+      const unsubscribe = vi.fn();
+      handle.onExit = vi.fn((listener) => {
+        listener(null, 'SIGTERM');
+        return unsubscribe;
+      });
+      // @ts-expect-error - exercising private bounded process lifecycle
+      await session.killAndWait(handle, false);
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Session termination failures', () => {
+  it('preserves stopping ownership after sandbox failure and allows retry', async () => {
+    const session = createSession();
+    const terminated = vi.fn();
+    session.on('terminated', terminated);
+    // @ts-expect-error - observing private sandbox lifecycle
+    const sandbox = session.sandbox;
+    const terminate = vi
+      .spyOn(sandbox, 'terminate')
+      .mockRejectedValueOnce(new Error('kill failed'))
+      .mockResolvedValue(undefined);
+    const cleanup = vi.spyOn(sandbox, 'cleanup').mockResolvedValue(undefined);
+    await expect(session.terminate(true)).rejects.toThrow('Session process termination failed');
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(terminated).not.toHaveBeenCalled();
+    // @ts-expect-error - observing retained lifecycle state
+    expect(session.status).toBe('stopping');
+    await session.terminate(true);
+    expect(terminate).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(terminated).toHaveBeenCalledTimes(1);
+  });
+
+  it('attempts the other process and sandbox when one process termination fails', async () => {
+    const session = createSession();
+    const failing = createProcessHandle(async () => {
+      throw new Error('process failure');
+    });
+    const terminateOther = vi.fn(async () => {});
+    // @ts-expect-error - exercising private process ownership
+    session.activeProcess = failing;
+    // @ts-expect-error - exercising private process ownership
+    session.agentProcess = createProcessHandle(terminateOther);
+    // @ts-expect-error - observing private sandbox lifecycle
+    const sandbox = session.sandbox;
+    const terminateSandbox = vi.spyOn(sandbox, 'terminate').mockResolvedValue(undefined);
+    const cleanup = vi.spyOn(sandbox, 'cleanup').mockResolvedValue(undefined);
+    await expect(session.terminate(true)).rejects.toThrow('Session process termination failed');
+    expect(terminateOther).toHaveBeenCalledWith(true);
+    expect(terminateSandbox).toHaveBeenCalledWith(true);
+    expect(cleanup).not.toHaveBeenCalled();
+    // @ts-expect-error - observing retained ownership for retry
+    expect(session.activeProcess).toBe(failing);
+  });
+});
+
+it('does not hide failed graceful termination when the root exits during the attempt', async () => {
+  const session = createSession();
+  const handle = createProcessHandle(vi.fn());
+  handle.terminate = vi.fn(async () => {
+    handle.child.signalCode = 'SIGTERM';
+    throw new Error('tree termination failed');
+  });
+  // @ts-expect-error - exercising private bounded process lifecycle
+  await expect(session.killAndWait(handle, false)).rejects.toThrow('tree termination failed');
+  expect(handle.terminate).toHaveBeenCalledTimes(1);
+});
+
+it('retries a refused graceful request forcibly while the root remains live', async () => {
+  const session = createSession();
+  const handle = createProcessHandle(vi.fn());
+  handle.terminate = vi.fn(async (force) => {
+    if (!force) throw new Error('graceful refusal');
+    handle.child.signalCode = 'SIGKILL';
+  });
+  // @ts-expect-error - exercising private bounded process lifecycle
+  await session.killAndWait(handle, false);
+  expect(handle.terminate).toHaveBeenNthCalledWith(1, false);
+  expect(handle.terminate).toHaveBeenNthCalledWith(2, true);
+});
+
+it('rejects a refused forced retry without claiming completion', async () => {
+  const session = createSession();
+  const handle = createProcessHandle(vi.fn());
+  handle.terminate = vi.fn(async (force) => {
+    throw new Error(force ? 'force refusal' : 'graceful refusal');
+  });
+  // @ts-expect-error - exercising private bounded process lifecycle
+  await expect(session.killAndWait(handle, false)).rejects.toThrow('force refusal');
+  expect(handle.terminate).toHaveBeenCalledTimes(2);
+});

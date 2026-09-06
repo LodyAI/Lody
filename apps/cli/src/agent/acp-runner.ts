@@ -13,6 +13,7 @@ import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
+import { terminateWindowsProcessTree } from '@/utils/windows-process-tree';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
   AgentClient,
@@ -162,8 +163,12 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
   return { client, acpSessionId: sessionResponse.sessionId as ACPSessionId, sessionResponse };
 };
 
+function hasChildExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode != null;
+}
+
 function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) {
+  if (hasChildExited(child)) {
     return Promise.resolve(true);
   }
 
@@ -174,7 +179,7 @@ function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promis
     };
     const onTimeout = () => {
       cleanup();
-      resolve(child.exitCode !== null);
+      resolve(hasChildExited(child));
     };
     const cleanup = () => {
       clearTimeout(timeoutHandle);
@@ -195,20 +200,48 @@ function signalChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
   child.kill(signal);
 }
 
-async function terminateChildProcess(
+const childTerminations = new WeakMap<ChildProcess, Promise<void>>();
+
+function terminateChildProcess(
   child: ChildProcess,
   logger: Logger,
   sessionLabel: string,
   exitTimeoutMs: number
 ): Promise<void> {
-  if (child.exitCode !== null) {
+  const pending = childTerminations.get(child);
+  if (pending) return pending;
+  const termination = terminateChildProcessOnce(child, logger, sessionLabel, exitTimeoutMs);
+  childTerminations.set(child, termination);
+  void termination.catch(() => {
+    if (childTerminations.get(child) === termination) childTerminations.delete(child);
+  });
+  return termination;
+}
+
+async function terminateChildProcessOnce(
+  child: ChildProcess,
+  logger: Logger,
+  sessionLabel: string,
+  exitTimeoutMs: number
+): Promise<void> {
+  if (process.platform === 'win32') {
+    await terminateWindowsProcessTree(child, true, { timeoutMs: exitTimeoutMs });
+    if (!(await waitForChildProcessExit(child, exitTimeoutMs))) {
+      throw new Error(
+        `[${sessionLabel}] ACP agent process did not exit after Windows tree termination`
+      );
+    }
+    return;
+  }
+  if (hasChildExited(child)) {
     return;
   }
 
   try {
     signalChildProcess(child, 'SIGTERM');
-  } catch {
-    return;
+  } catch (error) {
+    if (hasChildExited(child)) return;
+    throw error;
   }
 
   if (await waitForChildProcessExit(child, exitTimeoutMs)) {
@@ -220,10 +253,13 @@ async function terminateChildProcess(
   );
   try {
     signalChildProcess(child, 'SIGKILL');
-  } catch {
-    return;
+  } catch (error) {
+    if (hasChildExited(child)) return;
+    throw error;
   }
-  await waitForChildProcessExit(child, exitTimeoutMs);
+  if (!(await waitForChildProcessExit(child, exitTimeoutMs))) {
+    throw new Error(`[${sessionLabel}] ACP agent process did not exit after SIGKILL`);
+  }
 }
 
 export type SpawnAcpProcessOptions = {

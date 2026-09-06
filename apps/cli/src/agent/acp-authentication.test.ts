@@ -10,6 +10,12 @@ import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
 
+vi.mock('@/utils/windows-process-tree', () => ({
+  terminateWindowsProcessTree: async (child: ChildProcess) => {
+    if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
+  },
+}));
+
 const createSilentLogger = (): Logger => ({
   info: () => {},
   warn: () => {},
@@ -316,8 +322,12 @@ describe('AcpAuthenticationManager', () => {
       disposition: 'error',
       error: 'Kimi Code authentication timed out. Please try again.',
     });
-    expect(stuckChild.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
-    expect(stuckChild.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    if (process.platform === 'win32') {
+      expect(stuckChild.kill).toHaveBeenCalledWith('SIGKILL');
+    } else {
+      expect(stuckChild.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+      expect(stuckChild.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    }
 
     await expect(manager.authenticate({ requestId: 'auth-2', ...input })).resolves.toEqual({
       success: true,
@@ -531,7 +541,7 @@ describe('AcpAuthenticationManager', () => {
       success: true,
       disposition: 'cancelled',
     });
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child.kill).toHaveBeenCalledWith(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM');
   });
 
   it('bridges ACP URL consent without retaining authentication process output', async () => {
