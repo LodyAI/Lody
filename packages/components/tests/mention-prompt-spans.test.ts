@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyTextRewrites, reanchorMessageTextSpansForTrim } from '@lody/shared';
+import {
+  applyTextRewrites,
+  reanchorMessageTextSpansForTrim,
+  encodeBrowserPageReference,
+  historyItemsToInputBlocks,
+  inputBlocksToHistoryItems,
+} from '@lody/shared';
 
 import { buildVerbatimMentionRewrites } from '../src/components/mentions/mention-expansion';
 import { buildSkillMentionRewrites } from '../src/components/mentions/mention-skill-source';
@@ -54,6 +60,42 @@ const expectSpansAddressOutput = (result: ReturnType<typeof expand>) => {
 };
 
 describe('before-send mention rewrite', () => {
+  it('retains mixed URL/browser targets and complete agent text through history replay', () => {
+    const repository = 'https://github.com/LodyAI/Lody';
+    const page = 'https://example.test/a?q=1#part';
+    const browser = encodeBrowserPageReference({
+      version: 1,
+      machineId: 'm',
+      sessionId: 's',
+      url: page,
+      title: 'Original title',
+    });
+    if (!browser) throw new Error('Invalid fixture');
+    const text = `😀 $review ${repository} ${page}`;
+    const result = expand({
+      text,
+      skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
+      mentions: [
+        {
+          start: text.indexOf(repository),
+          end: text.indexOf(repository) + repository.length,
+          kind: 'github_repo',
+          value: repository,
+        },
+        { start: text.indexOf(page), end: text.length, kind: 'browser_page', value: browser },
+      ],
+    });
+    expect(result.text).toContain(repository);
+    expect(result.text).toContain(page);
+    expect(result.spans?.map((span) => span.label)).toEqual([
+      '$review',
+      'LodyAI/Lody',
+      'Original title',
+    ]);
+    const blocks = [{ type: 'text' as const, ...result }];
+    expect(historyItemsToInputBlocks(inputBlocksToHistoryItems(blocks))).toEqual(blocks);
+    expectSpansAddressOutput(result);
+  });
   it('leaves text with no mentions completely alone', () => {
     expect(expand({ text: 'just a prompt' })).toEqual({ text: 'just a prompt', spans: undefined });
   });
@@ -79,9 +121,7 @@ describe('before-send mention rewrite', () => {
       mentions: [{ value: 'review', start: 4, end: 11, kind: 'skill' }],
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
     });
-    expect(result.text).toBe(
-      'run use /review [Skill Path](.claude/skills/review/SKILL.md) on it'
-    );
+    expect(result.text).toBe('run use /review [Skill Path](.claude/skills/review/SKILL.md) on it');
     expect(result.spans).toHaveLength(1);
     expect(result.spans?.[0]).toMatchObject({ kind: 'skill', label: '$review' });
     expectSpansAddressOutput(result);
@@ -103,8 +143,18 @@ describe('before-send mention rewrite', () => {
       drafts,
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
       mentions: [
-        { value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' },
-        { value: 'sess-9f2c', start: text.indexOf('@my-run'), end: text.indexOf('@my-run') + 7, kind: 'session' },
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+        {
+          value: 'sess-9f2c',
+          start: text.indexOf('@my-run'),
+          end: text.indexOf('@my-run') + 7,
+          kind: 'session',
+        },
         { value: '42', start: text.indexOf('#42'), end: text.indexOf('#42') + 3, kind: 'issue' },
       ],
     });
@@ -156,7 +206,14 @@ describe('before-send mention rewrite', () => {
     const text = '\n  see @src/a.ts  \n';
     const result = expand({
       text,
-      mentions: [{ value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' }],
+      mentions: [
+        {
+          value: 'src/a.ts',
+          start: text.indexOf('@src/a.ts'),
+          end: text.indexOf('@src/a.ts') + 9,
+          kind: 'file',
+        },
+      ],
     });
     const trimmed = result.text.trim();
     const spans = reanchorMessageTextSpansForTrim(result.text, trimmed, result.spans);

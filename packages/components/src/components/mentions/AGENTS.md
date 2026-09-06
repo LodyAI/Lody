@@ -4,6 +4,16 @@ Product-level mention sources built on `src/ui/mention`.
 
 ## Invariants
 
+- URL references retain the pasted URL as native textarea text. Recognition runs
+  only for bounded native paste/redo insertions, after the text commit; ordinary
+  typing, composition, and collapsed pasted-text blobs do not trigger scans.
+  Removing a reference removes its range while retaining its text. Alt+Enter at
+  a reference boundary opens the same actions as clicking it.
+- Browser references freeze the owning machine/session and logical URL, with an
+  optional page title. Never persist preview capability query parameters. Opening
+  one uses the owning browser's navigation and approval flow. Reference discovery
+  reads existing browser state and does not fetch page metadata or content.
+
 - `@` reaches every mention type through the two-level menu. Skills also retain
   their direct `$` menu for compatibility, and `/` still opens commands
   directly because a slash command must own the whole prompt. `#` does not open

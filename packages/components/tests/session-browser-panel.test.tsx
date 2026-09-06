@@ -256,6 +256,7 @@ describe('SessionBrowserPanel controller', () => {
   const renderPanel = async (
     runtime: WorkspaceRuntime,
     options?: {
+      referenceNavigationRequest?: { id: number; url: string };
       candidateNavigationRequestId?: number;
       machineName?: string;
       panelSession?: SessionMeta;
@@ -283,6 +284,7 @@ describe('SessionBrowserPanel controller', () => {
           { store },
           createElement(SessionBrowserPanel, {
             session: options?.panelSession ?? session,
+            referenceNavigationRequest: options?.referenceNavigationRequest,
             candidateNavigationRequestId: options?.candidateNavigationRequestId,
             onCandidateNavigationRequestHandled: options?.onCandidateNavigationRequestHandled,
           })
@@ -329,6 +331,28 @@ describe('SessionBrowserPanel controller', () => {
     });
   };
 
+  it('opens an explicitly selected private-LAN page reference as user navigation', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime, {
+      referenceNavigationRequest: { id: 1, url: 'http://192.168.1.10:3000/admin' },
+    });
+    expect(rendered.querySelector('[data-testid="public-browser"]')?.getAttribute('data-url')).toBe(
+      'http://192.168.1.10:3000/admin'
+    );
+    expect(document.body.textContent).not.toContain('The page asked to open a private network');
+  });
+
+  it('requires remote preview approval when reopening a loopback reference', async () => {
+    const testRuntime = createRuntime({ plane: 'cloud' });
+    const rendered = await renderPanel(testRuntime.runtime, {
+      referenceNavigationRequest: { id: 1, url: 'http://127.0.0.1:5173/dashboard?mode=dev' },
+    });
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    expect(document.body.textContent).toContain('Open a remote preview?');
+    await confirmDialog();
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
+  });
   it('opens public URLs without sending them to the session runtime', async () => {
     const testRuntime = createRuntime();
     const rendered = await renderPanel(testRuntime.runtime);

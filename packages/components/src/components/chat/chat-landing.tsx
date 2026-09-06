@@ -3057,6 +3057,7 @@ function WorkspaceChatLanding({
         repoFullNameForMentions
       );
       const inputConfig = buildSessionTurnInputConfig({
+        machine,
         inputBlocks,
         prompt: promptPayload,
         cliType: selectedConfig.cliType,

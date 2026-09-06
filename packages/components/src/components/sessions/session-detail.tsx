@@ -1,4 +1,16 @@
 import {
+  encodeBrowserPageReference,
+  parseBrowserPageReference,
+  type BrowserPageReference,
+} from '@lody/shared';
+import {
+  OPEN_BROWSER_PAGE_REFERENCE_EVENT,
+  getPendingBrowserPageReference,
+  clearPendingBrowserPageReference,
+  prepareBrowserPageReferenceNavigation,
+  handleBrowserPageReferenceNavigation,
+} from '@/lib/browser-page-reference';
+import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
@@ -766,6 +778,12 @@ const SessionDetail = ({
     sessionId: SessionId;
     id: number;
   } | null>(null);
+  const [browserPageReference, setBrowserPageReference] = useState<BrowserPageReference>();
+  const [referenceNavigationRequest, setReferenceNavigationRequest] = useState<{
+    id: number;
+    url: string;
+    sessionId: string;
+  }>();
   const browserCandidateNavigationSequenceRef = useRef(0);
   const [viewerTabs, setViewerTabs] = useState<ViewerTab[]>(() => initialTabState.viewerTabs);
   const [activeViewerTabId, setActiveViewerTabId] = useState<string | null>(
@@ -1292,9 +1310,7 @@ const SessionDetail = ({
         };
       });
       if (placement === 'tab') {
-        setTabOrderState((current) =>
-          appendTabOrderId(current, sessionGroupIds, targetSessionId)
-        );
+        setTabOrderState((current) => appendTabOrderId(current, sessionGroupIds, targetSessionId));
       }
       if (response.partial && response.warnings.length > 0) {
         toast.warning(
@@ -1302,7 +1318,16 @@ const SessionDetail = ({
         );
       }
     },
-    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, sessionGroupIds, t, user?.id]
+    [
+      canForkSession,
+      currentWorkspaceId,
+      pendingForks,
+      postHog,
+      runtime,
+      sessionGroupIds,
+      t,
+      user?.id,
+    ]
   );
   const pendingForkSourceByTargetSessionId = useMemo(() => {
     const sourceByTarget = new Map<SessionId, string>();
@@ -3136,6 +3161,94 @@ const SessionDetail = ({
     ]
   );
 
+  const browserReferenceStore = useStore();
+  useEffect(() => {
+    const openReference = () => {
+      if (!router.state.location.pathname.endsWith(`/sessions/${sessionId}`)) return;
+      const pending = getPendingBrowserPageReference(router.state.location.pathname);
+      if (!pending) return;
+      const encoded = encodeBrowserPageReference(pending);
+      const reference = encoded ? parseBrowserPageReference(encoded) : null;
+      if (!reference) {
+        clearPendingBrowserPageReference(pending);
+        return;
+      }
+      const owner = browserReferenceStore.get(
+        sessionMetaAtomFamily(getSessionRoomId(reference.sessionId as SessionId))
+      );
+      if (!owner && !docMetaCacheReady) return;
+      if (!owner || owner.machineId !== reference.machineId) {
+        clearPendingBrowserPageReference(pending);
+        toast.error(
+          t('sessions.browser.referenceUnavailable', 'The owning browser session is unavailable.')
+        );
+        return;
+      }
+      const rootId = owner.parentSessionId ?? owner.id;
+      if (rootId !== sessionId) {
+        if (!workspaceSlug) {
+          clearPendingBrowserPageReference(pending);
+          return;
+        }
+        const destination = {
+          to: '/$workspaceName/sessions/$sessionId' as const,
+          params: { workspaceName: workspaceSlug, sessionId: rootId },
+          search: { tab: formatExplicitSessionTabSearch(owner.id) },
+        };
+        prepareBrowserPageReferenceNavigation(pending, router.buildLocation(destination).pathname);
+        void router.navigate(destination).catch(() => {
+          clearPendingBrowserPageReference(pending);
+          toast.error(
+            t('sessions.browser.referenceUnavailable', 'The owning browser session is unavailable.')
+          );
+        });
+        return;
+      }
+      clearPendingBrowserPageReference(pending);
+      handleOpenBrowser(owner.id);
+      setReferenceNavigationRequest({
+        id: ++browserCandidateNavigationSequenceRef.current,
+        url: reference.url,
+        sessionId: owner.id,
+      });
+    };
+    const unsubscribeNavigation = router.subscribe('onBeforeNavigate', (event) => {
+      if (event.fromLocation?.pathname.endsWith(`/sessions/${sessionId}`)) {
+        handleBrowserPageReferenceNavigation(event.toLocation.pathname);
+      }
+    });
+    window.addEventListener(OPEN_BROWSER_PAGE_REFERENCE_EVENT, openReference);
+    openReference();
+    return () => {
+      unsubscribeNavigation();
+      window.removeEventListener(OPEN_BROWSER_PAGE_REFERENCE_EVENT, openReference);
+    };
+  }, [
+    browserReferenceStore,
+    docMetaCacheReady,
+    router,
+    sessionId,
+    workspaceSlug,
+    handleOpenBrowser,
+    t,
+  ]);
+  const handleReferenceNavigationRequestHandled = useCallback((id: number) => {
+    setReferenceNavigationRequest((current) => (current?.id === id ? undefined : current));
+  }, []);
+  const handleReferenceBrowserPage = useCallback(
+    (reference: BrowserPageReference) => {
+      const chat = chatRefsMap.current.get(reference.sessionId);
+      if (
+        chat &&
+        'insertBrowserPageReference' in chat &&
+        chat.insertBrowserPageReference(reference)
+      ) {
+        if (isMobile) replaceSessionUrlBrowser(false);
+        chat.focusInput();
+      }
+    },
+    [isMobile, replaceSessionUrlBrowser]
+  );
   const handleBrowserCandidateNavigationRequestHandled = useCallback((requestId: number) => {
     setBrowserCandidateNavigationRequest((current) => (current?.id === requestId ? null : current));
   }, []);
@@ -5139,6 +5252,11 @@ const SessionDetail = ({
                   }
                   forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
                   forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
+                  browserPageReference={
+                    browserPageReference?.sessionId === tabSession.id
+                      ? browserPageReference
+                      : undefined
+                  }
                   onNavigateSession={handleNavigateSession}
                   onConversationPrepared={
                     pendingForkSourceId
@@ -5442,6 +5560,14 @@ const SessionDetail = ({
               {activeBrowserSession && (
                 <SessionBrowserPanel
                   session={activeBrowserSession}
+                  onBrowserPageReferenceChange={setBrowserPageReference}
+                  onReferencePage={handleReferenceBrowserPage}
+                  onReferenceNavigationRequestHandled={handleReferenceNavigationRequestHandled}
+                  referenceNavigationRequest={
+                    referenceNavigationRequest?.sessionId === activeBrowserSession.id
+                      ? referenceNavigationRequest
+                      : undefined
+                  }
                   active={Boolean(urlBrowser)}
                   className="h-full"
                   candidateNavigationRequestId={
@@ -5562,6 +5688,14 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
+            onBrowserPageReferenceChange={setBrowserPageReference}
+            onReferencePage={handleReferenceBrowserPage}
+            onReferenceNavigationRequestHandled={handleReferenceNavigationRequestHandled}
+            referenceNavigationRequest={
+              referenceNavigationRequest?.sessionId === activeBrowserSession.id
+                ? referenceNavigationRequest
+                : undefined
+            }
             active={activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
@@ -5732,6 +5866,8 @@ const SessionDetail = ({
   ) => {
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
+      browserPageReference:
+        browserPageReference?.sessionId === chatSession.id ? browserPageReference : undefined,
       ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
       claimNavigationFocus:
         isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,

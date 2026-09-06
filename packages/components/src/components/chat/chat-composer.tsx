@@ -15,7 +15,7 @@ import {
 import { ClipboardPaste, RefreshCw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { AcpCommandSummary } from '@lody/shared';
+import type { AcpCommandSummary, BrowserPageReference } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
@@ -110,6 +110,7 @@ export interface ChatComposerProps {
   skillAgent?: SkillMentionAgent;
   /** Dropped from the `@session:` category — a session never references itself. */
   currentSessionId?: string | null;
+  browserPageReference?: BrowserPageReference;
   promptId?: string;
   promptValue: string;
   onPromptChange: (value: string) => void;
@@ -235,6 +236,7 @@ export function ChatComposer({
   commandsEnabled = true,
   skillAgent,
   currentSessionId,
+  browserPageReference,
   promptId,
   promptValue,
   onPromptChange,
@@ -881,6 +883,7 @@ export function ChatComposer({
                 commandsEnabled={commandsEnabled}
                 skillAgent={skillAgent}
                 currentSessionId={currentSessionId}
+                browserPageReference={browserPageReference}
                 value={promptValue}
                 onValueChange={onPromptChange}
                 externalMentions={pastedTextMentions}
@@ -983,6 +986,7 @@ export function ChatComposer({
               commandsEnabled={commandsEnabled}
               skillAgent={skillAgent}
               currentSessionId={currentSessionId}
+              browserPageReference={browserPageReference}
               value={promptValue}
               onValueChange={onPromptChange}
               externalMentions={pastedTextMentions}

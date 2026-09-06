@@ -1,3 +1,4 @@
+import type { BrowserPageReference } from '@lody/shared';
 import {
   useState,
   useCallback,
@@ -378,6 +379,7 @@ export function getSessionChatInputAreaShellClassName({
 }
 
 export interface SessionChatInputAreaProps {
+  browserPageReference?: BrowserPageReference;
   /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
@@ -483,6 +485,7 @@ export type SessionChatInputAreaHandle = {
    * written (archived draft, unknown/own session, already mentioned), so the
    * caller can leave the gesture unacknowledged instead of implying a change.
    */
+  insertBrowserPageReference: (reference: BrowserPageReference) => boolean;
   insertSessionMention: (sessionId: string) => boolean;
   /** Role identity committed in the currently rendered composer. */
   getAgentRoleSelection: (
@@ -540,6 +543,7 @@ export const SessionChatInputArea = memo(
       onCommentReferencesChange,
       onVisualAnnotationReferencesChange,
       onVisualAnnotationReferencesSubmitted,
+      browserPageReference,
     }: SessionChatInputAreaProps,
     ref: React.ForwardedRef<SessionChatInputAreaHandle>
   ) {
@@ -1681,6 +1685,10 @@ export const SessionChatInputArea = memo(
     useImperativeHandle(
       ref,
       () => ({
+        insertBrowserPageReference: (reference) =>
+          !isArchived &&
+          !submissionPending &&
+          (mentionActionsRef.current?.insertBrowserPageReference(reference) ?? false),
         setInputText,
         focusInput: () => {
           textareaRef.current?.focus();
@@ -1700,6 +1708,8 @@ export const SessionChatInputArea = memo(
           }),
       }),
       [
+        isArchived,
+        submissionPending,
         setInputText,
         addCommentReference,
         toggleCommentReference,
@@ -2463,6 +2473,7 @@ export const SessionChatInputArea = memo(
         pastedTextDrafts={submissionPending ? [] : pastedTextDrafts}
         onPastedTextDraftsChange={submissionPending ? undefined : handlePastedTextDraftsChange}
         onMentionRangesChange={handleMentionRangesChange}
+        browserPageReference={browserPageReference}
         mentionActionsRef={mentionActionsRef}
         persistedMentions={persistedMentionRanges}
         // This composer switches sessions in place, so the draft's identity has

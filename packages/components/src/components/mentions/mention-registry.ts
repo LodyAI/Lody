@@ -1,6 +1,12 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
+import {
+  getAgentRoleEmoji,
+  encodeBrowserPageReference,
+  parseBrowserPageReference,
+  type BrowserPageReference,
+  type AcpCommandSummary,
+} from '@lody/shared';
 import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
 import {
   buildPathSuggestions,
@@ -42,7 +48,8 @@ export type MentionCategoryId =
   | 'skill'
   | 'command'
   | 'session'
-  | 'agent_role';
+  | 'agent_role'
+  | 'browser_page';
 
 export type MentionIcon =
   | 'file'
@@ -52,7 +59,8 @@ export type MentionIcon =
   | 'skill'
   | 'command'
   | 'session'
-  | 'agent_role';
+  | 'agent_role'
+  | 'browser_page';
 
 export type MentionCategoryStatus = 'ready' | 'loading' | 'error';
 
@@ -579,6 +587,7 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
 }
 
 export type MentionCategorySources = {
+  browserPageReference?: BrowserPageReference;
   file?: SourceState & {
     index: FileSuggestionIndex | null;
     notice?: string;
@@ -611,7 +620,7 @@ export type MentionSourceKey = keyof MentionCategorySources;
  */
 export function useMentionCategories(sources: MentionCategorySources): MentionCategory[] {
   const { t } = useTranslation();
-  const { file, issuePr, skill, command, session, agentRole } = sources;
+  const { file, issuePr, skill, command, session, agentRole, browserPageReference } = sources;
 
   // Partitioned once: the cache holds both types, and re-splitting it inside
   // `getCandidates` would walk the whole list twice on every keystroke.
@@ -625,6 +634,35 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
   );
   return React.useMemo(() => {
     const categories: MentionCategory[] = [];
+    const browserTarget = browserPageReference
+      ? encodeBrowserPageReference(browserPageReference)
+      : null;
+    const browserPage = browserTarget ? parseBrowserPageReference(browserTarget) : null;
+    if (browserTarget && browserPage) {
+      categories.push({
+        id: 'browser_page',
+        namespace: 'browser',
+        label: t('mention.category.browser.label', 'Browser'),
+        icon: 'browser_page',
+        status: 'ready',
+        getCandidates: (term) => {
+          const title = browserPage.title || browserPage.url;
+          if (!`${title} ${browserPage.url}`.toLocaleLowerCase().includes(term.toLocaleLowerCase()))
+            return [];
+          return [
+            {
+              value: browserTarget,
+              label: title,
+              insertText: browserPage.url,
+              kind: 'browser_page',
+              icon: 'browser_page',
+              title,
+              subtitle: browserPage.url,
+            },
+          ];
+        },
+      });
+    }
 
     if (file?.enabled) {
       categories.push({
@@ -731,5 +769,16 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     }
 
     return categories;
-  }, [agentRole, command, file, issuePr, issueSuggestions, prSuggestions, session, skill, t]);
+  }, [
+    agentRole,
+    command,
+    file,
+    issuePr,
+    issueSuggestions,
+    prSuggestions,
+    session,
+    skill,
+    t,
+    browserPageReference,
+  ]);
 }

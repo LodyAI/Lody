@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import {
   Boxes,
+  Globe,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -96,6 +97,8 @@ function CandidateIcon({
     );
   }
   switch (icon) {
+    case 'browser_page':
+      return <Globe className={className} />;
     case 'file':
       return <FileIcon filePath={path ?? ''} className={className} />;
     case 'dir':

@@ -43,6 +43,7 @@ import {
 } from '../src/components/mentions/combined-mention-textarea';
 import type { Mention as MentionRange } from '../src/ui/mention/index';
 import { initI18n } from '../src/i18n';
+import { parseBrowserPageReference } from '@lody/shared';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -157,5 +158,45 @@ describe('inserting a session mention from outside the composer', () => {
     expect(await insert('sess_missing')).toBe(false);
     expect(value).toBe('hello');
     expect(ranges).toHaveLength(0);
+  });
+  it('inserts a browser snapshot and removes decoration without removing its URL', async () => {
+    await render('Read');
+    act(() => {
+      expect(
+        handle?.insertBrowserPageReference({
+          version: 1,
+          machineId: 'm',
+          sessionId: 's',
+          url: 'http://localhost:3000/docs?__lody_preview_token=secret&tab=1',
+          title: 'Docs',
+        })
+      ).toBe(true);
+    });
+    await render(value);
+    expect(value).toBe('Read http://localhost:3000/docs?tab=1 ');
+    expect(ranges).toHaveLength(1);
+    expect(parseBrowserPageReference(ranges[0].value)?.title).toBe('Docs');
+    const textarea = container.querySelector('textarea')!;
+    act(() => {
+      textarea.focus();
+      textarea.setSelectionRange(5, 5);
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    const remove = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Remove reference'
+    );
+    expect(remove).toBeDefined();
+    act(() => remove!.click());
+    expect(ranges).toEqual([]);
+    expect(value).toBe('Read http://localhost:3000/docs?tab=1 ');
+    await render(value);
+    expect(ranges).toEqual([]);
   });
 });

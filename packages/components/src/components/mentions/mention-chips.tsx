@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
+import { ClipboardList, MessagesSquare, UserRoundCog, Github, Globe, Link } from 'lucide-react';
+import { isInlineReferenceKind } from '@lody/shared';
 
 import { MonochromeFileIcon, MonochromeFolderIcon } from '@/components/icons/file-icons';
 import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/index';
@@ -101,6 +102,9 @@ export function getMentionKindIcon(
   kind: string,
   { path, className = MENTION_ICON_CLASS_NAME }: { path?: string; className?: string } = {}
 ): React.ReactNode {
+  if (kind === 'url') return <Link className={className} />;
+  if (kind === 'github_repo') return <Github className={className} />;
+  if (kind === 'browser_page') return <Globe className={className} />;
   if (kind === 'dir') return <MonochromeFolderIcon folderPath={path ?? ''} className={className} />;
   if (kind === 'file') return <MonochromeFileIcon filePath={path ?? ''} className={className} />;
   if (kind === 'session') return <MessagesSquare className={className} />;
@@ -146,6 +150,11 @@ const getMentionPath = (mention: Mention, text: string): string =>
  */
 export const getComposerMentionChip: MentionChipResolver = (mention: Mention, text: string) => {
   const kind = mention.kind ?? 'mention';
+  if (isInlineReferenceKind(kind))
+    return {
+      className: `${MENTION_CHIP_CLASS_NAME} underline decoration-dotted underline-offset-2`,
+      iconSlots: 0,
+    };
   if (kind === 'pasted_text') return pastedTextChip(text);
   if (!CHIP_KINDS.has(kind)) return null;
 

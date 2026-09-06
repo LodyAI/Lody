@@ -48,6 +48,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
 }));
 
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
+import type { Mention as MentionRange } from '../src/ui/mention/index';
 import { initI18n } from '../src/i18n';
 import { commands } from '../src/lib/commands';
 
@@ -88,6 +89,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
+    onMentionRangesChange?: (ranges: MentionRange[]) => void;
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -98,6 +100,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           skillAgent={props.skillAgent as never}
           mentionSource={props.mentionSource as never}
           commandsEnabled={props.commandsEnabled}
+          onMentionRangesChange={props.onMentionRangesChange}
           resetOnEmpty={false}
         />
       );
@@ -112,11 +115,6 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     return container.querySelector('textarea');
   }
 
-  /**
-   * The `<Mention>` tree renders a real `<label>`; the plain-textarea fallback
-   * only sets `aria-label`. That is the observable difference between a
-   * composer that can mention and one that silently cannot.
-   */
   function mentionTreeMounted() {
     return container.querySelector('label') !== null;
   }
@@ -127,7 +125,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   }
 
   /** Types into the composer the way the mention primitive observes it. */
-  async function typeInto(value: string) {
+  async function typeInto(value: string, inputType = 'insertText') {
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');
     await act(async () => {
@@ -139,15 +137,29 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       setter?.call(input, value);
       input.selectionStart = value.length;
       input.selectionEnd = value.length;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType }));
     });
   }
 
-  it('renders a plain textarea when no mention type is reachable', async () => {
-    await render({ value: '' });
+  it('recognizes pasted URLs without another mention source or activating skills', async () => {
+    let ranges: MentionRange[] = [];
+    await render({
+      value: '',
+      onMentionRangesChange: (next) => {
+        ranges = next;
+      },
+    });
+    const url = 'https://example.test/docs?view=full#section';
+    await typeInto(url, 'insertFromPaste');
 
-    expect(textarea()).not.toBeNull();
-    expect(mentionTreeMounted()).toBe(false);
+    expect(textarea()?.value).toBe(url);
+    expect(ranges).toEqual([{ start: 0, end: url.length, value: url, kind: 'url' }]);
+    expect(skillScanEnabled).not.toContain(true);
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+
+    await typeInto('@');
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+    expect(skillScanEnabled).not.toContain(true);
   });
 
   it('mounts the mention tree when sessions are the only mentionable type', async () => {

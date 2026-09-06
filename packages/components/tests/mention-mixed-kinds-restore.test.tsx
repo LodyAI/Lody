@@ -54,6 +54,7 @@ import {
   type PersistedMentionRange,
 } from '../src/components/mentions/mention-persistence';
 import { initI18n } from '../src/i18n';
+import { encodeBrowserPageReference } from '@lody/shared';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -144,6 +145,29 @@ describe('a draft with several kinds of mention keeps all of them', () => {
 
   it('keeps a session mention beside a file mention', async () => {
     await roundTrip('see @fix-ci and @src/app.ts', ['file', 'session']);
+  });
+  it('restores URL and browser references beside files without loading their sources', async () => {
+    const url = 'https://example.test/docs';
+    const text = `@src/app.ts ${url} ${url}`;
+    const target = encodeBrowserPageReference({
+      version: 1,
+      machineId: 'm',
+      sessionId: 's',
+      url,
+      title: 'Frozen title',
+    });
+    if (!target) throw new Error('Invalid fixture');
+    const persisted: PersistedMentionRange[] = [
+      { start: 0, end: 11, kind: 'file', value: 'src/app.ts' },
+      { start: 12, end: 12 + url.length, kind: 'url', value: url },
+      { start: 13 + url.length, end: text.length, kind: 'browser_page', value: target },
+    ];
+    await render({ value: text, persisted });
+    expect(kinds()).toEqual(['browser_page', 'file', 'url']);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render({ value: text, persisted });
+    expect(kinds()).toEqual(['browser_page', 'file', 'url']);
   });
 
   it('keeps a session mention beside a skill mention', async () => {
