@@ -20,56 +20,47 @@ Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/compone
 - EVERY desktop row also exposes Mark as unread from that shared ⋯ menu — Workspace,
   Local Project, Updated, and Pinned renderers must all wire it; hide the action once
   the row is unread.
-- `SessionMeta.openedBySessionId` (a Session created BY another, e.g. the
-  `lody_session_create` MCP tool) indents that row under its opener via
-  `lib/session-opened-by-tree.ts`. EVERY session list uses it — `session-list.tsx`
+- `SessionMeta.openedBySessionId` indents rows via `lib/session-opened-by-tree.ts`.
+  EVERY session list uses it — `session-list.tsx`
   groups, the local-project sections, and `sidebar-updated-session-list.tsx` (Updated
   bucket and Pinned section) — plus `sidebar-navigation-model.ts`, so keyboard nav
   matches what is rendered.
-- It is presentation only and is NOT `parentSessionId`: opened Sessions keep their own
-  workspace/lifecycle and stay first-class rows, while `parentSessionId` children never
-  reach the sidebar at all (`sessionListAtom`).
-- TWO fields, never merged: `openedBySessionId` is the PRECISE opener and drives
-  navigation; `openedByRowSessionId` is the sidebar ROW to indent under. They differ when
-  an agent inside a child Tab creates a Session, so `buildSidebarOpenerRowResolver`
-  (`sessions/session-list-rows.ts`) walks `parentSessionId` up to the root row. Never
-  "simplify" that by rewriting `openedBySessionId` to the root: "Go to Opener Session"
-  and the conversation's "Opened by" entry must land on the exact Tab that created it.
+- Opened-by is presentation only, not `parentSessionId`: preserve independent
+  workspace/lifecycle and first-class rows. `sessionListAtom` excludes child Tabs.
+- Keep `openedBySessionId` (precise opener/navigation) separate from
+  `openedByRowSessionId` (sidebar indent). `buildSidebarOpenerRowResolver` in
+  `sessions/session-list-rows.ts` must walk `parentSessionId` to the root row without
+  rewriting `openedBySessionId`. "Go to Opener Session" and "Opened by" must land on
+  the exact creating Tab; the linked guide explains why the fields differ.
 - The opener and unrelated top-level rows keep the exact flat-list alignment. The shared
   leading slot owns the node-centre affordance: an opener shows its disclosure at rest
   and swaps it for ⋯ on row hover; a child shows ├/└ and swaps those for ⋯ in the SAME
-  7px-centred position. It draws the tree UNCONDITIONALLY — a working / unread / waiting
-  row must never lose its nesting, which is the whole point of moving status out of it.
+  7px-centred position. Draw the tree unconditionally, including working/unread/waiting rows.
   Only a child widens that slot from 14px to 26px, producing the 12px title indent
   without shifting the row background. Keep connector geometry in
   `sidebar-row-shared.tsx`, and keep the context menu's expand/collapse item wired to the
   same toggle callback.
-- Desktop row status (working / waiting / unread) belongs to the END slot
-  (`SessionRowStatusIndicator` inside `SidebarRowEndSlot`) and nowhere else. While a
-  status shows it REPLACES that slot's resting content — line diff, `Mergeable`, worktree
-  glyph, PR icon, mobile time — so the right edge is one 14px mark; the metrics stay one
-  hover away in the desktop info card. Pass the three flags to the end slot, never to the
-  leading slot. The mobile chat rows keep their own leading-node rule
-  ([mobile/AGENTS.md](mobile/AGENTS.md)); do not assume the two match.
-- The resolver needs `allActiveSessions`, so any new list must take it from the sidebar
-  rather than re-deriving it from rows.
+- Desktop working/waiting/unread status belongs only in `SessionRowStatusIndicator`
+  inside `SidebarRowEndSlot`; pass its three flags there, never to the leading slot.
+  Status replaces ALL resting content (line diff, `Mergeable`, worktree glyph, PR icon,
+  mobile time) with one 14px mark; keep metrics in the desktop hover info card.
+  Mobile chat rows retain their separate [leading-node rule](mobile/AGENTS.md).
+- Pass the sidebar's `allActiveSessions` to the resolver; never derive it from list rows.
 - The tree never hides a Session: a missing, cross-section, cross-group, cycling, or
   deeper-than-one-level opener degrades to a top-level row, and the preview cap
   (`MAX_VISIBLE_SESSIONS` / `SHOW_FULL_BUCKET_THRESHOLD`) counts top-level rows.
-- Every list here is sorted by latest activity, so each surface passes `rootRank` and an
-  opener is ranked by its FRESHEST opened Session.
-- Collapse state is the shared `sidebarCollapsedOpenedBySessionsAtom` and defaults to
-  EXPANDED. Both navigation directions must stay reachable: the tree and the row context
-  menu's "Go to Opener Session" in every sidebar list,
-  `SessionHeaderMenu.openedByRelations`, and the in-conversation cards for successful
-  create Operations / the opened Session's precise opener. The mobile chat lists render
-  the same tree from the same two fields, per bucket, minus the disclosure — see
+- Keep latest-activity sorting: each surface passes `rootRank`; rank an opener by its
+  freshest opened Session.
+- Use `sidebarCollapsedOpenedBySessionsAtom`, default EXPANDED. Preserve both navigation
+  directions through every sidebar tree/row's "Go to Opener Session",
+  `SessionHeaderMenu.openedByRelations`, and conversation cards for successful create
+  Operations / the precise opener. Mobile renders the same two-field tree per bucket
+  without disclosure — see
   [mobile/AGENTS.md](mobile/AGENTS.md).
-- Session lifecycle actions traverse both relations: a root archive, restore, or delete
-  includes child Tabs and every independently opened descendant. Child Tabs share the
-  root's machine lifecycle command; independently opened Sessions enqueue their own. The
-  archive list keeps the opened-by indentation while child Tabs remain inside their
-  owning Session's archived-tab UI.
+- Root archive/restore/delete traverses both relations, including all child Tabs and
+  independently opened descendants. Child Tabs share the root's machine command;
+  independent Sessions enqueue their own. Preserve archive-list opened-by indentation
+  and keep child Tabs in their owner's archived-tab UI.
 
 ## Entry points, drafts, and layout
 
