@@ -88,8 +88,8 @@ describe('SessionGCManager', () => {
       {
         getSessionLastActivity: (sessionId) => sessionActivities.get(sessionId),
         hasActiveTurn: (sessionId) => activeTurns.has(sessionId),
-        hasActiveGoal: async (sessionId) => activeGoals.has(sessionId),
-        hasBackgroundWork: backgroundWork,
+        hasProtectedWork: async (sessionId) =>
+          activeGoals.has(sessionId) || (await backgroundWork(sessionId)),
         hasPendingUpdates: (sessionId) => pendingUpdates.has(sessionId),
         hasPendingUserWork: async (sessionId) => pendingUserWork.has(sessionId),
         isArchiveInFlight: (sessionId) => archiveInFlight.has(sessionId),
@@ -146,13 +146,37 @@ describe('SessionGCManager', () => {
       expect(cleanMock).not.toHaveBeenCalled();
     });
 
-    it('does not evict when background history cannot be read', async () => {
-      const manager = createManager({ idleTimeoutMs: 1000 });
-      sessionActivities.set('background' as SessionId, Date.now() - 60000);
-      backgroundWork.mockRejectedValue(new Error('history unavailable'));
-      await expect(manager.sweep()).rejects.toThrow('history unavailable');
-      expect(cleanMock).not.toHaveBeenCalled();
-    });
+    it.each(['idle', 'pressure', 'periodic'] as const)(
+      'protects unreadable history while continuing %s cleanup for other sessions',
+      async (mode) => {
+        const manager = createManager({ idleTimeoutMs: 1000, sweepIntervalMs: 500 });
+        const unreadable = 'unreadable' as SessionId;
+        const eligible = 'eligible' as SessionId;
+        sessionActivities.set(unreadable, Date.now() - 60000);
+        sessionActivities.set(eligible, Date.now() - 60000);
+        backgroundWork.mockImplementation(async (sessionId) => {
+          if (sessionId === unreadable) throw new Error('history unavailable');
+          return false;
+        });
+        mockedGetMemoryPressureSnapshot.mockResolvedValue({
+          availableMemoryBytes: 500 * 1024 * 1024,
+          effectiveMemoryLimitBytes: 32 * 1024 ** 3,
+        });
+        try {
+          if (mode === 'idle') await manager.sweep();
+          else if (mode === 'pressure') await manager.evictForMemoryPressure();
+          else {
+            manager.start();
+            await vi.advanceTimersByTimeAsync(600);
+          }
+          expect(cleanMock).toHaveBeenCalledTimes(1);
+          expect(cleanMock).toHaveBeenCalledWith(eligible);
+          expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('unreadable'));
+        } finally {
+          manager.stop();
+        }
+      }
+    );
   });
   describe('loadGCConfig', () => {
     it('returns default config with 20 minute timeout', () => {
@@ -646,6 +670,24 @@ describe('SessionGCManager', () => {
   });
 
   describe('start/stop', () => {
+    it('handles unexpected periodic sweep rejection and continues the next interval', async () => {
+      const manager = createManager({ sweepIntervalMs: 500 });
+      const sweep = vi
+        .spyOn(manager, 'sweep')
+        .mockRejectedValueOnce(new Error('unexpected sweep failure'))
+        .mockResolvedValue(undefined);
+      try {
+        manager.start();
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(sweep).toHaveBeenCalledTimes(2);
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          '[GC] Sweep failed: unexpected sweep failure'
+        );
+      } finally {
+        manager.stop();
+      }
+    });
+
     it('runs periodic sweep', async () => {
       const manager = createManager({
         idleTimeoutMs: 1000,

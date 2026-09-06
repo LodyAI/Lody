@@ -66,9 +66,9 @@ function resolveOwner(
   return null;
 }
 
-/** Root identities are pinned for each observed session generation, never reused by PID alone. */
+/** Only provider identities may pin roots; coarse ps lstart timestamps remain unassigned. */
 export class ObservedProcessAttribution {
-  private readonly roots = new Map<string, number>();
+  private readonly roots = new Map<string, string>();
 
   assign(
     entries: readonly ProcessTableEntry[],
@@ -82,10 +82,11 @@ export class ObservedProcessAttribution {
         const key = `${root.sessionId}:${root.startedAtMs}:${pid}`;
         currentKeys.add(key);
         const entry = byPid.get(pid);
-        if (!entry) continue;
+        if (!entry?.processIdentity) continue;
         const pinned = this.roots.get(key);
-        if (pinned === undefined) this.roots.set(key, entry.startedAtMs);
-        if ((pinned ?? entry.startedAtMs) === entry.startedAtMs) owners.set(pid, root.sessionId);
+        if (pinned === undefined) this.roots.set(key, entry.processIdentity);
+        if ((pinned ?? entry.processIdentity) === entry.processIdentity)
+          owners.set(pid, root.sessionId);
       }
     }
     for (const key of this.roots.keys()) if (!currentKeys.has(key)) this.roots.delete(key);

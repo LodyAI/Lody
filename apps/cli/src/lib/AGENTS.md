@@ -165,7 +165,11 @@ control-plane path is DEPRECATED; do not add functionality to it.
   Recent resource history retains only bounded observed samples in memory. The local
   `machine/get-resource-history` Machine RPC reads that buffer without probing; negotiate
   `resourceHistory` v1. History is workspace-scoped and excludes command lines/environment.
-  PID/start-time attribution is diagnostic only and never authorizes process termination.
+  Per-process attribution pins Windows creation-identity strings after first observation;
+  coarse POSIX `lstart` timestamps cannot establish identity, so those session process rows
+  are omitted. Aggregate resource estimates remain separate. History schemas reject unknown
+  nested resource fields and unsupported session statuses. Diagnostic attribution never
+  authorizes process termination.
 - Machine Flock writes for this CLI's own machine must be local-first: after `repo.flush()`,
   call `LoroDocumentManager.markMachineFlockDocDirty(...)` (or pass the manager as the
   sync scheduler) instead of awaiting `handle.syncOnce()` in the user/RPC request path.
@@ -305,6 +309,14 @@ control-plane path is DEPRECATED; do not add functionality to it.
   `tool_call` items in history — the CLI persists NO extra scheduled-task state (not in
   `SessionMeta`, not a new history item); see `@lody/shared`
   `collectPendingScheduledTasksFromHistory` + `nextCronFireMs`.
+  GC uses one history snapshot for active goals and background protection. Completed
+  scheduling tool calls protect the owning runtime until an explicit persisted cancellation;
+  an elapsed fire time is never proof of completion. Live pending/terminal work is checked
+  before and after asynchronous reads. Missing runtime ownership releases stale task-only
+  protection, while active goals remain persistent; a replacement runtime requires a fresh
+  eligibility check. If task completion/liveness is not observable for a live runtime,
+  preserve it conservatively instead of inventing a TTL. A failed history read protects only
+  its session and must not abort the sweep or become an unhandled interval rejection.
   INVARIANT: `history-apply.ts` strips `rawInput`/`rawOutput` from ALL generic tool calls
   (unstructured by spec) EXCEPT the four scheduling tools in `SCHEDULING_TOOL_NAMES`
   (`CronCreate/CronDelete/CronList/ScheduleWakeup`, matched via `_meta.lody.toolName`),

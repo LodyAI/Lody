@@ -10,6 +10,8 @@ export type ProcessTableEntry = {
   parentPid: number;
   processGroupId: number | null;
   startedAtMs: number;
+  /** Provider identity with finer precision than display timestamps; absent means unpinnable. */
+  processIdentity?: string;
   cpuTimeMicros: number;
   memoryBytes: number;
 };
@@ -25,6 +27,7 @@ const WindowsProcessSchema = z.object({
   ProcessId: z.coerce.number().int().nonnegative(),
   ParentProcessId: z.coerce.number().int().nonnegative(),
   CreationDateMs: z.coerce.number().finite().nonnegative(),
+  CreationIdentity: z.string().regex(/^\d+$/),
   KernelModeTime: z.coerce.number().finite().nonnegative(),
   UserModeTime: z.coerce.number().finite().nonnegative(),
   WorkingSetSize: z.coerce.number().finite().nonnegative(),
@@ -126,7 +129,7 @@ async function readDarwinProcessTable(): Promise<ProcessTableSnapshot> {
 async function readWindowsProcessTable(): Promise<ProcessTableSnapshot> {
   const command = [
     "$ProgressPreference = 'SilentlyContinue'; Get-CimInstance -ClassName Win32_Process",
-    'Select-Object ProcessId,ParentProcessId,KernelModeTime,UserModeTime,WorkingSetSize,@{Name="CreationDateMs";Expression={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}}',
+    'Select-Object ProcessId,ParentProcessId,KernelModeTime,UserModeTime,WorkingSetSize,@{Name="CreationDateMs";Expression={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}},@{Name="CreationIdentity";Expression={$_.CreationDate.ToUniversalTime().Ticks.ToString()}}',
     'ConvertTo-Json -Compress',
   ].join(' | ');
   const stdout = await runProbe(
@@ -146,6 +149,7 @@ async function readWindowsProcessTable(): Promise<ProcessTableSnapshot> {
       parentPid: item.ParentProcessId,
       processGroupId: null,
       startedAtMs: item.CreationDateMs,
+      processIdentity: item.CreationIdentity,
       cpuTimeMicros: (item.KernelModeTime + item.UserModeTime) / 10,
       memoryBytes: item.WorkingSetSize,
     })),

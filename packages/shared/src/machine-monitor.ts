@@ -26,14 +26,16 @@ export type MachineMonitorMeasurementQuality =
   | 'estimated-tree'
   | 'unavailable';
 
-export type MachineMonitorSessionStatus =
-  | 'initializing'
-  | 'running'
-  | 'waiting_permission'
-  | 'finalizing'
-  | 'idle'
-  | 'stopping'
-  | 'failed';
+const MachineMonitorSessionStatusSchema = z.enum([
+  'initializing',
+  'running',
+  'waiting_permission',
+  'finalizing',
+  'idle',
+  'stopping',
+  'failed',
+]);
+export type MachineMonitorSessionStatus = z.infer<typeof MachineMonitorSessionStatusSchema>;
 
 export type MachineMonitorResourceUsage = {
   memoryBytes: number | null;
@@ -130,7 +132,7 @@ export const MachineResourceHistorySchema = z
           .object({
             sampledAtMs: z.number().finite().nonnegative(),
             source: z.enum(['available', 'unavailable', 'not-sampled']),
-            cliControlPlane: MachineMonitorResourceUsageSchema.nullable(),
+            cliControlPlane: MachineMonitorResourceUsageSchema.strict().nullable(),
             memoryKind: z.enum(['rss-sum', 'physical-footprint-sum', 'working-set-sum']),
             processesTruncated: z.boolean(),
             sessionsTruncated: z.boolean(),
@@ -153,7 +155,7 @@ export const MachineResourceHistorySchema = z
                   .object({
                     sessionId: z.string(),
                     parentSessionId: z.string().nullable(),
-                    status: z.string(),
+                    status: MachineMonitorSessionStatusSchema,
                     cleanup: z
                       .object({
                         state: z.enum(['running', 'failed', 'completed']),
@@ -161,7 +163,7 @@ export const MachineResourceHistorySchema = z
                       })
                       .strict()
                       .nullable(),
-                    resource: MachineMonitorResourceUsageSchema,
+                    resource: MachineMonitorResourceUsageSchema.strict(),
                   })
                   .strict()
               )
@@ -180,15 +182,7 @@ const AcpSessionMonitorSnapshotSchema = z.object({
   parentSessionId: SessionIdSchema.nullable(),
   agentCliType: z.string().nullable(),
   agentType: z.string().nullable(),
-  status: z.enum([
-    'initializing',
-    'running',
-    'waiting_permission',
-    'finalizing',
-    'idle',
-    'stopping',
-    'failed',
-  ]),
+  status: MachineMonitorSessionStatusSchema,
   lastActivityAtMs: nullableFiniteNonNegative,
   startedAtMs: nullableFiniteNonNegative,
   resource: MachineMonitorResourceUsageSchema,

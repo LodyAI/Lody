@@ -9934,30 +9934,29 @@ export class MessageHandler {
     return hasPendingUserTurnActivation(meta);
   }
 
-  /** Observed terminal liveness and persisted tasks protect background work. */
-  async hasBackgroundWork(sessionId: SessionId): Promise<boolean> {
-    if (this.sessionManager.getSession(sessionId)?.terminalManager.hasRunningTerminals?.()) {
+  /** One history read covers goals and tasks; runtime ownership bounds task protection. */
+  async hasProtectedWork(sessionId: SessionId): Promise<boolean> {
+    const runtime = this.sessionManager.getSession(sessionId);
+    if (runtime?.terminalManager.hasRunningTerminals?.()) {
       return true;
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const history = await sessionDoc.getHistory();
-    return (
-      hasBackgroundWorkFromHistory(history) ||
-      this.sessionManager.getSession(sessionId)?.terminalManager.hasRunningTerminals?.() === true
-    );
-  }
-
-  /**
-   * Persistent active goals may drive a later autonomous ACP cycle even while
-   * no prompt is running. They are not a live-presence signal, but evicting the
-   * ACP process would discard that resumable session state.
-   */
-  async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const historyGoal = resolveLatestSessionGoalFromHistory(history);
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-    const historyGoal = resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory());
-    return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
+    // Goals intentionally persist beyond runtime exit. Task snapshots do not:
+    // once the owning runtime is gone they cannot pin its transient state.
+    if (isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal)) return true;
+    const currentRuntime = this.sessionManager.getSession(sessionId);
+    if (!currentRuntime) return false;
+    // A replacement arrived while reading. This snapshot cannot establish that
+    // replacement's idleness; defer its cleanup until a fresh eligibility check.
+    if (currentRuntime !== runtime) return true;
+    return (
+      currentRuntime.terminalManager.hasRunningTerminals?.() === true ||
+      hasBackgroundWorkFromHistory(history)
+    );
   }
 
   /**

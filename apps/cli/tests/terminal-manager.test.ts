@@ -420,17 +420,20 @@ it('protects live terminal work through MessageHandler before consulting empty h
   const terminalManager = releaseFixture([owned.handle]);
   const id = await terminalManager.createTerminal('acp-1', 'watch');
   const getHistory = vi.fn(async () => []);
+  const runtime = { terminalManager };
   const receiver = {
-    sessionManager: { getSession: () => ({ terminalManager }) },
-    workspaceDocument: { getOrCreateSessionDoc: async () => ({ getHistory }) },
+    sessionManager: { getSession: () => runtime },
+    workspaceDocument: {
+      getOrCreateSessionDoc: async () => ({ getHistory, getMetaState: async () => null }),
+    },
   };
   const sessionId = SessionIdSchema.parse('watch-session');
-  await expect(MessageHandler.prototype.hasBackgroundWork.call(receiver, sessionId)).resolves.toBe(
+  await expect(MessageHandler.prototype.hasProtectedWork.call(receiver, sessionId)).resolves.toBe(
     true
   );
   expect(getHistory).not.toHaveBeenCalled();
   owned.exit(0);
-  await expect(MessageHandler.prototype.hasBackgroundWork.call(receiver, sessionId)).resolves.toBe(
+  await expect(MessageHandler.prototype.hasProtectedWork.call(receiver, sessionId)).resolves.toBe(
     false
   );
   expect(getHistory).toHaveBeenCalledOnce();

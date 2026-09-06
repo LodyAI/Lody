@@ -27,13 +27,12 @@ it('uses the latest snapshot per task and supports resumed agents', () => {
   );
 });
 
-it('ignores raw scheduling and generic tool calls rather than inferring scheduler state', () => {
+it('ignores malformed cron and generic tool calls', () => {
   expect(
     hasBackgroundWorkFromHistory([
       {
         items: [
           { type: 'tool_call', toolName: 'CronCreate', status: 'completed' },
-          { type: 'tool_call', toolName: 'ScheduleWakeup', status: 'completed' },
           { type: 'tool_call', status: 'in_progress' },
           null,
           { type: 'subagent_task' },
@@ -41,6 +40,55 @@ it('ignores raw scheduling and generic tool calls rather than inferring schedule
       },
     ])
   ).toBe(false);
+});
+
+it('protects a completed scheduling call until explicit cron deletion', () => {
+  const create = {
+    type: 'tool_call',
+    toolName: 'CronCreate',
+    status: 'completed',
+    toolCallId: 'create-1',
+    rawInput: { cron: '* * * * *', recurring: true },
+    rawOutput: 'id: job-123',
+  };
+  const remove = {
+    type: 'tool_call',
+    toolName: 'CronDelete',
+    status: 'completed',
+    rawInput: { id: 'job-123' },
+  };
+  expect(hasBackgroundWorkFromHistory([{ items: [create] }])).toBe(true);
+  expect(hasBackgroundWorkFromHistory([{ items: [create, remove] }])).toBe(false);
+  expect(hasBackgroundWorkFromHistory([{ items: [create, { ...remove, status: 'failed' }] }])).toBe(
+    true
+  );
+});
+
+it('protects wakeups and one-shot schedules even after their expected fire time', () => {
+  const schedules = [
+    {
+      type: 'tool_call',
+      toolName: 'ScheduleWakeup',
+      status: 'completed',
+      recordedAtMs: 1,
+      rawInput: { delaySeconds: 1 },
+    },
+    {
+      type: 'tool_call',
+      toolName: 'CronCreate',
+      status: 'completed',
+      toolCallId: 'old-cron',
+      recordedAtMs: 1,
+      rawInput: { cron: '0 0 * * *', recurring: false },
+      rawOutput: 'id: old-job\nnextFireAt: 2000-01-01T00:00:00Z',
+    },
+  ];
+  for (const schedule of schedules) {
+    expect(hasBackgroundWorkFromHistory([{ items: [schedule] }])).toBe(true);
+    expect(hasBackgroundWorkFromHistory([{ items: [{ ...schedule, status: 'failed' }] }])).toBe(
+      false
+    );
+  }
 });
 
 it('keeps scheduled pending tasks protected regardless of historical timestamps', () => {

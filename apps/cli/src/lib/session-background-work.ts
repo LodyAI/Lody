@@ -1,6 +1,11 @@
-import { isRecord, SubagentTaskPayloadSchema, type SubagentTaskStatus } from '@lody/shared';
+import {
+  collectPendingScheduledTasksFromHistory,
+  isRecord,
+  SubagentTaskPayloadSchema,
+  type SubagentTaskStatus,
+} from '@lody/shared';
 
-/** Latest persisted task snapshots, not inferred cron fire times or generic tool activity. */
+/** Persisted task state and schedules; elapsed fire times never prove completion. */
 export function hasBackgroundWorkFromHistory(
   history: readonly { items?: readonly unknown[] }[]
 ): boolean {
@@ -12,5 +17,8 @@ export function hasBackgroundWorkFromHistory(
       if (parsed.success) latest.set(parsed.data.taskId, parsed.data.status);
     }
   }
-  return [...latest.values()].some((status) => status === 'pending' || status === 'in_progress');
+  return (
+    [...latest.values()].some((status) => status === 'pending' || status === 'in_progress') ||
+    collectPendingScheduledTasksFromHistory(history).length > 0
+  );
 }

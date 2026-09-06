@@ -186,6 +186,7 @@ describe('MessageHandler machine registration', () => {
       localProjectRemoval: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,
+      resourceHistory: 1,
     });
 
     await handler.cleanup();

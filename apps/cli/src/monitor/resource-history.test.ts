@@ -79,12 +79,28 @@ describe('resource history', () => {
       parentPid: 1,
       processGroupId: null,
       startedAtMs: 5,
+      processIdentity: '50000',
       memoryBytes: 1,
       cpuTimeMicros: 1,
     };
     expect(attribution.assign([root], roots).get(10)).toBe('session');
     attribution.assign([], roots);
-    const reused = { ...root, startedAtMs: 15 };
+    // Display timestamps may be equal even though the provider identifies a new process.
+    const reused = { ...root, processIdentity: '50001' };
     expect(attribution.assign([reused, { ...reused, pid: 11, parentPid: 10 }], roots).size).toBe(0);
+  });
+  it('leaves coarse POSIX observations unassigned even when PID and lstart match', () => {
+    const attribution = new ObservedProcessAttribution();
+    const roots = [{ sessionId: 'session' as SessionId, startedAtMs: 1, rootPids: [10] }];
+    const root = {
+      pid: 10,
+      parentPid: 1,
+      processGroupId: 10,
+      startedAtMs: 1000,
+      memoryBytes: 1,
+      cpuTimeMicros: 1,
+    };
+    expect(attribution.assign([root], roots).size).toBe(0);
+    expect(attribution.assign([root, { ...root, pid: 11, parentPid: 10 }], roots).size).toBe(0);
   });
 });

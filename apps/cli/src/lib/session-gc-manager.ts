@@ -95,10 +95,8 @@ export interface SessionGCDeps {
   getSessionLastActivity: (sessionId: SessionId) => number | undefined;
   /** Whether the session has an active turn (prompting or finalizing) */
   hasActiveTurn: (sessionId: SessionId) => boolean;
-  /** Whether the session has an active background goal that still needs its ACP runtime */
-  hasActiveGoal: (sessionId: SessionId) => boolean | Promise<boolean>;
-  /** Latest task snapshots still need this session runtime, including scheduled tasks. */
-  hasBackgroundWork: (sessionId: SessionId) => boolean | Promise<boolean>;
+  /** Goals, live terminals and background tasks from one history snapshot. */
+  hasProtectedWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   hasPendingUpdates: (sessionId: SessionId) => boolean;
   hasPendingUserWork: (sessionId: SessionId) => boolean | Promise<boolean>;
   isArchiveInFlight: (sessionId: SessionId) => boolean;
@@ -339,7 +337,11 @@ export class SessionGCManager {
         `pressureSignal=${pressureSignal}, ` +
         `maxEvictionsPerCall=${this.config.maxEvictionsPerCall})`
     );
-    this.sweepInterval = setInterval(() => void this.sweep(), this.config.sweepIntervalMs);
+    this.sweepInterval = setInterval(() => {
+      void this.sweep().catch((error: unknown) => {
+        this.deps.logger.error(`[GC] Sweep failed: ${formatErrorMessage(error)}`);
+      });
+    }, this.config.sweepIntervalMs);
   }
 
   stop(): void {
@@ -670,11 +672,14 @@ export class SessionGCManager {
       return false;
     }
 
-    if (await this.deps.hasActiveGoal(sessionId)) {
-      return false;
-    }
-
-    if (await this.deps.hasBackgroundWork(sessionId)) {
+    try {
+      if (await this.deps.hasProtectedWork(sessionId)) return false;
+    } catch (error) {
+      // An unreadable session may still own work. Protect only that session so
+      // one history failure cannot prevent reclaiming every other idle runtime.
+      this.deps.logger.warn(
+        `[GC] Cannot inspect protected work for ${sessionId}: ${formatErrorMessage(error)}`
+      );
       return false;
     }
 
