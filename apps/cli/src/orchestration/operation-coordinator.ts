@@ -355,7 +355,7 @@ export class LodyOperationCoordinator {
       );
     } catch (error) {
       if (!isAtDeadline()) throw error;
-      const failedOperation = this.withStore((store) =>
+      this.withStore((store) =>
         store.finish(operation.requesterSessionId, operation.operationId, {
           type: 'error',
           error: makeLodyError(
@@ -367,7 +367,6 @@ export class LodyOperationCoordinator {
           ),
         })
       );
-      await this.writeOperationProgress(failedOperation);
       this.clearDeadline(operation);
       this.clearOperationMaterializationRetries(operation);
       return;
@@ -457,7 +456,7 @@ export class LodyOperationCoordinator {
       } else if (item.status === 'active' && item.inputDurable) expected.set(key, 'created');
     }
     // Previously published targets stay owned even when metadata is temporarily absent.
-    for (const [key] of published) if (!expected.has(key)) return false;
+    if (published.size !== expected.size) return false;
     return [...expected].every(
       ([key, status]) =>
         status !== 'created' && status !== 'running' && published.get(key) === status
@@ -973,10 +972,6 @@ export class LodyOperationCoordinator {
     const operation = this.withStore((store) =>
       store.get(delivery.requesterSessionId, delivery.operationId)
     );
-    // Progress is presentation-only, but pending Deliveries are the durable
-    // repair window after an Operation finished. Retry terminal progress here
-    // without letting failures block expiry, continuation, or consumption.
-    await this.writeOperationProgress(operation);
     if (this.now() >= Date.parse(operation.deadlineAt) + DELIVERY_EXPIRY_GRACE_MS) {
       this.consumeDelivery(delivery, reason, 'expired_stale');
       return;

@@ -104,10 +104,8 @@ export const mergeOperationProgressContent = (
     mergedItems.set(getOperationProgressTargetKey(item.target), item);
   }
   for (const item of next.items) {
-    mergedItems.set(
-      getOperationProgressTargetKey(item.target),
-      mergeProgressItem(mergedItems.get(getOperationProgressTargetKey(item.target)), item)
-    );
+    const key = getOperationProgressTargetKey(item.target);
+    mergedItems.set(key, mergeProgressItem(mergedItems.get(key), item));
   }
   return {
     ...next,
@@ -153,7 +151,7 @@ export const upsertOperationProgressHistory = async (
     const existing = duplicates[0];
     const existingProgress = duplicates
       .flatMap((entry) => entry.items ?? [])
-      .filter((item): item is OperationProgressContent => item.type === 'operation_progress')
+      .filter((item) => item.type === 'operation_progress')
       .reduce<OperationProgressContent | undefined>(
         (merged, item) => mergeOperationProgressContent(merged, item),
         undefined

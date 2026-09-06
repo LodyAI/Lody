@@ -637,3 +637,19 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
     right.dispose();
   }
 });
+
+it('preserves a published label when a later snapshot omits it', () => {
+  const target = { sessionId: 'labelled-child' as SessionId, userTurnId: 'turn-1' };
+  const content: OperationProgressContent = {
+    type: 'operation_progress',
+    operationKind: 'session_create',
+    operationId: 'label-test',
+    items: [{ target, status: 'created', label: 'Keep this label' }],
+  };
+  expect(
+    mergeOperationProgressContent(content, {
+      ...content,
+      items: [{ target, status: 'running' }],
+    }).items
+  ).toEqual([{ target, status: 'running', label: 'Keep this label' }]);
+});
