@@ -3859,5 +3859,17 @@
   "sessions.fileActions.fileMissing": "That file no longer exists.",
   "sessions.fileActions.openFailed": "Could not open that file.",
   "sessions.fileActions.more": "File actions",
-  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it."
+  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it.",
+  "storageCrisis.title": "Lody ran out of local storage",
+  "storageCrisis.descriptionQuota": "This device is out of space, so Lody could not save your work locally. It has stopped writing to local storage to avoid losing data.",
+  "storageCrisis.descriptionUnavailable": "Lody's local database stopped responding, usually because the device ran out of space. It has stopped writing to local storage to avoid losing data.",
+  "storageCrisis.stepsTitle": "How to recover",
+  "storageCrisis.stepFreeSpace": "Free up disk space on this device — empty the trash, or delete large files you no longer need.",
+  "storageCrisis.stepRestartDesktop": "Restart Lody. Freeing space is not enough on its own: the local database only reopens in a new app process.",
+  "storageCrisis.stepRestartWeb": "Reload this page. Freeing space is not enough on its own: the local database only reopens on a fresh page load.",
+  "storageCrisis.syncedWorkSafe": "Work that already synced is unaffected and comes back after the restart.",
+  "storageCrisis.restart": "Restart Lody",
+  "storageCrisis.reload": "Reload Lody",
+  "storageCrisis.quit": "Quit Lody",
+  "storageCrisis.technicalDetails": "Technical details"
 }

@@ -11,6 +11,7 @@ import { ThemeProvider } from '../theme-provider';
 import { LanguageProvider } from '../i18n';
 import { Toaster } from '@/ui/sonner';
 import { NotFound } from '@/components/not-found';
+import { StorageCrisisDialog } from '@/components/storage-crisis-dialog';
 import { TooltipProvider } from '@/ui';
 import { RuntimeProvider } from '../providers/runtime-provider';
 import { markStartupNavigationForEagerSync } from '../providers/startup-network-idle';
@@ -214,6 +215,9 @@ function RootApp() {
             <LanguageProvider>
               <>
                 <Toaster />
+                {/* Above the runtime on purpose: a full or dead repo
+                    IndexedDB can latch while the runtime is still opening. */}
+                <StorageCrisisDialog />
                 <RuntimeProvider>
                   {/* Location-driven effects and the Outlet boundary subscribe to
                       router state in these two small components, so a navigation

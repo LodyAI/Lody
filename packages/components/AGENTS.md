@@ -57,6 +57,12 @@ mobile surfaces. Background for the rules below:
 - `maybeClearLodyCacheOnBoot` runs at most once per page load and is shared by
   `AppInitializer` (so a user wedged before any workspace still gets the wipe) and
   `RuntimeProvider` (which must await it before opening the repo IndexedDB).
+- A full or dead repo IndexedDB latches ONE one-way breaker
+  ([storage crisis](../../.agents/docs/components-storage-crisis.md)) inside the adapter
+  wrapping `LoroRepo.create`'s adaptor, never at a call site. Once latched it fails
+  closed on reads too, never falls back to an in-memory repo, and never retries:
+  recovery is `restartApp()`, not a reload. Raw IndexedDB DOMException text must not
+  reach a toast.
 - `stuck-connection-banner.tsx` (mounted once in `MainLayout`) surfaces the same
   cache-clear flow after the control connection has been continuously `loading` for 45s.
   It is observational only: it must never interrupt, retry, or time out the connection

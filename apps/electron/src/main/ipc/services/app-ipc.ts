@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
-import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
@@ -392,5 +392,22 @@ export class AppIpc extends IpcService {
     const { event } = getIpcContext()
     const window = findWindow(event.sender)
     if (window) requestRendererReload(window)
+  }
+
+  /**
+   * Quit and relaunch in a NEW process. Required by the storage-crisis recovery
+   * screen: a renderer reload keeps the same process, and Chromium keeps a
+   * dying IndexedDB backing store bound to it, so only a relaunch recovers once
+   * the user has freed disk space.
+   */
+  @IpcMethod()
+  async restartApp() {
+    app.relaunch()
+    app.quit()
+  }
+
+  @IpcMethod()
+  async quitApp() {
+    app.quit()
   }
 }

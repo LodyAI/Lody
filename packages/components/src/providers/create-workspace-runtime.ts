@@ -106,6 +106,7 @@ import { WorkspaceMachineMonitorTransport } from './workspace-machine-monitor-tr
 import { WorkspaceLocalMachineMonitorTransport } from './workspace-local-machine-monitor-transport';
 import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
+import { createCrisisAwareStorageAdapter } from './crisis-aware-storage-adapter';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import { listDocMetaEntries } from '@/lib/doc-meta-batch';
@@ -390,9 +391,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
   const repo = await LoroRepo.create({
-    storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: 'lody-loro-repo-db-' + deps.workspaceId,
-    }),
+    // Fail-closed breaker for a full or dying repo IndexedDB. It has to wrap the
+    // adaptor here rather than guard a writer: `openPersistedDoc` for a NEW
+    // session room already runs a readwrite transaction, so a disk-full store
+    // breaks session creation on the read path, and every other repo writer
+    // (archive, send, catalog) hits the same dead connection right after.
+    storageAdapter: createCrisisAwareStorageAdapter(
+      new IndexedDBStorageAdaptor({
+        dbName: 'lody-loro-repo-db-' + deps.workspaceId,
+      })
+    ),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },

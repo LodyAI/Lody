@@ -3859,5 +3859,17 @@
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.openFailed": "无法打开该文件。",
   "sessions.fileActions.more": "文件操作",
-  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。"
+  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。",
+  "storageCrisis.title": "Lody 的本地存储空间不足",
+  "storageCrisis.descriptionQuota": "本机磁盘空间已满，Lody 无法把你的内容保存到本地。为避免数据丢失，它已停止写入本地存储。",
+  "storageCrisis.descriptionUnavailable": "Lody 的本地数据库已停止响应，通常是因为设备磁盘空间耗尽。为避免数据丢失，它已停止写入本地存储。",
+  "storageCrisis.stepsTitle": "如何恢复",
+  "storageCrisis.stepFreeSpace": "先在本机腾出磁盘空间——清空回收站，或删除不再需要的大文件。",
+  "storageCrisis.stepRestartDesktop": "重启 Lody。仅腾出空间还不够：本地数据库只有在新的应用进程中才会重新打开。",
+  "storageCrisis.stepRestartWeb": "重新加载本页。仅腾出空间还不够：本地数据库只有在重新加载页面后才会重新打开。",
+  "storageCrisis.syncedWorkSafe": "已经同步的内容不受影响，重启后会重新出现。",
+  "storageCrisis.restart": "重启 Lody",
+  "storageCrisis.reload": "重新加载 Lody",
+  "storageCrisis.quit": "退出 Lody",
+  "storageCrisis.technicalDetails": "技术详情"
 }
