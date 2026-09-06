@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { usePostHog } from '@posthog/react';
@@ -24,6 +24,7 @@ import {
 } from '@/ui/select';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -36,6 +37,7 @@ import {
 } from '@/ui/sheet';
 import {
   createCustomPathLauncherId,
+  buildPathLauncherProbes,
   DEFAULT_PATH_LAUNCHER_PREFERENCE,
   getAvailablePathLauncherOptions,
   getCustomPathLauncherOptionId,
@@ -83,7 +85,7 @@ export function PathLaunchersSettings({
   const [selectOpen, setSelectOpen] = useState(false);
   const [draft, setDraft] = useState<PathLauncherDraft | null>(null);
 
-  const pathLauncherOptions = useMemo(
+  const launcherCandidates = useMemo(
     () =>
       getAvailablePathLauncherOptions({
         customLaunchers: preference.customLaunchers,
@@ -92,11 +94,57 @@ export function PathLaunchersSettings({
       }),
     [isElectron, platform, preference.customLaunchers]
   );
+  const [availableLaunchers, setAvailableLaunchers] = useState<{
+    candidates: typeof launcherCandidates;
+    ids: Set<string>;
+  } | null>(null);
+  useEffect(() => {
+    if (!isElectron) return;
+    const services = getIpcServices();
+    if (!services) return;
+
+    let cancelled = false;
+    const launchers = buildPathLauncherProbes(
+      launcherCandidates.filter((launcher) => launcher.kind !== 'custom'),
+      PREVIEW_SAMPLE_PATH,
+      platform
+    );
+    void services.app.probePathLaunchers({ launchers }).then(
+      (result) => {
+        if (!cancelled) {
+          setAvailableLaunchers({
+            candidates: launcherCandidates,
+            ids: new Set(result.availableIds),
+          });
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setAvailableLaunchers({ candidates: launcherCandidates, ids: new Set() });
+        }
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [isElectron, platform, launcherCandidates, selectOpen]);
+  const pathLauncherOptions = useMemo(
+    () =>
+      launcherCandidates.filter(
+        (launcher) =>
+          !isElectron ||
+          launcher.kind === 'custom' ||
+          (availableLaunchers?.candidates === launcherCandidates &&
+            availableLaunchers.ids.has(getPathLauncherId(launcher)))
+      ),
+    [isElectron, launcherCandidates, availableLaunchers]
+  );
   const selectedLauncher = useMemo(
     () => resolveSelectedPathLauncher(preference.selectedLauncherId, pathLauncherOptions),
     [pathLauncherOptions, preference.selectedLauncherId]
   );
-  const selectedLauncherId = getPathLauncherId(selectedLauncher);
+  const selectedLauncherId =
+    pathLauncherOptions.length > 0 ? getPathLauncherId(selectedLauncher) : '';
 
   const templateValidation = useMemo(
     () =>
@@ -201,8 +249,10 @@ export function PathLaunchersSettings({
               aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
               className="w-full sm:w-[220px]"
             >
-              <SelectValue>
-                <LauncherOptionContent launcher={selectedLauncher} />
+              <SelectValue
+                placeholder={t('settings.pathLaunchers.default.label', 'Default launcher')}
+              >
+                {selectedLauncherId ? <LauncherOptionContent launcher={selectedLauncher} /> : null}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>

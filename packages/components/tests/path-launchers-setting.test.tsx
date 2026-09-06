@@ -15,6 +15,11 @@ vi.mock('@posthog/react', () => ({
   usePostHog: () => null,
 }));
 
+const { probePathLaunchers } = vi.hoisted(() => ({ probePathLaunchers: vi.fn() }));
+vi.mock('../src/lib/electron-ipc-client', () => ({
+  getIpcServices: () => ({ app: { probePathLaunchers } }),
+}));
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,6 +40,7 @@ describe('PathLaunchersSettings', () => {
   beforeEach(async () => {
     await initI18n('en');
     localStorage.clear();
+    probePathLaunchers.mockReset().mockResolvedValue({ availableIds: ['vscode', 'cursor'] });
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -136,6 +142,32 @@ describe('PathLaunchersSettings', () => {
     expect(sheet?.className).toContain('bottom-0');
     expect(sheet?.className).toContain('slide-in-from-bottom');
     expect(sheet?.textContent).toContain('Edit launcher');
+  });
+
+  it('filters uninstalled built-ins and refreshes availability when opening the menu', async () => {
+    probePathLaunchers.mockResolvedValue({ availableIds: ['cursor'] });
+    await renderSettings();
+    expect(getSelectTrigger().textContent).toContain('Cursor');
+    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('vscode');
+
+    probePathLaunchers.mockResolvedValue({ availableIds: ['zed'] });
+    await openSelect();
+    const labels = Array.from(document.querySelectorAll('[role="option"]')).map(
+      (option) => option.textContent
+    );
+    expect(labels).toContain('Zed');
+    expect(labels).not.toContain('Cursor');
+    expect(labels).not.toContain('VS Code');
+  });
+
+  it('does not display a fallback editor when the probe fails and still allows creation', async () => {
+    probePathLaunchers.mockRejectedValue(new Error('Probe unavailable'));
+    await renderSettings();
+    expect(getSelectTrigger().textContent).not.toContain('VS Code');
+    await openSelect();
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    await chooseOption('Custom launcher');
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Add custom launcher');
   });
 
   async function renderSettings(): Promise<void> {
