@@ -74,7 +74,6 @@ import {
   MachineUpgradeRequestValidated,
   MachineUpgradeResponse,
   MachineAcpCapabilitiesRefreshRequestValidated,
-  MachineAcpCapabilitiesRefreshResponse,
   type MachineAcpAuthenticateRequestValidated,
   type MachineAcpAuthenticateResponse,
   SessionCodeCollabHostStartRequestValidated,
@@ -119,7 +118,6 @@ import {
   SESSION_FILE_MAX_SIZE_BYTES,
   SESSION_FILE_PART_SIZE_BYTES,
   SESSION_FILE_PREVIEW_SNIFF_BYTES,
-  type AcpConfigOptionSummary,
   SESSION_IMAGE_ALLOWED_MIME_TYPES,
   SESSION_IMAGE_MAX_COUNT,
   SESSION_IMAGE_MAX_SIZE_BYTES,
@@ -284,7 +282,11 @@ import {
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
-import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import {
+  fetchAcpCapabilities,
+  type FetchAcpCapabilitiesOptions,
+  type FetchedAcpCapabilities,
+} from '@/agent/acp-capabilities';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -8391,16 +8393,7 @@ export class MessageHandler {
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides,
     options?: FetchAcpCapabilitiesOptions
-  ): Promise<{
-    modes: NonNullable<MachineAcpCapabilitiesRefreshResponse['modes']>;
-    models: NonNullable<MachineAcpCapabilitiesRefreshResponse['models']>;
-    configOptions?: AcpConfigOptionSummary[];
-    availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
-    sessionFork: boolean;
-    acknowledgedSteer: boolean;
-    modelReasoningEfforts?: Record<string, string[]>;
-    capabilitySourceVersion?: string;
-  }> {
+  ): Promise<FetchedAcpCapabilities> {
     return fetchAcpCapabilities(
       cliType,
       agentType,

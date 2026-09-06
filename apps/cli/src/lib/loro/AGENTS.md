@@ -48,6 +48,17 @@ Rules:
 The dispatch watcher's contract, "session metadata is the activation index", is
 documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
 
+## ACP capability rows carry the per-model catalog forward
+
+`MachineDocument.updateAcpCapabilities` takes the catalog as a write command
+(`AcpCapabilityCatalogWrite`), not as a plain field: an omitted
+`configOptionsByModel` inherits the stored catalog for the same config and the
+same `cliType`/`agentType` across `sourceVersion` changes, `null` clears it
+because the agent confirmed it publishes none, and a map (including `{}`)
+replaces it. `null` is consumed before the entry is built and never reaches the
+Flock row or the wire schema. A session snapshot must not drop a catalog it did
+not observe, and a probe that observed "none" must not leave a stale one behind.
+
 ## Shared ACP runtime config contains no secrets
 
 `SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the

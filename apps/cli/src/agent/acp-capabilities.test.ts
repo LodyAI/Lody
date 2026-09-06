@@ -395,9 +395,20 @@ describe('fetchAcpCapabilities', () => {
     const customResult = await fetchAcpCapabilities('custom', 'cursor', createSilentLogger());
     const builtinResult = await fetchAcpCapabilities('builtin', 'claude', createSilentLogger());
 
+    expect(Object.hasOwn(customResult, 'configOptionsByModel')).toBe(false);
+    expect(Object.hasOwn(builtinResult, 'configOptionsByModel')).toBe(false);
     expect(customResult.configOptionsByModel).toBeUndefined();
     expect(builtinResult.configOptionsByModel).toBeUndefined();
     expect(mocks.fetchCursorModelCatalog).not.toHaveBeenCalled();
+  });
+
+  it('clears the Cursor model catalog when the agent reports method not found', async () => {
+    mocks.fetchCursorModelCatalog.mockResolvedValue(undefined);
+
+    const result = await fetchAcpCapabilities('registry', 'cursor', createSilentLogger());
+
+    expect(Object.hasOwn(result, 'configOptionsByModel')).toBe(true);
+    expect(result.configOptionsByModel).toBeNull();
   });
 
   it('shuts down the temp agent when the Cursor catalog fetch is incomplete', async () => {

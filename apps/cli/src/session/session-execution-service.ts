@@ -55,6 +55,7 @@ import {
   hasBuiltinRuntimeOverrideValues,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
+  isRegistryCursorAgent,
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
@@ -87,6 +88,7 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { fetchCursorModelCatalog } from '@/agent/cursor-acp';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
 import {
   AcpAuthenticationManager,
@@ -99,7 +101,11 @@ import { captureCli } from '@/lib/analytics/posthog';
 import type { SessionActivePresencePhase } from '@/lib/loro/session-active-presence';
 import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
-import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import type {
+  AcpCapabilityCatalogWrite,
+  LoroDocumentManager,
+  SessionDocument,
+} from '@/lib/loro/doc';
 import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import { resolveResumableAcpSessionId } from './session-dispatch-logic';
@@ -510,7 +516,7 @@ export type SessionExecutionServiceDeps = {
     modes: NonNullable<MachineAcpCapabilitiesRefreshResponse['modes']>;
     models: NonNullable<MachineAcpCapabilitiesRefreshResponse['models']>;
     configOptions?: AcpConfigOptionSummary[];
-    configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
+    configOptionsByModel?: AcpCapabilityCatalogWrite;
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
@@ -4906,6 +4912,28 @@ export class SessionExecutionService {
           : existing?.sourceVersion === sourceVersion
             ? existing.availableCommands
             : undefined;
+      let configOptionsByModel: AcpCapabilityCatalogWrite | undefined;
+      if (
+        isRegistryCursorAgent({
+          cliType: config.agentCliType,
+          agentType: config.agentType,
+        }) &&
+        session.agentClient !== null
+      ) {
+        try {
+          const catalog = await fetchCursorModelCatalog({
+            client: session.agentClient,
+            logger: this.deps.logger,
+          });
+          configOptionsByModel = catalog ?? null;
+        } catch (error: unknown) {
+          this.deps.logger.debug(
+            `[${session.sessionId}] Keeping the stored Cursor model catalog: ${formatErrorMessage(
+              error
+            )}`
+          );
+        }
+      }
       await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         agentConfigId,
@@ -4918,7 +4946,8 @@ export class SessionExecutionService {
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
-        capabilities.acknowledgedSteer
+        capabilities.acknowledgedSteer,
+        configOptionsByModel !== undefined ? { configOptionsByModel } : {}
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
