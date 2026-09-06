@@ -43,19 +43,22 @@ const isOperationProgressContent = (item: MessageContent): item is OperationProg
 const progressStatusForItem = (
   operation: StoredLodyOperation,
   item: LodyOperationItemResult,
-  statusByTarget?: OperationProgressStatusByTarget
+  statusByTarget?: OperationProgressStatusByTarget,
+  materializedTargets?: ReadonlySet<string>
 ): OperationProgressStatus | null => {
   if (!('target' in item) || !item.target) return null;
-  const targetStatus = statusByTarget?.get(getOperationProgressTargetKey(item.target));
+  const key = getOperationProgressTargetKey(item.target);
+  const targetStatus = statusByTarget?.get(key);
+  const wasMaterialized = targetStatus !== undefined || materializedTargets?.has(key);
   if (item.status === 'succeeded') return item.status;
   if (item.status === 'failed' || item.status === 'cancelled') {
-    return targetStatus ? item.status : null;
+    return wasMaterialized ? item.status : null;
   }
   if (operation.completion?.type === 'cancelled') {
-    return targetStatus || item.inputDurable ? 'cancelled' : null;
+    return targetStatus ?? (wasMaterialized || item.inputDurable ? 'cancelled' : null);
   }
   if (operation.completion?.type === 'error') {
-    return targetStatus || item.inputDurable ? 'failed' : null;
+    return targetStatus ?? (wasMaterialized || item.inputDurable ? 'failed' : null);
   }
   // Preallocated target ids are not navigable evidence. Wait until the target
   // Session/UserTurn is durable before publishing it as a created card.
@@ -65,11 +68,12 @@ const progressStatusForItem = (
 
 export const buildOperationProgressContent = (
   operation: StoredLodyOperation,
-  statusByTarget?: OperationProgressStatusByTarget
+  statusByTarget?: OperationProgressStatusByTarget,
+  materializedTargets?: ReadonlySet<string>
 ): OperationProgressContent | null => {
   if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return null;
   const items = operation.items.reduce<OperationProgressItem[]>((acc, item) => {
-    const status = progressStatusForItem(operation, item, statusByTarget);
+    const status = progressStatusForItem(operation, item, statusByTarget, materializedTargets);
     if (!status || !('target' in item) || !item.target) return acc;
     acc.push({
       target: item.target,
@@ -142,15 +146,12 @@ export const upsertOperationProgressHistory = async (
     const existingIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
     const existing = existingIndex >= 0 ? history[existingIndex] : undefined;
     const existingProgress = existing?.items?.find(isOperationProgressContent);
-    // A published card already proves materialization, even when its target's
-    // replica is unavailable at timeout/cancellation. Use that evidence before
-    // filtering terminal items so an existing card cannot remain stuck running.
-    const materializedStatuses = new Map(statusByTarget);
-    for (const item of existingProgress?.items ?? []) {
-      const key = getOperationProgressTargetKey(item.target);
-      if (!materializedStatuses.has(key)) materializedStatuses.set(key, item.status);
-    }
-    const content = buildOperationProgressContent(operation, materializedStatuses);
+    // A prior card proves existence, not the current execution state. Keep that
+    // evidence separate so a stale running snapshot cannot mask root termination.
+    const materializedTargets = new Set(
+      (existingProgress?.items ?? []).map((item) => getOperationProgressTargetKey(item.target))
+    );
+    const content = buildOperationProgressContent(operation, statusByTarget, materializedTargets);
     if (!content) return history;
     const merged = mergeOperationProgressContent(existingProgress, content);
     const nextItems = [merged as MessageContent];

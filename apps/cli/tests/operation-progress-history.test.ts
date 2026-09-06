@@ -429,3 +429,65 @@ it.each(['succeeded', 'failed', 'cancelled'] as const)(
     }
   }
 );
+
+it.each(['cancelled', 'error'] as const)(
+  'preserves fresh target evidence after root %s without treating prior cards as fresh',
+  async (completionType) => {
+    const target = { sessionId: 'child-1' as SessionId, userTurnId: 'turn-1' };
+    const operation: StoredLodyOperation = {
+      ...baseOperation([{ status: 'active', target, inputDurable: true }]),
+      state: 'finished',
+      completion:
+        completionType === 'cancelled'
+          ? { type: 'cancelled' }
+          : {
+              type: 'error',
+              error: { code: 'COORDINATOR_FAILED', message: 'Unavailable', retryable: false },
+            },
+    };
+    const now = () => Date.parse('2026-01-01T00:00:01.000Z');
+    let history: SessionHistoryInput[] = [];
+    const doc = {
+      updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history = update(history);
+      },
+    };
+    const statusOf = () => {
+      const content = history[0]?.items?.[0];
+      return content?.type === 'operation_progress' ? content.items[0]?.status : undefined;
+    };
+    for (const status of ['running', 'succeeded', 'failed', 'cancelled'] as const) {
+      expect(
+        buildOperationProgressContent(
+          operation,
+          new Map([[getOperationProgressTargetKey(target), status]])
+        )?.items
+      ).toEqual([{ target, status }]);
+    }
+    // A failed best-effort cancellation must not freeze the card as cancelled.
+    await upsertOperationProgressHistory(
+      doc,
+      operation,
+      now,
+      new Map([[getOperationProgressTargetKey(target), 'running']])
+    );
+    expect(statusOf()).toBe('running');
+    await upsertOperationProgressHistory(
+      doc,
+      operation,
+      now,
+      new Map([[getOperationProgressTargetKey(target), 'succeeded']])
+    );
+    expect(statusOf()).toBe('succeeded');
+
+    history = [];
+    await upsertOperationProgressHistory(
+      doc,
+      operation,
+      now,
+      new Map([[getOperationProgressTargetKey(target), 'running']])
+    );
+    await upsertOperationProgressHistory(doc, operation, now);
+    expect(statusOf()).toBe(completionType === 'cancelled' ? 'cancelled' : 'failed');
+  }
+);
