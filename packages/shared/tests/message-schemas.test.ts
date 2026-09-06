@@ -314,6 +314,86 @@ describe('message-schemas machine ACP capabilities refresh', () => {
       response.capability
     );
   });
+
+  it('accepts a capability whose configOptionsByModel carries the per-model catalog', () => {
+    const configOptionsByModel = {
+      'claude-opus-4-7': [
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'true',
+          options: [
+            { value: 'false', name: 'Off' },
+            { value: 'true', name: 'On' },
+          ],
+        },
+      ],
+      'gemini-3.1-pro': [],
+    };
+    const response = {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: 'machine-1',
+      configId: 'config-1',
+      cliType: 'registry',
+      agentType: 'deepseek',
+      success: true,
+      capability: {
+        cliType: 'registry',
+        agentType: 'deepseek',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        sourceVersion: 'registry:deepseek:test',
+        modes: [],
+        models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'kimi-k3',
+            options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+          },
+        ],
+        modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+        configOptionsByModel,
+        sessionFork: false,
+        fetchedAt: 1,
+      },
+    };
+
+    expect(MachineAcpCapabilitiesRefreshResponseSchema.safeParse(response).success).toBe(true);
+    expect(
+      MachineAcpCapabilitiesRefreshResponseSchema.parse(response).capability?.configOptionsByModel
+    ).toEqual(configOptionsByModel);
+  });
+
+  it('still rejects unknown capability fields', () => {
+    const response = {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: 'machine-1',
+      configId: 'config-1',
+      cliType: 'registry',
+      agentType: 'deepseek',
+      success: true,
+      capability: {
+        cliType: 'registry',
+        agentType: 'deepseek',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        sourceVersion: 'registry:deepseek:test',
+        modes: [],
+        models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+        catalogByModel: {},
+        sessionFork: false,
+        fetchedAt: 1,
+      },
+    };
+
+    expect(MachineAcpCapabilitiesRefreshResponseSchema.safeParse(response).success).toBe(false);
+  });
 });
 
 describe('message-schemas machine ACP authentication', () => {
