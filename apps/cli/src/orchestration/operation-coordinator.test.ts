@@ -1354,9 +1354,14 @@ describe('LodyOperationCoordinator', () => {
     ]);
   });
 
-  it.each([false, true])(
-    'only suppresses batch fallback cards with complete coverage (%s)',
-    async (completeCoverage) => {
+  it.each([
+    { completeCoverage: false, progressStatus: 'succeeded' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'created' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'running' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'succeeded' as const, shouldLink: true },
+  ])(
+    'only suppresses current complete batch cards ($completeCoverage, $progressStatus)',
+    async ({ completeCoverage, progressStatus, shouldLink }) => {
       const harness = await makeHarness({
         operationKind: 'session_create_many',
         failProgressHistoryWrites: true,
@@ -1393,7 +1398,7 @@ describe('LodyOperationCoordinator', () => {
               operationKind: 'session_create_many',
               items: targets
                 .slice(0, completeCoverage ? 2 : 1)
-                .map((target) => ({ target, status: 'created' })),
+                .map((target) => ({ target, status: progressStatus })),
             },
           ],
         },
@@ -1408,7 +1413,7 @@ describe('LodyOperationCoordinator', () => {
       expect(completion?.type).toBe('operation_completion');
       if (completion?.type !== 'operation_completion') throw new Error('Missing completion');
       expect(completion.progressMessageId).toBe(
-        completeCoverage ? 'operation-progress:requester-1:review-round-1' : undefined
+        shouldLink ? 'operation-progress:requester-1:review-round-1' : undefined
       );
       expect(completion.completion).toMatchObject({ type: 'result', value: { items: results } });
     }

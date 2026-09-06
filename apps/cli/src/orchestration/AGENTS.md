@@ -66,8 +66,8 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   monotonically by exact target, and treat progress write failures as repairable: they
   must not fail Operation acceptance, target materialization, cancellation, finalization,
   delivery, or best-effort target cancel. Set `progressMessageId` only when the row
-  covers every successful or durably materialized target; partial rows must retain
-  completion fallback cards.
+  covers every durably materialized target and reflects every successful result;
+  partial or stale rows must retain completion fallback cards.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

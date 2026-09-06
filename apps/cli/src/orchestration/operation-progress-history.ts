@@ -52,7 +52,7 @@ const progressStatusForItem = (
   const wasMaterialized = targetStatus !== undefined || materializedTargets?.has(key);
   if (item.status === 'succeeded') return item.status;
   if (item.status === 'failed' || item.status === 'cancelled') {
-    return wasMaterialized ? item.status : null;
+    return targetStatus ?? (wasMaterialized ? item.status : null);
   }
   if (operation.completion?.type === 'cancelled') {
     return targetStatus ?? (wasMaterialized || item.inputDurable ? 'cancelled' : null);

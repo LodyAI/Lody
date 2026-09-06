@@ -1127,8 +1127,8 @@ export class LodyOperationCoordinator {
         (item) => item.type === 'operation_progress' && item.operationId === operation.operationId
       );
     if (progress?.type !== 'operation_progress') return undefined;
-    const covered = new Set(
-      progress.items.map((item) => getOperationProgressTargetKey(item.target))
+    const covered = new Map(
+      progress.items.map((item) => [getOperationProgressTargetKey(item.target), item.status])
     );
     // A partial row is not permission to hide every successful-target fallback.
     // Include the completion payload as well as stored items for recovery snapshots.
@@ -1140,9 +1140,11 @@ export class LodyOperationCoordinator {
           ? (completion.partial?.items ?? [])
           : [];
     const complete = [...operation.items, ...results].every((item) =>
-      item.status === 'succeeded' || (item.status === 'active' && item.inputDurable)
-        ? covered.has(getOperationProgressTargetKey(item.target))
-        : true
+      item.status === 'succeeded'
+        ? covered.get(getOperationProgressTargetKey(item.target)) === 'succeeded'
+        : item.status === 'active' && item.inputDurable
+          ? covered.has(getOperationProgressTargetKey(item.target))
+          : true
     );
     return complete ? progressMessageId : undefined;
   }

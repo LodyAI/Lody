@@ -491,3 +491,23 @@ it.each(['cancelled', 'error'] as const)(
     expect(statusOf()).toBe(completionType === 'cancelled' ? 'cancelled' : 'failed');
   }
 );
+
+it.each(['running', 'succeeded'] as const)(
+  'keeps fresh target %s despite a stored TARGET_TIMEOUT',
+  async (status) => {
+    const target = { sessionId: 'timeout-child' as SessionId, userTurnId: 'timeout-turn' };
+    const operation = baseOperation([
+      {
+        status: 'failed',
+        target,
+        error: { code: 'TARGET_TIMEOUT', message: 'Deadline reached', retryable: false },
+      },
+    ]);
+    expect(
+      buildOperationProgressContent(
+        operation,
+        new Map([[getOperationProgressTargetKey(target), status]])
+      )?.items
+    ).toEqual([{ target, status }]);
+  }
+);
