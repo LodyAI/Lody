@@ -741,7 +741,7 @@ export function MobileGeneralSettings() {
                 <Switch
                   id="auto-launch-toggle"
                   checked={autoLaunch.enabled}
-                  disabled={!autoLaunch.supported || autoLaunch.loading}
+                  disabled={autoLaunch.supported !== true || autoLaunch.loading}
                   onCheckedChange={(checked) => {
                     void autoLaunch.updateEnabled(checked);
                   }}
