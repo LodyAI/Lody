@@ -11,6 +11,7 @@ import type {
 export type TerminalExitStatus = { exitCode: number | null; signal?: string | null };
 
 export interface TerminalManager {
+  hasRunningTerminals?(): boolean;
   createTerminal(
     acpSessionId: string,
     command: string,
@@ -60,6 +61,13 @@ const DEFAULT_TERMINAL_BYTE_LIMIT = 1024 * 1024; // 1MB of retained output
 
 abstract class BaseTerminalManager<THandle> implements TerminalManager {
   protected terminals = new Map<string, TerminalState<THandle>>();
+  private pendingStarts = 0;
+  hasRunningTerminals(): boolean {
+    return (
+      this.pendingStarts > 0 ||
+      [...this.terminals.values()].some((terminal) => terminal.exitStatus === null)
+    );
+  }
   protected readonly logger: Logger;
   protected readonly sessionLabel: string;
   private readonly getActiveSessionId: () => string | null;
@@ -101,18 +109,23 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       },
     };
 
-    state.handle = await this.startProcess(
-      {
-        terminalId,
-        command,
-        args: args ?? [],
-        cwd,
-        env,
-      },
-      hooks
-    );
+    this.pendingStarts += 1;
+    try {
+      state.handle = await this.startProcess(
+        {
+          terminalId,
+          command,
+          args: args ?? [],
+          cwd,
+          env,
+        },
+        hooks
+      );
 
-    this.terminals.set(terminalId, state);
+      this.terminals.set(terminalId, state);
+    } finally {
+      this.pendingStarts -= 1;
+    }
     this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} started: ${command}`);
     return terminalId;
   }

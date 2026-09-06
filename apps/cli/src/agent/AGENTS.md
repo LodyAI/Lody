@@ -93,6 +93,10 @@ arrive: context/message-flow.md "Upstream".
   `resolveACPProcessLaunchAsync()`: Claude/Codex/Kimi/Grok may install Lody-managed
   native or Node-package runtimes, while DeepSeek Harness publishes an immutable
   Cordis composition before its npx launch.
+- `account-profiles.ts` resolves machine-local account ids after environment merging.
+  Missing ids mean System Default and preserve native auth/config exactly. Extra
+  Codex/Claude profiles own isolated homes, never copied native credentials; auth,
+  status and title launches use the same binding. Never fall back on a missing profile.
 - `deepseek-harness-runtime.ts` is the standard Harness-home (`DSH_HOME`, then `~/.dsh`),
   atomic-config, and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It
   publishes Lody's versioned ACP composition beside (without replacing) user Harness config and
@@ -153,7 +157,7 @@ arrive: context/message-flow.md "Upstream".
   crossed the final complete-marker commit may remain as a safe cache hit even though that caller
   observes cancellation. An immediate retry waits for an earlier aborted generation's scratch
   cleanup before starting a new generation for the same artifact.
-- `acp-authentication.ts` — the authentication lifecycle, with ONE slot, timeout,
+- `acp-authentication.ts` — the authentication lifecycle, with one provider/account slot, timeout,
   and cancellation policy shared by both of its paths. Which path runs is decided
   by the provider, not by the caller: a managed builtin runs its pinned login
   command, and everything else (registry and custom ACP) opens a temporary standard
@@ -175,7 +179,7 @@ arrive: context/message-flow.md "Upstream".
   explicit environment-authenticated paths bypass the native status check and
   remain under adapter validation. Grok and Codex authentication requirements come from
   ACP session creation because `codex login status` cannot account for custom
-  model providers with `requires_openai_auth = false`. The per-agent slot covers async
+  model providers with `requires_openai_auth = false`. The provider/account slot covers async
   launch preparation as well as the child process, so cancel and concurrent start cannot race spawn;
   timeout/cancel terminate and release the slot for Retry. Because protocol authentication
   spans launch preparation, JSON-RPC requests, and process cleanup, the running

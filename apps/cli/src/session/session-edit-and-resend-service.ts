@@ -518,6 +518,7 @@ export class SessionEditAndResendService {
         machineId: meta.machineId,
         agentConfigId: meta.agentConfigId,
         agentCliType: meta.cliType,
+        accountProfileId: meta.accountProfileId,
         agentType: meta.agentType,
         mcpServerIds,
         taskToolsEnabled,

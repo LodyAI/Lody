@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
 import { createAcpClient } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
+import { acquireAccountProfileUse } from '@/agent/account-profiles';
 import {
   AcpStartupProcessError,
   AcpStartupProcessExitError,
@@ -103,12 +104,20 @@ function createAbortPromise(signal?: AbortSignal):
 
 export class Session extends EventEmitter<SessionEvents> implements ISession {
   readonly sessionId: SessionId;
+  get accountProfileId(): string {
+    return this.config.accountProfileId ?? 'system-default';
+  }
+  get agentType(): string {
+    return this.config.agentType;
+  }
   private readonly config: SessionConfig;
   private readonly logger: Logger;
   private fixedWorkdir?: string;
   private status: SessionStatus['status'] = 'created';
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
+  private activeExecCount = 0;
+  private accountProfileLease: { release: () => void; established: boolean } | undefined;
   private agentProcess: SessionProcessHandle | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
@@ -233,8 +242,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     if (this.status === 'failed' || this.status === 'stopping' || this.status === 'terminated') {
       throw new Error(`Session ${this.sessionId} is not running`);
     }
-    const execPromise = await this.runCommand(command, args, workdir, isAI);
-    return execPromise;
+    this.activeExecCount += 1;
+    try {
+      return await this.runCommand(command, args, workdir, isAI);
+    } finally {
+      this.activeExecCount -= 1;
+    }
+  }
+
+  hasActiveToolExecution(): boolean {
+    return this.activeExecCount > 0 || this.terminalManager.hasRunningTerminals?.() === true;
   }
 
   async terminate(force: boolean = false): Promise<void> {
@@ -298,6 +315,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.agentClient = null;
     this.acpSessionId = null;
     this.acpCapabilities = null;
+    this.accountProfileLease?.release();
+    this.accountProfileLease = undefined;
 
     this.status = 'terminated';
 
@@ -478,13 +497,46 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    const lease = {
+      release: acquireAccountProfileUse({
+        cliType: callbacks.cliType,
+        agentType: callbacks.agentType,
+        accountProfileId: this.config.accountProfileId,
+      }),
+      established: false,
+    };
+    this.accountProfileLease = lease;
+    try {
+      const result = await this.createAgentWithAccount(callbacks);
+      lease.established = true;
+      if (!this.agentProcess) lease.release();
+      return result;
+    } catch (error) {
+      lease.release();
+      if (this.accountProfileLease === lease) this.accountProfileLease = undefined;
+      throw error;
+    }
+  }
+
+  private async createAgentWithAccount(callbacks: CreateAgentConfig): Promise<string> {
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
     const loginShellEnv = await getLoginShellEnv();
     callbacks.abortSignal?.throwIfAborted();
-    const env = withLodyNpmCacheForNpx(
+    const baseEnv = withLodyNpmCacheForNpx(
       callbacks.command,
       this.buildShellEnv(callbacks.env, loginShellEnv)
     );
+    // Resolve only after shell/config merging; inherited auth must not defeat isolation.
+    let env = baseEnv;
+    if (this.config.accountProfileId && this.config.accountProfileId !== 'system-default') {
+      const { resolveAccountProfileEnv } = await import('@/agent/account-profiles');
+      env = await resolveAccountProfileEnv({
+        cliType: callbacks.cliType,
+        agentType: callbacks.agentType,
+        accountProfileId: this.config.accountProfileId,
+        env: baseEnv,
+      });
+    }
     const launcher: AcpLauncher = resolveAcpLauncher(callbacks.command);
     const spawnAnalyticsProps = {
       cliType: callbacks.cliType,
@@ -554,6 +606,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         this.logger.debug(
           `[${this.sessionId}] ACP agent process exited with code ${code} signal ${signal}`
         );
+        if (this.agentProcess === agentProcessHandle && this.accountProfileLease?.established) {
+          this.accountProfileLease.release();
+          this.accountProfileLease = undefined;
+        }
         this.agentProcess = null;
         void agentProcessHandle
           .inspectExit(code, signal)

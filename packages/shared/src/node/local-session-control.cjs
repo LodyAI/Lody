@@ -1,3 +1,28 @@
+function isAccountProfileId(value) {
+  return (
+    value === 'system-default' ||
+    (typeof value === 'string' &&
+      /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/.test(
+        value
+      ))
+  );
+}
+function hasOnlyKeys(value, keys) {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+function isAccountProfileSummary(value) {
+  return (
+    isObjectRecord(value) &&
+    hasOnlyKeys(value, ['accountProfileId', 'label', 'identity', 'status']) &&
+    isAccountProfileId(value.accountProfileId) &&
+    typeof value.label === 'string' &&
+    value.label.trim().length > 0 &&
+    value.label.trim().length <= 120 &&
+    (value.identity === undefined ||
+      (typeof value.identity === 'string' && value.identity.length <= 320)) &&
+    ['authenticated', 'unauthenticated', 'unknown', 'error'].includes(value.status)
+  );
+}
 const SESSION_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const SESSION_IMAGE_MAX_COUNT = 8;
 const SESSION_IMAGE_ALLOWED_MIME_TYPES = new Set([
@@ -501,7 +526,61 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (value.type === 'machine/account-profiles') {
+    if (
+      !hasOnlyKeys(value, [
+        'type',
+        'machineId',
+        'workspaceId',
+        'requestId',
+        'configId',
+        'cliType',
+        'agentType',
+        'action',
+        'label',
+      ])
+    )
+      return false;
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.requestId === 'string' &&
+      value.requestId.length > 0 &&
+      value.cliType === 'builtin' &&
+      ['codex', 'claude'].includes(value.agentType) &&
+      ['list', 'create'].includes(value.action) &&
+      typeof value.configId === 'string' &&
+      (value.label === undefined ||
+        (typeof value.label === 'string' &&
+          value.label.trim().length > 0 &&
+          value.label.trim().length <= 120))
+    );
+  }
+  if (value.type === 'session/account-switch') {
+    if (
+      !hasOnlyKeys(value, [
+        'type',
+        'machineId',
+        'workspaceId',
+        'requestId',
+        'sessionId',
+        'accountProfileId',
+      ])
+    )
+      return false;
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.requestId === 'string' &&
+      value.requestId.length > 0 &&
+      typeof value.sessionId === 'string' &&
+      isAccountProfileId(value.accountProfileId)
+    );
+  }
   if (value.type === 'machine/acp-authenticate') {
+    if (value.action !== 'start' && value.accountProfileId !== undefined) return false;
+    if (value.accountProfileId !== undefined && !isAccountProfileId(value.accountProfileId))
+      return false;
     return (
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
@@ -784,6 +863,44 @@ function isLocalSessionControlResponse(value) {
     );
   }
 
+  if (value.type === 'machine/account-profiles_response') {
+    if (!hasOnlyKeys(value, ['type', 'machineId', 'requestId', 'success', 'profiles', 'error']))
+      return false;
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.requestId === 'string' &&
+      value.requestId.length > 0 &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (value.profiles === undefined ||
+        (Array.isArray(value.profiles) && value.profiles.every(isAccountProfileSummary)))
+    );
+  }
+  if (value.type === 'session/account-switch_response') {
+    if (
+      !hasOnlyKeys(value, [
+        'type',
+        'machineId',
+        'requestId',
+        'sessionId',
+        'success',
+        'accountProfileId',
+        'continuation',
+        'error',
+      ])
+    )
+      return false;
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.requestId === 'string' &&
+      value.requestId.length > 0 &&
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (value.accountProfileId === undefined || isAccountProfileId(value.accountProfileId)) &&
+      (value.continuation === undefined || typeof value.continuation === 'boolean')
+    );
+  }
   if (value.type === 'machine/acp-authenticate_response') {
     return (
       typeof value.machineId === 'string' &&

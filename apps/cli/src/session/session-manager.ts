@@ -298,6 +298,7 @@ export type PreparedSessionLaunchConfigSnapshot = {
 };
 
 export interface ISession {
+  hasActiveToolExecution?(): boolean;
   agentClient: AgentClient | null;
   acpSessionId: ACPSessionId | null;
   sessionId: SessionId;
@@ -397,6 +398,9 @@ export interface CreateAgentConfig {
 }
 
 export type AgentStartConfig = {
+  /** A handoff candidate must not publish title/history/goal changes before commit. */
+  dispatchEvent?: (event: () => void) => void;
+  allowInteractiveRequest?: () => boolean;
   /**
    * ACP session id to resume when starting the agent, if the ACP agent supports it.
    * Kept separate from SessionConfig because it only applies to a single ACP startup attempt.
@@ -429,7 +433,13 @@ interface SessionManagerEvents {
     usage: SessionUsageUpdate;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (machineId: MachineId, cliType: CliType, limits: RateLimit) => void;
+  onRateLimitUpdate: (
+    machineId: MachineId,
+    cliType: CliType,
+    limits: RateLimit,
+    accountProfileId?: string,
+    sessionId?: SessionId
+  ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
     goal: Extract<MessageContent, { type: 'goal' }>
@@ -452,6 +462,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
+  private readonly pendingAccountBindings = new Map<SessionId, string>();
+  private readonly authenticatingAccountProfiles = new Set<string>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
@@ -612,6 +624,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async createSession(config: SessionConfig, agentStart?: AgentStartConfig): Promise<ISession> {
+    const accountKey = `${config.agentType}:${config.accountProfileId ?? 'system-default'}`;
+    if (this.authenticatingAccountProfiles.has(accountKey)) {
+      throw new Error('Account sign-in is in progress; retry after it finishes.');
+    }
     if (!config.assumeDocExisting) {
       const sessionId = await this.workspaceDocument.createSession(
         config.machineId,
@@ -620,6 +636,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.title
       );
       config.sessionId = sessionId;
+      await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+        accountProfileId: config.accountProfileId ?? 'system-default',
+      });
     }
 
     const sessionId = config.sessionId;
@@ -631,6 +650,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (existing) {
       return await existing;
     }
+    if (this.authenticatingAccountProfiles.has(accountKey)) {
+      throw new Error('Account sign-in is in progress; retry after it finishes.');
+    }
+    this.pendingAccountBindings.set(sessionId, accountKey);
 
     // Register durable ownership before claim/cold-start work begins. Besides
     // deduplicating concurrent creates, this prevents an abandoned preparation
@@ -640,10 +663,35 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       .finally(() => {
         if (this.pendingSessionCreates.get(sessionId) === promise) {
           this.pendingSessionCreates.delete(sessionId);
+          this.pendingAccountBindings.delete(sessionId);
         }
       });
     this.pendingSessionCreates.set(sessionId, promise);
     return await promise;
+  }
+
+  beginAccountProfileAuthentication(
+    agentType: string,
+    accountProfileId: string
+  ): (() => void) | null {
+    const key = `${agentType}:${accountProfileId}`;
+    if (
+      this.authenticatingAccountProfiles.has(key) ||
+      [...this.pendingAccountBindings.values()].includes(key) ||
+      [...this.sessions.values()].some(
+        (session) =>
+          session.agentType === agentType && session.accountProfileId === accountProfileId
+      )
+    ) {
+      return null;
+    }
+    this.authenticatingAccountProfiles.add(key);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.authenticatingAccountProfiles.delete(key);
+    };
   }
 
   private async createSessionFromPreparationOrCold(
@@ -651,6 +699,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
     const sessionId = config.sessionId!;
+    // Prepared agents use native auth. A bound account must start its own process.
+    if (
+      (config.accountProfileId && config.accountProfileId !== 'system-default') ||
+      agentStart?.deferAcpSessionIdPersistence
+    ) {
+      await this.preparationService.discard(sessionId);
+      return await this.createSessionInnerWithAgent(config, agentStart);
+    }
     const preparationIdentity = config.agentConfigId
       ? {
           requestedByUserId: config.requesterUserId,
@@ -1272,7 +1328,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onRateLimitUpdate: (limits: RateLimit) => {
         dispatchEvent(() => {
           if (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType)) {
-            this.emit('onRateLimitUpdate', this.machineId, config.agentType, limits);
+            this.emit(
+              'onRateLimitUpdate',
+              this.machineId,
+              config.agentType,
+              limits,
+              config.accountProfileId,
+              sessionId
+            );
           }
         });
       },
@@ -1408,6 +1471,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         session.createAgent(
           this.buildCreateAgentConfig(session, config, launch, {
             resumeSessionId: requestedResumeSessionId,
+            dispatchEvent: agentStart?.dispatchEvent,
+            allowInteractiveRequest: agentStart?.allowInteractiveRequest,
             forkSessionId: requestedForkSessionId,
             forkSessionTurnId: requestedForkSessionTurnId,
             onStartupStage: (event) => {

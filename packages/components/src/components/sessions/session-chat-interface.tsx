@@ -1,3 +1,5 @@
+import { machineSupportsAccountProfilesProtocol } from '@lody/shared';
+import { SessionAccountSelector } from '../settings/account-profiles';
 import {
   startTransition,
   forwardRef,
@@ -2227,6 +2229,7 @@ export const SessionChatInterface = memo(
     // judge on the full provider identity. `cliType`/`agentType` alone would let
     // a Codex-compatible provider behind a custom key show OpenAI's forecast.
     const showCodexResetForecast =
+      (session.accountProfileId ?? 'system-default') === 'system-default' &&
       (!session.agentConfigId || !!sessionAgentConfig) &&
       canShowCodexResetForecast({
         cliType: session.cliType,
@@ -2240,7 +2243,12 @@ export const SessionChatInterface = memo(
         agentType: session.agentType,
         config: sessionAgentConfig,
       })
-        ? sessionMachine?.raceLimits
+        ? (session.accountProfileId ?? 'system-default') === 'system-default'
+          ? sessionMachine?.raceLimits
+          : session.accountRateLimits &&
+              session.accountRateLimits.accountProfileId === session.accountProfileId
+            ? session.accountRateLimits.limits
+            : undefined
         : undefined;
     const sessionDividerLabel = useMemo(() => {
       if (!session) return '';
@@ -5929,6 +5937,26 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
+                  {machineSupportsAccountProfilesProtocol(sessionMachine) &&
+                  session.cliType === 'builtin' &&
+                  (session.agentType === 'codex' || session.agentType === 'claude') &&
+                  session.agentConfigId &&
+                  !!sessionAgentConfig &&
+                  canShowSubscriptionRateLimits({
+                    cliType: session.cliType,
+                    agentType: session.agentType,
+                    config: sessionAgentConfig,
+                  }) ? (
+                    <SessionAccountSelector
+                      key={session.id}
+                      machineId={session.machineId}
+                      sessionId={session.id}
+                      agentType={session.agentType}
+                      configId={session.agentConfigId}
+                      accountProfileId={session.accountProfileId}
+                      busy={isAgentBusy}
+                    />
+                  ) : null}
                   <SessionInfoBar
                     status={statusStripState}
                     goal={latestGoal}

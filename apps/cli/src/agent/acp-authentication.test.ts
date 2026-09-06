@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
+import { resolve as resolvePath } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -129,7 +130,7 @@ describe('AcpAuthenticationManager', () => {
         })
       ).resolves.toEqual({ success: true, disposition: 'authenticated' });
       expect(spawnProcess).toHaveBeenCalledWith(
-        command,
+        resolvePath(command),
         args,
         expect.objectContaining({ cwd: expect.any(String) })
       );
@@ -875,7 +876,7 @@ describe('probeBuiltinAuthentication', () => {
       })
     ).resolves.toEqual({ status: 'authenticated' });
     expect(spawnProcess).toHaveBeenCalledWith(
-      '/test/claude',
+      resolvePath('/test/claude'),
       ['auth', 'status', '--json'],
       expect.objectContaining({ stdio: 'ignore' })
     );

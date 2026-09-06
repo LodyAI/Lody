@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 import { __test__ } from './index';
 
 describe('cli tool detection helpers', () => {
@@ -14,7 +15,9 @@ describe('cli tool detection helpers', () => {
     const originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = '/tmp/custom-codex';
     try {
-      expect(__test__.getCodexCredentialsPath('/tmp/home')).toBe('/tmp/custom-codex/auth.json');
+      expect(__test__.getCodexCredentialsPath('/tmp/home')).toBe(
+        path.join('/tmp/custom-codex', 'auth.json')
+      );
     } finally {
       if (originalCodexHome === undefined) {
         delete process.env.CODEX_HOME;

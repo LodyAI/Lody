@@ -182,10 +182,10 @@ describe('resolveContainedUploadPath', () => {
     const inside = path.join(nested, 'a.txt');
     fs.writeFileSync(inside, 'x');
     await expect(resolveContainedUploadPath(inside, root)).resolves.toBe(
-      path.join(fs.realpathSync(nested), 'a.txt')
+      await fs.promises.realpath(inside)
     );
     await expect(resolveContainedUploadPath(path.join('sub', 'a.txt'), root)).resolves.toBe(
-      path.join(fs.realpathSync(nested), 'a.txt')
+      await fs.promises.realpath(inside)
     );
   });
 

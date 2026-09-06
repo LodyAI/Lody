@@ -56,7 +56,9 @@ async function runGitLsFiles(
   cwd: string
 ): Promise<{ readonly ok: true; readonly paths: readonly string[] } | { readonly ok: false }> {
   try {
-    const [{ stdout }, deleted] = await Promise.all([
+    // Drain both child processes even if one fails: a non-Git fallback must not
+    // return while the other Git process still holds the workspace directory.
+    const [listingResult, deletedResult] = await Promise.allSettled([
       execFileAsync(
         'git',
         [
@@ -75,6 +77,11 @@ async function runGitLsFiles(
       ),
       runGit(cwd, ['ls-files', '--deleted', '-z', '--', '.']),
     ]);
+    if (listingResult.status === 'rejected' || deletedResult.status === 'rejected') {
+      return { ok: false };
+    }
+    const { stdout } = listingResult.value;
+    const deleted = deletedResult.value;
     const deletedPaths = deleted.ok
       ? new Set(deleted.stdout.split('\0').map(normalizeGitPath).filter(isValidRelativeGitPath))
       : new Set<string>();

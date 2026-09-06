@@ -809,6 +809,28 @@ export type SessionMeta = {
   agentRoleId?: AgentRoleId;
   agentRoleRevision?: number;
   acpSessionId?: ACPSessionId;
+  /** Absent legacy bindings use the CLI's native account without an override. */
+  accountProfileId?: string;
+  /** Uncommitted intent never overrides the committed account/provider session pair. */
+  accountHandoff?: {
+    requestId?: string;
+    sourceAccountProfileId: string;
+    sourceAcpSessionId?: ACPSessionId;
+    targetAccountProfileId: string;
+  } | null;
+  accountTransitions?: Array<{
+    requestId: string;
+    fromAccountProfileId: string;
+    fromAcpSessionId?: ACPSessionId;
+    toAccountProfileId: string;
+    toAcpSessionId: ACPSessionId;
+    continuation: boolean;
+    committedAt: number;
+  }>;
+  /** A fresh provider session needs existing Lody history on its next prompt. */
+  accountContinuation?: { acpSessionId: ACPSessionId } | null;
+  /** Managed-account usage is session-scoped; native machine usage stays unchanged. */
+  accountRateLimits?: { accountProfileId: string; limits: Record<string, RateLimit> } | null;
   /** Exact Session or child Tab that created/opened this session, when known. */
   openedBySessionId?: SessionId;
   /**

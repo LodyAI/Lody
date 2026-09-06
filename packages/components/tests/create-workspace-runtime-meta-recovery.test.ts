@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => {
   const machineRpcConstructors = vi.fn();
   const machineRpcStart = vi.fn(async () => {});
   const machineRpcStop = vi.fn();
+  const accountProfiles = vi.fn(async () => null);
+  const accountSwitch = vi.fn(async () => null);
   const machineRpcOpenTurnDiff = vi.fn(async () => ({ status: 'ok' }));
   const rpcResponseDispatcherStart = vi.fn(async () => {});
   const rpcResponseDispatcherStop = vi.fn();
@@ -59,6 +61,8 @@ const mocks = vi.hoisted(() => {
     machineRpcConstructors,
     machineRpcStart,
     machineRpcStop,
+    accountProfiles,
+    accountSwitch,
     machineRpcOpenTurnDiff,
     rpcResponseDispatcherStart,
     rpcResponseDispatcherStop,
@@ -293,6 +297,8 @@ vi.mock('@lody/loro-streams-rpc', () => ({
     }
     start = mocks.machineRpcStart;
     stop = mocks.machineRpcStop;
+    requestAccountProfiles = mocks.accountProfiles;
+    requestSessionAccountSwitch = mocks.accountSwitch;
     requestCodeCollabOpenTurnDiff = mocks.machineRpcOpenTurnDiff;
   },
   LORO_STREAMS_RPC_RETENTION_SECONDS: 60,
@@ -341,6 +347,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.machineRpcConstructors.mockClear();
     mocks.machineRpcStart.mockClear();
     mocks.machineRpcStop.mockClear();
+    mocks.accountProfiles.mockClear();
+    mocks.accountSwitch.mockClear();
     mocks.machineRpcOpenTurnDiff.mockClear();
     mocks.rpcResponseDispatcherStart.mockClear();
     mocks.rpcResponseDispatcherStop.mockClear();
@@ -537,6 +545,50 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('narrows account RPC parameters before crossing the strict remote boundary', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    await runtime.setAuthToken('auth-token');
+    const envelope = {
+      machineId: 'remote-machine' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      requestId: 'request-1',
+    };
+    await runtime.requestAccountProfiles({
+      ...envelope,
+      type: 'machine/account-profiles',
+      cliType: 'builtin',
+      agentType: 'codex',
+      action: 'list',
+    });
+    await runtime.requestSessionAccountSwitch({
+      ...envelope,
+      type: 'session/account-switch',
+      sessionId: 'session-1' as SessionId,
+      accountProfileId: 'system-default',
+    });
+    expect(mocks.accountProfiles).toHaveBeenCalledWith({
+      requestId: 'request-1',
+      configId: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      action: 'list',
+      label: undefined,
+    });
+    expect(mocks.accountSwitch).toHaveBeenCalledWith({
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      accountProfileId: 'system-default',
+    });
+    await runtime.dispose();
+  });
   it('hot-attaches one cloud plane on auth without touching the local plane', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();

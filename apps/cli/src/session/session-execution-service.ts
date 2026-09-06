@@ -56,6 +56,12 @@ import {
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
   serializeCustomAcpLaunchSpec,
+  resolveAccountProfileId,
+  resolveSessionConversationConfig,
+  resolveLatestSessionGoalFromHistory,
+  isSessionGoalActive,
+  isLoroRepoDocDeleted,
+  type SessionLegacyMetaFields,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import type { ModelInfo } from '@lody/shared';
@@ -104,6 +110,8 @@ import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-he
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import { resolveResumableAcpSessionId } from './session-dispatch-logic';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
+import { switchSessionAccount, type AccountHandoffResult } from './session-account-handoff';
+import { applyAcpSessionRunConfig } from './acp-session-config-applier';
 import type { MachineAccessVerification } from './session-access-retry';
 import {
   GIT_EXECUTABLE_NOT_FOUND_CODE,
@@ -400,6 +408,7 @@ function truncateAnalyticsString(value: string, maxLength = 1_000): string {
 }
 
 export type SessionExecutionServiceDeps = {
+  resolveAccountSwitchUser?: (userId: string) => Promise<{ name: string; email: string }>;
   logger: Logger;
   sessionManager: SessionManager;
   workspaceDocument: LoroDocumentManager;
@@ -1040,6 +1049,186 @@ export class SessionExecutionService {
       hasRewriteBarrier: this.rewriteBarrierSessions.has(sessionId),
       hasActiveAutomation: Boolean(runtime?.autoPromptInFlight),
     };
+  }
+
+  async switchAccount(request: {
+    sessionId: SessionId;
+    accountProfileId: string;
+    requestId: string;
+  }): Promise<AccountHandoffResult> {
+    const { sessionId } = request;
+    const existing = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!existing || isLoroRepoDocDeleted(existing)) throw new Error('Session was not found.');
+    const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    let launchConfig: SessionConfig | undefined;
+    let conversation: ReturnType<typeof resolveSessionConversationConfig> = {};
+    let activateCandidateEvents: (() => void) | undefined;
+    const result = await switchSessionAccount(request, {
+      acquire: () => this.tryAcquireSessionRewriteBarrier(sessionId),
+      assertIdle: async () => {
+        const meta = await doc.getMetaState();
+        const history = await doc.getHistory();
+        const execution = this.getExecutionSnapshot(sessionId);
+        const legacyMeta = meta as (SessionMeta & SessionLegacyMetaFields) | undefined;
+        if (
+          execution.hasActiveTurn ||
+          execution.hasBlockingPendingCreate ||
+          execution.hasActiveAutomation ||
+          this.deps.sessionManager.getPendingSession(sessionId) ||
+          this.deps.sessionManager.getSession(sessionId)?.hasActiveToolExecution?.() ||
+          meta?.awaitingUserSince ||
+          meta?.autoReview ||
+          isSessionGoalActive(
+            resolveLatestSessionGoalFromHistory(history) ?? legacyMeta?.latestGoal
+          )
+        ) {
+          throw new Error('Session is busy; retry the account switch between requests.');
+        }
+      },
+      read: async () => {
+        const meta = await doc.getMetaState();
+        if (!meta || meta.machineId !== this.deps.machineId || meta.isArchived) {
+          throw new Error('Session is unavailable on this machine.');
+        }
+        if (
+          meta.cliType !== 'builtin' ||
+          (meta.agentType !== 'codex' && meta.agentType !== 'claude')
+        ) {
+          throw new Error('Account switching is available for builtin Codex and Claude only.');
+        }
+        return meta;
+      },
+      validate: async (meta, accountProfileId) => {
+        const resolved = await resolveSessionLaunchConfig({
+          workspaceDocument: this.deps.workspaceDocument,
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          sessionId,
+          sessionMeta: meta,
+          logger: this.deps.logger,
+        });
+        const { validateAccountProfile } = await import('@/agent/account-profiles');
+        await validateAccountProfile({
+          cliType: meta.cliType,
+          agentType: meta.agentType,
+          accountProfileId,
+          env: resolved.config?.env,
+          runtimeOverrides: resolved.config?.runtimeOverrides,
+          logger: this.deps.logger,
+        });
+        const resident = this.deps.sessionManager.getSession(sessionId);
+        const user =
+          resident?.getGitIdentityForUser?.(meta.userId) ??
+          (await this.deps.resolveAccountSwitchUser?.(meta.userId));
+        if (!user)
+          throw new Error('Session user identity is unavailable; retry the account switch.');
+        conversation = resolveSessionConversationConfig(await doc.getHistory());
+        launchConfig = {
+          sessionId,
+          workspaceId: this.deps.workspaceId,
+          machineId: meta.machineId,
+          requesterUserId: meta.userId,
+          userName: user.name,
+          userEmail: user.email,
+          agentConfigId: meta.agentConfigId,
+          agentCliType: meta.cliType,
+          agentType: meta.agentType,
+          accountProfileId,
+          configOptionValues: conversation.configOptionValues,
+          mcpServerIds: conversation.mcpServerIds ?? [],
+          taskToolsEnabled: conversation.taskToolsEnabled === true,
+          customAcp: resolved.config?.customAcp,
+          runtimeOverrides: resolved.config?.runtimeOverrides,
+          env: resolved.config?.env,
+          project: meta.project,
+          githubRepo: meta.repoFullName,
+          restoreBranchName: meta.branchName,
+          parentSessionId: meta.parentSessionId,
+          workdir: await this.deps.sessionManager.resolveSessionWorkdir(sessionId),
+          assumeDocExisting: true,
+          resume: true,
+        };
+      },
+      checkpoint: async (patch) => {
+        await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), patch);
+        await this.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
+      },
+      stop: async () => {
+        await this.deps.sessionManager.requestSessionTerminate(sessionId, false);
+      },
+      launch: async (_meta, _accountProfileId, resumeSessionId) => {
+        if (!launchConfig) throw new Error('Account launch configuration is unavailable.');
+        this.deps.beginACPReplaySuppression(sessionId);
+        try {
+          let candidateCommitted = false;
+          const candidate = await this.deps.sessionManager.createSession(launchConfig, {
+            resumeSessionId,
+            deferAcpSessionIdPersistence: true,
+            dispatchEvent: (event) => {
+              if (candidateCommitted) event();
+            },
+            allowInteractiveRequest: () => candidateCommitted,
+          });
+          const applied = await applyAcpSessionRunConfig({
+            session: candidate,
+            config: {
+              ...conversation,
+              cliType: launchConfig.agentCliType,
+              agentType: launchConfig.agentType,
+            },
+            logger: this.deps.logger,
+          });
+          if (applied.rejectedSelections.length)
+            throw new Error('The target account cannot use the selected model or configuration.');
+          if (!candidate.acpSessionId)
+            throw new Error('Target provider did not establish a session.');
+          try {
+            const usageResult = await Effect.runPromiseExit(
+              Effect.tryPromise({
+                try: async () =>
+                  await candidate.agentClient?.getRateLimits({
+                    sessionId: candidate.acpSessionId ?? undefined,
+                    modelId: conversation.modelId,
+                  }),
+                catch: (error) => error,
+              }).pipe(Effect.timeout('10 seconds'))
+            );
+            if (Exit.isFailure(usageResult)) throw Cause.squash(usageResult.cause);
+            const usage = usageResult.value;
+            if (
+              usage?.rateLimits.some(
+                (limit) =>
+                  (!limit.scope.modelId || limit.scope.modelId === conversation.modelId) &&
+                  limit.windows.some(
+                    (window) =>
+                      window.usedPercent >= 100 &&
+                      (window.resetsAtEpochSeconds === null ||
+                        window.resetsAtEpochSeconds > getServerNow() / 1000)
+                  )
+              )
+            ) {
+              throw new Error('The target account has exhausted its usage allowance.');
+            }
+          } catch (error) {
+            // Providers without usage queries still support explicit manual selection.
+            if (!formatErrorMessage(error).includes('ACP_RATE_LIMITS_UNSUPPORTED')) throw error;
+          }
+          activateCandidateEvents = () => {
+            candidateCommitted = true;
+          };
+          return candidate.acpSessionId;
+        } finally {
+          this.deps.endACPReplaySuppression(sessionId);
+        }
+      },
+      isResumeFailure: (error) => {
+        const message = formatErrorMessage(error).toLowerCase();
+        return message.includes('acp_resume_unsupported') || message.includes('acp_resume_failed');
+      },
+      now: getServerNow,
+    });
+    activateCandidateEvents?.();
+    return result;
   }
 
   tryAcquireSessionRewriteBarrier(sessionId: SessionId): (() => void) | null {
@@ -3437,7 +3626,11 @@ export class SessionExecutionService {
           `[${sessionId}] Resume env resolved (agentConfigId=${meta?.agentConfigId ?? 'none'} source=${storedLaunchConfig.source} keys=${agentConfigEnv ? Object.keys(agentConfigEnv).length : 0})`
         );
 
-        const requestedResumeSessionId = acpSessionConfig.resume;
+        // A pre-switch input config can still name the former provider session.
+        const requestedResumeSessionId =
+          meta?.accountTransitions?.length || meta?.accountHandoff
+            ? undefined
+            : acpSessionConfig.resume;
         const storedResumeSessionId = resolveResumableAcpSessionId(meta);
         const resumeSessionId = requestedResumeSessionId ?? storedResumeSessionId;
         const resumeSource = requestedResumeSessionId
@@ -3471,6 +3664,7 @@ export class SessionExecutionService {
         const restoreBranch = project?.branch?.trim() || undefined;
         const restoreConfig: SessionConfig = {
           sessionId,
+          accountProfileId: resolveAccountProfileId(meta?.accountProfileId),
           workspaceId: message.workspaceId,
           agentCliType: acpSessionConfig.cliType,
           agentType: acpSessionConfig.agentType,
@@ -3876,6 +4070,16 @@ export class SessionExecutionService {
           );
 
         bindReadySession(readySession);
+        const bindingMeta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+        if (bindingMeta?.accountContinuation) {
+          const history = yield* self.tryPromise(() => sessionDoc.getHistory());
+          replayPromptResult = buildReplayPromptFromHistory({
+            history,
+            excludeTurnId: message.userTurnId,
+          });
+          replayPromptResult.promptText += `\n\nThis is a continuation of the same Lody session (${sessionId}). The replay above is bounded and may omit older messages or tool output. The full visible transcript remains available through the lody_session_history MCP tool for this session; use its nextCursor to read older pages whenever missing context matters. Preserve the existing task, workspace, worktree, and files; do not repeat completed actions merely because the provider session changed.`;
+          usedHistoryReplay = true;
+        }
         yield* acpReplaySuppression.release;
         self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
         yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));
@@ -3907,7 +4111,32 @@ export class SessionExecutionService {
 
         yield* abortIfCancelled();
 
-        yield* promptWithStaleACPRecovery(promptBlocks);
+        yield* promptWithStaleACPRecovery(promptBlocks).pipe(
+          Effect.onExit((exit) => {
+            const consumed = Exit.isSuccess(exit)
+              ? self.turnProducedVisibleOutput(sessionId, turnId)
+              : self.deps.hasPromptOutputForTurn?.(sessionId, turnId) === true;
+            if (!bindingMeta?.accountContinuation || !consumed) return Effect.void;
+            // Visible output proves the replacement accepted its context, even if the
+            // request later fails. Do not prepend that context again on the next turn.
+            return self
+              .tryPromise(async () => {
+                await self.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+                  accountContinuation: null,
+                });
+                await self.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
+              })
+              .pipe(
+                Effect.catchAll(() =>
+                  Effect.sync(() => {
+                    self.deps.logger.warn(
+                      `[${sessionId}] Could not persist account continuation acknowledgement`
+                    );
+                  })
+                )
+              );
+          })
+        );
         yield* self.tryPromise(() => runtime.yieldedFinalization);
 
         const completedTurnId = runtime.turnId;
@@ -4269,6 +4498,7 @@ export class SessionExecutionService {
     this.deps.logger.debug(`[${sessionId}] session/create summary`, configForLog);
     const sessionConfig: SessionConfig = {
       sessionId,
+      accountProfileId: resolveAccountProfileId(existingMeta?.accountProfileId),
       workspaceId,
       agentCliType: acpSessionConfig.cliType,
       agentType: acpSessionConfig.agentType,
@@ -4298,7 +4528,9 @@ export class SessionExecutionService {
     // Fold the dispatch-start meta fields into the status transition so the
     // latency-critical create path performs one doc-meta upsert instead of five
     // sequential ones.
-    const dispatchStartPatch: Partial<SessionMeta> = {};
+    const dispatchStartPatch: Partial<SessionMeta> = {
+      accountProfileId: sessionConfig.accountProfileId,
+    };
     if (project) {
       dispatchStartPatch.project = project;
     }
@@ -5012,16 +5244,36 @@ export class SessionExecutionService {
         ...event,
       });
     };
-    const result = await this.acpAuthenticationManager.authenticate({
-      requestId: message.requestId,
-      cliType: config.cliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-      onProgress,
-    });
-    if (result.success && result.disposition === 'authenticated') {
+    const managedAccount = resolveAccountProfileId(message.accountProfileId) !== 'system-default';
+    const releaseAccount = managedAccount
+      ? this.deps.sessionManager.beginAccountProfileAuthentication(
+          config.agentType,
+          resolveAccountProfileId(message.accountProfileId)
+        )
+      : undefined;
+    if (managedAccount && !releaseAccount) {
+      return {
+        ...resolvedBase,
+        success: false,
+        disposition: 'error',
+        error:
+          'This account is in use by a session or another sign-in. Detach its sessions before signing in again.',
+      };
+    }
+    const result = await this.acpAuthenticationManager
+      .authenticate({
+        requestId: message.requestId,
+        onAccountLeaseReleased: releaseAccount ?? undefined,
+        accountProfileId: message.accountProfileId,
+        cliType: config.cliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        env: config.env,
+        onProgress,
+      })
+      .finally(() => releaseAccount?.());
+    if (result.success && result.disposition === 'authenticated' && !managedAccount) {
       const refreshController = new AbortController();
       const refreshTimeoutMs = Math.max(
         1,

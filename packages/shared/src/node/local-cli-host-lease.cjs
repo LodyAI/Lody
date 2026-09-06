@@ -296,6 +296,9 @@ async function requestLocalCliHostShutdown(options) {
           );
           continue;
         }
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return finish({ ok: false, error: 'invalid_response' });
+        }
         if (value?.ok === true) return finish({ ok: true, record: hostRecord });
         return finish({
           ok: false,

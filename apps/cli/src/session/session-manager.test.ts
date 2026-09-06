@@ -186,6 +186,35 @@ const createSessionInner = async (
   ).createSessionInner(config, undefined, preparedWorktree);
 
 describe('SessionManager cleanup phases', () => {
+  it('prevents a process launch while its managed account is signing in', async () => {
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const accountProfileId = '00000000-0000-4000-8000-00000000000b';
+    const release = manager.beginAccountProfileAuthentication('codex', accountProfileId);
+    expect(release).not.toBeNull();
+    expect(manager.beginAccountProfileAuthentication('codex', accountProfileId)).toBeNull();
+    await expect(
+      manager.createSession(
+        createSessionConfig({ sessionId: 'account-auth-busy' as SessionId, accountProfileId })
+      )
+    ).rejects.toThrow('sign-in is in progress');
+    release?.();
+    const next = manager.beginAccountProfileAuthentication('codex', accountProfileId);
+    expect(next).not.toBeNull();
+    release?.();
+    expect(manager.beginAccountProfileAuthentication('codex', accountProfileId)).toBeNull();
+    next?.();
+    await manager.cleanUp();
+  });
   it('stops session producers before closing the workspace document', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(

@@ -320,6 +320,7 @@ export type LoroRepoPersistReason =
   | 'remote-meta-sync'
   | 'remote-flock-sync'
   | 'session-local-base-ref'
+  | 'session-account-handoff'
   /** One flush standing in for several remote sync events; see `scheduleRemoteSyncPersist`. */
   | 'remote-sync-coalesced'
   | 'session-fork-prepare'

@@ -12,6 +12,7 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
+  accountProfileId?: string;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
@@ -106,6 +107,7 @@ export function useMachineAcpAuthentication(
             requestId,
             action: 'start',
             configId: args.configId,
+            accountProfileId: args.accountProfileId,
           });
           const response = await responsePromise;
           if (!response) {

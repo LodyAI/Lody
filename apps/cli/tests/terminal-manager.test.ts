@@ -48,6 +48,37 @@ function createProcessHandle(terminate: SessionProcessHandle['terminate']): Sess
 }
 
 describe('ShellTerminalManager', () => {
+  it('reports pending and running terminals so an account handoff cannot terminate them', async () => {
+    const processHandle = createProcessHandle(async () => {});
+    let finishSpawn: (handle: SessionProcessHandle) => void = () => {};
+    const spawned = new Promise<SessionProcessHandle>((resolve) => {
+      finishSpawn = resolve;
+    });
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'noop',
+      applyLimits: async () => {},
+      spawn: async () => await spawned,
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    const manager = new ShellTerminalManager({
+      logger: createSilentLogger(),
+      sessionLabel: 'test-session',
+      getActiveAcpSessionId: () => 'acp-1',
+      resolveWorkdir: (cwd) => cwd ?? process.cwd(),
+      buildEnv: () => process.env,
+      sandbox,
+    });
+    expect(manager.hasRunningTerminals()).toBe(false);
+    const pending = manager.createTerminal('acp-1', 'node', ['-v']);
+    expect(manager.hasRunningTerminals()).toBe(true);
+    finishSpawn(processHandle);
+    const terminalId = await pending;
+    expect(manager.hasRunningTerminals()).toBe(true);
+    await manager.releaseTerminal('acp-1', terminalId);
+    expect(manager.hasRunningTerminals()).toBe(false);
+  });
   it('preserves a Windows executable path and structured arguments', async () => {
     const processHandle = createProcessHandle(async () => {});
     const sandbox: SessionSandbox = {

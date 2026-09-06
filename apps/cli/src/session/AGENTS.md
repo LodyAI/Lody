@@ -246,6 +246,21 @@ the frozen identity. Never fall back to the Session owner when the driving Turn 
   session/preparation producers but deliberately leaves the document manager and credentials
   alive so MessageHandler can flush final ACP/Code Collab evidence; the later plain `cleanUp()`
   closes shared resources. Never restore document teardown ahead of session termination.
+- `session-account-handoff.ts` owns explicit account switching between requests. The committed
+  `SessionMeta.accountProfileId` plus `acpSessionId` is authoritative; missing account ids resolve
+  to `system-default`, and pending `accountHandoff` intent never overrides that pair on restart.
+  Hold the existing execution rewrite barrier through validation, local checkpoint, provider
+  teardown and replacement, and commit with `persistPendingChanges`. Candidate starts defer
+  ACP id persistence. A fresh provider session keeps an `accountContinuation` marker until its
+  next successful prompt consumes the existing bounded history replay; full Lody history stays
+  intact. Provider auth resolution stays in `agent/account-profiles.ts`; System Default follows
+  the existing environment unchanged. Prepared default processes cannot satisfy managed-account
+  launches, and account rate-limit events carry both session and account identity.
+  The handoff also refuses pending/running exec and ACP terminals after a turn ends. Candidate
+  notifications and interactive requests stay suppressed until commit. Managed processes hold
+  the provider's process-wide account-use lease across startup and lifetime; sign-in holds the
+  matching exclusive lease. Completed switch request ids remain in transition receipts so a
+  replayed older RPC cannot undo a later account choice.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
   Peek/claim are synchronous published-resource snapshots and must never delay cold
   fallback; peek never transfers ownership. A prepared resource may reuse its open

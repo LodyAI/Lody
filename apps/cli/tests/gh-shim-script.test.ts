@@ -32,6 +32,26 @@ beforeEach(() => {
   vi.stubEnv('PATH', `${fakeBinDir}${path.delimiter}${originalPath}`);
   brokerRequestCount = 0;
 
+  if (process.platform === 'win32') {
+    writeFakeGhNamed(
+      'gh.cmd',
+      `@echo off
+if "%~1"=="auth" if "%~2"=="status" (
+  if "%FAKE_GH_AUTHED%"=="1" exit /b 0
+  exit /b 1
+)
+if "%~1"=="print-token" (
+  echo GH_TOKEN=%GH_TOKEN%
+  echo GITHUB_TOKEN=%GITHUB_TOKEN%
+  echo MARKER=%${LODY_MANAGED_GH_TOKEN_SHA256_ENV}%
+  exit /b 0
+)
+echo %*
+`
+    );
+    return;
+  }
+
   writeFakeGh(
     `#!/bin/sh
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
@@ -72,7 +92,7 @@ describe('ensureGhShimScript', () => {
   it('generates a gh wrapper without PR association behavior', () => {
     ensureGhShimScript();
 
-    const source = readFileSync(getGhShimHostPath(), 'utf8');
+    const source = readFileSync(path.join(getGhShimHostBinDir(), 'gh'), 'utf8');
 
     expect(source).toContain('/github-token');
     expect(source).not.toContain('associatePullRequestForCli');
@@ -94,7 +114,7 @@ describe('ensureGhShimScript', () => {
       expect(launcherSource).toContain(process.execPath);
       expect(launcherSource).toContain('%~dp0gh');
       expect(nodeShimSource).toContain('/github-token');
-      expect(nodeShimSource).toContain(path.join(fakeBinDir!, 'gh.cmd'));
+      expect(nodeShimSource).toContain(path.join(fakeBinDir!, 'gh.cmd').replace(/\\/g, '\\\\'));
     } finally {
       restorePlatform();
     }
@@ -239,7 +259,7 @@ const setPlatformForTest = (platform: NodeJS.Platform): (() => void) => {
 const runShim = async (
   env: Record<string, string>
 ): Promise<{ status: number | null; stdout: string; stderr: string }> => {
-  const shimPath = getGhShimHostPath();
+  const shimPath = path.join(getGhShimHostBinDir(), 'gh');
   const shimBinDir = getGhShimHostBinDir();
   if (!fakeBinDir) {
     throw new Error('fakeBinDir is not initialized');
@@ -253,6 +273,8 @@ const runShim = async (
     PATH: [shimBinDir, fakeBinDir, path.dirname(process.execPath)].join(path.delimiter),
   };
   if (process.platform === 'win32') {
+    if (!process.env.ComSpec) throw new Error('Windows shim tests require ComSpec');
+    childEnv.PATH += path.delimiter + path.dirname(process.env.ComSpec);
     childEnv.USERPROFILE = tempHomeDir;
     childEnv.SystemRoot = process.env.SystemRoot;
     childEnv.ComSpec = process.env.ComSpec;

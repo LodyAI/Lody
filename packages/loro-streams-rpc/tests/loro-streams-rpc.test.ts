@@ -1447,6 +1447,111 @@ describe('LoroStreamsMachineRpcClient', () => {
     expect(fake.appended).toEqual([]);
   });
 
+  it.each(['profiles', 'switch'] as const)(
+    'round trips account %s requests with strict parameters',
+    async (operation) => {
+      const fake = createFakeStreamClient();
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+      const accountProfileId = '6b130632-7cce-4db8-97e9-53514b5f241f';
+      const responsePromise =
+        operation === 'profiles'
+          ? client.requestAccountProfiles({
+              requestId: 'account-op',
+              configId: 'config-1' as AgentConfigId,
+              cliType: 'builtin',
+              agentType: 'codex',
+              action: 'list',
+            })
+          : client.requestSessionAccountSwitch({
+              requestId: 'account-op',
+              sessionId: 'session-1' as SessionId,
+              accountProfileId,
+            });
+      await fake.waitForAppendedCount(1);
+      const request = LoroStreamsRpcRequestSchema.parse(fake.appended[0]?.value);
+      expect(request.params).not.toHaveProperty('type');
+      expect(request.params).not.toHaveProperty('machineId');
+      const result =
+        operation === 'profiles'
+          ? {
+              type: 'machine/account-profiles_response',
+              machineId: 'machine-1',
+              requestId: 'account-op',
+              success: true,
+              profiles: [{ accountProfileId, label: 'Personal', status: 'authenticated' }],
+            }
+          : {
+              type: 'session/account-switch_response',
+              machineId: 'machine-1',
+              requestId: 'account-op',
+              sessionId: 'session-1',
+              success: true,
+              accountProfileId,
+              continuation: true,
+            };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result,
+          },
+        ],
+        nextOffset: '2',
+        cursor: 'cursor-2',
+        upToDate: true,
+      });
+      await expect(responsePromise).resolves.toEqual(result);
+      client.stop();
+    }
+  );
+
+  it('preserves handoff identity when the daemon reports an RPC failure', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    const responsePromise = client.requestSessionAccountSwitch({
+      requestId: 'account-op',
+      sessionId: 'session-1' as SessionId,
+      accountProfileId: 'system-default',
+    });
+    await fake.waitForAppendedCount(1);
+    const request = LoroStreamsRpcRequestSchema.parse(fake.appended[0]?.value);
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: request.id,
+          method: request.method,
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          error: { code: 'method_unavailable', message: 'Unavailable' },
+        },
+      ],
+      nextOffset: '2',
+      cursor: 'cursor-2',
+      upToDate: true,
+    });
+    await expect(responsePromise).resolves.toMatchObject({
+      type: 'session/account-switch_response',
+      machineId: 'machine-1',
+      requestId: 'account-op',
+      sessionId: 'session-1',
+      success: false,
+    });
+    client.stop();
+  });
+
   it('streams structured ACP authorization before resolving the final response', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({

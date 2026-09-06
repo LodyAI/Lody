@@ -1,3 +1,9 @@
+import type {
+  MachineAccountProfilesRequest,
+  MachineAccountProfilesResponse,
+  SessionAccountSwitchRequest,
+  SessionAccountSwitchResponse,
+} from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -1360,7 +1366,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | MachineAcpAuthenticationProgressMessage
     | MachineAcpBinaryStatusResponse
     | MachineAcpBinaryInstallResponse
-    | MachineAcpBinaryProgressMessage;
+    | MachineAcpBinaryProgressMessage
+    | MachineAccountProfilesResponse
+    | SessionAccountSwitchResponse;
 
   const handleControlMessage = (message: ControlResponseMessage) => {
     if (message.type === 'session/create_response') {
@@ -1424,6 +1432,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         | 'machine/ping'
         | 'machine/restart'
         | 'machine/upgrade'
+        | 'machine/account-profiles'
+        | 'session/account-switch'
         | 'machine/acp-capabilities-refresh'
         | 'machine/acp-authenticate'
         | 'machine/acp-binary-status'
@@ -1472,6 +1482,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     message.type === 'machine/ping' ||
     message.type === 'machine/restart' ||
     message.type === 'machine/upgrade' ||
+    message.type === 'machine/account-profiles' ||
+    message.type === 'session/account-switch' ||
     message.type === 'machine/acp-capabilities-refresh' ||
     message.type === 'machine/acp-authenticate' ||
     message.type === 'machine/acp-binary-status' ||
@@ -1942,6 +1954,61 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return signal ? waitForPromiseOrAbort(request, signal) : request;
   };
 
+  const requestAccountProfiles = async (
+    message: MachineAccountProfilesRequest
+  ): Promise<MachineAccountProfilesResponse | null> => {
+    await waitForMachineRouteIfNeeded(message.machineId);
+    if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
+      if (!canUseLocalSessionControl(message)) throw new Error('Target machine is unavailable');
+      const result = await requestLocalSessionControl(message);
+      if (!result.ok) throw new Error(result.error);
+      return (
+        result.responses.find(
+          (response): response is MachineAccountProfilesResponse =>
+            response.type === 'machine/account-profiles_response' &&
+            response.machineId === message.machineId &&
+            response.requestId === message.requestId
+        ) ?? null
+      );
+    }
+    if (!cloudPlaneEnabled) throw new Error('Machine RPC is unavailable');
+    const client = await getMachineRpcClient(message.machineId);
+    return client.requestAccountProfiles({
+      requestId: message.requestId,
+      configId: message.configId,
+      cliType: message.cliType,
+      agentType: message.agentType,
+      action: message.action,
+      label: message.label,
+    });
+  };
+
+  const requestSessionAccountSwitch = async (
+    message: SessionAccountSwitchRequest
+  ): Promise<SessionAccountSwitchResponse | null> => {
+    await waitForMachineRouteIfNeeded(message.machineId);
+    if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
+      if (!canUseLocalSessionControl(message)) throw new Error('Target machine is unavailable');
+      const result = await requestLocalSessionControl(message);
+      if (!result.ok) throw new Error(result.error);
+      return (
+        result.responses.find(
+          (response): response is SessionAccountSwitchResponse =>
+            response.type === 'session/account-switch_response' &&
+            response.machineId === message.machineId &&
+            response.sessionId === message.sessionId &&
+            response.requestId === message.requestId
+        ) ?? null
+      );
+    }
+    if (!cloudPlaneEnabled) throw new Error('Machine RPC is unavailable');
+    const client = await getMachineRpcClient(message.machineId);
+    return client.requestSessionAccountSwitch({
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+      accountProfileId: message.accountProfileId,
+    });
+  };
   const dispatchMachineAcpAuthenticateViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-authenticate' }>
   ): Promise<void> => {
@@ -1959,6 +2026,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ...common,
               action: message.action,
               configId: message.configId,
+              accountProfileId: message.accountProfileId,
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({
@@ -2167,6 +2235,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           continue;
         }
         if (
+          controlMessage.type === 'machine/account-profiles_response' ||
+          controlMessage.type === 'session/account-switch_response' ||
           controlMessage.type === 'session/create_response' ||
           controlMessage.type === 'session/cancel_response' ||
           controlMessage.type === 'session/chat_response' ||
@@ -4580,6 +4650,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     waitForMachineRestartResponse,
     waitForMachineUpgradeResponse,
     requestMachineAcpCapabilitiesRefresh,
+    requestAccountProfiles,
+    requestSessionAccountSwitch,
     waitForMachineAcpAuthenticateResponse,
     subscribeMachineAcpAuthenticationProgress,
     waitForMachineAcpBinaryStatusResponse,

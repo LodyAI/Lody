@@ -16,7 +16,7 @@ import {
 const releaseWorkflow = readFileSync(
   new URL('../../../.github/workflows/release-electron.yml', import.meta.url),
   'utf8'
-)
+).replace(/\r\n/g, '\n')
 
 function releaseWorkflowStep(name) {
   const marker = `      - name: ${name}\n`

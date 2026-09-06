@@ -108,8 +108,10 @@ describe('AcpBinaryManager', () => {
       expect(launch.command).toBe(join(rootDir, 'test-raw', '1.0.0', 'linux-x86_64', 'foo'));
       expect(launch.args).toEqual(['acp']);
       expect(existsSync(launch.command)).toBe(true);
-      const mode = (await stat(launch.command)).mode;
-      expect(mode & 0o100).toBe(0o100); // owner-executable
+      if (process.platform !== 'win32') {
+        const mode = (await stat(launch.command)).mode;
+        expect(mode & 0o100).toBe(0o100); // POSIX owner-executable bit
+      }
     });
 
     it('extracts a .tar.gz archive and resolves the nested cmd', async () => {

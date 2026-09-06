@@ -42,6 +42,20 @@ const CLAUDE_AUTH_ROUTING_KEYS = [
   'CLAUDE_CODE_SUBAGENT_MODEL',
 ] as const;
 
+/** A managed subscription account must not inherit another authentication route. */
+export function scrubManagedClaudeAccountEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const result = { ...env };
+  for (const key of Object.keys(result)) {
+    if (
+      /^(ANTHROPIC_|CLAUDE_CODE_(USE_|SKIP_))/.test(key.toUpperCase()) ||
+      key.toUpperCase() === 'CLAUDE_CODE_OAUTH_TOKEN'
+    ) {
+      delete result[key];
+    }
+  }
+  return result;
+}
+
 /**
  * Keys that, when present in the user's agent config, signal explicit
  * auth/routing intent. Setting one of these means "I am choosing how Claude

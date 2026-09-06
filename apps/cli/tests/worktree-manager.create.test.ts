@@ -106,6 +106,7 @@ describe('WorktreeManager', () => {
       const gitFile = fs.readFileSync(path.join(info.hostPath, '.git'), 'utf8');
       expect(gitFile).toMatch(/^gitdir:\s*\.\./m);
       expect(gitFile).not.toMatch(/^gitdir:\s*\//m);
+      expect(runGit(info.hostPath, ['rev-parse', '--is-inside-work-tree'])).toBe('true');
     });
 
     it('should reject unsafe session ids', async () => {
@@ -263,8 +264,10 @@ describe('WorktreeManager', () => {
 
       expect(info.branch).toBe('lody/local001-ses');
       expect(fs.existsSync(info.hostPath)).toBe(true);
-      expect(runGit(info.hostPath, ['rev-parse', '--show-toplevel'])).toBe(info.hostPath);
-      expect(runGit(sourceDir, ['worktree', 'list'])).toContain(info.hostPath);
+      expect(path.normalize(runGit(info.hostPath, ['rev-parse', '--show-toplevel']))).toBe(
+        info.hostPath
+      );
+      expect(runGit(sourceDir, ['worktree', 'list'])).toContain(info.hostPath.replace(/\\/g, '/'));
     });
 
     it('should suffix a stale generated shared-local branch instead of restoring it', async () => {

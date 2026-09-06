@@ -83,12 +83,17 @@ export function areAcpAuthenticationTargetsEqual(
   left: MachineAcpAuthenticationArgs,
   right: MachineAcpAuthenticationArgs
 ): boolean {
-  return left.machineId === right.machineId && left.configId === right.configId;
+  return (
+    left.machineId === right.machineId &&
+    left.configId === right.configId &&
+    left.accountProfileId === right.accountProfileId
+  );
 }
 
 export function AcpAuthenticationPanel({
   machineId,
   configId,
+  accountProfileId,
   cliType,
   agentType,
   customAcp,
@@ -100,6 +105,7 @@ export function AcpAuthenticationPanel({
 }: {
   machineId: MachineId | null;
   configId?: AgentConfigId;
+  accountProfileId?: string;
   cliType: AgentConfigCliType;
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
@@ -148,8 +154,10 @@ export function AcpAuthenticationPanel({
 
   const authArgs: MachineAcpAuthenticationArgs | null = useMemo(
     () =>
-      machineId && configId && (cliType !== 'custom' || customAcp) ? { machineId, configId } : null,
-    [cliType, configId, customAcp, machineId]
+      machineId && configId && (cliType !== 'custom' || customAcp)
+        ? { machineId, configId, accountProfileId }
+        : null,
+    [cliType, configId, customAcp, machineId, accountProfileId]
   );
 
   const closePendingAuthorizationWindow = (): void => {

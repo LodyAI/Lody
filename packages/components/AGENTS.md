@@ -346,3 +346,11 @@ mobile surfaces.
   `[data-lody-dialog-content]`; a body portal is outside Radix remove-scroll handling.
 - Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
   and SSR consumers do not evaluate its renderer graph.
+
+## Provider account profiles
+
+Codex/Claude account controls and their background requests require the machine's
+account-profiles protocol capability. System Default follows native CLI auth; UI
+never writes credentials or optimistically changes a session account binding.
+Additional-account quota must match the durable session account id; never fall
+back to machine-wide System Default quota. Preserve legacy login controls.

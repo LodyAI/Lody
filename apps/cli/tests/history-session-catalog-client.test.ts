@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as acp from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
@@ -198,10 +199,11 @@ describe('requestHistorySessionReplay', () => {
 
 describe('resolveHistoryACPProcessLaunch', () => {
   it('uses the same builtin Codex bundled-adapter launch as normal sessions', async () => {
+    const codexPath = path.resolve('/opt/lody/codex');
     const provider = {
       cliType: 'builtin',
       agentType: 'codex',
-      runtimeOverrides: { codexPath: '/opt/lody/codex' },
+      runtimeOverrides: { codexPath },
     } as const;
     const sessionLaunch = await resolveACPProcessLaunchAsync(provider);
     const historyLaunch = await resolveHistoryACPProcessLaunch({
@@ -213,7 +215,7 @@ describe('resolveHistoryACPProcessLaunch', () => {
     expect(historyLaunch.args).toEqual(sessionLaunch.args);
     expect(historyLaunch.command).toBe(process.execPath);
     expect(historyLaunch.args[0]).toContain('codex-acp.js');
-    expect(historyLaunch.env.CODEX_PATH).toBe('/opt/lody/codex');
+    expect(historyLaunch.env.CODEX_PATH).toBe(codexPath);
     expect(historyLaunch.env.PATH).toBe('/usr/bin');
   });
 

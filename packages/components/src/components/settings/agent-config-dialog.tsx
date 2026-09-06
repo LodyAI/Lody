@@ -1,3 +1,5 @@
+import { machineSupportsAccountProfilesProtocol } from '@lody/shared';
+import { AccountProfilesPanel } from './account-profiles';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -1955,6 +1957,33 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     </aside>
   );
 
+  const systemDefaultAuthentication = (
+    <AcpAuthenticationPanel
+      machineId={machine.id}
+      configId={agentConfigId}
+      cliType={formData.cliType}
+      agentType={formData.agentType}
+      providerName={formData.name}
+      customAcp={parsedCustomAcp ?? undefined}
+      runtimeOverrides={formData.runtimeOverrides}
+      env={formData.env}
+      compact
+      reauthentication={!authRequired}
+      onBeforeStart={persistConfigBeforeMachineLaunch}
+      onAuthenticated={() => {
+        setAuthRequired(false);
+        setProbeError(null);
+        setManuallyTested(true);
+        if (isCustom && parsedCustomAcp) {
+          setTestedCustomKey(customAcpKey);
+        }
+        if (requiresBuiltinCreationVerification) {
+          setVerifiedBuiltinContext(builtinVerificationContext);
+        }
+      }}
+    />
+  );
+
   const formPane = (
     <section className="flex min-h-0 flex-1 flex-col">
       <header
@@ -2221,30 +2250,23 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 }
                 icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <AcpAuthenticationPanel
-                  machineId={machine.id}
-                  configId={agentConfigId}
-                  cliType={formData.cliType}
-                  agentType={formData.agentType}
-                  providerName={formData.name}
-                  customAcp={parsedCustomAcp ?? undefined}
-                  runtimeOverrides={formData.runtimeOverrides}
-                  env={formData.env}
-                  compact
-                  reauthentication={!authRequired}
-                  onBeforeStart={persistConfigBeforeMachineLaunch}
-                  onAuthenticated={() => {
-                    setAuthRequired(false);
-                    setProbeError(null);
-                    setManuallyTested(true);
-                    if (isCustom && parsedCustomAcp) {
-                      setTestedCustomKey(customAcpKey);
-                    }
-                    if (requiresBuiltinCreationVerification) {
-                      setVerifiedBuiltinContext(builtinVerificationContext);
-                    }
-                  }}
-                />
+                {mode.kind === 'edit' &&
+                machineSupportsAccountProfilesProtocol(machine) &&
+                formData.cliType === 'builtin' &&
+                (formData.agentType === 'codex' || formData.agentType === 'claude') &&
+                Object.keys(formData.env).length === 0 &&
+                !resolvedBrandId ? (
+                  <AccountProfilesPanel
+                    key={`${machine.id}:${formData.agentType}:${agentConfigId}`}
+                    machineId={machine.id}
+                    agentType={formData.agentType}
+                    configId={agentConfigId}
+                    systemDefaultAuthentication={systemDefaultAuthentication}
+                    onBeforeStart={persistConfigBeforeMachineLaunch}
+                  />
+                ) : (
+                  systemDefaultAuthentication
+                )}
               </Field>
             </div>
           ) : null}

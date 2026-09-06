@@ -214,8 +214,9 @@ describe('lody_upload_files input schema', () => {
 
 describe('resolveUploadPath', () => {
   it('keeps absolute paths and resolves relative ones against the workdir', () => {
-    const workdir = '/tmp/workspace';
-    expect(resolveUploadPath('/abs/x.txt', workdir)).toBe('/abs/x.txt');
+    const workdir = path.resolve('/tmp/workspace');
+    const absolutePath = path.resolve('/abs/x.txt');
+    expect(resolveUploadPath(absolutePath, workdir)).toBe(absolutePath);
     expect(resolveUploadPath('sub/x.txt', workdir)).toBe(path.join(workdir, 'sub/x.txt'));
   });
 });

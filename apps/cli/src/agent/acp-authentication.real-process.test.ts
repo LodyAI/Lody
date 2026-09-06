@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { SpawnOptions } from 'node:child_process';
+import spawn from 'cross-spawn';
 
 import type { MachineAcpAuthenticationForm } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
@@ -45,8 +47,16 @@ describe('Custom ACP authentication real process', () => {
         interactionId: string;
         form: MachineAcpAuthenticationForm;
       }>();
+      let processExited = false;
       const manager = new AcpAuthenticationManager(createSilentLogger(), {
         resolveLoginShellEnv: async () => ({}),
+        spawnProcess: ((command: string, args: string[], options: SpawnOptions) => {
+          const child = spawn(command, args, options);
+          child.once('exit', () => {
+            processExited = true;
+          });
+          return child;
+        }) as typeof spawn,
       });
       const authentication = manager.authenticate({
         requestId: 'real-process-validation',
@@ -113,7 +123,11 @@ describe('Custom ACP authentication real process', () => {
       expect(authorizationUrls).toContain(
         'https://provider.example.test/oauth/authorize?client_id=validation'
       );
-      await expect(readFile(shutdownMarkerPath, 'utf8')).resolves.toBe('terminated');
+      expect(processExited).toBe(true);
+      // Windows terminates the child directly rather than invoking its SIGTERM handler.
+      if (process.platform !== 'win32') {
+        await expect(readFile(shutdownMarkerPath, 'utf8')).resolves.toBe('terminated');
+      }
     } finally {
       if (previousTerm === undefined) delete process.env.TERM;
       else process.env.TERM = previousTerm;

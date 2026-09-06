@@ -26,6 +26,7 @@ import {
   type AcpSessionStartTarget,
 } from './agent-client';
 import { getLoginShellEnv } from './login-shell-env';
+import { acquireAccountProfileUse, resolveAccountProfileEnv } from './account-profiles';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
@@ -269,6 +270,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
 };
 
 export type StartLocalAcpAgentOptions = {
+  accountProfileId?: string;
   cliType: AgentConfigCliType;
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
@@ -346,6 +348,19 @@ export const __test__ = {
 };
 
 export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => {
+  const release = acquireAccountProfileUse(options);
+  try {
+    const result = await startLocalAcpAgentWithAccountLease(options);
+    if (result.agentProcess.exitCode !== null || result.agentProcess.signalCode != null) release();
+    else result.agentProcess.once('exit', release);
+    return result;
+  } catch (error) {
+    release();
+    throw error;
+  }
+};
+
+const startLocalAcpAgentWithAccountLease = async (options: StartLocalAcpAgentOptions) => {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
   // downloaded/unpacked on demand before spawn (no-op for builtin/npx/uvx/local).
@@ -374,7 +389,10 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     isResume: false,
   };
 
-  const baseEnv = withoutElectronBootstrapCredentials(options.env ?? process.env);
+  const baseEnv = await resolveAccountProfileEnv({
+    ...options,
+    env: withoutElectronBootstrapCredentials(options.env ?? process.env),
+  });
   // Codex CLI reads config from `~/.codex` by default. E2E and title-agent runs use a temporary,
   // repo-local Codex home so their rollout/history state stays isolated. A title agent copies the
   // user's config into that home because custom model-provider routing and authentication must stay
@@ -395,17 +413,20 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.
-  const mergedStartupEnv = withLoopbackNoProxy(
-    withoutElectronBootstrapCredentials(
-      withLodyNpmCacheForNpx(
-        launch.command,
-        withDefaultAcpPathEntries(
-          mergeACPProcessEnv(launch, mergeLoginShellEnv(env, loginShellEnv)),
-          options.agentType
+  const mergedStartupEnv = await resolveAccountProfileEnv({
+    ...options,
+    env: withLoopbackNoProxy(
+      withoutElectronBootstrapCredentials(
+        withLodyNpmCacheForNpx(
+          launch.command,
+          withDefaultAcpPathEntries(
+            mergeACPProcessEnv(launch, mergeLoginShellEnv(env, loginShellEnv)),
+            options.agentType
+          )
         )
       )
-    )
-  );
+    ),
+  });
   const envWithAcpStartup = isTitleAgentCodexRun
     ? withTitleAgentCodexConfig(mergedStartupEnv)
     : mergedStartupEnv;

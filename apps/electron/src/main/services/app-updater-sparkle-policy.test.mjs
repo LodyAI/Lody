@@ -12,18 +12,9 @@ import {
 } from './app-updater-sparkle-policy.ts'
 
 void test('keeps OSS local updater off unless explicitly force-enabled', () => {
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: false }),
-    false
-  )
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: true }),
-    true
-  )
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: false, forceEnable: false }),
-    true
-  )
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: false }), false)
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: true }), true)
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: false, forceEnable: false }), true)
 })
 
 void test('uses Sparkle only for packaged macOS when the native bridge is available', () => {
@@ -104,18 +95,32 @@ void test('electron-builder SUFeedURL matches the runtime Sparkle appcast', asyn
 })
 
 void test('prefers the unpacked native addon next to the resolved package', () => {
-  const exists = new Set([
-    '/App.app/Contents/Resources/app.asar.unpacked/node_modules/electron-sparkle-updater/native/build/Release/sparkle_bridge.node'
-  ])
+  const resourcesPath = path.join('/App.app', 'Contents', 'Resources')
+  const addon = path.join(
+    resourcesPath,
+    'app.asar.unpacked',
+    'node_modules',
+    'electron-sparkle-updater',
+    'native',
+    'build',
+    'Release',
+    'sparkle_bridge.node'
+  )
+  const exists = new Set([addon])
   assert.equal(
     resolveSparkleAddonPath({
       isPackaged: true,
-      resourcesPath: '/App.app/Contents/Resources',
-      resolvedPackageJsonPath:
-        '/App.app/Contents/Resources/app.asar/node_modules/electron-sparkle-updater/package.json',
+      resourcesPath,
+      resolvedPackageJsonPath: path.join(
+        resourcesPath,
+        'app.asar',
+        'node_modules',
+        'electron-sparkle-updater',
+        'package.json'
+      ),
       exists: (candidate) => exists.has(candidate)
     }),
-    '/App.app/Contents/Resources/app.asar.unpacked/node_modules/electron-sparkle-updater/native/build/Release/sparkle_bridge.node'
+    addon
   )
 })
 

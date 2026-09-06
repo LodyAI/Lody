@@ -186,6 +186,7 @@ describe('WorktreeManager', () => {
 
       const sessionId = 'archive01-session-restore' as SessionId;
       const info = await manager.createWorktree(sessionId);
+      runGit(info.hostPath, ['config', 'core.autocrlf', 'false']);
 
       fs.writeFileSync(path.join(info.hostPath, '.gitignore'), 'dist/\n', 'utf8');
       gitCommit(info.hostPath, 'add ignore rules');

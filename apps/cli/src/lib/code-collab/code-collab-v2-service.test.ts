@@ -222,42 +222,49 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       const publishStarted = new Promise<void>((resolve) => {
         resolvePublishStarted = resolve;
       });
+      let releasePublish: (() => void) | undefined;
+      const publishReleased = new Promise<void>((resolve) => {
+        releasePublish = resolve;
+      });
+      let resolvePublishFinished: (() => void) | undefined;
+      const publishFinished = new Promise<void>((resolve) => {
+        resolvePublishFinished = resolve;
+      });
       const service = new CodeCollabV2Service({
         resolveWorkspace: makeResolver(workspaceRoot),
         publishFileIndex: async () => {
           resolvePublishStarted?.();
-          await new Promise<void>(() => undefined);
+          await publishReleased;
         },
+        publishFileIndexSignal: async () => resolvePublishFinished?.(),
       });
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'hello.ts' });
-
-      const saved = await Promise.race([
-        service.saveText({
+      try {
+        // Use the known fixture digest so openText does not start an independent
+        // reconciliation that could still hold the workspace during cleanup.
+        const saved = await service.saveText({
           sessionId: SESSION_ID,
           requestedByUserId: 'user-1',
           path: 'hello.ts',
-          baseDigest: opened.digest,
+          baseDigest: digestText('old\n'),
           text: {
             encoding: 'plain',
             text: 'new\n',
             rawBytes: Buffer.byteLength('new\n'),
           },
-        }),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error('saveText did not return after writing to disk'));
-          }, 250);
-        }),
-      ]);
-
-      expect(saved).toEqual({
-        status: 'ok',
-        path: 'hello.ts',
-        digest: digestText('new\n'),
-        rawBytes: Buffer.byteLength('new\n'),
-      });
-      expect(await readFile(filePath, 'utf8')).toBe('new\n');
-      await publishStarted;
+        });
+        await publishStarted;
+        expect(saved).toEqual({
+          status: 'ok',
+          path: 'hello.ts',
+          digest: digestText('new\n'),
+          rawBytes: Buffer.byteLength('new\n'),
+        });
+        expect(await readFile(filePath, 'utf8')).toBe('new\n');
+      } finally {
+        releasePublish?.();
+        await publishFinished;
+        service.dispose();
+      }
     });
   });
 

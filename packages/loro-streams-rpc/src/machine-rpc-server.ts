@@ -1,4 +1,10 @@
 import type {
+  MachineAccountProfilesRequest,
+  MachineAccountProfilesResponse,
+  SessionAccountSwitchRequest,
+  SessionAccountSwitchResponse,
+} from '@lody/shared';
+import type {
   AgentConfigId,
   CodeCollabV2InitDirectoryOk,
   CodeCollabV2InitDirectoryRequest,
@@ -305,12 +311,18 @@ type RpcServerDeps = {
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal: AbortSignal;
   }) => Promise<MachineAcpCapabilitiesRefreshResponse>;
+  accountProfiles?: (
+    args: Omit<MachineAccountProfilesRequest, 'type' | 'machineId' | 'workspaceId'>
+  ) => Promise<MachineAccountProfilesResponse>;
+  switchSessionAccount?: (
+    args: Omit<SessionAccountSwitchRequest, 'type' | 'machineId' | 'workspaceId'>
+  ) => Promise<SessionAccountSwitchResponse>;
   authenticateMachineAcp?: (
     args: {
       requestId: string;
       onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
     } & (
-      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'start'; configId: AgentConfigId; accountProfileId?: string }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
           action: 'submit-code';
@@ -442,6 +454,7 @@ export class LoroStreamsMachineRpcServer {
   private readonly controlConcurrency = new Semaphore(DEFAULT_MAX_CONCURRENT_CONTROL_REQUESTS);
   private readonly inFlightRequests = new Set<Promise<void>>();
   private readonly acpAuthorizationCodeRecipients = new Map<string, RpcSecretRecipient>();
+  private readonly activeAcpAuthenticationRequestIds = new Set<string>();
   private readonly acpCapabilitiesRefreshControllers = new Map<string, AbortController>();
   private requestLoopFailure: {
     message: string;
@@ -497,6 +510,7 @@ export class LoroStreamsMachineRpcServer {
     }
     this.stopped = true;
     this.acpAuthorizationCodeRecipients.clear();
+    this.activeAcpAuthenticationRequestIds.clear();
     for (const controller of this.acpCapabilitiesRefreshControllers.values()) {
       controller.abort();
     }
@@ -839,6 +853,33 @@ export class LoroStreamsMachineRpcServer {
           this.acpCapabilitiesRefreshControllers.get(request.params.requestId)?.abort();
           return;
         }
+        case 'machine/account-profiles': {
+          if (!this.deps.accountProfiles) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Account profiles are unavailable.',
+            });
+            return;
+          }
+          const response = await this.deps.accountProfiles({
+            ...request.params,
+            configId: request.params.configId as AgentConfigId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'session/account-switch': {
+          if (!this.deps.switchSessionAccount) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Account switching is unavailable.',
+            });
+            return;
+          }
+          const response = await this.deps.switchSessionAccount(request.params);
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/acp-authenticate': {
           if (!this.deps.authenticateMachineAcp) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -848,81 +889,94 @@ export class LoroStreamsMachineRpcServer {
             return;
           }
           const isStart = request.params.action === 'start';
-          const recipient = isStart ? await createRpcSecretRecipient() : undefined;
-          if (recipient) {
-            this.acpAuthorizationCodeRecipients.set(request.params.requestId, recipient);
+          if (isStart) {
+            if (this.activeAcpAuthenticationRequestIds.has(request.params.requestId)) {
+              throw new Error('Authentication request is already running.');
+            }
+            // Reserve before asynchronous key generation so another account cannot
+            // replace the recipient used by this request's encrypted replies.
+            this.activeAcpAuthenticationRequestIds.add(request.params.requestId);
           }
-          let progressWrites: Promise<void> = Promise.resolve();
-          const appendProgress = (progress: MachineAcpAuthenticationProgressMessage) => {
-            const acceptsInteractionInput =
-              progress.status === 'auth-methods' ||
-              progress.status === 'input-required' ||
-              progress.requiresAuthorizationConsent === true;
-            const safeProgress =
-              recipient && (progress.acceptsAuthorizationCode || acceptsInteractionInput)
-                ? {
-                    ...progress,
-                    ...(progress.acceptsAuthorizationCode
-                      ? { authorizationCodePublicKey: recipient.publicKey }
-                      : {}),
-                    ...(acceptsInteractionInput
-                      ? { authenticationInputPublicKey: recipient.publicKey }
-                      : {}),
-                  }
-                : progress;
-            progressWrites = progressWrites
-              .then(() =>
-                this.appendResultResponse(request.replyTo, request.id, request.method, safeProgress)
-              )
-              .catch(() => undefined);
-          };
-
-          let authorizationCode: string | undefined;
-          let authenticationInput: string | undefined;
-          if (request.params.action === 'submit-code') {
-            const authenticationRequestId = request.params.authenticationRequestId;
-            const authorizationCodeEnvelope = request.params.authorizationCodeEnvelope;
-            const activeRecipient =
-              this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
-            if (!activeRecipient) {
-              throw new Error('Authorization-code recipient is no longer active.');
-            }
-            authorizationCode = await activeRecipient.decrypt(
-              authorizationCodeEnvelope,
-              getMachineAcpAuthorizationCodeSecretContext({
-                workspaceId: this.deps.workspaceId,
-                machineId: this.deps.machineId,
-                authenticationRequestId,
-              })
-            );
-            if (!authorizationCode.trim() || authorizationCode.length > 4096) {
-              throw new Error('Invalid decrypted authorization-code input.');
-            }
-          }
-          if (request.params.action === 'submit-input') {
-            const authenticationRequestId = request.params.authenticationRequestId;
-            const interactionId = request.params.interactionId;
-            const authenticationInputEnvelope = request.params.authenticationInputEnvelope;
-            const activeRecipient =
-              this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
-            if (!activeRecipient) {
-              throw new Error('Authentication-input recipient is no longer active.');
-            }
-            authenticationInput = await activeRecipient.decrypt(
-              authenticationInputEnvelope,
-              getMachineAcpAuthenticationInputSecretContext({
-                workspaceId: this.deps.workspaceId,
-                machineId: this.deps.machineId,
-                authenticationRequestId,
-                interactionId,
-              })
-            );
-            if (!authenticationInput || authenticationInput.length > 65_536) {
-              throw new Error('Invalid decrypted authentication input.');
-            }
-          }
-
           try {
+            const recipient = isStart ? await createRpcSecretRecipient() : undefined;
+            if (recipient) {
+              this.acpAuthorizationCodeRecipients.set(request.params.requestId, recipient);
+            }
+            let progressWrites: Promise<void> = Promise.resolve();
+            const appendProgress = (progress: MachineAcpAuthenticationProgressMessage) => {
+              const acceptsInteractionInput =
+                progress.status === 'auth-methods' ||
+                progress.status === 'input-required' ||
+                progress.requiresAuthorizationConsent === true;
+              const safeProgress =
+                recipient && (progress.acceptsAuthorizationCode || acceptsInteractionInput)
+                  ? {
+                      ...progress,
+                      ...(progress.acceptsAuthorizationCode
+                        ? { authorizationCodePublicKey: recipient.publicKey }
+                        : {}),
+                      ...(acceptsInteractionInput
+                        ? { authenticationInputPublicKey: recipient.publicKey }
+                        : {}),
+                    }
+                  : progress;
+              progressWrites = progressWrites
+                .then(() =>
+                  this.appendResultResponse(
+                    request.replyTo,
+                    request.id,
+                    request.method,
+                    safeProgress
+                  )
+                )
+                .catch(() => undefined);
+            };
+
+            let authorizationCode: string | undefined;
+            let authenticationInput: string | undefined;
+            if (request.params.action === 'submit-code') {
+              const authenticationRequestId = request.params.authenticationRequestId;
+              const authorizationCodeEnvelope = request.params.authorizationCodeEnvelope;
+              const activeRecipient =
+                this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
+              if (!activeRecipient) {
+                throw new Error('Authorization-code recipient is no longer active.');
+              }
+              authorizationCode = await activeRecipient.decrypt(
+                authorizationCodeEnvelope,
+                getMachineAcpAuthorizationCodeSecretContext({
+                  workspaceId: this.deps.workspaceId,
+                  machineId: this.deps.machineId,
+                  authenticationRequestId,
+                })
+              );
+              if (!authorizationCode.trim() || authorizationCode.length > 4096) {
+                throw new Error('Invalid decrypted authorization-code input.');
+              }
+            }
+            if (request.params.action === 'submit-input') {
+              const authenticationRequestId = request.params.authenticationRequestId;
+              const interactionId = request.params.interactionId;
+              const authenticationInputEnvelope = request.params.authenticationInputEnvelope;
+              const activeRecipient =
+                this.acpAuthorizationCodeRecipients.get(authenticationRequestId);
+              if (!activeRecipient) {
+                throw new Error('Authentication-input recipient is no longer active.');
+              }
+              authenticationInput = await activeRecipient.decrypt(
+                authenticationInputEnvelope,
+                getMachineAcpAuthenticationInputSecretContext({
+                  workspaceId: this.deps.workspaceId,
+                  machineId: this.deps.machineId,
+                  authenticationRequestId,
+                  interactionId,
+                })
+              );
+              if (!authenticationInput || authenticationInput.length > 65_536) {
+                throw new Error('Invalid decrypted authentication input.');
+              }
+            }
+
             const response = await (() => {
               switch (request.params.action) {
                 case 'start':
@@ -930,6 +984,7 @@ export class LoroStreamsMachineRpcServer {
                     requestId: request.params.requestId,
                     action: request.params.action,
                     configId: request.params.configId as AgentConfigId,
+                    accountProfileId: request.params.accountProfileId,
                     onProgress: appendProgress,
                   });
                 case 'cancel':
@@ -975,8 +1030,7 @@ export class LoroStreamsMachineRpcServer {
           } finally {
             if (isStart) {
               this.acpAuthorizationCodeRecipients.delete(request.params.requestId);
-            } else if (request.params.action === 'cancel') {
-              this.acpAuthorizationCodeRecipients.delete(request.params.authenticationRequestId);
+              this.activeAcpAuthenticationRequestIds.delete(request.params.requestId);
             }
           }
         }
@@ -1533,6 +1587,8 @@ export class LoroStreamsMachineRpcServer {
       | MachineStatusResponse
       | MachinePingResponse
       | MachineAcpCapabilitiesRefreshResponse
+      | MachineAccountProfilesResponse
+      | SessionAccountSwitchResponse
       | MachineAcpAuthenticateResponse
       | MachineAcpAuthenticationProgressMessage
       | MachineRestartResponse
