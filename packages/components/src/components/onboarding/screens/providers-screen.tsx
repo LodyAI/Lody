@@ -1303,13 +1303,25 @@ function useElapsedSeconds(startedAtMs: number | null): number {
 }
 
 /**
+ * How long a wait has to run before it is worth putting a number on it.
+ *
+ * A counter is not free. "Starting · 3s" reassures; "Starting · 87s" applies
+ * pressure, and a normal handshake is over long before anyone wants to measure
+ * it. Measuring is what you need once a wait has already begun to look
+ * abnormal, so the seconds stay hidden until then and an ordinary start reads
+ * as plain "Starting".
+ */
+const ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS = 10;
+
+/**
  * The in-flight action for a row.
  *
  * A download has a denominator, so the button fills and reads as a percentage.
  * Every other stage — the ACP handshake above all — has none, and inventing one
- * would be a lie; it reports elapsed time instead, which is what turns an
- * open-ended wait into a wait the user can measure. The badge beside it names
- * the stage, so the two together read as "Starting · 14s".
+ * would be a lie. Past {@link ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS} it reports
+ * elapsed time instead, which is what turns an open-ended wait into a wait the
+ * user can measure. The badge beside it names the stage, so the two together
+ * read as "Starting · 14s".
  */
 function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }) {
   const { t } = useTranslation();
@@ -1323,7 +1335,7 @@ function ProviderActivityAction({ activity }: { activity: ProviderTestActivity }
     // Never label an already-failed runtime as ongoing work while the durable
     // reason is still in flight.
     if (runtimeFailed) return t('onboarding.providers.failedAction', 'Failed');
-    if (elapsedSeconds > 0) {
+    if (elapsedSeconds >= ELAPSED_SECONDS_VISIBLE_AFTER_SECONDS) {
       return t('onboarding.providers.workingSeconds', '{{seconds}}s', {
         seconds: elapsedSeconds,
       });

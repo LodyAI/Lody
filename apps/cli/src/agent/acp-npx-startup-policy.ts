@@ -1,4 +1,4 @@
-import { ACP_COLD_NPX_INIT_TIMEOUT_MS } from '@lody/shared';
+import { ACP_COLD_NPX_INIT_TIMEOUT_MS, ACP_NPX_STARTUP_MAX_ATTEMPTS } from '@lody/shared';
 import type { AcpStartupTimeoutOptions } from './agent-client';
 import { AcpTimeoutError } from './agent-client';
 import type { Logger } from '@/utils/logger';
@@ -17,9 +17,12 @@ import {
 
 /**
  * Re-exported so the client-side backstop in `@lody/shared/acp-startup-budget`
- * and this startup path cannot drift into two different worst cases.
+ * and this startup path cannot drift into two different worst cases. The
+ * backstop has to cover every attempt this policy may make, not just one, so
+ * the attempt count is part of the same shared binding as the timeout.
  */
 export const COLD_NPX_INIT_TIMEOUT_MS = ACP_COLD_NPX_INIT_TIMEOUT_MS;
+export const DEFAULT_NPX_STARTUP_MAX_ATTEMPTS = ACP_NPX_STARTUP_MAX_ATTEMPTS;
 
 export type NpxStartupAttemptInput = {
   attempt: number;
@@ -104,7 +107,7 @@ export async function runNpxStartupWithRecovery<T>(
     });
   }
 
-  const maxAttempts = options.maxAttempts ?? 3;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_NPX_STARTUP_MAX_ATTEMPTS;
   const coldInitTimeoutMs = options.coldInitTimeoutMs ?? COLD_NPX_INIT_TIMEOUT_MS;
   const npxCacheRoot = getConfiguredNpxCacheRoot(options.env);
   const roots = options.npxCacheRoots ?? (npxCacheRoot ? [npxCacheRoot] : undefined);

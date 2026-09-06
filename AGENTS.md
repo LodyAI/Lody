@@ -44,6 +44,9 @@ and Web/mobile app sources.
   died without replying, so it derives from
   `packages/shared/src/acp-startup-budget.ts` and stays strictly above the machine's worst
   case; never set a second, smaller client deadline that expires work the machine is still doing.
+  That worst case is the whole recovery policy, not one attempt: a cold `npx` initialize
+  timeout makes the machine purge and retry, and every retry gets the full per-attempt
+  timeouts again, so the attempt count lives in the same shared binding as the timeouts.
 - Managed runtime downloads default to the public R2-backed channel owned by
   `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
   same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
