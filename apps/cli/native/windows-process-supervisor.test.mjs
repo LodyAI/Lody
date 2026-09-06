@@ -189,7 +189,7 @@ async function runningTree(t) {
   return { ...supervisor, pids };
 }
 
-describe('native Windows process supervisor', { skip: process.platform !== 'win32' }, () => {
+void describe('native Windows process supervisor', { skip: process.platform !== 'win32' }, () => {
   before(() => {
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-supervisor-test-'));
     execFileSync(
@@ -206,7 +206,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     fs.rmSync(scratch, { recursive: true, force: true });
   });
 
-  it('preserves UTF-16 argv, inherited streams/env/cwd, and the target exit code', async (t) => {
+  void it('preserves UTF-16 argv, inherited streams/env/cwd, and the target exit code', async (t) => {
     const args = [
       '',
       'a b',
@@ -252,7 +252,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.equal(stderr, 'stderr-preserved');
   });
 
-  it('kills detached descendants when the target exits normally', async (t) => {
+  void it('kills detached descendants when the target exits normally', async (t) => {
     const tree = await runningTree(t);
     const observer = await observeOwned(t, [tree.child.pid, ...tree.pids]);
     tree.child.stdin.write('exit\n');
@@ -260,14 +260,14 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.deepEqual(await bounded(tree.exit), { code: 23, signal: null });
   });
 
-  it('kills detached descendants when the native supervisor is killed', async (t) => {
+  void it('kills detached descendants when the native supervisor is killed', async (t) => {
     const tree = await runningTree(t);
     const observer = await observeOwned(t, [tree.child.pid, ...tree.pids]);
     tree.child.kill('SIGKILL');
     await observer.verify();
   });
 
-  it('kills detached descendants when the target crashes', async (t) => {
+  void it('kills detached descendants when the target crashes', async (t) => {
     const tree = await runningTree(t);
     const observer = await observeOwned(t, [tree.child.pid, ...tree.pids]);
     tree.child.stdin.write('crash\n');
@@ -275,7 +275,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.deepEqual(await bounded(tree.exit), { code: 1, signal: null });
   });
 
-  it('kills the job when the owner closes its control channel', async (t) => {
+  void it('kills the job when the owner closes its control channel', async (t) => {
     const tree = await runningTree(t);
     const observer = await observeOwned(t, [tree.child.pid, ...tree.pids]);
     tree.control.end();
@@ -283,7 +283,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.deepEqual(await bounded(tree.exit), { code: 124, signal: null });
   });
 
-  it('returns every owned process to zero survivors across three lifetimes', async (t) => {
+  void it('returns every owned process to zero survivors across three lifetimes', async (t) => {
     for (const ending of ['exit', 'crash', 'supervisor-kill']) {
       const tree = await runningTree(t);
       const observer = await observeOwned(t, [tree.child.pid, ...tree.pids]);
@@ -297,7 +297,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
   });
 
   for (const phase of ['prepared', 'running']) {
-    it(`kills all owned processes after abrupt owner death (${phase})`, async (t) => {
+    void it(`kills all owned processes after abrupt owner death (${phase})`, async (t) => {
       const ownerSource = String.raw`
         const { spawn } = require('node:child_process');
         const { createInterface } = require('node:readline');
@@ -331,7 +331,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     });
   }
 
-  it('kills a suspended child if the supervisor crashes before resume', async (t) => {
+  void it('kills a suspended child if the supervisor crashes before resume', async (t) => {
     const supervisor = startSupervisor(t, process.execPath, [
       '-e',
       'process.stdout.write("unexpected-run")',
@@ -347,7 +347,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.equal(output, '');
   });
 
-  it('rejects native launch failure without emitting arguments or environment', async (t) => {
+  void it('rejects native launch failure without emitting arguments or environment', async (t) => {
     const supervisor = startSupervisor(t, path.join(scratch, 'missing.exe'), ['synthetic-secret']);
     assert.deepEqual(JSON.parse(await supervisor.status.next()), { type: 'ready', protocol: 1 });
     supervisor.control.write('start\n');
@@ -359,7 +359,7 @@ describe('native Windows process supervisor', { skip: process.platform !== 'win3
     assert.deepEqual(await bounded(supervisor.exit), { code: 125, signal: null });
   });
 
-  it('requires explicit parent authorization before creating a child', async (t) => {
+  void it('requires explicit parent authorization before creating a child', async (t) => {
     const supervisor = startSupervisor(t, process.execPath, [
       '-e',
       'process.stdout.write("unexpected-run")',

@@ -1,4 +1,5 @@
 import { assertWindowsSupervisorArtifacts } from '../../cli/scripts/windows-supervisor-artifacts.mjs'
+import { probeWindowsSupervisor } from '../../cli/scripts/probe-windows-supervisor.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -184,6 +185,11 @@ export default async function afterPack(context) {
 
   if (!fs.existsSync(cliRuntimePath)) {
     throw new Error(`[embedded-cli-smoke] missing expected runtime path: ${cliRuntimePath}`)
+  }
+
+  if (platform === 'win32') {
+    await probeWindowsSupervisor({ directory: packedCliDir, runtimePath: cliRuntimePath })
+    console.log('[embedded-cli-smoke] Windows owned launcher probe passed')
   }
 
   const result = spawnSync(cliRuntimePath, [cliEntry, '--help'], {
