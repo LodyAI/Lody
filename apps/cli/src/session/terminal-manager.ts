@@ -41,6 +41,8 @@ interface TerminalState<THandle> {
   truncated: boolean;
   exitStatus: TerminalExitStatus | null;
   waiters: Array<(status: TerminalExitStatus) => void>;
+  releasing?: Promise<void>;
+  disposed: boolean;
 }
 
 interface TerminalHooks {
@@ -91,6 +93,7 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       truncated: false,
       exitStatus: null,
       waiters: [],
+      disposed: false,
     };
 
     const hooks: TerminalHooks = {
@@ -130,20 +133,57 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
 
   async releaseTerminal(acpSessionId: string, terminalId: string): Promise<void> {
     const state = this.getTerminal(acpSessionId, terminalId);
+    if (state.releasing) return state.releasing;
+    const releasing = this.releaseState(state);
+    state.releasing = releasing;
     try {
-      await this.killHandle(state);
-    } catch (error) {
-      this.logger.debug(
-        `[${this.sessionLabel}] Failed to kill terminal ${terminalId} on release: ${error}`
-      );
+      await releasing;
+    } finally {
+      state.releasing = undefined;
     }
+  }
+
+  private async releaseState(state: TerminalState<THandle>): Promise<void> {
     if (!state.exitStatus) {
-      state.exitStatus = { exitCode: null, signal: 'SIGTERM' };
-      this.resolveWaiters(state);
+      let forced = false;
+      try {
+        await this.killHandle(state);
+      } catch (error) {
+        if (!this.isHandleLive(state)) throw error;
+        await this.killHandle(state, true);
+        forced = true;
+      }
+      if (!(await this.waitForObservedExit(state))) {
+        if (!forced && this.isHandleLive(state)) {
+          await this.killHandle(state, true);
+          if (!(await this.waitForObservedExit(state))) {
+            throw new Error('Terminal process did not report exit after forced termination');
+          }
+        } else {
+          throw new Error('Terminal process did not report exit after termination');
+        }
+      }
     }
     await this.disposeHandle(state);
-    this.terminals.delete(terminalId);
-    this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} released`);
+    state.disposed = true;
+    this.terminals.delete(state.id);
+    this.logger.debug(`[${this.sessionLabel}] Terminal ${state.id} released`);
+  }
+
+  private waitForObservedExit(state: TerminalState<THandle>): Promise<boolean> {
+    if (state.exitStatus) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const waiter = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        const index = state.waiters.indexOf(waiter);
+        if (index >= 0) state.waiters.splice(index, 1);
+        resolve(false);
+      }, 5_000);
+      state.waiters.push(waiter);
+    });
   }
 
   async waitForTerminalExit(acpSessionId: string, terminalId: string): Promise<TerminalExitStatus> {
@@ -168,11 +208,15 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     if (terminalIds.length === 0) {
       return;
     }
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       terminalIds.map(async (terminalId) => {
         await this.releaseTerminal(acpSessionId, terminalId);
       })
     );
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length > 0) throw new AggregateError(failures, 'Terminal disposal failed');
   }
 
   protected abstract startProcess(
@@ -186,12 +230,14 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     hooks: TerminalHooks
   ): Promise<THandle>;
 
-  protected abstract killHandle(state: TerminalState<THandle>): Promise<void>;
+  protected abstract killHandle(state: TerminalState<THandle>, force?: boolean): Promise<void>;
+  protected abstract isHandleLive(state: TerminalState<THandle>): boolean;
 
   protected abstract disposeHandle(state: TerminalState<THandle>): Promise<void>;
 
   private resolveWaiters(state: TerminalState<THandle>) {
-    const exitStatus = state.exitStatus ?? { exitCode: null, signal: null };
+    const exitStatus = state.exitStatus;
+    if (!exitStatus) return;
     while (state.waiters.length) {
       const waiter = state.waiters.shift();
       if (waiter) {
@@ -224,7 +270,7 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     exitCode: number | null,
     signal: NodeJS.Signals | null
   ) {
-    if (!this.terminals.has(state.id)) {
+    if (state.disposed || state.exitStatus) {
       return;
     }
     state.exitStatus = {
@@ -303,6 +349,8 @@ export class ShellTerminalManager
     const stdoutListener = (chunk: Buffer) => hooks.onData(chunk);
     const stderrListener = (chunk: Buffer) => hooks.onData(chunk);
     const closeListener = (code: number | null, signal: NodeJS.Signals | null) => {
+      // OS close is authoritative even if resource accounting is slow or stuck.
+      hooks.onExit(code, signal);
       void processHandle
         .inspectExit(code, signal)
         .then((violation) => {
@@ -316,9 +364,6 @@ export class ShellTerminalManager
         })
         .catch((error: unknown) => {
           hooks.onError?.(error instanceof Error ? error : new Error(String(error)));
-        })
-        .finally(() => {
-          hooks.onExit(code, signal);
         });
     };
     const errorListener = (error: Error) => hooks.onError?.(error);
@@ -339,9 +384,17 @@ export class ShellTerminalManager
     };
   }
 
-  protected async killHandle(state: TerminalState<ShellTerminalHandle>): Promise<void> {
+  protected isHandleLive(state: TerminalState<ShellTerminalHandle>): boolean {
+    const child = state.handle.processHandle.child;
+    return child.exitCode == null && child.signalCode == null;
+  }
+
+  protected async killHandle(
+    state: TerminalState<ShellTerminalHandle>,
+    force = false
+  ): Promise<void> {
     if (!state.exitStatus) {
-      await state.handle.processHandle.terminate(false);
+      await state.handle.processHandle.terminate(force);
     }
   }
 

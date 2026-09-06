@@ -246,6 +246,10 @@ the frozen identity. Never fall back to the Session owner when the driving Turn 
   session/preparation producers but deliberately leaves the document manager and credentials
   alive so MessageHandler can flush final ACP/Code Collab evidence; the later plain `cleanUp()`
   closes shared resources. Never restore document teardown ahead of session termination.
+  Failed process/terminal cleanup retains the Session for retry and blocks shared-resource
+  teardown; a root exit is not successful cleanup. Remove only the exact successfully
+  terminated instance. Terminal release reports observed exit only, retains failed releases,
+  and Session bounds terminal disposal before continuing process termination.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
   Peek/claim are synchronous published-resource snapshots and must never delay cold
   fallback; peek never transfers ownership. A prepared resource may reuse its open

@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -186,6 +187,100 @@ const createSessionInner = async (
   ).createSessionInner(config, undefined, preparedWorktree);
 
 describe('SessionManager cleanup phases', () => {
+  const cleanupFixture = () => {
+    const workspaceDocument = createWorkspaceDocument(new Map());
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const internals = manager as unknown as { sessions: Map<SessionId, ISession> };
+    return { manager, workspaceDocument, sessions: internals.sessions };
+  };
+
+  it('retains failed cleanup ownership, waits for all attempts, and retries before closing documents', async () => {
+    const { manager, workspaceDocument, sessions } = cleanupFixture();
+    const successId = 'cleanup-success' as SessionId;
+    const failureId = 'cleanup-failure' as SessionId;
+    const completed = deferred<void>();
+    const failure = new Error('tree failure');
+    const failureEvents = new EventEmitter();
+    const retry = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => {
+        failureEvents.emit('exit', { sessionId: failureId, exitCode: 0 });
+        throw failure;
+      })
+      .mockResolvedValue(undefined);
+    sessions.set(successId, {
+      sessionId: successId,
+      terminate: () => completed.promise,
+    } as unknown as ISession);
+    const failedSession = Object.assign(failureEvents, {
+      sessionId: failureId,
+      terminate: retry,
+    }) as unknown as ISession;
+    (
+      manager as unknown as { registerSessionEvents(session: ISession): void }
+    ).registerSessionEvents(failedSession);
+    sessions.set(failureId, failedSession);
+    let settled = false;
+    const cleanup = manager.cleanUp().finally(() => {
+      settled = true;
+    });
+    const assertion = expect(cleanup).rejects.toMatchObject({ errors: [failure] });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    completed.resolve();
+    await assertion;
+    expect(sessions.has(successId)).toBe(false);
+    expect(sessions.get(failureId)).toBe(failedSession);
+    failureEvents.emit('exit', { sessionId: failureId, exitCode: 0 });
+    expect(sessions.get(failureId)).toBe(failedSession);
+    expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
+    await manager.cleanUp();
+    expect(sessions.size).toBe(0);
+    expect(workspaceDocument.cleanUp).toHaveBeenCalledOnce();
+  });
+
+  it('preserves replacement and newly registered sessions during an in-flight cleanup', async () => {
+    const { manager, sessions } = cleanupFixture();
+    const sessionId = 'cleanup-replaced' as SessionId;
+    const newId = 'cleanup-new' as SessionId;
+    const started = deferred<void>();
+    const completed = deferred<void>();
+    const oldEvents = new EventEmitter();
+    const oldSession = Object.assign(oldEvents, {
+      sessionId,
+      terminate: () => {
+        started.resolve();
+        return completed.promise;
+      },
+    }) as unknown as ISession;
+    sessions.set(sessionId, oldSession);
+    (
+      manager as unknown as { registerSessionEvents(session: ISession): void }
+    ).registerSessionEvents(oldSession);
+    const cleanup = manager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    await started.promise;
+    const replacement = { sessionId } as unknown as ISession;
+    const newSession = { sessionId: newId } as unknown as ISession;
+    sessions.set(sessionId, replacement);
+    sessions.set(newId, newSession);
+    oldEvents.emit('exit', { sessionId, exitCode: 0 });
+    oldEvents.emit('terminated', { sessionId, exitCode: 0 });
+    completed.resolve();
+    await cleanup;
+    expect(sessions.get(sessionId)).toBe(replacement);
+    expect(sessions.get(newId)).toBe(newSession);
+  });
+
   it('stops session producers before closing the workspace document', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(

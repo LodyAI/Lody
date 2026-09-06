@@ -110,6 +110,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
+  private terminalDisposal: {
+    manager: TerminalManager;
+    sessionId: string;
+    promise: Promise<void>;
+  } | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
@@ -240,11 +245,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   async terminate(force: boolean = false): Promise<void> {
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
+    const failures: unknown[] = [];
+    // Exit callbacks may release these references during terminal/ACP disposal.
+    const activeProcess = this.activeProcess;
+    const agentProcess = this.agentProcess;
 
     if (this.acpSessionId && this.terminalManager.disposeAll) {
       try {
-        await this.terminalManager.disposeAll(this.acpSessionId);
+        await this.disposeTerminalsWithDeadline(this.acpSessionId);
       } catch (error) {
+        failures.push(error);
         this.logger.debug(
           `[${
             this.sessionId
@@ -265,10 +275,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       }
     }
 
-    // Capture references before any async work, since onExit handlers may null them out
-    const activeProcess = this.activeProcess;
-    const agentProcess = this.agentProcess;
-
     // Kill both processes and wait for them to actually exit before proceeding.
     // This prevents OS-level process leaks where SIGTERM is sent but the process
     // outlives this function (and all tracking of it).
@@ -276,9 +282,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       this.killAndWait(activeProcess, force),
       this.killAndWait(agentProcess, force),
     ]);
-    const failures: unknown[] = processResults.flatMap((result) =>
-      result.status === 'rejected' ? [result.reason] : []
-    );
+    for (const result of processResults) {
+      if (result.status === 'rejected') failures.push(result.reason);
+    }
 
     try {
       await this.sandbox.terminate(force);
@@ -317,6 +323,36 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       exitCode: activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
+  }
+
+  private async disposeTerminalsWithDeadline(sessionId: string): Promise<void> {
+    const manager = this.terminalManager;
+    let disposal = this.terminalDisposal;
+    if (!disposal || disposal.manager !== manager || disposal.sessionId !== sessionId) {
+      const promise = Promise.resolve().then(() => manager.disposeAll?.(sessionId));
+      disposal = { manager, sessionId, promise };
+      this.terminalDisposal = disposal;
+      const clear = () => {
+        if (this.terminalDisposal === disposal) this.terminalDisposal = null;
+      };
+      void promise.then(clear, clear);
+    }
+    // Shell terminals have bounded graceful/forced phases. This outer bound also
+    // protects shutdown from other TerminalManager implementations that hang.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        disposal.promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Terminal disposal timed out after 30000ms')),
+            30_000
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

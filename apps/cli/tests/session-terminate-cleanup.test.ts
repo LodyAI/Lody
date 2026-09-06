@@ -113,10 +113,48 @@ describe('Session terminate cleanup', () => {
       closeSession,
     } as never;
 
-    await expect(session.terminate(false)).resolves.toBeUndefined();
+    await expect(session.terminate(false)).rejects.toThrow('Session process termination failed');
     expect(disposeAll).toHaveBeenCalledTimes(1);
     expect(closeSession).toHaveBeenCalledTimes(1);
-    expect(session.acpSessionId).toBeNull();
+    expect(session.acpSessionId).toBe('acp-session-1');
+  });
+
+  it('bounds stalled terminal disposal, still kills processes, and retries without duplicate disposal', async () => {
+    vi.useFakeTimers();
+    try {
+      const session = createSession();
+      let finishDisposal = () => {};
+      const pending = new Promise<void>((resolve) => {
+        finishDisposal = resolve;
+      });
+      const disposeAll = vi.fn(() => pending);
+      session.terminalManager = createTerminalManager({ disposeAll });
+      session.acpSessionId = 'acp-session-1' as ACPSessionId;
+      const terminateProcess = vi.fn(async () => {});
+      // @ts-expect-error - exercising private process ownership
+      session.agentProcess = createProcessHandle(terminateProcess);
+      // @ts-expect-error - observing private sandbox lifecycle
+      const terminateSandbox = vi.spyOn(session.sandbox, 'terminate');
+      const terminated = vi.fn();
+      session.on('terminated', terminated);
+      const first = expect(session.terminate(true)).rejects.toThrow(
+        'Session process termination failed'
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      await first;
+      expect(terminateProcess).toHaveBeenCalledWith(true);
+      expect(terminateSandbox).toHaveBeenCalledWith(true);
+      expect(terminated).not.toHaveBeenCalled();
+      const retry = session.terminate(true);
+      await Promise.resolve();
+      expect(disposeAll).toHaveBeenCalledTimes(1);
+      finishDisposal();
+      await retry;
+      expect(terminated).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('skips ACP closeSession during forced terminate', async () => {

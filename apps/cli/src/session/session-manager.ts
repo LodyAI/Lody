@@ -451,6 +451,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private githubTokenManager: CloudGithubTokenManager | null = null;
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
+  private readonly cleanupOwnedSessions = new WeakSet<Session>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
@@ -2066,7 +2067,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return;
     }
 
+    this.cleanupOwnedSessions.add(session);
     await session.terminate(force);
+    this.cleanupOwnedSessions.delete(session);
     this.logger.debug(`[${sessionId}] Session terminated`);
   }
 
@@ -2096,18 +2099,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private async cleanupSessions(): Promise<void> {
     this.logger.debug('Cleaning up all sessions...');
 
-    const terminations = Array.from(this.sessions.values()).map((session) =>
-      session
-        .terminate(true)
-        .catch((error: unknown) =>
-          this.logger.error(
-            `[${session.sessionId}] Failed to terminate session: ${error instanceof Error ? error.message : 'Unknown error'}`
-          )
-        )
+    const results = await Promise.allSettled(
+      Array.from(this.sessions.entries()).map(async ([sessionId, session]) => {
+        this.cleanupOwnedSessions.add(session);
+        await session.terminate(true);
+        if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
+        this.cleanupOwnedSessions.delete(session);
+      })
     );
-
-    await Promise.allSettled(terminations);
-    this.sessions.clear();
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'Failed to terminate all sessions');
+    }
   }
 
   hasSession(sessionId: SessionId): boolean {
@@ -2250,12 +2255,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     });
 
     session.on('exit', (event: SessionExitEvent) => {
+      if (this.sessions.get(event.sessionId) !== session) return;
+      if (this.cleanupOwnedSessions.has(session)) return;
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       this.emit('exit', event);
     });
 
     session.on('terminated', (event: SessionExitEvent) => {
+      if (this.sessions.get(event.sessionId) !== session) return;
+      this.cleanupOwnedSessions.delete(session);
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       const terminatedEvent: SessionTerminatedEvent = {
