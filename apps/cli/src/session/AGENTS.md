@@ -19,10 +19,9 @@ specs/session-orchestration.md.
   config; missing-email placeholders are not identities.
 - Account switch needs local dispatch plus an out-of-band verifier before
   reads and handoff; never trust serialized requester/source.
-- `session-account-binding-store.ts` uses the installation data root and
-  workspace/machine/session keys. Synced fields and receipts are display-only.
-  Restart/fork/edit and helpers resolve it. Missing managed records
-  and corrupt files fail closed; legacy defaults preserve `system-default`.
+- Restart/fork/edit/helpers use installation-local `session-account-binding-store.ts`, keyed by
+  workspace/machine/session. Synced fields/receipts are display-only; missing managed/corrupt
+  records fail closed; legacy uses `system-default`.
 
 ## Dispatch
 
@@ -101,10 +100,11 @@ specs/session-orchestration.md.
 - Fork recovery fail-closes interrupted operations from ONLY local markers under
   `withForkOperationLock`; never enumerate rooms/open docs to discover candidates or `cleanSessionDoc`
   an unowned doc. Defer candidate ACP ids until commit.
-- Edit/resend prepares provider `forkAtTurn` (`session/new` for first User), cancels the exact active
-  turn, waits for release, then durably commits history/meta. Its rewrite barrier excludes promotion,
-  dispatch and steer; never rewrite the queue. Keep User attribution/config/attachments; use new turn
-  and ACP ids, and never replay transcript or roll back files.
+- Edit/resend prepares `forkAtTurn` (`session/new` for first User), cancels the exact turn and awaits
+  release. Journal before history/meta flush, promote after; recovery matches local source/target
+  history hashes. Pending journals block resume; failed rollback keeps them.
+  Barrier excludes promotion/dispatch/steer. Keep queue, User attribution/config/attachments;
+  use new turn/ACP ids, never replay transcripts or roll back files.
 
 ## Access
 

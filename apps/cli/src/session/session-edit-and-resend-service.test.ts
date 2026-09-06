@@ -1,4 +1,9 @@
-import { updateSessionAccountNativeId } from './session-account-binding-store';
+import {
+  beginSessionAccountEdit,
+  commitSessionAccountEdit,
+  rollbackSessionAccountEdit,
+  abandonSessionAccountEdit,
+} from './session-account-binding-store';
 import { describe, expect, it, vi } from 'vitest';
 import {
   SessionStatusFactory,
@@ -69,11 +74,28 @@ function createHarness(
     active?: boolean;
     prepareError?: Error;
     persistError?: Error;
+    rollbackError?: Error;
+    restoreHistoryError?: Error;
+    changeHistoryDuringStage?: boolean;
+    changeHistoryDuringPersist?: 'commit' | 'rollback';
     history?: SessionHistoryInput[];
   } = {}
 ) {
   const events: string[] = [];
   let history = options.history ?? historyFixture();
+  vi.mocked(beginSessionAccountEdit).mockImplementation(async () => {
+    events.push('stage');
+    if (options.changeHistoryDuringStage) history = history.slice(0, 2);
+  });
+  vi.mocked(commitSessionAccountEdit).mockImplementation(async () => {
+    events.push('binding-commit');
+  });
+  vi.mocked(rollbackSessionAccountEdit).mockImplementation(async () => {
+    events.push('binding-rollback');
+  });
+  vi.mocked(abandonSessionAccountEdit).mockImplementation(() => {
+    events.push('binding-abandon');
+  });
   const meta = {
     id: sessionId,
     machineId,
@@ -92,6 +114,9 @@ function createHarness(
     updateHistory: vi.fn(
       async (update: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         events.push('history');
+        if (options.restoreHistoryError && events.includes('persist')) {
+          throw options.restoreHistoryError;
+        }
         history = update(history);
       }
     ),
@@ -147,9 +172,25 @@ function createHarness(
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       persistPendingChanges: vi.fn(async (reason: string) => {
         events.push(reason.endsWith('rollback') ? 'persist-rollback' : 'persist');
+        if (
+          options.changeHistoryDuringPersist &&
+          reason.endsWith(options.changeHistoryDuringPersist)
+        ) {
+          history = [
+            ...history,
+            {
+              id: 'concurrent-user',
+              role: 'user',
+              timestamp: '2026-08-03T00:00:05.000Z',
+              items: [{ type: 'text', text: 'concurrent message' }],
+              fileDiff: [],
+            },
+          ];
+        }
         if (options.persistError && reason.endsWith('commit')) {
           throw options.persistError;
         }
+        if (options.rollbackError && reason.endsWith('rollback')) throw options.rollbackError;
       }),
     } as never,
     sessionManager: {
@@ -189,9 +230,15 @@ describe('SessionEditAndResendService', () => {
 
     await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: true });
 
-    expect(updateSessionAccountNativeId).toHaveBeenCalledWith(
+    expect(beginSessionAccountEdit).toHaveBeenCalledWith(
       { workspaceId: 'workspace-1', machineId: 'machine-1', sessionId },
-      'acp-new'
+      expect.objectContaining({
+        operationId: 'user-3',
+        sourceMeta: expect.objectContaining({ acpSessionId: 'acp-old' }),
+        targetMeta: expect.objectContaining({ acpSessionId: 'acp-new' }),
+        sourceHistory: historyFixture(),
+        targetHistory: harness.getHistory(),
+      })
     );
     expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
     expect(harness.events).toEqual([
@@ -199,9 +246,11 @@ describe('SessionEditAndResendService', () => {
       'prepare',
       'cancel',
       'wait-release',
+      'stage',
       'history',
       'meta',
       'persist',
+      'binding-commit',
       'adopt',
       'barrier-release',
       'dispatch',
@@ -313,8 +362,56 @@ describe('SessionEditAndResendService', () => {
       'assistant-2',
     ]);
     expect(harness.events).toContain('persist-rollback');
+    expect(harness.events.indexOf('persist-rollback')).toBeLessThan(
+      harness.events.indexOf('binding-rollback')
+    );
     expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
   });
+
+  it.each(['persist', 'restore'])(
+    'retains the local journal when rollback %s fails',
+    async (failure) => {
+      const harness = createHarness({
+        persistError: new Error('commit failed'),
+        rollbackError: failure === 'persist' ? new Error('rollback failed') : undefined,
+        restoreHistoryError: failure === 'restore' ? new Error('restore failed') : undefined,
+      });
+      await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: false });
+      expect(harness.events).toContain('binding-abandon');
+      expect(harness.events).not.toContain('binding-rollback');
+      expect(harness.events).not.toContain('binding-commit');
+      expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects changed history after staging without overwriting it', async () => {
+    const harness = createHarness({ changeHistoryDuringStage: true });
+    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({
+      success: false,
+      error: { code: 'STALE_USER_TURN' },
+    });
+    expect(harness.getHistory().map((entry) => entry.id)).toEqual(['user-1', 'assistant-1']);
+    expect(harness.events).toContain('binding-rollback');
+    expect(harness.events).not.toContain('meta');
+    expect(harness.events).not.toContain('persist');
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+  });
+
+  it.each(['commit', 'rollback'] as const)(
+    'preserves concurrent history during %s persistence and retains the journal',
+    async (phase) => {
+      const harness = createHarness({
+        changeHistoryDuringPersist: phase,
+        persistError: phase === 'rollback' ? new Error('commit failed') : undefined,
+      });
+      await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: false });
+      expect(harness.getHistory().at(-1)?.id).toBe('concurrent-user');
+      expect(harness.events).toContain('binding-abandon');
+      expect(harness.events).not.toContain('binding-commit');
+      expect(harness.events).not.toContain('binding-rollback');
+      expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    }
+  );
 });
 
 // Fixtures model trusted local bindings; filesystem authority has separate regression coverage.
@@ -322,6 +419,10 @@ vi.mock('./session-account-binding-store', () => ({
   resolveSessionAccountMeta: vi.fn(async (_scope: unknown, meta: SessionMeta) => meta),
   getSessionAccountBinding: vi.fn(async () => null),
   setSessionAccountBinding: vi.fn(async () => {}),
-  updateSessionAccountNativeId: vi.fn(async () => {}),
+  beginSessionAccountEdit: vi.fn(async () => {}),
+  commitSessionAccountEdit: vi.fn(async () => {}),
+  rollbackSessionAccountEdit: vi.fn(async () => {}),
+  abandonSessionAccountEdit: vi.fn(),
+  hashSessionAccountEditHistory: (history: SessionHistoryInput[]) => JSON.stringify(history),
   clearSessionAccountBinding: vi.fn(async () => {}),
 }));

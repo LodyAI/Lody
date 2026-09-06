@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ACPSessionId, SessionMeta } from '@lody/shared';
+import type { ACPSessionId, SessionHistoryInput, SessionMeta } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   getSessionAccountBinding,
@@ -10,9 +10,16 @@ import {
   resolveSessionAccountMeta,
   updateSessionAccountNativeId,
   clearSessionAccountBinding,
+  beginSessionAccountEdit,
+  commitSessionAccountEdit,
+  rollbackSessionAccountEdit,
+  abandonSessionAccountEdit,
+  hashSessionAccountEditHistory,
 } from './session-account-binding-store';
 const scope = { workspaceId: 'workspace', machineId: 'machine', sessionId: 'session' };
 const managed = '00000000-0000-4000-8000-00000000000b';
+const meta = (patch: Partial<SessionMeta> = {}) =>
+  ({ accountProfileId: 'system-default', acpSessionId: 'legacy-acp', ...patch }) as SessionMeta;
 let directory: string;
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), 'lody-binding-'));
@@ -20,13 +27,230 @@ beforeEach(async () => {
   vi.stubEnv('LODY_PLATFORM', undefined);
   vi.stubEnv('LODY_DATA_DIR', undefined);
 });
+
+describe('durable account edit journal', () => {
+  const sourceHistory = [
+    {
+      id: 'old-turn',
+      role: 'user',
+      timestamp: 1,
+      items: [{ type: 'text', text: 'old' }],
+      fileDiff: [],
+    },
+  ] as SessionHistoryInput[];
+  const targetHistory = [
+    {
+      id: 'new-turn',
+      role: 'user',
+      timestamp: 2,
+      items: [{ type: 'text', text: 'replacement' }],
+      fileDiff: [],
+    },
+  ] as SessionHistoryInput[];
+  const sourceMeta = meta({
+    accountProfileId: managed,
+    acpSessionId: 'source-native' as ACPSessionId,
+    latestUserMsgId: 'old-turn',
+    status: { type: 'idle' },
+  });
+  const targetMeta = {
+    acpSessionId: 'target-native' as ACPSessionId,
+    latestUserMsgId: 'new-turn',
+    status: { type: 'idle' as const },
+  };
+  async function stage() {
+    await setSessionAccountBinding(scope, {
+      accountProfileId: managed,
+      acpSessionId: sourceMeta.acpSessionId,
+    });
+    await beginSessionAccountEdit(scope, {
+      operationId: 'edit',
+      sourceMeta,
+      targetMeta,
+      sourceHistory,
+      targetHistory,
+    });
+  }
+  it('blocks all ordinary consumers and competing writers until the active edit commits', async () => {
+    await stage();
+    const readHistory = vi.fn(async () => targetHistory);
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+    await expect(
+      setSessionAccountBinding(scope, { accountProfileId: 'system-default' })
+    ).rejects.toThrow('recovery is required');
+    await expect(updateSessionAccountNativeId(scope, 'injected' as ACPSessionId)).rejects.toThrow(
+      'recovery is required'
+    );
+    await expect(clearSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+    await expect(
+      resolveSessionAccountMeta(scope, sourceMeta, {
+        readHistory,
+        writeMeta: async () => {},
+        persist: async () => {},
+      })
+    ).rejects.toThrow('recovery is required');
+    expect(readHistory).not.toHaveBeenCalled();
+    await expect(commitSessionAccountEdit(scope, 'wrong')).rejects.toThrow('no longer active');
+    await commitSessionAccountEdit(scope, 'edit');
+    expect(await getSessionAccountBinding(scope)).toMatchObject({
+      accountProfileId: managed,
+      acpSessionId: 'target-native',
+    });
+  });
+  it.each(['source', 'target'] as const)(
+    'recovers the %s checkpoint and repairs inconsistent metadata before exposing its binding',
+    async (checkpoint) => {
+      await stage();
+      abandonSessionAccountEdit(scope, 'edit');
+      const history = checkpoint === 'source' ? sourceHistory : targetHistory;
+      const expectedMeta = checkpoint === 'source' ? sourceMeta : targetMeta;
+      const order: string[] = [];
+      const writeMeta = vi.fn(async () => {
+        order.push('meta');
+      });
+      const recovered = await resolveSessionAccountMeta(
+        scope,
+        meta({ acpSessionId: 'forged' as ACPSessionId, accountProfileId: 'system-default' }),
+        {
+          readHistory: async () => history,
+          writeMeta,
+          persist: async () => {
+            order.push('persist');
+          },
+        }
+      );
+      expect(recovered).toMatchObject({
+        accountProfileId: managed,
+        acpSessionId: expectedMeta.acpSessionId,
+        latestUserMsgId: expectedMeta.latestUserMsgId,
+      });
+      expect(writeMeta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acpSessionId: expectedMeta.acpSessionId,
+          processingUserMsgId: undefined,
+        })
+      );
+      expect(order).toEqual(['meta', 'persist']);
+      expect(await getSessionAccountBinding(scope)).toMatchObject({
+        accountProfileId: managed,
+        acpSessionId: expectedMeta.acpSessionId,
+      });
+    }
+  );
+  it('retains the journal when repair persistence fails and safely retries', async () => {
+    await stage();
+    abandonSessionAccountEdit(scope, 'edit');
+    const recovery = {
+      readHistory: async () => targetHistory,
+      writeMeta: vi.fn(async () => {}),
+      persist: vi.fn(async () => {}),
+    };
+    recovery.persist.mockRejectedValueOnce(new Error('disk unavailable'));
+    await expect(resolveSessionAccountMeta(scope, sourceMeta, recovery)).rejects.toThrow(
+      'disk unavailable'
+    );
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+    expect(await resolveSessionAccountMeta(scope, sourceMeta, recovery)).toMatchObject({
+      acpSessionId: 'target-native',
+    });
+  });
+  it('rejects divergent history without trusting the synced native id or overwriting history', async () => {
+    await stage();
+    abandonSessionAccountEdit(scope, 'edit');
+    const writeMeta = vi.fn(async () => {});
+    await expect(
+      resolveSessionAccountMeta(scope, meta({ acpSessionId: 'target-native' as ACPSessionId }), {
+        readHistory: async () => [],
+        writeMeta,
+        persist: async () => {},
+      })
+    ).rejects.toThrow('cannot match');
+    expect(writeMeta).not.toHaveBeenCalled();
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+  });
+  it('detects a history change during metadata repair and retains the journal', async () => {
+    await stage();
+    abandonSessionAccountEdit(scope, 'edit');
+    const readHistory = vi
+      .fn()
+      .mockResolvedValueOnce(sourceHistory)
+      .mockResolvedValueOnce(targetHistory);
+    await expect(
+      resolveSessionAccountMeta(scope, sourceMeta, {
+        readHistory,
+        writeMeta: async () => {},
+        persist: async () => {},
+      })
+    ).rejects.toThrow('changed during');
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+  });
+  it('keeps the journal authoritative when atomic promotion fails', async () => {
+    await stage();
+    vi.mocked(rename).mockRejectedValueOnce(new Error('promotion failed'));
+    await expect(commitSessionAccountEdit(scope, 'edit')).rejects.toThrow('promotion failed');
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery is required');
+    await rollbackSessionAccountEdit(scope, 'edit');
+    expect(await getSessionAccountBinding(scope)).toMatchObject({ acpSessionId: 'source-native' });
+    expect(await readdir(path.join(getLodyDataDir(), 'session-account-bindings'))).toHaveLength(1);
+  });
+  it('does not stage against a changed local native identity', async () => {
+    await setSessionAccountBinding(scope, {
+      accountProfileId: managed,
+      acpSessionId: 'different' as ACPSessionId,
+    });
+    await expect(
+      beginSessionAccountEdit(scope, {
+        operationId: 'edit',
+        sourceMeta,
+        targetMeta,
+        sourceHistory,
+        targetHistory,
+      })
+    ).rejects.toThrow('binding changed');
+    expect(await getSessionAccountBinding(scope)).toMatchObject({ acpSessionId: 'different' });
+  });
+  it('does not roll history back when final rename succeeds but directory sync fails', async () => {
+    await stage();
+    const { open: actualOpen } =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.stubGlobal(
+      'process',
+      new Proxy(process, {
+        get: (target, key) => (key === 'platform' ? 'linux' : Reflect.get(target, key)),
+      })
+    );
+    vi.mocked(open).mockImplementation(async (...args) => {
+      if (args[0] === path.join(getLodyDataDir(), 'session-account-bindings'))
+        throw new Error('directory sync unavailable');
+      return await actualOpen(...args);
+    });
+    await commitSessionAccountEdit(scope, 'edit');
+    expect(await getSessionAccountBinding(scope)).toMatchObject({ acpSessionId: 'target-native' });
+  });
+  it('hashes content stably across read markers, container ids and object key ordering', () => {
+    const entry = sourceHistory[0];
+    if (!entry) throw new Error('Expected a source history entry');
+    const original = [{ ...entry, read: false, $cid: 'old-container' }];
+    const reopened = [
+      {
+        ...entry,
+        items: [{ text: 'old', type: 'text' }],
+        read: true,
+        $cid: 'new-container',
+      },
+    ] as SessionHistoryInput[];
+    expect(hashSessionAccountEditHistory(original)).toBe(hashSessionAccountEditHistory(reopened));
+    expect(hashSessionAccountEditHistory(original)).not.toBe(
+      hashSessionAccountEditHistory(targetHistory)
+    );
+  });
+});
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await rm(directory, { recursive: true, force: true });
 });
-const meta = (patch: Partial<SessionMeta> = {}) =>
-  ({ accountProfileId: 'system-default', acpSessionId: 'legacy-acp', ...patch }) as SessionMeta;
 describe('machine-local session account authority', () => {
   it('preserves legacy default resume and rejects injected managed profiles', async () => {
     expect(await resolveSessionAccountMeta(scope, meta())).toMatchObject({
@@ -117,7 +341,7 @@ describe('machine-local session account authority', () => {
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, rename: vi.fn(actual.rename) };
+  return { ...actual, rename: vi.fn(actual.rename), open: vi.fn(actual.open) };
 });
 it('preserves the prior binding when replacement fails and removes its temporary file', async () => {
   await setSessionAccountBinding(scope, {

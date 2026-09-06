@@ -1,3 +1,4 @@
+import { createSessionAccountEditRecovery } from '@/session/session-account-edit-recovery';
 import { getRateLimitEntryKey, resolveAccountProfileId } from '@lody/shared';
 import type {
   MachineAccountProfilesRequest,
@@ -9183,7 +9184,8 @@ export class MessageHandler {
                   machineId: this.machineId,
                   sessionId,
                 },
-                meta
+                meta,
+                createSessionAccountEditRecovery(this.workspaceDocument, sessionId)
               )
             ).accountProfileId
           : 'system-default',
@@ -9859,7 +9861,8 @@ export class MessageHandler {
               machineId: this.machineId,
               sessionId,
             },
-            meta
+            meta,
+            createSessionAccountEditRecovery(this.workspaceDocument, sessionId)
           )
         ).accountProfileId
       : 'system-default';

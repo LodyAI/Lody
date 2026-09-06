@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { AccountProfileIdSchema, type SessionMeta } from '@lody/shared';
+import {
+  AccountProfileIdSchema,
+  normalizeSessionTurnInputConfig,
+  type SessionHistoryInput,
+  type SessionMeta,
+} from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { z } from 'zod';
 
@@ -43,6 +48,130 @@ const bindingSchema = z
       .optional(),
   })
   .strict();
+export type SessionAccountEditMeta = Pick<
+  SessionMeta,
+  | 'acpSessionId'
+  | 'status'
+  | 'latestUserMsgId'
+  | 'lastHandledUserMsgId'
+  | 'processingUserMsgId'
+  | 'lastCanceledTurn'
+  | 'lastMissingHistoryUserMsgId'
+  | 'lastMessageAt'
+>;
+export interface SessionAccountEditRecovery {
+  readHistory(): Promise<SessionHistoryInput[]>;
+  writeMeta(patch: SessionAccountEditMeta): Promise<void>;
+  persist(): Promise<void>;
+}
+const editMetaSchema = z
+  .object({
+    acpSessionId: z.string().optional(),
+    status: z
+      .discriminatedUnion('type', [
+        z.object({ type: z.literal('idle') }).strict(),
+        z
+          .object({
+            type: z.literal('running'),
+            activity: z.literal('image_generation').optional(),
+          })
+          .strict(),
+        z.object({ type: z.literal('requestPermission') }).strict(),
+        z
+          .object({
+            type: z.literal('initializing'),
+            stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
+            detail: z.string().optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    latestUserMsgId: z.string().optional(),
+    lastHandledUserMsgId: z.string().optional(),
+    processingUserMsgId: z.string().optional(),
+    lastCanceledTurn: z.string().optional(),
+    lastMissingHistoryUserMsgId: z.string().optional(),
+    lastMessageAt: z.number().finite().optional(),
+  })
+  .strict();
+const pendingEditSchema = z
+  .object({
+    operationId: z.string().min(1),
+    sourceBinding: bindingSchema,
+    targetBinding: bindingSchema,
+    sourceMeta: editMetaSchema,
+    targetMeta: editMetaSchema,
+    sourceHistoryHash: z.string().regex(/^[a-f0-9]{64}$/),
+    targetHistoryHash: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+const recordSchema = bindingSchema.extend({ pendingEdit: pendingEditSchema.optional() }).strict();
+type BindingRecord = z.infer<typeof recordSchema>;
+const activeEdits = new Map<string, string>();
+const locks = new Map<string, Promise<void>>();
+async function withBindingLock<T>(
+  scope: SessionAccountScope,
+  action: () => Promise<T>
+): Promise<T> {
+  const key = bindingPath(scope);
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => gate);
+  locks.set(key, tail);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release?.();
+    if (locks.get(key) === tail) locks.delete(key);
+  }
+}
+function editMeta(meta: SessionAccountEditMeta): SessionAccountEditMeta {
+  // Explicit undefined fields clear target pointers when restoring the source.
+  return {
+    acpSessionId: meta.acpSessionId,
+    status: meta.status,
+    latestUserMsgId: meta.latestUserMsgId,
+    lastHandledUserMsgId: meta.lastHandledUserMsgId,
+    processingUserMsgId: meta.processingUserMsgId,
+    lastCanceledTurn: meta.lastCanceledTurn,
+    lastMissingHistoryUserMsgId: meta.lastMissingHistoryUserMsgId,
+    lastMessageAt: meta.lastMessageAt,
+  };
+}
+export function hashSessionAccountEditHistory(history: SessionHistoryInput[]): string {
+  const normalized = history.map((entry) => {
+    const { $cid: _cid, read: _read, ...content } = entry;
+    return {
+      ...content,
+      // Opening a document may acknowledge a pending user row as seen.
+      // Processing/handled states remain significant checkpoint content.
+      status:
+        entry.role === 'user' && (entry.status === 'pending' || entry.status === 'seen')
+          ? undefined
+          : entry.status,
+      inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
+    };
+  });
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([key]) => key !== '$cid')
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, canonicalize(item)])
+      );
+    }
+    return value;
+  };
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(normalized)))
+    .digest('hex');
+}
 function bindingPath(scope: SessionAccountScope): string {
   const key = createHash('sha256')
     .update(JSON.stringify([scope.workspaceId, scope.machineId, scope.sessionId]))
@@ -50,9 +179,7 @@ function bindingPath(scope: SessionAccountScope): string {
   return path.join(getLodyDataDir(), 'session-account-bindings', `${key}.json`);
 }
 /** Local files are the authority. Synced session metadata is only a display mirror. */
-export async function getSessionAccountBinding(
-  scope: SessionAccountScope
-): Promise<SessionAccountBinding | null> {
+async function readRecord(scope: SessionAccountScope): Promise<BindingRecord | null> {
   let content: string;
   try {
     content = await readFile(bindingPath(scope), 'utf8');
@@ -60,16 +187,28 @@ export async function getSessionAccountBinding(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-  return bindingSchema.parse(JSON.parse(content)) as SessionAccountBinding;
+  return recordSchema.parse(JSON.parse(content));
 }
-export async function setSessionAccountBinding(
+function requireCommitted(record: BindingRecord | null): SessionAccountBinding | null {
+  if (record?.pendingEdit)
+    throw new Error('Session account edit recovery is required before continuing.');
+  return record as SessionAccountBinding | null;
+}
+export async function getSessionAccountBinding(
+  scope: SessionAccountScope
+): Promise<SessionAccountBinding | null> {
+  return await withBindingLock(scope, async () => requireCommitted(await readRecord(scope)));
+}
+async function writeRecord(
   scope: SessionAccountScope,
-  binding: SessionAccountBinding
+  binding: BindingRecord,
+  finishingEdit = false
 ): Promise<void> {
-  const content = bindingSchema.parse(binding);
+  const content = recordSchema.parse(binding);
   const destination = bindingPath(scope);
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
   const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  let published = false;
   try {
     const handle = await open(temporary, 'wx', 0o600);
     try {
@@ -79,24 +218,41 @@ export async function setSessionAccountBinding(
       await handle.close();
     }
     await rename(temporary, destination);
+    published = true;
     if (process.platform !== 'win32') {
-      const directory = await open(path.dirname(destination), 'r');
       try {
-        await directory.sync();
-      } finally {
-        await directory.close();
+        const directory = await open(path.dirname(destination), 'r');
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      } catch (error) {
+        // Finalization follows durable history. If the directory sync fails,
+        // restart sees either this binding or the previous recoverable journal.
+        // Reporting a failed commit here would wrongly roll history back after
+        // the replacement was already published. Staging still fails closed.
+        if (!finishingEdit) throw error;
       }
     }
   } finally {
-    await rm(temporary, { force: true });
+    // Rename consumed the temporary path; cleanup must not reverse its outcome.
+    if (!published) await rm(temporary, { force: true });
   }
 }
-/** Legacy default sessions retain their native history. Untrusted managed mirrors cannot select credentials. */
-export async function resolveSessionAccountMeta(
+export async function setSessionAccountBinding(
   scope: SessionAccountScope,
-  meta: SessionMeta
-): Promise<SessionMeta> {
-  const binding = await getSessionAccountBinding(scope);
+  binding: SessionAccountBinding
+): Promise<void> {
+  await withBindingLock(scope, async () => {
+    requireCommitted(await readRecord(scope));
+    await writeRecord(scope, bindingSchema.parse(binding));
+  });
+}
+function resolveCommittedMeta(
+  meta: SessionMeta,
+  binding: SessionAccountBinding | null
+): SessionMeta {
   if (binding)
     return {
       ...meta,
@@ -119,22 +275,141 @@ export async function resolveSessionAccountMeta(
     accountHandoff: null,
   };
 }
+export async function beginSessionAccountEdit(
+  scope: SessionAccountScope,
+  edit: {
+    operationId: string;
+    sourceMeta: SessionMeta;
+    targetMeta: SessionAccountEditMeta;
+    sourceHistory: SessionHistoryInput[];
+    targetHistory: SessionHistoryInput[];
+  }
+): Promise<void> {
+  await withBindingLock(scope, async () => {
+    const source = resolveCommittedMeta(edit.sourceMeta, requireCommitted(await readRecord(scope)));
+    if (
+      source.accountProfileId !== (edit.sourceMeta.accountProfileId ?? 'system-default') ||
+      source.acpSessionId !== edit.sourceMeta.acpSessionId
+    )
+      throw new Error('Session account binding changed before the edit was staged.');
+    const sourceBinding = bindingSchema.parse({
+      accountProfileId: source.accountProfileId,
+      acpSessionId: source.acpSessionId,
+      accountContinuation: source.accountContinuation,
+      accountTransitions: source.accountTransitions,
+      accountHandoff: source.accountHandoff,
+    });
+    const targetBinding = {
+      ...sourceBinding,
+      acpSessionId: edit.targetMeta.acpSessionId,
+      accountContinuation:
+        sourceBinding.accountContinuation && edit.targetMeta.acpSessionId
+          ? { acpSessionId: edit.targetMeta.acpSessionId }
+          : sourceBinding.accountContinuation,
+    };
+    const sourceHistoryHash = hashSessionAccountEditHistory(edit.sourceHistory);
+    const targetHistoryHash = hashSessionAccountEditHistory(edit.targetHistory);
+    if (sourceHistoryHash === targetHistoryHash)
+      throw new Error('Session account edit requires distinct history checkpoints.');
+    await writeRecord(scope, {
+      ...sourceBinding,
+      pendingEdit: {
+        operationId: edit.operationId,
+        sourceBinding,
+        targetBinding,
+        sourceMeta: editMeta(source) as z.infer<typeof editMetaSchema>,
+        targetMeta: editMeta(edit.targetMeta) as z.infer<typeof editMetaSchema>,
+        sourceHistoryHash,
+        targetHistoryHash,
+      },
+    });
+    activeEdits.set(bindingPath(scope), edit.operationId);
+  });
+}
+async function finishSessionAccountEdit(
+  scope: SessionAccountScope,
+  operationId: string,
+  target: boolean
+): Promise<void> {
+  await withBindingLock(scope, async () => {
+    const pending = (await readRecord(scope))?.pendingEdit;
+    if (
+      !pending ||
+      pending.operationId !== operationId ||
+      activeEdits.get(bindingPath(scope)) !== operationId
+    )
+      throw new Error('Session account edit operation is no longer active.');
+    await writeRecord(scope, target ? pending.targetBinding : pending.sourceBinding, true);
+    activeEdits.delete(bindingPath(scope));
+  });
+}
+export async function commitSessionAccountEdit(
+  scope: SessionAccountScope,
+  operationId: string
+): Promise<void> {
+  await finishSessionAccountEdit(scope, operationId, true);
+}
+export async function rollbackSessionAccountEdit(
+  scope: SessionAccountScope,
+  operationId: string
+): Promise<void> {
+  await finishSessionAccountEdit(scope, operationId, false);
+}
+export function abandonSessionAccountEdit(scope: SessionAccountScope, operationId: string): void {
+  if (activeEdits.get(bindingPath(scope)) === operationId) activeEdits.delete(bindingPath(scope));
+}
+/** Legacy default sessions retain their native history. Untrusted managed mirrors cannot select credentials. */
+export async function resolveSessionAccountMeta(
+  scope: SessionAccountScope,
+  meta: SessionMeta,
+  recovery?: SessionAccountEditRecovery
+): Promise<SessionMeta> {
+  return await withBindingLock(scope, async () => {
+    const record = await readRecord(scope);
+    const pending = record?.pendingEdit;
+    if (!pending) return resolveCommittedMeta(meta, requireCommitted(record));
+    if (!recovery || activeEdits.has(bindingPath(scope)))
+      throw new Error('Session account edit recovery is required before continuing.');
+    const hash = hashSessionAccountEditHistory(await recovery.readHistory());
+    const target = hash === pending.targetHistoryHash;
+    if (!target && hash !== pending.sourceHistoryHash)
+      throw new Error('Session account edit recovery cannot match the durable history checkpoint.');
+    const patch = editMeta(
+      (target ? pending.targetMeta : pending.sourceMeta) as SessionAccountEditMeta
+    );
+    const binding = target ? pending.targetBinding : pending.sourceBinding;
+    await recovery.writeMeta(patch);
+    await recovery.persist();
+    if (hashSessionAccountEditHistory(await recovery.readHistory()) !== hash)
+      throw new Error('Session history changed during account edit recovery.');
+    await writeRecord(scope, binding, true);
+    return resolveCommittedMeta({ ...meta, ...patch }, binding as SessionAccountBinding);
+  });
+}
 
 export async function clearSessionAccountBinding(scope: SessionAccountScope): Promise<void> {
-  await rm(bindingPath(scope), { force: true });
+  await withBindingLock(scope, async () => {
+    requireCommitted(await readRecord(scope));
+    await rm(bindingPath(scope), { force: true });
+  });
 }
 export async function updateSessionAccountNativeId(
   scope: SessionAccountScope,
   acpSessionId: SessionMeta['acpSessionId']
 ): Promise<void> {
-  const binding = await getSessionAccountBinding(scope);
-  if (binding)
-    await setSessionAccountBinding(scope, {
-      ...binding,
-      acpSessionId,
-      accountContinuation:
-        binding.accountContinuation && acpSessionId
-          ? { acpSessionId }
-          : binding.accountContinuation,
-    });
+  await withBindingLock(scope, async () => {
+    const binding = requireCommitted(await readRecord(scope));
+    if (binding)
+      await writeRecord(
+        scope,
+        bindingSchema.parse({
+          ...binding,
+          acpSessionId,
+          accountContinuation:
+            binding.accountContinuation && acpSessionId
+              ? { acpSessionId }
+              : binding.accountContinuation,
+        })
+      );
+  });
 }

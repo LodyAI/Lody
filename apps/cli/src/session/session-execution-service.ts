@@ -1,3 +1,4 @@
+import { createSessionAccountEditRecovery } from './session-account-edit-recovery';
 import {
   getSessionAccountBinding,
   setSessionAccountBinding,
@@ -1161,7 +1162,11 @@ export class SessionExecutionService {
         ) {
           throw new Error('Account switching is available for builtin Codex and Claude only.');
         }
-        localAccountMeta = await resolveSessionAccountMeta(accountScope, meta);
+        localAccountMeta = await resolveSessionAccountMeta(
+          accountScope,
+          meta,
+          createSessionAccountEditRecovery(this.deps.workspaceDocument, sessionId)
+        );
         return localAccountMeta;
       },
       validate: async (meta, accountProfileId) => {
@@ -3639,7 +3644,8 @@ export class SessionExecutionService {
           ? yield* self.tryPromise(() =>
               resolveSessionAccountMeta(
                 { workspaceId: self.deps.workspaceId, machineId: self.deps.machineId, sessionId },
-                rawMeta
+                rawMeta,
+                createSessionAccountEditRecovery(self.deps.workspaceDocument, sessionId)
               )
             )
           : rawMeta;
@@ -4161,7 +4167,8 @@ export class SessionExecutionService {
           return raw
             ? await resolveSessionAccountMeta(
                 { workspaceId: self.deps.workspaceId, machineId: self.deps.machineId, sessionId },
-                raw
+                raw,
+                createSessionAccountEditRecovery(self.deps.workspaceDocument, sessionId)
               )
             : raw;
         });
@@ -4551,7 +4558,8 @@ export class SessionExecutionService {
     const existingMeta = rawExistingMeta
       ? await resolveSessionAccountMeta(
           { workspaceId: this.deps.workspaceId, machineId: this.deps.machineId, sessionId },
-          rawExistingMeta
+          rawExistingMeta,
+          createSessionAccountEditRecovery(this.deps.workspaceDocument, sessionId)
         )
       : rawExistingMeta;
     // A persisted ACP session id proves that this direct local Session has run

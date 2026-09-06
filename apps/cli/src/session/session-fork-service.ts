@@ -1,3 +1,4 @@
+import { createSessionAccountEditRecovery } from './session-account-edit-recovery';
 import {
   getSessionAccountBinding,
   clearSessionAccountBinding,
@@ -491,7 +492,8 @@ export class SessionForkService {
         machineId: this.deps.machineId,
         sessionId: sourceSessionId,
       },
-      source
+      source,
+      createSessionAccountEditRecovery(this.deps.workspaceDocument, sourceSessionId)
     );
     const sourceBusy = this.deps.isSourceBusy(sourceSessionId);
     if (!source.acpSessionId || !source.agentConfigId) {

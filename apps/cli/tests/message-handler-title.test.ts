@@ -200,7 +200,12 @@ describe('MessageHandler title generation', () => {
           machineId: 'm-1',
           sessionId: 'session',
         },
-        expect.objectContaining({ accountProfileId: 'remote-injected-account' })
+        expect.objectContaining({ accountProfileId: 'remote-injected-account' }),
+        expect.objectContaining({
+          readHistory: expect.any(Function),
+          writeMeta: expect.any(Function),
+          persist: expect.any(Function),
+        })
       );
     }
   );
