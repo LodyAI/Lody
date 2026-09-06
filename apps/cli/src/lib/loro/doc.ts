@@ -43,6 +43,8 @@ import {
   getServerNow,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
+  getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderSetups,
   getMachineFlockDocId,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -57,6 +59,8 @@ import {
   type SessionAcpRuntimeConfigPatch,
   type SessionAcpRuntimeConfigSnapshot,
   isSensitiveAcpConfigOptionId,
+  BuiltinRuntimeOverridesSchema,
+  CustomAcpLaunchSpecSchema,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
@@ -109,6 +113,43 @@ const normalizeSessionHistoryEntry = (entry: SessionHistoryInput): SessionHistor
   ...entry,
   inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
 });
+
+const isValidDaemonLaunchConfig = (
+  config: AgentConfigMeta,
+  expectedConfigId: AgentConfigId,
+  expectedMachineId: MachineId
+): boolean => {
+  if (
+    config.id !== expectedConfigId ||
+    config.machineId !== expectedMachineId ||
+    typeof config.agentType !== 'string' ||
+    config.agentType.trim().length === 0 ||
+    typeof config.env !== 'object' ||
+    config.env === null ||
+    Array.isArray(config.env) ||
+    Object.values(config.env).some((value) => typeof value !== 'string')
+  ) {
+    return false;
+  }
+
+  if (config.cliType === 'custom') {
+    return (
+      CustomAcpLaunchSpecSchema.safeParse(config.customAcp).success &&
+      config.runtimeOverrides === undefined
+    );
+  }
+  if (config.cliType === 'registry') {
+    return config.customAcp === undefined && config.runtimeOverrides === undefined;
+  }
+  if (config.cliType === 'builtin') {
+    return (
+      config.customAcp === undefined &&
+      (config.runtimeOverrides === undefined ||
+        BuiltinRuntimeOverridesSchema.safeParse(config.runtimeOverrides).success)
+    );
+  }
+  return false;
+};
 
 type GlobalWithOptionalBun = typeof globalThis & { Bun?: unknown };
 type GlobalWithWebSocket = { WebSocket: typeof ProxiedWebSocket };
@@ -1350,6 +1391,37 @@ export class LoroDocumentManager {
     return configs.find((config) => config.id === agentConfigId) ?? null;
   }
 
+  /**
+   * Resolve the daemon-authoritative Provider config used by a process-launching
+   * Machine RPC. Published configs and durable provider-setup rows are the only
+   * accepted sources; caller-supplied launch fields never participate.
+   */
+  async getAgentConfigForMachineLaunch(
+    agentConfigId: AgentConfigId,
+    machineId: MachineId
+  ): Promise<AgentConfigMeta | null> {
+    const config = await this.getAgentConfigById(agentConfigId, machineId);
+    if (config) {
+      return isValidDaemonLaunchConfig(config, agentConfigId, machineId) ? config : null;
+    }
+
+    const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      prefixes: [
+        machineFlockKeys.providerSetup(agentConfigId),
+        machineFlockKeys.providerSetupCancellation(agentConfigId),
+      ],
+    });
+    if (getMachineFlockProviderSetupCancellations(rows)[agentConfigId]) {
+      return null;
+    }
+    const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
+    return setup?.machineId === machineId &&
+      isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
+      ? setup.config
+      : null;
+  }
+
   async createAgentConfig(
     cliType: AgentConfigCliType,
     agentType: AgentType,
@@ -1451,14 +1523,14 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
     options.signal?.throwIfAborted();
-    await this.machine.updateAcpCapabilities(
+    return await this.machine.updateAcpCapabilities(
       configId,
       cliType,
       agentType,
@@ -3047,6 +3119,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     modes: entry.modes,
     models: entry.models,
     configOptions: entry.configOptions,
+    modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -3136,7 +3209,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
       id: mode.id,
@@ -3178,7 +3251,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       serializeAcpCapabilityWithoutFetchTime(existing) ===
         serializeAcpCapabilityWithoutFetchTime(entry)
     ) {
-      return;
+      return existing;
     }
     options.signal?.throwIfAborted();
     const changed = writeMachineFlockRowToFlock(handle.flock, {
@@ -3193,6 +3266,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
+    return entry;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

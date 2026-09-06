@@ -9,6 +9,8 @@
  * Early-bird yearly Plus ($5/seat/mo = $60/yr) is the fixed public presentation
  * with regular $8 (and monthly $10) as strike-through reference only. Do not
  * gate on `Date.now()` or env end dates — that caused an $8→$5 flash on paint.
+ * The Sep 30 end date is therefore static copy — one line, in `promoDiscount`:
+ * when it passes, edit that copy, do not add a clock.
  */
 
 import NumberFlow from '@number-flow/react';
@@ -125,7 +127,7 @@ const copy = {
       save: 'Save 20%',
       earlyBirdSave: '$60/year',
       promoLabel: 'Early-bird offer',
-      promoDiscount: '$60/year · locked forever',
+      promoDiscount: '$60/year · ends Sep 30',
       earlyBirdYearlyNote:
         'Pay yearly now to lock $60 per seat per year for this workspace forever.',
       regularYearlyPrice: 'Regular yearly price',
@@ -327,7 +329,7 @@ const copy = {
       save: '省 20%',
       earlyBirdSave: '$60/年',
       promoLabel: '早鸟活动',
-      promoDiscount: '$60/年 · 永久锁定',
+      promoDiscount: '$60/年 · 9 月 30 日截止',
       earlyBirdYearlyNote: '现在选择年付，即可为当前 workspace 永久锁定每席位每年 $60。',
       regularYearlyPrice: '常规年付价格',
       monthlyPrice: '月付价格',

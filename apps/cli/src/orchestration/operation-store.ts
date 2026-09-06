@@ -112,6 +112,7 @@ const FrozenConfigSchema = z
   .object({
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
+    sourceTurnId: z.string().trim().min(1).optional(),
     targetDispatchConfigs: z
       .array(
         z
@@ -438,7 +439,13 @@ export class LodyOperationStore {
         if (existing)
           return {
             created: false,
-            operation: this.assertMatching(existing, input.kind, fingerprint),
+            operation: this.assertMatching(
+              existing,
+              input.kind,
+              fingerprint,
+              input.requesterUserId,
+              frozenConfig.sourceTurnId
+            ),
             claimedItemIndexes: [],
           };
         const inserted = this.db
@@ -488,7 +495,13 @@ export class LodyOperationStore {
         }
         return {
           created: inserted.changes === 1,
-          operation: this.assertMatching(operation, input.kind, fingerprint),
+          operation: this.assertMatching(
+            operation,
+            input.kind,
+            fingerprint,
+            input.requesterUserId,
+            frozenConfig.sourceTurnId
+          ),
           claimedItemIndexes,
         };
       }
@@ -519,12 +532,14 @@ export class LodyOperationStore {
     requesterSessionId: SessionId,
     operationId: string,
     kind: LodyOperationKind,
-    canonicalCommand: unknown
+    canonicalCommand: unknown,
+    requesterUserId: string,
+    sourceTurnId?: string
   ): StoredLodyOperation | undefined {
     const existing = this.getStored(requesterSessionId, operationId);
     if (!existing) return undefined;
     const fingerprint = fingerprintLodyCommand(kind, canonicalizeLodyCommand(canonicalCommand));
-    return this.assertMatching(existing, kind, fingerprint);
+    return this.assertMatching(existing, kind, fingerprint, requesterUserId, sourceTurnId);
   }
 
   listActive(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {
@@ -791,9 +806,16 @@ export class LodyOperationStore {
   private assertMatching(
     operation: StoredLodyOperation,
     kind: LodyOperationKind,
-    fingerprint: string
+    fingerprint: string,
+    requesterUserId: string,
+    sourceTurnId?: string
   ): StoredLodyOperation {
-    if (operation.kind !== kind || operation.fingerprint !== fingerprint) {
+    if (
+      operation.kind !== kind ||
+      operation.fingerprint !== fingerprint ||
+      operation.requesterUserId !== requesterUserId ||
+      operation.frozenContinuationConfig.sourceTurnId !== sourceTurnId
+    ) {
       throw new LodyOperationStoreError(
         'OPERATION_ID_REUSED',
         `Operation id ${operation.operationId} is already bound to different input.`,

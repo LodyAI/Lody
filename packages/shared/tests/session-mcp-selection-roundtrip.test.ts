@@ -2,7 +2,7 @@ import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { describe, expect, it } from 'vitest';
 
-import type { McpServerId, SessionId } from '../src/ids';
+import type { AgentRoleId, McpServerId, SessionId } from '../src/ids';
 import { resolveSessionConversationConfig } from '../src/session-input';
 import { sessionDocSchema, type SessionDoc, type SessionHistoryInput } from '../src/schema';
 
@@ -95,5 +95,37 @@ describe('session MCP selection CRDT round-trip', () => {
     const resolved = resolveSessionConversationConfig(state.history, state.mq);
     expect(resolved.mcpServerIds).toEqual(['queued-server']);
     expect(resolved.sourceConfigKey).toMatch(/^queue:/);
+  });
+
+  it('round-trips Agent Role identity and explicit None through Loro', () => {
+    const historyTurn = userTurn('turn-role', undefined);
+    historyTurn.inputConfig = {
+      ...historyTurn.inputConfig,
+      agentRoleId: 'role-reviewer' as AgentRoleId,
+      agentRoleRevision: 6,
+    };
+    const withRole = roundTrip([historyTurn]);
+    expect(resolveSessionConversationConfig(withRole.history, withRole.mq)).toMatchObject({
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 6,
+    });
+
+    const withNone = roundTrip(
+      [historyTurn],
+      [
+        {
+          $cid: 'queue-none',
+          text: 'queued',
+          timestamp: '2026-08-12T00:00:01.000Z',
+          acpSessionConfig: {
+            prompt: 'queued',
+            cliType: 'builtin',
+            agentType: 'codex',
+            agentRoleId: null,
+          },
+        },
+      ]
+    );
+    expect(resolveSessionConversationConfig(withNone.history, withNone.mq).agentRoleId).toBeNull();
   });
 });

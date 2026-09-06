@@ -96,6 +96,14 @@ export const getMachineAcpAuthorizationCodeSecretContext = (options: {
 }): string =>
   `machine/acp-authenticate\0${options.workspaceId}\0${options.machineId}\0${options.authenticationRequestId}`;
 
+export const getMachineAcpAuthenticationInputSecretContext = (options: {
+  workspaceId: string;
+  machineId: string;
+  authenticationRequestId: string;
+  interactionId: string;
+}): string =>
+  `machine/acp-authenticate-input\0${options.workspaceId}\0${options.machineId}\0${options.authenticationRequestId}\0${options.interactionId}`;
+
 export type RpcSecretRecipient = {
   readonly publicKey: RpcSecretPublicKey;
   decrypt(envelope: RpcSecretEnvelope, context: string): Promise<string>;

@@ -177,5 +177,7 @@ const FOLEY_VOLUME = 0.7;
 export function unlockSound(): void {
   void ensureReady()
     .then(() => setMasterVolume(FOLEY_VOLUME))
-    .catch(() => undefined);
+    .catch((error: unknown) => {
+      console.error('[onboarding] Failed to unlock ceremony sounds:', error);
+    });
 }

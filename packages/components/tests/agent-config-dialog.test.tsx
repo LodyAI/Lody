@@ -174,8 +174,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response' as const,
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: true,
     }),
     onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected']
@@ -253,11 +253,64 @@ describe('AgentConfigDialog', () => {
     });
   });
 
-  it('collects the DeepSeek API Key directly and keeps Harness out of managed runtime setup', async () => {
-    const onManagedRuntimeSelected = vi.fn();
-    const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
-    await renderDialog(
+  const getTabByName = (name: string): HTMLButtonElement => {
+    const tab = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+      (button) => button.textContent?.trim() === name
+    );
+    if (!tab) {
+      throw new Error(`Expected tab "${name}"`);
+    }
+    return tab;
+  };
+
+  const selectTab = async (name: string): Promise<void> => {
+    await act(async () => {
+      getTabByName(name).dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+      );
+    });
+  };
+
+  const getVisibleDeepSeekEndpointInput = (): HTMLInputElement | null => {
+    const input = document.body.querySelector<HTMLInputElement>('#deepseek-endpoint');
+    if (!input) return null;
+    const panel = input.closest<HTMLElement>('[role="tabpanel"]');
+    if (panel?.hidden) return null;
+    return input;
+  };
+
+  const getPrimaryAction = (label: 'Create' | 'Save'): HTMLButtonElement => {
+    const button = Array.from(document.body.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === label
+    );
+    if (!button) {
+      throw new Error(`Expected ${label} button`);
+    }
+    return button;
+  };
+
+  const openAdditionalEnvSection = async (): Promise<HTMLTextAreaElement> => {
+    const environmentSection = Array.from(document.body.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Additional environment variables')
+    );
+    await act(async () => {
+      environmentSection?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const envTextArea = Array.from(
+      document.body.querySelectorAll<HTMLTextAreaElement>('textarea')
+    ).at(-1);
+    if (!envTextArea) {
+      throw new Error('Expected additional environment textarea');
+    }
+    return envTextArea;
+  };
+
+  const renderDeepSeekCreate = (
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {}),
+    onManagedRuntimeSelected = vi.fn(),
+    onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }))
+  ) =>
+    renderDialog(
       {
         kind: 'create',
         initialForm: {
@@ -273,44 +326,255 @@ describe('AgentConfigDialog', () => {
       onManagedRuntimeSelected
     );
 
+  const renderDeepSeekEdit = (
+    env: Record<string, string>,
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {})
+  ) =>
+    renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: claudeConfigId,
+          machineId,
+          name: 'DeepSeek Harness',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env,
+        } as AgentConfigMeta,
+      },
+      createMachine('Workstation'),
+      onSubmit
+    );
+
+  it('defaults DeepSeek Harness to the official endpoint and keeps it out of managed runtime setup', async () => {
+    const onManagedRuntimeSelected = vi.fn();
+    const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
+
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
     expect(onCheckBinaryStatus).not.toHaveBeenCalled();
+    expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
+    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('false');
+    expect(getVisibleDeepSeekEndpointInput()).toBeNull();
+    expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
+      'DeepSeek API Key'
+    );
     const apiKeyInput = document.body.querySelector<HTMLInputElement>('#deepseek-api-key');
     expect(apiKeyInput?.type).toBe('password');
-    const createButton = Array.from(document.body.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Create'
-    );
-    expect(createButton?.disabled).toBe(true);
+    const createButton = getPrimaryAction('Create');
+    expect(createButton.disabled).toBe(true);
 
     await act(async () => {
       setNativeInputValue(apiKeyInput!, 'sk-deepseek-test');
     });
+    expect(createButton.disabled).toBe(false);
 
-    const environmentSection = Array.from(document.body.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Additional environment variables')
-    );
-    await act(async () => {
-      environmentSection?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
+    const envTextArea = await openAdditionalEnvSection();
     expect(document.body.textContent).toContain(
-      'Optional: set DEEPSEEK_BASE_URL here to use a compatible endpoint.'
+      'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
     );
-    const envTextArea = Array.from(
-      document.body.querySelectorAll<HTMLTextAreaElement>('textarea')
-    ).at(-1);
-    expect(envTextArea?.value).not.toContain('DEEPSEEK_API_KEY');
+    expect(envTextArea.value).not.toContain('DEEPSEEK_API_KEY');
+    expect(envTextArea.value).not.toContain('DEEPSEEK_BASE_URL');
+
     await act(async () => {
-      setNativeTextAreaValue(envTextArea!, 'DEEPSEEK_BASE_URL=https://api.deepseek.com');
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env: {
+            DEEPSEEK_API_KEY: 'sk-deepseek-test',
+            DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          },
+        })
+      );
+    });
+  });
+
+  it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekCreate(onSubmit);
+
+    await selectTab('Custom Endpoint');
+    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
+    expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
+      'API Key'
+    );
+
+    const apiKeyInput = document.body.querySelector<HTMLInputElement>('#deepseek-api-key');
+    await act(async () => {
+      setNativeInputValue(apiKeyInput!, 'sk-deepseek-test');
+    });
+    const createButton = getPrimaryAction('Create');
+    expect(createButton.disabled).toBe(true);
+
+    const endpointInput = getVisibleDeepSeekEndpointInput();
+    expect(endpointInput).not.toBeNull();
+    expect(document.body.querySelector('#deepseek-models')).toBeNull();
+    expect(document.body.textContent).toContain(
+      'Available models are discovered automatically from the endpoint when this provider is verified.'
+    );
+    await act(async () => {
+      setNativeInputValue(endpointInput!, 'not-a-url');
+    });
+    expect(createButton.disabled).toBe(true);
+
+    await act(async () => {
+      setNativeInputValue(endpointInput!, 'ftp://llm.example.com');
+    });
+    expect(createButton.disabled).toBe(true);
+
+    await act(async () => {
+      setNativeInputValue(endpointInput!, '  https://llm.example.com/open/v1  ');
+    });
+    expect(createButton.disabled).toBe(false);
+
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env: {
+            DEEPSEEK_API_KEY: 'sk-deepseek-test',
+            DEEPSEEK_BASE_URL: 'https://llm.example.com/open/v1',
+          },
+        })
+      );
+    });
+  });
+
+  it.each([
+    { label: 'no base URL', env: { DEEPSEEK_API_KEY: 'sk-old' } },
+    {
+      label: 'the official URL',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com' },
+    },
+    {
+      label: 'a trailing slash',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/' },
+    },
+    {
+      label: 'a /v1 path',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1' },
+    },
+    {
+      label: 'a /v1 trailing slash',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1/' },
+    },
+  ])('opens the official DeepSeek tab when editing a config with $label', async ({ env }) => {
+    await renderDeepSeekEdit(env);
+
+    expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
+    expect(getVisibleDeepSeekEndpointInput()).toBeNull();
+    expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
+      'sk-old'
+    );
+  });
+
+  it('opens the custom DeepSeek tab, fills its endpoint, and drops the legacy model override', async () => {
+    await renderDeepSeekEdit({
+      DEEPSEEK_API_KEY: 'sk-old',
+      DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+      ACP_EXTENSION_DSH_MODELS: '["gateway-model","reasoning-model"]',
+    });
+
+    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
+    expect(getVisibleDeepSeekEndpointInput()?.value).toBe('https://llm.example.com/open');
+    expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
+      'sk-old'
+    );
+    expect(document.body.querySelector('#deepseek-models')).toBeNull();
+  });
+
+  it('keeps DeepSeek key and custom endpoint drafts when switching tabs, and official save drops the custom URL', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekEdit(
+      {
+        DEEPSEEK_API_KEY: 'sk-old',
+        DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+      },
+      onSubmit
+    );
+
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#deepseek-api-key')!,
+        'sk-updated'
+      );
     });
     await act(async () => {
-      createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      setNativeInputValue(getVisibleDeepSeekEndpointInput()!, 'https://llm.example.com/open/v1');
+    });
+
+    await selectTab('DeepSeek official');
+    expect(getVisibleDeepSeekEndpointInput()).toBeNull();
+    expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
+      'sk-updated'
+    );
+
+    await selectTab('Custom Endpoint');
+    expect(getVisibleDeepSeekEndpointInput()?.value).toBe('https://llm.example.com/open/v1');
+
+    await selectTab('DeepSeek official');
+    await act(async () => {
+      getPrimaryAction('Save').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'deepseek',
         env: {
+          DEEPSEEK_API_KEY: 'sk-updated',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+        },
+      })
+    );
+  });
+
+  it('ignores protected DeepSeek env keys typed in the additional environment textarea', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekCreate(onSubmit);
+
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#deepseek-api-key')!,
+        'sk-deepseek-test'
+      );
+    });
+
+    const envTextArea = await openAdditionalEnvSection();
+    await act(async () => {
+      setNativeTextAreaValue(
+        envTextArea,
+        [
+          'DEEPSEEK_API_KEY=sk-from-textarea',
+          'DEEPSEEK_BASE_URL=https://evil.example.com',
+          'ACP_EXTENSION_DSH_MODELS=["evil-model"]',
+          'EXTRA_FLAG=1',
+        ].join('\n')
+      );
+    });
+    expect(envTextArea.value).toContain('EXTRA_FLAG=1');
+    expect(envTextArea.value).not.toContain('DEEPSEEK_API_KEY');
+    expect(envTextArea.value).not.toContain('DEEPSEEK_BASE_URL');
+    expect(envTextArea.value).not.toContain('ACP_EXTENSION_DSH_MODELS');
+
+    await act(async () => {
+      getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          EXTRA_FLAG: '1',
           DEEPSEEK_API_KEY: 'sk-deepseek-test',
           DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
         },
@@ -335,7 +599,7 @@ describe('AgentConfigDialog', () => {
       onSubmit
     );
     await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const firstId = onSubmit.mock.calls[0]?.[0].id;
 
     await renderDialog(
@@ -344,9 +608,9 @@ describe('AgentConfigDialog', () => {
       onSubmit
     );
     await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
 
-    expect(onSubmit.mock.calls[1]?.[0].id).toBe(firstId);
+    expect(onSubmit.mock.calls.every(([payload]) => payload.id === firstId)).toBe(true);
   });
 
   it('shows the managed Kimi Node requirement before create', async () => {
@@ -407,7 +671,10 @@ describe('AgentConfigDialog', () => {
       createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await vi.waitFor(() => expect(onRefreshCapabilities).toHaveBeenCalledOnce());
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+      onRefreshCapabilities.mock.invocationCallOrder[0]!
+    );
 
     await act(async () => {
       finishRefresh?.({
@@ -464,8 +731,8 @@ describe('AgentConfigDialog', () => {
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
+        cliType: 'builtin',
+        agentType,
         success: false,
         authRequired: true,
         authMethods: [],
@@ -494,7 +761,10 @@ describe('AgentConfigDialog', () => {
         expect(document.body.textContent).toContain(`Sign in with ${accountName}`);
       });
       expect(onRefreshCapabilities).toHaveBeenCalledOnce();
-      expect(onSubmit).not.toHaveBeenCalled();
+      expect(onSubmit).toHaveBeenCalledOnce();
+      expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        onRefreshCapabilities.mock.invocationCallOrder[0]!
+      );
     }
   );
 
@@ -515,6 +785,7 @@ describe('AgentConfigDialog', () => {
       }),
       cancelAuthentication: vi.fn(),
       submitAuthorizationCode: vi.fn(async () => {}),
+      submitAuthenticationInput: vi.fn(async () => {}),
     });
     vi.spyOn(window, 'open').mockReturnValue(null);
     const onSubmit = vi.fn(async () => {});
@@ -522,8 +793,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: false,
       authRequired: true,
       authMethods: [],
@@ -570,8 +841,8 @@ describe('AgentConfigDialog', () => {
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
+        cliType: 'builtin',
+        agentType,
         success: true,
       }));
       await renderDialog(
@@ -594,17 +865,20 @@ describe('AgentConfigDialog', () => {
 
       await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
       expect(onRefreshCapabilities).toHaveBeenCalledOnce();
+      expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        onRefreshCapabilities.mock.invocationCallOrder[0]!
+      );
     }
   );
 
-  it('does not create a built-in provider when its live probe fails', async () => {
+  it('persists the provider before probing and surfaces a live-probe failure', async () => {
     const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: false,
       error: 'Codex could not reach OpenAI',
     }));
@@ -629,7 +903,10 @@ describe('AgentConfigDialog', () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Codex could not reach OpenAI');
     });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+      onRefreshCapabilities.mock.invocationCallOrder[0]!
+    );
   });
 
   it('revalidates a built-in provider when its environment changes after a successful test', async () => {
@@ -638,8 +915,8 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
       configId: args.configId,
-      cliType: args.cliType,
-      agentType: args.agentType,
+      cliType: 'builtin',
+      agentType: 'codex',
       success: true,
     }));
     await renderDialog(
@@ -682,7 +959,7 @@ describe('AgentConfigDialog', () => {
       createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
     expect(onRefreshCapabilities).toHaveBeenCalledTimes(2);
   });
 

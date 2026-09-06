@@ -6,6 +6,7 @@ export type ShortcutCommandId =
   | 'nav.back'
   | 'nav.forward'
   | 'app.cycleTheme'
+  | 'layout.toggleZenMode'
   | 'workspace.openSettings'
   | 'session.new'
   | 'session.archiveCurrent'
@@ -18,7 +19,6 @@ export type ShortcutCommandId =
   | 'session.copyUrl'
   | 'session.renameCurrent'
   | 'session.newTabOrTerminal'
-  | 'session.closeFocusedTab'
   | 'session.toggleTerminal'
   | 'session.saveCurrentFile'
   | 'session.nextTab'
@@ -52,6 +52,7 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'nav.back': [electron('$mod+[')],
   'nav.forward': [electron('$mod+]')],
   'app.cycleTheme': [],
+  'layout.toggleZenMode': ['$mod+.'],
   // Settings: ⌘, follows OS convention, on web + desktop. On desktop the native app menu
   // still SHOWS ⌘, next to "Settings" but does NOT register the accelerator
   // (`registerAccelerator: false` in apps/electron menu.ts), so the key reaches this
@@ -73,9 +74,6 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // ⌥N creates a new tab, or a new terminal when the terminal is focused (desktop).
   // ⌘T is intentionally avoided — the browser claims it on web.
   'session.newTabOrTerminal': ['Alt+n'],
-  // Electron's native menu only displays this accelerator; the renderer owns it so the
-  // focused in-app tab closes instead of the BrowserWindow.
-  'session.closeFocusedTab': [electron('$mod+w')],
   // Open/close the terminal panel (desktop, local sessions only).
   'session.toggleTerminal': [electron('Ctrl+`'), electron('$mod+j')],
   'session.saveCurrentFile': ['$mod+s'],

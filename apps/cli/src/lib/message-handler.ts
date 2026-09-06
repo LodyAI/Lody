@@ -262,6 +262,7 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
@@ -2836,6 +2837,9 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2860,8 +2864,12 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(delegatedRequester
+          ? { delegatedRequester }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
@@ -2910,12 +2918,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      delegatedRequester
     );
   }
 
@@ -3260,63 +3269,56 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onAcpBinaryProgress,
-          signal,
-        }) =>
+        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
             },
             { onAcpBinaryProgress, signal }
           ),
-        authenticateMachineAcp: async ({
-          requestId,
-          action,
-          authenticationRequestId,
-          authorizationCode,
-          methodId,
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onProgress,
-        }) =>
-          await this.authenticateMachineAcpAndResumeSetup(
-            {
-              type: 'machine/acp-authenticate',
-              machineId: this.machineId,
-              workspaceId: this.workspaceId,
-              requestId,
-              action,
-              authenticationRequestId,
-              authorizationCode,
-              methodId,
-              configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
-            },
-            { onProgress }
-          ),
+        authenticateMachineAcp: async (args) => {
+          const common = {
+            type: 'machine/acp-authenticate' as const,
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+            requestId: args.requestId,
+          };
+          const message: MachineAcpAuthenticateRequestValidated = (() => {
+            switch (args.action) {
+              case 'start':
+                return { ...common, action: args.action, configId: args.configId };
+              case 'cancel':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                };
+              case 'submit-code':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  authorizationCode: args.authorizationCode,
+                };
+              case 'submit-input':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  interactionId: args.interactionId,
+                  authenticationInput: args.authenticationInput,
+                };
+              default:
+                throw new Error('Unsupported ACP authentication action');
+            }
+          })();
+          return await this.authenticateMachineAcpAndResumeSetup(message, {
+            onProgress: args.onProgress,
+          });
+        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',
@@ -5814,20 +5816,9 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
-            }
-            break;
-          }
-        }
-        return history;
-      });
+      await sessionDoc.updateHistory((history) =>
+        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+      );
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
@@ -6241,24 +6232,79 @@ export class MessageHandler {
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
     if (project?.kind === 'local') {
-      const workspaceRoot = await resolveWorkspaceLocalProjectRootPath(
+      const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
         project.localProjectId
       );
-      if (!workspaceRoot) {
+      if (!originalRootPath) {
         return {
           ok: false,
           error: 'workspace_unavailable',
           message: `Local project not found in workspace: ${project.localProjectId}`,
         };
       }
+      const isLocalWorktree = meta.isWorktree === true || project.useWorktree === true;
+      if (!isLocalWorktree) {
+        return {
+          ok: true,
+          workspaceRoot: originalRootPath,
+          source: `local-project:${project.localProjectId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      const worktreeManager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
+        source: { kind: 'local-shared', originalRootPath },
+        logger: this.logger,
+      });
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      // Fork metadata is persisted before asynchronous worktree creation starts. Never fall
+      // back to originalRootPath here: it is the shared main checkout, so All Changes would
+      // show another checkout's edits. Wait for the session, then recheck the worktree manager.
+      this.logCodeCollabDebug(
+        `[${sessionId}] Code Collab v2 workspace resolution waiting for local worktree ownerSessionId=${ownerSessionId} project=${project.localProjectId}`
+      );
+      const waited = await waitForSessionWorkspaceRoot({
+        targetSessionId: ownerSessionId,
+        activeSource:
+          ownerSessionId === sessionId
+            ? 'active-session-after-wait'
+            : `active-parent-session:${ownerSessionId}`,
+        pendingSource:
+          ownerSessionId === sessionId
+            ? 'pending-session-after-wait'
+            : `pending-parent-session:${ownerSessionId}`,
+        timeoutMs: CODE_COLLAB_WORKSPACE_WAIT_TIMEOUT_MS,
+      });
+      if (waited) {
+        return waited.ok ? { ...waited, ...ownerSessionIdField(ownerSessionId) } : waited;
+      }
+
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing-after-wait:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
       return {
-        ok: true,
-        workspaceRoot,
-        source: `local-project:${project.localProjectId}`,
-        ...ownerSessionIdField(ownerSessionId),
+        ok: false,
+        error: 'session_initializing',
+        message:
+          'Session workspace is still being prepared. Code Collab will start after the session is ready.',
       };
     }
 
@@ -6540,9 +6586,28 @@ export class MessageHandler {
         return await this.filePreviewService.previewFile(request.params);
       case 'file/preview-local':
         await assertOwner(request.params.sessionId as SessionId);
+        // Same machine: no wire to protect, so the read is not held to the
+        // remote transport's size budget.
         return await this.filePreviewService.previewFile(request.params, {
           allowArbitraryPaths: true,
+          sameMachine: true,
         });
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        return invocation
+          ? {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: true as const,
+              ...invocation,
+            }
+          : {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: false as const,
+            };
+      }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',
@@ -8283,7 +8348,6 @@ export class MessageHandler {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
       message.action === 'start' &&
-      message.configId &&
       response.success &&
       response.disposition === 'authenticated'
     ) {

@@ -31,7 +31,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionPrIcon,
@@ -39,6 +38,7 @@ import {
   SessionRowLeadingSlot,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SidebarSectionHeader,
   type SidebarRowKind,
 } from '@/components/sidebar-row-shared';
@@ -137,34 +137,6 @@ export type SidebarUpdatedContextMenuLabels = {
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
   return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
-}
-
-function SidebarUpdatedTaskListSkeleton({ className }: { className?: string }) {
-  // Three buckets each with a header and a couple of rows; matches the
-  // TaskListSkeleton density so the two organize modes look the same when
-  // the session list is still loading.
-  const bucketRows: string[][] = [
-    ['w-[68%]', 'w-[58%]', 'w-[74%]'],
-    ['w-[60%]', 'w-[52%]'],
-  ];
-  return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {bucketRows.map((rows, bucketIndex) => (
-        <div key={bucketIndex} className="space-y-2">
-          <Skeleton className="h-3 w-16" />
-          <div className="space-y-2 rounded-lg border border-border/50 p-2">
-            {rows.map((width, rowIndex) => (
-              <div key={rowIndex} className="flex items-center gap-2 px-1 py-1.5">
-                <Skeleton className="h-7 w-7 rounded-md" />
-                <Skeleton className={cn('h-3', width)} />
-                <Skeleton className="ml-auto h-3 w-10" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function parseGitHubPrNumber(url: string): number | null {
@@ -406,7 +378,11 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <SidebarUpdatedTaskListSkeleton className={className} />
+        <SidebarListSkeleton
+          className={className}
+          showHeaderIcon={false}
+          sectionClassName="mb-4 last:mb-0"
+        />
       </div>
     );
   }

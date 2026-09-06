@@ -13,6 +13,7 @@
 | Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
 | Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                           |
 | Code checks         | `workflows/ci.yml`                                             | Preserve the stable `Static checks` and `Tests` jobs used as required checks.    |
+| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.           |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -34,11 +35,8 @@ complete and rejected bodies locally.
   reviewing Agent. Require concise review focus, decisions to challenge, and
   plausible failures or evidence gaps; generic checklists and review essays are
   not valid substitutes.
-- An Agent preparing a fork-based contribution does not treat creating an Issue
-  as approval. It tells its author-side user about the policy and waits for
-  explicit maintainer agreement on scope and approach before implementation or
-  a PR. It also warns that Context handoff is public and an invalid PR closes
-  after the seven-day correction period. Never invent notice or agreement.
+- An Agent preparing a fork-based contribution explains that the Context handoff
+  is public and an invalid PR closes after the seven-day correction period.
 - Same-repository branches do not create or require an Issue solely for intake,
   and their bodies are not subject to the external contribution template.
 
@@ -90,6 +88,10 @@ their failures and perform expiry.
 
 - `workflows/pr-policy.yml` is the only PR policy event entry point.
   `workflows/pr-policy-reconcile.yml` is callable only through `workflow_call`.
+- Workflows that pass signing or update keys to a third-party Action must pin that
+  Action to a reviewed full commit SHA. Scope signing secrets to the exact trusted
+  preparation, packaging, or signing step that consumes them; never place them in a
+  job-level environment inherited by unrelated actions and dependency scripts.
 - `pull_request_target` provides a write-capable token. For PR events, checkout
   policy from trusted `github.sha`; scheduled and manual audits use
   `github.event.repository.default_branch`. Never checkout or execute the PR
@@ -99,6 +101,9 @@ their failures and perform expiry.
   current response.
 - Code CI runs on `pull_request` with read-only repository permissions and
   checks out all public submodules recursively.
+- Desktop journey authoring runs on a maintainer machine. GitHub workflows never
+  receive Codex credentials or publish author output; an ordinary PR exposes the
+  reviewed patch to the existing read-only code checks.
 
 ## Other automation
 

@@ -18,6 +18,7 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!**/node_modules/electron-sparkle-updater/native/vendor/**'
   - '!**/*.map'
   - '!**/*.{md,markdown,mkd}'
   - '!**/{test,tests,__tests__,testing,__mocks__,mocks,spec,examples,example,stories,storybook}/**'
@@ -47,6 +48,7 @@ files:
   - '!node_modules/better-auth/dist/test-utils/**'
 asarUnpack:
   - resources/**
+  - '**/node_modules/electron-sparkle-updater/native/build/Release/*.node'
 # Keep only the app locales we actually ship to reduce Chromium locale payload.
 # Both naming forms are required: macOS resources use the underscore form
 # (`en_US`) while Windows/Linux Chromium `locales/*.pak` use the hyphen form
@@ -63,8 +65,9 @@ win:
 nsis:
   # GitHub Releases rewrites spaces in uploaded asset names to periods, which would
   # desynchronize the file names electron-builder records in latest*.yml from the
-  # ones electron-updater can actually download. productName is "Lody OSS", so every
-  # artifact name here uses a space-free token instead of ${productName}.
+  # ones electron-updater can actually download on Windows/Linux. productName is
+  # "Lody OSS", so every artifact name here uses a space-free token instead of
+  # ${productName}. macOS updates use Sparkle appcast.xml, not latest-mac.yml.
   artifactName: LodyOSS-${version}-${arch}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
@@ -75,20 +78,29 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  extraFiles:
+    - from: node_modules/electron-sparkle-updater/native/vendor/Sparkle.framework
+      to: Frameworks/Sparkle.framework
   extendInfo:
     NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
     NSUserNotificationAlertStyle: banner
-  # Squirrel.Mac refuses to install an update whose code signature it cannot
-  # validate against the running app, so signed + notarized is what makes macOS
-  # auto-update work at all. Local builds without Apple credentials are still
-  # fine: electron-builder skips signing (and therefore notarization) with a
-  # warning rather than failing.
+    SUFeedURL: https://github.com/LodyAI/Lody/releases/latest/download/appcast.xml
+    SUPublicEDKey: SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER
+    SUEnableInstallerLauncherService: false
+    SUScheduledCheckInterval: 3600
+    CFBundleLocalizations:
+      - en
+      - zh_CN
+  # Sparkle verifies updates with EdDSA, not Squirrel.Mac's copy of the Developer
+  # ID signature. First-install Gatekeeper still needs a signed + notarized DMG.
+  # Local builds without Apple credentials are still fine: electron-builder skips
+  # signing (and therefore notarization) with a warning rather than failing.
   notarize: true
-  # Covers the zip target that Squirrel.Mac downloads for auto-update.
   artifactName: LodyOSS-${version}-${arch}.${ext}
 dmg:
   artifactName: LodyOSS-${version}-${arch}.${ext}
+  writeUpdateInfo: false
 linux:
   icon: build/icon.png
   executableName: lodyOssDesktop
@@ -109,9 +121,9 @@ includePdb: false
 npmRebuild: false
 # The public build has no VITE_ELECTRON_UPDATE_URL to inject: electron.vite.config.ts
 # deliberately strips every VITE_* value so public builds stay deterministic. This
-# provider is baked into the packaged app-update.yml instead, which is exactly the
-# fallback AppUpdaterService takes when no feed URL is defined. Generating latest*.yml
-# during packaging also depends on this block being present.
+# provider is baked into the packaged app-update.yml for Windows/Linux electron-updater.
+# macOS Sparkle reads SUFeedURL / SUPublicEDKey from Info.plist instead. Generating
+# latest*.yml for non-mac targets still depends on this block being present.
 publish:
   provider: github
   owner: LodyAI

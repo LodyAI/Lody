@@ -12,12 +12,11 @@ import type {
   WorktreeSetupScriptConfig,
   AgentConfigId,
   AgentConfigCliType,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
   SessionImageGroupContent,
   SessionImagePayload,
   SessionFilePayload,
   SessionTurnInputConfig,
+  AcpCapabilityCacheEntry,
 } from '.';
 import type {
   PreviewCandidateReportRequest,
@@ -296,12 +295,6 @@ export interface MachineAcpCapabilitiesRefreshRequest {
   machineId: MachineId;
   workspaceId: WorkspaceId;
   configId: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  /** Launch spec for probing `cliType: 'custom'` agents. */
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
 }
 
 export interface MachineAcpCapabilitiesRefreshResponse {
@@ -328,6 +321,8 @@ export interface MachineAcpCapabilitiesRefreshResponse {
     category?: string;
     optionCount: number;
   }>;
+  /** Complete persisted entry for immediate renderer convergence after the refresh RPC. */
+  capability?: AcpCapabilityCacheEntry;
   /** Available slash commands advertised by the agent. */
   availableCommands?: Array<{
     name: string;
@@ -348,28 +343,74 @@ export interface MachineAcpAuthMethodSummary {
   args?: string[];
 }
 
-export interface MachineAcpAuthenticateRequest {
+export type MachineAcpAuthenticationFormField =
+  | {
+      id: string;
+      type: 'text';
+      label: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: string;
+    }
+  | {
+      id: string;
+      type: 'secret';
+      label: string;
+      description?: string;
+      required: boolean;
+    }
+  | {
+      id: string;
+      type: 'select';
+      label: string;
+      description?: string;
+      required: boolean;
+      options: Array<{ value: string; label: string }>;
+      defaultValue?: string;
+    };
+
+export interface MachineAcpAuthenticationForm {
+  title?: string;
+  description?: string;
+  fields: MachineAcpAuthenticationFormField[];
+}
+
+type MachineAcpAuthenticateRequestBase = {
   type: 'machine/acp-authenticate';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requestId: string;
-  action: 'start' | 'cancel' | 'submit-code';
-  /** Target login request for a one-time browser authorization code. */
-  authenticationRequestId?: string;
-  /** One-time provider input; never log or copy it into durable Lody product state. */
-  authorizationCode?: string;
-  /**
-   * Which advertised ACP authentication method to run. Only registry/custom
-   * agents publish a choice; builtin providers have exactly one login command.
-   */
-  methodId?: string;
-  configId?: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
-}
+};
+
+export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
+  (
+    | {
+        action: 'start';
+        /** Daemon-authoritative persisted Provider config. No launch fields cross RPC. */
+        configId: AgentConfigId;
+      }
+    | {
+        action: 'cancel';
+        /** Authentication request whose frozen daemon-side target is cancelled. */
+        authenticationRequestId: string;
+      }
+    | {
+        action: 'submit-code';
+        /** Target login request for a one-time browser authorization code. */
+        authenticationRequestId: string;
+        /** One-time provider input; never log or copy it into durable Lody product state. */
+        authorizationCode: string;
+      }
+    | {
+        action: 'submit-input';
+        /** Authentication request whose frozen daemon-side target owns the interaction. */
+        authenticationRequestId: string;
+        /** Target interaction when replying to a method picker, URL consent, or form. */
+        interactionId: string;
+        /** Ephemeral interaction payload. It is encrypted by remote Machine RPC. */
+        authenticationInput: string;
+      }
+  );
 
 export interface MachineAcpAuthenticateResponse {
   type: 'machine/acp-authenticate_response';
@@ -401,7 +442,20 @@ export interface MachineAcpAuthenticationProgressMessage {
   machineId: MachineId;
   requestId: string;
   agentType: string;
-  status: 'starting' | 'authorization' | 'output' | 'authenticated' | 'cancelled' | 'error';
+  status:
+    | 'starting'
+    | 'auth-methods'
+    | 'authorization'
+    | 'input-required'
+    | 'output'
+    | 'authenticated'
+    | 'cancelled'
+    | 'error';
+  authMethods?: MachineAcpAuthMethodSummary[];
+  /** Opaque id echoed by submit-input. */
+  interactionId?: string;
+  message?: string;
+  form?: MachineAcpAuthenticationForm;
   authorizationUrl?: string;
   /** Device user code entered on the provider's authorization page. */
   userCode?: string;
@@ -409,6 +463,10 @@ export interface MachineAcpAuthenticationProgressMessage {
   acceptsAuthorizationCode?: boolean;
   /** Ephemeral target-machine key used only to encrypt the one-time browser code. */
   authorizationCodePublicKey?: RpcSecretPublicKey;
+  /** Ephemeral target-machine key for generic authentication interaction input. */
+  authenticationInputPublicKey?: RpcSecretPublicKey;
+  /** URL-mode ACP elicitation requires an explicit user action before navigation. */
+  requiresAuthorizationConsent?: boolean;
   expiresInSeconds?: number;
   stream?: 'stdout' | 'stderr';
   output?: string;
@@ -823,173 +881,173 @@ export type LocalProjectWorktreeCleanupResult = {
 
 export type LocalProjectControlRequest =
   | {
-    type: 'local-project/add';
-    machineId: MachineId;
-    rootPath: string;
-    workspace?: string;
-    allWorkspaces?: boolean;
-  }
+      type: 'local-project/add';
+      machineId: MachineId;
+      rootPath: string;
+      workspace?: string;
+      allWorkspaces?: boolean;
+    }
   | {
-    type: 'local-project/prepare-add';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    rootPath: string;
-  }
+      type: 'local-project/prepare-add';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      rootPath: string;
+    }
   | {
-    type: 'local-project/list-roots';
-    machineId: MachineId;
-  }
+      type: 'local-project/list-roots';
+      machineId: MachineId;
+    }
   | {
-    type: 'local-project/browse-dir';
-    machineId: MachineId;
-    workspaceId?: WorkspaceId;
-    absolutePath?: string;
-    showHidden?: boolean;
-    limit?: number;
-    cursor?: string;
-  }
+      type: 'local-project/browse-dir';
+      machineId: MachineId;
+      workspaceId?: WorkspaceId;
+      absolutePath?: string;
+      showHidden?: boolean;
+      limit?: number;
+      cursor?: string;
+    }
   | {
-    type: 'local-project/delete';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-  }
+      type: 'local-project/delete';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+    }
   | {
-    type: 'local-project/removal-preflight';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/removal-preflight';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list';
-    machineId: MachineId;
-  }
+      type: 'local-project/list';
+      machineId: MachineId;
+    }
   | {
-    type: 'local-project/git-state';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-  }
+      type: 'local-project/git-state';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+    }
   | {
-    type: 'local-project/list-files';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    maxFiles?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      maxFiles?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list-dir';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    relativePath: string;
-    limit?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-dir';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      relativePath: string;
+      limit?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list-skills';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    skillDirs: string[];
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-skills';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      skillDirs: string[];
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list-global-skills';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-global-skills';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/read-file';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    relativePath: string;
-    maxBytes?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/read-file';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      relativePath: string;
+      maxBytes?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/checkout-branch';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    branchName: string;
-  }
+      type: 'local-project/checkout-branch';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      branchName: string;
+    }
   | {
-    type: 'local-project/get-worktree-setup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/get-worktree-setup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/set-worktree-setup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    config: WorktreeSetupScriptConfig;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/set-worktree-setup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      config: WorktreeSetupScriptConfig;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/get-worktree-cleanup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/get-worktree-cleanup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/set-worktree-cleanup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    config: WorktreeCleanupScriptConfig;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/set-worktree-cleanup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      config: WorktreeCleanupScriptConfig;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/sync-history';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/sync-history';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/import-history';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    acpSessionIds: string[];
-    requestedByUserId?: string;
-  }
+      type: 'local-project/import-history';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      acpSessionIds: string[];
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/resolve-history-conflict';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    sessionId: SessionId;
-    acpSessionId: string;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/resolve-history-conflict';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      sessionId: SessionId;
+      acpSessionId: string;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'worktree/list-files';
-    machineId: MachineId;
-    repoFullName: string;
-    sessionId: SessionId;
-    maxFiles?: number;
-  }
+      type: 'worktree/list-files';
+      machineId: MachineId;
+      repoFullName: string;
+      sessionId: SessionId;
+      maxFiles?: number;
+    }
   | {
-    type: 'worktree/read-file';
-    machineId: MachineId;
-    repoFullName: string;
-    sessionId: SessionId;
-    relativePath: string;
-    maxBytes?: number;
-  };
+      type: 'worktree/read-file';
+      machineId: MachineId;
+      repoFullName: string;
+      sessionId: SessionId;
+      relativePath: string;
+      maxBytes?: number;
+    };
 
 export type LocalProjectControlErrorCode =
   | 'invalid_request'
@@ -1019,42 +1077,42 @@ type LocalProjectControlOkResponse<TType extends LocalProjectControlRequest['typ
 
 export type LocalProjectControlResponse =
   | LocalProjectControlOkResponse<
-    'local-project/add',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      workspaceIds: WorkspaceId[];
-    }
-  >
+      'local-project/add',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        workspaceIds: WorkspaceId[];
+      }
+    >
   | LocalProjectControlOkResponse<
-    'local-project/prepare-add',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      alreadyRegistered: boolean;
-    }
-  >
+      'local-project/prepare-add',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        alreadyRegistered: boolean;
+      }
+    >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>
   | LocalProjectControlOkResponse<'local-project/browse-dir', LocalProjectBrowseDirectoryResult>
   | LocalProjectControlOkResponse<
-    'local-project/delete',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      workspaceIds: WorkspaceId[];
-    }
-  >
+      'local-project/delete',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        workspaceIds: WorkspaceId[];
+      }
+    >
   | LocalProjectControlOkResponse<
-    'local-project/removal-preflight',
-    LocalProjectWorktreeCleanupPreflightResult
-  >
+      'local-project/removal-preflight',
+      LocalProjectWorktreeCleanupPreflightResult
+    >
   | LocalProjectControlOkResponse<
-    'local-project/list',
-    { workspaces: LocalProjectWorkspaceSummary[] }
-  >
+      'local-project/list',
+      { workspaces: LocalProjectWorkspaceSummary[] }
+    >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>
@@ -1063,21 +1121,21 @@ export type LocalProjectControlResponse =
   | LocalProjectControlOkResponse<'local-project/read-file', LocalProjectFileReadResult | null>
   | LocalProjectControlOkResponse<'local-project/checkout-branch', LocalProjectCheckoutBranchResult>
   | LocalProjectControlOkResponse<
-    'local-project/get-worktree-setup',
-    WorktreeSetupScriptConfig | null
-  >
+      'local-project/get-worktree-setup',
+      WorktreeSetupScriptConfig | null
+    >
   | LocalProjectControlOkResponse<'local-project/set-worktree-setup', WorktreeSetupScriptConfig>
   | LocalProjectControlOkResponse<
-    'local-project/get-worktree-cleanup',
-    WorktreeCleanupScriptConfig | null
-  >
+      'local-project/get-worktree-cleanup',
+      WorktreeCleanupScriptConfig | null
+    >
   | LocalProjectControlOkResponse<'local-project/set-worktree-cleanup', WorktreeCleanupScriptConfig>
   | LocalProjectControlOkResponse<'local-project/sync-history', LocalProjectHistoryCatalogResult>
   | LocalProjectControlOkResponse<'local-project/import-history', LocalProjectHistoryImportResult>
   | LocalProjectControlOkResponse<
-    'local-project/resolve-history-conflict',
-    LocalProjectHistoryConflictResolveResult
-  >
+      'local-project/resolve-history-conflict',
+      LocalProjectHistoryConflictResolveResult
+    >
   | LocalProjectControlOkResponse<'worktree/list-files', LocalProjectFileListResult>
   | LocalProjectControlOkResponse<'worktree/read-file', LocalProjectFileReadResult | null>
   | LocalProjectControlErrorResponse;

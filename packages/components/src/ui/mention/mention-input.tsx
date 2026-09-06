@@ -81,6 +81,28 @@ function isPointInsideMentionHighlight(
   return false;
 }
 
+/**
+ * Mention ranges are atomic editing units. Keep a collapsed caret out of the
+ * range so the chip mirror cannot cover the native caret and a following edit
+ * cannot accidentally split the range. Text selections that span a mention are
+ * left alone so the browser can still select/copy ordinary text naturally.
+ */
+function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly Mention[]) {
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? selectionStart;
+  if (selectionStart !== selectionEnd) return;
+
+  const mention = mentions.find(
+    (candidate) => selectionStart > candidate.start && selectionStart < candidate.end
+  );
+  if (!mention) return;
+
+  const distanceFromStart = selectionStart - mention.start;
+  const distanceToEnd = mention.end - selectionStart;
+  const nextPosition = distanceFromStart <= distanceToEnd ? mention.start : mention.end;
+  input.setSelectionRange(nextPosition, nextPosition);
+}
+
 interface MentionInputProps extends React.ComponentPropsWithoutRef<typeof Primitive.textarea> {
   containerClassName?: string;
   highlighterClassName?: string;
@@ -101,6 +123,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   // during composition, and sync the final value after composition ends.
   const isComposingRef = React.useRef(false);
   const [compositionRenderValue, setCompositionRenderValue] = React.useState<string | null>(null);
+  const [caretAtMentionBoundary, setCaretAtMentionBoundary] = React.useState(false);
 
   const normalizedPropValue = React.useMemo(
     () => normalizeTextareaValue(inputProps.value),
@@ -116,6 +139,52 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   }, [compositionRenderValue, normalizedPropValue]);
 
   const renderedInputValue = compositionRenderValue ?? normalizedPropValue;
+  const mentionRenderValue = compositionRenderValue ?? context.inputValue;
+  // IME preedit changes the textarea before the owner commits its controlled
+  // value. Move the mirror ranges through that transient edit so the chip stays
+  // aligned instead of exposing either the raw token or an offset duplicate.
+  const mentionRenderMentions = React.useMemo(() => {
+    if (compositionRenderValue === null) return context.mentions;
+    const diff = getTextDiff(context.inputValue, compositionRenderValue);
+    if (!diff) return context.mentions;
+    return applyTextEditToMentions(context.mentions, diff.start, diff.prevEnd, diff.delta);
+  }, [compositionRenderValue, context.inputValue, context.mentions]);
+
+  const updateCaretLayer = React.useCallback(
+    (input: InputElement | null = inputRef.current) => {
+      if (!input || document.activeElement !== input) {
+        setCaretAtMentionBoundary(false);
+        return;
+      }
+
+      const selectionStart = input.selectionStart;
+      const selectionEnd = input.selectionEnd;
+      const atMentionBoundary =
+        selectionStart !== null &&
+        selectionStart === selectionEnd &&
+        mentionRenderMentions.some(
+          (mention) => selectionStart === mention.start || selectionStart === mention.end
+        );
+      setCaretAtMentionBoundary((previous) =>
+        previous === atMentionBoundary ? previous : atMentionBoundary
+      );
+    },
+    [inputRef, mentionRenderMentions]
+  );
+
+  // A chip must cover the textarea glyphs to recolour them, but that same
+  // cover would hide the native caret at a mention edge. Raise the textarea
+  // only at that edge and let the background mirror carry its text while the
+  // caret remains native. This avoids painting a second, synthetic caret.
+  React.useLayoutEffect(() => {
+    const read = () => updateCaretLayer();
+    read();
+    document.addEventListener('selectionchange', read);
+    return () => document.removeEventListener('selectionchange', read);
+  }, [updateCaretLayer]);
+
+  const showNativeCaretAboveChip =
+    !!context.getMentionChip && mentionRenderMentions.length > 0 && caretAtMentionBoundary;
 
   const queueSelectionRestore = React.useCallback(
     (start: number, end: number = start, expectedValue?: string) => {
@@ -449,40 +518,50 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       // The value at compositionEnd should be the final committed text.
       syncInputValue(input);
       onMentionUpdate(input);
+      updateCaretLayer(input);
     },
-    [context, onMentionUpdate, syncInputValue]
+    [context, onMentionUpdate, syncInputValue, updateCaretLayer]
   );
 
   const onClick = React.useCallback(
     (event: React.MouseEvent<InputElement>) => {
       const input = event.currentTarget;
+      if (isComposingRef.current) return;
+      const selectionStart = input.selectionStart ?? 0;
+      const selectionEnd = input.selectionEnd ?? selectionStart;
+      const mentionAtClick =
+        selectionStart === selectionEnd
+          ? context.mentions.find(
+              (mention) => selectionStart >= mention.start && selectionStart <= mention.end
+            )
+          : undefined;
+
+      constrainCaretToMentionBoundary(input, context.mentions);
+      updateCaretLayer(input);
       onMentionUpdate(input);
 
       if (!context.onMentionClick) return;
-
-      const selectionStart = input.selectionStart ?? 0;
-      const selectionEnd = input.selectionEnd ?? selectionStart;
       if (selectionStart !== selectionEnd) return;
 
-      const mentionAtCursor = context.mentions.find(
-        (mention) => selectionStart >= mention.start && selectionStart <= mention.end
-      );
-
       if (
-        mentionAtCursor &&
-        isPointInsideMentionHighlight(input, mentionAtCursor, event.clientX, event.clientY)
+        mentionAtClick &&
+        isPointInsideMentionHighlight(input, mentionAtClick, event.clientX, event.clientY)
       ) {
-        context.onMentionClick(mentionAtCursor);
+        context.onMentionClick(mentionAtClick);
       }
     },
-    [context, onMentionUpdate]
+    [context, onMentionUpdate, updateCaretLayer]
   );
 
   const onFocus = React.useCallback(
     (event: React.FocusEvent<InputElement>) => {
+      if (!isComposingRef.current) {
+        constrainCaretToMentionBoundary(event.currentTarget, context.mentions);
+      }
+      updateCaretLayer(event.currentTarget);
       onMentionUpdate(event.currentTarget);
     },
-    [onMentionUpdate]
+    [context, onMentionUpdate, updateCaretLayer]
   );
 
   const onKeyDown = React.useCallback(
@@ -762,15 +841,27 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   );
 
   const onSelect = React.useCallback(() => {
-    if (context.disabled || context.readonly) return;
+    if (context.disabled) return;
+    // IMEs own the transient selection while composing. The committed mention
+    // ranges still use the pre-composition offsets, so snapping against them
+    // moves the IME caret into the wrong text.
+    if (isComposingRef.current) return;
     const inputElement = context.inputRef.current;
     if (!inputElement) return;
+    constrainCaretToMentionBoundary(inputElement, context.mentions);
+    updateCaretLayer(inputElement);
+    if (context.readonly) return;
     onMentionUpdate(inputElement);
-  }, [context, onMentionUpdate]);
+  }, [context, onMentionUpdate, updateCaretLayer]);
 
   return (
     <div className={cn('relative', containerClassName)}>
-      <MentionHighlighter className={highlighterClassName} />
+      <MentionHighlighter
+        className={highlighterClassName}
+        renderValue={mentionRenderValue}
+        renderMentions={mentionRenderMentions}
+        showText={showNativeCaretAboveChip}
+      />
       <Primitive.textarea
         role="combobox"
         id={context.inputId}
@@ -788,7 +879,17 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         {...inputProps}
         ref={composedRef}
         value={renderedInputValue}
-        className={cn('relative z-10', inputProps.className, 'bg-transparent')}
+        className={cn(
+          'relative',
+          showNativeCaretAboveChip ? 'z-30' : 'z-10',
+          inputProps.className,
+          'bg-transparent'
+        )}
+        style={
+          showNativeCaretAboveChip
+            ? { ...inputProps.style, WebkitTextFillColor: 'transparent' }
+            : inputProps.style
+        }
         onBeforeInput={composeEventHandlers(inputProps.onBeforeInput, onBeforeInput)}
         onChange={composeEventHandlers(inputProps.onChange, onChange)}
         onClick={composeEventHandlers(inputProps.onClick, onClick)}
@@ -801,12 +902,17 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       {/*
         The chip mirror is a second full copy of the draft, re-split into
         segments on every keystroke and measuring the textarea's computed style
-        of its own. With no committed range it paints nothing — its text is
-        `transparent` and only a chip is ever opaque — so it is worth exactly
-        nothing until there is one, which is most of a composer's life.
+        of its own. Its text is `transparent` while the textarea is the visible
+        source; only at a mention boundary does the background mirror carry the
+        text so the raised textarea can expose its native caret.
       */}
-      {context.getMentionChip && context.mentions.length > 0 ? (
-        <MentionHighlighter layer="chip" className={highlighterClassName} />
+      {context.getMentionChip && mentionRenderMentions.length > 0 ? (
+        <MentionHighlighter
+          layer="chip"
+          className={highlighterClassName}
+          renderValue={mentionRenderValue}
+          renderMentions={mentionRenderMentions}
+        />
       ) : null}
     </div>
   );

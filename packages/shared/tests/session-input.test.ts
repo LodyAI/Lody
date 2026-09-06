@@ -12,6 +12,7 @@ import {
   normalizeSessionInputBlocks,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
+  resolveSessionConversationSourceFence,
   resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
@@ -190,6 +191,62 @@ describe('session-input helpers', () => {
       sourceConfigKey: 'queue:queue-1',
       modelId: 'model-b',
       configOptionValues: { approval: 'never' },
+    });
+  });
+
+  it('keeps one causal Turn key when a queued Turn is promoted to history', () => {
+    const queued = resolveSessionConversationSourceFence(
+      [{ id: 'turn-1', role: 'user' }],
+      [{ $cid: 'queue-cid', userTurnId: 'turn-2', acpSessionConfig: {} }]
+    );
+    const promoted = resolveSessionConversationSourceFence([
+      { id: 'turn-1', role: 'user' },
+      { id: 'turn-2', role: 'user' },
+    ]);
+
+    expect(queued.currentTurnKey).toBe('turn:turn-2');
+    expect(promoted.currentTurnKey).toBe('turn:turn-2');
+    expect(queued.knownTurnKeys).toEqual(['turn:turn-2', 'turn:turn-1']);
+    expect(promoted.knownTurnKeys).toEqual(['turn:turn-2', 'turn:turn-1']);
+
+    const legacyQueued = resolveSessionConversationSourceFence(
+      [],
+      [{ $cid: 'legacy-cid', acpSessionConfig: {} }]
+    );
+    const legacyPromoted = resolveSessionConversationSourceFence([
+      { id: 'queued-legacy-cid', role: 'user' },
+    ]);
+    expect(legacyQueued.currentTurnKey).toBe('turn:queued-legacy-cid');
+    expect(legacyPromoted.currentTurnKey).toBe('turn:queued-legacy-cid');
+  });
+
+  it('inherits the latest explicit Role across legacy or non-composer Turns', () => {
+    const history = [
+      {
+        id: 'turn-role',
+        role: 'user',
+        inputConfig: { agentRoleId: 'role-reviewer', agentRoleRevision: 7 },
+      },
+      {
+        id: 'turn-programmatic',
+        role: 'user',
+        inputConfig: { prompt: 'continue automatically' },
+      },
+    ];
+    expect(resolveSessionConversationConfig(history)).toMatchObject({
+      sourceConfigKey: 'history:turn-programmatic',
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 7,
+    });
+
+    expect(
+      resolveSessionConversationConfig([
+        ...history,
+        { id: 'turn-none', role: 'user', inputConfig: { agentRoleId: null } },
+      ])
+    ).toMatchObject({
+      sourceConfigKey: 'history:turn-none',
+      agentRoleId: null,
     });
   });
 

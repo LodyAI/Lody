@@ -1,0 +1,119 @@
+---
+title: Parallel Coding Agents
+description: Run multiple coding agents as a team in one Lody workspace — isolated Git worktrees, mixed models such as Claude Code and Kimi, and shared session visibility.
+---
+
+Lody is a team workspace for **multi-agent coding**: you start several coding-agent sessions at
+once, each with its own conversation. When a session uses a [worktree](/docs/worktrees) — always
+for GitHub, and available for local projects — that session also gets its own working directory, so
+agents can change files side by side without colliding.
+
+People searching for a “Claude Code team” or “parallel coding agents” usually want that setup —
+several agents working at the same time, in one place teammates can see. Lody is that place, not a
+Claude-only product. You can run Claude Code next to Codex, Kimi, DeepSeek, or any
+[ACP](/docs/cli-runtimes) runtime in the same workspace.
+
+See also [Agent Config](/docs/agents), [Team Features](/docs/team),
+[Share a Coding Agent Session](/docs/session-handoff), and
+[Agent Session Control](/docs/session-orchestration).
+
+## Isolated worktrees
+
+When you create a session that uses a worktree, Lody:
+
+1. Creates a branch (default `session/<shortSessionId>`)
+2. Checks it out in a dedicated worktree
+3. Optionally runs the project setup script
+4. Streams file changes into the session UI
+
+Agents in different sessions do not share a working directory, so uncommitted edits stay with the
+task that made them. Review, discard, or open a PR per session.
+
+<Callout title="Fork destinations">
+[Fork](/docs/session#fork-a-session) copies conversation history into a **new** session. **Current
+workspace** (and Side Chat) stay on the source directory. When **New worktree** is offered, that
+fork is an independent session from the latest committed `HEAD` — use it when you want isolation
+without abandoning the conversation. Start a new home-page session when you want a fresh isolated
+task with no copied history.
+</Callout>
+
+Details: [Worktrees](/docs/worktrees).
+
+## Several agents, one workspace
+
+Each session picks its own [agent config](/docs/agents), model, and permission scope from the
+composer. You can run:
+
+- Claude Code or Codex from the machine’s subscription login
+- Kimi Code, DeepSeek Harness, and other built-in or Claude-compatible setups
+- Any runtime in the [ACP Registry](/docs/cli-runtimes), or a custom ACP launch command
+
+Save a repeatable mix of machine, config, model, and permission as an
+[Agent Role](/docs/agent-roles) if you start the same setups often.
+
+How many sessions can run at once depends on the host machine and how many conversations you can
+usefully watch — see [Recommended Workflow](/docs/workflow).
+
+## Team visibility
+
+Parallel work is easier when the team can see what is already running.
+
+- On the home page, the sidebar filter defaults to **All Tasks**. If someone only sees their own
+  sessions, switch from **My Tasks** to **All Tasks** (on mobile, **Team Tasks**). Avatars show who
+  started each one.
+- Machines stay **private by default**. Share a machine (or use **Share with team…** on a session)
+  when teammates should open those conversations.
+- To put a teammate *inside* one existing session — same chat, diffs, and worktree — follow
+  [Share a Coding Agent Session](/docs/session-handoff).
+
+Membership, roles, and machine sharing: [Team Features](/docs/team).
+
+## Coordinate from one conversation
+
+Starting sessions by hand is enough for most parallel work. When you want one agent to split a job,
+ask it to use [Agent Session Control](/docs/session-orchestration): create or reuse conversations,
+check their status, send a follow-up, and bring results back. Those delegated conversations can run
+in parallel while the target machine is online.
+
+## A practical split
+
+From the [recommended workflow](/docs/workflow):
+
+1. Break the work into small features or fixes.
+2. Start one home-page conversation per item (usually one PR).
+3. Review live [diffs](/docs/diff-viewer) as each agent works.
+4. For GitHub-backed work, create a PR from the session when the change is ready.
+5. [Archive](/docs/session#archive-sessions) the session after the work is done so its worktree is
+   reclaimed.
+
+## FAQ
+
+### Is this a Claude Code team feature?
+
+No. Claude Code is one [agent config](/docs/agents) you can run in Lody. The workspace, isolated
+worktrees, and team session list are Lody. You can run several Claude Code sessions, or mix Claude
+Code with Kimi, DeepSeek, Codex, or other ACP agents.
+
+### Do parallel agents overwrite each other's files?
+
+Not when each task has its own [worktree](/docs/worktrees) — including a **New worktree** fork or a
+new home-page session. **Current workspace** forks and Side Chats share the source session's
+directory, so they can see each other's file changes. A New worktree fork starts from committed
+`HEAD`; uncommitted edits stay on the source.
+
+### Can teammates see every running agent?
+
+They can see sessions on machines (and local projects) that have been shared with the workspace,
+then switch the home-page filter to **All Tasks** if it is set to **My Tasks**. Unshared machines
+never sync those conversations into other members' sidebars. See [Team Features](/docs/team).
+
+### Can one agent start the others?
+
+Yes, through [Agent Session Control](/docs/session-orchestration), when **Developer mode** and the
+**Tasks** beta are on. Ask one conversation to create focused sessions, watch them, and summarize.
+This is bounded to Lody conversation data — not a general background scheduler.
+
+### When should I hand off instead of starting another agent?
+
+Start another session when you want a **new** isolated task.
+[Hand off](/docs/session-handoff) when a teammate should **continue** an existing session.

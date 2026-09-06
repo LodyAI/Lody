@@ -565,7 +565,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
    * Update organization metadata.
    */
   const updateOrganization = useCallback(
-    async (organizationId: string, data: { name?: string; logo?: string }) => {
+    async (organizationId: string, data: { name?: string; slug?: string; logo?: string }) => {
       setMutationError(null);
       try {
         const { data: updatedOrganization, error } = await authClient.organization.update({

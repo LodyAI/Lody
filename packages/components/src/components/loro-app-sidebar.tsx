@@ -150,6 +150,7 @@ import {
   Link2,
   LockKeyhole,
   Loader2,
+  Mail,
   FolderOpen,
   Monitor,
   MoreHorizontal,
@@ -547,6 +548,7 @@ type LocalProjectSessionItemProps = {
   workspaceSlug: string | null;
   onNavigate: (sessionId: string, tabSessionId?: string) => void;
   onArchive: (sessionId: string) => void;
+  onMarkUnread?: (sessionId: string) => void;
   onRename?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   onTogglePinned?: (sessionId: string, nextPinned: boolean) => void;
   onCopyUrl?: (sessionId: string) => void;
@@ -580,6 +582,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   isSelected,
   onNavigate,
   onArchive,
+  onMarkUnread,
   onRename,
   onTogglePinned,
   onCopyUrl,
@@ -615,6 +618,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const canRename = typeof onRename === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
+  const canMarkUnread = typeof onMarkUnread === 'function' && !hasUnreadMessages;
   const hasContextMenuActions = !isMobile;
   const openedByOpener = openedByTree?.kind === 'opener' ? openedByTree : null;
   const contextMenuLabels = useMemo(
@@ -623,6 +627,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       goToOpenerSession: t('sessions.contextMenu.goToOpenerSession', 'Go to Opener Session'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
@@ -778,6 +783,16 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             }}
           >
             {isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
+          </ContextMenuItem>
+        ) : null}
+        {canMarkUnread ? (
+          <ContextMenuItem
+            icon={<Mail />}
+            onSelect={() => {
+              onMarkUnread?.(session.id);
+            }}
+          >
+            {contextMenuLabels.markUnread}
           </ContextMenuItem>
         ) : null}
         <ContextMenuItem
@@ -936,6 +951,7 @@ export type LocalProjectItemProps = {
   onArchiveProjectChats?: (sessionIds: string[]) => void;
   onNavigateSession: (sessionId: string, tabSessionId?: string) => void;
   onArchive: (sessionId: string) => void;
+  onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   onToggleSessionPinned?: (sessionId: string, nextPinned: boolean) => void;
   onCopySessionUrl?: (sessionId: string) => void;
@@ -1017,6 +1033,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   onArchiveProjectChats,
   onNavigateSession,
   onArchive,
+  onMarkSessionUnread,
   onRenameSession,
   onToggleSessionPinned,
   onCopySessionUrl,
@@ -1373,6 +1390,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   workspaceSlug={null}
                   onNavigate={onNavigateSession}
                   onArchive={onArchive}
+                  onMarkUnread={onMarkSessionUnread}
                   onRename={onRenameSession}
                   onTogglePinned={onToggleSessionPinned}
                   onCopyUrl={onCopySessionUrl}
@@ -1582,7 +1600,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [setOrganizeMode]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
-  const { archiveSession, setSessionPinned, updateSessionTitle } = useSessionActions();
+  const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
+    useSessionActions();
   const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
     useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
@@ -1606,6 +1625,13 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       void setSessionPinned(sessionId as SessionId, nextPinned);
     },
     [setSessionPinned]
+  );
+
+  const handleMarkSessionUnread = useCallback(
+    (sessionId: string) => {
+      void markSessionUnread(sessionId as SessionId);
+    },
+    [markSessionUnread]
   );
 
   const sessionById = useMemo(() => {
@@ -2487,6 +2513,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         onArchiveProjectChats={handleArchiveProjectChats}
                         onNavigateSession={handleNavigateToSession}
                         onArchive={handleArchiveSession}
+                        onMarkSessionUnread={handleMarkSessionUnread}
                         onRenameSession={handleRenameSession}
                         onToggleSessionPinned={handleTogglePinSession}
                         onCopySessionUrl={handleCopySessionUrl}
@@ -2867,6 +2894,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       onSelectSession={handleNavigateToSession}
       onNavigateSessionTab={handleNavigateToSession}
       onArchiveSession={handleArchiveSession}
+      onMarkSessionUnread={handleMarkSessionUnread}
       onRenameSession={handleRenameSession}
       onTogglePinSession={handleTogglePinSession}
       onCopySessionUrl={handleCopySessionUrl}
@@ -2910,6 +2938,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       onSelectSession: handleNavigateToSession,
       onNavigateSessionTab: handleNavigateToSession,
       onArchiveSession: handleArchiveSession,
+      onMarkSessionUnread: handleMarkSessionUnread,
       onRenameSession: handleRenameSession,
       onTogglePinSession: handleTogglePinSession,
       onCopySessionUrl: handleCopySessionUrl,
@@ -2925,6 +2954,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       getSessionHref,
       githubWorktreesSectionCollapsed,
       handleArchiveSession,
+      handleMarkSessionUnread,
       handleCopySessionUrl,
       handleRenameSession,
       handleRequestShareSession,
@@ -3205,6 +3235,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onToggleUpdatedBucket={handleToggleUpdatedBucket}
         onToggleUpdatedShowFullBucket={handleToggleUpdatedShowFullBucket}
         onArchiveUpdatedItem={handleArchiveSession}
+        onMarkUpdatedItemUnread={handleMarkSessionUnread}
         onRenameUpdatedItem={handleRenameSession}
         onToggleUpdatedItemPinned={handleTogglePinSession}
         onCopyUpdatedItemUrl={handleCopySessionUrl}

@@ -161,6 +161,14 @@ export const WithoutTitle: Story = {
   render: () => <InteractiveWrapper options={STANDARD_OPTIONS} />,
 };
 
+export const ConversationCollapsed: Story = {
+  args: {
+    options: STANDARD_OPTIONS,
+    defaultCollapsed: true,
+    onSelect: () => {},
+  },
+};
+
 export const Disabled: Story = {
   args: {
     title: 'Delete `node_modules`',

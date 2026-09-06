@@ -167,9 +167,7 @@ function InviteStatusLine({
 }) {
   const { t } = useTranslation();
   if (status === 'sent') {
-    return (
-      <div className="text-xs text-primary">{t('onboarding.invite.statusSent', 'Sent')}</div>
-    );
+    return <div className="text-xs text-primary">{t('onboarding.invite.statusSent', 'Sent')}</div>;
   }
   if (status === 'failed') {
     return (
@@ -245,6 +243,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
 
   const handleSendAndContinue = useCallback(() => {
     if (!activeOrganization) {
+      console.error('[onboarding] Cannot send invitations without an active workspace');
       toast.error(t('onboarding.invite.errorNoWorkspace', 'No workspace to invite to'));
       return;
     }
@@ -272,6 +271,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
           const failed = result?.error;
           if (failed) {
             const message = failed.message || String(failed);
+            console.error(`[onboarding] Failed to invite ${entry.email}:`, failed);
             setInvites((prev) =>
               prev.map((e) =>
                 e.id === entry.id ? { ...e, status: 'failed', errorMessage: message } : e
@@ -285,6 +285,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
             );
           }
         } catch (error) {
+          console.error(`[onboarding] Failed to invite ${entry.email}:`, error);
           const message = error instanceof Error ? error.message : String(error);
           setInvites((prev) =>
             prev.map((e) =>

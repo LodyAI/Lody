@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { getSessionFileErrorPresentation } from '../src/components/sessions/session-file-error-state';
+import {
+  getSessionFileErrorPresentation,
+  offersFileActions,
+} from '../src/components/sessions/session-file-error-state';
 
 const t = (_key: string, fallback: string) => fallback;
 
@@ -76,5 +79,14 @@ describe('getSessionFileErrorPresentation', () => {
         t
       )
     ).toMatchObject({ kind: 'temporarily-unavailable', title: 'File is not ready yet' });
+  });
+  it('offers a way out only where opening the file outside Lody would help', () => {
+    // On a missing, denied, or offline file every action on the card would
+    // fail, so the card must not grow one.
+    expect(offersFileActions('too-large')).toBe(true);
+    expect(offersFileActions('unsupported')).toBe(true);
+    expect(offersFileActions('not-found')).toBe(false);
+    expect(offersFileActions('permission-denied')).toBe(false);
+    expect(offersFileActions('temporarily-unavailable')).toBe(false);
   });
 });

@@ -4,16 +4,17 @@
   "type": "module",
   "scripts": {
     "clean:out": "node scripts/clean-output.mjs",
-    "generate": "fumadocs-mdx && node scripts/generate-sitemap.mjs && node scripts/generate-docs-search.mjs && node scripts/generate-llms.mjs && node scripts/generate-rss.mjs && node scripts/generate-blog-reading-time.mjs",
+    "generate": "fumadocs-mdx && node scripts/generate-sitemap.mjs && node scripts/generate-docs-search.mjs && node scripts/generate-llms.mjs && node scripts/generate-rss.mjs && node scripts/generate-blog-reading-time.mjs && node scripts/generate-docs-faq.mjs",
     "generate:routes": "tsr generate",
     "postinstall": "node scripts/postinstall.mjs",
     "predev": "corepack pnpm run generate",
     "dev": "vite dev --host 127.0.0.1 --port 3002",
     "prebuild": "corepack pnpm run clean:out && corepack pnpm run generate && corepack pnpm run generate:routes",
-    "build": "vite build",
+    "build": "vite build && node scripts/finalize-404-html.mjs",
+    "preview:static": "node scripts/serve-static.mjs",
     "pretypecheck": "corepack pnpm run generate && corepack pnpm run generate:routes",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/postinstall.test.mjs"
+    "test": "node --test scripts/postinstall.test.mjs scripts/site-paths.test.mjs scripts/static-host.test.mjs scripts/finalize-404-html.test.mjs scripts/llms-answers.test.mjs && node --experimental-strip-types --test lib/metadata.test.ts lib/not-found-seo.test.ts lib/docs-faq.test.ts"
   },
   "dependencies": {
     "@lody/components": "workspace:*",

@@ -580,9 +580,6 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             machineId: machine.id,
             workspaceId: workspace.id as WorkspaceId,
             configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            env: config.env,
           })
         );
 

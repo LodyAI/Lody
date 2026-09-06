@@ -442,6 +442,16 @@ const issuePrMentionSchema = schema.LoroMap({
   number: schema.Number(),
 });
 
+// Loro Mirror passes null through transforms without invoking encode/decode.
+// The transform therefore gives this optional string its domain-level explicit
+// None state while retaining a primitive string in the CRDT when an id exists.
+const agentRoleIdSchema = schema
+  .String<AgentRoleId>({ required: false })
+  .transform<AgentRoleId | null>({
+    decode: (value) => value,
+    encode: (value) => value,
+  });
+
 const acpSessionConfigSchema = schema
   .LoroMap(
     {
@@ -459,6 +469,9 @@ const acpSessionConfigSchema = schema
       mcpServerIds: schema.Any({ required: false }),
       /** Whether the built-in Lody Task MCP tools are mounted for this Turn. */
       taskToolsEnabled: schema.Boolean({ required: false }),
+      /** Agent Role selected for this Turn; null is explicit None. */
+      agentRoleId: agentRoleIdSchema,
+      agentRoleRevision: schema.Number({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -728,9 +741,18 @@ export type PendingScheduledTask = {
   /** Stable id: cron job id, or a fixed key for the session's single pending wakeup. */
   id: string;
   kind: 'cron' | 'wakeup';
-  /** When this task set entry was last recorded, epoch ms. */
+  /**
+   * When this task set entry was last recorded, epoch ms. For calls persisted with
+   * `recordedAtMs` this is the tool call's own first-sighting stamp (the true creation
+   * moment); older history falls back to the owning turn's START — never its `endedAt`,
+   * which merged cron-fire turns can push past a one-shot's fire minute.
+   */
   createdAtMs: number;
-  /** Wakeup fire time (epoch ms). Absent for cron jobs (they use a schedule expression). */
+  /**
+   * Wakeup fire time (epoch ms); also the runtime-committed fire time of a one-shot cron
+   * whose CronCreate output carried a `nextFireAt` line. Absent for recurring cron jobs
+   * (they resolve from their schedule expression relative to now).
+   */
   scheduledForMs?: number;
   /** Cron schedule expression / human-readable schedule string. */
   humanSchedule?: string;

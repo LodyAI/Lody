@@ -55,6 +55,7 @@ const SessionUsageUpdateSchema = z.object({
 });
 
 const RateLimitWindowSchema = z.object({
+  label: z.string().optional(),
   usedPercent: z.number().min(0).max(100),
   windowDurationSeconds: z.number().nonnegative().nullable(),
   resetsAtEpochSeconds: z.number().int().positive().nullable(),

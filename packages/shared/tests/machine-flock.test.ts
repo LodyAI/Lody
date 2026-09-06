@@ -458,6 +458,21 @@ describe('machine Flock helpers', () => {
     });
   });
 
+  it('rejects an agent config whose value id does not match its row key', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.agentConfig('trusted-config' as AgentConfigId), {
+      id: 'different-config',
+      machineId: 'machine-1',
+      name: 'Mismatched provider',
+      cliType: 'custom',
+      agentType: 'custom-agent',
+      customAcp: { command: '/tmp/untrusted-acp' },
+      env: {},
+    });
+
+    expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
+  });
+
   it('normalizes null optional fields in agent config rows', () => {
     const agentConfigId = 'config-null-optionals' as AgentConfigId;
     const row = {

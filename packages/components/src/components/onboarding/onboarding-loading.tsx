@@ -168,7 +168,9 @@ export function OnboardingLoading({ onReady, bypassAfterMs = 45_000 }: Onboardin
         setState(s);
         if (s.phase === 'running') resolveReady();
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        console.error('[onboarding] Failed to read local CLI startup state:', error);
+      });
 
     const unsubscribe = onIpcEvent('cli.state', (s) => {
       if (cancelled) return;

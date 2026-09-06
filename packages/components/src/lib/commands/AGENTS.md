@@ -30,6 +30,8 @@ only tells global dispatch to yield for events originating in its subtree.
 - A scope that yields an event must not call `preventDefault`: the editor/local keymap
   still needs to receive it. This applies after a shortcut is rebound as well.
 - `$mod` means Command on macOS and Control elsewhere. Formatting is platform-aware.
+- `layout.toggleZenMode` owns `$mod+.` outside editors. Monaco claims that binding
+  locally for Quick Fix, so the app command must yield while focus is in its subtree.
 - Alt+letter matching and recording must use `event.code`; macOS `event.key` may be a
   generated glyph such as `∫`.
 - Shortcut capture pauses dispatch. It finishes after the last modifier is released and
@@ -60,10 +62,15 @@ only tells global dispatch to yield for events originating in its subtree.
 - Settings: `components/settings/keyboard-shortcuts-setting.tsx` lists every command,
   records bindings, detects conflicts, unbinds, and resets.
 - Electron menu bridge: `components/electron-menu-handler.tsx` converts
-  `lody:menu-action` IPC into `commands.execute()`.
-- `session.closeFocusedTab` is the only Cmd/Ctrl+W owner. Do not restore a native
-  `role: 'close'` accelerator that can close the window before the renderer decides
-  whether a conversation or side panel owns the action.
+  `lody:menu-action` IPC into `commands.execute()`, except window chords.
+- Cmd/Ctrl+W is a native menu accelerator, not a registry command. Do not restore a
+  `role: 'close'` accelerator and do not bind `$mod+w` in the renderer. Main
+  `closeFocusedTabOrWindow` closes DevTools, then broadcasts
+  `close-current-tab-or-window` to the main window. The shell
+  (`desktop-tab-or-window-close.ts`) asks the top tab closer; session-detail
+  registers one. No closer (Chat Landing and other surfaces) closes the
+  BrowserWindow. The main-process `close` handler still hides on macOS instead of
+  quitting. The chord is not listed or rebindable in keyboard settings.
 - Commands carry `titleKey`; palette/settings resolve it through i18n at render time.
 - Desktop native Tab handling is in
   `apps/electron/src/renderer/src/native-tab-behavior.ts`.

@@ -61,8 +61,7 @@ describe('local session control node validators', () => {
       workspaceId: 'workspace-1',
       requestId: 'auth-1',
       action: 'start',
-      cliType: 'builtin',
-      agentType: 'kimi',
+      configId: 'config-1',
     };
     const progress = {
       type: 'machine/acp-authentication-progress',
@@ -75,7 +74,9 @@ describe('local session control node validators', () => {
       expiresInSeconds: 900,
     };
     const submitCode = {
-      ...request,
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
       requestId: 'auth-input-1',
       action: 'submit-code',
       authenticationRequestId: 'auth-1',
@@ -93,12 +94,65 @@ describe('local session control node validators', () => {
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',
     };
+    const inputProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'input-required',
+      interactionId: 'interaction-1',
+      message: 'Choose an account',
+      form: {
+        fields: [
+          {
+            id: 'account',
+            type: 'select',
+            label: 'Account',
+            required: true,
+            options: [{ value: 'work', label: 'Work' }],
+          },
+        ],
+      },
+    };
+    const submitInput = {
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      requestId: 'auth-input-2',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-1',
+      interactionId: 'interaction-1',
+      authenticationInput: JSON.stringify({
+        action: 'accept',
+        content: { account: 'work' },
+      }),
+    };
     expect(isLocalSessionControlRequest(request)).toBe(true);
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
     expect(isLocalSessionControlRequest(submitCode)).toBe(true);
     expect(isLocalSessionControlRequestCjs(submitCode)).toBe(true);
+    expect(isLocalSessionControlRequest(submitInput)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(submitInput)).toBe(true);
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      expect(
+        validate({
+          ...request,
+          customAcp: { command: '/tmp/untrusted-acp' },
+          env: { TOKEN: 'attacker-controlled' },
+        })
+      ).toBe(false);
+      expect(
+        validate({
+          ...submitInput,
+          configId: 'config-1',
+          runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
+        })
+      ).toBe(false);
+    }
     expect(isLocalSessionControlResponse(progress)).toBe(true);
     expect(isLocalSessionControlResponseCjs(progress)).toBe(true);
+    expect(isLocalSessionControlResponse(inputProgress)).toBe(true);
+    expect(isLocalSessionControlResponseCjs(inputProgress)).toBe(true);
     expect(isLocalSessionControlResponse(response)).toBe(true);
     expect(isLocalSessionControlResponseCjs(response)).toBe(true);
   });
@@ -461,19 +515,30 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
   });
 
-  it('accepts provider env on capability refresh in ts and cjs validators', () => {
+  it('accepts config-bound capability refresh and rejects launch fields in ts and cjs', () => {
     const request = {
       type: 'machine/acp-capabilities-refresh' as const,
       machineId: 'machine-1',
       workspaceId: 'workspace-1',
       configId: 'config-1',
-      cliType: 'registry',
-      agentType: 'env-agent',
-      env: { ACP_PROVIDER_TOKEN: 'secret-token' },
     };
 
     expect(isLocalSessionControlRequest(request)).toBe(true);
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+    expect(
+      isLocalSessionControlRequest({
+        ...request,
+        customAcp: { command: '/tmp/untrusted-acp' },
+        env: { ACP_PROVIDER_TOKEN: 'attacker-controlled' },
+      })
+    ).toBe(false);
+    expect(
+      isLocalSessionControlRequestCjs({
+        ...request,
+        customAcp: { command: '/tmp/untrusted-acp' },
+        env: { ACP_PROVIDER_TOKEN: 'attacker-controlled' },
+      })
+    ).toBe(false);
   });
 
   it('accepts machine ping requests and responses in ts and cjs validators', () => {

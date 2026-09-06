@@ -58,6 +58,55 @@ export const FILE_PREVIEW_V3_LIMITS = {
 } as const;
 export type FilePreviewV3Limits = typeof FILE_PREVIEW_V3_LIMITS;
 
+/**
+ * The local IPC response body the same-machine reply has to fit inside.
+ *
+ * Mirrors `LOCAL_IPC_MAX_RESPONSE_BODY_BYTES` (`node/local-ipc.ts`), which is a
+ * node-only module this browser-safe one cannot import. That client DESTROYS
+ * the response past the cap, so exceeding it is not a bigger preview — it is an
+ * `IpcProtocolError` the facade reports as a retryable I/O failure, i.e. the
+ * viewer would say "try again" about a file that will never load. Anything the
+ * preview answers with must be bounded by this, not merely by what the disk
+ * can produce. The service enforces it on the ENCODED payload; see
+ * `apps/cli/src/lib/file-preview/file-preview-service.ts`.
+ */
+export const FILE_PREVIEW_LOCAL_IPC_RESPONSE_LIMIT_BYTES = 16 * 1024 * 1024;
+
+/** Room for the JSON envelope around the content (path, digest, mime, format). */
+export const FILE_PREVIEW_LOCAL_ENVELOPE_BYTES = 64 * 1024;
+
+/** What one same-machine preview payload may encode to. */
+export const FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES =
+  FILE_PREVIEW_LOCAL_IPC_RESPONSE_LIMIT_BYTES - FILE_PREVIEW_LOCAL_ENVELOPE_BYTES;
+
+/**
+ * Limits for a SAME-MACHINE preview (the Electron `file/preview-local` path).
+ *
+ * The default limits are shaped by the REMOTE wire: a preview is gzipped and
+ * base64'd through Loro Streams, so a 1 MiB compressed ceiling is what keeps
+ * one file read off everyone else's connection. Locally there is no such wire,
+ * so a 10 MiB "too large to preview" verdict was an artifact of a transport
+ * that is not in play — but there IS still a transport, and these numbers are
+ * derived from ITS cap rather than from what the disk can hand over:
+ *
+ * - binary is base64, a fixed 4/3 expansion, so the raw cap is the budget × 3/4.
+ * - text is a JSON string, whose escaping is DATA-dependent (a file of newlines
+ *   doubles; one of control bytes sextuples), so its raw cap cannot be derived
+ *   at all — the service measures the encoded payload and refuses past the
+ *   budget, and this number is only a pre-read bound so a huge file is not read
+ *   into memory just to be rejected.
+ *
+ * Past either, opening the file with the OS is the honest answer, which is what
+ * the viewer's error card offers.
+ */
+export const FILE_PREVIEW_V3_LOCAL_LIMITS = {
+  maxTextBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
+  maxBinaryBytes: Math.floor((FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES * 3) / 4),
+  /** No remote wire to compress for, so text always ships as plain UTF-8. */
+  plainTextBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
+  maxCompressedBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
+} as const satisfies FilePreviewV3Limits;
+
 export const FilePreviewV3DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 export type FilePreviewV3Digest = z.infer<typeof FilePreviewV3DigestSchema>;
 

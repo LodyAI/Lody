@@ -7,6 +7,10 @@ import {
 describe('local Machine RPC', () => {
   it.each([
     {
+      method: 'session/get-active-invocation-context',
+      params: { sessionId: 'session-1' },
+    },
+    {
       method: 'session/fork',
       params: {
         sourceSessionId: 'session-1',
@@ -229,5 +233,32 @@ describe('local Machine RPC', () => {
       },
     };
     expect(LocalMachineRpcResponseSchema.safeParse(endpointWithoutTarget).success).toBe(false);
+  });
+
+  it('validates active invocation identity and its frozen input config', () => {
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'session/active-invocation-context',
+          sessionId: 'session-1',
+          active: true,
+          requesterUserId: 'user-b',
+          sourceTurnId: 'turn-b',
+          inputConfig: { chainDepth: 1, taskToolsEnabled: true },
+        },
+      }).success
+    ).toBe(true);
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'session/active-invocation-context',
+          sessionId: 'session-1',
+          active: true,
+          requesterUserId: 'user-b',
+        },
+      }).success
+    ).toBe(false);
   });
 });

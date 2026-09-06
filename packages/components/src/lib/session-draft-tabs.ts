@@ -307,6 +307,28 @@ export const replaceTabOrderId = (
   return nextOrder.includes(nextId) ? nextOrder : [...nextOrder, nextId];
 };
 
+/** Adds a tab after the currently displayed fallback tabs without disturbing saved order. */
+export const appendTabOrderId = (
+  tabOrder: string[],
+  displayedTabIds: Iterable<string>,
+  nextId: string
+): string[] => {
+  const nextOrder = [...tabOrder];
+  const seen = new Set(nextOrder);
+
+  for (const id of displayedTabIds) {
+    if (!seen.has(id)) {
+      nextOrder.push(id);
+      seen.add(id);
+    }
+  }
+  if (!seen.has(nextId)) {
+    nextOrder.push(nextId);
+  }
+
+  return nextOrder;
+};
+
 export const removeTabOrderId = (tabOrder: string[], targetId: string): string[] =>
   tabOrder.filter((id) => id !== targetId);
 

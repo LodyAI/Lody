@@ -78,7 +78,8 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(existsSync(configPath)).toBe(true);
     expect(config).toContain('compression: zstd');
     expect(launch.args).toContain('dsh-acp-demo');
-    expect(launch.args).toContain('--force');
+    expect(launch.args).not.toContain('--force');
+    expect(launch.args).not.toContain('--legacy-peer-deps');
     expect(launch.args).not.toContain('@deepseek-ai/dsh@0.1.0-rc.6');
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);
     expect(await readdir(rootDir)).toContain(basename(configPath));

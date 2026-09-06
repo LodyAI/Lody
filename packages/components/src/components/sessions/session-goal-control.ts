@@ -18,6 +18,14 @@ export const canPauseGoalThroughPromptBridge = (
   agentType: string | null | undefined
 ): boolean => getPromptBridgeGoalCommands(agentType).includes('pause');
 
+/**
+ * Slash `/goal …` commands must never route through steer/guide submit paths.
+ * Steer rejects slash input ("Slash commands cannot steer an active Codex turn")
+ * and Stop's `/goal pause` side-effect would wedge the session when queued
+ * message behavior is set to Steer.
+ */
+export const GOAL_PROMPT_DISPATCH_OPTIONS = { forceDirect: true as const };
+
 export type SessionPromptActivity = {
   isDispatching: boolean;
   isSessionWorking: boolean;

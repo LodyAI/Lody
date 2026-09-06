@@ -354,7 +354,8 @@ const byCreatedAtAscending = (left: SessionMeta, right: SessionMeta): number =>
 
 // Child sessions for a given parent session — used by the multi-tab UI
 export const childSessionsAtomFamily = createChildSessionsAtomFamily(
-  (session, parentId) => isTopTabChild(session, parentId) && !session.isArchived
+  (session, parentId) => isTopTabChild(session, parentId) && !session.isArchived,
+  byCreatedAtAscending
 );
 
 // Archived child sessions for a given parent — used by the tab archive popover

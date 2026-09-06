@@ -283,6 +283,33 @@ export class AppIpc extends IpcService {
     return { revealed: true as const }
   }
 
+  // Hands a workspace file to the OS default handler — the same thing a
+  // double-click in Finder/Explorer does. It is the only way to see a file the
+  // in-app viewer refuses (too large, unsupported), so the renderer offers it
+  // beside `revealLocalPath` on those error states.
+  @IpcMethod()
+  async openLocalPath(pathRaw: unknown) {
+    if (typeof pathRaw !== 'string') {
+      return { opened: false as const, error: 'invalid_path' }
+    }
+    const targetPath = pathRaw.trim()
+    if (!targetPath || !isAbsolute(targetPath)) {
+      return { opened: false as const, error: 'invalid_path' }
+    }
+    try {
+      await access(targetPath)
+    } catch {
+      return { opened: false as const, error: 'not_found' }
+    }
+    // `shell.openPath` resolves to '' on success and to the failure message
+    // otherwise; it never rejects.
+    const failure = await shell.openPath(targetPath)
+    if (failure) {
+      return { opened: false as const, error: failure }
+    }
+    return { opened: true as const }
+  }
+
   @IpcMethod()
   async launchLocalPath(payload: unknown) {
     const parsed = LaunchLocalPathInputSchema.safeParse(payload)

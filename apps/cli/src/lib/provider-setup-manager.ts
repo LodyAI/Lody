@@ -187,11 +187,6 @@ export class ProviderSetupManager {
         machineId: this.machineId,
         workspaceId: this.workspaceId,
         configId: verifying.config.id,
-        cliType: verifying.config.cliType,
-        agentType: verifying.config.agentType,
-        customAcp: verifying.config.customAcp,
-        runtimeOverrides: verifying.config.runtimeOverrides,
-        env: verifying.config.env,
       });
       if (response.success) {
         await this.publishVerifiedConfig(verifying.id, attempt);

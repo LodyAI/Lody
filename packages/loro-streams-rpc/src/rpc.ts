@@ -8,7 +8,6 @@ import {
 } from '@loro-dev/streams-client';
 import type {
   AgentConfigId,
-  AgentConfigCliType,
   CodeCollabV2Error,
   CodeCollabV2InitDirectoryOk,
   CodeCollabV2InitDirectoryRequest,
@@ -27,8 +26,6 @@ import type {
   CodeCollabV2RpcContentEnvelope,
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
   LocalProjectControlRequest,
   LocalProjectControlResponse,
   LocalProjectId,
@@ -68,7 +65,6 @@ import type {
 } from '@lody/shared';
 import {
   AgentConfigIdSchema,
-  AgentConfigCliTypeSchema,
   CodeCollabV2ErrorCodeSchema,
   CodeCollabV2ErrorSchema,
   CodeCollabV2RpcContentEnvelopeSchema,
@@ -77,8 +73,6 @@ import {
   FilePreviewV3ErrorCodeSchema,
   FilePreviewV3ErrorSchema,
   FilePreviewV3ResponseSchema,
-  BuiltinRuntimeOverridesSchema,
-  CustomAcpLaunchSpecSchema,
   deriveCodeCollabV2ContentKeyBytes,
   deriveCodeCollabV2ContentKeyId,
   LocalProjectControlRequestSchema,
@@ -115,7 +109,11 @@ import {
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
 } from '@lody/shared';
-import { encryptRpcSecret, getMachineAcpAuthorizationCodeSecretContext } from './rpc-secret';
+import {
+  encryptRpcSecret,
+  getMachineAcpAuthenticationInputSecretContext,
+  getMachineAcpAuthorizationCodeSecretContext,
+} from './rpc-secret';
 import type {
   LoroStreamsLiveModeDiagnostics,
   LoroStreamsLiveRequestMode,
@@ -204,7 +202,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
 ]);
 
 export type LoroStreamsRpcMethod = z.infer<typeof LoroStreamsRpcMethodSchema>;
-type RpcAgentConfigCliType = AgentConfigCliType;
+type RpcAgentConfigCliType = MachineAcpCapabilitiesRefreshResponse['cliType'];
 
 export const LoroStreamsRpcErrorSchema = z
   .object({
@@ -270,11 +268,6 @@ export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestS
   params: z
     .object({
       configId: AgentConfigIdSchema,
-      cliType: AgentConfigCliTypeSchema,
-      agentType: z.string().trim().min(1),
-      customAcp: CustomAcpLaunchSpecSchema.optional(),
-      runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-      env: z.record(z.string(), z.string()).optional(),
     })
     .strict(),
 }).strict();
@@ -290,36 +283,39 @@ export const LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema = BaseRpcRe
 
 export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/acp-authenticate'),
-  params: z
-    .object({
-      requestId: z.string().trim().min(1),
-      action: z.enum(['start', 'cancel', 'submit-code']),
-      authenticationRequestId: z.string().trim().min(1).optional(),
-      authorizationCodeEnvelope: RpcSecretEnvelopeSchema.optional(),
-      methodId: z.string().trim().min(1).max(256).optional(),
-      configId: AgentConfigIdSchema.optional(),
-      cliType: AgentConfigCliTypeSchema,
-      agentType: z.string().trim().min(1),
-      customAcp: CustomAcpLaunchSpecSchema.optional(),
-      runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-      env: z.record(z.string(), z.string()).optional(),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      if (value.action === 'submit-code') {
-        if (!value.authenticationRequestId || !value.authorizationCodeEnvelope) {
-          context.addIssue({
-            code: 'custom',
-            message: 'submit-code requires an authentication request and authorization code',
-          });
-        }
-      } else if (value.authenticationRequestId || value.authorizationCodeEnvelope) {
-        context.addIssue({
-          code: 'custom',
-          message: 'Authorization-code fields are only valid for submit-code',
-        });
-      }
-    }),
+  params: z.discriminatedUnion('action', [
+    z
+      .object({
+        requestId: z.string().trim().min(1).max(1024),
+        action: z.literal('start'),
+        configId: AgentConfigIdSchema,
+      })
+      .strict(),
+    z
+      .object({
+        requestId: z.string().trim().min(1).max(1024),
+        action: z.literal('cancel'),
+        authenticationRequestId: z.string().trim().min(1).max(1024),
+      })
+      .strict(),
+    z
+      .object({
+        requestId: z.string().trim().min(1).max(1024),
+        action: z.literal('submit-code'),
+        authenticationRequestId: z.string().trim().min(1).max(1024),
+        authorizationCodeEnvelope: RpcSecretEnvelopeSchema,
+      })
+      .strict(),
+    z
+      .object({
+        requestId: z.string().trim().min(1).max(1024),
+        action: z.literal('submit-input'),
+        authenticationRequestId: z.string().trim().min(1).max(1024),
+        interactionId: z.string().trim().min(1).max(1024),
+        authenticationInputEnvelope: RpcSecretEnvelopeSchema,
+      })
+      .strict(),
+  ]),
 }).strict();
 
 export const LoroMachineAcpBinaryStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -521,7 +517,7 @@ export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.ext
       approval: z
         .object({
           source: z.enum(['browser_address', 'share_action']),
-          targetClass: z.enum(['loopback', 'private_lan']),
+          targetClass: z.literal('loopback'),
           target: PreviewTargetSchema,
           confirmedByUserId: z.string().trim().min(1),
           confirmedAt: z.number().int().nonnegative(),
@@ -1855,7 +1851,7 @@ export type LoroStreamsRpcPendingRegistration = {
   timeoutMs: number;
   refreshContext?: {
     configId: AgentConfigId;
-    cliType: AgentConfigCliType;
+    cliType: RpcAgentConfigCliType;
     agentType: string;
   };
   pingContext?: { requestId: string };
@@ -2360,11 +2356,6 @@ export class LoroStreamsMachineRpcClient {
 
   async requestMachineAcpCapabilitiesRefresh(options: {
     configId: AgentConfigId;
-    cliType: RpcAgentConfigCliType;
-    agentType: string;
-    customAcp?: CustomAcpLaunchSpec;
-    runtimeOverrides?: BuiltinRuntimeOverrides;
-    env?: Record<string, string>;
     onProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -2376,33 +2367,35 @@ export class LoroStreamsMachineRpcClient {
       signal: options.signal,
       params: {
         configId: options.configId,
-        cliType: options.cliType,
-        agentType: options.agentType,
-        customAcp: options.customAcp,
-        runtimeOverrides: options.runtimeOverrides,
-        env: options.env,
       },
     })) as MachineAcpCapabilitiesRefreshResponse | null;
   }
 
-  async requestMachineAcpAuthenticate(options: {
-    requestId: string;
-    action: 'start' | 'cancel' | 'submit-code';
-    authenticationRequestId?: string;
-    authorizationCode?: string;
-    /** Which advertised ACP method the user picked; absent on the first attempt. */
-    methodId?: string;
-    configId?: AgentConfigId;
-    cliType: RpcAgentConfigCliType;
-    agentType: string;
-    customAcp?: CustomAcpLaunchSpec;
-    runtimeOverrides?: BuiltinRuntimeOverrides;
-    env?: Record<string, string>;
-    onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
-    timeoutMs?: number;
-  }): Promise<MachineAcpAuthenticateResponse | null> {
-    const authenticationRequestId = options.authenticationRequestId;
+  async requestMachineAcpAuthenticate(
+    options: {
+      requestId: string;
+      onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+      timeoutMs?: number;
+    } & (
+      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'cancel'; authenticationRequestId: string }
+      | {
+          action: 'submit-code';
+          authenticationRequestId: string;
+          authorizationCode: string;
+        }
+      | {
+          action: 'submit-input';
+          authenticationRequestId: string;
+          interactionId: string;
+          authenticationInput: string;
+        }
+    )
+  ): Promise<MachineAcpAuthenticateResponse | null> {
+    const authenticationRequestId =
+      options.action === 'start' ? undefined : options.authenticationRequestId;
     let authorizationCodeEnvelope: RpcSecretEnvelope | undefined;
+    let authenticationInputEnvelope: RpcSecretEnvelope | undefined;
     if (options.action === 'submit-code') {
       if (
         !authenticationRequestId ||
@@ -2425,41 +2418,91 @@ export class LoroStreamsMachineRpcClient {
         })
       );
     }
+    if (options.action === 'submit-input') {
+      if (
+        !authenticationRequestId ||
+        !options.interactionId ||
+        !options.authenticationInput ||
+        options.authenticationInput.length > 65_536
+      ) {
+        throw new Error('Submitting authentication input requires an active interaction.');
+      }
+      const publicKey = this.acpAuthorizationCodePublicKeys.get(authenticationRequestId);
+      if (!publicKey) {
+        throw new Error('The target machine did not provide an authentication-input key.');
+      }
+      authenticationInputEnvelope = await encryptRpcSecret(
+        publicKey,
+        options.authenticationInput,
+        getMachineAcpAuthenticationInputSecretContext({
+          workspaceId: this.options.workspaceId,
+          machineId: this.options.machineId,
+          authenticationRequestId,
+          interactionId: options.interactionId,
+        })
+      );
+    }
 
     const onProgress = (progress: MachineAcpAuthenticationProgressMessage): void => {
-      if (progress.authorizationCodePublicKey) {
-        this.acpAuthorizationCodePublicKeys.set(
-          progress.requestId,
-          progress.authorizationCodePublicKey
-        );
+      const inputPublicKey =
+        progress.authenticationInputPublicKey ?? progress.authorizationCodePublicKey;
+      if (inputPublicKey) {
+        this.acpAuthorizationCodePublicKeys.set(progress.requestId, inputPublicKey);
       }
       options.onProgress?.(progress);
     };
 
     try {
+      const params = (() => {
+        switch (options.action) {
+          case 'start':
+            return {
+              requestId: options.requestId,
+              action: options.action,
+              configId: options.configId,
+            } as const;
+          case 'cancel':
+            return {
+              requestId: options.requestId,
+              action: options.action,
+              authenticationRequestId: options.authenticationRequestId,
+            } as const;
+          case 'submit-code':
+            if (!authorizationCodeEnvelope) {
+              throw new Error('Authorization-code encryption did not produce an envelope.');
+            }
+            return {
+              requestId: options.requestId,
+              action: options.action,
+              authenticationRequestId: options.authenticationRequestId,
+              authorizationCodeEnvelope,
+            } as const;
+          case 'submit-input':
+            if (!authenticationInputEnvelope) {
+              throw new Error('Authentication-input encryption did not produce an envelope.');
+            }
+            return {
+              requestId: options.requestId,
+              action: options.action,
+              authenticationRequestId: options.authenticationRequestId,
+              interactionId: options.interactionId,
+              authenticationInputEnvelope,
+            } as const;
+          default:
+            throw new Error('Unsupported ACP authentication action.');
+        }
+      })();
       return (await this.sendRequest({
         method: 'machine/acp-authenticate',
         timeoutMs: options.timeoutMs ?? 300_000,
         onAcpAuthenticationProgress: onProgress,
-        params: {
-          requestId: options.requestId,
-          action: options.action,
-          authenticationRequestId,
-          authorizationCodeEnvelope,
-          // Omitted unless the user picked, so a daemon that predates method
-          // selection never sees a key its strict schema would reject.
-          ...(options.methodId ? { methodId: options.methodId } : {}),
-          configId: options.configId,
-          cliType: options.cliType,
-          agentType: options.agentType,
-          customAcp: options.customAcp,
-          runtimeOverrides: options.runtimeOverrides,
-          env: options.env,
-        },
+        params,
       })) as MachineAcpAuthenticateResponse | null;
     } finally {
-      if (options.action === 'start' || options.action === 'cancel') {
+      if (options.action === 'start') {
         this.acpAuthorizationCodePublicKeys.delete(options.requestId);
+      } else if (options.action === 'cancel') {
+        this.acpAuthorizationCodePublicKeys.delete(options.authenticationRequestId);
       }
     }
   }
@@ -2954,29 +2997,28 @@ export class LoroStreamsMachineRpcClient {
           signal?: AbortSignal;
           params: {
             configId: AgentConfigId;
-            cliType: RpcAgentConfigCliType;
-            agentType: string;
-            customAcp?: CustomAcpLaunchSpec;
-            runtimeOverrides?: BuiltinRuntimeOverrides;
-            env?: Record<string, string>;
           };
         }
       | {
           method: 'machine/acp-authenticate';
           timeoutMs: number;
           onAcpAuthenticationProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
-          params: {
-            requestId: string;
-            action: 'start' | 'cancel' | 'submit-code';
-            authenticationRequestId?: string;
-            authorizationCodeEnvelope?: RpcSecretEnvelope;
-            configId?: AgentConfigId;
-            cliType: RpcAgentConfigCliType;
-            agentType: string;
-            customAcp?: CustomAcpLaunchSpec;
-            runtimeOverrides?: BuiltinRuntimeOverrides;
-            env?: Record<string, string>;
-          };
+          params:
+            | { requestId: string; action: 'start'; configId: AgentConfigId }
+            | { requestId: string; action: 'cancel'; authenticationRequestId: string }
+            | {
+                requestId: string;
+                action: 'submit-code';
+                authenticationRequestId: string;
+                authorizationCodeEnvelope: RpcSecretEnvelope;
+              }
+            | {
+                requestId: string;
+                action: 'submit-input';
+                authenticationRequestId: string;
+                interactionId: string;
+                authenticationInputEnvelope: RpcSecretEnvelope;
+              };
         }
       | {
           method: 'machine/acp-binary-status';
@@ -3198,8 +3240,8 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'machine/acp-capabilities-refresh'
           ? {
               configId: args.params.configId,
-              cliType: args.params.cliType,
-              agentType: args.params.agentType,
+              cliType: 'builtin',
+              agentType: 'unknown',
             }
           : undefined,
       pingContext:
@@ -3212,7 +3254,7 @@ export class LoroStreamsMachineRpcClient {
             : undefined,
       binaryContext:
         args.method === 'machine/acp-authenticate'
-          ? { agentType: args.params.agentType, requestId: args.params.requestId }
+          ? { agentType: 'unknown', requestId: args.params.requestId }
           : args.method === 'machine/acp-binary-status' ||
               args.method === 'machine/acp-binary-install'
             ? { agentType: args.params.agentType }

@@ -142,9 +142,11 @@ function PendingProviderJourney() {
         connectingGitHub={false}
         canImportLocal
         canConnectGitHub={false}
+        loadingRepos={false}
         onAddLocal={fn()}
         onConnectGitHub={fn()}
         onBack={() => setStep('providers')}
+        onSkip={() => setStep('summary')}
         onComplete={() => setStep('summary')}
       />
     );

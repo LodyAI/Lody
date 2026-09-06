@@ -1006,6 +1006,7 @@ export class LodyOperationCoordinator {
     const turn: SessionHistoryInput = {
       id: delivery.systemTurnId,
       role: 'system',
+      userId: operation.requesterUserId,
       timestamp: new Date(this.now()).toISOString(),
       items: [item],
       fileDiff: [],

@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  AgentConfigCliType,
   AgentConfigId,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineId,
@@ -14,24 +11,30 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
-  configId?: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
-  /** Set once the user picks from the methods the agent advertised. */
-  methodId?: string;
+  configId: AgentConfigId;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
-export type MachineAcpAuthenticationCodeArgs = Omit<MachineAcpAuthenticationArgs, 'onProgress'> & {
+export type MachineAcpAuthenticationCodeArgs = {
+  machineId: MachineId;
   authenticationRequestId: string;
   authorizationCode: string;
 };
 
-type ActiveMachineAcpAuthentication = Omit<MachineAcpAuthenticationArgs, 'onProgress'> & {
-  requestId: string;
+export type MachineAcpAuthenticationInputArgs = {
+  machineId: MachineId;
+  authenticationRequestId: string;
+  interactionId: string;
+  input: {
+    action: 'accept' | 'decline' | 'cancel';
+    methodId?: string;
+    content?: Record<string, unknown>;
+  };
+};
+
+type ActiveMachineAcpAuthentication = {
+  machineId: MachineId;
+  authenticationRequestId: string;
 };
 
 export function useMachineAcpAuthentication(
@@ -48,14 +51,9 @@ export function useMachineAcpAuthentication(
         type: 'machine/acp-authenticate',
         machineId: args.machineId,
         workspaceId,
-        requestId: args.requestId,
+        requestId: crypto.randomUUID(),
         action: 'cancel',
-        configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
-        customAcp: args.customAcp,
-        runtimeOverrides: args.runtimeOverrides,
-        env: args.env,
+        authenticationRequestId: args.authenticationRequestId,
       });
     },
     [runtime, workspaceId]
@@ -85,13 +83,7 @@ export function useMachineAcpAuthentication(
         }
         const activeAuthentication: ActiveMachineAcpAuthentication = {
           machineId: args.machineId,
-          configId: args.configId,
-          cliType: args.cliType,
-          agentType: args.agentType,
-          customAcp: args.customAcp,
-          runtimeOverrides: args.runtimeOverrides,
-          env: args.env,
-          requestId,
+          authenticationRequestId: requestId,
         };
         activeAuthenticationsRef.current.set(requestId, activeAuthentication);
         const unsubscribe = args.onProgress
@@ -113,15 +105,7 @@ export function useMachineAcpAuthentication(
             workspaceId,
             requestId,
             action: 'start',
-            // Only sent once the user picked, so a daemon that predates method
-            // selection never sees a field its strict schema would reject.
-            ...(args.methodId ? { methodId: args.methodId } : {}),
             configId: args.configId,
-            cliType: args.cliType,
-            agentType: args.agentType,
-            customAcp: args.customAcp,
-            runtimeOverrides: args.runtimeOverrides,
-            env: args.env,
           });
           const response = await responsePromise;
           if (!response) {
@@ -184,12 +168,6 @@ export function useMachineAcpAuthentication(
         action: 'submit-code',
         authenticationRequestId: args.authenticationRequestId,
         authorizationCode: args.authorizationCode,
-        configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType,
-        customAcp: args.customAcp,
-        runtimeOverrides: args.runtimeOverrides,
-        env: args.env,
       });
       const response = await responsePromise;
       if (!response || !response.success || response.disposition !== 'input-accepted') {
@@ -205,5 +183,45 @@ export function useMachineAcpAuthentication(
     [runtime, t, workspaceId]
   );
 
-  return { startAuthentication, cancelAuthentication, submitAuthorizationCode };
+  const submitAuthenticationInput = useCallback(
+    async (args: MachineAcpAuthenticationInputArgs): Promise<void> => {
+      if (!runtime || workspaceId == null) {
+        throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
+      }
+      const requestId = crypto.randomUUID();
+      const responsePromise = runtime.waitForMachineAcpAuthenticateResponse(
+        args.machineId,
+        requestId,
+        { timeoutMs: 10000 }
+      );
+      runtime.sendControl({
+        type: 'machine/acp-authenticate',
+        machineId: args.machineId,
+        workspaceId,
+        requestId,
+        action: 'submit-input',
+        authenticationRequestId: args.authenticationRequestId,
+        interactionId: args.interactionId,
+        authenticationInput: JSON.stringify(args.input),
+      });
+      const response = await responsePromise;
+      if (!response || !response.success || response.disposition !== 'input-accepted') {
+        throw new Error(
+          response?.error ??
+            t(
+              'agents.authentication.inputSubmitFailed',
+              'Could not submit the authentication response. Please try again.'
+            )
+        );
+      }
+    },
+    [runtime, t, workspaceId]
+  );
+
+  return {
+    startAuthentication,
+    cancelAuthentication,
+    submitAuthorizationCode,
+    submitAuthenticationInput,
+  };
 }

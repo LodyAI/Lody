@@ -2,7 +2,16 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
-import { AlertCircle, Boxes, Info, Loader2, PackageOpen, RefreshCw, User } from 'lucide-react';
+import {
+  AlertCircle,
+  Boxes,
+  Info,
+  Loader2,
+  PackageOpen,
+  RefreshCw,
+  Search,
+  User,
+} from 'lucide-react';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
 import { SkillDetailDialog } from './skill-detail';
 import { SkillScopeBadge, SkillSymlinkBadge, SkillVersionBadge } from './skill-badges';
@@ -13,6 +22,7 @@ import {
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
 import { Button } from '@/ui/button';
+import { Input } from '@/ui/input';
 import { cn } from '@/lib/utils';
 
 /**
@@ -58,11 +68,26 @@ export function ProjectSkillsView({
   onRefresh,
 }: ProjectSkillsViewProps) {
   const { t, i18n } = useTranslation();
+  const [searchQuery, setSearchQuery] = useState('');
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const totalSkills = useMemo(
     () => groups.reduce((sum, group) => sum + group.skills.length, 0),
     [groups]
   );
+  const filteredGroups = useMemo(() => {
+    if (!normalizedSearchQuery) return groups;
+
+    return groups.flatMap((group) => {
+      const skills = group.skills.filter((skill) =>
+        [skill.name, skill.description, skill.author, skill.relativePath].some((value) =>
+          value?.toLowerCase().includes(normalizedSearchQuery)
+        )
+      );
+      return skills.length > 0 ? [{ ...group, skills }] : [];
+    });
+  }, [groups, normalizedSearchQuery]);
+  const hasMatches = filteredGroups.some((group) => group.skills.length > 0);
 
   const isInitialLoading = status === 'loading' && groups.length === 0;
   const isRefreshing = status === 'refreshing';
@@ -155,11 +180,37 @@ export function ProjectSkillsView({
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {groups.map((group) => (
-          <SkillGroupCard key={`${group.scope}:${group.dir}`} group={group} />
-        ))}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          aria-label={t('workspace.projects.skills.searchLabel', 'Search skills')}
+          placeholder={t(
+            'workspace.projects.skills.searchPlaceholder',
+            'Search by name, description, author, or path'
+          )}
+          className="bg-input-field pl-9"
+        />
       </div>
+
+      {normalizedSearchQuery && !hasMatches ? (
+        <SkillsEmptyShell
+          icon={<Search className="h-4 w-4 text-muted-foreground" />}
+          title={t('workspace.projects.skills.noSearchResults', 'No matching skills')}
+          body={t(
+            'workspace.projects.skills.noSearchResultsHint',
+            'Try another name, description, author, or path.'
+          )}
+        />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {filteredGroups.map((group) => (
+            <SkillGroupCard key={`${group.scope}:${group.dir}`} group={group} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

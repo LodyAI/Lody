@@ -1,16 +1,11 @@
-import type { ComponentType, SVGProps } from 'react';
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
-import {
-  FileClock,
-  FileLock2,
-  FileQuestion,
-  FileWarning,
-  FileX2,
-  HardDrive,
-  ShieldAlert,
-  WifiOff,
-} from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
+// The action model is shared with the file tree context menu and the side
+// panel ⋯ menu; the card is one consumer of it, not its owner.
+import type { SessionFileErrorActions } from '@/lib/session-file-actions';
+import { Button } from '@/ui/button';
 
 type Translation = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
@@ -24,6 +19,14 @@ export type SessionFileErrorKind =
   | 'unsupported'
   | 'content-unavailable'
   | 'unknown';
+
+/**
+ * Only the errors whose advice is "open it outside Lody" get the actions. On a
+ * missing, denied, or offline file every button would fail, so they stay off.
+ */
+export function offersFileActions(kind: SessionFileErrorKind): boolean {
+  return kind === 'too-large' || kind === 'unsupported';
+}
 
 export type SessionFileErrorPresentation = {
   readonly kind: SessionFileErrorKind;
@@ -265,61 +268,87 @@ export function getSessionFileErrorPresentation(
   };
 }
 
-const ERROR_ICON: Record<
-  SessionFileErrorKind,
-  ComponentType<SVGProps<SVGSVGElement> & { size?: string | number }>
-> = {
-  'outside-workspace': ShieldAlert,
-  'not-found': FileX2,
-  'permission-denied': FileLock2,
-  'temporarily-locked': FileClock,
-  'temporarily-unavailable': WifiOff,
-  'too-large': HardDrive,
-  unsupported: FileWarning,
-  'content-unavailable': FileQuestion,
-  unknown: FileWarning,
-};
+// One row per action, all the same width. A wrapping row of buttons sized by
+// their own labels was the previous layout, and in a side panel it produced
+// three ragged widths on three lines — the width difference read as meaning.
+const ACTION_BUTTON_CLASS = 'h-8 w-full justify-start gap-2 px-2.5 text-xs font-normal';
 
 export function SessionFileErrorState({
   message,
   reason,
+  fileActions,
 }: {
   readonly message: string;
   readonly reason?: CodeCollabContentUnavailableReason;
+  readonly fileActions?: SessionFileErrorActions;
 }) {
   const { t } = useTranslation();
   const presentation = getSessionFileErrorPresentation(message, reason, t);
-  const Icon = ERROR_ICON[presentation.kind];
+  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : null;
+  const localHost = actions?.localHost;
 
   return (
-    <div className="flex min-h-full items-center justify-center px-5 py-8">
+    <div className="flex min-h-full items-start justify-center px-4 py-6">
+      {/* No status glyph: the card is one short paragraph and a stack of
+          actions, and a 40px icon column indented all of it for decoration. */}
       <section
         data-testid="session-file-error-state"
-        className="w-full max-w-sm rounded-2xl border border-border/70 bg-card px-5 py-6 shadow-sm"
+        className="w-full max-w-xs rounded-xl border border-border/70 bg-card px-4 py-3.5 shadow-sm"
       >
-        <div className="flex items-start gap-3.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <Icon className="h-5 w-5" strokeWidth={1.7} aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1 pt-0.5">
-            <h2 className="text-sm font-semibold leading-5 text-foreground">
-              {presentation.title}
-            </h2>
-            <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
-              {presentation.description}
-            </p>
-            {presentation.technicalDetails ? (
-              <details className="mt-4 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-                <summary className="cursor-pointer select-none font-medium text-foreground/80">
-                  {t('sessions.fileError.technicalDetails', 'Technical details')}
-                </summary>
-                <p className="mt-2 break-words font-mono leading-5">
-                  {presentation.technicalDetails}
-                </p>
-              </details>
+        <h2 className="text-sm font-semibold leading-5 text-foreground">{presentation.title}</h2>
+        <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+          {presentation.description}
+        </p>
+        {actions ? (
+          <div className="mt-3 flex flex-col gap-0.5">
+            {localHost ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={ACTION_BUTTON_CLASS}
+                  onClick={localHost.onOpen}
+                  data-testid="session-file-error-open"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {localHost.openTarget === 'browser'
+                    ? t('sessions.fileActions.openInBrowser', 'Open in browser')
+                    : t('sessions.fileActions.openInDefaultApp', 'Open in default app')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={ACTION_BUTTON_CLASS}
+                  onClick={localHost.onReveal}
+                  data-testid="session-file-error-reveal"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {localHost.revealLabel}
+                </Button>
+              </>
             ) : null}
+            <Button
+              size="sm"
+              // Without the local-host pair this is the only way out of the
+              // card, so it leads instead of trailing them.
+              variant={localHost ? 'ghost' : 'secondary'}
+              className={cn(ACTION_BUTTON_CLASS)}
+              onClick={actions.onCopyPath}
+              data-testid="session-file-error-copy-path"
+            >
+              <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {t('sessions.fileViewer.copyPath', 'Copy file path')}
+            </Button>
           </div>
-        </div>
+        ) : null}
+        {presentation.technicalDetails ? (
+          <details className="mt-3 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none font-medium text-foreground/80">
+              {t('sessions.fileError.technicalDetails', 'Technical details')}
+            </summary>
+            <p className="mt-2 break-words font-mono leading-5">{presentation.technicalDetails}</p>
+          </details>
+        ) : null}
       </section>
     </div>
   );
