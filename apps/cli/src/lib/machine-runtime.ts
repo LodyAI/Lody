@@ -274,7 +274,7 @@ export class MachineRuntime {
     );
 
     return await new Promise<LocalSessionControlResponse[]>((resolve, reject) => {
-      this.messageProcessor.enqueue(message, async (nextMessage) => {
+      const processMessage = async (nextMessage: LocalSessionControlRequestValidated) => {
         const responses: LocalSessionControlResponse[] = [];
         let settled = false;
         const resolveOnce = () => {
@@ -335,7 +335,8 @@ export class MachineRuntime {
           rejectOnce(error);
           throw error;
         }
-      });
+      };
+      this.messageProcessor.enqueue(message, processMessage, reject);
     });
   }
 

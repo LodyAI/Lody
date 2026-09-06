@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LodyFleet } from '../src/lib/lody-fleet';
 import { Lody } from '../src/lib/lody';
 import { MachineRuntime } from '../src/lib/machine-runtime';
+import { stopLocalTerminalServer } from '../src/lib/local-terminal-server';
 
 vi.mock('@/lib/local-ipc-socket-server', async (original) => ({
   ...(await original<object>()),
@@ -32,6 +33,9 @@ function runtime(id: string) {
 }
 function fixture(entries: ReturnType<typeof runtime>[]) {
   const runtimes = new Map(entries.map((entry) => [entry.workspace.id, entry]));
+  const workspaceWatchCoordinator = { dispose: vi.fn(async () => {}) };
+  const cloudPort = { dispose: vi.fn(async () => {}) };
+  const terminalPtyService = { closeAll: vi.fn() };
   const fleet: LodyFleet = Object.assign(Object.create(LodyFleet.prototype), {
     runtimes,
     stopped: false,
@@ -42,11 +46,11 @@ function fixture(entries: ReturnType<typeof runtime>[]) {
     memoryPressure: { stop: vi.fn() },
     cancelScheduledRemoteBridgeOffline: vi.fn(),
     clearReconcileRetry: vi.fn(),
-    workspaceWatchCoordinator: { dispose: vi.fn(async () => {}) },
-    cloudPort: { dispose: vi.fn(async () => {}) },
-    terminalPtyService: { closeAll: vi.fn() },
+    workspaceWatchCoordinator,
+    cloudPort,
+    terminalPtyService,
   });
-  return { fleet, runtimes };
+  return { fleet, runtimes, workspaceWatchCoordinator, cloudPort, terminalPtyService };
 }
 
 describe('fleet process shutdown ownership', () => {
@@ -118,4 +122,66 @@ it('retries graceful cleanup of retained failures after a forced sweep', async (
   await fleet.shutdown();
   expect(entry.lody.cleanup).toHaveBeenCalledTimes(2);
   expect(runtimes.size).toBe(0);
+});
+
+it('closes independent PTYs after workspace failure while retaining shared retry dependencies', async () => {
+  const entry = runtime('retry-dependencies');
+  const workspaceFailure = new Error('workspace producer cleanup failed');
+  entry.lody.cleanup.mockRejectedValueOnce(workspaceFailure).mockResolvedValue(undefined);
+  const { fleet, runtimes, terminalPtyService, workspaceWatchCoordinator, cloudPort } = fixture([
+    entry,
+  ]);
+  await expect(fleet.shutdown()).rejects.toMatchObject({ errors: [workspaceFailure] });
+  expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(1);
+  expect(runtimes.get(entry.workspace.id)).toBe(entry);
+  expect(workspaceWatchCoordinator.dispose).not.toHaveBeenCalled();
+  expect(cloudPort.dispose).not.toHaveBeenCalled();
+  entry.lody.cleanup.mockImplementation(async () => {
+    expect(workspaceWatchCoordinator.dispose).not.toHaveBeenCalled();
+    expect(cloudPort.dispose).not.toHaveBeenCalled();
+  });
+  await fleet.shutdown();
+  expect(runtimes.size).toBe(0);
+  expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(2);
+  expect(workspaceWatchCoordinator.dispose).toHaveBeenCalledTimes(1);
+  expect(cloudPort.dispose).toHaveBeenCalledTimes(1);
+});
+
+it('reports independent PTY and workspace failures together and permits retry', async () => {
+  const entry = runtime('multiple-failures');
+  const workspaceFailure = new Error('workspace failure');
+  const ptyFailure = new Error('PTY failure');
+  entry.lody.cleanup.mockRejectedValueOnce(workspaceFailure);
+  const { fleet, terminalPtyService } = fixture([entry]);
+  terminalPtyService.closeAll.mockImplementationOnce(() => {
+    throw ptyFailure;
+  });
+  await expect(fleet.shutdown()).rejects.toMatchObject({ errors: [workspaceFailure, ptyFailure] });
+  await fleet.shutdown();
+  expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(2);
+});
+
+it('attempts every eligible shared disposer even when an earlier disposer fails', async () => {
+  const { fleet, terminalPtyService, workspaceWatchCoordinator, cloudPort } = fixture([]);
+  const watcherFailure = new Error('watcher failure');
+  const cloudFailure = new Error('cloud failure');
+  workspaceWatchCoordinator.dispose.mockRejectedValueOnce(watcherFailure);
+  cloudPort.dispose.mockRejectedValueOnce(cloudFailure);
+  await expect(fleet.shutdown()).rejects.toMatchObject({ errors: [watcherFailure, cloudFailure] });
+  expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(1);
+  expect(cloudPort.dispose).toHaveBeenCalledTimes(1);
+  await fleet.shutdown();
+  expect(workspaceWatchCoordinator.dispose).toHaveBeenCalledTimes(2);
+  expect(cloudPort.dispose).toHaveBeenCalledTimes(2);
+});
+
+it('reports local endpoint stop failure after closing independent and shared resources', async () => {
+  const endpointFailure = new Error('terminal endpoint failure');
+  vi.mocked(stopLocalTerminalServer).mockRejectedValueOnce(endpointFailure);
+  const { fleet, terminalPtyService, workspaceWatchCoordinator, cloudPort } = fixture([]);
+  await expect(fleet.shutdown()).rejects.toMatchObject({ errors: [endpointFailure] });
+  expect(terminalPtyService.closeAll).toHaveBeenCalledTimes(1);
+  expect(workspaceWatchCoordinator.dispose).toHaveBeenCalledTimes(1);
+  expect(cloudPort.dispose).toHaveBeenCalledTimes(1);
+  await fleet.shutdown();
 });

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const treeCleanup = vi.hoisted(() => vi.fn<() => Promise<void>>());
-vi.mock('@/utils/windows-process-tree', () => ({ terminateWindowsProcessTree: treeCleanup }));
+const childCleanup = vi.hoisted(() => vi.fn<() => Promise<void>>());
+vi.mock('@/utils/windows-child-process', () => ({ terminateWindowsChildProcess: childCleanup }));
 const nativePlatform = process.platform;
 
 import { __test__, shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
@@ -142,7 +142,7 @@ base_url = "https://gateway.example/v1"
 describe('shutdownLocalAcpAgent', () => {
   beforeEach(() => {
     Object.defineProperty(process, 'platform', { value: 'linux' });
-    treeCleanup.mockReset();
+    childCleanup.mockReset();
   });
   afterEach(() => {
     Object.defineProperty(process, 'platform', { value: nativePlatform });
@@ -282,11 +282,11 @@ describe('shutdownLocalAcpAgent', () => {
     expect(child.exitCode).toBe(0);
   });
 
-  it('waits for shared Windows tree cleanup despite protocol close failure', async () => {
+  it('waits for shared Windows child cleanup despite protocol close failure', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const child = createFakeChildProcess({ pid: 1234 });
     let finish: (() => void) | undefined;
-    treeCleanup.mockImplementation(
+    childCleanup.mockImplementation(
       () =>
         new Promise<void>((resolve) => {
           finish = resolve;
@@ -311,7 +311,7 @@ describe('shutdownLocalAcpAgent', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(treeCleanup).toHaveBeenCalledTimes(1);
+    expect(childCleanup).toHaveBeenCalledTimes(1);
     child.signalCode = 'SIGKILL';
     finish?.();
     await Promise.all([first, second]);
@@ -319,12 +319,14 @@ describe('shutdownLocalAcpAgent', () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
-  it('reports Windows tree failure and permits retry', async () => {
+  it('reports Windows child failure and permits retry', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const child = createFakeChildProcess({ pid: 1234 });
-    treeCleanup.mockRejectedValueOnce(new Error('tree failed')).mockImplementationOnce(async () => {
-      child.signalCode = 'SIGKILL';
-    });
+    childCleanup
+      .mockRejectedValueOnce(new Error('tree failed'))
+      .mockImplementationOnce(async () => {
+        child.signalCode = 'SIGKILL';
+      });
     const options = {
       agentProcess: child,
       logger: createSilentLogger(),
@@ -335,17 +337,19 @@ describe('shutdownLocalAcpAgent', () => {
     expect(child.signalCode).toBe('SIGKILL');
   });
 
-  it('does not equate Windows helper success with wrapper exit', async () => {
+  it('does not equate Windows cleanup return with wrapper exit', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     vi.useFakeTimers();
-    treeCleanup.mockResolvedValue(undefined);
+    childCleanup.mockResolvedValue(undefined);
     const result = shutdownLocalAcpAgent({
       agentProcess: createFakeChildProcess({ pid: 1234 }),
       logger: createSilentLogger(),
       sessionLabel: 'tree-timeout',
       exitTimeoutMs: 10,
     });
-    const assertion = expect(result).rejects.toThrow('did not exit after Windows tree termination');
+    const assertion = expect(result).rejects.toThrow(
+      'did not exit after Windows child termination'
+    );
     await vi.advanceTimersByTimeAsync(10);
     await assertion;
   });

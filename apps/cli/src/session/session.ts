@@ -624,20 +624,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       if (!handle) {
         return;
       }
-      try {
-        await this.killAndWait(handle, true);
-      } catch (error) {
-        this.logger.debug(
-          `[${
-            this.sessionId
-          }] Failed to terminate ACP startup attempt before retry: ${formatErrorMessage(error)}`
-        );
-      } finally {
-        if (this.agentProcess === handle) {
-          this.agentProcess = null;
-        }
-        lastAgentProcessHandle = null;
+      // Recovery may start another child only after cleanup is confirmed.
+      // Keep ownership intact when termination fails so shutdown can retry.
+      await this.killAndWait(handle, true);
+      if (this.agentProcess === handle) {
+        this.agentProcess = null;
       }
+      lastAgentProcessHandle = null;
     };
 
     const attemptCreateAgent = async (

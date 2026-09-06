@@ -179,39 +179,31 @@ class FakeCgroupFs {
 }
 
 describe('session sandbox', () => {
-  it('awaits recursive Windows termination and reports taskkill failure', async () => {
+  it('awaits Windows child exit through the retained handle', async () => {
     const child = new FakeChildProcess(1234);
-    const helper = new FakeChildProcess(5678);
-    const spawnProcess = vi.fn(
-      (command: string) => (command === 'taskkill' ? helper : child) as unknown as ChildProcess
-    ) as typeof realSpawn;
+    const spawnProcess = vi.fn(() => child as unknown as ChildProcess) as typeof realSpawn;
     const factory = createSessionSandboxFactory({
       logger: createSilentLogger(),
       deps: { platform: 'win32', spawnProcess, configureExecutionProcess: vi.fn(async () => {}) },
     });
-    const sandbox = await factory('windows-tree' as SessionId);
+    const sandbox = await factory('windows-child' as SessionId);
     const handle = await sandbox.spawn('node', [], {
       cwd: process.cwd(),
       env: {},
       stdio: 'ignore',
     });
     const settled = vi.fn();
-    const termination = handle.terminate(true);
-    const result = termination.catch(settled);
+    const termination = handle.terminate(true).then(settled);
     await Promise.resolve();
     expect(settled).not.toHaveBeenCalled();
-    expect(spawnProcess).toHaveBeenLastCalledWith('taskkill', ['/PID', '1234', '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    helper.emit('close', 1, null);
-    await result;
-    expect(settled).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Windows process tree termination did not succeed' })
-    );
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    await termination;
   });
 
-  it('never reuses an exited Windows handle PID for tree termination', async () => {
+  it('never signals an exited Windows child', async () => {
     const child = new FakeChildProcess(1234);
     const spawnProcess = vi.fn(() => child as unknown as ChildProcess) as typeof realSpawn;
     const factory = createSessionSandboxFactory({
@@ -228,19 +220,24 @@ describe('session sandbox', () => {
     child.emit('exit', null, 'SIGTERM');
     await handle.terminate(true);
     await sandbox.terminate(true);
-    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
-  it('attempts every Windows root when one taskkill fails and retains tracking for retry', async () => {
+  it('attempts every Windows root and retains a failed handle for retry', async () => {
     const first = new FakeChildProcess(1234);
     const second = new FakeChildProcess(2345);
-    const spawnProcess = vi.fn((command: string, args: string[]) => {
-      if (command !== 'taskkill')
-        return (command === 'first' ? first : second) as unknown as ChildProcess;
-      const helper = new FakeChildProcess(5678);
-      queueMicrotask(() => helper.emit('close', args.includes('1234') ? 1 : 0, null));
-      return helper as unknown as ChildProcess;
-    }) as typeof realSpawn;
+    first.kill.mockImplementation(() => {
+      first.emit('error', new Error('kill failed'));
+      return false;
+    });
+    second.kill.mockImplementation(() => {
+      second.exitCode = 0;
+      second.emit('exit', 0, null);
+      return true;
+    });
+    const spawnProcess = vi.fn(
+      (command: string) => (command === 'first' ? first : second) as unknown as ChildProcess
+    ) as typeof realSpawn;
     const factory = createSessionSandboxFactory({
       logger: createSilentLogger(),
       deps: { platform: 'win32', spawnProcess, configureExecutionProcess: vi.fn(async () => {}) },
@@ -252,10 +249,19 @@ describe('session sandbox', () => {
     await expect(sandbox.terminate(true)).rejects.toThrow(
       'Session process tree termination failed'
     );
-    expect(spawnProcess).toHaveBeenCalledTimes(4);
-    expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [1234, 2345] });
+    expect(first.kill).toHaveBeenCalledOnce();
+    expect(second.kill).toHaveBeenCalledOnce();
+    expect(spawnProcess).toHaveBeenCalledTimes(2);
+    expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [1234] });
+    first.kill.mockImplementation(() => {
+      first.exitCode = 0;
+      first.emit('exit', 0, null);
+      return true;
+    });
+    await sandbox.terminate(true);
+    expect(first.kill).toHaveBeenCalledTimes(2);
+    expect(await sandbox.readResourceAccounting()).toMatchObject({ rootPids: [] });
   });
-
   it('applies process resource profiles on Linux', async () => {
     const setPriority = vi.fn();
     const writeFile = vi.fn(async () => {});

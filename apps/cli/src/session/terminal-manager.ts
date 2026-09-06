@@ -62,6 +62,8 @@ const DEFAULT_TERMINAL_BYTE_LIMIT = 1024 * 1024; // 1MB of retained output
 
 abstract class BaseTerminalManager<THandle> implements TerminalManager {
   protected terminals = new Map<string, TerminalState<THandle>>();
+  private admissionClosed = false;
+  private readonly pendingStarts = new Set<Promise<void>>();
   protected readonly logger: Logger;
   protected readonly sessionLabel: string;
   private readonly getActiveSessionId: () => string | null;
@@ -84,6 +86,7 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
   ): Promise<string> {
     this.ensureValidSession(acpSessionId);
 
+    if (this.admissionClosed) throw new Error('Terminal manager is shutting down');
     const terminalId = randomUUID();
     const state: TerminalState<THandle> = {
       id: terminalId,
@@ -104,20 +107,31 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       },
     };
 
-    state.handle = await this.startProcess(
-      {
-        terminalId,
-        command,
-        args: args ?? [],
-        cwd,
-        env,
-      },
-      hooks
-    );
+    let finishStart = () => {};
+    const pendingStart = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    this.pendingStarts.add(pendingStart);
+    try {
+      state.handle = await this.startProcess(
+        {
+          terminalId,
+          command,
+          args: args ?? [],
+          cwd,
+          env,
+        },
+        hooks
+      );
 
-    this.terminals.set(terminalId, state);
-    this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} started: ${command}`);
-    return terminalId;
+      this.terminals.set(terminalId, state);
+      this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} started: ${command}`);
+      if (this.admissionClosed) throw new Error('Terminal launch cancelled by shutdown');
+      return terminalId;
+    } finally {
+      this.pendingStarts.delete(pendingStart);
+      finishStart();
+    }
   }
 
   async terminalOutput(acpSessionId: string, terminalId: string) {
@@ -204,6 +218,8 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
 
   async disposeAll(acpSessionId: string): Promise<void> {
     this.ensureValidSession(acpSessionId);
+    this.admissionClosed = true;
+    await Promise.all(this.pendingStarts);
     const terminalIds = Array.from(this.terminals.keys());
     if (terminalIds.length === 0) {
       return;

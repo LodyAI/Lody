@@ -83,8 +83,12 @@ arrive: context/message-flow.md "Upstream".
   race and would otherwise mask the refusal.
 - `acp-runner.ts` — process spawn/restart around the client.
   Auxiliary ACP shutdown shares one termination attempt per owned child, uses the
-  Windows process-tree cleanup helper, and reports termination failure; protocol
+  Windows retained-child-handle cleanup utility, and reports termination failure; protocol
   session-close failure must still proceed to process cleanup.
+  Windows termination must never reopen a cached PID. Observed child exit is the
+  utility's guarantee; descendant teardown requires spawn-time Job Object ownership.
+  Protocol authentication cleanup failure must return an error and retain its child
+  and provider slot until observed exit. Cancellation must permit cleanup retry.
   Spawn + initialize + `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
   `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Unbounded concurrent Codex starts
   each spawn a lody.exe adapter, a Codex app-server, and a lody.exe MCP child;

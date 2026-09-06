@@ -15,6 +15,15 @@ control-plane path is DEPRECATED; do not add functionality to it.
   NDJSON so ACP runtime/auth progress crosses the daemon socket immediately; legacy
   clients keep the buffered JSON envelope. `MachineRuntime` may collect responses for
   completion, but it must also forward each response to the streaming observer as it is sent.
+- Stopping local message admission must reject both new requests and queued requests
+  whose handlers have not started. Discarded handlers must never run after cleanup;
+  active handlers retain their actual completion/error result because side effects may
+  already have happened. `MessageProcessor` owns this boundary and `MachineRuntime`
+  forwards admission/discard errors to each waiting local control response.
+- Fleet shutdown always attempts independent terminal PTY cleanup and collects local
+  endpoint errors, even when a workspace cleanup fails. Retain failed workspace owners
+  and their shared watcher/cloud dependencies for retry; dispose shared services only
+  once no workspace owner remains, attempting every eligible disposer before rejecting.
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud
   clients, endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort`

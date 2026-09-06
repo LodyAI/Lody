@@ -6,6 +6,13 @@ import { ConcurrentQueue } from './concurrent-queue';
 type QueuedControlMessage = LocalSessionControlRequestValidated;
 type MessageQueueKey = string;
 
+export class MessageProcessorStoppedError extends Error {
+  constructor() {
+    super('Local control message processor is stopping');
+    this.name = 'MessageProcessorStoppedError';
+  }
+}
+
 interface ProcessorEvents {
   'message:processed': (message: QueuedControlMessage) => void;
   'message:error': (error: Error, message: QueuedControlMessage) => void;
@@ -22,6 +29,7 @@ interface ProcessorEvents {
 export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly queue: ConcurrentQueue<MessageQueueKey>;
   private isStopped = false;
+  private readonly pendingDiscards = new Set<() => void>();
   private static readonly QUEUE_WAIT_WARNING_MS = 10_000;
   private static readonly PROCESSING_WARNING_MS = 30_000;
 
@@ -38,10 +46,13 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   enqueue(
     message: QueuedControlMessage,
-    handler: (msg: QueuedControlMessage) => Promise<void>
+    handler: (msg: QueuedControlMessage) => Promise<void>,
+    onDiscard?: (error: MessageProcessorStoppedError) => void
   ): void {
     if (this.isStopped) {
-      this.logger.debug('MessageProcessor is stopped, ignoring new message');
+      const error = new MessageProcessorStoppedError();
+      onDiscard?.(error);
+      this.emit('message:error', error, message);
       return;
     }
 
@@ -62,6 +73,15 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       );
     }, MessageProcessor.QUEUE_WAIT_WARNING_MS);
     waitWarning.unref?.();
+    let discarded = false;
+    const discard = () => {
+      discarded = true;
+      clearInterval(waitWarning);
+      const error = new MessageProcessorStoppedError();
+      onDiscard?.(error);
+      this.emit('message:error', error, message);
+    };
+    this.pendingDiscards.add(discard);
 
     this.logger.debug(
       `Enqueued message type=${message.type} sessionId=${sessionId || 'N/A'} active=${
@@ -70,6 +90,8 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
     );
 
     void this.queue.enqueue(queueKey, async () => {
+      this.pendingDiscards.delete(discard);
+      if (discarded) return;
       const startTime = Date.now();
       started = true;
       clearInterval(waitWarning);
@@ -140,6 +162,11 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   stop(): void {
     this.isStopped = true;
+    // Reject only requests whose handlers have not started. Active handlers may
+    // already have committed side effects and must report their actual result.
+    const pending = [...this.pendingDiscards];
+    this.pendingDiscards.clear();
+    for (const discard of pending) discard();
     this.logger.debug('MessageProcessor stopped');
   }
 

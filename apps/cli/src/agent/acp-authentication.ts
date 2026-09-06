@@ -136,6 +136,7 @@ type RunningAuthentication = {
   cancelled: boolean;
   timedOut: boolean;
   terminating: boolean;
+  workflowFinished?: boolean;
   acceptsAuthorizationCode: boolean;
   authorizationCodeSubmitted: boolean;
   abortController: AbortController;
@@ -622,7 +623,7 @@ export class AcpAuthenticationManager {
         detached: process.platform !== 'win32',
         windowsHide: true,
       });
-      running.child = child;
+      this.trackAuthenticationChild(options.agentType, running, child);
       child.stdin?.on('error', (error: unknown) => {
         this.logger.debug(
           `[acp-auth] ${displayName} authorization input failed: ${formatErrorMessage(error)}`
@@ -684,9 +685,8 @@ export class AcpAuthenticationManager {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
-      if (this.runningByAgentType.get(options.agentType) === running) {
-        this.runningByAgentType.delete(options.agentType);
-      }
+      running.workflowFinished = true;
+      this.releaseFinishedAuthentication(options.agentType, running);
     }
   }
 
@@ -873,6 +873,13 @@ export class AcpAuthenticationManager {
           logPrefix: '[acp-auth]',
           getStderrTail: () => lastStderrTail,
           attempt: async ({ args }) => {
+            if (
+              running.child &&
+              running.child.exitCode == null &&
+              running.child.signalCode == null
+            ) {
+              throw new Error('Previous authentication process cleanup is incomplete');
+            }
             running.abortController.signal.throwIfAborted();
             lastStderrTail = '';
             options.onProgress?.({ status: 'starting' });
@@ -887,7 +894,7 @@ export class AcpAuthenticationManager {
               args: [...args],
               spawnImpl: this.spawnProcess,
             });
-            running.child = child;
+            this.trackAuthenticationChild(options.agentType, running, child);
             running.terminating = false;
             child.stderr?.setEncoding('utf8');
             const authorizationParser = new AcpAgentAuthorizationOutputParser();
@@ -1094,10 +1101,6 @@ export class AcpAuthenticationManager {
                 logger: this.logger,
                 sessionLabel: `acp-auth:${options.agentType}:protocol`,
                 exitTimeoutMs: this.terminationGraceMs,
-              }).catch((error: unknown) => {
-                this.logger.debug(
-                  `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
-                );
               });
               if (running.child === child) running.child = undefined;
             }
@@ -1113,6 +1116,25 @@ export class AcpAuthenticationManager {
     return { success: true, disposition: 'authenticated' };
   }
 
+  private releaseFinishedAuthentication(agentType: string, running: RunningAuthentication): void {
+    const child = running.child;
+    if (
+      running.workflowFinished &&
+      (!child || child.exitCode != null || child.signalCode != null) &&
+      this.runningByAgentType.get(agentType) === running
+    ) {
+      this.runningByAgentType.delete(agentType);
+    }
+  }
+
+  private trackAuthenticationChild(
+    agentType: string,
+    running: RunningAuthentication,
+    child: ChildProcess
+  ): void {
+    running.child = child;
+    child.once('exit', () => this.releaseFinishedAuthentication(agentType, running));
+  }
   private terminateAuthentication(
     agentType: string,
     running: RunningAuthentication,
@@ -1128,10 +1150,15 @@ export class AcpAuthenticationManager {
       logger: this.logger,
       sessionLabel: `acp-auth:${agentType}:${reason}`,
       exitTimeoutMs: this.terminationGraceMs,
-    }).catch((error: unknown) => {
-      this.logger.debug(
-        `[acp-auth] Failed to terminate authentication process: ${formatErrorMessage(error)}`
-      );
-    });
+    })
+      .catch((error: unknown) => {
+        this.logger.debug(
+          `[acp-auth] Failed to terminate authentication process: ${formatErrorMessage(error)}`
+        );
+      })
+      .finally(() => {
+        running.terminating = false;
+        this.releaseFinishedAuthentication(agentType, running);
+      });
   }
 }

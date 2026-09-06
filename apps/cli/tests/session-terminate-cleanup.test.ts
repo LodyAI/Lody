@@ -380,3 +380,30 @@ it('rejects a refused forced retry without claiming completion', async () => {
   await expect(session.killAndWait(handle, false)).rejects.toThrow('force refusal');
   expect(handle.terminate).toHaveBeenCalledTimes(2);
 });
+
+it('propagates failed startup cleanup and retains ownership for shutdown', async () => {
+  const session = createSession();
+  const cleanupError = new Error('startup cleanup refused');
+  const handle = createProcessHandle(async () => {
+    throw cleanupError;
+  });
+  // No stdin causes startup to fail after the session takes ownership.
+  // @ts-expect-error - injecting the owned sandbox boundary
+  const spawn = vi.spyOn(session.sandbox, 'spawn').mockResolvedValue(handle);
+  await expect(
+    session.createAgent({
+      cliType: 'registry',
+      agentType: 'opencode',
+      command: 'opencode',
+      args: ['acp'],
+    } as Parameters<Session['createAgent']>[0])
+  ).rejects.toBe(cleanupError);
+  expect(spawn).toHaveBeenCalledTimes(1);
+  // @ts-expect-error - verifying retained ownership after failure
+  expect(session.agentProcess).toBe(handle);
+  handle.terminate = vi.fn(async () => {
+    handle.child.exitCode = 0;
+  });
+  await session.terminate(true);
+  expect(handle.terminate).toHaveBeenCalledWith(true);
+});

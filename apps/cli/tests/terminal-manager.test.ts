@@ -279,3 +279,68 @@ it('publishes actual close without waiting for hung resource inspection', async 
   expect(owned.unsubscribe).toHaveBeenCalledTimes(1);
   expect(owned.handle.terminate).not.toHaveBeenCalled();
 });
+
+it('closes admission and drains pending terminal starts before disposal returns', async () => {
+  const owned = observedHandle();
+  owned.handle.terminate = vi.fn(async () => owned.exit(0));
+  let finishSpawn: (handle: SessionProcessHandle) => void = () => {};
+  const pending = new Promise<SessionProcessHandle>((resolve) => {
+    finishSpawn = resolve;
+  });
+  const sandbox: SessionSandbox = {
+    enabled: false,
+    description: 'test',
+    applyLimits: async () => {},
+    spawn: vi.fn(() => pending),
+    terminate: async () => {},
+    cleanup: async () => {},
+  };
+  const manager = new ShellTerminalManager({
+    logger: createSilentLogger(),
+    sessionLabel: 'test',
+    getActiveAcpSessionId: () => 'acp-1',
+    resolveWorkdir: () => process.cwd(),
+    buildEnv: () => ({}),
+    sandbox,
+  });
+  const start = expect(manager.createTerminal('acp-1', 'test')).rejects.toThrow(
+    'cancelled by shutdown'
+  );
+  const disposed = vi.fn();
+  const disposal = manager.disposeAll('acp-1').then(disposed);
+  await expect(manager.createTerminal('acp-1', 'late')).rejects.toThrow('shutting down');
+  await Promise.resolve();
+  expect(disposed).not.toHaveBeenCalled();
+  finishSpawn(owned.handle);
+  await Promise.all([start, disposal]);
+  expect(owned.handle.terminate).toHaveBeenCalledTimes(1);
+  expect(owned.unsubscribe).toHaveBeenCalledTimes(1);
+  expect(sandbox.spawn).toHaveBeenCalledTimes(1);
+});
+
+it('finishes disposal when a pending terminal launch rejects', async () => {
+  let failSpawn: (error: Error) => void = () => {};
+  const pending = new Promise<SessionProcessHandle>((_resolve, reject) => {
+    failSpawn = reject;
+  });
+  const sandbox: SessionSandbox = {
+    enabled: false,
+    description: 'test',
+    applyLimits: async () => {},
+    spawn: () => pending,
+    terminate: async () => {},
+    cleanup: async () => {},
+  };
+  const manager = new ShellTerminalManager({
+    logger: createSilentLogger(),
+    sessionLabel: 'test',
+    getActiveAcpSessionId: () => 'acp-1',
+    resolveWorkdir: () => process.cwd(),
+    buildEnv: () => ({}),
+    sandbox,
+  });
+  const start = expect(manager.createTerminal('acp-1', 'test')).rejects.toThrow('launch failed');
+  const disposal = manager.disposeAll('acp-1');
+  failSpawn(new Error('launch failed'));
+  await Promise.all([start, disposal]);
+});

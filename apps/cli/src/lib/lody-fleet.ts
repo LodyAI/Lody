@@ -606,19 +606,44 @@ export class LodyFleet {
     const cleanupFailures = cleanupResults.flatMap((result) =>
       result.status === 'rejected' ? [result.reason] : []
     );
-    if (cleanupFailures.length > 0)
-      throw new AggregateError(cleanupFailures, 'Workspace cleanup failed');
-    await this.workspaceWatchCoordinator.dispose();
-    await this.cloudPort.dispose();
+    const workspaceCleanupFailed = cleanupFailures.length > 0;
+    // PTYs are independent of workspace document flush/retry. A retained failed
+    // runtime must not keep these processes alive just because its cleanup failed.
+    try {
+      this.terminalPtyService.closeAll();
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+
+    // Failed workspace owners may still need shared services on the next cleanup
+    // attempt. Release those dependencies only after every owner was removed.
+    if (this.runtimes.size === 0) {
+      for (const dispose of [
+        () => this.workspaceWatchCoordinator.dispose(),
+        () => this.cloudPort.dispose(),
+      ]) {
+        try {
+          await dispose();
+        } catch (error) {
+          cleanupFailures.push(error);
+        }
+      }
+    }
 
     for (const result of await localServicesStopped) {
       if (result.status === 'rejected') {
+        cleanupFailures.push(result.reason);
         this.logger.debug(
           `[fleet] Failed to stop a local service: ${formatErrorMessage(result.reason)}`
         );
       }
     }
-    this.terminalPtyService.closeAll();
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        cleanupFailures,
+        workspaceCleanupFailed ? 'Workspace cleanup failed' : 'Fleet cleanup failed'
+      );
+    }
   }
 
   private async applyWorkspaceList(

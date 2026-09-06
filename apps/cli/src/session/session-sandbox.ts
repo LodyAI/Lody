@@ -8,7 +8,7 @@ import { type SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { applyExecutionProcessResourceProfile } from '@/utils/process-resource-profile';
-import { terminateWindowsProcessTree } from '@/utils/windows-process-tree';
+import { terminateWindowsChildProcess } from '@/utils/windows-child-process';
 
 const DEFAULT_CGROUP_MOUNT = '/sys/fs/cgroup';
 const DEFAULT_SESSION_PARENT = 'lody-sessions';
@@ -330,7 +330,7 @@ class NoopSessionSandbox implements SessionSandbox {
       child,
       async () => null,
       async (force) => {
-        if (typeof child.pid === 'number' && child.pid > 0) {
+        if (this.deps.platform === 'win32' || (typeof child.pid === 'number' && child.pid > 0)) {
           await this.terminateProcessTree(child, force, detached);
           return;
         }
@@ -346,7 +346,7 @@ class NoopSessionSandbox implements SessionSandbox {
       };
       child.once('exit', cleanupTrackedProcess);
       child.once('close', cleanupTrackedProcess);
-      child.once('error', cleanupTrackedProcess);
+      // A kill error is retryable; only observed process exit releases ownership.
       await configureExecutionProcessBestEffort(child.pid, this.deps, this.logger);
     }
     return processHandle;
@@ -375,7 +375,7 @@ class NoopSessionSandbox implements SessionSandbox {
     detached: boolean
   ): Promise<void> {
     if (this.deps.platform === 'win32') {
-      await terminateWindowsProcessTree(child, force, { spawnProcess: this.deps.spawnProcess });
+      await terminateWindowsChildProcess(child, force);
       return;
     }
 

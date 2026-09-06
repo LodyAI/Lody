@@ -13,7 +13,7 @@ import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
-import { terminateWindowsProcessTree } from '@/utils/windows-process-tree';
+import { terminateWindowsChildProcess } from '@/utils/windows-child-process';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
   AgentClient,
@@ -225,10 +225,10 @@ async function terminateChildProcessOnce(
   exitTimeoutMs: number
 ): Promise<void> {
   if (process.platform === 'win32') {
-    await terminateWindowsProcessTree(child, true, { timeoutMs: exitTimeoutMs });
+    await terminateWindowsChildProcess(child, true, { timeoutMs: exitTimeoutMs });
     if (!(await waitForChildProcessExit(child, exitTimeoutMs))) {
       throw new Error(
-        `[${sessionLabel}] ACP agent process did not exit after Windows tree termination`
+        `[${sessionLabel}] ACP agent process did not exit after Windows child termination`
       );
     }
     return;
