@@ -1,3 +1,8 @@
+import {
+  getSessionAccountBinding,
+  clearSessionAccountBinding,
+  updateSessionAccountNativeId,
+} from './session-account-binding-store';
 import { describe, expect, it, vi } from 'vitest';
 import {
   getSessionRoomId,
@@ -182,7 +187,7 @@ function createForkHarness(
     resolveLocalProjectRootPath: vi.fn(async () => '/source/project-root'),
     cleanupForkWorktree: vi.fn(async () => undefined),
   };
-  const logger = { error: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn() };
   const service = new SessionForkService({
     workspaceDocument: workspaceDocument as never,
     sessionManager: sessionManager as never,
@@ -403,6 +408,10 @@ describe('SessionForkService durability boundary', () => {
         parentSessionId: sourceSessionId,
         childSessionPlacement: 'side-panel',
       })
+    );
+    expect(updateSessionAccountNativeId).toHaveBeenCalledWith(
+      { workspaceId: 'workspace-1', machineId: 'machine-1', sessionId: targetSessionId },
+      'acp-target'
     );
     expect(harness.sessionManager.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ parentSessionId: sourceSessionId }),
@@ -882,6 +891,25 @@ describe('SessionForkService fork operation recovery', () => {
     expect(harness.markers).toEqual([]);
   });
 
+  it('retains a missing-room marker until its orphaned account binding can be removed', async () => {
+    const harness = createForkHarness(undefined, {
+      markers: [staleMarker],
+      aliveRoomIds: [],
+    });
+    vi.mocked(clearSessionAccountBinding).mockRejectedValueOnce(new Error('disk unavailable'));
+    await harness.service.recoverPendingForks();
+    expect(harness.markers).toEqual([staleMarker]);
+    expect(harness.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+
+    await harness.service.recoverPendingForks();
+    expect(clearSessionAccountBinding).toHaveBeenLastCalledWith({
+      workspaceId: 'workspace-1',
+      machineId,
+      sessionId: targetSessionId,
+    });
+    expect(harness.markers).toEqual([]);
+  });
+
   it('ignores markers from other machines or workspaces without deleting them', async () => {
     const harness = createForkHarness(undefined, {
       markers: [
@@ -966,4 +994,23 @@ describe('SessionForkService fork operation recovery', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+});
+
+// Fixtures model trusted local bindings; filesystem authority has separate regression coverage.
+vi.mock('./session-account-binding-store', () => ({
+  resolveSessionAccountMeta: vi.fn(async (_scope: unknown, meta: SessionMeta) => meta),
+  getSessionAccountBinding: vi.fn(async () => null),
+  setSessionAccountBinding: vi.fn(async () => {}),
+  updateSessionAccountNativeId: vi.fn(async () => {}),
+  clearSessionAccountBinding: vi.fn(async () => {}),
+}));
+
+it('does not overwrite or clear an existing target local account binding', async () => {
+  const harness = createForkHarness();
+  vi.mocked(getSessionAccountBinding).mockResolvedValueOnce({ accountProfileId: 'system-default' });
+  vi.mocked(clearSessionAccountBinding).mockClear();
+  const result = await harness.service.fork(forkSpec);
+  expect(result.success).toBe(false);
+  expect(harness.sessionManager.createSession).not.toHaveBeenCalled();
+  expect(clearSessionAccountBinding).not.toHaveBeenCalled();
 });

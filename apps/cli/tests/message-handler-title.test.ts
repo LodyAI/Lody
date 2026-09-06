@@ -5,6 +5,12 @@ import type { SessionId, SessionTitleSource } from '@lody/shared';
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import { createTestCloudPort } from './test-cloud-port';
+import { resolveSessionAccountMeta } from '../src/session/session-account-binding-store';
+
+vi.mock('../src/session/session-account-binding-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/session/session-account-binding-store')>()),
+  resolveSessionAccountMeta: vi.fn(),
+}));
 
 vi.mock('@/agent/title-generator', async () => {
   const actual =
@@ -36,6 +42,7 @@ const createHandler = async (
   latestMeta?: { title?: string; titleSource?: SessionTitleSource },
   options?: {
     agentConfigId?: string;
+    accountProfileId?: string;
     agentConfigMeta?: { titleGeneration?: { configOptionValues: Record<string, string> } } | null;
   }
 ) => {
@@ -48,6 +55,7 @@ const createHandler = async (
         title: metaTitle ?? undefined,
         titleSource,
         agentConfigId: options?.agentConfigId,
+        accountProfileId: options?.accountProfileId,
       })
       .mockResolvedValue(latestMeta ?? { title: metaTitle ?? undefined, titleSource }),
     setTitle: vi.fn(async () => {}),
@@ -105,6 +113,12 @@ const createHandler = async (
 describe('MessageHandler title generation', () => {
   beforeEach(() => {
     mockedGenerateTitleIsolated.mockClear();
+    vi.mocked(resolveSessionAccountMeta)
+      .mockReset()
+      .mockImplementation(async (_scope, meta) => ({
+        ...meta,
+        accountProfileId: 'system-default',
+      }));
   });
 
   it('skips isolated generation when title already meaningful', async () => {
@@ -151,6 +165,46 @@ describe('MessageHandler title generation', () => {
     ]);
   });
 
+  it.each(['system-default', 'local-account'])(
+    'uses the local account binding instead of synchronized metadata for title generation',
+    async (accountProfileId) => {
+      vi.mocked(resolveSessionAccountMeta).mockImplementation(async (_scope, meta) => ({
+        ...meta,
+        accountProfileId,
+      }));
+      const { handler } = await createHandler(undefined, undefined, undefined, {
+        accountProfileId: 'remote-injected-account',
+      });
+      const titleHost = handler as unknown as {
+        maybeGenerateAndStoreSessionTitle(
+          sessionId: SessionId,
+          cliType: string,
+          agentType: string,
+          taskPrompt: string
+        ): Promise<void>;
+      };
+      await titleHost.maybeGenerateAndStoreSessionTitle(
+        'session',
+        'builtin',
+        'codex',
+        'Synthetic task'
+      );
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountProfileId,
+        })
+      );
+      expect(resolveSessionAccountMeta).toHaveBeenCalledWith(
+        {
+          workspaceId: 'ws-1',
+          machineId: 'm-1',
+          sessionId: 'session',
+        },
+        expect.objectContaining({ accountProfileId: 'remote-injected-account' })
+      );
+    }
+  );
+
   it('shares one in-flight generation across duplicate title requests', async () => {
     let resolveTitle: ((title: string | null) => void) | undefined;
     mockedGenerateTitleIsolated.mockImplementationOnce(
@@ -187,6 +241,30 @@ describe('MessageHandler title generation', () => {
 
     expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not launch a title helper when the local account binding is unavailable', async () => {
+    vi.mocked(resolveSessionAccountMeta).mockRejectedValue(
+      new Error('Local account binding unavailable')
+    );
+    const { handler } = await createHandler(undefined, undefined, undefined, {
+      accountProfileId: 'managed-account',
+    });
+    const titleHost = handler as unknown as {
+      maybeGenerateAndStoreSessionTitle(
+        sessionId: SessionId,
+        cliType: string,
+        agentType: string,
+        taskPrompt: string
+      ): Promise<void>;
+    };
+    await titleHost.maybeGenerateAndStoreSessionTitle(
+      'session',
+      'builtin',
+      'codex',
+      'Synthetic task'
+    );
+    expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
   });
 
   it('reuses an existing title promise for branch-name generation', async () => {

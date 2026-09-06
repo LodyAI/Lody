@@ -11,6 +11,9 @@ mobile surfaces.
 - Regenerate TanStack routes after changing route files.
 - Add Storybook coverage for new presentational components and meaningful states.
 - All user-visible copy must go through i18n.
+- Account profile management and session account switching require the target's
+  local Electron IPC connection. Do not fall back to cloud Machine RPC when that
+  connection is unavailable; the remote transport cannot authenticate the requester.
 - Compact number units (K/M/B vs 万/亿) follow the product language via
   `toIntlLocaleOrEn` / `formatCompactNumber`, never the host OS locale.
 - Prefer shared primitives from `src/components/ui` over private replacements.

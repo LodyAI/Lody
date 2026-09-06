@@ -1,3 +1,10 @@
+import {
+  getSessionAccountBinding,
+  clearSessionAccountBinding,
+  updateSessionAccountNativeId,
+  setSessionAccountBinding,
+  resolveSessionAccountMeta,
+} from './session-account-binding-store';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -298,7 +305,13 @@ export class SessionForkService {
     const roomId = getSessionRoomId(targetSessionId);
     if (!aliveRoomIds.has(roomId)) {
       // Marker outlived its doc (crash between marker record and doc creation,
-      // i.e. before the saga could produce anything). Nothing to compensate.
+      // after the initial local binding may already have been persisted).
+      // Retain the marker if cleanup fails so the next recovery can retry.
+      await clearSessionAccountBinding({
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId: targetSessionId,
+      });
       await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       return;
     }
@@ -321,6 +334,11 @@ export class SessionForkService {
       return;
     }
     if (operation?.state === 'failed') {
+      await clearSessionAccountBinding({
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId: targetSessionId,
+      });
       // The saga already compensated and left the durable receipt.
       await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       return;
@@ -334,6 +352,11 @@ export class SessionForkService {
     );
     if (!hasOriginNotice) {
       if (!operation) {
+        await clearSessionAccountBinding({
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          sessionId: targetSessionId,
+        });
         // Neither the prepare persist nor any commit write landed (the flag
         // clear is ordered after the history write, and both are flush-atomic
         // doc writes), so nothing durable references this operation.
@@ -373,6 +396,11 @@ export class SessionForkService {
       });
       try {
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-rollback');
+        await clearSessionAccountBinding({
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          sessionId: targetSessionId,
+        });
         await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       } catch {
         // Keep the marker so the next startup retries the compensation.
@@ -433,8 +461,14 @@ export class SessionForkService {
 
   private async forkInner(spec: SessionForkSpec): Promise<SessionForkResponse> {
     const { sourceSessionId, targetSessionId } = spec;
+    const accountScope = {
+      workspaceId: this.deps.workspaceId,
+      machineId: this.deps.machineId,
+      sessionId: targetSessionId,
+    };
+    let accountBindingCreated = false;
     const sourceDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sourceSessionId);
-    const source = await sourceDoc.getMetaState();
+    let source = await sourceDoc.getMetaState();
     if (!source)
       return sessionForkFailure(spec, 'SOURCE_SESSION_NOT_FOUND', 'Source session was not found.');
     if (source.machineId !== this.deps.machineId) {
@@ -451,6 +485,14 @@ export class SessionForkService {
         'Archived sessions cannot be forked.'
       );
     }
+    source = await resolveSessionAccountMeta(
+      {
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId: sourceSessionId,
+      },
+      source
+    );
     const sourceBusy = this.deps.isSourceBusy(sourceSessionId);
     if (!source.acpSessionId || !source.agentConfigId) {
       return sessionForkFailure(
@@ -723,8 +765,25 @@ export class SessionForkService {
       // it sees the other's writes.
       const acceptFailure = await withForkOperationLock(targetSessionId, async () => {
         try {
+          if (await getSessionAccountBinding(accountScope))
+            throw new Error('Target local account binding already exists.');
           await this.deps.forkOperationStore.record(marker);
+          await setSessionAccountBinding(
+            {
+              workspaceId: this.deps.workspaceId,
+              machineId: this.deps.machineId,
+              sessionId: targetSessionId,
+            },
+            { accountProfileId: source.accountProfileId ?? 'system-default' }
+          );
+          accountBindingCreated = true;
         } catch (error) {
+          if (accountBindingCreated)
+            await clearSessionAccountBinding(accountScope).catch((cleanupError) =>
+              this.deps.logger.warn(
+                `Could not clear failed fork account binding: ${formatErrorMessage(cleanupError)}`
+              )
+            );
           return sessionForkFailure(
             spec,
             'TARGET_WRITE_FAILED',
@@ -738,6 +797,12 @@ export class SessionForkService {
           doc.setForkOperation(operation);
           await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
         } catch (error) {
+          if (accountBindingCreated)
+            await clearSessionAccountBinding(accountScope).catch((cleanupError) =>
+              this.deps.logger.warn(
+                `Could not clear failed fork account binding: ${formatErrorMessage(cleanupError)}`
+              )
+            );
           doc?.setForkOperation(undefined);
           this.activeOperations.delete(operation.id);
           await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
@@ -809,6 +874,17 @@ export class SessionForkService {
 
     let targetPrepared = false;
     try {
+      if (await getSessionAccountBinding(accountScope))
+        throw new Error('Target local account binding already exists.');
+      await setSessionAccountBinding(
+        {
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          sessionId: targetSessionId,
+        },
+        { accountProfileId: source.accountProfileId ?? 'system-default' }
+      );
+      accountBindingCreated = true;
       await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, targetMeta);
       const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
       await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
@@ -861,6 +937,14 @@ export class SessionForkService {
         );
       }
       try {
+        await updateSessionAccountNativeId(
+          {
+            workspaceId: this.deps.workspaceId,
+            machineId: this.deps.machineId,
+            sessionId: targetSessionId,
+          },
+          targetSession.acpSessionId ?? undefined
+        );
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
@@ -883,6 +967,12 @@ export class SessionForkService {
         warnings: historyResult.warnings,
       };
     } catch (error) {
+      if (accountBindingCreated)
+        await clearSessionAccountBinding(accountScope).catch((cleanupError) =>
+          this.deps.logger.warn(
+            `Could not clear failed fork account binding: ${formatErrorMessage(cleanupError)}`
+          )
+        );
       if (targetPrepared) {
         await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       }
@@ -1006,6 +1096,14 @@ export class SessionForkService {
         // durable acpSessionId then implies the doc writes are durable too).
         await targetDoc.updateHistory(() => historyResult.history);
         targetDoc.setForkOperation(undefined);
+        await updateSessionAccountNativeId(
+          {
+            workspaceId: this.deps.workspaceId,
+            machineId: this.deps.machineId,
+            sessionId: targetSessionId,
+          },
+          targetSession.acpSessionId ?? undefined
+        );
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,
           acpSessionId: targetSession.acpSessionId,
@@ -1016,6 +1114,15 @@ export class SessionForkService {
         await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       });
     } catch (error) {
+      await clearSessionAccountBinding({
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId: targetSessionId,
+      }).catch((cleanupError) =>
+        this.deps.logger.warn(
+          `Could not clear failed fork account binding: ${formatErrorMessage(cleanupError)}`
+        )
+      );
       await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       await this.deps.sessionManager.cleanupForkWorktree(config).catch((cleanupError: unknown) => {
         this.deps.logger.error(

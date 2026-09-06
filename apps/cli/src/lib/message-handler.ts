@@ -6,6 +6,7 @@ import type {
   SessionAccountSwitchResponse,
 } from '@lody/shared';
 import { createAccountProfile, listAccountProfiles } from '@/agent/account-profiles';
+import { resolveSessionAccountMeta } from '@/session/session-account-binding-store';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -874,6 +875,7 @@ export class MessageHandler {
   private readonly store = new SessionTransientStore();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
+  private readonly localAccountAuthenticationRequests = new Set<string>();
   // Note: titleGenerationInFlight, archiveInFlight, deleteInFlight are self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private archiveWatchHandle: RepoWatchHandle | null = null;
@@ -6855,10 +6857,10 @@ export class MessageHandler {
         await this.handleMachineAcpCapabilitiesRefresh(message, context);
         break;
       case 'machine/account-profiles':
-        context.send(await this.handleAccountProfiles(message));
+        context.send(await this.handleAccountProfiles(message, context));
         break;
       case 'session/account-switch':
-        context.send(await this.handleAccountSwitch(message));
+        context.send(await this.handleAccountSwitch(message, context));
         break;
       case 'machine/acp-authenticate':
         await this.handleMachineAcpAuthenticate(message, context);
@@ -8431,13 +8433,21 @@ export class MessageHandler {
   }
 
   private async handleAccountProfiles(
-    message: MachineAccountProfilesRequest
+    message: MachineAccountProfilesRequest,
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<MachineAccountProfilesResponse> {
     const base = {
       type: 'machine/account-profiles_response' as const,
       machineId: this.machineId,
       requestId: message.requestId,
     };
+    if (dispatchContext.source !== 'local') {
+      return {
+        ...base,
+        success: false,
+        error: 'Account profiles require a local connection to this machine.',
+      };
+    }
     try {
       if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
         throw new Error('Account profile machine or workspace mismatch');
@@ -8477,7 +8487,8 @@ export class MessageHandler {
   }
 
   private async handleAccountSwitch(
-    message: SessionAccountSwitchRequest
+    message: SessionAccountSwitchRequest,
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<SessionAccountSwitchResponse> {
     const base = {
       type: 'session/account-switch_response' as const,
@@ -8486,9 +8497,19 @@ export class MessageHandler {
       sessionId: message.sessionId,
     };
     try {
+      // Local IPC supplies this out-of-band context; remote RPC always uses runtime.
+      if (dispatchContext.source !== 'local')
+        throw new Error('Account switching requires a local connection to this machine.');
       if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
         throw new Error('Account switch machine or workspace mismatch');
-      const result = await this.executionService.switchAccount(message);
+      const result = await this.executionService.switchAccount(message, {
+        verifyAccess: ({ sessionId, localProjectId }) =>
+          this.verifyMachineAccess({
+            sessionId,
+            requesterUserId: this.userId,
+            localProjectId,
+          }),
+      });
       return {
         ...base,
         success: true,
@@ -8504,17 +8525,47 @@ export class MessageHandler {
     message: MachineAcpAuthenticateRequestValidated,
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
-    const response = await this.authenticateMachineAcpAndResumeSetup(message, {
-      onProgress: (progress) => dispatchContext.send(progress),
-    });
+    const response = await this.authenticateMachineAcpAndResumeSetup(
+      message,
+      {
+        onProgress: (progress) => dispatchContext.send(progress),
+      },
+      dispatchContext
+    );
     dispatchContext.send(response);
   }
 
   private async authenticateMachineAcpAndResumeSetup(
     message: MachineAcpAuthenticateRequestValidated,
-    options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {}
+    options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {},
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<MachineAcpAuthenticateResponse> {
-    const response = await this.executionService.authenticateMachineAcp(message, options);
+    const targetRequestId =
+      message.action === 'start' ? message.requestId : message.authenticationRequestId;
+    const startsAccountAuthentication = message.action === 'start' && !!message.accountProfileId;
+    if (
+      dispatchContext.source !== 'local' &&
+      (startsAccountAuthentication || this.localAccountAuthenticationRequests.has(targetRequestId))
+    ) {
+      return {
+        type: 'machine/acp-authenticate_response',
+        machineId: this.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: false,
+        disposition: 'error',
+        error: 'Account authentication requires a local connection to this machine.',
+      };
+    }
+    const ownsLocalRequest =
+      startsAccountAuthentication && !this.localAccountAuthenticationRequests.has(targetRequestId);
+    if (ownsLocalRequest) this.localAccountAuthenticationRequests.add(targetRequestId);
+    let response: MachineAcpAuthenticateResponse;
+    try {
+      response = await this.executionService.authenticateMachineAcp(message, options);
+    } finally {
+      if (ownsLocalRequest) this.localAccountAuthenticationRequests.delete(targetRequestId);
+    }
     if (
       message.action === 'start' &&
       (!message.accountProfileId || message.accountProfileId === 'system-default') &&
@@ -9124,7 +9175,18 @@ export class MessageHandler {
         logger: this.logger,
         env,
         titleConfig: resolvedTitleConfig,
-        accountProfileId: meta?.accountProfileId,
+        accountProfileId: meta
+          ? (
+              await resolveSessionAccountMeta(
+                {
+                  workspaceId: this.workspaceId,
+                  machineId: this.machineId,
+                  sessionId,
+                },
+                meta
+              )
+            ).accountProfileId
+          : 'system-default',
       });
       if (!title) {
         this.logger.debug(`[${sessionId}] Session title generation returned empty result`);
@@ -9787,14 +9849,24 @@ export class MessageHandler {
     let metaCustomAcp: CustomAcpLaunchSpec | undefined;
     let metaRuntimeOverrides: BuiltinRuntimeOverrides | undefined;
     let metaAgentConfigId: AgentConfigId | undefined;
-    let accountProfileId: string | undefined;
+    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const meta = await sessionDoc.getMetaState();
+    const accountProfileId = meta
+      ? (
+          await resolveSessionAccountMeta(
+            {
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              sessionId,
+            },
+            meta
+          )
+        ).accountProfileId
+      : 'system-default';
     let reusableTitlePromise: Promise<string | null> | undefined;
     try {
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
       metaBranchName = meta?.branchName?.trim() || null;
       metaAgentConfigId = meta?.agentConfigId;
-      accountProfileId = meta?.accountProfileId;
       const generatedMetaTitle = meta?.titleSource === 'generated' ? meta.title?.trim() : '';
       reusableTitlePromise = generatedMetaTitle
         ? Promise.resolve(generatedMetaTitle)

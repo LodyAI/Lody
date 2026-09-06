@@ -11,6 +11,13 @@ control-plane path is DEPRECATED; do not add functionality to it.
   handling (`handleSessionChat`), ACP update buffering/flush, Code Collab v2 machine
   RPC wiring, local project control. Turn execution itself lives in
   `../session/session-execution-service.ts`.
+- Account profile listing/creation, account switching, and explicit profile login
+  require the trusted local IPC dispatch context. Workspace Machine RPC does not
+  authenticate a member; caller-supplied owner IDs or source fields are not proof.
+  Local profile login continuations retain this boundary for cancellation and
+  submitted codes/input. Legacy default login without a profile ID keeps its
+  existing contract. Title and branch helpers resolve the machine-local account
+  binding instead of selecting credentials from synced session metadata.
 - Local session control preserves every intermediate response. New clients negotiate
   NDJSON so ACP runtime/auth progress crosses the daemon socket immediately; legacy
   clients keep the buffered JSON envelope. `MachineRuntime` may collect responses for

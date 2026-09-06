@@ -16,6 +16,13 @@ boundary. Do not send an untrusted requester through
 workspace Machine RPC: that transport does not authenticate member identity.
 Live status is a target-daemon Machine RPC read, and durable session metadata is not a
 live-presence substitute.
+Account switching requires an out-of-band access verifier before session reads
+and again before handoff. `session-account-binding-store.ts` owns the durable
+machine-local account/native-session pair, scoped by workspace, machine, and
+session. Synced account fields are display mirrors, including handoff/replay
+receipts. Restart, fork, edit/resend, and auxiliary launches must resolve the local
+binding; missing managed bindings and corrupt files fail closed. Candidate startup
+must defer binding persistence until the handoff or fork commits.
 Session orchestration MCP authenticates execution with the daemon owner's CLI credential,
 but derives the human identity causally from the active dispatch/execution runtime. Persisted
 history must never reconstruct a missing invocation; fail closed when no active runtime exists. Freeze that identity
@@ -247,8 +254,8 @@ the frozen identity. Never fall back to the Session owner when the driving Turn 
   alive so MessageHandler can flush final ACP/Code Collab evidence; the later plain `cleanUp()`
   closes shared resources. Never restore document teardown ahead of session termination.
 - `session-account-handoff.ts` owns explicit account switching between requests. The committed
-  `SessionMeta.accountProfileId` plus `acpSessionId` is authoritative; missing account ids resolve
-  to `system-default`, and pending `accountHandoff` intent never overrides that pair on restart.
+  machine-local `session-account-binding-store.ts` account/native-session pair is authoritative; legacy default sessions resolve
+  to `system-default`; synced managed fields without a local record fail closed. Synced metadata is a display mirror, and pending local `accountHandoff` intent never overrides the committed pair on restart.
   Hold the existing execution rewrite barrier through validation, local checkpoint, provider
   teardown and replacement, and commit with `persistPendingChanges`. Candidate starts defer
   ACP id persistence. A fresh provider session keeps an `accountContinuation` marker until its

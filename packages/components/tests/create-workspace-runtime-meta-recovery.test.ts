@@ -545,7 +545,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
-  it('narrows account RPC parameters before crossing the strict remote boundary', async () => {
+  it('rejects remote account operations before opening a machine RPC request', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();
     const runtime = await createWorkspaceRuntime({
@@ -561,32 +561,100 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       workspaceId: 'workspace-1' as WorkspaceId,
       requestId: 'request-1',
     };
-    await runtime.requestAccountProfiles({
-      ...envelope,
-      type: 'machine/account-profiles',
-      cliType: 'builtin',
-      agentType: 'codex',
-      action: 'list',
+    await expect(
+      runtime.requestAccountProfiles({
+        ...envelope,
+        type: 'machine/account-profiles',
+        cliType: 'builtin',
+        agentType: 'codex',
+        action: 'list',
+      })
+    ).rejects.toThrow('Account profiles require a local connection to this machine.');
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).rejects.toThrow('Account switching requires a local connection to this machine.');
+    expect(mocks.accountProfiles).not.toHaveBeenCalled();
+    expect(mocks.accountSwitch).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('keeps account operations on local IPC and returns the matching response', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    let rejectControl = false;
+    const invoke = vi.fn(
+      async (channel: string, payload?: { message: { type: string; requestId: string } }) => {
+        if (channel !== 'sessionControl.send') return channel === 'loro.isConnected';
+        if (rejectControl) return { ok: false, error: 'local authorization denied' };
+        const request = payload!.message;
+        const response = {
+          type:
+            request.type === 'machine/account-profiles'
+              ? 'machine/account-profiles_response'
+              : 'session/account-switch_response',
+          machineId: 'local-machine',
+          requestId: request.requestId,
+          ...(request.type === 'session/account-switch'
+            ? { sessionId: 'session-1', accountProfileId: 'system-default' }
+            : { profiles: [] }),
+          success: true,
+        };
+        return { ok: true, responses: [{ ...response, requestId: 'unrelated-request' }, response] };
+      }
+    );
+    Object.assign(window.ipc!, { invoke });
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
     });
-    await runtime.requestSessionAccountSwitch({
-      ...envelope,
-      type: 'session/account-switch',
-      sessionId: 'session-1' as SessionId,
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    const envelope = {
+      machineId: 'local-machine' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      requestId: 'request-1',
+    };
+    await expect(
+      runtime.requestAccountProfiles({
+        ...envelope,
+        type: 'machine/account-profiles',
+        cliType: 'builtin',
+        agentType: 'codex',
+        action: 'list',
+      })
+    ).resolves.toMatchObject({ success: true, requestId: 'request-1', profiles: [] });
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).resolves.toMatchObject({
+      success: true,
+      requestId: 'request-1',
       accountProfileId: 'system-default',
     });
-    expect(mocks.accountProfiles).toHaveBeenCalledWith({
-      requestId: 'request-1',
-      configId: undefined,
-      cliType: 'builtin',
-      agentType: 'codex',
-      action: 'list',
-      label: undefined,
-    });
-    expect(mocks.accountSwitch).toHaveBeenCalledWith({
-      requestId: 'request-1',
-      sessionId: 'session-1',
-      accountProfileId: 'system-default',
-    });
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'sessionControl.send')).toHaveLength(
+      2
+    );
+    rejectControl = true;
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).rejects.toThrow('local authorization denied');
+    expect(mocks.accountProfiles).not.toHaveBeenCalled();
+    expect(mocks.accountSwitch).not.toHaveBeenCalled();
     await runtime.dispose();
   });
   it('hot-attaches one cloud plane on auth without touching the local plane', async () => {

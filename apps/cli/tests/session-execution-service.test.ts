@@ -1,3 +1,7 @@
+import {
+  resolveSessionAccountMeta,
+  setSessionAccountBinding,
+} from '../src/session/session-account-binding-store';
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,6 +11,7 @@ import type { ContentBlock } from '@agentclientprotocol/sdk';
 import type { Logger } from '../src/utils/logger';
 import {
   SessionExecutionService,
+  type AccountSwitchAuthorization,
   type SessionExecutionServiceDeps,
 } from '../src/session/session-execution-service';
 import {
@@ -36,6 +41,9 @@ import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
+const allowAccountSwitch: AccountSwitchAuthorization = {
+  verifyAccess: async () => ({ outcome: 'allowed' }),
+};
 
 const createLaunchConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta => ({
   id: capabilityConfigId,
@@ -212,6 +220,87 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it.each(['missing', 'forged', 'denied', 'indeterminate', 'outage'])(
+    'rejects %s account-switch authority before any session read or mutation',
+    async (outcome) => {
+      const deps = createBaseDeps({});
+      const service = new SessionExecutionService(deps);
+      const authorization =
+        outcome === 'missing'
+          ? undefined
+          : outcome === 'forged'
+            ? ({
+                source: 'local',
+                userId: 'owner-user',
+                verifyAccess: 'allowed',
+              } as unknown as AccountSwitchAuthorization)
+            : {
+                verifyAccess: async () => {
+                  if (outcome === 'outage') throw new Error('authorization service unavailable');
+                  return outcome === 'denied'
+                    ? ({ outcome: 'denied', reason: 'not_visible' } as const)
+                    : ({
+                        outcome: 'indeterminate',
+                        cause: 'network',
+                        error: 'unavailable',
+                      } as const);
+                },
+              };
+      await expect(
+        service.switchAccount(
+          {
+            sessionId: 'protected-session' as SessionId,
+            accountProfileId: 'system-default',
+            requestId: 'unauthorized-switch',
+          },
+          authorization
+        )
+      ).rejects.toThrow(/authorization|access/);
+      expect(deps.workspaceDocument.repo.getDocMeta).not.toHaveBeenCalled();
+      expect(deps.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+      expect(deps.workspaceDocument.repo.upsertDocMeta).not.toHaveBeenCalled();
+      expect(deps.workspaceDocument.persistPendingChanges).not.toHaveBeenCalled();
+      expect(deps.sessionManager.getSession).not.toHaveBeenCalled();
+      expect(deps.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
+    }
+  );
+
+  it('checks the persisted local-project scope before opening the session document', async () => {
+    const deps = createBaseDeps({});
+    vi.mocked(deps.workspaceDocument.repo.getDocMeta).mockResolvedValue({
+      meta: { project: { kind: 'local', localProjectId: 'private-project' } },
+    } as never);
+    const verifyAccess = vi.fn<AccountSwitchAuthorization['verifyAccess']>(async (scope) =>
+      scope.localProjectId
+        ? { outcome: 'denied', reason: 'project_not_shared' }
+        : { outcome: 'allowed' }
+    );
+    const service = new SessionExecutionService(deps);
+    await expect(
+      service.switchAccount(
+        {
+          sessionId: 'protected-session' as SessionId,
+          accountProfileId: 'system-default',
+          requestId: 'private-project-switch',
+        },
+        { verifyAccess }
+      )
+    ).rejects.toThrow('access denied');
+    expect(verifyAccess).toHaveBeenLastCalledWith({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      sessionId: 'protected-session',
+      accountProfileId: 'system-default',
+      requestId: 'private-project-switch',
+      localProjectId: 'private-project',
+    });
+    expect(deps.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+    expect(deps.workspaceDocument.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(deps.workspaceDocument.persistPendingChanges).not.toHaveBeenCalled();
+    expect(deps.sessionManager.createSession).not.toHaveBeenCalled();
+  });
+
   it.each([
     'native',
     'continuation',
@@ -221,9 +310,18 @@ describe('SessionExecutionService', () => {
     'cli-crash',
     'commit-failed',
     'model-unavailable',
+    'access-revoked',
+    'access-outage',
   ])('runs the account handoff through the existing manager with %s outcome', async (outcome) => {
+    vi.mocked(setSessionAccountBinding).mockClear();
     const profiles = await import('../src/agent/account-profiles');
     const validate = vi.spyOn(profiles, 'validateAccountProfile').mockResolvedValue(undefined);
+    let preflightComplete = false;
+    if (outcome === 'access-revoked' || outcome === 'access-outage') {
+      validate.mockImplementation(async () => {
+        preflightComplete = true;
+      });
+    }
     if (outcome === 'deleted-profile') validate.mockRejectedValue(new Error('profile deleted'));
     const id = 'integrated-account-switch' as SessionId;
     const oldId = 'old-provider' as ACPSessionId;
@@ -330,18 +428,36 @@ describe('SessionExecutionService', () => {
     });
     const service = new SessionExecutionService(deps);
     try {
-      const result = service.switchAccount({
-        sessionId: id,
-        accountProfileId,
-        requestId: 'switch-integrated',
-      });
-      if (outcome === 'deleted-profile') {
-        await expect(result).rejects.toThrow('profile deleted');
+      const result = service.switchAccount(
+        {
+          sessionId: id,
+          accountProfileId,
+          requestId: 'switch-integrated',
+        },
+        {
+          verifyAccess: async () => {
+            if (preflightComplete && outcome === 'access-outage')
+              throw new Error('access service unavailable');
+            return preflightComplete
+              ? { outcome: 'denied', reason: 'not_visible' }
+              : { outcome: 'allowed' };
+          },
+        }
+      );
+      if (
+        outcome === 'deleted-profile' ||
+        outcome === 'access-revoked' ||
+        outcome === 'access-outage'
+      ) {
+        await expect(result).rejects.toThrow(
+          outcome === 'deleted-profile' ? 'profile deleted' : 'access'
+        );
         expect(stop).not.toHaveBeenCalled();
         expect(createSession).not.toHaveBeenCalled();
         expect(meta.accountProfileId).toBeUndefined();
         expect(meta.acpSessionId).toBe(oldId);
         expect(resident).not.toBeNull();
+        expect(deps.workspaceDocument.persistPendingChanges).not.toHaveBeenCalled();
       } else if (
         ['exhausted', 'usage-failed', 'cli-crash', 'commit-failed', 'model-unavailable'].includes(
           outcome
@@ -368,6 +484,14 @@ describe('SessionExecutionService', () => {
           continuation: outcome === 'continuation',
         });
         expect(meta.accountProfileId).toBe(accountProfileId);
+        expect(setSessionAccountBinding).toHaveBeenLastCalledWith(
+          { workspaceId: 'workspace-1', machineId: 'machine-1', sessionId: id },
+          expect.objectContaining({
+            accountProfileId,
+            acpSessionId: outcome === 'continuation' ? newId : oldId,
+            accountHandoff: null,
+          })
+        );
         expect(meta.accountContinuation).toEqual(
           outcome === 'continuation' ? { acpSessionId: newId } : undefined
         );
@@ -399,11 +523,14 @@ describe('SessionExecutionService', () => {
     } as never);
     const service = new SessionExecutionService(deps);
     await expect(
-      service.switchAccount({
-        sessionId: 'tool-session' as SessionId,
-        accountProfileId: '00000000-0000-4000-8000-00000000000b',
-        requestId: 'tool-switch',
-      })
+      service.switchAccount(
+        {
+          sessionId: 'tool-session' as SessionId,
+          accountProfileId: '00000000-0000-4000-8000-00000000000b',
+          requestId: 'tool-switch',
+        },
+        allowAccountSwitch
+      )
     ).rejects.toThrow('busy');
     expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
   });
@@ -2617,6 +2744,14 @@ describe('SessionExecutionService', () => {
             }
           : {}),
       };
+      const canonicalMeta = { ...meta };
+      if (accountProfileId) {
+        meta.accountProfileId = '00000000-0000-4000-8000-00000000000c';
+        meta.acpSessionId = 'forged-native-id' as ACPSessionId;
+        vi.mocked(resolveSessionAccountMeta).mockImplementationOnce(
+          async (_scope, raw) => ({ ...raw, ...canonicalMeta }) as SessionMeta
+        );
+      }
       let history: unknown[] = [];
       const sessionDoc = {
         getMetaState: vi.fn(async () => meta),
@@ -6070,11 +6205,14 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({});
     const service = new SessionExecutionService(deps);
     await expect(
-      service.switchAccount({
-        sessionId: 'missing-session' as SessionId,
-        accountProfileId: 'system-default',
-        requestId: 'missing-switch',
-      })
+      service.switchAccount(
+        {
+          sessionId: 'missing-session' as SessionId,
+          accountProfileId: 'system-default',
+          requestId: 'missing-switch',
+        },
+        allowAccountSwitch
+      )
     ).rejects.toThrow('not found');
     expect(deps.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
   });
@@ -6585,3 +6723,12 @@ describe('SessionExecutionService', () => {
     expect(fetchAcpCapabilities).toHaveBeenCalledTimes(2);
   });
 });
+
+// Fixtures model trusted local bindings; filesystem authority has separate regression coverage.
+vi.mock('../src/session/session-account-binding-store', () => ({
+  resolveSessionAccountMeta: vi.fn(async (_scope: unknown, meta: SessionMeta) => meta),
+  getSessionAccountBinding: vi.fn(async () => null),
+  setSessionAccountBinding: vi.fn(async () => {}),
+  updateSessionAccountNativeId: vi.fn(async () => {}),
+  clearSessionAccountBinding: vi.fn(async () => {}),
+}));

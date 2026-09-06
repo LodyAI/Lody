@@ -1,3 +1,4 @@
+import { updateSessionAccountNativeId } from './session-account-binding-store';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
 import path from 'path';
@@ -1259,6 +1260,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const accountScope = {
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        sessionId,
+      };
+      await updateSessionAccountNativeId(accountScope, acpSessionId as ACPSessionId);
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
       return session;
     } catch (error) {
@@ -1519,6 +1526,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
     if (!agentStart?.deferAcpSessionIdPersistence) {
+      await updateSessionAccountNativeId(
+        { workspaceId: this.workspaceId, machineId: this.machineId, sessionId },
+        acpSessionId as ACPSessionId
+      );
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
     }
     this.logger.debug(`[${sessionId}] ACP session ID persisted to doc`);

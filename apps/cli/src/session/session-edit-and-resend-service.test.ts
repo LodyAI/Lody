@@ -1,3 +1,4 @@
+import { updateSessionAccountNativeId } from './session-account-binding-store';
 import { describe, expect, it, vi } from 'vitest';
 import {
   SessionStatusFactory,
@@ -188,6 +189,10 @@ describe('SessionEditAndResendService', () => {
 
     await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: true });
 
+    expect(updateSessionAccountNativeId).toHaveBeenCalledWith(
+      { workspaceId: 'workspace-1', machineId: 'machine-1', sessionId },
+      'acp-new'
+    );
     expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
     expect(harness.events).toEqual([
       'barrier-acquire',
@@ -311,3 +316,12 @@ describe('SessionEditAndResendService', () => {
     expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
   });
 });
+
+// Fixtures model trusted local bindings; filesystem authority has separate regression coverage.
+vi.mock('./session-account-binding-store', () => ({
+  resolveSessionAccountMeta: vi.fn(async (_scope: unknown, meta: SessionMeta) => meta),
+  getSessionAccountBinding: vi.fn(async () => null),
+  setSessionAccountBinding: vi.fn(async () => {}),
+  updateSessionAccountNativeId: vi.fn(async () => {}),
+  clearSessionAccountBinding: vi.fn(async () => {}),
+}));

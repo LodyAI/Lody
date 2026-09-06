@@ -1,4 +1,8 @@
 import {
+  resolveSessionAccountMeta,
+  updateSessionAccountNativeId,
+} from './session-account-binding-store';
+import {
   buildPendingUserHistoryEntry,
   getServerNow,
   getSessionRoomId,
@@ -114,7 +118,18 @@ export class SessionEditAndResendService {
       );
     }
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(spec.sessionId);
-    const meta = await sessionDoc.getMetaState();
+    const meta = await sessionDoc.getMetaState().then((raw) =>
+      raw
+        ? resolveSessionAccountMeta(
+            {
+              workspaceId: this.deps.workspaceId,
+              machineId: this.deps.machineId,
+              sessionId: spec.sessionId,
+            },
+            raw
+          )
+        : raw
+    );
     if (!meta) {
       return sessionEditAndResendFailure(spec, 'SESSION_NOT_FOUND', 'Session was not found.');
     }
@@ -218,7 +233,18 @@ export class SessionEditAndResendService {
         preparedSessionId = prepared.sessionId as ACPSessionId;
 
         const [freshMeta, freshHistory] = await Promise.all([
-          sessionDoc.getMetaState(),
+          sessionDoc.getMetaState().then((raw) =>
+            raw
+              ? resolveSessionAccountMeta(
+                  {
+                    workspaceId: this.deps.workspaceId,
+                    machineId: this.deps.machineId,
+                    sessionId: spec.sessionId,
+                  },
+                  raw
+                )
+              : raw
+          ),
           sessionDoc.getHistory(),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
@@ -307,7 +333,18 @@ export class SessionEditAndResendService {
           await this.deps.executionService.waitForTurnRelease(spec.sessionId, activeTurnId);
         }
 
-        const preCommitMeta = await sessionDoc.getMetaState();
+        const preCommitMeta = await sessionDoc.getMetaState().then((raw) =>
+          raw
+            ? resolveSessionAccountMeta(
+                {
+                  workspaceId: this.deps.workspaceId,
+                  machineId: this.deps.machineId,
+                  sessionId: spec.sessionId,
+                },
+                raw
+              )
+            : raw
+        );
         const preCommitExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (
           !preCommitMeta ||
@@ -389,6 +426,14 @@ export class SessionEditAndResendService {
           return [...prefix, replacement];
         });
         try {
+          await updateSessionAccountNativeId(
+            {
+              workspaceId: this.deps.workspaceId,
+              machineId: this.deps.machineId,
+              sessionId: spec.sessionId,
+            },
+            preparedSessionId
+          );
           await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(spec.sessionId), {
             acpSessionId: preparedSessionId,
             status: SessionStatusFactory.idle(),
@@ -429,6 +474,14 @@ export class SessionEditAndResendService {
           await this.deps.workspaceDocument
             .persistPendingChanges('session-edit-and-resend-rollback')
             .catch(() => {});
+          await updateSessionAccountNativeId(
+            {
+              workspaceId: this.deps.workspaceId,
+              machineId: this.deps.machineId,
+              sessionId: spec.sessionId,
+            },
+            meta.acpSessionId
+          );
           throw error;
         }
 

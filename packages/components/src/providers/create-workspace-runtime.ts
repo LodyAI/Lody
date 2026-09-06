@@ -1971,16 +1971,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         ) ?? null
       );
     }
-    if (!cloudPlaneEnabled) throw new Error('Machine RPC is unavailable');
-    const client = await getMachineRpcClient(message.machineId);
-    return client.requestAccountProfiles({
-      requestId: message.requestId,
-      configId: message.configId,
-      cliType: message.cliType,
-      agentType: message.agentType,
-      action: message.action,
-      label: message.label,
-    });
+    throw new Error('Account profiles require a local connection to this machine.');
   };
 
   const requestSessionAccountSwitch = async (
@@ -2001,13 +1992,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         ) ?? null
       );
     }
-    if (!cloudPlaneEnabled) throw new Error('Machine RPC is unavailable');
-    const client = await getMachineRpcClient(message.machineId);
-    return client.requestSessionAccountSwitch({
-      requestId: message.requestId,
-      sessionId: message.sessionId,
-      accountProfileId: message.accountProfileId,
-    });
+    throw new Error('Account switching requires a local connection to this machine.');
   };
   const dispatchMachineAcpAuthenticateViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-authenticate' }>

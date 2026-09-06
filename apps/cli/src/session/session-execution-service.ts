@@ -1,4 +1,9 @@
 import {
+  getSessionAccountBinding,
+  setSessionAccountBinding,
+  resolveSessionAccountMeta,
+} from './session-account-binding-store';
+import {
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -406,6 +411,18 @@ const isSessionTurnHalted = (error: unknown): error is SessionTurnHalted => {
 function truncateAnalyticsString(value: string, maxLength = 1_000): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
+
+export type AccountSwitchAuthorization = {
+  /** Supplied out-of-band by trusted local dispatch, never decoded from the request. */
+  verifyAccess: (scope: {
+    workspaceId: WorkspaceId;
+    machineId: MachineId;
+    sessionId: SessionId;
+    accountProfileId: string;
+    requestId: string;
+    localProjectId?: string;
+  }) => Promise<MachineAccessVerification>;
+};
 
 export type SessionExecutionServiceDeps = {
   resolveAccountSwitchUser?: (userId: string) => Promise<{ name: string; email: string }>;
@@ -1051,22 +1068,67 @@ export class SessionExecutionService {
     };
   }
 
-  async switchAccount(request: {
-    sessionId: SessionId;
-    accountProfileId: string;
-    requestId: string;
-  }): Promise<AccountHandoffResult> {
-    const { sessionId } = request;
+  async switchAccount(
+    request: {
+      sessionId: SessionId;
+      accountProfileId: string;
+      requestId: string;
+    },
+    authorization?: AccountSwitchAuthorization
+  ): Promise<AccountHandoffResult> {
+    if (!authorization || typeof authorization.verifyAccess !== 'function') {
+      throw new Error('Account switch authorization is required.');
+    }
+    // Bind all later checks and writes to the exact request admitted at entry.
+    const switchRequest = Object.freeze({
+      sessionId: request.sessionId,
+      accountProfileId: request.accountProfileId,
+      requestId: request.requestId,
+    });
+    const { sessionId } = switchRequest;
+    const verifyAccess = authorization.verifyAccess;
+    const assertAccess = async (meta?: Pick<SessionMeta, 'project'>): Promise<void> => {
+      let access: MachineAccessVerification;
+      try {
+        access = await verifyAccess({
+          ...switchRequest,
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          ...(meta?.project?.kind === 'local'
+            ? { localProjectId: meta.project.localProjectId }
+            : {}),
+        });
+      } catch {
+        throw new Error(
+          'Account switch access could not be verified. Retry when access is available.'
+        );
+      }
+      if (access?.outcome === 'denied') throw new Error('Account switch access denied.');
+      if (access?.outcome !== 'allowed') {
+        throw new Error(
+          'Account switch access could not be verified. Retry when access is available.'
+        );
+      }
+    };
+    await assertAccess();
     const existing = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     if (!existing || isLoroRepoDocDeleted(existing)) throw new Error('Session was not found.');
+    await assertAccess(existing.meta as SessionMeta | undefined);
     const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const accountScope = {
+      workspaceId: this.deps.workspaceId,
+      machineId: this.deps.machineId,
+      sessionId,
+    };
+    let localAccountMeta: SessionMeta | undefined;
     let launchConfig: SessionConfig | undefined;
     let conversation: ReturnType<typeof resolveSessionConversationConfig> = {};
     let activateCandidateEvents: (() => void) | undefined;
-    const result = await switchSessionAccount(request, {
+    const result = await switchSessionAccount(switchRequest, {
       acquire: () => this.tryAcquireSessionRewriteBarrier(sessionId),
       assertIdle: async () => {
         const meta = await doc.getMetaState();
+        await assertAccess(meta);
         const history = await doc.getHistory();
         const execution = this.getExecutionSnapshot(sessionId);
         const legacyMeta = meta as (SessionMeta & SessionLegacyMetaFields) | undefined;
@@ -1096,7 +1158,8 @@ export class SessionExecutionService {
         ) {
           throw new Error('Account switching is available for builtin Codex and Claude only.');
         }
-        return meta;
+        localAccountMeta = await resolveSessionAccountMeta(accountScope, meta);
+        return localAccountMeta;
       },
       validate: async (meta, accountProfileId) => {
         const resolved = await resolveSessionLaunchConfig({
@@ -1152,6 +1215,16 @@ export class SessionExecutionService {
       checkpoint: async (patch) => {
         await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), patch);
         await this.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
+        if (!localAccountMeta) throw new Error('Account binding source is unavailable.');
+        const next = { ...localAccountMeta, ...patch };
+        await setSessionAccountBinding(accountScope, {
+          accountProfileId: next.accountProfileId,
+          acpSessionId: next.acpSessionId,
+          accountHandoff: next.accountHandoff,
+          accountTransitions: next.accountTransitions,
+          accountContinuation: next.accountContinuation,
+        });
+        localAccountMeta = next;
       },
       stop: async () => {
         await this.deps.sessionManager.requestSessionTerminate(sessionId, false);
@@ -3558,7 +3631,15 @@ export class SessionExecutionService {
       ctx: VisibleSessionTurnContext
     ): Effect.Effect<ISession, unknown, Scope.Scope> =>
       Effect.gen(function* () {
-        const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+        const rawMeta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+        const meta = rawMeta
+          ? yield* self.tryPromise(() =>
+              resolveSessionAccountMeta(
+                { workspaceId: self.deps.workspaceId, machineId: self.deps.machineId, sessionId },
+                rawMeta
+              )
+            )
+          : rawMeta;
         project = project ?? self.resolveProjectFromMeta(meta, message.project?.branch);
         const localProjectId = project?.kind === 'local' ? project.localProjectId : undefined;
         const restoreWorkdir = localProjectId
@@ -3628,7 +3709,9 @@ export class SessionExecutionService {
 
         // A pre-switch input config can still name the former provider session.
         const requestedResumeSessionId =
-          meta?.accountTransitions?.length || meta?.accountHandoff
+          resolveAccountProfileId(meta?.accountProfileId) !== 'system-default' ||
+          meta?.accountTransitions?.length ||
+          meta?.accountHandoff
             ? undefined
             : acpSessionConfig.resume;
         const storedResumeSessionId = resolveResumableAcpSessionId(meta);
@@ -4070,7 +4153,15 @@ export class SessionExecutionService {
           );
 
         bindReadySession(readySession);
-        const bindingMeta = yield* self.tryPromise(() => sessionDoc.getMetaState());
+        const bindingMeta = yield* self.tryPromise(async () => {
+          const raw = await sessionDoc.getMetaState();
+          return raw
+            ? await resolveSessionAccountMeta(
+                { workspaceId: self.deps.workspaceId, machineId: self.deps.machineId, sessionId },
+                raw
+              )
+            : raw;
+        });
         if (bindingMeta?.accountContinuation) {
           const history = yield* self.tryPromise(() => sessionDoc.getHistory());
           replayPromptResult = buildReplayPromptFromHistory({
@@ -4125,6 +4216,14 @@ export class SessionExecutionService {
                   accountContinuation: null,
                 });
                 await self.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
+                const scope = {
+                  workspaceId: self.deps.workspaceId,
+                  machineId: self.deps.machineId,
+                  sessionId,
+                };
+                const binding = await getSessionAccountBinding(scope);
+                if (binding)
+                  await setSessionAccountBinding(scope, { ...binding, accountContinuation: null });
               })
               .pipe(
                 Effect.catchAll(() =>
@@ -4445,7 +4544,13 @@ export class SessionExecutionService {
       prepareOptions?.sessionDoc ??
       (await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId));
 
-    const existingMeta = await sessionDoc.getMetaState();
+    const rawExistingMeta = await sessionDoc.getMetaState();
+    const existingMeta = rawExistingMeta
+      ? await resolveSessionAccountMeta(
+          { workspaceId: this.deps.workspaceId, machineId: this.deps.machineId, sessionId },
+          rawExistingMeta
+        )
+      : rawExistingMeta;
     // A persisted ACP session id proves that this direct local Session has run
     // before. It can later be re-initialized when that ACP session is no longer
     // resumable. Its stored branch was only a snapshot from the original
