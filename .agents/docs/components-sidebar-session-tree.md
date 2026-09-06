@@ -48,14 +48,30 @@ opener is ranked by its freshest opened Session. Without that, nesting would bur
 just-updated row under a stale opener and silently break the ordering contract of
 Updated mode.
 
-## The leading slot
+## The leading slot, and why status left it
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
 widens the shared leading slot from 14px to 26px, which produces the 12px title indent
-without shifting the row background. Status outranks the tree because a node can show
-only one thing at its centre: an active child drops its trunk and elbow, and an active
-opener drops its disclosure. Gating the opener on the whole activity set rather than
-`isWorking` alone matters because the disclosure branch replaces the indicator — an
-unread opener would otherwise render a chevron and lose its unread dot. The context
-menu's expand/collapse item is then the only way to fold a busy opener, so it must stay
-wired.
+without shifting the row background.
+
+That slot used to hold status as well, with status winning: an active child dropped its
+trunk and elbow, and an active opener dropped its disclosure, because a node can show
+only one thing at its centre. The cost of that rule was backwards. Working, unread, and
+waiting rows are precisely the ones a user is tracking through a tree, and they were the
+only rows whose nesting silently disappeared — a group of opened Sessions looked like a
+group right up to the moment any of it started running, and then looked like a flat list
+with a stray indent.
+
+So status moved to the row's END slot instead, where it replaces the resting metric
+cluster (line diff, `Mergeable`, worktree glyph, PR icon, time) for as long as it lasts.
+Both halves of that are deliberate. The leading slot now draws the tree unconditionally,
+so nesting is a stable fact about the list rather than a function of activity. And the
+end slot still shows one thing at a time: a running row reads `[├─ title ......... ◌]`,
+with nothing competing for the right edge and more room for the title. Nothing is lost —
+the diff, branch, and PR detail were already in the desktop hover info card, which is
+where a user goes when they want numbers rather than a glance.
+
+The mobile chat rows still keep status on their leading node; their geometry (48px
+indent, a selection checkbox in the same slot, a chevron that has to sit outside the row
+button and lift above the edge-back swipe zone) is different enough that the change is a
+separate one to make.

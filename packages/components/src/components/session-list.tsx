@@ -952,9 +952,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ) : null}
                 <div className="flex min-w-0 items-center gap-1.5">
                   <SessionRowLeadingSlot
-                    isWaitingPermission={session.isWaitingPermission}
-                    isWorking={session.isWorking}
-                    hasUnreadMessages={session.hasUnreadMessages}
                     showMenuButton={hasMenuActions}
                     menuLabel={moreActionsLabel}
                     openedByTree={openedByTreeSlot}
@@ -986,6 +983,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   </div>
                   {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
                   <SidebarRowEndSlot
+                    isWaitingPermission={session.isWaitingPermission}
+                    isWorking={session.isWorking}
+                    hasUnreadMessages={session.hasUnreadMessages}
                     restIcon={
                       isChatSession ? (
                         <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
