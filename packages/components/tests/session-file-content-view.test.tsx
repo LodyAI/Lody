@@ -51,6 +51,11 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
 
+const downloadBytesAsFile = vi.fn();
+vi.mock('../src/lib/download-file', () => ({
+  downloadBytesAsFile: (...args: unknown[]) => downloadBytesAsFile(...args),
+}));
+
 const monacoMockState = vi.hoisted(() => ({
   mountCount: 0,
   unmountCount: 0,
@@ -1284,6 +1289,15 @@ describe('SessionFileContentView', () => {
 
     expect(view.querySelector('[data-testid="managed-html-preview"]')).not.toBeNull();
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();
+    expect(view.querySelector('button[aria-label="Reload"]')).not.toBeNull();
+    expect(view.querySelector('button[aria-label="Refresh"]')).toBeNull();
+
+    const openFile = vi.spyOn(provider, 'openFile');
+    await act(async () => {
+      view.querySelector<HTMLButtonElement>('button[aria-label="Reload"]')?.click();
+    });
+    await flushMicrotasks();
+    expect(openFile).toHaveBeenCalledWith('artifacts/result.html');
   });
 
   it('previews the latest editor text instead of the opened HTML snapshot', async () => {
@@ -1338,6 +1352,50 @@ describe('SessionFileContentView', () => {
     await flushMicrotasks();
     expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
       '<h1>Edited</h1>'
+    );
+  });
+
+  it('renders a download action in the toolbar and downloads HTML file content', async () => {
+    downloadBytesAsFile.mockClear();
+    const provider = createFakeSessionFileProvider({
+      files: [
+        {
+          path: 'artifacts/result.html',
+          fileId: 't:result-html',
+          kind: 'text',
+          sourceState: 'live-readonly',
+        },
+      ],
+      snapshots: {
+        'artifacts/result.html': { kind: 'text', text: '<!doctype html><h1>Hello</h1>' },
+      },
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'artifacts/result.html',
+        fileId: 't:result-html',
+        fileProvider: provider,
+        fileProviderPending: false,
+        htmlPreviewRequestSeq: 1,
+      })
+    );
+    await flushMicrotasks();
+
+    const downloadButton = view.querySelector<HTMLButtonElement>(
+      'button[aria-label="Download file"]'
+    );
+    expect(downloadButton).not.toBeNull();
+
+    await act(async () => {
+      downloadButton?.click();
+    });
+
+    expect(downloadBytesAsFile).toHaveBeenCalledTimes(1);
+    expect(downloadBytesAsFile).toHaveBeenCalledWith(
+      'artifacts/result.html',
+      new TextEncoder().encode('<!doctype html><h1>Hello</h1>')
     );
   });
 
