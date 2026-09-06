@@ -36,6 +36,7 @@ import {
   buildAskUserQuestionElicitationResponse,
   formatMcpResolutionProblem,
   getServerNow,
+  isRegistryCursorAgent,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -77,7 +78,6 @@ import {
   parseLodyExtensionMessage,
   parseRateLimitsSnapshot,
 } from './lody-acp-extension';
-import { isRegistryCursorAgent } from './cursor-acp';
 
 /**
  * Checks if an error is a transport-related error that may be transient.

@@ -8,7 +8,10 @@ import {
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
 } from 'acp-extension-dsh/profile';
-import { REGISTRY_ACP_AGENTS } from '@lody/shared';
+import {
+  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
+  REGISTRY_ACP_AGENTS,
+} from '@lody/shared';
 
 import {
   getAcpCapabilitySourceVersion,
@@ -101,6 +104,31 @@ describe('resolveBuiltinACPSetting', () => {
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' }, '0.36.0')).toBe(
       'builtin-kimi:0.36.0'
     );
+  });
+
+  it('keys registry Cursor capability versions on the parameterized model picker suffix', () => {
+    const cursorVersion = REGISTRY_ACP_AGENTS.find((agent) => agent.id === 'cursor')!.version;
+    expect(getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'cursor' })).toBe(
+      `cursor@${cursorVersion}${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`
+    );
+
+    const otherRegistryAgent = REGISTRY_ACP_AGENTS.find((agent) => agent.id !== 'cursor')!;
+    expect(
+      getAcpCapabilitySourceVersion({
+        cliType: 'registry',
+        agentType: otherRegistryAgent.id,
+      })
+    ).toBe(`${otherRegistryAgent.id}@${otherRegistryAgent.version}`);
+
+    const customCursorVersion = getAcpCapabilitySourceVersion({
+      cliType: 'custom',
+      agentType: 'cursor',
+      customAcp: { command: 'cursor-agent' },
+    });
+    expect(customCursorVersion.startsWith('custom:')).toBe(true);
+    expect(
+      customCursorVersion.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX)
+    ).toBe(false);
   });
 
   it('launches DeepSeek Harness through the pinned ACP npm composition', async () => {

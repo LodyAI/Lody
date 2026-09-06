@@ -1,5 +1,5 @@
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
-import type { AcpConfigOptionSummary, AgentConfigCliType } from '@lody/shared';
+import type { AcpConfigOptionSummary } from '@lody/shared';
 import { z } from 'zod';
 
 import { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
@@ -8,15 +8,6 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 export const CURSOR_LIST_AVAILABLE_MODELS_METHOD = 'cursor/list_available_models';
-
-/**
- * Identity, not command line, decides the opt-in: a custom or builtin config that
- * happens to launch the same binary keeps standard ACP behaviour.
- */
-export const isRegistryCursorAgent = (identity: {
-  cliType: AgentConfigCliType | null | undefined;
-  agentType: string | null | undefined;
-}): boolean => identity.cliType === 'registry' && identity.agentType === 'cursor';
 
 export type FetchCursorModelCatalogParams = {
   client: Pick<AgentClient, 'requestExtMethod'>;
