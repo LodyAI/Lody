@@ -749,6 +749,24 @@ const cursorCatalogCapability = (): AcpCapabilityCacheEntry => ({
 });
 
 describe('per-model config catalog run config', () => {
+  it('publishes Fast availability for every known model without guessing unknown models', () => {
+    const capability = cursorCatalogCapability();
+    const models = summarizeAgentRunConfigCapabilities(capability).models;
+    expect(models.map(({ id, fastMode }) => ({ id, fastMode }))).toEqual([
+      { id: 'opus', fastMode: true },
+      { id: 'sonnet', fastMode: false },
+      { id: 'gemini', fastMode: false },
+      { id: 'gpt', fastMode: true },
+      { id: 'empty', fastMode: false },
+    ]);
+    delete capability.configOptionsByModel;
+    expect(
+      summarizeAgentRunConfigCapabilities(capability).models.every(
+        (model) => !('fastMode' in model)
+      )
+    ).toBe(true);
+  });
+
   it('writes gpt extra-high onto reasoning and marks that id pre-validated', () => {
     const resolved = resolveAgentRunConfigSelection(
       { modelId: 'gpt', reasoningEffort: 'extra-high' },

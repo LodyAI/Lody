@@ -10,7 +10,6 @@ import {
   getAcpCapabilityCacheKey,
   getActiveTaskPrLinks,
   getActiveTaskSessionLinks,
-  getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
   getWorkspaceFlockDocId,
   getServerNow,
@@ -18,7 +17,6 @@ import {
   hasAgentRunConfigSelection,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
-  readMachineFlockRowsFromFlock,
   readWorkspaceFlockRowsFromFlock,
   listWorkspaceAgentRoles,
   summarizeAgentRunConfigCapabilities,
@@ -119,6 +117,7 @@ import {
   readLocalProjectGitStateOnMachine,
   readSessionLiveStatusesMany,
   readSessionMachineAccess,
+  readAgentAcpCapability,
   selectDefaultAgentConfigForCreate,
   resolveTurnDispatchConfig,
   sendSessionChatResult,
@@ -2403,7 +2402,7 @@ const summarizeAgentConfig = (config: AgentConfigMeta, capability?: AcpCapabilit
     // not reported capabilities on this Machine yet.
     //
     // Reasoning effort and fast mode are per model. Prefer a model entry's own
-    // reasoningEffortValues; the top-level list and fastMode were measured under
+    // reasoningEffortValues and optional fastMode; the top-level controls were measured under
     // measuredForModelId and may differ for another model.
     runConfig,
   };
@@ -2415,14 +2414,25 @@ const summarizeAgentConfig = (config: AgentConfigMeta, capability?: AcpCapabilit
  * advertises a value create would reject.
  */
 const readMachineAcpCapabilities = async (
+  auth: AuthContext,
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
-  machineId: MachineId
+  agentConfigs: AgentConfigMeta[]
 ): Promise<Record<string, AcpCapabilityCacheEntry>> => {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  return getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-  );
+  const capabilities: Record<string, AcpCapabilityCacheEntry> = {};
+  // Refresh only the bounded, authorized selection; do not probe the entire Machine catalog.
+  for (const config of agentConfigs) {
+    const capability = await readAgentAcpCapability({
+      auth,
+      manager,
+      workspaceId,
+      machineId: config.machineId,
+      agentConfigId: config.id,
+      agent: config,
+    });
+    if (capability) capabilities[getAcpCapabilityCacheKey(config.id)] = capability;
+  }
+  return capabilities;
 };
 
 const buildSessionWorkContext = async (
@@ -2589,9 +2599,10 @@ const buildSessionCreateOptions = async (
       })
       .slice(0, MAX_MCP_CREATE_OPTION_MATCHES);
     const acpCapabilities = await readMachineAcpCapabilities(
+      auth,
       manager,
       workspaceId,
-      selectedMachine.id
+      agentConfigs
     );
     const localProjectQuery = normalizeCliValue(input.localProjectQuery)?.toLowerCase();
     const currentLocalProjectId =

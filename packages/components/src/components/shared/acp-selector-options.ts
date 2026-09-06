@@ -11,6 +11,7 @@ import {
   getBuiltinDefaultModeId,
   getStaticBuiltinAcpCapabilities,
   isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
+  resolveAcpConfigOptionsForModel,
   type AcpCapabilityAuthority,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -215,6 +216,24 @@ type ResolvedConfigOptions = {
   modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
+const isAcpProbedTarget = (target?: Pick<AcpSelectorTarget, 'cliType'>): boolean =>
+  target?.cliType === 'registry' || target?.cliType === 'custom';
+
+/** Read the channel the composer writes; the live session's model can lag a draft selection. */
+const resolveComposerTargetModelId = (
+  configOptions: AcpConfigOptionSummary[] | undefined,
+  target?: AcpSelectorTarget
+): string | undefined => {
+  const modelOption = configOptions?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const storedModel = modelOption ? target?.configOptionValues?.[modelOption.id] : undefined;
+  const fromConfigOption =
+    typeof storedModel === 'string' && storedModel !== '' ? storedModel : undefined;
+  const fromPicker = target?.selectedModelId || undefined;
+  return isAcpProbedTarget(target) ? (fromConfigOption ?? fromPicker) : fromPicker;
+};
+
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
   if (!target?.cliType || !target.agentType) {
     return { authority: 'unavailable', modelReasoningEfforts: undefined };
@@ -237,7 +256,14 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       );
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions, modelReasoningEfforts };
+        return {
+          authority,
+          configOptions: resolveAcpConfigOptionsForModel(
+            capability,
+            resolveComposerTargetModelId(capability.configOptions, target)
+          ),
+          modelReasoningEfforts,
+        };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -270,7 +296,10 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       }
       return {
         authority,
-        configOptions: synthesized.length > 0 ? synthesized : undefined,
+        configOptions: resolveAcpConfigOptionsForModel(
+          { ...capability, configOptions: synthesized.length > 0 ? synthesized : undefined },
+          resolveComposerTargetModelId(synthesized, target)
+        ),
         modelReasoningEfforts,
       };
     }
@@ -581,12 +610,15 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions, modelReasoningEfforts } =
-    resolveConfigOptions(target);
+  const {
+    authority: capabilityAuthority,
+    configOptions,
+    modelReasoningEfforts,
+  } = resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
-  const isAcpProbed = target?.cliType === 'registry' || target?.cliType === 'custom';
+  const isAcpProbed = isAcpProbedTarget(target);
   const modeConfigOption = configOptions?.find(
     (opt) => opt.category === 'mode' && opt.type === 'select' && opt.id !== 'interaction_mode'
   );

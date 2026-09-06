@@ -11,6 +11,7 @@ import {
   machineFlockKeys,
   serializeMachineFlockKey,
   type AgentConfigId,
+  type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
@@ -328,6 +329,90 @@ describe('useMachineFlockRows', () => {
 
     const capabilityRowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
     expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(capability);
+  });
+
+  it('keeps the complete Cursor row on refresh and observes a subsequent catalog clear', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const store = createStore();
+    const workspaceId = 'workspace-cursor-refresh-catalog' as WorkspaceId;
+    const machineId = 'machine-cursor-refresh-catalog' as MachineId;
+    const configId = 'config-cursor-refresh-catalog' as AgentConfigId;
+    const key = machineFlockKeys.acpCapability(configId);
+    const rowId = serializeMachineFlockKey(key);
+    const stripped: AcpCapabilityCacheEntry = {
+      cliType: 'registry',
+      agentType: 'cursor',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      sourceVersion: 'cursor@test+parameterized-model-picker',
+      fetchedAt: 2,
+      modes: [],
+      models: [],
+      configOptions: [],
+    };
+    let current: AcpCapabilityCacheEntry = { ...stripped, configOptionsByModel: { a: [] } };
+    let emitFlockBatch: ((batch: { events: MachineFlockEvent[] }) => void) | undefined;
+    const handle = {
+      flock: {
+        scan: () => [{ key, value: current }],
+        subscribe: (listener: (batch: { events: MachineFlockEvent[] }) => void) => {
+          emitFlockBatch = listener;
+          return () => undefined;
+        },
+      },
+      syncOnce: async () => ({ ok: true, transports: [] }),
+    };
+    const runtime = {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      repo: { openFlockDoc: async () => handle },
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          remoteMachineIds: [],
+          families: ['acpCapability'],
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+    await act(async () => {
+      await resyncMachineFlockRows(runtime, machineId, {
+        refreshedCapability: { configId, value: stripped },
+      });
+    });
+    expect(updates.at(-1)?.[rowId]?.value).toEqual(current);
+    expect(updates.at(-1)?.[rowId]?.value).toHaveProperty('configOptionsByModel', { a: [] });
+
+    // An RPC can finish before the room delivers its row. The later Flock
+    // observation must replace the catalog without another manual refresh.
+    await act(async () => {
+      await resyncMachineFlockRows(runtime, machineId, {
+        refreshedCapability: { configId, value: { ...stripped, fetchedAt: 3 } },
+      });
+    });
+    expect(updates.at(-1)?.[rowId]?.value).toEqual(current);
+    current = { ...stripped, fetchedAt: 3, configOptionsByModel: { b: [] } };
+    act(() => emitFlockBatch?.({ events: [{ key, value: current }] }));
+    expect(updates.at(-1)?.[rowId]?.value).toEqual(current);
+
+    // A confirmed -32601 writes a complete row without a catalog. Never merge
+    // an older catalog back into this new observation.
+    current = { ...stripped, fetchedAt: 4 };
+    await act(async () => {
+      await resyncMachineFlockRows(runtime, machineId, {
+        refreshedCapability: { configId, value: current },
+      });
+    });
+    expect(updates.at(-1)?.[rowId]?.value).toEqual(current);
+    expect(updates.at(-1)?.[rowId]?.value).not.toHaveProperty('configOptionsByModel');
   });
 
   it('resolves ACP capabilities from Machine Flock over legacy machine meta', async () => {

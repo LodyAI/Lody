@@ -94,7 +94,13 @@ export type AgentRunConfigCapabilities = {
    * breakdown or a per-model option catalog; otherwise it is absent and only
    * the snapshot below applies.
    */
-  models: Array<{ id: string; name: string; reasoningEffortValues?: string[] }>;
+  models: Array<{
+    id: string;
+    name: string;
+    reasoningEffortValues?: string[];
+    /** Absent when no per-model catalog observation is available. */
+    fastMode?: boolean;
+  }>;
   /**
    * Effort values the agent reported for `measuredForModelId`. Agents rebuild
    * this list on every model switch, so it only describes that one model.
@@ -306,18 +312,18 @@ export const summarizeAgentRunConfigCapabilities = (
   return {
     models: listModels(capability).map((model) => {
       const legacyEfforts = perModelEfforts?.[model.id];
-      if (legacyEfforts) {
-        return { ...model, reasoningEffortValues: legacyEfforts };
-      }
       if (!capability || !hasPerModelCatalogEntry(capability, model.id)) {
-        return model;
+        return legacyEfforts ? { ...model, reasoningEffortValues: legacyEfforts } : model;
       }
       const catalogEfforts = findReasoningEffortOptionIn(
         resolveAcpConfigOptionsForModel(capability, model.id)
       )?.options.map((value) => value.value);
       return {
         ...model,
-        ...(catalogEfforts ? { reasoningEffortValues: catalogEfforts } : {}),
+        ...(legacyEfforts || catalogEfforts
+          ? { reasoningEffortValues: legacyEfforts ?? catalogEfforts }
+          : {}),
+        fastMode: findFastModeOption(capability, model.id) !== undefined,
       };
     }),
     reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(

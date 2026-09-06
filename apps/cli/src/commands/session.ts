@@ -33,6 +33,10 @@ import {
   formatSessionQuotaRejection,
   FREE_SESSION_TURN_LIMIT,
   isBillingQuotaExempt,
+  isAcpCapabilityCacheEntryCurrent,
+  isRegistryCursorAgent,
+  machineSupportsCursorParameterizedModelPicker,
+  MachineAcpCapabilitiesRefreshResponseSchema,
   getAcpCapabilityCacheKey,
   getBuiltinDefaultModeId,
   getMachineFlockAcpCapabilities,
@@ -99,6 +103,7 @@ import {
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
 import { LoroDocumentManager, type SessionDocument } from '@/lib/loro/doc';
+import { withTimeout } from '@/lib/loro/timeout-utils';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import {
   canRequestMachineForCliToken,
@@ -1372,7 +1377,17 @@ export function applyAgentRunConfigSelection(
   if (!hasAgentRunConfigSelection(runConfig)) {
     return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
   }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const modelId =
+    runConfig.modelId ??
+    resolveAcpTargetModelId({
+      modelId: rest.modelId,
+      configOptionValues: rest.configOptionValues,
+      configOptions: capability?.configOptions,
+    });
+  const resolved = resolveAgentRunConfigSelection(
+    { ...runConfig, ...(modelId ? { modelId } : {}) },
+    capability
+  );
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
@@ -1636,15 +1651,22 @@ export function filterCompatibleInheritedTurnConfig(
   };
 }
 
-async function readAgentAcpCapability(args: {
+/** Call only after authorizing the target Machine. Cursor migration refreshes automatically. */
+export async function readAgentAcpCapability(args: {
+  auth: AuthContext;
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   agentConfigId?: AgentConfigMeta['id'];
+  agent: Pick<AgentConfigMeta, 'cliType' | 'agentType'>;
 }): Promise<AcpCapabilityCacheEntry | undefined> {
   if (!args.agentConfigId) {
     return undefined;
   }
+  const configId = args.agentConfigId;
+  const machine = (await args.manager.repo.getDocMeta(getMachineRoomId(args.machineId)))?.meta as
+    | MachineMeta
+    | undefined;
   await syncMachineFlockDocsForRead(
     args.manager,
     args.workspaceId,
@@ -1654,10 +1676,79 @@ async function readAgentAcpCapability(args: {
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
-  const capabilities = getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-  );
-  return capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
+  const readCurrent = () => {
+    const entry = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[getAcpCapabilityCacheKey(configId)];
+    return entry?.cliType === args.agent.cliType &&
+      entry.agentType === args.agent.agentType &&
+      isAcpCapabilityCacheEntryCurrent(entry, machine)
+      ? entry
+      : undefined;
+  };
+  const current = readCurrent();
+  if (
+    current ||
+    !isRegistryCursorAgent(args.agent) ||
+    !machineSupportsCursorParameterizedModelPicker(machine)
+  ) {
+    return current;
+  }
+
+  // The ACK can precede publication, and its compatibility payload omits the
+  // catalog. Subscribe before probing and wait for the complete current Flock row.
+  let resolveCurrent!: (entry: AcpCapabilityCacheEntry) => void;
+  const currentRow = new Promise<AcpCapabilityCacheEntry>((resolve) => {
+    resolveCurrent = resolve;
+  });
+  const observeCurrent = () => {
+    const entry = readCurrent();
+    if (entry) resolveCurrent(entry);
+  };
+  const unsubscribeFlock = handle.flock.subscribe(observeCurrent);
+  let disposed = false;
+  let room: Awaited<ReturnType<typeof handle.joinRoom>> | undefined;
+  const joining = handle.joinRoom().then((subscription) => {
+    if (disposed) subscription.unsubscribe();
+    else room = subscription;
+  });
+  try {
+    await withTimeout(
+      joining,
+      8_000,
+      'Automatic Cursor capability refresh could not join its Flock room.'
+    );
+    const response =
+      args.machineId === args.auth.machineId
+        ? MachineAcpCapabilitiesRefreshResponseSchema.parse(
+            (
+              await dispatchLocalControl({
+                type: 'machine/acp-capabilities-refresh',
+                machineId: args.machineId,
+                workspaceId: args.workspaceId,
+                configId,
+              })
+            ).find((message) => message.type === 'machine/acp-capabilities-refresh_response')
+          )
+        : await withMachineRpcClient(args, (client) =>
+            client.requestMachineAcpCapabilitiesRefresh({ configId, timeoutMs: 120_000 })
+          );
+    if (!response?.success) {
+      throw new Error(
+        `Automatic Cursor capability refresh failed: ${response?.error ?? 'no response'}`
+      );
+    }
+    observeCurrent();
+    return await withTimeout(
+      currentRow,
+      8_000,
+      'Automatic Cursor capability refresh did not provide a current capability row.'
+    );
+  } finally {
+    disposed = true;
+    unsubscribeFlock();
+    room?.unsubscribe();
+  }
 }
 
 export function resolveTurnDispatchConfigFromInputConfig(
@@ -2847,6 +2938,7 @@ export async function validateSessionCreateOptions(args: {
   );
   const resolved = await resolveCreateContext({ ...args, requester });
   return await resolveEffectiveSessionCreateDispatchConfig({
+    auth: args.auth,
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
     agentConfig: resolved.agentConfig,
@@ -2856,6 +2948,7 @@ export async function validateSessionCreateOptions(args: {
 }
 
 async function resolveEffectiveSessionCreateDispatchConfig(args: {
+  auth: AuthContext;
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   agentConfig: AgentConfigMeta;
@@ -2883,13 +2976,41 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     inheritedDispatchConfig?.configOptionValues !== undefined;
   const capability = needsCapability
     ? await readAgentAcpCapability({
+        auth: args.auth,
+        agent: args.agentConfig,
         manager: args.manager,
         workspaceId: args.workspaceId,
         machineId: args.agentConfig.machineId,
         agentConfigId: args.agentConfig.id,
       })
     : undefined;
-  const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
+  return withBuiltinDefaultTurnMode(
+    resolveSessionCreateDispatchConfig(dispatchConfig, inheritedDispatchConfig, capability),
+    args.agentConfig
+  );
+}
+
+export function resolveSessionCreateDispatchConfig(
+  dispatchConfig: ResolvedTurnDispatchConfig,
+  inheritedDispatchConfig: ResolvedTurnDispatchConfig | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
+): ResolvedTurnDispatchConfig {
+  const modelOption = capability?.configOptions?.find((option) => option.category === 'model');
+  const optionModelId = modelOption && dispatchConfig.configOptionValues?.[modelOption.id];
+  const explicitModelId =
+    dispatchConfig.runConfig?.modelId ??
+    dispatchConfig.modelId ??
+    (typeof optionModelId === 'string' ? optionModelId : undefined);
+  const merged = mergeTurnDispatchConfig(
+    { ...dispatchConfig, modelId: explicitModelId },
+    filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability, {
+      targetModelId: explicitModelId,
+    })
+  );
+  const requested = applyAgentRunConfigSelection(
+    { ...merged, runConfig: dispatchConfig.runConfig },
+    capability
+  );
   validateTurnModeAndModel(requested.config, capability);
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
@@ -2898,15 +3019,7 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     requested.config.modelId
   );
   return {
-    ...withBuiltinDefaultTurnMode(
-      mergeTurnDispatchConfig(
-        requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability, {
-          targetModelId: requested.config.modelId,
-        })
-      ),
-      args.agentConfig
-    ),
+    ...requested.config,
     inheritSessionDefaults: false,
   };
 }
@@ -3056,6 +3169,7 @@ export async function createSessionResult(
     taskId,
   } = resolved;
   const effectiveDispatchConfig = await resolveEffectiveSessionCreateDispatchConfig({
+    auth,
     manager,
     workspaceId: workspace.id as WorkspaceId,
     agentConfig,
@@ -3292,6 +3406,8 @@ export async function sendSessionChatResult(
   });
   if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
     const capability = await readAgentAcpCapability({
+      auth,
+      agent: session,
       manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
