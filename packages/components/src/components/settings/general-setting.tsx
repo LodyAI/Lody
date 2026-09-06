@@ -715,10 +715,25 @@ export function GeneralSettingsComponent() {
             <CliDaemonSetting />
             <CompactRow
               label={t('settings.general.autoLaunch.label', 'Launch at startup')}
-              helper={t(
-                'settings.general.autoLaunch.helper',
-                'Automatically run Lody when you sign in'
-              )}
+              helper={
+                <span className="flex flex-col gap-0.5">
+                  <span>
+                    {t(
+                      'settings.general.autoLaunch.helper',
+                      'Automatically run Lody when you sign in'
+                    )}
+                  </span>
+                  {autoLaunch.unsupported ? (
+                    <span className="text-destructive">
+                      {t(
+                        'settings.general.autoLaunch.unsupported',
+                        'This platform does not support launching at startup.'
+                      )}
+                    </span>
+                  ) : null}
+                </span>
+              }
+              alignTop={autoLaunch.unsupported}
             >
               {autoLaunch.enabledLoading ? (
                 <Loading size="sm" className="h-5 w-9" />
