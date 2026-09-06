@@ -17,6 +17,7 @@ import {
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { buildAgentPrompt } from '@/lib';
+import { filterAcpSessionConfigOptionValuesForTarget } from '@/lib/acp-session-config-selection';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import {
   buildSessionCreateAcpAnalyticsProperties,
@@ -24,6 +25,7 @@ import {
 } from '@/lib/session-create-analytics';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useTaskActions } from '@/hooks/use-task-actions';
+import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 
 export type TaskRunRequest = {
   taskId: TaskId;
@@ -70,6 +72,7 @@ export function useTaskRun() {
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { startSession, requestSessionDispatch } = useSessionActions();
   const { linkSession, updateTaskFields } = useTaskActions();
+  const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
 
   return useCallback(
     async (request: TaskRunRequest): Promise<TaskRunOutcome> => {
@@ -94,6 +97,16 @@ export function useTaskRun() {
       const project = request.projects[0];
       const brief = buildTaskBrief(request.title, request.body);
       const inputBlocks = [{ type: 'text' as const, text: `▶ ${request.title}` }];
+      const configOptionValues = filterAcpSessionConfigOptionValuesForTarget({
+        configId: config.id,
+        cliType: config.cliType,
+        agentType: config.agentType,
+        runtimeOverrides: config.runtimeOverrides,
+        machine: machines.get(config.machineId) ?? null,
+        selectedModeId: request.agent.modeId,
+        selectedModelId: request.agent.modelId,
+        configOptionValues: request.agent.configOptionValues,
+      });
       const inputConfig = buildSessionTurnInputConfig({
         inputBlocks,
         prompt: buildAgentPrompt(brief, config.prompt ?? ''),
@@ -101,7 +114,7 @@ export function useTaskRun() {
         agentType: config.agentType,
         modeId: request.agent.modeId,
         modelId: request.agent.modelId,
-        configOptionValues: request.agent.configOptionValues,
+        configOptionValues,
         taskToolsEnabled: true,
       });
       const pendingHistoryEntry = buildPendingUserHistoryEntry({
@@ -200,6 +213,7 @@ export function useTaskRun() {
     [
       agentConfigs,
       linkSession,
+      machines,
       postHog,
       requestSessionDispatch,
       router,

@@ -18,6 +18,7 @@ import {
   isConfigOptionValueValid,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
+import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 
 /**
  * The authoring state of one Agent Role, and the pure rules around it.
@@ -262,19 +263,13 @@ export const reconcileAgentRoleModelChange = (
     return next;
   }
 
-  const pruned: Record<string, string | boolean> = {};
-  let dropped = false;
-  for (const [configId, value] of Object.entries(next.configOptionValues)) {
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === configId
-    );
-    if (selector && isConfigOptionValueValid(selector, value)) {
-      pruned[configId] = value;
-    } else {
-      dropped = true;
-    }
+  const pruned = filterAcpSessionConfigOptionValues(
+    next.configOptionValues,
+    options.configOptionSelectors
+  );
+  if (Object.keys(pruned).length === Object.keys(next.configOptionValues).length) {
+    return next;
   }
-  if (!dropped) return next;
   return { ...next, configOptionValues: pruned };
 };
 

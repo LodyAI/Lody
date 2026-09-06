@@ -30,6 +30,7 @@ import {
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
+import { filterAcpSessionConfigOptionValuesForTarget } from '@/lib/acp-session-config-selection';
 import { cn } from '@/lib/utils';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
@@ -246,20 +247,23 @@ export function TaskAgentRunConfigMenu({
     [machines, selectedConfig]
   );
 
-  const selectorOptions = useAcpSelectorOptions(
-    selectedConfig
-      ? {
-          configId: selectedConfig.id,
-          cliType: selectedConfig.cliType,
-          agentType: selectedConfig.agentType,
-          selectedModeId: value?.modeId,
-          selectedModelId: value?.modelId,
-          configOptionValues: value?.configOptionValues,
-          runtimeOverrides: selectedConfig.runtimeOverrides,
-          machine: selectedMachine,
-        }
-      : undefined
+  const selectorTarget = useMemo(
+    () =>
+      selectedConfig
+        ? {
+            configId: selectedConfig.id,
+            cliType: selectedConfig.cliType,
+            agentType: selectedConfig.agentType,
+            selectedModeId: value?.modeId,
+            selectedModelId: value?.modelId,
+            configOptionValues: value?.configOptionValues,
+            runtimeOverrides: selectedConfig.runtimeOverrides,
+            machine: selectedMachine,
+          }
+        : undefined,
+    [selectedConfig, selectedMachine, value?.configOptionValues, value?.modeId, value?.modelId]
   );
+  const selectorOptions = useAcpSelectorOptions(selectorTarget);
 
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
   const ordered = useMemo(
@@ -394,10 +398,19 @@ export function TaskAgentRunConfigMenu({
   const patchConfigOption = useCallback(
     (configId: string, optionValue: AcpConfigOptionValue) => {
       if (!value?.agentConfigId) return;
-      const nextValues = {
+      let nextValues: Record<string, string> = {
         ...(value.configOptionValues ?? {}),
         [configId]: String(optionValue),
       };
+      if (selectorTarget && configId === modelConfigSelector?.configId) {
+        const filtered = filterAcpSessionConfigOptionValuesForTarget({
+          ...selectorTarget,
+          configOptionValues: nextValues,
+        });
+        nextValues = Object.fromEntries(
+          Object.entries(filtered).map(([key, filteredValue]) => [key, String(filteredValue)])
+        );
+      }
       commit({
         agentConfigId: value.agentConfigId as AgentConfigId,
         ...(value.modeId ? { modeId: value.modeId } : {}),
@@ -405,7 +418,7 @@ export function TaskAgentRunConfigMenu({
         configOptionValues: nextValues,
       });
     },
-    [commit, value]
+    [commit, modelConfigSelector?.configId, selectorTarget, value]
   );
 
   const selectAgentConfig = useCallback(
@@ -685,12 +698,25 @@ export function TaskAgentRunConfigMenu({
                   onSelect={() => {
                     if (!value?.agentConfigId) return;
                     if (modelOptions.length > 0) {
+                      const filtered = selectorTarget
+                        ? filterAcpSessionConfigOptionValuesForTarget({
+                            ...selectorTarget,
+                            selectedModelId: opt.value,
+                            configOptionValues: value.configOptionValues,
+                          })
+                        : (value.configOptionValues ?? {});
+                      const nextValues = Object.fromEntries(
+                        Object.entries(filtered).map(([key, optionValue]) => [
+                          key,
+                          String(optionValue),
+                        ])
+                      );
                       commit({
                         agentConfigId: value.agentConfigId as AgentConfigId,
                         modelId: opt.value,
                         ...(value.modeId ? { modeId: value.modeId } : {}),
-                        ...(value.configOptionValues
-                          ? { configOptionValues: value.configOptionValues }
+                        ...(Object.keys(nextValues).length > 0
+                          ? { configOptionValues: nextValues }
                           : {}),
                       });
                     } else if (modelConfigSelector) {

@@ -1,5 +1,6 @@
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
+  buildAcpSelectorOptions,
   isConfigOptionValueValid,
   normalizeCodexReasoningEffortSelectors,
   type AcpConfigOptionSelector,
@@ -320,3 +321,16 @@ export const filterAcpSessionConfigOptionValues = (
   }
   return filtered;
 };
+
+/**
+ * The config option values a target may keep or dispatch: only what the composed selectors of
+ * the model it names publish and accept. Durable pickers call it when their model changes so a
+ * previous model's keys are not persisted, and session starts call it so they are not dispatched.
+ */
+export const filterAcpSessionConfigOptionValuesForTarget = (
+  target: AcpSelectorTarget
+): Record<string, AcpConfigOptionValue> =>
+  filterAcpSessionConfigOptionValues(
+    target.configOptionValues,
+    buildAcpSelectorOptions(target).configOptionSelectors
+  );
