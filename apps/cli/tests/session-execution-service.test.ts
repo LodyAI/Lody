@@ -6131,6 +6131,99 @@ describe('SessionExecutionService', () => {
     expect(result.capability).not.toEqual(expect.objectContaining({ configOptionsByModel: null }));
   });
 
+  it('omits the stored per-model catalog from the refresh response capability', async () => {
+    const catalog = {
+      'model-a': [
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'true',
+          options: [{ value: 'true', name: 'On' }],
+        },
+      ],
+      'model-b': [],
+    };
+    const storedCapability = {
+      cliType: 'registry' as const,
+      agentType: 'cursor',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'registry:cursor:unknown',
+      modes: [],
+      models: [
+        { modelId: 'model-a', name: 'Model A' },
+        { modelId: 'model-b', name: 'Model B' },
+      ],
+      sessionFork: false,
+      acknowledgedSteer: false,
+      sessionForkWorktree: false,
+      fetchedAt: 1,
+      configOptionsByModel: catalog,
+    };
+    const updateAcpCapabilities = vi.fn(async () => storedCapability);
+    const fetchAcpCapabilities = vi.fn(async () => ({
+      modes: [],
+      models: storedCapability.models,
+      configOptionsByModel: catalog,
+      sessionFork: false,
+      acknowledgedSteer: false,
+    }));
+
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(),
+        updateAcpCapabilities,
+        getAgentConfigForMachineLaunch: vi.fn(async () =>
+          createLaunchConfig({
+            agentType: 'cursor',
+          })
+        ),
+      } as unknown as LoroDocumentManager,
+      fetchAcpCapabilities,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.refreshMachineAcpCapabilities({
+      type: 'machine/acp-capabilities-refresh',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      configId: capabilityConfigId,
+    });
+
+    // The catalog is written durably...
+    expect(updateAcpCapabilities).toHaveBeenCalledWith(
+      'machine-1',
+      capabilityConfigId,
+      'registry',
+      'cursor',
+      [],
+      storedCapability.models,
+      undefined,
+      undefined,
+      false,
+      expect.any(String),
+      undefined,
+      false,
+      expect.objectContaining({ configOptionsByModel: catalog })
+    );
+    // ...but the response carries the entry without it, so a client whose strict
+    // capability schema predates the field still parses a successful refresh.
+    expect(result.success).toBe(true);
+    expect(result.capability).toBeDefined();
+    expect(result.capability && 'configOptionsByModel' in result.capability).toBe(false);
+    const expectedWireCapability: Record<string, unknown> = { ...storedCapability };
+    delete expectedWireCapability.configOptionsByModel;
+    expect(result.capability).toEqual(expectedWireCapability);
+    // The stored entry itself is untouched.
+    expect(storedCapability.configOptionsByModel).toEqual(catalog);
+  });
+
   it('deduplicates concurrent ACP capability refreshes for the same config and launch inputs', async () => {
     let release: () => void = () => {};
     const fetched = new Promise<void>((resolve) => {

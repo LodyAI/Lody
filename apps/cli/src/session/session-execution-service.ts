@@ -47,6 +47,7 @@ import {
   buildReplayPromptFromHistory,
   type ReplayPromptResult,
   getLegacyReadForSessionHistoryStatus,
+  type AcpCapabilityCacheEntry,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
   type AcpConfigOptionValue,
@@ -528,6 +529,22 @@ export type SessionExecutionServiceDeps = {
 };
 
 const shouldRedactEnvKey = (key: string): boolean => /token|secret|password|passwd|key/i.test(key);
+
+/**
+ * Clients read the refresh response's `capability` through a strict schema, so it
+ * carries only the fields every shipped client declares. Registry Cursor's per-model
+ * catalog reaches clients through the Machine Flock row instead, whose reader
+ * tolerates unknown fields, so a client older than the catalog still parses a
+ * successful refresh.
+ */
+const toRefreshResponseCapability = (
+  entry: AcpCapabilityCacheEntry | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  if (entry?.configOptionsByModel === undefined) return entry;
+  const wireEntry: AcpCapabilityCacheEntry = { ...entry };
+  delete wireEntry.configOptionsByModel;
+  return wireEntry;
+};
 
 const redactEnvForLog = (env?: Record<string, string>): Record<string, string> | undefined => {
   if (!env) {
@@ -5318,7 +5335,7 @@ export class SessionExecutionService {
           category: opt.category,
           optionCount: opt.options.length,
         })),
-        capability,
+        capability: toRefreshResponseCapability(capability),
         availableCommands,
       };
     } catch (error) {
