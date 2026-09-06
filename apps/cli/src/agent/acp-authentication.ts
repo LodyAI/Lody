@@ -713,7 +713,12 @@ export class AcpAuthenticationManager {
     profilesRoot?: string;
     onAccountLeaseReleased?: () => void;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
+    signal?: AbortSignal;
   }): Promise<AcpAuthenticationResult> {
+    if (options.signal?.aborted) {
+      options.onProgress?.({ status: 'cancelled' });
+      return { success: true, disposition: 'cancelled' };
+    }
     const isBuiltinAuthentication =
       options.cliType === 'builtin' && isManagedBuiltinAgentType(options.agentType);
     const displayName = isBuiltinAuthentication
@@ -753,6 +758,11 @@ export class AcpAuthenticationManager {
     // Reserve the slot before any async launch preparation. This makes
     // concurrent starts and cancellation deterministic even before spawn.
     this.runningByAgentType.set(accountKey, running);
+    const abortFromCaller = () => {
+      if (this.runningByAgentType.get(accountKey) === running) this.cancel(options.requestId);
+    };
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    if (options.signal?.aborted) abortFromCaller();
 
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const interruptedResult = (): AcpAuthenticationResult | null => {
@@ -783,6 +793,8 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      const initialInterruption = interruptedResult();
+      if (initialInterruption) return initialInterruption;
       const releaseProfileAuthentication = acquireAccountProfileAuthentication(options);
       let leaseReleased = false;
       running.releaseAccountLease = () => {
@@ -901,6 +913,7 @@ export class AcpAuthenticationManager {
       options.onProgress?.({ status: 'error', error: message });
       return { success: false, disposition: 'error', error: message };
     } finally {
+      options.signal?.removeEventListener('abort', abortFromCaller);
       running.releaseAccountLease?.();
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);

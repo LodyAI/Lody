@@ -6135,6 +6135,63 @@ describe('SessionExecutionService', () => {
     }
   });
 
+  it.each(['before-config', 'pending-config', 'after-lease'] as const)(
+    'does not launch authentication cancelled at %s',
+    async (phase) => {
+      const controller = new AbortController();
+      const configGate = createDeferred<void>();
+      const configStarted = createDeferred<void>();
+      const release = vi.fn();
+      const authenticate = vi
+        .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+        .mockResolvedValue({ success: true, disposition: 'authenticated' });
+      const getAgentConfigForMachineLaunch = vi.fn(async () => {
+        configStarted.resolve();
+        if (phase === 'pending-config') await configGate.promise;
+        return createLaunchConfig({ cliType: 'builtin', agentType: 'codex' });
+      });
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch,
+        } as unknown as LoroDocumentManager,
+      });
+      deps.sessionManager.beginAccountProfileAuthentication = vi.fn(() => {
+        if (phase === 'after-lease') controller.abort();
+        return release;
+      });
+      const service = new SessionExecutionService(deps);
+      try {
+        if (phase === 'before-config') controller.abort();
+        const result = service.authenticateMachineAcp(
+          {
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'cancelled-config-start',
+            action: 'start',
+            configId: capabilityConfigId,
+            accountProfileId: '00000000-0000-4000-8000-00000000000b',
+          },
+          { signal: controller.signal }
+        );
+        if (phase === 'pending-config') {
+          await configStarted.promise;
+          controller.abort();
+          configGate.resolve();
+        }
+        await expect(result).resolves.toMatchObject({ success: true, disposition: 'cancelled' });
+        expect(authenticate).not.toHaveBeenCalled();
+        if (phase === 'before-config')
+          expect(getAgentConfigForMachineLaunch).not.toHaveBeenCalled();
+        if (phase === 'after-lease') expect(release).toHaveBeenCalledOnce();
+        else expect(deps.sessionManager.beginAccountProfileAuthentication).not.toHaveBeenCalled();
+      } finally {
+        configGate.resolve();
+        authenticate.mockRestore();
+      }
+    }
+  );
+
   it('bounds the post-authentication capability proof inside the renderer deadline', async () => {
     vi.useFakeTimers();
     const authenticate = vi

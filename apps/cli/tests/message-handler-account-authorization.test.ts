@@ -374,6 +374,31 @@ describe('account operation source authorization', () => {
     ).toEqual(success);
   });
 
+  it('forwards cancellation only from trusted local dispatch context', async () => {
+    const h = harness();
+    const controller = new AbortController();
+    await h.handler.authenticateMachineAcpAndResumeSetup(
+      start,
+      {},
+      {
+        ...local,
+        authenticationSignal: controller.signal,
+      }
+    );
+    expect(h.authenticate).toHaveBeenLastCalledWith(start, { signal: controller.signal });
+
+    const legacy = { ...start, accountProfileId: undefined };
+    await h.handler.authenticateMachineAcpAndResumeSetup(
+      legacy,
+      { signal: controller.signal },
+      {
+        ...remote,
+        authenticationSignal: controller.signal,
+      }
+    );
+    expect(h.authenticate).toHaveBeenLastCalledWith(legacy, { signal: undefined });
+  });
+
   it('retains local login ownership across duplicate starts and releases it after completion', async () => {
     const h = harness();
     let complete = (_response: MachineAcpAuthenticateResponse) => {};

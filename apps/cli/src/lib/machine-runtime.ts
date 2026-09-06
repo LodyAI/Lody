@@ -37,6 +37,7 @@ export class MachineRuntime {
   private handler: MessageHandler | null = null;
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;
+  private readonly localAuthenticationStarts = new Map<string, AbortController>();
   private gcManager: SessionGCManager | null = null;
   private resourceMonitor: CliResourceMonitor | null = null;
   private initialized = false;
@@ -239,6 +240,7 @@ export class MachineRuntime {
       this.gcManager = null;
     }
 
+    for (const controller of this.localAuthenticationStarts.values()) controller.abort();
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
     await this.messageProcessor.drainWithTimeout(5000);
@@ -260,76 +262,145 @@ export class MachineRuntime {
   ): Promise<LocalSessionControlResponse[]> {
     const handler = this.requireHandler();
     const dispatchStartedAt = Date.now();
+    const authenticationKey =
+      message.type === 'machine/acp-authenticate'
+        ? JSON.stringify([
+            message.workspaceId,
+            message.machineId,
+            message.action === 'start' ? message.requestId : message.authenticationRequestId,
+          ])
+        : undefined;
+    let authenticationController: AbortController | undefined;
+    if (message.type === 'machine/acp-authenticate' && authenticationKey) {
+      if (message.action === 'start') {
+        if (this.localAuthenticationStarts.has(authenticationKey)) {
+          const response: LocalSessionControlResponse = {
+            type: 'machine/acp-authenticate_response',
+            machineId: message.machineId,
+            requestId: message.requestId,
+            agentType: 'unknown',
+            success: false,
+            disposition: 'error',
+            error: 'An authentication request with this ID is already running.',
+          };
+          options.onResponse?.(response);
+          return [response];
+        }
+        authenticationController = new AbortController();
+        this.localAuthenticationStarts.set(authenticationKey, authenticationController);
+      } else if (message.action === 'cancel') {
+        this.localAuthenticationStarts.get(authenticationKey)?.abort();
+      }
+    }
+    let removeQueuedAbortListener = () => {};
     this.options.logger.debug(
       `Local control dispatch started type=${message.type} sessionId=${
         'sessionId' in message ? message.sessionId : 'N/A'
       } active=${this.messageProcessor.getActiveSessions()} waiting=${this.messageProcessor.getQueueSize()}`
     );
 
-    return await new Promise<LocalSessionControlResponse[]>((resolve, reject) => {
-      this.messageProcessor.enqueue(message, async (nextMessage) => {
-        const responses: LocalSessionControlResponse[] = [];
-        let settled = false;
-        const resolveOnce = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          this.options.logger.debug(
-            `Local control dispatch resolved type=${message.type} sessionId=${
-              'sessionId' in message ? message.sessionId : 'N/A'
-            } duration=${Date.now() - dispatchStartedAt}ms responses=${
-              responses.length
-            } active=${this.messageProcessor.getActiveSessions()} waiting=${this.messageProcessor.getQueueSize()}`
-          );
-          resolve([...responses]);
-        };
-        const rejectOnce = (error: unknown) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          this.options.logger.debug(
-            `Local control dispatch rejected type=${message.type} sessionId=${
-              'sessionId' in message ? message.sessionId : 'N/A'
-            } duration=${Date.now() - dispatchStartedAt}ms: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-          reject(error);
-        };
-        const context: MessageDispatchContext = {
-          source: 'local',
-          send: (response) => {
-            const typed = response as LocalSessionControlResponse;
-            responses.push(typed);
-            options.onResponse?.(typed);
-
-            const isImmediateCreateResponse =
-              nextMessage.type === 'session/create' &&
-              typed.type === 'session/create_response' &&
-              typed.sessionId === nextMessage.sessionId;
-            const isImmediateChatResponse =
-              nextMessage.type === 'session/chat' &&
-              typed.type === 'session/chat_response' &&
-              typed.sessionId === nextMessage.sessionId &&
-              typed.userTurnId === nextMessage.userTurnId;
-
-            if (isImmediateCreateResponse || isImmediateChatResponse) {
-              resolveOnce();
+    try {
+      return await new Promise<LocalSessionControlResponse[]>((resolve, reject) => {
+        let cancelledBeforeStart = false;
+        if (authenticationController && message.type === 'machine/acp-authenticate') {
+          const cancelQueuedStart = () => {
+            cancelledBeforeStart = true;
+            const response: LocalSessionControlResponse = {
+              type: 'machine/acp-authenticate_response',
+              machineId: message.machineId,
+              requestId: message.requestId,
+              agentType: 'unknown',
+              success: true,
+              disposition: 'cancelled',
+            };
+            try {
+              options.onResponse?.(response);
+              resolve([response]);
+            } catch (error) {
+              reject(error);
             }
-          },
-        };
-
-        try {
-          await handler.handleMessage(nextMessage, context);
-          resolveOnce();
-        } catch (error) {
-          rejectOnce(error);
-          throw error;
+          };
+          authenticationController.signal.addEventListener('abort', cancelQueuedStart, {
+            once: true,
+          });
+          removeQueuedAbortListener = () =>
+            authenticationController?.signal.removeEventListener('abort', cancelQueuedStart);
         }
+        this.messageProcessor.enqueue(message, async (nextMessage) => {
+          removeQueuedAbortListener();
+          if (cancelledBeforeStart) return;
+          const responses: LocalSessionControlResponse[] = [];
+          let settled = false;
+          const resolveOnce = () => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            this.options.logger.debug(
+              `Local control dispatch resolved type=${message.type} sessionId=${
+                'sessionId' in message ? message.sessionId : 'N/A'
+              } duration=${Date.now() - dispatchStartedAt}ms responses=${
+                responses.length
+              } active=${this.messageProcessor.getActiveSessions()} waiting=${this.messageProcessor.getQueueSize()}`
+            );
+            resolve([...responses]);
+          };
+          const rejectOnce = (error: unknown) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            this.options.logger.debug(
+              `Local control dispatch rejected type=${message.type} sessionId=${
+                'sessionId' in message ? message.sessionId : 'N/A'
+              } duration=${Date.now() - dispatchStartedAt}ms: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+            reject(error);
+          };
+          const context: MessageDispatchContext = {
+            source: 'local',
+            authenticationSignal: authenticationController?.signal,
+            send: (response) => {
+              const typed = response as LocalSessionControlResponse;
+              responses.push(typed);
+              options.onResponse?.(typed);
+
+              const isImmediateCreateResponse =
+                nextMessage.type === 'session/create' &&
+                typed.type === 'session/create_response' &&
+                typed.sessionId === nextMessage.sessionId;
+              const isImmediateChatResponse =
+                nextMessage.type === 'session/chat' &&
+                typed.type === 'session/chat_response' &&
+                typed.sessionId === nextMessage.sessionId &&
+                typed.userTurnId === nextMessage.userTurnId;
+
+              if (isImmediateCreateResponse || isImmediateChatResponse) {
+                resolveOnce();
+              }
+            },
+          };
+
+          try {
+            await handler.handleMessage(nextMessage, context);
+            resolveOnce();
+          } catch (error) {
+            rejectOnce(error);
+            throw error;
+          }
+        });
       });
-    });
+    } finally {
+      removeQueuedAbortListener();
+      if (
+        authenticationKey &&
+        this.localAuthenticationStarts.get(authenticationKey) === authenticationController
+      ) {
+        this.localAuthenticationStarts.delete(authenticationKey);
+      }
+    }
   }
 
   async dispatchLocalMachineRpc(

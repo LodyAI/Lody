@@ -678,6 +678,7 @@ export type MessageDispatchSource = 'runtime' | 'local';
 export type MessageDispatchContext = {
   source: MessageDispatchSource;
   send: (message: unknown) => void;
+  authenticationSignal?: AbortSignal;
 };
 
 type ControlMessage = LocalSessionControlRequestValidated;
@@ -8563,7 +8564,11 @@ export class MessageHandler {
     if (ownsLocalRequest) this.localAccountAuthenticationRequests.add(targetRequestId);
     let response: MachineAcpAuthenticateResponse;
     try {
-      response = await this.executionService.authenticateMachineAcp(message, options);
+      response = await this.executionService.authenticateMachineAcp(message, {
+        ...options,
+        signal:
+          dispatchContext.source === 'local' ? dispatchContext.authenticationSignal : undefined,
+      });
     } finally {
       if (ownsLocalRequest) this.localAccountAuthenticationRequests.delete(targetRequestId);
     }

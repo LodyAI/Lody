@@ -616,6 +616,7 @@ function createAcpRefreshAbortError(): DOMException {
 
 type AcpAuthenticationOptions = {
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+  signal?: AbortSignal;
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
@@ -5325,10 +5326,12 @@ export class SessionExecutionService {
       };
     }
 
+    if (options.signal?.aborted) return { ...base, success: true, disposition: 'cancelled' };
     const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
       message.configId,
       this.deps.machineId
     );
+    if (options.signal?.aborted) return { ...base, success: true, disposition: 'cancelled' };
     if (!config || (config.cliType === 'custom' && !config.customAcp)) {
       return {
         ...base,
@@ -5367,6 +5370,10 @@ export class SessionExecutionService {
           resolveAccountProfileId(message.accountProfileId)
         )
       : undefined;
+    if (options.signal?.aborted) {
+      releaseAccount?.();
+      return { ...resolvedBase, success: true, disposition: 'cancelled' };
+    }
     if (managedAccount && !releaseAccount) {
       return {
         ...resolvedBase,
@@ -5387,8 +5394,11 @@ export class SessionExecutionService {
         runtimeOverrides: config.runtimeOverrides,
         env: config.env,
         onProgress,
+        signal: options.signal,
       })
       .finally(() => releaseAccount?.());
+    if (options.signal?.aborted)
+      return { ...resolvedBase, success: true, disposition: 'cancelled' };
     if (result.success && result.disposition === 'authenticated' && !managedAccount) {
       const refreshController = new AbortController();
       const refreshTimeoutMs = Math.max(
