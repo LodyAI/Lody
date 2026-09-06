@@ -58,46 +58,34 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   paths must not add blocking waits on top of the driver's `busy_timeout`.
 - `operation-model.ts` is the reduced executable race model. Update its bounded
   exploration and concrete traces whenever scheduling semantics change.
-- Delivery never writes user dispatch pointers. Pending user input wins every
-  idle boundary; completion uses a stable `role: system`
-  `operation_completion` Turn and then the existing Session execution mutex.
-  Its Assistant Turn id is `assistant:<systemTurnId>` even though it has no user
-  dispatch ownership. Assistant `finished`/`endedAt` is never Delivery completion
-  evidence: teardown writes the same terminal footprint. Delivery execution has three
-  fencing layers: the Host lease excludes other Hosts; each CLI Worker process owns one boot
-  id and starts only after the supervisor/Host-lease lifecycle barrier; and each attempt owns
-  a fresh token.
-  Execution fields live in `delivery_execution_state`, not `deliveries`: stable binaries parse
-  `SELECT * FROM deliveries` strictly, so adding columns there makes a downgraded binary unable
-  to read the shared local database.
-  Normal claims require no active token and never take over another owner. Paths that write
-  a terminal continuation failure or consume without execution must acquire the same
-  exclusive token first; the history write and token-matched consume happen while it is
-  held. Failed finalization retains the token and unfinished steps for later wakes: retry
-  history before consume, never ACP or a cleanup write. Recheck ownership after history
-  awaits; do not rewrite durable history. Stop drops this memory; replacement Workers use
-  durable state. Once per Worker startup,
-  the coordinator clears tokens owned by older boot ids
-  without resetting the attempt count. A claim records `claimed`, becomes `prepared` only
-  after the completion Turn is durable (which spends one bounded preparation attempt), and
-  becomes `started` immediately before calling ACP. Release and consume must match both the
-  boot id and claim token. Claim contention exits before history or ACP side effects and
-  records no failure. Only a confirmed pre-provider interruption releases a prepared claim;
-  a rejected start-fence write settles as not started and follows that same release path instead
-  of becoming a handled turn. User cancellation consumes it. A missing settlement after ACP started becomes `uncertain`
-  and is never automatically replayed: reconciliation writes
-  `DELIVERY_EXECUTION_UNCERTAIN` under a terminal claim, preserves existing output, and tells
-  the user to continue manually if needed. Provider-accepted steer settles the original
-  Delivery immediately, so cancellation of a later user-owned turn cannot reopen it.
-  Settlement write failure retains the claim-bound outcome in the live coordinator and retries
-  it on later wakes without ACP; replacement-Worker recovery converts any still-fenced started
-  claim to `uncertain`, never to runnable. A
-  coordinated workspace stop abandons only that coordinator's claims before closing its store:
-  `claimed`/`prepared` become runnable and `started` becomes `uncertain`. At most
-  one confirmed pre-provider recovery is allowed; after two prepared attempts,
-  `DELIVERY_ATTEMPTS_EXHAUSTED` is written and consumed without invoking ACP. A pending
-  Delivery from the pre-claim schema migrates as `uncertain`; its prior execution count is
-  unknowable and must not be fabricated.
+- Delivery never writes user dispatch pointers. Pending users win idle boundaries;
+  completion uses a stable system `operation_completion` Turn, the Session execution mutex,
+  and Assistant id `assistant:<systemTurnId>`. Assistant `finished`/`endedAt` is not completion
+  evidence: teardown writes it too.
+  Fencing has three layers: exclusive Host lease, per-process Worker boot id after the
+  supervisor/Host-lease lifecycle barrier, and fresh per-attempt token. Execution fields stay
+  in `delivery_execution_state`: stable binaries strictly parse `SELECT * FROM deliveries`.
+  Claims never take over active tokens. Contention exits before history/ACP side effects
+  without recording failure. Release and consume match both boot id and token.
+  Terminal history and consume-without-execution acquire the same token. Failed
+  finalization retains it and unfinished steps for later wakes: history before consume,
+  never ACP or a cleanup write. Recheck ownership after history awaits; do not rewrite durable
+  history. Stop drops this memory; replacement Workers use durable state.
+  `claimed` becomes `prepared` after durable completion history, spending one attempt, then
+  `started` before the first ACP prompt. Stale-ACP recovery never repeats the fence.
+  A failed fence write finalizes the Assistant and restores idle under Session ownership,
+  then settles `not_started`, not handled. Only confirmed
+  pre-provider interruption releases a prepared claim. User cancellation consumes it;
+  accepted steer settles the original Delivery immediately so later turns cannot reopen it.
+  Missing post-start settlement becomes `uncertain`, never automatic replay. Reconciliation
+  writes `DELIVERY_EXECUTION_UNCERTAIN` under a terminal claim, preserving output and directing
+  manual continuation. Observed outcomes survive write failures in the live coordinator,
+  bound to the claim; later wakes retry settlement without ACP.
+  Startup clears older-boot tokens once without resetting attempts; started becomes uncertain.
+  Workspace stop abandons only its own claims before closing the store:
+  `claimed`/`prepared` become runnable, `started` becomes uncertain. After one pre-provider
+  recovery (two prepared attempts), write and consume `DELIVERY_ATTEMPTS_EXHAUSTED` without ACP.
+  Pre-claim pending Deliveries migrate as uncertain; execution counts stay unknown.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

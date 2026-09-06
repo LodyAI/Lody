@@ -2837,7 +2837,7 @@ export class SessionExecutionService {
                   yield* Effect.fail(new Error('Agent session was not ready'));
                   return undefined;
                 }
-                if (options.onTurnStarted) {
+                if (!runtime.promptStarted && options.onTurnStarted) {
                   const started = yield* self.tryPromise(options.onTurnStarted).pipe(
                     Effect.mapError(
                       (cause) =>
@@ -2846,6 +2846,14 @@ export class SessionExecutionService {
                           turnId: runtime.turnId,
                           cause,
                         })
+                    ),
+                    // Finalize while this runtime still owns the session; settlement is not success.
+                    Effect.tapError(() =>
+                      self.ignoreWithWarning(
+                        sessionId,
+                        'Failed to finalize a rejected Delivery start fence',
+                        self.tryPromise(() => self.handleTurnError(sessionId, sessionDoc))
+                      )
                     )
                   );
                   if (!started) {
