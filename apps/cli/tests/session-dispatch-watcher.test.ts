@@ -4,7 +4,10 @@ import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
-import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
+import {
+  findNextDispatchableUserTurn,
+  resolveDispatchTurnInput,
+} from '../src/session/session-dispatch-logic';
 import {
   buildMissingEmail,
   getPendingUserTurnActivationId,
@@ -1306,6 +1309,22 @@ describe('SessionDispatchWatcher', () => {
   });
 
   it('hydrates queued mq items into pending turns before dispatching', async () => {
+    const queuedBlocks = [
+      {
+        type: 'text' as const,
+        text: 'https://example.com',
+        spans: [
+          {
+            start: 0,
+            end: 19,
+            kind: 'url' as const,
+            label: 'example',
+            target: 'https://example.com',
+          },
+        ],
+      },
+      { type: 'image' as const, imageId: 'synthetic-image', mimeType: 'image/png', sizeBytes: 12 },
+    ];
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
     const cancelSession = vi.fn(async () => ({ success: true }));
@@ -1322,11 +1341,11 @@ describe('SessionDispatchWatcher', () => {
         project: undefined,
         acpSessionConfig: {
           prompt: 'queued hello',
-          inputBlocks: [{ type: 'text', text: 'queued hello' }],
           cliType: 'builtin',
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          inputBlocks: queuedBlocks,
         },
       },
     ];
@@ -1416,9 +1435,12 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          inputBlocks: queuedBlocks,
         }),
       })
     );
+    const restored = JSON.parse(JSON.stringify(history[0])) as SessionHistoryInput;
+    expect(resolveDispatchTurnInput(restored).inputBlocks).toEqual(queuedBlocks);
     // The promoted turn is published for dispatch, not just written to history.
     expect(promotedPointer).toBe('queued-mq-1');
     expect(startSession).toHaveBeenCalledWith(
@@ -1429,6 +1451,7 @@ describe('SessionDispatchWatcher', () => {
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          inputBlocks: queuedBlocks,
         }),
       }),
       { dispatchSource: 'queue' }

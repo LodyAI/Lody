@@ -4,6 +4,7 @@ import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
   getLegacyReadForSessionHistoryStatus,
   type ChatFailedReason,
@@ -2098,6 +2099,8 @@ export class SessionDispatchWatcher {
         queuedItem.acpSessionConfig?.prompt ?? queuedItem.task
       );
       const inputConfig = buildSessionTurnInputConfig({
+        // Promotion executes on this daemon, whose parser capabilities are known.
+        machine: { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
         inputBlocks,
         prompt:
           queuedItem.acpSessionConfig?.prompt ?? extractPromptPreviewFromInputBlocks(inputBlocks),
