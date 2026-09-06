@@ -28,6 +28,14 @@ normalized to `Closes #123` by the PR policy workflow.
 
 <!-- What changed in response to that pressure. Keep this about the change set, not the motivation. -->
 
+<!--
+Optional: a diagram, tree, or structural diff often explains a change faster than
+prose. Put it directly in Summary or Before / after. Examples and the rules for
+choosing a view: .agents/docs/visual-explanations.md
+Any supporting artifact must be reachable by reviewers; a local HTML file is not.
+Small fixes need no visual. Do not add one for ceremony.
+-->
+
 ## Before / after
 
 | Before | After |

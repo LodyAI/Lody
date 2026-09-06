@@ -1,439 +1,109 @@
 # CLI Agent Guidelines
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-Root `AGENTS.md` applies; this file adds CLI context.
+Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adapter background:
+[.agents/docs/cli-overview.md](../../.agents/docs/cli-overview.md). Scoped rules live under
+`src/{agent,commands,session,mcp,orchestration,preview,lib}`.
 
-## Running the CLI in development
+## Build and packaging
 
-`pnpm dev` bundles with esbuild (`scripts/dev-build.mjs`, ~3s) into `dist-dev/`, then
-runs `node --enable-source-maps dist-dev/index.js`. `pnpm dev:build` builds only;
-there is no on-demand TypeScript-loader fallback, so development startup must
-run built JavaScript.
-The public CLI defaults to local platform, does not discover deployment dotenv
-files, and must never initialize telemetry in local mode even if generic PostHog
-variables are present in the shell.
-
-INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
-`claude-acp.js` / `codex-acp.js` / `*-worker.js`. `agent/setting.ts`, the Tinypool pools
-(`file-index-scan-pool.ts`, `diff-line-count-pool.ts`), the direct
-`turn-diff-store-worker.ts` client, and `workspace-watch-coordinator.ts` all locate
-their child by FILENAME next to
-`import.meta.url`. Running directly from `src/` would leave only `.ts` siblings, so pools
-would fall back to the main thread (`reason=worker_missing`) and mandatory workers would
-be unavailable. `dev-build.mjs` asserts after each build that no
-worker-resolving module was hoisted into `chunks/`, because that reintroduces the same
-invisible fallback.
-
-Two things the dev build does deliberately, both load-bearing:
-
-- npm packages stay external (that is what makes it fast, and it avoids inlining wasm),
-  but they are externalized by ABSOLUTE path — bundling a workspace package's `.ts`
-  source moves its imports into this bundle, and pnpm's strict layout has no entry for
-  that package's transitive deps under `apps/cli/node_modules`.
-- `splitting: true`, so `await import(...)` stays a real lazy boundary. `review-viewer.ts`
-  statically imports the generated `lody-code-review-viewer/manifest`, which does not
-  exist until that package is built; inlining it would make `lody --version` fail.
+- The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
+  never initialize telemetry in local mode even if PostHog variables exist in the shell.
+- INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
+  `claude-acp.js` / `codex-acp.js` / `*-worker.js` — because worker owners resolve their child by
+  FILENAME next to `import.meta.url`. Keep npm packages external by ABSOLUTE path, keep
+  `splitting: true`, and keep the no-hoisting assertion.
+- Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
+  `name` stays `lody` in every composition.
+- Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
+  adapter capabilities from a stale `dist/`.
+- `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
+  `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
+  segfaults on the SQLite binding instead of throwing.
+- Read [apps/electron/AGENTS.md](../electron/AGENTS.md) — embedded packaging, native deps/ABI,
+  child runtime env, and the three places the Node pin moves together — before changing runtime
+  deps, bundle externals, or spawning `process.execPath` with a filtered environment.
 
 ## Coding rules
 
-- The CLI's own `version` must be imported from `@/pkg`, never from a relative
-  `../package.json`. Each build composition aliases `@/pkg` to the manifest that
-  actually gets published (cloud builds point it at the private composing
-  package), so a relative import bakes the stale OSS version into the published
-  bundle — this is what made `lody@0.82.1 --version` print `0.76.0`. The package
-  `name` is the exception: it stays `lody` in every composition.
-- context/cli-effect-ts.md — prefer Effect TS idioms
-  for new/refactored CLI code: services via `Context.Tag` + `Layer`, typed errors,
-  structured concurrency, `Schedule` retries; when raw async/await is OK; interop.
-- context/cli-type-safety.md — strict tsconfig
-  (`noUncheckedIndexedAccess` etc.), no `any`/non-null assertions, Zod for all foreign
-  data (JSON.parse, WS payloads, env), dependency type alignment.
-- context/cli-prompt-hot-path.md — after the
-  CLI receives a remote prompt, only correctness-critical setup may block before ACP
-  `agent.prompt`; notifications/analytics/UI summaries must not be awaited there.
-- context/cli-startup.md — local-ready boundary,
-  remote reconcile sequence, and startup timing trace names.
+- Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,
+  typed errors, structured concurrency, `Schedule` retries: context/cli-effect-ts.md.
+- Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
+  context/cli-type-safety.md.
+- After a remote prompt arrives, only correctness-critical setup may block before ACP
+  `agent.prompt`; never await notifications, analytics, or UI summaries
+  (context/cli-prompt-hot-path.md).
+- Startup order and timing traces: context/cli-startup.md. Local logs: context/cli-logs.md.
+- Read context/local-agent-ownership.md before changing local ports/sockets, daemon PID state,
+  Electron/daemon startup, Supervisor retries, or Worker shutdown; health probes are observation
+  only and never authorize PID killing.
+- Read context/terminal-output-lifecycle.md before changing ACP terminal notification handling or
+  history compaction.
 
-## Debugging
+## MCP tool surface
 
-- Local logs (`~/.lody/logs/`, levels, `lody daemon logs`, ACP stderr capture):
-  context/cli-logs.md.
-- Preview targets are untrusted, and a managed preview reaches THIS machine's
-  loopback and nothing else — agent candidate or user-approved alike, there is
-  no policy under which a LAN host is accepted (`normalizeTarget` in
-  `preview/preview-service.ts`). The tunnel makes this machine the origin of
-  whatever it connects to, so a LAN target would turn it into a pivot into its
-  own network for a remote workspace member or an agent that talked them into a
-  click; the approver cannot see what a LAN address here even is. Clients never
-  send one, but this check must hold for any client. Loopback means a literal
-  address or the exact name `localhost`: `classifyBrowserHostname` reads the
-  hostname text, so any `*.localhost` name passes it while a search domain or
-  rebinding record can point that name at a LAN host. Still require a fresh
-  approval from the session initiator and validate path-relative targets here.
-- The local preview proxy must never forward an OBSERVED WebSocket close code into a
-  Close frame. RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a
-  TCP callback and kills the CLI with the active Agent session. Mirror the shape instead
-  (`mirrorWebSocketClose` in `preview/local-preview-proxy.ts`): `terminate()` for 1006,
-  code-less `close()` for 1005. Both directions, plus the local-socket `error` handler,
-  which must not pre-empt that mirror once the connection is open.
-- Embedded CLI packaging invariants (native deps, ABI, child runtime env) live in
-  [apps/electron/AGENTS.md](../electron/AGENTS.md). Read them before changing runtime
-  deps/bundle externals or spawning `process.execPath` with a filtered environment.
-- `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
-  `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts`. Older Node
-  segfaults on the SQLite binding instead of throwing. Rationale + the three places that
-  must move together: [apps/electron/AGENTS.md](../electron/AGENTS.md) (native deps).
+- MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
+  Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
+  before its fallible availability step: a transient post-accept failure returns the active fixed
+  target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
+  the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
+  is a temporary adapter new callers must not use.
+- Child Sessions are one level deep. An independent Session created inside another persists exact
+  provenance in `openedBySessionId`, plus `openedByRootSessionId` when the opener is a child Tab;
+  never rewrite the exact opener to the root or treat either as `parentSessionId`.
+- `lody_session_create_options` publishes valid run-config values per agent config and stays
+  sparse by default (online Machines, one agent config, the current local project, no GitHub
+  fetch), expanding only through explicit query inputs.
+- INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
+  describe only the model current at probe time. Validate effort against the TARGET model using
+  `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
+  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
+  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
+  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
+  models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
+- `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
+  keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
+  and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
+  Machine RPC snapshot. Operations: `src/orchestration/AGENTS.md`, `specs/session-orchestration.md`.
+- Bound every task reply: body 64 KiB with head-and-tail truncation
+  (`bodyTruncated`/`bodyOmittedBytes`), newest 20 comments with `commentCount`, 50 links,
+  `lody_task_list` 20/100 with `matched`. `lody_task_edit_body` still matches exactly against the
+  FULL body server-side.
+- `lody_task_list` reads the Task Index Flock ONLY: never open task documents on a list path, and
+  never return `order`.
+- `lody_task_update` writes every scalar property EXCEPT `agent`, and never the body: the body goes
+  through the exact-match edit, and `agent` is the sole automation consent.
+- INVARIANT: `status`, `ownerId`, and `projects` all sit in the delegated-automation eligibility
+  predicate (`planTaskAutomation`), so an agent write to any of them can START a session on an
+  already-entrusted task; anything in that predicate is an execution trigger. Its attributed
+  activity entry is an audit record, NOT a user-visible notice.
+- `ownerId` on an agent WRITE accepts ONLY `""` (unassign) — `TaskOwnerIdWriteSchema` — because
+  naming an owner points `isTaskAutomationEligible` somewhere new and could route a task into
+  execution under this operator's credentials on someone else's consent; it also disposes of the
+  `me` filter sentinel. Keep that restriction at the MCP boundary, NOT in `task-doc.ts`.
+- `lody_task_create` versus `lody_task_propose` splits on WHO ASKED (user request → create now;
+  agent-noticed follow-up → proposal card), and that split lives in the tool descriptions on
+  purpose. The proposal writer hydrates the Session doc, flushes locally, and confirms remote sync
+  before `ok`.
+- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
+  version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
+  history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.
 
-## Process lifecycle
+## Agents, GitHub, and PR status
 
-- Read context/local-agent-ownership.md
-  before changing local ports/sockets, daemon PID state, Electron/daemon startup,
-  Supervisor retries, or Worker shutdown. Health probes are observation only and
-  must never authorize PID killing.
-- Cloud-mode `lody daemon status` reads the runtime probe's explicit `backend` authorization/
-  connection state and `connectedWorkspaces`; local mode omits that cloud-only block. Aggregate
-  `connectivity` is local runtime health and must not be presented as proof that the cached CLI
-  token was accepted.
-  Connection-age fields preserve one continuous non-connected interval across
-  connecting/disconnected transitions and clear only on connected. They travel in the
-  top-level `connectionAges` v1 extension because older consumers reject unknown keys inside
-  the strict backend/workspace objects but accept unknown top-level state. Status colors
-  these states and reports a red connection error once that interval reaches 60 seconds.
-
-- `lody daemon start` resolves cloud authentication in the FOREGROUND process before
-  spawning the detached runner (`commands/daemon-auth-preflight.ts`): validate the cached
-  credential against the backend, and on a missing/rejected credential run the interactive
-  device-authorization flow (browser link) right there. The runner is detached, so a
-  credential failure inside it is invisible. An unreachable backend aborts instead of
-  re-authenticating — a network outage must not replace a working credential — and a
-  non-TTY run aborts instead of blocking on a browser link until the device code expires.
-  `--skip-auth-check` is the explicit opt-out; `--auth` keeps its non-interactive path.
-  The runner's fd 3 launch handshake reports success only after its supervised Worker reaches
-  `startupStage=ready`; an initial Worker exit returns its bounded output to the foreground and
-  terminates the runner instead of claiming that daemon startup succeeded. Explicitly retryable
-  startup exits keep that handshake pending, and a handshake timeout terminates and awaits the
-  exact spawned runner before the foreground reports failure.
-- New one-shot commands should use `src/lib/command-runtime.ts` (`runOneShotCommand`)
-  so exit codes, telemetry flush, and stream flushing are handled consistently.
-- Process entrypoints, command-owned boundaries, global process-error handlers, and
-  generated standalone shims may force exit after their own cleanup policy: `start.ts`
-  owns startup/fatal/signal exits; `daemon-runner.ts` owns watchdog fatal and signal
-  exits. This is process-boundary policy.
-- Never force exit from reusable business libraries, session/agent internals, TUI/watch
-  flows, or worker code. Those modules should expose explicit cleanup and let the
-  process boundary decide whether to exit.
-- Remote daemon restart/upgrade is documented in
-  context/machine-lifecycle.md. The RPC handler
-  ACKs and asks `start.ts` to exit with the reserved lifecycle code; the watchdog
-  performs upgrade/restart work after the worker exits.
-- Session read commands (`session list/show/history/status` and `export`) sync Loro
-  metadata/docs before reading by default; sync failure is a command failure with an
-  `--offline` hint. `--offline` is the explicit local-cache path, not an automatic
-  fallback. `lody sync` is the explicit workspace sync command and excludes Code
-  Collab file-index Flock docs.
-- Persisting a non-empty Task document makes loro-repo register
-  `e/task-<id>` in workspace meta; Task business fields are not copied into
-  `m/task-<id>/*`. `listAliveRoomIds` enumerates `e/*`. `listWorkspaceTaskIds`
-  combines that physical existence source with visible Task Index rows, repairs a
-  missing row from its Task document, and honors an explicit index tombstone.
-  `sync`, `export`, and account deletion must retain both discovery paths so an
-  interrupted or legacy write cannot silently escape coverage.
-
-## `lody app` (open the desktop app on a directory)
-
-- `src/commands/app.ts` registers the directory as a local project through the
-  daemon (`local-project/add`, idempotent — the id is a sha256 of the resolved root
-  path), then hands the active installation profile's deep link
-  (`lody://chat/new?…` for cloud, `lody-oss://chat/new?…` for local) to the OS
-  via `utils/open-browser.ts`. Link shape lives in `src/lib/desktop-deep-link.ts`;
-  the desktop side parses it in
-  `packages/components/src/lib/desktop-open-local-project-deep-link.ts` and routes to
-  `/<slug>/chat?context=local&machine=…&project=…`. Both sides pin the URL in unit tests.
-- INVARIANT: registration happens only in the CLI. The deep link carries ids, never a
-  path, and the app must never register a project from one — any web page can navigate
-  the OS to either registered protocol, so a path-carrying link would let a site hand agents an
-  arbitrary directory. An unknown project id just stays unselected.
-- `workspaceSlug` is present only when the daemon reported workspace candidates (i.e.
-  multiple active workspaces). With one workspace the app's current workspace is
-  already correct, so the link omits it.
-- Daemon down is not a failure: the deterministic project id is computed locally and
-  the app still opens (already-registered directories stay selectable); the command
-  warns that a brand-new directory was not registered.
-- Local-project control transport, workspace-candidate parsing, and the workspace
-  picker are shared with `lody project` in `src/lib/local-project-control-client.ts`.
-
-## `lody review` (no-login HTML review)
-
-- `src/commands/review.ts` renders a `.review.md` (or `.review.json[.gz]` snapshot)
-  into a self-contained HTML file and opens it; `lody review prompt` prints the agent
-  prompt; bare `lody review` prints a 3-step guide. No Lody login is involved.
-  Reading `.review.md` resolves against the local Git repo read-only. On render
-  failure the action prints `error.message` and sets `process.exitCode = 1`.
-- The ~8 MB viewer is NOT bundled. `src/lib/review-viewer.ts` fetches the public
-  `lody-code-review-viewer` package's `standalone.html` from jsDelivr (then unpkg)
-  at the EXACT version the CLI was built against, verifies its sha256, and caches it
-  under `~/.lody/code-review-viewer/<version>.html`. `LODY_REVIEW_VIEWER` (file path
-  or URL) overrides the source for offline/mirror use (still sha-verified). The
-  pinned version + sha come from the bundled-at-build `lody-code-review-viewer/manifest`
-  import (the only viewer piece kept in the CLI bundle; ~3 KB); CLI `build:bundle`
-  prepares that viewer package first. The external release pipeline must publish
-  the viewer at the same version before the CLI. See `packages/code-review-viewer`.
-- The agent prompt IS still embedded (small) via `@lody/code-review-helper/prompt-text`
-  (generated by the helper's prompt embed script before bundling), lazy-imported in the action.
-
-## Session create/worktree shortcut
-
-- `lody session create --local-project ... --worktree` is wired by setting
-  `ProjectRef.useWorktree` in `src/commands/session.ts`; daemon startup consumes
-  that flag in `src/session/session-execution-service.ts`, and actual local/GitHub
-  worktree creation happens in `src/session/session-manager.ts`.
-- Post-turn automatic commit/push is allowed for GitHub worktrees and local projects
-  with `ProjectRef.useWorktree === true`. Never run it against a local project's
-  original directory, even when that project has a `githubRepoFullName` or associated PR.
-- Local create resolves `ProjectRef.githubRepoFullName` from the project's `origin`
-  for direct AND worktree sessions, exactly like desktop creation, because
-  `repoFullName`, PR actions, and post-turn PR detection all read it. Bind only a
-  repository the workspace enables, recording the workspace's spelling; an
-  unauthorized, absent, or unreadable one leaves the Session local rather than
-  failing create.
-- MCP session tools use stable machine/session/agent-config ids and strict, narrow input
-  schemas. New create/chat Commands require a caller-chosen Operation id. Create persists
-  the Operation before its fallible availability/materialization step; the normal response
-  has durable target input, while a transient post-accept failure returns the active fixed
-  target for daemon replay. `session_create({ operationId, resume: true })` recovers that
-  Operation without resending the prompt. Completion is delivered automatically, with no
-  public wait tool.
-  Legacy single create/chat `wait=true` remains a temporary compatibility adapter;
-  new callers must not depend on it. Child Sessions are one level deep only.
-  An independent Session created from inside another Session persists exact provenance in
-  `openedBySessionId`. If that opener is a child Tab, it also sparsely persists the Tab owner's
-  root route as `openedByRootSessionId`; clients need both ids to restore the exact originating
-  Tab. Do not rewrite the exact opener to the root or treat either pointer as `parentSessionId`.
-- Local daemon IPC sends the real control request once; do not restore a health preflight.
-  Native `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary
-  so MCP can preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`. A connection
-  refusal means not running; timeout/408/429/5xx means busy.
-- The task MCP replies are bounded the same way: a task body is capped at 64 KiB with
-  head-and-tail truncation (`bodyTruncated` + `bodyOmittedBytes` state it), comments
-  return the newest 20 with `commentCount` when more exist, links cap at 50, and
-  `lody_task_list` defaults to 20 (maximum 100) reporting `matched` when the page was
-  cut. The document itself has no body limit, so an unbounded read would blow the
-  caller's context. Keep both ends: `lody_task_edit_body` matches exactly against the
-  FULL body server-side, so an agent editing from a truncated view still resolves.
-- `lody_task_list` reads the Task Index Flock ONLY (`listTasksFromIndex` →
-  `selectTaskIndexRows`). Never make a list path open task documents: that is the whole
-  reason the index exists. `order` is deliberately not returned — it is a fractional
-  index and callers must not depend on its format.
-- `lody_task_update` writes every scalar property EXCEPT `agent`, and never the body.
-  Two different reasons, both load-bearing: the body goes through the exact-match edit
-  so a content change carries its size delta and origin, while `agent` is the sole
-  automation consent — an agent writing it would hand itself a scheduler slot. Do not
-  "complete" the surface by adding it.
-- INVARIANT: `status`, `ownerId`, and `projects` are all in the delegated-automation
-  eligibility predicate (`planTaskAutomation`), so an agent write to any of them can
-  START a session on an already-entrusted task. Keep it in mind before adding another
-  agent-writable field: anything in that predicate is an execution trigger, not just a
-  property. Each write records an attributed activity entry on the task document —
-  but note that entry is an audit record, NOT a user-visible notice: `task-thread.tsx`
-  deliberately renders only `pr_linked`, because property-edit entries were shown once
-  and were unreadable (raw ids) while the properties rail already shows current values.
-  So do not cite the timeline as the thing that tells a person their task changed.
-- `ownerId` on an agent WRITE accepts ONLY `""` (unassign) — `TaskOwnerIdWriteSchema`.
-  Naming an owner points `isTaskAutomationEligible` somewhere new: it runs a task only
-  when the owner is the local operator, so an agent that could set that field could
-  route a task referencing this operator's agent config into execution under this
-  operator's credentials, on a consent belonging to whoever set `agent`. Unassigning
-  only ever REDUCES eligibility, so it stays open. This also disposes of the `me`
-  sentinel that `lody_task_list` accepts as a filter — stored verbatim it would name no
-  user, silently removing the task from every owner view with an `ok` reply.
-  **The restriction lives at the MCP boundary, not in `task-doc.ts`**: the document
-  layer is also the human write path (the app assigns owners today, a `lody task`
-  command would tomorrow) and must stay general. Do not "simplify" by pushing it down.
-- `lody_task_create` vs `lody_task_propose` splits on WHO ASKED (user request →
-  create now; agent-noticed follow-up → proposal card) and that split lives in the tool
-  descriptions on purpose. A forced justification field was considered and rejected:
-  it taxes every call to police a boundary whose error cost is one `canceled` task or
-  one ignored card. The proposal writer is a one-shot manager: it must hydrate the
-  Session doc before its idempotent upsert, flush locally, and confirm remote doc sync
-  before returning `ok`; otherwise fast cleanup can strand a card only in local SQLite.
-- MCP create takes run config semantically (`modelId`/`reasoningEffort`/`fastMode`/
-  `planMode`), never raw ACP option ids. `@lody/shared` `acp-run-config.ts` owns the
-  mapping onto each agent's advertised option ids (also the source of truth for the
-  web selectors), `applyAgentRunConfigSelection` in `src/commands/session.ts` applies it
-  once the target agent's cached capabilities are read, and
-  `validateSessionCreateOptions({ dispatchConfig })` rejects unsupported selections
-  before the Operation is accepted. `lody_session_create_options` publishes the valid
-  values per agent config as `runConfig`. Its default response is sparse: online Machines,
-  one default/current agent config, the current local project, and no GitHub repository
-  fetch. Agent configs/local projects/repos expand only through their query inputs.
-  Durable create acceptance stores each target's resolved effective dispatch config;
-  recovery must use it instead of inheriting again from mutable requester history.
-- INVARIANT: reasoning effort and fast mode are per MODEL. An ACP probe's
-  `configOptions` only describe the model that was current at probe time — agents
-  rebuild those options on every model switch and then REJECT a value the new model
-  does not support. `acp-capability-normalization.ts` recovers the model-independent
-  view into `AcpCapabilityCacheEntry.modelReasoningEfforts` from agents that also
-  publish the legacy `model[effort]` list (Codex); effort is validated against the
-  TARGET model and the ids so validated come back as `validatedConfigIds`, which
-  `validateTurnConfigOptionValues(..., skipIds)` must skip (the probed model's list
-  would wrongly reject them). What cannot be checked offline is dispatched as
-  requested. Runtime rejections remain in debug diagnostics; Codex/Claude mismatches
-  for model, reasoning effort, Fast, or Plan are not promoted to visible
-  `agent_warning` notices, while other rejected selections still are. Compatibility exception: Claude
-  Fable models omit the Fast mode option, so an explicit `fast=false` is skipped as
-  an already-effective no-op; `fast=true` must still be dispatched and retained in debug
-  diagnostics if rejected.
-- MCP `session_list` defaults to 20 (maximum 100), and `session_history` defaults to 10
-  (maximum 50 and 128 KiB). Keep the MCP surface bounded even though the human CLI retains
-  `session history --all`. `session_list` and `session_status_many` derive busy/idle from
-  the same history, durable queue, presence, and Machine RPC snapshot. Operation/Delivery
-  implementation invariants live in
-  `src/orchestration/AGENTS.md`; normative behavior lives in
-  `specs/session-orchestration.md`.
-- Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult` in
-  `src/commands/session.ts`): `writeDispatchPointer` commits `latestUserMsgId` to the
-  local repo, after which the daemon may already be executing the turn. Cloud
-  confirmation is a separate `confirmDispatchSyncedBestEffort` step that is AWAITED (so
-  the push completes before the one-shot `withWorkspaceManager` transport is torn down)
-  but NEVER throws — the durable pointer plus the SQLite Operation own delivery, and the
-  repo reconciles on its own schedule. The create/chat `catch` must only unwind when the
-  pointer was NOT yet written (`if (!dispatched)`); rolling back after dispatch deletes an
-  already-running session out from under the daemon and drops its generated title. Do not
-  reintroduce a hard-fail Streams ack on the dispatch write.
-- A renderer joining a local data-plane Session Doc room must not call
-  `LoroDocumentManager.getOrCreateSessionDoc` or retain a live cloud room.
-  Renderers may visit thousands of historical sessions; coupling local join to a
-  `SessionDocument` retains them until GC and can starve the Host health endpoint. Use the
-  bounded raw-doc one-shot reconciliation in `loro/doc.ts`, cancel it on local leave or
-  Session activation, and unload renderer-only docs after the last peer leaves. Session
-  metadata/RPC activation owns persistent CLI cloud joins. Flock room bridging remains
-  explicitly paired to local Flock join/leave.
-
-## Agent feedback
-
-- `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text.
-  The shared client adds only CLI version, platform, and architecture. Do not add cwd,
-  paths, hostname, environment, logs, prompts, conversation history, or file contents.
-- Keep obvious-secret rejection in both the CLI and hosted API boundary; instructions alone
-  are not the privacy boundary.
-
-## GitHub auth shortcut
-
-- Custom and Registry ACP authentication uses a temporary protocol connection: initialize,
-  select an advertised agent-driven method, then call ACP `authenticate`. Deprecated `env_var`
-  methods are rejected rather than revived as a second credential protocol, and terminal methods
-  remain unavailable until Machine RPC has a real interactive terminal bridge. Request-scoped URL
-  and text/secret/single-select form elicitations are bounded, validated, and bridged one at a time
-  to Machine RPC progress; URLs must use HTTP(S). Replies stay ephemeral; secret defaults and raw
-  authentication-process output never enter retained progress. Renderer cancellation and the
-  CLI-owned deadline must abort the ACP request and terminate its whole process group, including a
-  timeout that lands during cleanup. A capability refresh after login remains the proof that
-  credentials actually became usable and must finish inside the renderer's 300-second workflow
-  deadline.
-
-- Agent `gh` auth for GitHub repo sessions is managed in
-  `src/session/session-manager.ts`: it creates the git credential broker, prepends the
-  `~/.lody/bin/gh` shim, and injects/refreshes a managed `GH_TOKEN` when no user token
-  is present. The shim lives in `src/lib/gh-shim-script.ts`; token fetching/caching is
-  in `src/lib/github-token-manager.ts`; git HTTPS auth uses
-  `src/lib/git-credential-helper-script.ts`.
-- INVARIANT: host-side git must receive its credential broker as an explicit argument
-  (`WorktreeManager.ensureRepo({ brokerAuth })`), never from ambient `process.env`.
-  A fleet process runs one `GitCredentialBroker` per workspace, each bound at
-  construction to its own workspace-scoped `GitHubTokenManager`, and every one of them
-  writes the same process-global `LODY_GIT_CRED_BROKER_*` pair plus the shared
-  `~/.lody/broker.json`. The ambient value therefore belongs to whichever workspace
-  started or recovered its broker LAST — and `ensureStarted()` early-returns once
-  started, so the correct workspace never takes the pointer back. A session in
-  workspace A then authenticates through B's token manager and fails with
-  `repo_not_linked` → `terminal prompts disabled`, while A's own prefetch succeeds.
-  Keep `brokerAuth` a per-call argument: `getWorktreeManager` caches by `repoId` alone,
-  so two workspaces sharing a repo share one manager instance. Session process trees are
-  already correct (`prepareGitHubRepoSessionConfig` injects the env explicitly); the
-  helper's connection-refused fallback is scoped by `LODY_GIT_CRED_BROKER_STATE_FILE`
-  (per-workspace `broker-<workspaceId>.json`) for the same reason. Diagnostics must
-  probe the same broker the failing command used, or they report a misroute as the
-  caller's workspace lacking the repo link.
-  Regression test: `src/session/worktree/worktree-manager-broker-auth.test.ts`.
-
-## PR status reconciler
-
-`src/lib/pr-poller/` reconciles PR discovery/association, lifecycle, CI
-rollup, and merge/conflict state for this machine's sessions — the
-compensation path when the hosted GitHub webhook → Streams fan-out breaks.
-Normative spec: `specs/pr-status-reconciler.md`. `PrStatusPoller` is
-constructed in `LodyFleet.start()`; per-workspace handles
-(`pr-poller-workspace.ts`) are fact sources + write-back destinations only.
-All policy lives in pure modules (targets, priority, quota, selection,
-provider projection, write-back planning); the scheduler is a thin
-orchestrator. Priority comes from `session-viewing` presence and
-`lastMessageAt` activity (high lane 20s, low status 5min, no-PR discovery
-20min) — there is NO turn-end hook. Batched GraphQL per `(workspace, repo)`
-under a per-credential-scope point bucket, provider safety-floor freeze, and
-15min→2h repo cooldowns. Write-back plans against freshly read owner meta:
-`pullRequests` upserts by URL with the current PR as the LAST item (legacy
-fields stripped once), CI/merge live in `SessionMeta.pullRequestState`
-(`{s,m,t}`, ≤50B/entry; legacy `r` readiness is no longer written and is
-deleted on touch). Scheduling state (never PR status) is in
-`~/.lody/pr-poller-state.json`. Env: `LODY_PR_POLL_DISABLED=1` kill switch,
-`LODY_PR_POLL_*` overrides (`pr-poller-config.ts`). Module invariants live in
-`src/lib/pr-poller/AGENTS.md`.
-
-## ACP adapter provenance
-
-Terminal output history is bounded separately from agent execution output. Read
-context/terminal-output-lifecycle.md before
-changing ACP terminal notification handling or history compaction.
-
-Builtin Claude/Codex/Grok use bundled adapters plus managed native runtimes; builtin Kimi
-launches its managed Node package directly. `src/agent/setting.ts` resolves those four
-through `src/agent/managed-agent-runtime.ts`. Builtin DeepSeek Harness is deliberately not
-a managed runtime: `src/agent/deepseek-harness-runtime.ts` consumes the pinned profile from
-the `packages/acp-extension-dsh` submodule, launches it through Lody's isolated npx cache,
-and loads the bundled `deepseek-acp.js` adapter. The extension owns the ACP model,
-reasoning-effort, and permission selectors while Harness
-continues to own model execution, sandbox enforcement, and one-shot approvals.
-`DEEPSEEK_BASE_URL` is a capability-bearing launch input: include a digest of its
-exact value in the DeepSeek capability source version and thread the Agent config
-environment through every probe/session source-version derivation, so two discovered
-endpoint catalogs never share an authoritative cache identity. Never put the API key
-or a derivative of it in that public cache key. See
-managed runtime context and the
-builtin extension checklist.
-
-Built-in provider auto-registration runs from `src/lib/lody.ts`. Provider configs
-live in the current machine Flock doc, so registration starts only after the Fleet's
-workspace subscription confirms remote identity/access and the remote bridge attaches.
-It must then wait for initial meta sync and a confirmed `syncMachineFlockDoc()` before calling
-`hasAgentConfig`/`createAgentConfig`; otherwise a stale local doc can create
-duplicate built-in configs. If machine Flock sync is not confirmed,
-keep a deferred backoff retry instead of dropping the registration attempt.
-
-The adapter packages in `apps/cli/package.json` are public submodule dependencies.
-Adapter bugs/behaviors should be fixed in their package sources first:
-
-- `claude` → `packages/acp-extension-claude`, source:
-  https://github.com/LodyAI/acp-extension-claude
-- `codex` → `packages/acp-extension-codex`, source:
-  https://github.com/LodyAI/acp-extension-codex
-- shared extension contracts → `packages/acp-extension-core`, source:
-  https://github.com/LodyAI/acp-extension-core
-- `deepseek` → `packages/acp-extension-dsh`, source:
-  https://github.com/LodyAI/acp-extension-dsh
-
-Both adapters ship from these workspace sources; debug behavior there first.
-
-Clean checkouts do not have adapter `dist/` outputs, and existing checkouts may have
-stale outputs after a submodule update. Keep `apps/cli`'s `prepare:acp-adapters` step
-before both `scripts/dev-build.mjs` in the CLI `dev` script and Vite in the CLI `build`
-chain. The `src/claude-acp-entry.ts` / `src/codex-acp-entry.ts` entries import the
-adapters' package roots, whose runtime exports point at adapter `dist/`; skipping
-preparation can silently launch old capabilities even while the adapter source is current.
-
-When debugging Codex-side ACP behavior (tool_call update shapes, collaboration events,
-goal metadata, image generation, history recovery), check the workspace adapter source
-first. Managed runtime artifact pins and checksums live in
-`src/agent/managed-agent-runtime.ts`; artifact production and publication are
-external distribution responsibilities. Observed per-agent edit-evidence behavior and
-the ACP protocol reference are documented in `context/acp-protocol.md` and
-`context/acp-agent-edit-evidence.md`.
+- ACP authentication rules: [src/agent/AGENTS.md](src/agent/AGENTS.md). A capability refresh after
+  login proves credentials became usable and must finish inside the renderer's 300-second deadline.
+- Agent `gh` auth for GitHub repo sessions is set up in `src/session/session-manager.ts`; the
+  host-side credential-broker INVARIANT is in [worktree](src/session/worktree/AGENTS.md).
+- Built-in provider auto-registration (`src/lib/lody.ts`) must wait for initial meta sync and a
+  confirmed `syncMachineFlockDoc()` before `hasAgentConfig`/`createAgentConfig`, or a stale local
+  doc creates duplicate configs; unconfirmed sync keeps a deferred backoff retry.
+- `DEEPSEEK_BASE_URL` is a capability-bearing launch input: digest its exact value into the
+  DeepSeek capability source version and thread the Agent config environment through every
+  probe/session source-version derivation, so two endpoint catalogs never share a cache identity.
+  Never put the API key or a derivative of it in that cache key.
+- `src/lib/pr-poller/` compensates for a broken hosted GitHub webhook → Streams fan-out. Keep
+  policy in its pure modules with a thin scheduler, keep priority driven by presence and
+  `lastMessageAt` rather than a turn-end hook, and keep only scheduling state (never PR status) in
+  `~/.lody/pr-poller-state.json`. Spec: `specs/pr-status-reconciler.md`; invariants:
+  `src/lib/pr-poller/AGENTS.md`.
