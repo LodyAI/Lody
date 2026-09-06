@@ -1,3 +1,4 @@
+import { buildQueuedInputConfig } from './message-queue/queued-input-config';
 import type { BrowserPageReference } from '@lody/shared';
 import {
   startTransition,
@@ -66,7 +67,6 @@ import { toast } from 'sonner';
 import type {
   LocalProjectId,
   MessageContent,
-  MessageQueueItemInput,
   MessageQueueItem,
   ProjectRef,
   SessionHistory,
@@ -3720,22 +3720,7 @@ export const SessionChatInterface = memo(
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
             resume: session.acpSessionId ?? undefined,
           });
-          const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
-            prompt: inputConfig.prompt,
-            inputBlocks,
-            cliType: inputConfig.cliType,
-            agentType: inputConfig.agentType,
-            modeId: inputConfig.modeId ?? undefined,
-            modelId: inputConfig.modelId ?? undefined,
-            configOptionValues: inputConfig.configOptionValues ?? undefined,
-            issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...mcpSelection.selectedIds],
-            taskToolsEnabled: inputConfig.taskToolsEnabled,
-            agentRoleId: inputConfig.agentRoleId,
-            agentRoleRevision: inputConfig.agentRoleRevision,
-            resume: inputConfig.resume ?? undefined,
-            chainDepth: 0,
-          };
+          const queuedInputConfig = buildQueuedInputConfig(inputConfig);
 
           if (!guardNewBillableTurn()) {
             return false;
