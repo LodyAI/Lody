@@ -169,6 +169,7 @@ export class LodyOperationCoordinator {
   private metaWatch: RepoWatchHandle | null = null;
   private store: LodyOperationStore | null = null;
   private storeWatch: Pick<FSWatcher, 'close'> | null = null;
+  private progressRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private storeWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private readonly materializationClaimToken = randomUUID();
@@ -231,6 +232,8 @@ export class LodyOperationCoordinator {
     this.storeWatch = null;
     if (this.storeWakeTimer) clearTimeout(this.storeWakeTimer);
     this.storeWakeTimer = null;
+    if (this.progressRetryTimer) clearTimeout(this.progressRetryTimer);
+    this.progressRetryTimer = null;
     this.store?.close();
     this.store = null;
     for (const subscription of this.targetSubscriptions.values()) {
@@ -307,6 +310,27 @@ export class LodyOperationCoordinator {
       await this.reconcileOperation(operation);
     }
 
+    const pendingProgress = this.withStore((store) =>
+      store.listPendingProgress(this.options.workspaceId, this.options.machineId)
+    );
+    for (const operation of pendingProgress) await this.writeOperationProgress(operation);
+    if (
+      this.withStore((store) =>
+        store.listPendingProgress(this.options.workspaceId, this.options.machineId)
+      ).length > 0
+    ) {
+      if (!this.progressRetryTimer) {
+        this.progressRetryTimer = setTimeout(() => {
+          this.progressRetryTimer = null;
+          void this.wake('progress-retry');
+        }, 5_000);
+        this.progressRetryTimer.unref?.();
+      }
+    } else if (this.progressRetryTimer) {
+      clearTimeout(this.progressRetryTimer);
+      this.progressRetryTimer = null;
+    }
+
     const pendingDeliveries = this.withStore((store) =>
       store.listPendingDeliveries(this.options.workspaceId)
     );
@@ -368,6 +392,8 @@ export class LodyOperationCoordinator {
   }
 
   private async writeOperationProgress(operation: StoredLodyOperation): Promise<void> {
+    const ownerStore = this.store;
+    if (!ownerStore) return;
     try {
       if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
       const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
@@ -378,7 +404,20 @@ export class LodyOperationCoordinator {
         operation.requesterSessionId
       );
       const statusByTarget = await this.collectOperationProgressTargetStatuses(operation);
+      // A previous lease must not resume writing after stop/restart.
+      if (!this.started || this.store !== ownerStore) return;
       await upsertOperationProgressHistory(sessionDoc, operation, this.now, statusByTarget);
+      if (
+        operation.state === 'finished' &&
+        this.progressIsSettled(operation, await sessionDoc.getHistory(), statusByTarget)
+      ) {
+        // The SQLite acknowledgement must never outrun local Loro durability.
+        await this.options.workspaceDocument.repo.flush();
+        if (!this.started || this.store !== ownerStore) return;
+        this.withStore((store) =>
+          store.settleProgress(operation.requesterSessionId, operation.operationId)
+        );
+      }
     } catch (error) {
       this.options.logger.warn(
         `[orchestration] Progress update failed for ${operation.operationId}; retrying on a later wake: ${
@@ -386,6 +425,43 @@ export class LodyOperationCoordinator {
         }`
       );
     }
+  }
+
+  private progressIsSettled(
+    operation: StoredLodyOperation,
+    history: SessionHistoryInput[],
+    observed: OperationProgressStatusByTarget
+  ): boolean {
+    const row = history.find(
+      (entry) =>
+        entry.id === getOperationProgressTurnId(operation.requesterSessionId, operation.operationId)
+    );
+    const content = row?.items?.find((item) => item.type === 'operation_progress');
+    const published = new Map(
+      (content?.items ?? []).map((item) => [
+        getOperationProgressTargetKey(item.target),
+        item.status,
+      ])
+    );
+    const expected = new Map(observed);
+    for (const item of operation.items) {
+      if (!('target' in item) || !item.target) continue;
+      const key = getOperationProgressTargetKey(item.target);
+      if (expected.has(key)) continue;
+      if (
+        item.status === 'succeeded' ||
+        item.status === 'cancelled' ||
+        (item.status === 'failed' && item.error.code === 'TARGET_FAILED')
+      ) {
+        if (item.status === 'succeeded' || published.has(key)) expected.set(key, item.status);
+      } else if (item.status === 'active' && item.inputDurable) expected.set(key, 'created');
+    }
+    // Previously published targets stay owned even when metadata is temporarily absent.
+    for (const [key] of published) if (!expected.has(key)) return false;
+    return [...expected].every(
+      ([key, status]) =>
+        status !== 'created' && status !== 'running' && published.get(key) === status
+    );
   }
 
   private async collectOperationProgressTargetStatuses(
@@ -404,6 +480,7 @@ export class LodyOperationCoordinator {
       const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
         target.sessionId
       );
+      this.subscribeTarget(target.sessionId, sessionDoc);
       const history = await sessionDoc.getHistory();
       const userTurn = history.find(
         (entry) => entry.id === target.userTurnId && entry.role === 'user'
@@ -529,7 +606,7 @@ export class LodyOperationCoordinator {
           ),
         };
       }
-      this.withStore((store) =>
+      const materializedOperation = this.withStore((store) =>
         store.markItemInputDurable(
           operation.requesterSessionId,
           operation.operationId,
@@ -537,6 +614,8 @@ export class LodyOperationCoordinator {
           claimedMaterialization ? this.materializationClaimToken : undefined
         )
       );
+      // Publish each recovered child without waiting for slower batch siblings.
+      await this.writeOperationProgress(materializedOperation);
       this.clearMaterializationRetry(operation, index);
       item = { ...item, inputDurable: true };
     }
@@ -632,7 +711,7 @@ export class LodyOperationCoordinator {
   }
 
   private subscribeTarget(sessionId: SessionId, sessionDoc: SessionDocument): void {
-    if (this.targetSubscriptions.has(sessionId)) return;
+    if (!this.started || this.targetSubscriptions.has(sessionId)) return;
     const unsubscribe =
       sessionDoc.mirror?.subscribe(() => {
         void this.wake('target-history');

@@ -559,3 +559,41 @@ describe('runWithOperationStoreBusyRetry', () => {
     expect(isOperationStoreBusyError('database is locked')).toBe(false);
   });
 });
+
+it('retains unfinished progress ownership across delivery consumption, reopening and retention cleanup', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'lody-progress-obligation-'));
+  roots.add(root);
+  const dbPath = path.join(root, 'operations.sqlite3');
+  let now = Date.parse('2026-07-20T00:00:00Z');
+  const input = { ...baseInput(), kind: 'session_create' as const };
+  let store = new LodyOperationStore(dbPath, () => now);
+  store.accept(input);
+  store.cancel(input.requesterSessionId, input.operationId);
+  store.consumeDelivery(input.requesterSessionId, input.operationId);
+  store.close();
+  now += 100 * 24 * 60 * 60 * 1000;
+  store = new LodyOperationStore(dbPath, () => now);
+  try {
+    expect(store.listPendingDeliveries(input.workspaceId)).toEqual([]);
+    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toMatchObject([
+      { operationId: input.operationId },
+    ]);
+    expect(
+      store.listPendingProgress('other-workspace' as WorkspaceId, input.ownerMachineId)
+    ).toEqual([]);
+    expect(store.listPendingProgress(input.workspaceId, 'other-machine' as MachineId)).toEqual([]);
+    store.settleProgress(input.requesterSessionId, input.operationId);
+    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toEqual([]);
+  } finally {
+    store.close();
+  }
+  now += 2 * 24 * 60 * 60 * 1000;
+  store = new LodyOperationStore(dbPath, () => now);
+  try {
+    expect(() => store.get(input.requesterSessionId, input.operationId)).toThrow(
+      'Operation not found'
+    );
+  } finally {
+    store.close();
+  }
+});

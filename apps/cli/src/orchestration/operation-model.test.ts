@@ -99,3 +99,31 @@ describe('Operation delivery executable model', () => {
     ).toThrow(/exceeded the fixed depth cap/);
   });
 });
+
+it('retains UI observation after a deadline Delivery without scheduling another continuation', () => {
+  const delivered = trace(
+    'accept',
+    'materialize_success',
+    'deadline',
+    'schedule',
+    'complete_turn',
+    'flush_progress'
+  );
+  expect(delivered).toMatchObject({
+    delivery: 'consumed',
+    progress: 'pending',
+    targetTerminal: false,
+    completionTurnWrites: 1,
+  });
+  const settled = stepOrchestrationModel(
+    stepOrchestrationModel(delivered, 'observe_target_terminal'),
+    'flush_progress'
+  );
+  expect(settled).toMatchObject({
+    delivery: 'consumed',
+    progress: 'settled',
+    targetTerminal: true,
+    activeTurn: 'none',
+    completionTurnWrites: 1,
+  });
+});

@@ -7,6 +7,8 @@ export type OrchestrationModelState = {
   operation: 'absent' | 'active' | 'finished';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
   delivery: 'absent' | 'pending' | 'consumed';
+  progress: 'absent' | 'pending' | 'settled';
+  targetTerminal: boolean;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
   archived: boolean;
@@ -22,6 +24,8 @@ export type OrchestrationModelAction =
   | 'materialize_success'
   | 'finish'
   | 'deadline'
+  | 'observe_target_terminal'
+  | 'flush_progress'
   | 'enqueue_user'
   | 'schedule'
   | 'complete_turn'
@@ -33,6 +37,8 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   operation: 'absent',
   targetInput: 'absent',
   delivery: 'absent',
+  progress: 'absent',
+  targetTerminal: false,
   activeTurn: 'none',
   queuedUsers: 0,
   archived: false,
@@ -51,6 +57,7 @@ export const stepOrchestrationModel = (
       if (next.operation === 'absent' && next.chainDepth < 5) {
         next.operation = 'active';
         next.targetInput = 'missing';
+        next.progress = 'pending';
       }
       break;
     case 'materialize_fail':
@@ -73,6 +80,7 @@ export const stepOrchestrationModel = (
       break;
     case 'finish':
       if (next.operation === 'active' && next.targetInput === 'durable') {
+        next.targetTerminal = true;
         next.operation = 'finished';
         next.delivery = 'pending';
       }
@@ -83,6 +91,13 @@ export const stepOrchestrationModel = (
         if (next.targetInput === 'retry_scheduled') next.targetInput = 'missing';
         next.delivery = 'pending';
       }
+      break;
+    case 'observe_target_terminal':
+      if (next.targetInput === 'durable') next.targetTerminal = true;
+      break;
+    case 'flush_progress':
+      if (next.operation === 'finished' && (next.targetInput !== 'durable' || next.targetTerminal))
+        next.progress = 'settled';
       break;
     case 'enqueue_user':
       next.queuedUsers = Math.min(2, next.queuedUsers + 1);
@@ -118,6 +133,9 @@ export const stepOrchestrationModel = (
 };
 
 export const assertOrchestrationModelSafety = (state: OrchestrationModelState): void => {
+  if (state.progress === 'settled' && state.targetInput === 'durable' && !state.targetTerminal) {
+    throw new Error('progress ownership ended before the published target was terminal');
+  }
   if (state.completionTurnWrites > 1) {
     throw new Error('one Delivery created more than one visible completion Turn');
   }
@@ -146,6 +164,8 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'materialize_success',
     'finish',
     'deadline',
+    'observe_target_terminal',
+    'flush_progress',
     'enqueue_user',
     'schedule',
     'complete_turn',

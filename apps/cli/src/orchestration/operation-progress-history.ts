@@ -1,3 +1,4 @@
+import type { Loro, LoroList, LoroMap } from 'loro-crdt';
 import {
   getServerNow,
   type LodyOperationItemResult,
@@ -10,6 +11,7 @@ import {
 } from '@lody/shared';
 
 export type OperationProgressHistoryDocument = {
+  handle?: { doc: Pick<Loro, 'getList' | 'commit'> } | null;
   updateHistory: (
     updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
   ) => Promise<void>;
@@ -31,7 +33,6 @@ const progressStatusRank = (status: OperationProgressStatus): number =>
   status === 'created' ? 0 : status === 'running' ? 1 : 2;
 
 const progressStatusForItem = (
-  operation: StoredLodyOperation,
   item: LodyOperationItemResult,
   statusByTarget?: OperationProgressStatusByTarget,
   materializedTargets?: ReadonlySet<string>
@@ -42,17 +43,16 @@ const progressStatusForItem = (
   const wasMaterialized = targetStatus !== undefined || materializedTargets?.has(key);
   if (item.status === 'succeeded') return item.status;
   if (item.status === 'failed' || item.status === 'cancelled') {
-    return targetStatus ?? (wasMaterialized ? item.status : null);
-  }
-  if (operation.completion?.type === 'cancelled') {
-    return targetStatus ?? (wasMaterialized || item.inputDurable ? 'cancelled' : null);
-  }
-  if (operation.completion?.type === 'error') {
-    return targetStatus ?? (wasMaterialized || item.inputDurable ? 'failed' : null);
+    if (targetStatus) return targetStatus;
+    if (!wasMaterialized) return null;
+    // A deadline ends observation for the result, not execution of the child.
+    return item.status === 'failed' && item.error.code === 'TARGET_TIMEOUT'
+      ? 'created'
+      : item.status;
   }
   // Preallocated target ids are not navigable evidence. Wait until the target
   // Session/UserTurn is durable before publishing it as a created card.
-  if (!item.inputDurable) return null;
+  if (!item.inputDurable && !wasMaterialized) return null;
   return targetStatus ?? 'created';
 };
 
@@ -63,7 +63,7 @@ export const buildOperationProgressContent = (
 ): OperationProgressContent | null => {
   if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return null;
   const items = operation.items.reduce<OperationProgressItem[]>((acc, item) => {
-    const status = progressStatusForItem(operation, item, statusByTarget, materializedTargets);
+    const status = progressStatusForItem(item, statusByTarget, materializedTargets);
     if (!status || !('target' in item) || !item.target) return acc;
     acc.push({
       target: item.target,
@@ -123,13 +123,43 @@ export const upsertOperationProgressHistory = async (
 ): Promise<void> => {
   if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
   const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
+  // Mirror's history list is keyed by id and cannot diff duplicate ids safely.
+  // Give legacy duplicates recoverable, container-stable aliases first; the next
+  // validated update merges their contents and removes the aliases. A crash
+  // between these commits retains every target state for the next reconciliation.
+  const duplicatePrefix = `${id}:duplicate:`;
+  const doc = sessionDoc.handle?.doc;
+  if (doc) {
+    const list = doc.getList('history') as LoroList<LoroMap>;
+    let seen = false;
+    let renamed = false;
+    for (let index = 0; index < list.length; index++) {
+      const row = list.get(index);
+      if (row?.get('id') !== id || row.get('role') !== 'system') continue;
+      if (seen) {
+        row.set('id', `${duplicatePrefix}${row.id}`);
+        renamed = true;
+      }
+      seen = true;
+    }
+    if (renamed) doc.commit();
+  }
+  const isProgressRow = (entry: SessionHistoryInput) =>
+    entry.role === 'system' && (entry.id === id || entry.id.startsWith(duplicatePrefix));
   const timestamp = new Date(now()).toISOString();
   await sessionDoc.updateHistory((history) => {
     const existingIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
-    const existing = existingIndex >= 0 ? history[existingIndex] : undefined;
-    const existingProgress = existing?.items?.find((item) => item.type === 'operation_progress');
+    const duplicates = history.filter(isProgressRow);
+    const existing = duplicates[0];
+    const existingProgress = duplicates
+      .flatMap((entry) => entry.items ?? [])
+      .filter((item): item is OperationProgressContent => item.type === 'operation_progress')
+      .reduce<OperationProgressContent | undefined>(
+        (merged, item) => mergeOperationProgressContent(merged, item),
+        undefined
+      );
     // A prior card proves existence, not the current execution state. Keep that
-    // evidence separate so a stale running snapshot cannot mask root termination.
+    // evidence separate: a root timeout/cancel is not a target terminal state.
     const materializedTargets = new Set(
       (existingProgress?.items ?? []).map((item) => getOperationProgressTargetKey(item.target))
     );
@@ -137,7 +167,11 @@ export const upsertOperationProgressHistory = async (
     if (!content) return history;
     const merged = mergeOperationProgressContent(existingProgress, content);
     const nextItems = [merged];
-    if (existing && JSON.stringify(existing.items ?? []) === JSON.stringify(nextItems)) {
+    if (
+      duplicates.length === 1 &&
+      existing &&
+      JSON.stringify(existing.items ?? []) === JSON.stringify(nextItems)
+    ) {
       return history;
     }
     const entry: SessionHistoryInput = {
@@ -151,6 +185,8 @@ export const upsertOperationProgressHistory = async (
       finished: true,
     };
     if (existingIndex < 0) return [...history, entry];
-    return history.map((candidate, index) => (index === existingIndex ? entry : candidate));
+    return history.flatMap((candidate, index) =>
+      index === existingIndex ? [entry] : isProgressRow(candidate) ? [] : [candidate]
+    );
   });
 };

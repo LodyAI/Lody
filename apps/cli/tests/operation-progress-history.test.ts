@@ -112,7 +112,7 @@ describe('operation progress history', () => {
     });
   });
 
-  it('renders active create targets as cancelled when the operation is cancelled', () => {
+  it('does not freeze a target as cancelled merely because the root was cancelled', () => {
     const operation: StoredLodyOperation = {
       ...baseOperation([
         {
@@ -127,11 +127,11 @@ describe('operation progress history', () => {
     };
 
     expect(buildOperationProgressContent(operation)?.items).toEqual([
-      { target: { sessionId: 'session-1', userTurnId: 'turn-1' }, status: 'cancelled' },
+      { target: { sessionId: 'session-1', userTurnId: 'turn-1' }, status: 'created' },
     ]);
   });
 
-  it('renders active create targets as failed when the operation ends in a terminal error', () => {
+  it('does not freeze a target as failed merely because the root ended in error', () => {
     const operation: StoredLodyOperation = {
       ...baseOperation([
         {
@@ -149,7 +149,7 @@ describe('operation progress history', () => {
     };
 
     expect(buildOperationProgressContent(operation)?.items).toEqual([
-      { target: { sessionId: 'session-1', userTurnId: 'turn-1' }, status: 'failed' },
+      { target: { sessionId: 'session-1', userTurnId: 'turn-1' }, status: 'created' },
     ]);
   });
 
@@ -319,7 +319,7 @@ describe('operation progress history', () => {
 });
 
 it.each(['failed', 'cancelled'] as const)(
-  'finishes a previously published card as %s when target metadata is unavailable',
+  'preserves a timeout snapshot but applies confirmed %s when metadata is unavailable',
   async (status) => {
     let history: SessionHistoryInput[] = [];
     const doc = {
@@ -350,7 +350,7 @@ it.each(['failed', 'cancelled'] as const)(
         type: 'operation_progress',
         operationId: 'op-1',
         operationKind: 'session_create_many',
-        items: [{ target, status }],
+        items: [{ target, status: status === 'failed' ? 'running' : status }],
       },
     ]);
     // The same preallocated id without prior materialization evidence is not a card.
@@ -491,7 +491,7 @@ it.each(['cancelled', 'error'] as const)(
       new Map([[getOperationProgressTargetKey(target), 'running']])
     );
     await upsertOperationProgressHistory(doc, operation, now);
-    expect(statusOf()).toBe(completionType === 'cancelled' ? 'cancelled' : 'failed');
+    expect(statusOf()).toBe('running');
   }
 );
 
@@ -563,4 +563,77 @@ it('keeps the original history object for identical progress snapshots', async (
   const first = history;
   await upsertOperationProgressHistory(doc, operation, () => 1);
   expect(history).toBe(first);
+});
+
+it('compacts concurrent same-id inserts after a real two-replica merge without losing newer states', async () => {
+  const seedDoc = new Loro();
+  const seed = new Mirror({
+    doc: seedDoc,
+    schema: sessionDocSchema,
+    initialState: { session: { id: 'requester-1' as SessionId }, history: [], mq: [] },
+    strict: false,
+  });
+  const base = seedDoc.export({ mode: 'snapshot' });
+  seed.dispose();
+  const leftDoc = new Loro();
+  leftDoc.import(base);
+  const rightDoc = new Loro();
+  rightDoc.import(base);
+  const left = new Mirror({
+    doc: leftDoc,
+    schema: sessionDocSchema,
+    strict: false,
+    throwOnValidationError: true,
+  });
+  const right = new Mirror({
+    doc: rightDoc,
+    schema: sessionDocSchema,
+    strict: false,
+    throwOnValidationError: true,
+  });
+  const adapter = (mirror: typeof left) => ({
+    handle: { doc: mirror === left ? leftDoc : rightDoc },
+    updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+      mirror.setState((state) => ({ ...state, history: update(state.history) }));
+    },
+  });
+  const target = { sessionId: 'concurrent-child' as SessionId, userTurnId: 'same-turn' };
+  const created = baseOperation([{ status: 'active', inputDurable: true, target }]);
+  const succeeded = baseOperation([{ status: 'succeeded', target, assistantTurnId: 'answer' }]);
+  try {
+    await upsertOperationProgressHistory(adapter(left), created, () => 0);
+    await upsertOperationProgressHistory(adapter(right), succeeded, () => 0);
+    leftDoc.import(rightDoc.export({ mode: 'snapshot' }));
+    // Mirror processes remote events before its next state read.
+    expect(left.getState().history).toHaveLength(2);
+    await expect(
+      upsertOperationProgressHistory(
+        {
+          handle: { doc: leftDoc },
+          updateHistory: async () => {
+            throw new Error('interrupted after durable aliasing');
+          },
+        },
+        created,
+        () => 1
+      )
+    ).rejects.toThrow('interrupted after durable aliasing');
+    // A peer can recover the intermediate state without losing either snapshot.
+    rightDoc.import(leftDoc.export({ mode: 'snapshot' }));
+    expect(right.getState().history).toHaveLength(2);
+    expect(new Set(right.getState().history.map((row) => row.id)).size).toBe(2);
+    await upsertOperationProgressHistory(adapter(left), created, () => 1);
+    expect(left.getState().history).toHaveLength(1);
+    expect(left.getState().history[0]?.items).toMatchObject([
+      { type: 'operation_progress', items: [{ target, status: 'succeeded' }] },
+    ]);
+    rightDoc.import(leftDoc.export({ mode: 'snapshot' }));
+    expect(right.getState().history).toHaveLength(1);
+    expect(right.getState().history[0]?.items).toMatchObject([
+      { type: 'operation_progress', items: [{ target, status: 'succeeded' }] },
+    ]);
+  } finally {
+    left.dispose();
+    right.dispose();
+  }
 });

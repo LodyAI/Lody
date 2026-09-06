@@ -36,7 +36,7 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   subprocesses may accept Operations but never schedule completion Turns.
 - Reconciliation is level-checked. Loro subscriptions and SQLite directory
   watch events are hints; startup/lease acquisition scans active Operations and
-  pending Deliveries once. The watcher never carries result data.
+  pending Deliveries and unsettled progress once. The watcher never carries result data.
 - The coordinator holds ONE store connection from start to stop. Closing the
   last SQLite connection deletes the WAL/SHM sidecars, so per-reconcile
   open/close makes the directory watcher observe its own churn and wake itself
@@ -60,14 +60,19 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   idle boundary; completion uses a stable `role: system`
   `operation_completion` Turn and then the existing Session execution mutex.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
-  Turn in the requester Session. It is presentation-only durable UI state, never
+  Turn in the requester Session, written only by the Host-lease Worker, never by MCP
+  replicas. Repair duplicate ids before keyed Mirror updates. It is durable UI state, never
   agent input or a dispatch pointer. Only emit navigable target cards for materialized
   target Session/UserTurn evidence (or an already-published target), merge status
   monotonically by exact target, and treat progress write failures as repairable: they
   must not fail Operation acceptance, target materialization, cancellation, finalization,
   delivery, or best-effort target cancel. Set `progressMessageId` only when the row
   covers every durably materialized target and reflects every successful result;
-  partial or stale rows must retain completion fallback cards.
+  partial or stale rows must retain completion fallback cards. Root cancellation/errors/
+  deadlines do not establish target termination. Retain progress reconciliation after
+  Delivery consumption until every published target is terminal and the Loro write is
+  locally flushed; SQLite settlements and cleanup must preserve this obligation across
+  restart. Missing evidence/write failures retain an owned retry, never an agent wake.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.

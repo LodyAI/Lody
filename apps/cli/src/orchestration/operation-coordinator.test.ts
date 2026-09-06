@@ -48,6 +48,7 @@ const makeHarness = async (options?: {
   operationKind?: 'session_create' | 'session_create_many' | 'session_chat';
   failProgressHistoryWrites?: boolean;
   progressHistoryFailures?: number;
+  failProgressFlush?: boolean;
   targetDocSync?: () => Promise<{
     history?: SessionHistoryInput[];
     meta?: SessionMeta;
@@ -165,6 +166,9 @@ const makeHarness = async (options?: {
     return meta ? { meta } : undefined;
   });
   const repo = {
+    flush: async () => {
+      if (options?.failProgressFlush) throw new Error('flush unavailable');
+    },
     watch: () => ({ unsubscribe: vi.fn() }),
     getDocMeta,
     getMeta: getRepoMeta,
@@ -326,6 +330,12 @@ const makeHarness = async (options?: {
     openFlockDoc,
     logger,
     materializeTarget,
+    notifyTargetHistory: () => {
+      for (const callback of subscribers.get(targetSessionId) ?? []) callback();
+    },
+    setProgressWriteFailures: (count: number) => {
+      remainingProgressHistoryFailures = count;
+    },
     triggerOperationStoreWake: () => operationStoreWake?.(path.basename(storePath)),
     setPendingUser: (value: boolean) => {
       pendingUser = value;
@@ -1418,6 +1428,211 @@ describe('LodyOperationCoordinator', () => {
       expect(completion.completion).toMatchObject({ type: 'result', value: { items: results } });
     }
   );
+
+  it.each(
+    (['deadline', 'cancelled', 'error'] as const).flatMap((reason) =>
+      (['succeeded', 'failed', 'cancelled'] as const).map((terminal) => ({ reason, terminal }))
+    )
+  )(
+    'reconciles target $terminal after root $reason, delivery and daemon restart without another continuation',
+    async ({ reason, terminal }) => {
+      const harness = await makeHarness({
+        operationKind: 'session_create',
+        deadlineAt: reason === 'deadline' ? '2026-07-19T23:59:59.000Z' : '2026-07-21T00:00:00.000Z',
+      });
+      if (reason !== 'deadline') {
+        const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+        try {
+          if (reason === 'cancelled') store.cancel(harness.requesterSessionId, 'review-round-1');
+          else
+            store.finish(harness.requesterSessionId, 'review-round-1', {
+              type: 'error',
+              error: {
+                code: 'COORDINATOR_FAILED',
+                message: 'synthetic root error',
+                retryable: false,
+              },
+            });
+        } finally {
+          store.close();
+        }
+      }
+      const targetHistory = harness.histories.get(harness.targetSessionId);
+      const targetTurn = targetHistory?.[0];
+      if (!targetHistory || !targetTurn) throw new Error('missing target fixture');
+      targetHistory[0] = { ...targetTurn, status: 'processing' };
+      const read = () => {
+        const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+        try {
+          return {
+            pending: store.listPendingProgress(
+              'workspace-1' as WorkspaceId,
+              'machine-1' as MachineId
+            ),
+            deliveries: store.listPendingDeliveries('workspace-1' as WorkspaceId),
+            completion: store.get(harness.requesterSessionId, 'review-round-1').completion,
+          };
+        } finally {
+          store.close();
+        }
+      };
+      const status = () =>
+        harness.histories
+          .get(harness.requesterSessionId)
+          ?.flatMap((row) => row.items ?? [])
+          .find((item) => item.type === 'operation_progress')?.items[0]?.status;
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      expect(read().pending).toHaveLength(1);
+      expect(read().deliveries).toEqual([]);
+      const meta = harness.metas.get(harness.targetSessionId);
+      if (!meta) throw new Error('missing target metadata fixture');
+      harness.metas.delete(harness.targetSessionId);
+      harness.notifyTargetHistory();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      expect(read().pending).toHaveLength(1);
+      harness.metas.set(harness.targetSessionId, meta);
+      const rootResult = read().completion;
+      const requesterBefore = harness.histories.get(harness.requesterSessionId) ?? [];
+      const continuationIds = requesterBefore
+        .filter((row) => row.role === 'assistant')
+        .map((row) => row.id);
+      expect(continuationIds).toHaveLength(1);
+      harness.coordinator.stop();
+      // Opening the same SQLite store must restore observation even with no active Operation/Delivery.
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      targetHistory[0] = {
+        ...targetTurn,
+        status:
+          terminal === 'succeeded' ? 'handled' : terminal === 'failed' ? 'failed' : 'canceled',
+      };
+      if (terminal === 'succeeded')
+        targetHistory.push({
+          id: 'late-answer',
+          role: 'assistant',
+          userTurnId: 'turn-1',
+          timestamp: '2026-07-20T00:01:00.000Z',
+          items: [{ type: 'text', text: 'late success' }],
+          fileDiff: [],
+          finished: true,
+        });
+      harness.notifyTargetHistory();
+      await harness.coordinator.idle();
+      expect(status()).toBe(terminal);
+      expect(read().pending).toEqual([]);
+      expect(read().completion).toEqual(rootResult);
+      expect(
+        harness.histories
+          .get(harness.requesterSessionId)
+          ?.filter((row) => row.role === 'assistant')
+          .map((row) => row.id)
+      ).toEqual(continuationIds);
+      harness.coordinator.stop();
+    }
+  );
+
+  it('does not let an in-flight progress read write after the owning worker stops', async () => {
+    let signalRead: () => void = () => {};
+    let releaseRead: () => void = () => {};
+    const readStarted = new Promise<void>((resolve) => {
+      signalRead = resolve;
+    });
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      beforeTargetMetaRead: async () => {
+        signalRead();
+        await readGate;
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      store.cancel(harness.requesterSessionId, 'review-round-1');
+    } finally {
+      store.close();
+    }
+    harness.coordinator.start();
+    const wake = harness.coordinator.wake('observe-owner-stop');
+    await readStarted;
+    harness.coordinator.stop();
+    releaseRead();
+    await wake;
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+  });
+
+  it('keeps progress pending until the terminal Loro write is flushed', async () => {
+    const options = { operationKind: 'session_create' as const, failProgressFlush: true };
+    const harness = await makeHarness(options);
+    const targetHistory = harness.histories.get(harness.targetSessionId);
+    if (!targetHistory) throw new Error('missing target fixture');
+    targetHistory.push({
+      id: 'answer',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:01:00.000Z',
+      items: [{ type: 'text', text: 'done' }],
+      fileDiff: [],
+      finished: true,
+    });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+      expect(
+        store.listPendingProgress('workspace-1' as WorkspaceId, 'machine-1' as MachineId)
+      ).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+    options.failProgressFlush = false;
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const recovered = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(
+        recovered.listPendingProgress('workspace-1' as WorkspaceId, 'machine-1' as MachineId)
+      ).toEqual([]);
+    } finally {
+      recovered.close();
+    }
+  });
+
+  it('retries failed terminal progress writes after delivery without needing another history event', async () => {
+    vi.useFakeTimers();
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+    });
+    const targetHistory = harness.histories.get(harness.targetSessionId);
+    const targetTurn = targetHistory?.[0];
+    if (!targetHistory || !targetTurn) throw new Error('missing target fixture');
+    targetHistory[0] = { ...targetTurn, status: 'processing' };
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.setProgressWriteFailures(1);
+    targetHistory[0] = { ...targetTurn, status: 'failed' };
+    harness.notifyTargetHistory();
+    await harness.coordinator.idle();
+    const status = () =>
+      harness.histories
+        .get(harness.requesterSessionId)
+        ?.flatMap((row) => row.items ?? [])
+        .find((item) => item.type === 'operation_progress')?.items[0]?.status;
+    expect(status()).toBe('running');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await harness.coordinator.idle();
+    expect(status()).toBe('failed');
+    harness.coordinator.stop();
+  });
 
   it('links operation completion to existing create progress history', async () => {
     const harness = await makeHarness({
