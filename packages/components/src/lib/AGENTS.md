@@ -60,6 +60,11 @@ Before creating a top-level or child session, call
 `filterAcpSessionConfigOptionValues()` so cached values outside the current
 selector schema are not dispatched or persisted again.
 
+A model change in the Role editor (`reconcileAgentRoleModelChange`) drops config
+option values the new model's composed selectors do not publish or accept, so a
+Role never stores a key no surface can show or clear. A saved Role's stale keys
+are reported by `findAgentRoleRunConfigIssues`, never repaired.
+
 ## A resolved open is cached under BOTH spellings
 
 The machine may answer with a different on-disk spelling than the one requested

@@ -12,11 +12,16 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoleActions } from '@/hooks/use-workspace-agent-roles';
 import {
+  buildAcpSelectorOptions,
+  type AcpSelectorTarget,
+} from '@/components/shared/acp-selector-options';
+import {
   applyAgentRoleRunConfigDefaults,
   buildAgentRoleFormValue,
   buildAgentRoleFromForm,
   buildAgentRoleRunConfig,
   findAgentRoleRunConfigIssues,
+  reconcileAgentRoleModelChange,
   validateAgentRoleForm,
   type AgentRoleFormValue,
 } from '@/lib/agent-role-form';
@@ -114,21 +119,30 @@ export function AgentRoleEditorDialog({
     () => machineAgentConfigs.find((config) => config.id === editor?.value.agentConfigId),
     [editor?.value.agentConfigId, machineAgentConfigs]
   );
-  const selectorOptions = useAcpSelectorOptions(
-    selectedAgentConfig
-      ? {
-          configId: selectedAgentConfig.id,
-          cliType: selectedAgentConfig.cliType,
-          agentType: selectedAgentConfig.agentType,
-          runtimeOverrides: selectedAgentConfig.runtimeOverrides,
-          machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
-          // The STORED value names the model whose catalog composes the options;
-          // feeding the derived defaults back in would loop.
-          selectedModelId: editor?.value.modelId ?? null,
-          configOptionValues: editor?.value.configOptionValues,
-        }
-      : undefined
+  const selectorTarget: AcpSelectorTarget | undefined = useMemo(
+    () =>
+      selectedAgentConfig
+        ? {
+            configId: selectedAgentConfig.id,
+            cliType: selectedAgentConfig.cliType,
+            agentType: selectedAgentConfig.agentType,
+            runtimeOverrides: selectedAgentConfig.runtimeOverrides,
+            machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
+            // The STORED value names the model whose catalog composes the options;
+            // feeding the derived defaults back in would loop.
+            selectedModelId: editor?.value.modelId ?? null,
+            configOptionValues: editor?.value.configOptionValues,
+          }
+        : undefined,
+    [
+      selectedAgentConfig,
+      selectedMachineId,
+      machines,
+      editor?.value.modelId,
+      editor?.value.configOptionValues,
+    ]
   );
+  const selectorOptions = useAcpSelectorOptions(selectorTarget);
 
   // A Role pins concrete values, so as soon as an agent config's capabilities
   // are known its own defaults fill the unset fields. The user then adjusts a
@@ -235,7 +249,20 @@ export function AgentRoleEditorDialog({
           <AgentRoleForm
             className="min-h-0 flex-1"
             value={editorValue}
-            onChange={(value) => onChange({ ...editor, value })}
+            onChange={(next) =>
+              onChange({
+                ...editor,
+                value: reconcileAgentRoleModelChange(editorValue, next, (candidate) =>
+                  selectorTarget
+                    ? buildAcpSelectorOptions({
+                        ...selectorTarget,
+                        selectedModelId: candidate.modelId,
+                        configOptionValues: candidate.configOptionValues,
+                      })
+                    : null
+                ),
+              })
+            }
             machines={machineOptions}
             agentConfigs={machineAgentConfigs.map((config) => ({
               agentConfigId: config.id,
