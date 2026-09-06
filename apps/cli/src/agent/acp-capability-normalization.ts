@@ -146,12 +146,53 @@ type AcpSessionCapabilitiesResponse = {
     availableModes?: Array<{ id: string; name: string; description?: string | null }> | null;
   } | null;
   configOptions?: SessionConfigOption[] | null;
+  /** Session-response meta; adapters publish Lody-owned contracts here. */
+  _meta?: Record<string, unknown> | null;
 };
+
+const zLodySessionResponseMeta = z.object({
+  _meta: z
+    .object({
+      lody: z
+        .object({
+          modelReasoningEfforts: z.record(z.string(), z.array(z.string())),
+        })
+        .nullish(),
+    })
+    .nullish(),
+});
+
+/**
+ * Per-model reasoning-effort ladders an adapter published under the Lody-owned
+ * "_meta.lody" session-response namespace (the Grok adapter does; agents that
+ * publish no per-model information have none and stay undefined).
+ */
+export function readLodyModelReasoningEfforts(
+  sessionResponse: unknown
+): Record<string, string[]> | undefined {
+  const parsed = zLodySessionResponseMeta.safeParse(sessionResponse);
+  const map = parsed.success ? parsed.data._meta?.lody?.modelReasoningEfforts : undefined;
+  return map && Object.keys(map).length > 0 ? map : undefined;
+}
+
+/**
+ * Only builtin Codex encodes reasoning effort into its legacy model ids
+ * (`gpt-5.6-sol[xhigh]`). Other agents use the same bracket syntax for
+ * unrelated variants — Claude's `opus[1m]` is a context window — so the
+ * legacy derivation must not read those as effort ladders.
+ */
+const usesCodexModelEffortIds = (agent?: { cliType: string; agentType: string }): boolean =>
+  agent?.cliType === 'builtin' && agent.agentType === 'codex';
 
 /** Extract cacheable capabilities from a real ACP new/load/resume session response. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
-  lifecycleCapabilities: { sessionFork?: boolean; acknowledgedSteer?: boolean } = {}
+  lifecycleCapabilities: {
+    sessionFork?: boolean;
+    acknowledgedSteer?: boolean;
+    /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
+    agent?: { cliType: string; agentType: string };
+  } = {}
 ): AcpCapabilitiesResult {
   const modes = (sessionResponse.modes?.availableModes ?? []).map((mode) => ({
     id: mode.id,
@@ -169,12 +210,15 @@ export function normalizeAcpSessionCapabilities(
   const models = modelsFromConfigOptions.length > 0 ? modelsFromConfigOptions : legacyModels;
   const availableCommands = readSessionAvailableCommands(sessionResponse);
   // `configOptions` only describes the model that is current right now — agents
-  // rebuild the effort/fast options on every model switch. The legacy model list
-  // is the only place some agents (Codex) expose every `model[effort]`
-  // combination, so keep reading it even when configOptions supersede it.
-  const modelReasoningEfforts = deriveModelReasoningEffortsFromLegacyModelIds(
-    legacyModels.map((model) => model.modelId)
-  );
+  // rebuild the effort/fast options on every model switch. Two sources expose
+  // the model-independent view: the legacy `model[effort]` list (Codex) and the
+  // Lody "_meta.lody" map the adapter translates vendor metadata into (Grok).
+  const modelReasoningEfforts = {
+    ...readLodyModelReasoningEfforts(sessionResponse),
+    ...(usesCodexModelEffortIds(lifecycleCapabilities.agent)
+      ? deriveModelReasoningEffortsFromLegacyModelIds(legacyModels.map((model) => model.modelId))
+      : undefined),
+  };
 
   return {
     modes,
@@ -183,6 +227,6 @@ export function normalizeAcpSessionCapabilities(
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
-    ...(modelReasoningEfforts ? { modelReasoningEfforts } : {}),
+    ...(Object.keys(modelReasoningEfforts).length > 0 ? { modelReasoningEfforts } : {}),
   };
 }
