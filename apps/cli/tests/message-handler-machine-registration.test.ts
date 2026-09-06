@@ -185,6 +185,7 @@ describe('MessageHandler machine registration', () => {
       acpAuthenticationInteractions: 2,
       localProjectRemoval: 1,
       providerSetup: 1,
+      inlineReferences: 1,
       acpProtocolAuthentication: 2,
     });
 
