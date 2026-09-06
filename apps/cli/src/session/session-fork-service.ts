@@ -5,6 +5,10 @@ import {
   updateSessionAccountNativeId,
   setSessionAccountBinding,
   resolveSessionAccountMeta,
+  beginSessionAccountEdit,
+  commitSessionAccountEdit,
+  rollbackSessionAccountEdit,
+  abandonSessionAccountEdit,
 } from './session-account-binding-store';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -875,6 +879,8 @@ export class SessionForkService {
     };
 
     let targetPrepared = false;
+    const accountEditOperationId = `session-fork:${targetSessionId}`;
+    let accountEditStarted = false;
     try {
       if (await getSessionAccountBinding(accountScope))
         throw new Error('Target local account binding already exists.');
@@ -939,20 +945,26 @@ export class SessionForkService {
         );
       }
       try {
-        await updateSessionAccountNativeId(
-          {
-            workspaceId: this.deps.workspaceId,
-            machineId: this.deps.machineId,
-            sessionId: targetSessionId,
-          },
-          targetSession.acpSessionId ?? undefined
-        );
-        await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
+        const committedMeta = {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
+        };
+        // The native fork id must not become authoritative before cloned history
+        // is durable. Recovery matches either the prepared placeholder or the
+        // cloned checkpoint even if repo metadata persisted ahead of the doc.
+        await beginSessionAccountEdit(accountScope, {
+          operationId: accountEditOperationId,
+          sourceMeta: targetMeta,
+          targetMeta: committedMeta,
+          sourceHistory: await targetDoc.getHistory(),
+          targetHistory: historyResult.history,
         });
+        accountEditStarted = true;
+        await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, committedMeta);
         await targetDoc.updateHistory(() => historyResult.history);
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
+        await commitSessionAccountEdit(accountScope, accountEditOperationId);
+        accountEditStarted = false;
       } catch (error) {
         throw new SessionForkOperationError(
           'TARGET_WRITE_FAILED',
@@ -969,19 +981,24 @@ export class SessionForkService {
         warnings: historyResult.warnings,
       };
     } catch (error) {
-      if (accountBindingCreated)
-        await clearSessionAccountBinding(accountScope).catch((cleanupError) =>
-          this.deps.logger.warn(
-            `Could not clear failed fork account binding: ${formatErrorMessage(cleanupError)}`
-          )
-        );
       if (targetPrepared) {
         await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       }
-      await this.deps.workspaceDocument.repo.deleteDoc(targetRoomId).catch(() => {});
-      await this.deps.workspaceDocument
-        .persistPendingChanges('session-fork-rollback')
-        .catch(() => {});
+      try {
+        await this.deps.workspaceDocument.repo.deleteDoc(targetRoomId);
+        await this.deps.workspaceDocument.persistPendingChanges('session-fork-rollback');
+        // Keep a pending journal until deletion is durable. If rollback fails,
+        // restart recovery must still decide from the surviving history.
+        if (accountEditStarted)
+          await rollbackSessionAccountEdit(accountScope, accountEditOperationId);
+        if (accountBindingCreated) await clearSessionAccountBinding(accountScope);
+      } catch (cleanupError) {
+        this.deps.logger.warn(
+          `Could not finish failed fork cleanup: ${formatErrorMessage(cleanupError)}`
+        );
+      } finally {
+        if (accountEditStarted) abandonSessionAccountEdit(accountScope, accountEditOperationId);
+      }
       const publicError =
         error instanceof SessionForkOperationError
           ? error

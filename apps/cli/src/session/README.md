@@ -136,7 +136,13 @@ deliberately does not capture: it streams and would grow unbounded.
 
 ### Fork saga recovery
 
-Because a preparing target publishes no Session meta until its final commit, the repo meta
+Same-worktree forks journal the placeholder and cloned-history checkpoints before publishing
+the candidate account/native-session binding. The final binding is promoted only after the
+history and metadata flush succeeds. Restart recovery matches the durable history against the
+local journal, preserving the selected account and refusing an unmatched checkpoint. Failed
+cleanup retains the journal until target deletion is durable.
+
+New-worktree targets publish no Session meta until final commit, so the repo meta
 index cannot name interrupted operations; recovery discovers them from the machine-local
 marker store (`session-fork-operation-store.ts`), recorded fail-closed at accept and cleared
 only after the final commit or rollback persists. The marker carries the worktree-cleanup

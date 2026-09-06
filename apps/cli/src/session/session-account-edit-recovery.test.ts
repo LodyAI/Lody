@@ -90,6 +90,65 @@ async function openWorkspace() {
 }
 
 describe('account edit recovery across SQLite reopen', () => {
+  it.each([
+    ['system-default', 'placeholder'],
+    ['system-default', 'clone'],
+    [accountProfileId, 'placeholder'],
+    [accountProfileId, 'clone'],
+  ] as const)('recovers a fork on %s from durable %s history', async (profile, checkpoint) => {
+    const first = await openWorkspace();
+    const placeholder: SessionMeta = {
+      ...meta('placeholder'),
+      accountProfileId: profile,
+      acpSessionId: undefined,
+      latestUserMsgId: undefined,
+      status: SessionStatusFactory.initializing(),
+    };
+    const cloned: SessionMeta = {
+      ...placeholder,
+      acpSessionId: 'fork-native' as ACPSessionId,
+      status: SessionStatusFactory.idle(),
+    };
+    await first.repo.upsertDocMeta(roomId, placeholder);
+    await first.repo.flush();
+    await setSessionAccountBinding(scope, { accountProfileId: profile });
+    const clonedHistory = history('cloned-source-turn');
+    await beginSessionAccountEdit(scope, {
+      operationId: 'interrupted-fork',
+      sourceMeta: placeholder,
+      targetMeta: cloned,
+      sourceHistory: [],
+      targetHistory: clonedHistory,
+    });
+    await expect(getSessionAccountBinding(scope)).rejects.toThrow('recovery');
+    // Metadata and document persistence can land separately in either order.
+    if (checkpoint === 'clone') await first.document.updateHistory(() => clonedHistory);
+    await first.repo.upsertDocMeta(roomId, checkpoint === 'clone' ? placeholder : cloned);
+    await first.repo.flush();
+    abandonSessionAccountEdit(scope, 'interrupted-fork');
+    await first.close();
+    cleanups.splice(cleanups.indexOf(first.close), 1);
+
+    const reopened = await openWorkspace();
+    const expectedNative = checkpoint === 'clone' ? 'fork-native' : undefined;
+    const resolved = await resolveSessionAccountMeta(scope, meta('untrusted'), reopened.recovery);
+    expect(resolved.accountProfileId).toBe(profile);
+    expect(resolved.acpSessionId).toBe(expectedNative);
+    expect(resolved.status).toEqual(
+      checkpoint === 'clone' ? SessionStatusFactory.idle() : SessionStatusFactory.initializing()
+    );
+    expect(hashSessionAccountEditHistory(await reopened.document.getHistory())).toBe(
+      hashSessionAccountEditHistory(checkpoint === 'clone' ? clonedHistory : [])
+    );
+    await reopened.close();
+    cleanups.splice(cleanups.indexOf(reopened.close), 1);
+
+    const durable = await openWorkspace();
+    expect((await durable.repo.getDocMeta(roomId))?.meta?.acpSessionId).toBe(expectedNative);
+    expect(await getSessionAccountBinding(scope)).toMatchObject({ accountProfileId: profile });
+    expect((await getSessionAccountBinding(scope))?.acpSessionId).toBe(expectedNative);
+  });
+
   it.each(['source', 'target'] as const)(
     'recovers %s history with the opposite metadata checkpoint',
     async (checkpoint) => {
