@@ -6,6 +6,7 @@ import {
   isAuthenticationRequiredACPError,
   isAgentDisconnectedError,
   isAcpSessionNotFoundError,
+  isAccountHandoffResumeUnavailable,
   isProviderOverloadedACPError,
   mapACPErrorToFailureReason,
   parseACPError,
@@ -14,6 +15,37 @@ import {
 } from './acp-error-classification';
 
 describe('ACP error classification', () => {
+  it('requires resume-scoped definitive evidence before account continuation', () => {
+    expect(isAccountHandoffResumeUnavailable(new Error('[ACP_RESUME_UNSUPPORTED] no method'))).toBe(
+      true
+    );
+    expect(
+      isAccountHandoffResumeUnavailable(new Error('[ACP_RESUME_FAILED] unknown failure'))
+    ).toBe(false);
+    const definitive = {
+      code: ACP_ERROR_CODES.INTERNAL_ERROR,
+      message: 'Internal error',
+      data: { details: 'Session not found' },
+    };
+    expect(isAccountHandoffResumeUnavailable(definitive)).toBe(false);
+    expect(
+      isAccountHandoffResumeUnavailable(
+        new Error('[ACP_RESUME_FAILED] resource', { cause: definitive })
+      )
+    ).toBe(true);
+    expect(
+      isAccountHandoffResumeUnavailable(
+        new Error('[ACP_RESUME_FAILED] resource', {
+          cause: {
+            code: ACP_ERROR_CODES.RESOURCE_NOT_FOUND,
+            message: 'Resource not found',
+            data: { uri: 'native-session' },
+          },
+        })
+      )
+    ).toBe(false);
+  });
+
   it('parses JSON-RPC ACP errors', () => {
     expect(
       parseACPError({

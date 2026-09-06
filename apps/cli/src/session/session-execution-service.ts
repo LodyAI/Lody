@@ -126,6 +126,7 @@ import {
 import {
   getACPErrorUserMessage,
   isAgentDisconnectedError,
+  isAccountHandoffResumeUnavailable,
   mapACPErrorToFailureReason,
   parseACPError,
   shouldRecoverStaleACPConnectionPrompt,
@@ -1303,10 +1304,7 @@ export class SessionExecutionService {
           this.deps.endACPReplaySuppression(sessionId);
         }
       },
-      isResumeFailure: (error) => {
-        const message = formatErrorMessage(error).toLowerCase();
-        return message.includes('acp_resume_unsupported') || message.includes('acp_resume_failed');
-      },
+      isResumeFailure: isAccountHandoffResumeUnavailable,
       now: getServerNow,
     });
     activateCandidateEvents?.();

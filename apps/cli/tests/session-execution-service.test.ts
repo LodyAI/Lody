@@ -336,6 +336,11 @@ describe('SessionExecutionService', () => {
     'usage-failed',
     'deleted-profile',
     'cli-crash',
+    'resume-timeout',
+    'resume-disconnect',
+    'resume-crash',
+    'resume-cancelled',
+    'resume-resource',
     'commit-failed',
     'model-unavailable',
     'access-revoked',
@@ -434,7 +439,29 @@ describe('SessionExecutionService', () => {
         startupMutation = true;
       });
       latestStart = start;
-      if (++attempts === 1 && outcome === 'continuation') throw new Error('ACP_RESUME_FAILED');
+      if (++attempts === 1 && outcome === 'continuation')
+        throw new Error('[ACP_RESUME_FAILED] loadSession: Internal error', {
+          cause: {
+            code: -32603,
+            message: 'Internal error',
+            data: { details: 'Session not found' },
+          },
+        });
+      if (outcome.startsWith('resume-')) {
+        const cause =
+          outcome === 'resume-resource'
+            ? { code: -32002, message: 'Resource not found', data: { uri: oldId } }
+            : new Error(
+                outcome === 'resume-timeout'
+                  ? '[ACP_TIMEOUT] Operation loadSession timed out'
+                  : outcome === 'resume-disconnect'
+                    ? 'ACP connection closed'
+                    : outcome === 'resume-crash'
+                      ? 'provider process crashed'
+                      : 'Startup cancelled'
+              );
+        throw new Error('[ACP_RESUME_FAILED] loadSession failed', { cause });
+      }
       if (outcome === 'cli-crash') throw new Error('provider process crashed');
       resident = candidate;
       return candidate;
@@ -500,25 +527,32 @@ describe('SessionExecutionService', () => {
         expect(resident).not.toBeNull();
         expect(deps.workspaceDocument.persistPendingChanges).not.toHaveBeenCalled();
       } else if (
+        outcome.startsWith('resume-') ||
         ['exhausted', 'usage-failed', 'cli-crash', 'commit-failed', 'model-unavailable'].includes(
           outcome
         )
       ) {
         await expect(result).rejects.toThrow(
-          outcome === 'exhausted'
-            ? 'exhausted'
-            : outcome === 'usage-failed'
-              ? 'usage detection failed'
-              : outcome === 'cli-crash'
-                ? 'provider process crashed'
-                : outcome === 'commit-failed'
-                  ? 'checkpoint failed'
-                  : 'cannot use the selected model'
+          outcome.startsWith('resume-')
+            ? 'ACP_RESUME_FAILED'
+            : outcome === 'exhausted'
+              ? 'exhausted'
+              : outcome === 'usage-failed'
+                ? 'usage detection failed'
+                : outcome === 'cli-crash'
+                  ? 'provider process crashed'
+                  : outcome === 'commit-failed'
+                    ? 'checkpoint failed'
+                    : 'cannot use the selected model'
         );
         expect(meta.accountProfileId).toBe('system-default');
         expect(meta.acpSessionId).toBe(oldId);
         expect(resident).toBeNull();
         expect(createSession).toHaveBeenCalledTimes(1);
+        expect(setSessionAccountBinding).toHaveBeenLastCalledWith(
+          expect.anything(),
+          expect.objectContaining({ accountProfileId: 'system-default', acpSessionId: oldId })
+        );
       } else {
         await expect(result).resolves.toMatchObject({
           accountProfileId,
