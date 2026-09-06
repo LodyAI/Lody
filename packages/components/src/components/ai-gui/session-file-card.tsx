@@ -22,6 +22,7 @@ import {
   formatFileSize,
   getSessionFileDisplayState,
   getSessionFileKind,
+  isHtmlSessionFile,
   type SessionFileDisplayState,
   type SessionFileKind,
 } from '@/lib/session-file-presentation';
@@ -45,7 +46,11 @@ export type SessionFileCardProps = {
   pendingMachineName?: string;
   /** Click opens the in-app preview (text-previewable, available files only). */
   onPreview?: (file: SessionFilePayload) => void;
-  /** Click downloads the file (non-previewable, available files only). */
+  /**
+   * Downloads the file. The card's primary action when the file is not
+   * previewable, and the secondary action on an HTML card — whose preview
+   * opens a rendered surface, so the source bytes have no other route.
+   */
   onDownload?: (file: SessionFilePayload) => void;
   /** True while a download triggered from this card is in flight. */
   isDownloading?: boolean;
@@ -98,12 +103,9 @@ const buildActionIcon = ({
       <Download className="h-4 w-4" aria-hidden="true" />
     );
   }
-  // previewable
-  return isDownloading ? (
-    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-  ) : (
-    <Eye className="h-4 w-4" aria-hidden="true" />
-  );
+  // previewable — a download in flight belongs to the separate download
+  // button, so the preview affordance keeps reading as a preview.
+  return <Eye className="h-4 w-4" aria-hidden="true" />;
 };
 
 /**
@@ -140,56 +142,87 @@ export function SessionFileCard({
 
   const isMuted = state === 'expired' || state === 'pending';
 
+  /* An HTML attachment's click opens the RENDERED page (browser surface or live
+     file preview), which carries no control for the source bytes — so that one
+     card offers download as a second, always-visible action rather than hiding
+     the source behind the preview it replaces. Every other previewable file
+     opens the preview dialog, which already downloads from inside. */
+  const showDownloadAction = state === 'previewable' && isHtmlSessionFile(file) && !!onDownload;
+  const downloadLabel = t('sessions.fileActions.download', 'Download file');
+
   return (
-    <button
-      type="button"
-      onClick={isInteractive ? handleClick : undefined}
-      disabled={!isInteractive}
-      aria-label={file.fileName}
+    <div
       className={cn(
-        'group flex w-full max-w-sm items-center gap-3 rounded-xl border px-3 py-2.5 text-left',
+        'group flex w-full max-w-sm items-center gap-1 rounded-xl border px-3 py-2.5 text-left',
         'border-border/60 bg-card/80 transition-[background-color,border-color,box-shadow] duration-150',
         isInteractive &&
-          'cursor-pointer hover:border-border hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]',
-        !isInteractive && 'cursor-default',
+          'hover:border-border hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]',
         isMuted && 'opacity-70',
         className
       )}
     >
-      <span
+      <button
+        type="button"
+        onClick={isInteractive ? handleClick : undefined}
+        disabled={!isInteractive}
+        aria-label={file.fileName}
         className={cn(
-          'flex size-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-          isMuted
-            ? 'bg-muted text-muted-foreground'
-            : 'bg-muted/70 text-muted-foreground group-hover:bg-background group-hover:text-foreground'
+          'flex min-w-0 flex-1 items-center gap-3 text-left',
+          isInteractive ? 'cursor-pointer' : 'cursor-default'
         )}
       >
-        <Icon className="size-5" aria-hidden="true" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-sm font-medium leading-tight text-foreground">
-          {file.fileName}
-        </span>
-        <span className="truncate text-xs leading-tight text-muted-foreground tabular-nums">
-          {subtitle}
-        </span>
-      </span>
-      {actionIcon ? (
         <span
           className={cn(
-            'flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
-            /* One rest tone for every icon in a turn — an interactive affordance
-               resting DIMMER than the static chrome around it read as disabled.
-               Hover still brightens it. */
-            isInteractive
-              ? 'text-muted-foreground group-hover:bg-background group-hover:text-foreground'
-              : 'text-muted-foreground'
+            'flex size-10 shrink-0 items-center justify-center rounded-lg transition-colors',
+            isMuted
+              ? 'bg-muted text-muted-foreground'
+              : 'bg-muted/70 text-muted-foreground group-hover:bg-background group-hover:text-foreground'
           )}
         >
-          {actionIcon}
+          <Icon className="size-5" aria-hidden="true" />
         </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium leading-tight text-foreground">
+            {file.fileName}
+          </span>
+          <span className="truncate text-xs leading-tight text-muted-foreground tabular-nums">
+            {subtitle}
+          </span>
+        </span>
+        {actionIcon ? (
+          <span
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+              /* One rest tone for every icon in a turn — an interactive affordance
+                 resting DIMMER than the static chrome around it read as disabled.
+                 Hover still brightens it. */
+              isInteractive
+                ? 'text-muted-foreground group-hover:bg-background group-hover:text-foreground'
+                : 'text-muted-foreground'
+            )}
+          >
+            {actionIcon}
+          </span>
+        ) : null}
+      </button>
+      {showDownloadAction ? (
+        <button
+          type="button"
+          onClick={() => onDownload?.(file)}
+          disabled={isDownloading}
+          aria-busy={isDownloading}
+          aria-label={downloadLabel}
+          title={downloadLabel}
+          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isDownloading ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Download className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
       ) : null}
-    </button>
+    </div>
   );
 }
 
