@@ -3,14 +3,17 @@
 import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  ACCOUNT_PROFILES_PROTOCOL_VERSION,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
   type MachineViewMeta,
+  type WorkspaceId,
 } from '@lody/shared';
 import {
   AgentConfigDialog,
@@ -18,6 +21,10 @@ import {
   type AgentConfigSubmitPayload,
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
+import * as localAccountRouteHook from '../src/hooks/use-local-account-profiles-route';
+import * as authenticationPanel from '../src/components/settings/acp-authentication-panel';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { initI18n } from '../src/i18n';
 import { TooltipProvider } from '../src/ui/tooltip';
 
@@ -197,6 +204,132 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  it.each([false, true])(
+    'preserves native authentication with local account route=%s',
+    async (local) => {
+      const route = vi
+        .spyOn(localAccountRouteHook, 'useLocalAccountProfilesRoute')
+        .mockReturnValue(local);
+      const machine = {
+        ...createCodexMachine(),
+        protocolCapabilities: { accountProfiles: ACCOUNT_PROFILES_PROTOCOL_VERSION },
+      };
+      const config = {
+        id: codexConfigId,
+        machineId,
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
+      } as AgentConfigMeta;
+      await renderDialog({ kind: 'edit', config }, machine);
+      expect(route).toHaveBeenLastCalledWith(machineId, true);
+      expect(document.body.textContent).toContain('Sign in again');
+      expect(document.body.textContent?.includes('Add account')).toBe(local);
+    }
+  );
+
+  it.each([false, true])(
+    'refreshes native-login status only on the confirmed local route=%s',
+    async (local) => {
+      vi.spyOn(localAccountRouteHook, 'useLocalAccountProfilesRoute').mockReturnValue(local);
+      vi.spyOn(authenticationPanel, 'AcpAuthenticationPanel').mockImplementation(
+        ({ onAuthenticated }) => (
+          <button onClick={() => void onAuthenticated?.()}>Finish native authentication</button>
+        )
+      );
+      const requestAccountProfiles = vi.fn().mockResolvedValue({ success: true, profiles: [] });
+      const runtime = {
+        workspaceId: 'workspace-account-test' as WorkspaceId,
+        workspaceSlug: 'workspace-account-test',
+        requestAccountProfiles,
+        subscribeMachineAcpBinaryProgress: () => () => {},
+        getMachineAcpBinaryProgress: () => null,
+      } as unknown as WorkspaceRuntime;
+      const store = createStore();
+      store.set(runtimeAtom, runtime);
+      store.set(currentWorkspaceIdAtom, runtime.workspaceId);
+      const config = {
+        id: codexConfigId,
+        machineId,
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
+      } as AgentConfigMeta;
+      await act(async () => {
+        root?.render(
+          <Provider store={store}>
+            <TooltipProvider>
+              <AgentConfigDialog
+                open
+                onOpenChange={vi.fn()}
+                mode={{ kind: 'edit', config }}
+                machine={{
+                  ...createCodexMachine(),
+                  protocolCapabilities: { accountProfiles: ACCOUNT_PROFILES_PROTOCOL_VERSION },
+                }}
+                onSubmit={vi.fn(async () => {})}
+                onRefreshCapabilities={vi.fn()}
+              />
+            </TooltipProvider>
+          </Provider>
+        );
+      });
+      expect(requestAccountProfiles).toHaveBeenCalledTimes(local ? 1 : 0);
+      const button = Array.from(document.body.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent === 'Finish native authentication'
+      );
+      expect(button).toBeDefined();
+      await act(async () => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      expect(requestAccountProfiles).toHaveBeenCalledTimes(local ? 2 : 0);
+      if (local) {
+        expect(requestAccountProfiles).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            workspaceId: runtime.workspaceId,
+            machineId,
+            configId: codexConfigId,
+            agentType: 'codex',
+          })
+        );
+      }
+    }
+  );
+
+  it('does not enable account route resolution for a closed settings dialog', async () => {
+    const route = vi
+      .spyOn(localAccountRouteHook, 'useLocalAccountProfilesRoute')
+      .mockReturnValue(false);
+    const machine = {
+      ...createCodexMachine(),
+      protocolCapabilities: { accountProfiles: ACCOUNT_PROFILES_PROTOCOL_VERSION },
+    };
+    const config = {
+      id: codexConfigId,
+      machineId,
+      name: 'Codex',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    } as AgentConfigMeta;
+    await act(async () => {
+      root?.render(
+        <TooltipProvider>
+          <AgentConfigDialog
+            open={false}
+            onOpenChange={vi.fn()}
+            mode={{ kind: 'edit', config }}
+            machine={machine}
+            onSubmit={vi.fn(async () => {})}
+            onRefreshCapabilities={vi.fn()}
+          />
+        </TooltipProvider>
+      );
+    });
+    expect(route).toHaveBeenLastCalledWith(machineId, false);
+    expect(document.body.textContent).not.toContain('Add account');
+  });
 
   it('does not reset the selected agent type when machine metadata refreshes while creating', async () => {
     const mode: AgentConfigDialogMode = { kind: 'create' };

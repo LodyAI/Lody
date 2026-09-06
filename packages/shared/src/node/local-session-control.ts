@@ -1,3 +1,10 @@
+import {
+  MachineAccountProfilesRequestSchema,
+  MachineAccountProfilesResponseSchema,
+  SessionAccountSwitchRequestSchema,
+  SessionAccountSwitchResponseSchema,
+} from '../message-schemas';
+import { AccountProfileIdSchema } from '../account-profiles';
 import type { LocalSessionControlRequest, LocalSessionControlResponse } from '../message';
 
 const SESSION_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
@@ -516,7 +523,18 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
+  if (value.type === 'machine/account-profiles')
+    return MachineAccountProfilesRequestSchema.safeParse(value).success;
+  if (value.type === 'session/account-switch')
+    return SessionAccountSwitchRequestSchema.safeParse(value).success;
+
   if (value.type === 'machine/acp-authenticate') {
+    if (value.action !== 'start' && value.accountProfileId !== undefined) return false;
+    if (
+      value.accountProfileId !== undefined &&
+      !AccountProfileIdSchema.safeParse(value.accountProfileId).success
+    )
+      return false;
     return (
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
@@ -800,6 +818,11 @@ export function isLocalSessionControlResponse(
       isOptionalString(value.error)
     );
   }
+
+  if (value.type === 'machine/account-profiles_response')
+    return MachineAccountProfilesResponseSchema.safeParse(value).success;
+  if (value.type === 'session/account-switch_response')
+    return SessionAccountSwitchResponseSchema.safeParse(value).success;
 
   if (value.type === 'machine/acp-authenticate_response') {
     return (

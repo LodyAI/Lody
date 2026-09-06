@@ -24,7 +24,12 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => {
   };
 });
 
-import { AcpAuthenticationRequiredError, AgentClient } from '../src/agent/agent-client';
+import {
+  AcpAuthenticationRequiredError,
+  AcpTimeoutError,
+  AgentClient,
+} from '../src/agent/agent-client';
+import { isAccountHandoffResumeUnavailable } from '../src/session/acp-error-classification';
 import type { Logger } from '../src/utils/logger';
 
 const terminalAuthMethod: AuthMethod = {
@@ -128,6 +133,59 @@ describe('AgentClient Kimi authentication and resume', () => {
     );
     expect(connectionMocks.resumeSession).not.toHaveBeenCalled();
   });
+
+  it.each(['claude', 'kimi'])(
+    'requires a definitive native-resume rejection through the actual %s client wrapper',
+    async (agentType) => {
+      const operation =
+        agentType === 'claude' ? connectionMocks.loadSession : connectionMocks.resumeSession;
+      const failures = [
+        { cause: new AcpTimeoutError('resume', 25, 'test-session'), unavailable: false },
+        { cause: new Error('ACP connection closed'), unavailable: false },
+        { cause: new Error('provider process crashed'), unavailable: false },
+        { cause: new DOMException('Startup cancelled', 'AbortError'), unavailable: false },
+        { cause: Object.assign(new Error('Internal error'), { code: -32603 }), unavailable: false },
+        {
+          cause: Object.assign(new Error('Resource not found'), {
+            code: -32002,
+            data: { path: 'config.toml' },
+          }),
+          unavailable: false,
+        },
+        {
+          cause: Object.assign(new Error('Resource not found'), {
+            code: -32002,
+            data: { uri: 'native-session' },
+          }),
+          unavailable: false,
+        },
+        { cause: Object.assign(new Error('Process exited'), { code: 1001 }), unavailable: false },
+        {
+          cause: Object.assign(new Error('Method not found'), { code: -32601 }),
+          unavailable: true,
+        },
+        {
+          cause: Object.assign(new Error('Internal error'), {
+            code: -32603,
+            data: { details: 'Session not found' },
+          }),
+          unavailable: true,
+        },
+      ];
+      for (const { cause, unavailable } of failures) {
+        operation.mockRejectedValueOnce(cause);
+        const failure: unknown = await createClient(agentType)
+          .startSession({} as never, '/tmp', 'existing-session' as never)
+          .catch((error: unknown) => error);
+        expect(failure).toMatchObject({
+          message: expect.stringContaining('[ACP_RESUME_FAILED]'),
+          cause,
+        });
+        expect(isAccountHandoffResumeUnavailable(failure)).toBe(unavailable);
+      }
+      expect(connectionMocks.newSession).not.toHaveBeenCalled();
+    }
+  );
 
   it('lets builtin Grok use its local terminal runner', async () => {
     const client = createClient('grok');

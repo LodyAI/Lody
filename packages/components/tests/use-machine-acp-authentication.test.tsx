@@ -73,6 +73,7 @@ describe('useMachineAcpAuthentication', () => {
     const attempt = controller!.startAuthentication({
       machineId,
       configId: 'config-kimi' as AgentConfigId,
+      accountProfileId: 'account-b',
       onProgress: vi.fn(),
     });
 
@@ -82,6 +83,7 @@ describe('useMachineAcpAuthentication', () => {
       type: 'machine/acp-authenticate',
       requestId: attempt.requestId,
       action: 'start',
+      accountProfileId: 'account-b',
     });
     expect(sendControl.mock.calls[1]?.[0]).toMatchObject({
       type: 'machine/acp-authenticate',

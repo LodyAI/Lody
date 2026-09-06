@@ -721,10 +721,22 @@ export class WorktreeManager {
 
     const worktreeName = path.basename(currentGitdir) as SessionId;
     const expectedGitdir = path.join(this.bareGitDir, 'worktrees', worktreeName);
-    const relative = path.relative(worktreePath, expectedGitdir);
+    const relative = path.relative(
+      realpathIfExists(worktreePath),
+      realpathIfExists(expectedGitdir)
+    );
     lines[gitdirIndex] = `gitdir: ${toGitPath(relative)}`;
     try {
-      fs.writeFileSync(gitFilePath, lines.join('\n'));
+      // Git marks .git hidden on Windows, where opening it with 'w' fails.
+      // Update the existing file without changing its attributes.
+      const updatedContent = Buffer.from(lines.join('\n'), 'utf8');
+      const fd = fs.openSync(gitFilePath, 'r+');
+      try {
+        fs.writeFileSync(fd, updatedContent);
+        fs.ftruncateSync(fd, updatedContent.byteLength);
+      } finally {
+        fs.closeSync(fd);
+      }
     } catch {
       // ignore
     }

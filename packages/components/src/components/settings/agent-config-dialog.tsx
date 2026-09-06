@@ -1,3 +1,5 @@
+import { machineSupportsAccountProfilesProtocol } from '@lody/shared';
+import { AccountProfilesPanel } from './account-profiles';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -65,6 +67,8 @@ import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { useLocalAccountProfilesRoute } from '@/hooks/use-local-account-profiles-route';
+import { getAccountProfileStatusStore } from './account-profile-status';
 import { Button } from '@/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
@@ -1065,6 +1069,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         }) ||
         (authRequired && usesProtocolAuthentication)
       : authRequired && (isManagedBuiltin || usesProtocolAuthentication);
+  const hasLocalAccountProfilesRoute = useLocalAccountProfilesRoute(
+    machine.id,
+    open &&
+      showAuthenticationPanel &&
+      mode.kind === 'edit' &&
+      machineSupportsAccountProfilesProtocol(machine) &&
+      formData.cliType === 'builtin' &&
+      (formData.agentType === 'codex' || formData.agentType === 'claude') &&
+      Object.keys(formData.env).length === 0 &&
+      !resolvedBrandId
+  );
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1955,6 +1970,46 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     </aside>
   );
 
+  const systemDefaultAuthentication = (
+    <AcpAuthenticationPanel
+      machineId={machine.id}
+      configId={agentConfigId}
+      cliType={formData.cliType}
+      agentType={formData.agentType}
+      providerName={formData.name}
+      customAcp={parsedCustomAcp ?? undefined}
+      runtimeOverrides={formData.runtimeOverrides}
+      env={formData.env}
+      compact
+      reauthentication={!authRequired}
+      onBeforeStart={persistConfigBeforeMachineLaunch}
+      onAuthenticated={() => {
+        setAuthRequired(false);
+        setProbeError(null);
+        setManuallyTested(true);
+        if (isCustom && parsedCustomAcp) {
+          setTestedCustomKey(customAcpKey);
+        }
+        if (requiresBuiltinCreationVerification) {
+          setVerifiedBuiltinContext(builtinVerificationContext);
+        }
+        if (
+          hasLocalAccountProfilesRoute &&
+          workspaceRuntime &&
+          formData.cliType === 'builtin' &&
+          (formData.agentType === 'codex' || formData.agentType === 'claude')
+        ) {
+          void getAccountProfileStatusStore(workspaceRuntime, {
+            workspaceId: workspaceRuntime.workspaceId,
+            machineId: machine.id,
+            configId: agentConfigId,
+            agentType: formData.agentType,
+          }).refresh({ invalidate: true });
+        }
+      }}
+    />
+  );
+
   const formPane = (
     <section className="flex min-h-0 flex-1 flex-col">
       <header
@@ -2221,30 +2276,24 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 }
                 icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
               >
-                <AcpAuthenticationPanel
-                  machineId={machine.id}
-                  configId={agentConfigId}
-                  cliType={formData.cliType}
-                  agentType={formData.agentType}
-                  providerName={formData.name}
-                  customAcp={parsedCustomAcp ?? undefined}
-                  runtimeOverrides={formData.runtimeOverrides}
-                  env={formData.env}
-                  compact
-                  reauthentication={!authRequired}
-                  onBeforeStart={persistConfigBeforeMachineLaunch}
-                  onAuthenticated={() => {
-                    setAuthRequired(false);
-                    setProbeError(null);
-                    setManuallyTested(true);
-                    if (isCustom && parsedCustomAcp) {
-                      setTestedCustomKey(customAcpKey);
-                    }
-                    if (requiresBuiltinCreationVerification) {
-                      setVerifiedBuiltinContext(builtinVerificationContext);
-                    }
-                  }}
-                />
+                {hasLocalAccountProfilesRoute &&
+                mode.kind === 'edit' &&
+                machineSupportsAccountProfilesProtocol(machine) &&
+                formData.cliType === 'builtin' &&
+                (formData.agentType === 'codex' || formData.agentType === 'claude') &&
+                Object.keys(formData.env).length === 0 &&
+                !resolvedBrandId ? (
+                  <AccountProfilesPanel
+                    key={`${machine.id}:${formData.agentType}:${agentConfigId}`}
+                    machineId={machine.id}
+                    agentType={formData.agentType}
+                    configId={agentConfigId}
+                    systemDefaultAuthentication={systemDefaultAuthentication}
+                    onBeforeStart={persistConfigBeforeMachineLaunch}
+                  />
+                ) : (
+                  systemDefaultAuthentication
+                )}
               </Field>
             </div>
           ) : null}

@@ -21,6 +21,8 @@ export interface SessionConfig {
   requesterUserId: string;
   machineId: string;
   agentConfigId?: AgentConfigId;
+  /** Provider-neutral binding; absence preserves native CLI authentication. */
+  accountProfileId?: string;
   agentCliType: AgentConfigCliType;
   agentType: string;
   /** Config selected by the driving turn and carried into ACP session startup. */

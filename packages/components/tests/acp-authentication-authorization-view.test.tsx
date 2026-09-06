@@ -40,7 +40,7 @@ describe('AcpAuthenticationAuthorizationView', () => {
     expect(isAllowedAcpAuthorizationUrl('not a url')).toBe(false);
   });
 
-  it('identifies an authentication target only by machine and persisted config', () => {
+  it('identifies an authentication target by machine, persisted config, and account', () => {
     const target = {
       machineId: 'machine-1' as MachineId,
       configId: 'config-1' as AgentConfigId,
@@ -51,6 +51,12 @@ describe('AcpAuthenticationAuthorizationView', () => {
         ...target,
       })
     ).toBe(true);
+    expect(
+      areAcpAuthenticationTargetsEqual(target, {
+        ...target,
+        accountProfileId: 'account-b',
+      })
+    ).toBe(false);
     expect(
       areAcpAuthenticationTargetsEqual(target, {
         ...target,

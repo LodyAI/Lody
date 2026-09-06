@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => {
   const machineRpcConstructors = vi.fn();
   const machineRpcStart = vi.fn(async () => {});
   const machineRpcStop = vi.fn();
+  const accountProfiles = vi.fn(async () => null);
+  const accountSwitch = vi.fn(async () => null);
   const machineRpcOpenTurnDiff = vi.fn(async () => ({ status: 'ok' }));
   const rpcResponseDispatcherStart = vi.fn(async () => {});
   const rpcResponseDispatcherStop = vi.fn();
@@ -59,6 +61,8 @@ const mocks = vi.hoisted(() => {
     machineRpcConstructors,
     machineRpcStart,
     machineRpcStop,
+    accountProfiles,
+    accountSwitch,
     machineRpcOpenTurnDiff,
     rpcResponseDispatcherStart,
     rpcResponseDispatcherStop,
@@ -293,6 +297,8 @@ vi.mock('@lody/loro-streams-rpc', () => ({
     }
     start = mocks.machineRpcStart;
     stop = mocks.machineRpcStop;
+    requestAccountProfiles = mocks.accountProfiles;
+    requestSessionAccountSwitch = mocks.accountSwitch;
     requestCodeCollabOpenTurnDiff = mocks.machineRpcOpenTurnDiff;
   },
   LORO_STREAMS_RPC_RETENTION_SECONDS: 60,
@@ -341,6 +347,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.machineRpcConstructors.mockClear();
     mocks.machineRpcStart.mockClear();
     mocks.machineRpcStop.mockClear();
+    mocks.accountProfiles.mockClear();
+    mocks.accountSwitch.mockClear();
     mocks.machineRpcOpenTurnDiff.mockClear();
     mocks.rpcResponseDispatcherStart.mockClear();
     mocks.rpcResponseDispatcherStop.mockClear();
@@ -537,6 +545,118 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('rejects remote account operations before opening a machine RPC request', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    await runtime.setAuthToken('auth-token');
+    const envelope = {
+      machineId: 'remote-machine' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      requestId: 'request-1',
+    };
+    await expect(
+      runtime.requestAccountProfiles({
+        ...envelope,
+        type: 'machine/account-profiles',
+        cliType: 'builtin',
+        agentType: 'codex',
+        action: 'list',
+      })
+    ).rejects.toThrow('Account profiles require a local connection to this machine.');
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).rejects.toThrow('Account switching requires a local connection to this machine.');
+    expect(mocks.accountProfiles).not.toHaveBeenCalled();
+    expect(mocks.accountSwitch).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('keeps account operations on local IPC and returns the matching response', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    let rejectControl = false;
+    const invoke = vi.fn(
+      async (channel: string, payload?: { message: { type: string; requestId: string } }) => {
+        if (channel !== 'sessionControl.send') return channel === 'loro.isConnected';
+        if (rejectControl) return { ok: false, error: 'local authorization denied' };
+        const request = payload!.message;
+        const response = {
+          type:
+            request.type === 'machine/account-profiles'
+              ? 'machine/account-profiles_response'
+              : 'session/account-switch_response',
+          machineId: 'local-machine',
+          requestId: request.requestId,
+          ...(request.type === 'session/account-switch'
+            ? { sessionId: 'session-1', accountProfileId: 'system-default' }
+            : { profiles: [] }),
+          success: true,
+        };
+        return { ok: true, responses: [{ ...response, requestId: 'unrelated-request' }, response] };
+      }
+    );
+    Object.assign(window.ipc!, { invoke });
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    const envelope = {
+      machineId: 'local-machine' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      requestId: 'request-1',
+    };
+    await expect(
+      runtime.requestAccountProfiles({
+        ...envelope,
+        type: 'machine/account-profiles',
+        cliType: 'builtin',
+        agentType: 'codex',
+        action: 'list',
+      })
+    ).resolves.toMatchObject({ success: true, requestId: 'request-1', profiles: [] });
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).resolves.toMatchObject({
+      success: true,
+      requestId: 'request-1',
+      accountProfileId: 'system-default',
+    });
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'sessionControl.send')).toHaveLength(
+      2
+    );
+    rejectControl = true;
+    await expect(
+      runtime.requestSessionAccountSwitch({
+        ...envelope,
+        type: 'session/account-switch',
+        sessionId: 'session-1' as SessionId,
+        accountProfileId: 'system-default',
+      })
+    ).rejects.toThrow('local authorization denied');
+    expect(mocks.accountProfiles).not.toHaveBeenCalled();
+    expect(mocks.accountSwitch).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
   it('hot-attaches one cloud plane on auth without touching the local plane', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();

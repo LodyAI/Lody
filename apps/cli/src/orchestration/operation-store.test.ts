@@ -59,19 +59,23 @@ afterEach(async () => {
 });
 
 describe('LodyOperationStore', () => {
-  it('restricts the store directory and database to the local account', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-permissions-'));
-    roots.add(root);
-    await chmod(root, 0o755);
-    const dbPath = path.join(root, 'operations.sqlite3');
-    const store = new LodyOperationStore(dbPath);
-    try {
-      expect((await stat(root)).mode & 0o777).toBe(0o700);
-      expect((await stat(dbPath)).mode & 0o777).toBe(0o600);
-    } finally {
-      store.close();
+  // POSIX modes do not establish or verify Windows ACLs.
+  it.skipIf(process.platform === 'win32')(
+    'restricts the store directory and database with POSIX modes',
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-permissions-'));
+      roots.add(root);
+      await chmod(root, 0o755);
+      const dbPath = path.join(root, 'operations.sqlite3');
+      const store = new LodyOperationStore(dbPath);
+      try {
+        expect((await stat(root)).mode & 0o777).toBe(0o700);
+        expect((await stat(dbPath)).mode & 0o777).toBe(0o600);
+      } finally {
+        store.close();
+      }
     }
-  });
+  );
 
   it('accepts once and returns the same Operation for canonical-equivalent retries', async () => {
     const store = await makeStore();

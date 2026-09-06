@@ -289,137 +289,167 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('decrypts auth code input on the target machine without waiting for the active login', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    let releaseStart: () => void = () => {};
-    const startGate = new Promise<void>((resolve) => {
-      releaseStart = resolve;
-    });
-    let resolveSubmittedCode: (code: string | undefined) => void = () => {};
-    const submittedCode = new Promise<string | undefined>((resolve) => {
-      resolveSubmittedCode = resolve;
-    });
-    const authenticateMachineAcp = vi.fn(async (args): Promise<MachineAcpAuthenticateResponse> => {
-      if (args.action === 'start') {
-        args.onProgress?.({
-          type: 'machine/acp-authentication-progress',
-          machineId,
-          requestId: 'auth-claude',
-          agentType: 'claude',
-          status: 'authorization',
-          authorizationUrl: 'https://claude.ai/oauth/authorize',
-          acceptsAuthorizationCode: true,
-        });
-        await startGate;
-        return {
-          type: 'machine/acp-authenticate_response',
-          machineId,
-          requestId: 'auth-claude',
-          agentType: 'claude',
-          success: true,
-          disposition: 'authenticated',
-        };
-      }
-      resolveSubmittedCode(args.authorizationCode);
-      return {
-        type: 'machine/acp-authenticate_response',
-        machineId,
-        requestId: 'auth-code-ack',
-        agentType: 'claude',
-        success: true,
-        disposition: 'input-accepted',
-      };
-    });
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      maxConcurrentRequests: 1,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      authenticateMachineAcp,
-    });
-    const base = {
-      jsonrpc: '2.0' as const,
-      rpcVersion: '1',
-      machineId,
-      workspaceId,
-      replyTo: 'workspace-1:rpc:res:machine-1',
-      sentAt: Date.now(),
-      expiresAt: Date.now() + 5000,
-    };
-
-    fake.pushBatch({
-      messages: [
-        {
-          ...base,
-          id: 'auth-start',
-          method: 'machine/acp-authenticate',
-          params: {
-            requestId: 'auth-claude',
-            action: 'start',
-            configId,
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await server.start();
-    await fake.waitForAppendedCount(1);
-    const authorizationProgress = (
-      fake.appended[0]!.value as {
-        result: {
-          authorizationCodePublicKey: RpcSecretPublicKey;
-          authenticationInputPublicKey?: RpcSecretPublicKey;
-        };
-      }
-    ).result;
-    const publicKey = authorizationProgress.authorizationCodePublicKey;
-    // Preserve the old built-in OAuth progress shape for strict older clients.
-    // The generic key is advertised only by the new interactive protocol flows.
-    expect(authorizationProgress.authenticationInputPublicKey).toBeUndefined();
-    const authorizationCodeEnvelope = await encryptRpcSecret(
-      publicKey,
-      'browser-returned-code',
-      getMachineAcpAuthorizationCodeSecretContext({
+  it.each([false, true])(
+    'keeps encrypted auth replies bound to the original login (duplicate start: %s)',
+    async (duplicateStart) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      let releaseStart: () => void = () => {};
+      const startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
+      });
+      let resolveSubmittedCode: (code: string | undefined) => void = () => {};
+      const submittedCode = new Promise<string | undefined>((resolve) => {
+        resolveSubmittedCode = resolve;
+      });
+      const authenticateMachineAcp = vi.fn(
+        async (args): Promise<MachineAcpAuthenticateResponse> => {
+          if (args.action === 'start') {
+            args.onProgress?.({
+              type: 'machine/acp-authentication-progress',
+              machineId,
+              requestId: 'auth-claude',
+              agentType: 'claude',
+              status: 'authorization',
+              authorizationUrl: 'https://claude.ai/oauth/authorize',
+              acceptsAuthorizationCode: true,
+            });
+            await startGate;
+            return {
+              type: 'machine/acp-authenticate_response',
+              machineId,
+              requestId: 'auth-claude',
+              agentType: 'claude',
+              success: true,
+              disposition: 'authenticated',
+            };
+          }
+          resolveSubmittedCode(args.authorizationCode);
+          return {
+            type: 'machine/acp-authenticate_response',
+            machineId,
+            requestId: 'auth-code-ack',
+            agentType: 'claude',
+            success: true,
+            disposition: 'input-accepted',
+          };
+        }
+      );
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
         workspaceId,
         machineId,
-        authenticationRequestId: 'auth-claude',
-      })
-    );
-    fake.pushBatch({
-      messages: [
-        {
-          ...base,
-          id: 'auth-code',
-          method: 'machine/acp-authenticate',
-          params: {
-            requestId: 'auth-code-ack',
-            action: 'submit-code',
-            authenticationRequestId: 'auth-claude',
-            authorizationCodeEnvelope,
+        streamClient: fake.streamClient,
+        maxConcurrentRequests: duplicateStart ? 2 : 1,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        authenticateMachineAcp,
+      });
+      const base = {
+        jsonrpc: '2.0' as const,
+        rpcVersion: '1',
+        machineId,
+        workspaceId,
+        replyTo: 'workspace-1:rpc:res:machine-1',
+        sentAt: Date.now(),
+        expiresAt: Date.now() + 5000,
+      };
+
+      fake.pushBatch({
+        messages: [
+          {
+            ...base,
+            id: 'auth-start',
+            method: 'machine/acp-authenticate',
+            params: {
+              requestId: 'auth-claude',
+              action: 'start',
+              configId,
+              accountProfileId: '6b130632-7cce-4db8-97e9-53514b5f241f',
+            },
           },
-        },
-      ],
-      nextOffset: '2',
-      cursor: 'cursor-2',
-      upToDate: true,
-    });
+          ...(duplicateStart
+            ? [
+                {
+                  ...base,
+                  id: 'auth-duplicate',
+                  method: 'machine/acp-authenticate',
+                  params: {
+                    requestId: 'auth-claude',
+                    action: 'start',
+                    configId,
+                    accountProfileId: '168ea568-cb31-4ef9-8f30-58f5721e535d',
+                  },
+                },
+              ]
+            : []),
+        ],
+        nextOffset: '1',
+        cursor: 'cursor-1',
+        upToDate: true,
+      });
 
-    await expect(submittedCode).resolves.toBe('browser-returned-code');
-    await fake.waitForAppendedCount(2);
-    expect((fake.appended[1]!.value as { id?: string }).id).toBe('auth-code');
+      await server.start();
+      const initialResponseCount = duplicateStart ? 2 : 1;
+      await fake.waitForAppendedCount(initialResponseCount);
+      if (duplicateStart) {
+        expect(
+          fake.appended.find(({ value }) => (value as { id: string }).id === 'auth-duplicate')
+            ?.value
+        ).toMatchObject({
+          error: { message: 'Authentication request is already running.' },
+        });
+      }
+      const authorizationProgress = (
+        fake.appended.find(({ value }) => (value as { id: string }).id === 'auth-start')!.value as {
+          result: {
+            authorizationCodePublicKey: RpcSecretPublicKey;
+            authenticationInputPublicKey?: RpcSecretPublicKey;
+          };
+        }
+      ).result;
+      const publicKey = authorizationProgress.authorizationCodePublicKey;
+      // Preserve the old built-in OAuth progress shape for strict older clients.
+      // The generic key is advertised only by the new interactive protocol flows.
+      expect(authorizationProgress.authenticationInputPublicKey).toBeUndefined();
+      const authorizationCodeEnvelope = await encryptRpcSecret(
+        publicKey,
+        'browser-returned-code',
+        getMachineAcpAuthorizationCodeSecretContext({
+          workspaceId,
+          machineId,
+          authenticationRequestId: 'auth-claude',
+        })
+      );
+      fake.pushBatch({
+        messages: [
+          {
+            ...base,
+            id: 'auth-code',
+            method: 'machine/acp-authenticate',
+            params: {
+              requestId: 'auth-code-ack',
+              action: 'submit-code',
+              authenticationRequestId: 'auth-claude',
+              authorizationCodeEnvelope,
+            },
+          },
+        ],
+        nextOffset: '2',
+        cursor: 'cursor-2',
+        upToDate: true,
+      });
 
-    releaseStart();
-    await fake.waitForAppendedCount(3);
-    server.stop();
-  });
+      await expect(submittedCode).resolves.toBe('browser-returned-code');
+      await fake.waitForAppendedCount(initialResponseCount + 1);
+      expect((fake.appended[initialResponseCount]!.value as { id?: string }).id).toBe('auth-code');
+
+      releaseStart();
+      await fake.waitForAppendedCount(initialResponseCount + 2);
+      server.stop();
+    }
+  );
 
   it('carries only the persisted config reference when starting authentication', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;

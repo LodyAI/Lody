@@ -377,6 +377,10 @@ export async function requestLocalCliHostShutdown(options: {
           );
           continue;
         }
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          finish({ ok: false, error: 'invalid_response' });
+          return;
+        }
         const response = value as { ok?: unknown; error?: unknown };
         if (response.ok === true) {
           finish({ ok: true, record: hostRecord });

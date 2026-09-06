@@ -3,12 +3,14 @@ import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
+import { resolve as resolvePath } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { validateAccountProfile } from './account-profiles';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -85,6 +87,88 @@ describe('AcpAuthenticationManager', () => {
     expect(spawnProcess).toHaveBeenCalledOnce();
   });
 
+  it('does not reserve or prepare login for an already-cancelled caller', async () => {
+    const spawnProcess = vi.fn();
+    const resolveLoginShellEnv = vi.fn(async () => ({}));
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: spawnProcess as never,
+      resolveLoginShellEnv,
+    });
+    await expect(
+      manager.authenticate({
+        requestId: 'cancelled-before-start',
+        cliType: 'builtin',
+        agentType: 'kimi',
+        runtimeOverrides: { kimiPath: '/test/kimi' },
+        signal: AbortSignal.abort(),
+      })
+    ).resolves.toEqual({ success: true, disposition: 'cancelled' });
+    expect(manager.getAgentType('cancelled-before-start')).toBeUndefined();
+    expect(resolveLoginShellEnv).not.toHaveBeenCalled();
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('cancels registered preparation from the caller signal without spawning and releases its lease', async () => {
+    const env = createDeferred<Record<string, string>>();
+    const preparing = createDeferred<void>();
+    const controller = new AbortController();
+    const spawnProcess = vi.fn();
+    const release = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: spawnProcess as never,
+      resolveLoginShellEnv: () => {
+        preparing.resolve();
+        return env.promise;
+      },
+    });
+    const result = manager.authenticate({
+      requestId: 'cancel-preparation',
+      cliType: 'builtin',
+      agentType: 'kimi',
+      runtimeOverrides: { kimiPath: '/test/kimi' },
+      signal: controller.signal,
+      onAccountLeaseReleased: release,
+    });
+    await preparing.promise;
+    controller.abort();
+    expect(manager.getAgentType('cancel-preparation')).toBeUndefined();
+    expect(release).toHaveBeenCalledOnce();
+    env.resolve({});
+    await expect(result).resolves.toEqual({ success: true, disposition: 'cancelled' });
+    expect(spawnProcess).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a running child through the signal and removes the listener during cleanup', async () => {
+    const controller = new AbortController();
+    const removed = vi.spyOn(controller.signal, 'removeEventListener');
+    const child = createFakeChild();
+    const spawned = createDeferred<void>();
+    const release = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn(() => {
+        spawned.resolve();
+        return child;
+      }) as never,
+      resolveLoginShellEnv: async () => ({}),
+    });
+    const result = manager.authenticate({
+      requestId: 'cancel-running',
+      cliType: 'builtin',
+      agentType: 'kimi',
+      runtimeOverrides: { kimiPath: '/test/kimi' },
+      signal: controller.signal,
+      onAccountLeaseReleased: release,
+    });
+    await spawned.promise;
+    controller.abort();
+    await expect(result).resolves.toEqual({ success: true, disposition: 'cancelled' });
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(release).toHaveBeenCalledOnce();
+    expect(removed).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(manager.getAgentType('cancel-running')).toBeUndefined();
+  });
+
   it.each([
     {
       agentType: 'claude',
@@ -129,7 +213,7 @@ describe('AcpAuthenticationManager', () => {
         })
       ).resolves.toEqual({ success: true, disposition: 'authenticated' });
       expect(spawnProcess).toHaveBeenCalledWith(
-        command,
+        resolvePath(command),
         args,
         expect.objectContaining({ cwd: expect.any(String) })
       );
@@ -852,7 +936,74 @@ describe('probeBuiltinAuthentication', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
+
+  it.each(['input', 'inherited', 'login-shell'] as const)(
+    'allows a System Default handoff using resolved %s environment authentication',
+    async (source) => {
+      vi.stubEnv('ANTHROPIC_API_KEY', source === 'inherited' ? 'synthetic-test-value' : undefined);
+      const spawnProcess = vi.fn();
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'claude',
+        accountProfileId: 'system-default',
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
+        ...(source === 'input' ? { env: { ANTHROPIC_API_KEY: 'synthetic-test-value' } } : {}),
+        resolveLoginShellEnv: async () =>
+          source === 'login-shell' ? { ANTHROPIC_API_KEY: 'synthetic-test-value' } : {},
+        logger: createSilentLogger(),
+        spawnProcess,
+      };
+      await expect(
+        probeBuiltinAuthentication({ ...input, accountStatusOnly: true })
+      ).resolves.toEqual({
+        status: 'unknown',
+        reason: 'environment-authentication',
+      });
+      await expect(validateAccountProfile(input)).resolves.toBeUndefined();
+      // Ordinary capability probes keep their existing contract and defer to ACP.
+      await expect(probeBuiltinAuthentication(input)).resolves.toEqual({ status: 'unknown' });
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['missing', 'unknown', 'timeout'] as const)(
+    'rejects a System Default handoff when native authentication is %s without environment authentication',
+    async (outcome) => {
+      for (const key of Object.keys(process.env)) {
+        if (/^(ANTHROPIC_|CLAUDE_CODE_USE_|AWS_BEARER_TOKEN_BEDROCK)/.test(key))
+          vi.stubEnv(key, undefined);
+      }
+      if (outcome === 'timeout') vi.useFakeTimers();
+      const child = createFakeChild();
+      const started = createDeferred<void>();
+      const spawnProcess = vi.fn(() => {
+        started.resolve();
+        if (outcome !== 'timeout') {
+          queueMicrotask(() => {
+            child.exitCode = outcome === 'missing' ? 1 : 0;
+            child.emit('exit', child.exitCode, null);
+          });
+        }
+        return child;
+      });
+      const validation = validateAccountProfile({
+        cliType: 'builtin',
+        agentType: 'claude',
+        accountProfileId: 'system-default',
+        runtimeOverrides: { claudeCodeExecutable: '/test/claude' },
+        resolveLoginShellEnv: async () => ({}),
+        logger: createSilentLogger(),
+        spawnProcess: spawnProcess as never,
+        statusProbeTimeoutMs: 25,
+      });
+      const rejected = expect(validation).rejects.toThrow('authentication could not be verified');
+      await started.promise;
+      if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+    }
+  );
 
   it('recognizes an authenticated Claude credential store', async () => {
     const child = createFakeChild();
@@ -875,7 +1026,7 @@ describe('probeBuiltinAuthentication', () => {
       })
     ).resolves.toEqual({ status: 'authenticated' });
     expect(spawnProcess).toHaveBeenCalledWith(
-      '/test/claude',
+      resolvePath('/test/claude'),
       ['auth', 'status', '--json'],
       expect.objectContaining({ stdio: 'ignore' })
     );

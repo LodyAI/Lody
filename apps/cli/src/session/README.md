@@ -28,6 +28,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
+- `session-account-handoff.ts` — account-switch checkpoint, replacement, commit and rollback.
+- `session-account-binding-store.ts` — machine-local account/native-session authority and resume state.
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
@@ -134,7 +136,18 @@ deliberately does not capture: it streams and would grow unbounded.
 
 ### Fork saga recovery
 
-Because a preparing target publishes no Session meta until its final commit, the repo meta
+Same-worktree forks record an installation-local operation marker before saving the initial
+binding or placeholder. The preparing binding blocks resume until the native fork completes.
+Recovery deletes only an empty, incomplete owned target before releasing its binding.
+A committed local native-session binding proves completion; otherwise nonempty history must
+match the local journal's target checkpoint. Unmatched history remains blocked and preserved.
+After native startup, forks journal the placeholder and cloned-history checkpoints before publishing
+the candidate account/native-session binding. The final binding is promoted only after the
+history and metadata flush succeeds. Restart recovery matches the durable history against the
+local journal, preserving the selected account and refusing an unmatched checkpoint. Failed
+cleanup retains the journal until target deletion is durable.
+
+New-worktree targets publish no Session meta until final commit, so the repo meta
 index cannot name interrupted operations; recovery discovers them from the machine-local
 marker store (`session-fork-operation-store.ts`), recorded fail-closed at accept and cleared
 only after the final commit or rollback persists. The marker carries the worktree-cleanup

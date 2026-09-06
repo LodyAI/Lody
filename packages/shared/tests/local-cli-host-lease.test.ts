@@ -107,7 +107,11 @@ describe('local CLI host lease', () => {
 
   it('authenticates daemon shutdown control without exposing the token', async () => {
     const endpoint = await createEndpoint();
-    const onRequest = vi.fn();
+    let requested!: () => void;
+    const requestHandled = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    const onRequest = vi.fn(requested);
     const result = await acquireLocalCliHostLease({
       endpoint,
       instanceId: 'daemon-a',
@@ -122,6 +126,21 @@ describe('local CLI host lease', () => {
       requestLocalCliHostShutdown({ endpoint, instanceId: 'daemon-a', token: 'wrong-token' })
     ).resolves.toEqual({ ok: false, error: 'unauthorized' });
     expect(onRequest).not.toHaveBeenCalled();
+    for (const expectedOwner of [
+      { instanceId: 'other-owner' },
+      { expectedPid: process.pid + 1 },
+      { expectedMode: 'electron' as const },
+    ]) {
+      await expect(
+        requestLocalCliHostShutdown({
+          endpoint,
+          instanceId: 'daemon-a',
+          token: 'secret-token',
+          ...expectedOwner,
+        })
+      ).resolves.toEqual({ ok: false, error: 'owner_mismatch' });
+    }
+    expect(onRequest).not.toHaveBeenCalled();
 
     const accepted = await requestLocalCliHostShutdown({
       endpoint,
@@ -129,7 +148,48 @@ describe('local CLI host lease', () => {
       token: 'secret-token',
     });
     expect(accepted).toMatchObject({ ok: true, record: { instanceId: 'daemon-a' } });
-    await Promise.resolve();
+    await requestHandled;
     expect(onRequest).toHaveBeenCalledOnce();
   });
+
+  it.each(['esm', 'commonjs'])(
+    'rejects malformed shutdown responses without throwing (%s)',
+    async (implementation) => {
+      const request =
+        implementation === 'esm'
+          ? requestLocalCliHostShutdown
+          : (
+              require('../src/node/local-cli-host-lease.cjs') as typeof import('../src/node/local-cli-host-lease')
+            ).requestLocalCliHostShutdown;
+      for (const response of ['null', '[]', '"unexpected"', 'not-json']) {
+        const endpoint = await createEndpoint();
+        const server = net.createServer((socket) => {
+          socket.on('error', () => socket.destroy());
+          socket.write(
+            JSON.stringify({
+              version: 1,
+              instanceId: 'fake-owner',
+              pid: process.pid,
+              mode: 'daemon',
+              startedAtMs: 1,
+            }) + '\n'
+          );
+          socket.once('data', () => socket.end(response + '\n'));
+        });
+        await new Promise<void>((resolve) => {
+          if (endpoint.kind === 'pipe') server.listen(endpoint.path, resolve);
+          else server.listen(endpoint.port, endpoint.host, resolve);
+        });
+        try {
+          await expect(
+            request({ endpoint, instanceId: 'fake-owner', token: 'synthetic' })
+          ).resolves.toEqual({ ok: false, error: 'invalid_response' });
+        } finally {
+          await new Promise<void>((resolve, reject) =>
+            server.close((error) => (error ? reject(error) : resolve()))
+          );
+        }
+      }
+    }
+  );
 });

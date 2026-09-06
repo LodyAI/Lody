@@ -11,6 +11,13 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
 
 ## Composition and transports
 
+- Profile list/create, switching, explicit profile login and its cancel/code/input
+  require trusted local IPC. Machine RPC and supplied owner/source fields prove no
+  identity. Legacy login without a profile ID is unchanged. Title/branch use local
+  bindings, never synced account metadata.
+- Auth continuations reserve 1 queue slot; starts stay queued. Keep authorization
+  and both queues' stop/drain behavior. Register local cancellation before enqueue
+  and propagate it through launch preparation.
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK
   clients or read `LODY_AUTH_URL` / `LODY_AUTH_SITE_URL` / `LODY_SERVER_URL`. The local

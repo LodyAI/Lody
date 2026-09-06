@@ -99,8 +99,11 @@ describe('session file blob store', () => {
     const { destPath: dest, warn } = await copyIntoSessionFileBlobStore(args);
     expect(warn).toBe(false);
     expect(await readFile(dest, 'utf8')).toBe('hello');
-    expect((await stat(getSessionFileBlobDir(args))).mode & 0o777).toBe(0o700);
-    expect((await stat(dest)).mode & 0o777).toBe(0o600);
+    // POSIX modes do not establish or verify Windows ACLs.
+    if (process.platform !== 'win32') {
+      expect((await stat(getSessionFileBlobDir(args))).mode & 0o777).toBe(0o700);
+      expect((await stat(dest)).mode & 0o777).toBe(0o600);
+    }
     expect(
       await sessionFileBlobExists({
         workspaceId: 'ws',

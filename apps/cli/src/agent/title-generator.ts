@@ -279,6 +279,7 @@ const noopTerminalManager: TerminalManager = {
 };
 
 export type GenerateTitleOptions = {
+  accountProfileId?: string;
   cliType: AgentConfigCliType;
   agentType: AgentType;
   customAcp?: CustomAcpLaunchSpec;
@@ -306,6 +307,7 @@ export const generateTitleIsolated = async (
     const { agentProcess, client, acpSessionId, sessionResponse } = await startLocalAcpAgent({
       cliType: options.cliType,
       agentType: options.agentType,
+      ...(options.accountProfileId ? { accountProfileId: options.accountProfileId } : {}),
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
       workdir,

@@ -1,4 +1,12 @@
 import {
+  resolveSessionAccountMeta,
+  beginSessionAccountEdit,
+  commitSessionAccountEdit,
+  rollbackSessionAccountEdit,
+  abandonSessionAccountEdit,
+  hashSessionAccountEditHistory,
+} from './session-account-binding-store';
+import {
   buildPendingUserHistoryEntry,
   getServerNow,
   getSessionRoomId,
@@ -24,6 +32,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { SessionExecutionService } from './session-execution-service';
 import type { ISession, SessionManager } from './session-manager';
 import type { SessionUserResolver } from './session-user-resolver';
+import { createSessionAccountEditRecovery } from './session-account-edit-recovery';
 
 type EditableTail = {
   userIndex: number;
@@ -114,7 +123,19 @@ export class SessionEditAndResendService {
       );
     }
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(spec.sessionId);
-    const meta = await sessionDoc.getMetaState();
+    const meta = await sessionDoc.getMetaState().then((raw) =>
+      raw
+        ? resolveSessionAccountMeta(
+            {
+              workspaceId: this.deps.workspaceId,
+              machineId: this.deps.machineId,
+              sessionId: spec.sessionId,
+            },
+            raw,
+            createSessionAccountEditRecovery(this.deps.workspaceDocument, spec.sessionId)
+          )
+        : raw
+    );
     if (!meta) {
       return sessionEditAndResendFailure(spec, 'SESSION_NOT_FOUND', 'Session was not found.');
     }
@@ -218,7 +239,19 @@ export class SessionEditAndResendService {
         preparedSessionId = prepared.sessionId as ACPSessionId;
 
         const [freshMeta, freshHistory] = await Promise.all([
-          sessionDoc.getMetaState(),
+          sessionDoc.getMetaState().then((raw) =>
+            raw
+              ? resolveSessionAccountMeta(
+                  {
+                    workspaceId: this.deps.workspaceId,
+                    machineId: this.deps.machineId,
+                    sessionId: spec.sessionId,
+                  },
+                  raw,
+                  createSessionAccountEditRecovery(this.deps.workspaceDocument, spec.sessionId)
+                )
+              : raw
+          ),
           sessionDoc.getHistory(),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
@@ -307,7 +340,19 @@ export class SessionEditAndResendService {
           await this.deps.executionService.waitForTurnRelease(spec.sessionId, activeTurnId);
         }
 
-        const preCommitMeta = await sessionDoc.getMetaState();
+        const preCommitMeta = await sessionDoc.getMetaState().then((raw) =>
+          raw
+            ? resolveSessionAccountMeta(
+                {
+                  workspaceId: this.deps.workspaceId,
+                  machineId: this.deps.machineId,
+                  sessionId: spec.sessionId,
+                },
+                raw,
+                createSessionAccountEditRecovery(this.deps.workspaceDocument, spec.sessionId)
+              )
+            : raw
+        );
         const preCommitExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (
           !preCommitMeta ||
@@ -366,72 +411,112 @@ export class SessionEditAndResendService {
           ...pending,
           id: spec.replacementUserTurnId,
         };
-        let historyBeforeWrite: SessionHistoryInput[] | null = null;
-        let previousUserId: string | undefined;
-        await sessionDoc.updateHistory((currentHistory) => {
-          const currentGoal =
-            resolveLatestSessionGoalFromHistory(currentHistory) ??
-            (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
-          if (isSessionGoalActive(currentGoal)) {
-            throw new Error(
-              '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
-            );
-          }
-          const currentEditable = resolveEditableTail(currentHistory, spec.expectedUserTurnId);
-          if (!currentEditable || currentEditable.forkTurnId !== commitEditable.forkTurnId) {
-            throw new Error(
-              '[STALE_USER_TURN] The editable history boundary changed before commit.'
-            );
-          }
-          historyBeforeWrite = currentHistory;
-          const prefix = currentHistory.slice(0, currentEditable.userIndex);
-          previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
-          return [...prefix, replacement];
+        const accountScope = {
+          workspaceId: this.deps.workspaceId,
+          machineId: this.deps.machineId,
+          sessionId: spec.sessionId,
+        };
+        const operationId = spec.replacementUserTurnId;
+        const sourceHistory = await sessionDoc.getHistory();
+        const sourceHistoryHash = hashSessionAccountEditHistory(sourceHistory);
+        const currentEditable = resolveEditableTail(sourceHistory, spec.expectedUserTurnId);
+        if (!currentEditable || currentEditable.forkTurnId !== commitEditable.forkTurnId) {
+          throw new Error('[STALE_USER_TURN] The editable history boundary changed before commit.');
+        }
+        const prefix = sourceHistory.slice(0, currentEditable.userIndex);
+        const targetHistory = [...prefix, replacement];
+        const targetHistoryHash = hashSessionAccountEditHistory(targetHistory);
+        const previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
+        const targetMeta = {
+          acpSessionId: preparedSessionId,
+          status: SessionStatusFactory.idle(),
+          latestUserMsgId: spec.replacementUserTurnId,
+          lastHandledUserMsgId: previousUserId,
+          processingUserMsgId: undefined,
+          lastCanceledTurn: undefined,
+          lastMissingHistoryUserMsgId: undefined,
+          lastMessageAt: getServerNow(),
+        };
+        await beginSessionAccountEdit(accountScope, {
+          operationId,
+          sourceMeta: commitMeta,
+          targetMeta,
+          sourceHistory,
+          targetHistory,
         });
+        let historyChanged = false;
         try {
-          await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(spec.sessionId), {
-            acpSessionId: preparedSessionId,
-            status: SessionStatusFactory.idle(),
-            latestUserMsgId: spec.replacementUserTurnId,
-            lastHandledUserMsgId: previousUserId,
-            processingUserMsgId: undefined,
-            lastCanceledTurn: undefined,
-            lastMissingHistoryUserMsgId: undefined,
-            lastMessageAt: getServerNow(),
-          });
-          await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
-        } catch (error) {
-          if (historyBeforeWrite) {
-            await sessionDoc
-              .updateHistory(() => historyBeforeWrite ?? [])
-              .catch((rollbackError) => {
-                this.deps.logger.error(
-                  `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`
-                );
-              });
-          }
-          await this.deps.workspaceDocument.repo
-            .upsertDocMeta(getSessionRoomId(spec.sessionId), {
-              acpSessionId: commitMeta.acpSessionId,
-              status: commitMeta.status,
-              latestUserMsgId: commitMeta.latestUserMsgId,
-              lastHandledUserMsgId: commitMeta.lastHandledUserMsgId,
-              processingUserMsgId: commitMeta.processingUserMsgId,
-              lastCanceledTurn: commitMeta.lastCanceledTurn,
-              lastMissingHistoryUserMsgId: commitMeta.lastMissingHistoryUserMsgId,
-              lastMessageAt: commitMeta.lastMessageAt,
-            })
-            .catch((rollbackError) => {
-              this.deps.logger.error(
-                `[${spec.sessionId}] Failed to restore meta after commit failure: ${formatErrorMessage(rollbackError)}`
+          await sessionDoc.updateHistory((currentHistory) => {
+            if (hashSessionAccountEditHistory(currentHistory) !== sourceHistoryHash) {
+              throw new Error('[STALE_USER_TURN] The history changed while the edit was staged.');
+            }
+            const currentGoal =
+              resolveLatestSessionGoalFromHistory(currentHistory) ??
+              (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
+            if (isSessionGoalActive(currentGoal)) {
+              throw new Error(
+                '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
               );
-            });
-          await this.deps.workspaceDocument
-            .persistPendingChanges('session-edit-and-resend-rollback')
-            .catch(() => {});
+            }
+            historyChanged = true;
+            return targetHistory;
+          });
+          await this.deps.workspaceDocument.repo.upsertDocMeta(
+            getSessionRoomId(spec.sessionId),
+            targetMeta
+          );
+          await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
+          if (hashSessionAccountEditHistory(await sessionDoc.getHistory()) !== targetHistoryHash) {
+            throw new Error('Session history changed while the account edit was committed.');
+          }
+          await commitSessionAccountEdit(accountScope, operationId);
+        } catch (error) {
+          try {
+            if (historyChanged) {
+              await sessionDoc.updateHistory((currentHistory) => {
+                const currentHash = hashSessionAccountEditHistory(currentHistory);
+                if (currentHash !== targetHistoryHash && currentHash !== sourceHistoryHash) {
+                  throw new Error('Session history changed before account edit rollback.', {
+                    cause: error,
+                  });
+                }
+                return sourceHistory;
+              });
+              await this.deps.workspaceDocument.repo.upsertDocMeta(
+                getSessionRoomId(spec.sessionId),
+                {
+                  acpSessionId: commitMeta.acpSessionId,
+                  status: commitMeta.status,
+                  latestUserMsgId: commitMeta.latestUserMsgId,
+                  lastHandledUserMsgId: commitMeta.lastHandledUserMsgId,
+                  processingUserMsgId: commitMeta.processingUserMsgId,
+                  lastCanceledTurn: commitMeta.lastCanceledTurn,
+                  lastMissingHistoryUserMsgId: commitMeta.lastMissingHistoryUserMsgId,
+                  lastMessageAt: commitMeta.lastMessageAt,
+                }
+              );
+              await this.deps.workspaceDocument.persistPendingChanges(
+                'session-edit-and-resend-rollback'
+              );
+              if (
+                hashSessionAccountEditHistory(await sessionDoc.getHistory()) !== sourceHistoryHash
+              ) {
+                throw new Error(
+                  'Session history changed while account edit rollback was persisted.',
+                  { cause: error }
+                );
+              }
+            }
+            await rollbackSessionAccountEdit(accountScope, operationId);
+          } catch (rollbackError) {
+            abandonSessionAccountEdit(accountScope, operationId);
+            throw new Error(
+              `Account edit recovery is required: ${formatErrorMessage(rollbackError)}`,
+              { cause: rollbackError }
+            );
+          }
           throw error;
         }
-
         agentClient.adoptPreparedSession(prepared);
         runtime.acpSessionId = preparedSessionId;
         committed = true;
@@ -518,6 +603,7 @@ export class SessionEditAndResendService {
         machineId: meta.machineId,
         agentConfigId: meta.agentConfigId,
         agentCliType: meta.cliType,
+        accountProfileId: meta.accountProfileId,
         agentType: meta.agentType,
         mcpServerIds,
         taskToolsEnabled,

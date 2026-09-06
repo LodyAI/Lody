@@ -22,6 +22,7 @@ import type { CreateAgentConfig } from '../src/session/session-manager';
 import type { SessionSandbox } from '../src/session/session-sandbox';
 import type { SessionConfig } from '../src/session/types';
 import type { Logger } from '../src/utils/logger';
+import { acquireAccountProfileAuthentication } from '../src/agent/account-profiles';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -47,6 +48,50 @@ const createConfig = (overrides: Partial<SessionConfig> = {}): SessionConfig => 
 });
 
 describe('Session buildShellEnv', () => {
+  it('holds a managed-account process lease before startup awaits and releases it on abort', async () => {
+    const accountProfileId = '00000000-0000-4000-8000-00000000000b';
+    const session = new Session(createConfig({ accountProfileId }), createSilentLogger());
+    const pending = session.createAgent({
+      cliType: 'builtin',
+      agentType: 'codex',
+      command: 'codex',
+      abortSignal: AbortSignal.abort(),
+    } as CreateAgentConfig);
+    expect(() =>
+      acquireAccountProfileAuthentication({
+        cliType: 'builtin',
+        agentType: 'codex',
+        accountProfileId,
+      })
+    ).toThrow('in use');
+    await expect(pending).rejects.toThrow();
+    const release = acquireAccountProfileAuthentication({
+      cliType: 'builtin',
+      agentType: 'codex',
+      accountProfileId,
+    });
+    release();
+  });
+
+  it('reports a pending exec as active tool execution until it settles', async () => {
+    const session = new Session(createConfig(), createSilentLogger());
+    let finish: (output: string) => void = () => {};
+    const output = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const run = vi
+      .spyOn(session as unknown as { runCommand: () => Promise<string> }, 'runCommand')
+      .mockReturnValue(output);
+    try {
+      const command = session.exec('synthetic-command', [], '/workspace', false);
+      expect(session.hasActiveToolExecution()).toBe(true);
+      finish('done');
+      await expect(command).resolves.toBe('done');
+      expect(session.hasActiveToolExecution()).toBe(false);
+    } finally {
+      run.mockRestore();
+    }
+  });
   afterEach(() => {
     loginShellOverlay.value = {};
     resolvedLoginShellOverlay.value = {};

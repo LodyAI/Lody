@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject, RemoteCursor } from '@loro-dev/streams-crdt';
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
@@ -119,10 +119,9 @@ describe('SQLite Loro repo store', () => {
   });
 
   it('creates a workspace-scoped SQLite repo store under the Lody storage directory', async () => {
-    const previousHome = process.env.HOME;
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sqlite-repo-home-'));
     createdPaths.add(tempHome);
-    process.env.HOME = tempHome;
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tempHome);
 
     try {
       const workspaceId = 'workspace-1' as WorkspaceId;
@@ -134,11 +133,7 @@ describe('SQLite Loro repo store', () => {
       expect(getLoroRepoStorageBaseDir(workspaceId)).toBe(cliStore.baseDir);
       expect(getLoroRepoSqliteDbPath(workspaceId)).toBe(cliStore.dbPath);
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
+      homeSpy.mockRestore();
     }
   });
 });

@@ -7,6 +7,11 @@ lists. Binding rules live in
 [mobile/AGENTS.md](../../packages/components/src/components/mobile/AGENTS.md); this page
 explains why they are shaped that way.
 
+The desktop entry points include `loro-sidebar.tsx`, `loro-app-sidebar.tsx`,
+`sidebar-*.tsx`, and the grouped `session-list.tsx`. Local-project sections and
+`sidebar-updated-session-list.tsx` (Updated and Pinned) use the same tree, with
+`sidebar-navigation-model.ts` keeping keyboard navigation aligned with rendered rows.
+
 ## One gesture, every row
 
 Session-mention drag is a product-level gesture, not a feature of one list. A row
@@ -33,6 +38,19 @@ the Session.
 The resolver needs `allActiveSessions` because that is the only view that still contains
 child Tabs; a list that re-derives the set from its own rows cannot resolve openers that
 live outside it.
+
+`sessionListAtom` excludes child Tabs from sidebar rows. The shared
+`sidebarCollapsedOpenedBySessionsAtom` holds collapse state, initially expanded.
+Navigation connects the tree, each row's "Go to Opener Session" menu entry,
+`SessionHeaderMenu.openedByRelations`, and conversation cards for successful create
+Operations or the precise opener. Mobile applies the same two-field tree per bucket
+without the desktop disclosure.
+
+Lifecycle traversal follows both relationships. Child Tabs share the root's machine
+archive/restore/delete command; independently opened descendants enqueue their own.
+The archive list preserves opened-by indentation, while child Tabs stay within their
+owner's archived-tab UI. These are separate traversal and presentation responsibilities,
+not a reason to collapse the two relationships into one.
 
 ## Nesting inside one rendered list
 

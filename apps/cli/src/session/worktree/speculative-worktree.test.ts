@@ -79,6 +79,7 @@ describe('speculative worktree ownership', () => {
   beforeEach(() => {
     tempHome = mkdtempSync(path.join(os.tmpdir(), 'lody-speculative-worktree-'));
     vi.stubEnv('HOME', tempHome);
+    vi.stubEnv('USERPROFILE', tempHome);
   });
 
   afterEach(() => {

@@ -19,6 +19,7 @@ export type {
   WorkspaceId,
 } from './ids';
 export * from './message';
+export * from './account-profiles';
 export * from './ai';
 export * from './message-text-spans';
 export * from './deepseek-harness';

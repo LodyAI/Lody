@@ -3,7 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { AgentConfigCliTypeSchema, ProjectRefSchema, type SessionId } from '@lody/shared';
+import {
+  AccountProfileIdSchema,
+  AgentConfigCliTypeSchema,
+  ProjectRefSchema,
+  type SessionId,
+} from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 /**
  * Machine-local discovery index for in-flight worktree-fork operations.
@@ -73,8 +79,9 @@ const SessionForkOperationCleanupSchema = z
   })
   .strict();
 
-const SessionForkOperationMarkerSchema = z
+const WorktreeForkOperationMarkerSchema = z
   .object({
+    kind: z.literal('new-worktree').optional(),
     version: z.literal(SESSION_FORK_OPERATION_MARKER_VERSION),
     workspaceId: z.string().min(1),
     machineId: z.string().min(1),
@@ -93,23 +100,48 @@ const SessionForkOperationMarkerSchema = z
   })
   .strict();
 
+const SameWorktreeForkOperationMarkerSchema = z
+  .object({
+    kind: z.literal('same-worktree'),
+    version: z.literal(SESSION_FORK_OPERATION_MARKER_VERSION),
+    workspaceId: z.string().min(1),
+    machineId: z.string().min(1),
+    targetSessionId: z.string().min(1),
+    operationId: z.string().min(1),
+    createdAt: z.string().min(1),
+    title: z.string().min(1),
+    accountProfileId: AccountProfileIdSchema,
+  })
+  .strict();
+const SessionForkOperationMarkerSchema = z.union([
+  WorktreeForkOperationMarkerSchema,
+  SameWorktreeForkOperationMarkerSchema,
+]);
+
 export type SessionForkOperationCleanup = z.infer<typeof SessionForkOperationCleanupSchema>;
 export type SessionForkOperationMarker = z.infer<typeof SessionForkOperationMarkerSchema>;
+export type SameWorktreeForkOperationMarker = z.infer<typeof SameWorktreeForkOperationMarkerSchema>;
 
 export type SessionForkOperationStore = {
   record(marker: SessionForkOperationMarker): Promise<void>;
-  read(targetSessionId: SessionId): Promise<SessionForkOperationMarker | null>;
-  clear(targetSessionId: SessionId): Promise<void>;
+  read(
+    targetSessionId: SessionId,
+    kind?: 'same-worktree'
+  ): Promise<SessionForkOperationMarker | null>;
+  clear(targetSessionId: SessionId, kind?: 'same-worktree'): Promise<void>;
   list(): Promise<SessionForkOperationMarker[]>;
 };
 
-function getStoreRoot(): string {
-  return path.join(os.homedir(), '.lody', 'session-fork-operations');
+function getStoreRoot(kind?: 'same-worktree'): string {
+  return path.join(
+    kind === 'same-worktree' ? getLodyDataDir() : path.join(os.homedir(), '.lody'),
+    'session-fork-operations'
+  );
 }
 
-function getMarkerPath(targetSessionId: SessionId): string {
+function getMarkerPath(targetSessionId: SessionId, kind?: 'same-worktree'): string {
   const key = createHash('sha256').update(targetSessionId).digest('hex');
-  return path.join(getStoreRoot(), `${key}.json`);
+  return path.join(getStoreRoot(kind), `${key}.json`);
 }
 
 function readMarkerFile(markerPath: string): Promise<SessionForkOperationMarker | null> {
@@ -124,7 +156,10 @@ function readMarkerFile(markerPath: string): Promise<SessionForkOperationMarker 
 export function createFileSessionForkOperationStore(): SessionForkOperationStore {
   return {
     async record(marker) {
-      const markerPath = getMarkerPath(marker.targetSessionId as SessionId);
+      const markerPath = getMarkerPath(
+        marker.targetSessionId as SessionId,
+        marker.kind === 'same-worktree' ? marker.kind : undefined
+      );
       await mkdir(path.dirname(markerPath), { recursive: true, mode: 0o700 });
       const temporaryPath = `${markerPath}.${process.pid}.${randomUUID()}.tmp`;
       await writeFile(temporaryPath, `${JSON.stringify(marker)}\n`, {
@@ -134,29 +169,32 @@ export function createFileSessionForkOperationStore(): SessionForkOperationStore
       await rename(temporaryPath, markerPath);
     },
 
-    async read(targetSessionId) {
-      return await readMarkerFile(getMarkerPath(targetSessionId));
+    async read(targetSessionId, kind) {
+      const marker = await readMarkerFile(getMarkerPath(targetSessionId, kind));
+      if (marker && (marker.kind === 'same-worktree') !== (kind === 'same-worktree')) return null;
+      return marker;
     },
 
-    async clear(targetSessionId) {
-      await rm(getMarkerPath(targetSessionId), { force: true });
+    async clear(targetSessionId, kind) {
+      const marker = await readMarkerFile(getMarkerPath(targetSessionId, kind));
+      if (marker && (marker.kind === 'same-worktree') !== (kind === 'same-worktree')) return;
+      await rm(getMarkerPath(targetSessionId, kind), { force: true });
     },
 
     async list() {
-      let entries: string[];
-      try {
-        entries = await readdir(getStoreRoot());
-      } catch {
-        return [];
-      }
       const markers: SessionForkOperationMarker[] = [];
-      for (const entry of entries) {
-        if (!entry.endsWith('.json')) {
-          continue;
-        }
-        const marker = await readMarkerFile(path.join(getStoreRoot(), entry));
-        if (marker) {
-          markers.push(marker);
+      const legacyRoot = getStoreRoot();
+      const installationRoot = getStoreRoot('same-worktree');
+      for (const root of new Set([legacyRoot, installationRoot])) {
+        const entries = await readdir(root).catch(() => []);
+        for (const entry of entries) {
+          if (!entry.endsWith('.json')) continue;
+          const marker = await readMarkerFile(path.join(root, entry));
+          if (
+            marker &&
+            (marker.kind === 'same-worktree' ? root === installationRoot : root === legacyRoot)
+          )
+            markers.push(marker);
         }
       }
       return markers;

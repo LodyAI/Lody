@@ -1,3 +1,13 @@
+import { createSessionAccountEditRecovery } from '@/session/session-account-edit-recovery';
+import { getRateLimitEntryKey, resolveAccountProfileId } from '@lody/shared';
+import type {
+  MachineAccountProfilesRequest,
+  MachineAccountProfilesResponse,
+  SessionAccountSwitchRequest,
+  SessionAccountSwitchResponse,
+} from '@lody/shared';
+import { createAccountProfile, listAccountProfiles } from '@/agent/account-profiles';
+import { resolveSessionAccountMeta } from '@/session/session-account-binding-store';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -668,6 +678,7 @@ export type MessageDispatchSource = 'runtime' | 'local';
 export type MessageDispatchContext = {
   source: MessageDispatchSource;
   send: (message: unknown) => void;
+  authenticationSignal?: AbortSignal;
 };
 
 type ControlMessage = LocalSessionControlRequestValidated;
@@ -677,13 +688,49 @@ type ConversationTurnGateContext = {
   deferACPUpdateTarget?: boolean;
 };
 
+async function openSessionUploadFile(absolutePath: string): Promise<fs.promises.FileHandle> {
+  if (fs.constants.O_NOFOLLOW) {
+    return await fs.promises.open(absolutePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  }
+
+  // Windows has no O_NOFOLLOW. Compare the path before/after opening with the
+  // descriptor, using bigint inode identities to avoid precision loss.
+  const before = await fs.promises.lstat(absolutePath, { bigint: true });
+  if (before.isSymbolicLink()) {
+    throw Object.assign(new Error('Upload path is a symlink'), { code: 'ELOOP' });
+  }
+  if (!before.isFile()) throw new Error('Upload path is not a file');
+  const handle = await fs.promises.open(absolutePath, fs.constants.O_RDONLY);
+  try {
+    const opened = await handle.stat({ bigint: true });
+    const after = await fs.promises.lstat(absolutePath, { bigint: true });
+    if (after.isSymbolicLink()) {
+      throw Object.assign(new Error('Upload path became a symlink'), { code: 'ELOOP' });
+    }
+    if (
+      !opened.isFile() ||
+      !after.isFile() ||
+      before.dev !== opened.dev ||
+      before.ino !== opened.ino ||
+      after.dev !== opened.dev ||
+      after.ino !== opened.ino
+    ) {
+      throw new Error('Upload file changed while opening');
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
 type UploadableImageFile = {
   absolutePath: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
   // Bytes are read inside the validation function while the file is open with
-  // O_NOFOLLOW. Carrying them to upload avoids a second `readFile` that would
+  // symlink protection. Carrying them to upload avoids a second `readFile` that would
   // re-open the path and follow a symlink swapped in after validation (TOCTOU).
   bytes: Buffer;
 };
@@ -830,6 +877,7 @@ export class MessageHandler {
   private readonly store = new SessionTransientStore();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
+  private readonly localAccountAuthenticationRequests = new Set<string>();
   // Note: titleGenerationInFlight, archiveInFlight, deleteInFlight are self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private archiveWatchHandle: RepoWatchHandle | null = null;
@@ -1768,15 +1816,12 @@ export class MessageHandler {
     }
 
     const absolutePath = path.resolve(trimmed);
-    // O_NOFOLLOW makes the open() fail with ELOOP if the final path component is a
-    // symlink. We then fstat / read through the same fd, so an attacker who swaps
+    // Reject a symlink final component. We then fstat / read through the same fd,
+    // so an attacker who swaps
     // the file after validation cannot redirect us at a different inode.
     let handle: fs.promises.FileHandle;
     try {
-      handle = await fs.promises.open(
-        absolutePath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      );
+      handle = await openSessionUploadFile(absolutePath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | undefined)?.code;
       if (code === 'ELOOP') {
@@ -3064,6 +3109,7 @@ export class MessageHandler {
       runAutoPrompt: async (ctx) => await this.autoPromptRunner.run(ctx),
     });
     this.executionService = new SessionExecutionService({
+      resolveAccountSwitchUser: (userId) => this.sessionUserResolver.resolve(userId),
       logger: this.logger,
       sessionManager: this.sessionManager,
       workspaceDocument: this.workspaceDocument,
@@ -3279,6 +3325,20 @@ export class MessageHandler {
             },
             { onAcpBinaryProgress, signal }
           ),
+        accountProfiles: async (params) =>
+          this.handleAccountProfiles({
+            ...params,
+            type: 'machine/account-profiles',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+          }),
+        switchSessionAccount: async (params) =>
+          this.handleAccountSwitch({
+            ...params,
+            type: 'session/account-switch',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+          }),
         authenticateMachineAcp: async (args) => {
           const common = {
             type: 'machine/acp-authenticate' as const,
@@ -3289,7 +3349,12 @@ export class MessageHandler {
           const message: MachineAcpAuthenticateRequestValidated = (() => {
             switch (args.action) {
               case 'start':
-                return { ...common, action: args.action, configId: args.configId };
+                return {
+                  ...common,
+                  action: args.action,
+                  configId: args.configId,
+                  accountProfileId: args.accountProfileId,
+                };
               case 'cancel':
                 return {
                   ...common,
@@ -3692,8 +3757,22 @@ export class MessageHandler {
 
     this.sessionManager.on(
       'onRateLimitUpdate',
-      (machineId: MachineId, cliType: CliType, limits: RateLimit) => {
-        void this.workspaceDocument.updateRateLimits(machineId, cliType, limits);
+      (
+        machineId: MachineId,
+        cliType: CliType,
+        limits: RateLimit,
+        accountProfileId?: string,
+        sessionId?: SessionId
+      ) => {
+        if (resolveAccountProfileId(accountProfileId) === 'system-default') {
+          void this.workspaceDocument.updateRateLimits(machineId, cliType, limits);
+        } else if (sessionId && accountProfileId) {
+          this.enqueueSessionNoticeHistoryPersist(sessionId, () =>
+            this.persistAccountRateLimit(sessionId, accountProfileId, cliType, limits).catch(
+              () => {}
+            )
+          );
+        }
       }
     );
 
@@ -6779,6 +6858,12 @@ export class MessageHandler {
       case 'machine/acp-capabilities-refresh':
         await this.handleMachineAcpCapabilitiesRefresh(message, context);
         break;
+      case 'machine/account-profiles':
+        context.send(await this.handleAccountProfiles(message, context));
+        break;
+      case 'session/account-switch':
+        context.send(await this.handleAccountSwitch(message, context));
+        break;
       case 'machine/acp-authenticate':
         await this.handleMachineAcpAuthenticate(message, context);
         break;
@@ -7080,8 +7165,8 @@ export class MessageHandler {
   }
 
   /**
-   * Validate a file path for the agent-send upload: open with O_NOFOLLOW (no
-   * symlink final component), reject non-files/empty/oversize, compute sha256
+   * Validate a file path for the agent-send upload: reject a symlink final
+   * component, reject non-files/empty/oversize, compute sha256
    * and text-previewability by streaming (bounded memory).
    */
   private async validateSessionFileUploadPath(
@@ -7107,10 +7192,7 @@ export class MessageHandler {
 
     let handle: fs.promises.FileHandle;
     try {
-      handle = await fs.promises.open(
-        absolutePath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      );
+      handle = await openSessionUploadFile(absolutePath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | undefined)?.code;
       if (code === 'ELOOP') {
@@ -8331,23 +8413,168 @@ export class MessageHandler {
     dispatchContext.send(response);
   }
 
+  private async persistAccountRateLimit(
+    sessionId: SessionId,
+    accountProfileId: string,
+    cliType: CliType,
+    limits: RateLimit
+  ): Promise<void> {
+    const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const meta = await doc.getMetaState();
+    if (meta?.accountProfileId !== accountProfileId) return;
+    const previous =
+      meta.accountRateLimits?.accountProfileId === accountProfileId
+        ? meta.accountRateLimits.limits
+        : {};
+    await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      accountRateLimits: {
+        accountProfileId,
+        limits: { ...previous, [getRateLimitEntryKey(cliType, limits.limitId)]: limits },
+      },
+    });
+  }
+
+  private async handleAccountProfiles(
+    message: MachineAccountProfilesRequest,
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
+  ): Promise<MachineAccountProfilesResponse> {
+    const base = {
+      type: 'machine/account-profiles_response' as const,
+      machineId: this.machineId,
+      requestId: message.requestId,
+    };
+    if (dispatchContext.source !== 'local') {
+      return {
+        ...base,
+        success: false,
+        error: 'Account profiles require a local connection to this machine.',
+      };
+    }
+    try {
+      if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
+        throw new Error('Account profile machine or workspace mismatch');
+      const config = await this.workspaceDocument.getAgentConfigById(message.configId);
+      if (
+        !config ||
+        config.agentType !== message.agentType ||
+        config.cliType !== 'builtin' ||
+        config.machineId !== this.machineId
+      )
+        throw new Error('Account provider configuration is unavailable');
+      const input = {
+        cliType: message.cliType,
+        agentType: message.agentType,
+        env: config.env,
+        runtimeOverrides: config.runtimeOverrides,
+        logger: this.logger,
+      };
+      if (message.action === 'create') {
+        if (!message.label?.trim()) throw new Error('A new account requires a label');
+        const profile = await createAccountProfile({
+          ...input,
+          label: message.label,
+          operationId: `${this.workspaceId}/${message.requestId}`,
+        });
+        return { ...base, success: true, profiles: [profile] };
+      }
+      return { ...base, success: true, profiles: await listAccountProfiles(input) };
+    } catch {
+      return {
+        ...base,
+        success: false,
+        error:
+          'Account profiles could not be read or created. Check the provider configuration and retry.',
+      };
+    }
+  }
+
+  private async handleAccountSwitch(
+    message: SessionAccountSwitchRequest,
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
+  ): Promise<SessionAccountSwitchResponse> {
+    const base = {
+      type: 'session/account-switch_response' as const,
+      machineId: this.machineId,
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+    };
+    try {
+      // Local IPC supplies this out-of-band context; remote RPC always uses runtime.
+      if (dispatchContext.source !== 'local')
+        throw new Error('Account switching requires a local connection to this machine.');
+      if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
+        throw new Error('Account switch machine or workspace mismatch');
+      const result = await this.executionService.switchAccount(message, {
+        verifyAccess: ({ sessionId, localProjectId }) =>
+          this.verifyMachineAccess({
+            sessionId,
+            requesterUserId: this.userId,
+            localProjectId,
+          }),
+      });
+      return {
+        ...base,
+        success: true,
+        accountProfileId: result.accountProfileId,
+        continuation: result.continuation,
+      };
+    } catch (error) {
+      return { ...base, success: false, error: formatErrorMessage(error) };
+    }
+  }
+
   private async handleMachineAcpAuthenticate(
     message: MachineAcpAuthenticateRequestValidated,
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
-    const response = await this.authenticateMachineAcpAndResumeSetup(message, {
-      onProgress: (progress) => dispatchContext.send(progress),
-    });
+    const response = await this.authenticateMachineAcpAndResumeSetup(
+      message,
+      {
+        onProgress: (progress) => dispatchContext.send(progress),
+      },
+      dispatchContext
+    );
     dispatchContext.send(response);
   }
 
   private async authenticateMachineAcpAndResumeSetup(
     message: MachineAcpAuthenticateRequestValidated,
-    options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {}
+    options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {},
+    dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<MachineAcpAuthenticateResponse> {
-    const response = await this.executionService.authenticateMachineAcp(message, options);
+    const targetRequestId =
+      message.action === 'start' ? message.requestId : message.authenticationRequestId;
+    const startsAccountAuthentication = message.action === 'start' && !!message.accountProfileId;
+    if (
+      dispatchContext.source !== 'local' &&
+      (startsAccountAuthentication || this.localAccountAuthenticationRequests.has(targetRequestId))
+    ) {
+      return {
+        type: 'machine/acp-authenticate_response',
+        machineId: this.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: false,
+        disposition: 'error',
+        error: 'Account authentication requires a local connection to this machine.',
+      };
+    }
+    const ownsLocalRequest =
+      startsAccountAuthentication && !this.localAccountAuthenticationRequests.has(targetRequestId);
+    if (ownsLocalRequest) this.localAccountAuthenticationRequests.add(targetRequestId);
+    let response: MachineAcpAuthenticateResponse;
+    try {
+      response = await this.executionService.authenticateMachineAcp(message, {
+        ...options,
+        signal:
+          dispatchContext.source === 'local' ? dispatchContext.authenticationSignal : undefined,
+      });
+    } finally {
+      if (ownsLocalRequest) this.localAccountAuthenticationRequests.delete(targetRequestId);
+    }
     if (
       message.action === 'start' &&
+      (!message.accountProfileId || message.accountProfileId === 'system-default') &&
       response.success &&
       response.disposition === 'authenticated'
     ) {
@@ -8954,6 +9181,19 @@ export class MessageHandler {
         logger: this.logger,
         env,
         titleConfig: resolvedTitleConfig,
+        accountProfileId: meta
+          ? (
+              await resolveSessionAccountMeta(
+                {
+                  workspaceId: this.workspaceId,
+                  machineId: this.machineId,
+                  sessionId,
+                },
+                meta,
+                createSessionAccountEditRecovery(this.workspaceDocument, sessionId)
+              )
+            ).accountProfileId
+          : 'system-default',
       });
       if (!title) {
         this.logger.debug(`[${sessionId}] Session title generation returned empty result`);
@@ -9616,10 +9856,23 @@ export class MessageHandler {
     let metaCustomAcp: CustomAcpLaunchSpec | undefined;
     let metaRuntimeOverrides: BuiltinRuntimeOverrides | undefined;
     let metaAgentConfigId: AgentConfigId | undefined;
+    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const meta = await sessionDoc.getMetaState();
+    const accountProfileId = meta
+      ? (
+          await resolveSessionAccountMeta(
+            {
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              sessionId,
+            },
+            meta,
+            createSessionAccountEditRecovery(this.workspaceDocument, sessionId)
+          )
+        ).accountProfileId
+      : 'system-default';
     let reusableTitlePromise: Promise<string | null> | undefined;
     try {
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
       metaBranchName = meta?.branchName?.trim() || null;
       metaAgentConfigId = meta?.agentConfigId;
       const generatedMetaTitle = meta?.titleSource === 'generated' ? meta.title?.trim() : '';
@@ -9659,7 +9912,8 @@ export class MessageHandler {
       resolvedTitleConfig,
       metaCustomAcp,
       metaRuntimeOverrides,
-      reusableTitlePromise
+      reusableTitlePromise,
+      accountProfileId
     );
     if (!branchName) {
       this.logger.debug(`[${sessionId}] Skipping branch rename: name generation timed out`);
@@ -9713,7 +9967,8 @@ export class MessageHandler {
     titleConfig?: TitleGenerationConfig,
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides,
-    reusableTitlePromise?: Promise<string | null>
+    reusableTitlePromise?: Promise<string | null>,
+    accountProfileId?: string
   ): Promise<string | null> {
     let timeoutHandle: NodeJS.Timeout | null = null;
     const timeoutPromise = new Promise<null>((resolve) => {
@@ -9732,6 +9987,7 @@ export class MessageHandler {
             logger: this.logger,
             env,
             titleConfig,
+            accountProfileId,
           });
       const base = title ?? taskPrompt;
       return ensureValidBranchName(base, 'task');

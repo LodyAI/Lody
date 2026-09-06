@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -173,7 +173,7 @@ describe('resolveBuiltinACPSetting', () => {
         extraArgs: ['--login'],
       })
     ).resolves.toEqual({
-      command: '/opt/kimi',
+      command: resolve('/opt/kimi'),
       args: ['acp', '--login'],
       env: {
         KIMI_CODE_NO_AUTO_UPDATE: '1',
@@ -206,7 +206,7 @@ describe('resolveBuiltinACPSetting', () => {
           action: 'login',
         })
       ).resolves.toEqual({
-        command: agentType === 'claude' ? '/opt/claude' : '/opt/codex',
+        command: resolve(agentType === 'claude' ? '/opt/claude' : '/opt/codex'),
         args: loginArgs,
       });
       await expect(
@@ -217,7 +217,7 @@ describe('resolveBuiltinACPSetting', () => {
           action: 'status',
         })
       ).resolves.toEqual({
-        command: agentType === 'claude' ? '/opt/claude' : '/opt/codex',
+        command: resolve(agentType === 'claude' ? '/opt/claude' : '/opt/codex'),
         args: statusArgs,
       });
     }
@@ -232,7 +232,7 @@ describe('resolveBuiltinACPSetting', () => {
         action: 'login',
       })
     ).resolves.toEqual({
-      command: '/opt/kimi',
+      command: resolve('/opt/kimi'),
       args: ['acp', '--login'],
       env: { KIMI_CODE_NO_AUTO_UPDATE: '1' },
     });
@@ -256,7 +256,7 @@ describe('resolveBuiltinACPSetting', () => {
     ).resolves.toEqual({
       command: process.execPath,
       args: [expect.stringMatching(/grok-acp\.js$/u)],
-      env: { GROK_PATH: '/opt/grok', GROK_DISABLE_AUTOUPDATER: '1' },
+      env: { GROK_PATH: resolve('/opt/grok'), GROK_DISABLE_AUTOUPDATER: '1' },
       capabilitySourceVersion: `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}+override:{"grokPath":"/opt/grok"}`,
     });
     await expect(
@@ -267,7 +267,7 @@ describe('resolveBuiltinACPSetting', () => {
         action: 'login',
       })
     ).resolves.toEqual({
-      command: '/opt/grok',
+      command: resolve('/opt/grok'),
       args: ['login', '--device-auth'],
       env: { GROK_DISABLE_AUTOUPDATER: '1' },
     });
@@ -557,8 +557,8 @@ describe('mergeLoginShellEnv', () => {
   it('prepends login-shell PATH entries so user-installed tools resolve first', () => {
     // A GUI-launched daemon inherits a minimal PATH; the login shell knows where
     // tools like opencode actually live (homebrew, cargo, ~/.local/bin, ...).
-    const base = { PATH: '/usr/bin:/bin' };
-    const shell = { PATH: '/opt/homebrew/bin:/home/u/.local/bin:/usr/bin' };
+    const base = { PATH: ['/usr/bin', '/bin'].join(delimiter) };
+    const shell = { PATH: ['/opt/homebrew/bin', '/home/u/.local/bin', '/usr/bin'].join(delimiter) };
 
     expect(splitPath(mergeLoginShellEnv(base, shell).PATH)).toEqual([
       '/opt/homebrew/bin',
@@ -569,8 +569,8 @@ describe('mergeLoginShellEnv', () => {
   });
 
   it('keeps base-only PATH entries (e.g. runtime-injected node_modules/.bin)', () => {
-    const base = { PATH: '/proj/node_modules/.bin:/usr/bin' };
-    const shell = { PATH: '/home/u/.local/bin:/usr/bin' };
+    const base = { PATH: ['/proj/node_modules/.bin', '/usr/bin'].join(delimiter) };
+    const shell = { PATH: ['/home/u/.local/bin', '/usr/bin'].join(delimiter) };
 
     expect(splitPath(mergeLoginShellEnv(base, shell).PATH)).toEqual([
       '/home/u/.local/bin',

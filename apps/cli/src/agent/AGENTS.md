@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-ACP client side of the CLI. Responsibilities per file and background: [README.md](README.md).
+CLI ACP client. Index/background: [README.md](README.md).
 Protocol: context/acp-protocol.md; edit-payload quirks:
 context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AGENTS.md).
 
@@ -14,18 +14,18 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   provider-neutral.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
 - Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
-  provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
-  stays the live-session switch, and a successful selection becomes a later replacement's
+  provider startup translation belongs in the adapter. `session/set_config_option`
+  switches live sessions; successful selection becomes replacement
   startup state.
 - Cache session `_meta.lody.modelReasoningEfforts`; Codex `model[effort]` only.
-- Config projections must consume agent-confirmed state from session setup and
-  `set_config_option` responses, not only `config_option_update` notifications. A
-  present `configOptions` — empty array included — is an authoritative full snapshot; only an
+- Config projections consume confirmed session setup and
+  `set_config_option` responses, not just `config_option_update` notifications. A
+  present `configOptions` — empty array included — is the full snapshot; only an
   omitted field falls back to the requested value, and that fallback updates both replacement
   startup state and the option's `currentValue`.
-- Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
+- Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds; normalize
   `limited` to the durable `blocked` status.
-- Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the
+- Keep both built-in `lody` MCP transports; tools never run in the
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
@@ -41,7 +41,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   never between `initialize` and `newSession`.
 - Acknowledged steer is inject-or-refuse. `AgentSteerNotDeliveredError` marks ONLY a provable
   refusal — local pre-write failure or the agent's own JSON-RPC `invalid request`; never widen
-  it. The applied-waiter must await the steer request's answer before giving up on the turn's
+  it. Applied-waiter awaits the steer answer before abandoning the turn
   response.
 
 ## Launch and runtimes
@@ -50,6 +50,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
+- Account profiles: preserve isolated homes and native System Default; fail closed on managed
+  auth overrides. Follow [account isolation rules](README.md#account-isolation).
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
   prefetch, override, and interactive-auth flows, and launch the pinned closure, not the
   all-in-one `@deepseek-ai/dsh` CLI. Credentials stay in the agent config environment;
@@ -61,15 +63,15 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   fail a mixed root naming both paths; never migrate, rename, or delete session artifacts.
 - `managed-agent-runtime.ts`: Codex pins come only from `codex-runtime-manifest.json`, Claude
   pins only from `claude-runtime-manifest.json`; reject a dependency/manifest version mismatch
-  and never duplicate those pins or checksums beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. The Grok submodule is never the source for production
-  runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+  and never duplicate pins/checksums beside the manager. Do not loosen the metadata
+  schema or accept unknown legacy fields. Never source production
+  Grok binaries from its submodule; desktop must not depend on the Kimi submodule. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
 - Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
   download but keep independent consumer leases; cancelling one caller must not stop others, and
-  only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted
+  only the last aborts fetch, checksum, and extraction. Immediate retry waits for an aborted
   generation's scratch cleanup and never reuses it meanwhile. Tar and ZIP extraction must attach
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
@@ -80,9 +82,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `acp-authentication.ts`
 
-- The single per-agent slot covers launch preparation as well as the child process;
+- One provider/account slot covers launch preparation and the child process;
   timeout/cancel terminate it and release it for Retry, and a cancel or timeout during cleanup
-  still wins. Stop the process before returning success.
+  still wins. Stop before returning success.
 - Authorization data must never enter logs, chat, Flock, or config; raw provider output and
   secret defaults must never reach retained progress.
 - Claude capability refresh runs its native status command first so missing credentials surface
@@ -93,7 +95,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   real interactive-terminal bridge). Method lists and elicitations stay on the original
   long-running request with one pending interaction at a time; replies carry an interaction id
   and use the encrypted authentication-input path on remote Machines. Bound URL schemes, sizes,
-  ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
+  ids, labels, options, and defaults before progress, under a shared serialized-byte
   budget for the form.
 - Machine RPC may name only a persisted Provider `configId`; the daemon freezes
   machine/CLI/agent/launch/env/runtime fields before spawning, capability refresh included, and

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { FSWatcher } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -120,12 +121,14 @@ describe('workspace watch worker core', () => {
 
     expect(watched).toEqual([
       { directory: '/workspace', recursive: false },
-      { directory: '/workspace/apps', recursive: true },
-      { directory: '/workspace/packages', recursive: true },
+      { directory: path.join('/workspace', 'apps'), recursive: true },
+      { directory: path.join('/workspace', 'packages'), recursive: true },
     ]);
     // The whole point: no inotify tree over these.
-    expect(watched.map((entry) => entry.directory)).not.toContain('/workspace/node_modules');
-    expect(watched.map((entry) => entry.directory)).not.toContain('/workspace/.git');
+    expect(watched.map((entry) => entry.directory)).not.toContain(
+      path.join('/workspace', 'node_modules')
+    );
+    expect(watched.map((entry) => entry.directory)).not.toContain(path.join('/workspace', '.git'));
     worker.close();
   });
 
@@ -155,12 +158,12 @@ describe('workspace watch worker core', () => {
       revision: 1,
       roots: ['/workspace'],
     });
-    expect(watched).toEqual(['/workspace', '/workspace/apps']);
+    expect(watched).toEqual(['/workspace', path.join('/workspace', 'apps')]);
 
     // A nested path cannot change the top-level set, so no re-plan.
     rootCallbacks[0]?.('change', 'apps/web/src/main.ts');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(watched).toEqual(['/workspace', '/workspace/apps']);
+    expect(watched).toEqual(['/workspace', path.join('/workspace', 'apps')]);
 
     // A new top-level directory must get its own recursive watch.
     entries = [
@@ -172,10 +175,10 @@ describe('workspace watch worker core', () => {
 
     expect(watched).toEqual([
       '/workspace',
-      '/workspace/apps',
+      path.join('/workspace', 'apps'),
       '/workspace',
-      '/workspace/apps',
-      '/workspace/services',
+      path.join('/workspace', 'apps'),
+      path.join('/workspace', 'services'),
     ]);
     worker.close();
   });

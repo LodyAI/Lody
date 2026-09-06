@@ -29,6 +29,10 @@ import type {
   MachineUpgradeResponse,
   MachineAcpCapabilitiesRefreshResponse,
   MachineAcpAuthenticateResponse,
+  MachineAccountProfilesRequest,
+  MachineAccountProfilesResponse,
+  SessionAccountSwitchRequest,
+  SessionAccountSwitchResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpBinaryStatusResponse,
   MachineAcpBinaryInstallResponse,
@@ -251,6 +255,12 @@ export type WorkspaceRuntime = {
       onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
     }
   ) => Promise<MachineAcpCapabilitiesRefreshResponse | null>;
+  requestAccountProfiles: (
+    request: MachineAccountProfilesRequest
+  ) => Promise<MachineAccountProfilesResponse | null>;
+  requestSessionAccountSwitch: (
+    request: SessionAccountSwitchRequest
+  ) => Promise<SessionAccountSwitchResponse | null>;
   waitForMachineAcpAuthenticateResponse: (
     machineId: MachineId,
     requestId: string,

@@ -320,6 +320,7 @@ export type LoroRepoPersistReason =
   | 'remote-meta-sync'
   | 'remote-flock-sync'
   | 'session-local-base-ref'
+  | 'session-account-handoff'
   /** One flush standing in for several remote sync events; see `scheduleRemoteSyncPersist`. */
   | 'remote-sync-coalesced'
   | 'session-fork-prepare'
@@ -2111,7 +2112,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       session: state.session,
       history,
       mq: state.mq as SessionDocMeta['mq'],
-      forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
+      forkOperation: this.getForkOperation()
+        ? (state.forkOperation as SessionDocMeta['forkOperation'])
+        : undefined,
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
@@ -2183,8 +2186,10 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
         // @ts-expect-error mutable Mirror draft
         prev.forkOperation = operation;
       } else {
-        // @ts-expect-error mutable Mirror draft
-        delete prev.forkOperation;
+        // Loro root containers cannot be deleted. Empty the map instead;
+        // getForkOperation normalizes its missing required fields to undefined.
+        // @ts-expect-error mutable Mirror draft permits an empty root map
+        prev.forkOperation = {};
       }
       return prev;
     });

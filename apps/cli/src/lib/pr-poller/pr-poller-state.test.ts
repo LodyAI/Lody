@@ -162,6 +162,8 @@ describe('PrPollerStateStore', () => {
     expect(store.load()).toEqual(emptyPrPollerState());
     store.upsertTarget('t1', { lastSuccessAtMs: 1 });
     expect(store.load().targets['t1']).toEqual({ lastSuccessAtMs: 1 });
+    store.close();
+    expect(makeStore().load().targets['t1']).toEqual({ lastSuccessAtMs: 1 });
   });
 
   it('close() is idempotent and the store reopens lazily afterwards', () => {

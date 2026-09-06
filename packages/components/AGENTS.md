@@ -110,3 +110,13 @@ mobile surfaces. Background for the rules below:
 - Sessions, mobile, chat, mentions, tasks, onboarding, settings, and Codex reset
   forecast each own an `AGENTS.md` under `src/components/`. Commands and shortcuts:
   [src/lib/commands/AGENTS.md](src/lib/commands/AGENTS.md).
+
+## Provider account profiles
+
+Codex/Claude account UI and requests require the account-profiles capability and
+a runtime-confirmed local Electron IPC route. Remote Machine RPC cannot authenticate
+requesters; never fall back to it. System Default uses native CLI auth; preserve
+legacy login. UI never writes credentials or changes bindings optimistically.
+Additional-account quota must match the durable account id, never machine-wide
+System Default quota. Hidden surfaces must not load status. Active surfaces share
+status requests and invalidate cached status after account creation or login.

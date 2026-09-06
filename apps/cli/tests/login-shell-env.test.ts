@@ -31,6 +31,7 @@ describe('login-shell-env opt-out', () => {
 
 describe('login-shell-env slow-probe recovery', () => {
   beforeEach(() => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
     delete process.env.LODY_DISABLE_SHELL_ENV;
     resetLoginShellEnvCache();
     vi.mocked(shellEnv).mockReset();
@@ -38,7 +39,15 @@ describe('login-shell-env slow-probe recovery', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     resetLoginShellEnvCache();
+  });
+
+  it('skips the shell probe on Windows', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    expect(getCachedLoginShellEnvSync()).toEqual({});
+    await expect(getLoginShellEnv()).resolves.toEqual({});
+    expect(shellEnv).not.toHaveBeenCalled();
   });
 
   it('serves the real env to later awaiters once a slow probe lands after the timeout', async () => {

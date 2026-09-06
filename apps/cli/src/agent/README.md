@@ -40,6 +40,17 @@ context/message-flow.md "Upstream".
 
 ## Background
 
+### Account isolation
+
+`account-profiles.ts` resolves local ids after env merge; missing ids keep native System
+Default. Codex/Claude auth/status/title share each isolated profile home; never copy
+credentials or fall back on missing ids. Strip inherited Claude credential-store/auth
+overrides only for managed profiles.
+
+Managed Claude also checks resolved project/local/policy settings before provider operations.
+Native login/status preflight runs in an isolated child with the selected profile as cwd.
+Fail closed on auth overrides or uninspectable policy helpers without logging settings values.
+
 ### ACP start concurrency
 
 Unbounded concurrent Codex starts each spawn a lody.exe adapter, a Codex app-server, and a

@@ -1,3 +1,15 @@
+import {
+  getSessionAccountBinding,
+  clearSessionAccountBinding,
+  beginSessionAccountEdit,
+  commitSessionAccountEdit,
+  rollbackSessionAccountEdit,
+  abandonSessionAccountEdit,
+  createSessionAccountForkBinding,
+  clearSessionAccountBindingForOperation,
+  getSessionAccountForkBindingState,
+  resolveSessionAccountMeta,
+} from './session-account-binding-store';
 import { describe, expect, it, vi } from 'vitest';
 import {
   getSessionRoomId,
@@ -19,6 +31,11 @@ const sourceSessionId = 'source-session' as SessionId;
 const targetSessionId = 'target-session' as SessionId;
 const machineId = 'machine-1' as MachineId;
 const agentConfigId = 'agent-config-1' as AgentConfigId;
+
+function requireRecorded<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected the mock to have recorded this call');
+  return value;
+}
 
 const sourceHistory: SessionHistoryInput[] = [
   {
@@ -182,7 +199,7 @@ function createForkHarness(
     resolveLocalProjectRootPath: vi.fn(async () => '/source/project-root'),
     cleanupForkWorktree: vi.fn(async () => undefined),
   };
-  const logger = { error: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn() };
   const service = new SessionForkService({
     workspaceDocument: workspaceDocument as never,
     sessionManager: sessionManager as never,
@@ -373,6 +390,87 @@ describe('cloneHistoryThroughTurn', () => {
 });
 
 describe('SessionForkService durability boundary', () => {
+  it('records a recovery marker before binding creation and uses a new operation id for each attempt', async () => {
+    const first = createForkHarness();
+    const second = createForkHarness();
+    vi.mocked(createSessionAccountForkBinding).mockClear();
+    expect((await first.service.fork(forkSpec)).success).toBe(true);
+    const marker = requireRecorded(first.forkOperationStore.record.mock.calls[0])[0];
+    expect(marker.kind).toBe('same-worktree');
+    expect(first.forkOperationStore.record.mock.invocationCallOrder[0]).toBeLessThan(
+      requireRecorded(vi.mocked(createSessionAccountForkBinding).mock.invocationCallOrder[0])
+    );
+    expect((await second.service.fork(forkSpec)).success).toBe(true);
+    const next = requireRecorded(second.forkOperationStore.record.mock.calls[0])[0];
+    expect(next.operationId).not.toBe(marker.operationId);
+  });
+
+  it('preserves an unresolved same-target marker belonging to another workspace', async () => {
+    const foreign = {
+      kind: 'same-worktree' as const,
+      version: 1 as const,
+      workspaceId: 'foreign-workspace',
+      machineId,
+      targetSessionId,
+      operationId: 'foreign-operation',
+      createdAt: '2026-09-07T00:00:00.000Z',
+      title: 'Foreign fork',
+      accountProfileId: 'system-default',
+    };
+    const harness = createForkHarness(undefined, { markers: [foreign] });
+    vi.mocked(createSessionAccountForkBinding).mockClear();
+    expect((await harness.service.fork(forkSpec)).success).toBe(false);
+    expect(harness.markers).toEqual([foreign]);
+    expect(harness.forkOperationStore.record).not.toHaveBeenCalled();
+    expect(harness.repo.deleteDoc).not.toHaveBeenCalled();
+    expect(createSessionAccountForkBinding).not.toHaveBeenCalled();
+  });
+
+  it.each(['committed', 'pending'] as const)(
+    'preserves nonempty same-worktree history without an origin notice for %s binding',
+    async (bindingState) => {
+      const marker = {
+        kind: 'same-worktree' as const,
+        version: 1 as const,
+        workspaceId: 'workspace-1',
+        machineId,
+        targetSessionId,
+        operationId: 'fork-owner',
+        createdAt: '2026-09-07T00:00:00.000Z',
+        title: 'Fork',
+        accountProfileId: 'system-default',
+      };
+      const harness = createForkHarness(undefined, {
+        markers: [marker],
+        aliveRoomIds: [getSessionRoomId(targetSessionId)],
+        targetHistory: sourceHistory,
+        targetMeta: { acpSessionId: 'acp-target' } as SessionMeta,
+      });
+      vi.mocked(getSessionAccountForkBindingState).mockResolvedValueOnce(bindingState);
+      if (bindingState === 'pending') {
+        vi.mocked(resolveSessionAccountMeta).mockRejectedValueOnce(
+          new Error('Session account edit recovery cannot match the durable history checkpoint.')
+        );
+      }
+      await harness.service.recoverPendingForks();
+      expect(harness.repo.deleteDoc).not.toHaveBeenCalled();
+      expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
+      expect(harness.persistPendingChanges).not.toHaveBeenCalled();
+      expect(harness.markers).toEqual(bindingState === 'committed' ? [] : [marker]);
+      if (bindingState === 'committed') {
+        expect(harness.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it('does not create a binding or target when the recovery marker cannot be recorded', async () => {
+    const harness = createForkHarness(undefined, { storeRecordFails: true });
+    vi.mocked(createSessionAccountForkBinding).mockClear();
+    expect((await harness.service.fork(forkSpec)).success).toBe(false);
+    expect(createSessionAccountForkBinding).not.toHaveBeenCalled();
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.sessionManager.createSession).not.toHaveBeenCalled();
+  });
   it('commits after local persistence without requiring a cloud sync acknowledgement', async () => {
     const harness = createForkHarness();
 
@@ -402,6 +500,12 @@ describe('SessionForkService durability boundary', () => {
       expect.objectContaining({
         parentSessionId: sourceSessionId,
         childSessionPlacement: 'side-panel',
+      })
+    );
+    expect(beginSessionAccountEdit).toHaveBeenCalledWith(
+      { workspaceId: 'workspace-1', machineId: 'machine-1', sessionId: targetSessionId },
+      expect.objectContaining({
+        targetMeta: { acpSessionId: 'acp-target', status: { type: 'idle' } },
       })
     );
     expect(harness.sessionManager.createSession).toHaveBeenCalledWith(
@@ -511,6 +615,118 @@ describe('SessionForkService durability boundary', () => {
     expect(harness.repo.deleteDoc).toHaveBeenCalledTimes(1);
     expect(harness.persistPendingChanges).toHaveBeenLastCalledWith('session-fork-rollback');
   });
+
+  it('journals the placeholder and clone before writes and promotes only after durable commit', async () => {
+    const harness = createForkHarness();
+    vi.mocked(beginSessionAccountEdit).mockClear();
+    vi.mocked(commitSessionAccountEdit).mockClear();
+    const result = await harness.service.fork(forkSpec);
+    expect(result.success).toBe(true);
+    expect(beginSessionAccountEdit).toHaveBeenCalledWith(
+      { workspaceId: 'workspace-1', machineId, sessionId: targetSessionId },
+      expect.objectContaining({
+        operationId: expect.stringContaining(`session-fork:${targetSessionId}:`),
+        sourceMeta: expect.objectContaining({ accountProfileId: 'system-default' }),
+        sourceHistory: [],
+        targetMeta: { acpSessionId: 'acp-target', status: { type: 'idle' } },
+        targetHistory: expect.arrayContaining([expect.objectContaining({ id: 'user-1' })]),
+      })
+    );
+    const edit = requireRecorded(vi.mocked(beginSessionAccountEdit).mock.calls[0])[1];
+    expect(edit.sourceMeta.acpSessionId).toBeUndefined();
+    expect(vi.mocked(beginSessionAccountEdit).mock.invocationCallOrder[0]).toBeLessThan(
+      requireRecorded(harness.repo.upsertDocMeta.mock.invocationCallOrder[1])
+    );
+    expect(vi.mocked(beginSessionAccountEdit).mock.invocationCallOrder[0]).toBeLessThan(
+      requireRecorded(harness.targetDoc.updateHistory.mock.invocationCallOrder[0])
+    );
+    expect(vi.mocked(commitSessionAccountEdit).mock.invocationCallOrder[0]).toBeGreaterThan(
+      requireRecorded(harness.persistPendingChanges.mock.invocationCallOrder[1])
+    );
+  });
+
+  it('rolls back the journal only after failed-fork deletion is durable', async () => {
+    const harness = createForkHarness('session-fork-commit');
+    vi.mocked(clearSessionAccountBindingForOperation).mockClear();
+    vi.mocked(clearSessionAccountBinding).mockClear();
+    expect((await harness.service.fork(forkSpec)).success).toBe(false);
+    const rollbackOrder = requireRecorded(
+      vi.mocked(clearSessionAccountBindingForOperation).mock.invocationCallOrder[0]
+    );
+    expect(rollbackOrder).toBeGreaterThan(
+      requireRecorded(harness.repo.deleteDoc.mock.invocationCallOrder[0])
+    );
+    expect(rollbackOrder).toBeGreaterThan(
+      requireRecorded(harness.persistPendingChanges.mock.invocationCallOrder[2])
+    );
+    expect(clearSessionAccountBinding).not.toHaveBeenCalled();
+  });
+
+  it.each(['delete', 'persist'] as const)(
+    'retains the journal when rollback %s fails',
+    async (failure) => {
+      const harness = createForkHarness('session-fork-commit');
+      vi.mocked(rollbackSessionAccountEdit).mockClear();
+      vi.mocked(clearSessionAccountBindingForOperation).mockClear();
+      vi.mocked(clearSessionAccountBinding).mockClear();
+      vi.mocked(abandonSessionAccountEdit).mockClear();
+      if (failure === 'delete')
+        harness.repo.deleteDoc.mockRejectedValueOnce(new Error('delete failed'));
+      else
+        harness.persistPendingChanges.mockImplementation(async (reason) => {
+          if (reason !== 'session-fork-prepare') throw new Error('persist failed');
+        });
+      expect((await harness.service.fork(forkSpec)).success).toBe(false);
+      expect(rollbackSessionAccountEdit).not.toHaveBeenCalled();
+      expect(clearSessionAccountBinding).not.toHaveBeenCalled();
+      expect(clearSessionAccountBindingForOperation).not.toHaveBeenCalled();
+      expect(abandonSessionAccountEdit).toHaveBeenCalledWith(
+        { workspaceId: 'workspace-1', machineId, sessionId: targetSessionId },
+        expect.stringContaining(`session-fork:${targetSessionId}:`)
+      );
+    }
+  );
+
+  it('durably removes the failed fork before clearing a journal whose promotion failed', async () => {
+    const harness = createForkHarness();
+    vi.mocked(commitSessionAccountEdit).mockRejectedValueOnce(
+      new Error('binding promotion failed')
+    );
+    vi.mocked(clearSessionAccountBindingForOperation).mockClear();
+    expect((await harness.service.fork(forkSpec)).success).toBe(false);
+    expect(harness.sessionManager.terminateSession).toHaveBeenCalledWith(targetSessionId, true);
+    expect(
+      vi.mocked(clearSessionAccountBindingForOperation).mock.invocationCallOrder[0]
+    ).toBeGreaterThan(requireRecorded(harness.persistPendingChanges.mock.invocationCallOrder[2]));
+  });
+
+  it.each([false, true])(
+    'does not mutate target history if journal staging rejects (persisted=%s)',
+    async (journalPersisted) => {
+      const harness = createForkHarness();
+      vi.mocked(beginSessionAccountEdit).mockRejectedValueOnce(new Error('journal staging failed'));
+      vi.mocked(commitSessionAccountEdit).mockClear();
+      vi.mocked(rollbackSessionAccountEdit).mockClear();
+      vi.mocked(clearSessionAccountBinding).mockClear();
+      vi.mocked(clearSessionAccountBindingForOperation).mockClear();
+      if (journalPersisted)
+        vi.mocked(clearSessionAccountBindingForOperation).mockRejectedValueOnce(
+          new Error('recovery is required')
+        );
+      const result = await harness.service.fork(forkSpec);
+      expect(result).toMatchObject({ success: false, error: { code: 'TARGET_WRITE_FAILED' } });
+      expect(harness.targetDoc.updateHistory).not.toHaveBeenCalled();
+      expect(harness.repo.upsertDocMeta).toHaveBeenCalledTimes(1);
+      expect(commitSessionAccountEdit).not.toHaveBeenCalled();
+      expect(rollbackSessionAccountEdit).not.toHaveBeenCalled();
+      expect(harness.sessionManager.terminateSession).toHaveBeenCalledWith(targetSessionId, true);
+      expect(harness.repo.deleteDoc).toHaveBeenCalledOnce();
+      expect(harness.persistPendingChanges).toHaveBeenLastCalledWith('session-fork-rollback');
+      expect(
+        vi.mocked(clearSessionAccountBindingForOperation).mock.invocationCallOrder[0]
+      ).toBeGreaterThan(requireRecorded(harness.persistPendingChanges.mock.invocationCallOrder[1]));
+    }
+  );
 
   it('requires confirmation for a dirty source without reserving the target', async () => {
     const harness = createForkHarness(undefined, {
@@ -773,7 +989,7 @@ describe('SessionForkService fork operation recovery', () => {
     expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
     expect(harness.targetDoc.setForkOperation).not.toHaveBeenCalled();
     expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
-    expect(harness.persistPendingChanges).not.toHaveBeenCalled();
+    expect(harness.persistPendingChanges).toHaveBeenCalledWith('session-fork-commit');
     expect(harness.markers).toEqual([]);
   });
 
@@ -824,6 +1040,26 @@ describe('SessionForkService fork operation recovery', () => {
     expect(harness.targetDoc.setForkOperation).toHaveBeenLastCalledWith(undefined);
     expect(harness.persistPendingChanges).toHaveBeenCalledWith('session-fork-commit');
     expect(harness.markers).toEqual([]);
+  });
+
+  it('retains the operation and marker when the local account binding cannot be resolved', async () => {
+    const harness = createForkHarness(undefined, {
+      forkOperation: preparingOperation,
+      targetHistory: [forkOriginNotice],
+      markers: [staleMarker],
+      aliveRoomIds: [getSessionRoomId(targetSessionId)],
+    });
+    vi.mocked(resolveSessionAccountMeta).mockRejectedValueOnce(
+      new Error('Session account edit recovery is required before continuing.')
+    );
+
+    await harness.service.recoverPendingForks();
+
+    expect(harness.targetDoc.getForkOperation()).toEqual(preparingOperation);
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
+    expect(harness.persistPendingChanges).not.toHaveBeenCalled();
+    expect(harness.markers).toEqual([staleMarker]);
   });
 
   it('republishes meta even when the flag clear did land but meta did not', async () => {
@@ -879,6 +1115,25 @@ describe('SessionForkService fork operation recovery', () => {
 
     expect(harness.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
     expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
+    expect(harness.markers).toEqual([]);
+  });
+
+  it('retains a missing-room marker until its orphaned account binding can be removed', async () => {
+    const harness = createForkHarness(undefined, {
+      markers: [staleMarker],
+      aliveRoomIds: [],
+    });
+    vi.mocked(clearSessionAccountBinding).mockRejectedValueOnce(new Error('disk unavailable'));
+    await harness.service.recoverPendingForks();
+    expect(harness.markers).toEqual([staleMarker]);
+    expect(harness.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+
+    await harness.service.recoverPendingForks();
+    expect(clearSessionAccountBinding).toHaveBeenLastCalledWith({
+      workspaceId: 'workspace-1',
+      machineId,
+      sessionId: targetSessionId,
+    });
     expect(harness.markers).toEqual([]);
   });
 
@@ -966,4 +1221,31 @@ describe('SessionForkService fork operation recovery', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+});
+
+// Fixtures model trusted local bindings; filesystem authority has separate regression coverage.
+vi.mock('./session-account-binding-store', () => ({
+  resolveSessionAccountMeta: vi.fn(async (_scope: unknown, meta: SessionMeta) => meta),
+  getSessionAccountBinding: vi.fn(async () => null),
+  setSessionAccountBinding: vi.fn(async () => {}),
+  updateSessionAccountNativeId: vi.fn(async () => {}),
+  beginSessionAccountEdit: vi.fn(async () => {}),
+  commitSessionAccountEdit: vi.fn(async () => {}),
+  rollbackSessionAccountEdit: vi.fn(async () => {}),
+  abandonSessionAccountEdit: vi.fn(),
+  createSessionAccountForkBinding: vi.fn(async () => {}),
+  assertSessionAccountForkBindingOwned: vi.fn(async () => true),
+  getSessionAccountForkBindingState: vi.fn(async () => 'preparing'),
+  clearSessionAccountBindingForOperation: vi.fn(async () => {}),
+  clearSessionAccountBinding: vi.fn(async () => {}),
+}));
+
+it('does not overwrite or clear an existing target local account binding', async () => {
+  const harness = createForkHarness();
+  vi.mocked(getSessionAccountBinding).mockResolvedValueOnce({ accountProfileId: 'system-default' });
+  vi.mocked(clearSessionAccountBinding).mockClear();
+  const result = await harness.service.fork(forkSpec);
+  expect(result.success).toBe(false);
+  expect(harness.sessionManager.createSession).not.toHaveBeenCalled();
+  expect(clearSessionAccountBinding).not.toHaveBeenCalled();
 });

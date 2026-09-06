@@ -252,11 +252,15 @@ describe('lody MCP server internals', () => {
   });
 
   it('resolves relative image paths against the MCP workdir and passes absolute paths through', () => {
-    expect(resolveUploadPath('screenshots/home.png', '/repo/worktree')).toBe(
-      '/repo/worktree/screenshots/home.png'
+    const workdir = path.resolve('/repo/worktree');
+    const absolutePath = path.resolve('/tmp/home.png');
+    expect(resolveUploadPath('screenshots/home.png', workdir)).toBe(
+      path.join(workdir, 'screenshots/home.png')
     );
-    expect(resolveUploadPath('/tmp/home.png', '/repo/worktree')).toBe('/tmp/home.png');
-    expect(resolveUploadPath('../outside.png', '/repo/worktree')).toBe('/repo/outside.png');
+    expect(resolveUploadPath(absolutePath, workdir)).toBe(absolutePath);
+    expect(resolveUploadPath('../outside.png', workdir)).toBe(
+      path.join(path.dirname(workdir), 'outside.png')
+    );
   });
 
   it('loads session context from env vars', () => {

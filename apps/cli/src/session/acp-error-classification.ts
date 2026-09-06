@@ -124,6 +124,17 @@ export const isAcpSessionNotFoundError = (error: unknown): boolean => {
   return /\bsession not found\b/i.test(getACPDiagnosticText(error, parsed));
 };
 
+/** Account handoffs may discard native resume only after a definitive verdict. */
+export const isAccountHandoffResumeUnavailable = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  if (error.message.startsWith('[ACP_RESUME_UNSUPPORTED]')) return true;
+  if (!error.message.startsWith('[ACP_RESUME_FAILED]')) return false;
+  // AgentClient wraps timeouts, transport failures and protocol rejections with
+  // the same marker. Only the preserved protocol cause can authorize replay.
+  const cause = parseACPError(error.cause);
+  return cause?.code === ACP_ERROR_CODES.METHOD_NOT_FOUND || isAcpSessionNotFoundError(error.cause);
+};
+
 /**
  * Some provider runtimes still wrap expired OAuth credentials in an ACP
  * internal error instead of using ACP's dedicated auth-required code. Keep the

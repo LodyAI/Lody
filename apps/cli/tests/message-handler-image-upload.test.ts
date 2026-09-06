@@ -580,23 +580,77 @@ describe('MessageHandler image upload flow', () => {
     expect(harness.history).toHaveLength(0);
   });
 
-  it('rejects symlinked image paths before upload', async () => {
-    const harness = createHarness();
-    handlers.push(harness.handler);
+  it.each(['validateSessionImageUploadPath', 'validateSessionFileUploadPath'])(
+    '%s rejects symlinked paths before upload',
+    async (method) => {
+      const harness = createHarness();
+      handlers.push(harness.handler);
 
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-image-upload-'));
-    try {
-      const targetPath = path.join(tempDir, 'secret.txt');
-      const linkPath = path.join(tempDir, 'innocent.png');
-      await fs.writeFile(targetPath, 'secret');
-      await fs.symlink(targetPath, linkPath);
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-image-upload-'));
+      try {
+        const targetPath = path.join(tempDir, 'secret.txt');
+        const linkPath = path.join(tempDir, 'innocent.png');
+        await fs.writeFile(targetPath, 'secret');
+        await fs.symlink(targetPath, linkPath);
 
-      const validatePath = harness.host.validateSessionImageUploadPath as (
-        filePath: string
-      ) => Promise<unknown>;
-      await expect(validatePath(linkPath)).rejects.toThrow(/must not be a symlink/);
-    } finally {
-      await fs.rm(tempDir, { recursive: true, force: true });
+        const validatePath = harness.host[method] as (filePath: string) => Promise<unknown>;
+        await expect(validatePath(linkPath)).rejects.toThrow(/must not be a symlink/);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
     }
-  });
+  );
+
+  it.each(['validateSessionImageUploadPath', 'validateSessionFileUploadPath'])(
+    '%s accepts a stable regular file',
+    async (method) => {
+      const harness = createHarness();
+      handlers.push(harness.handler);
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-upload-regular-'));
+      try {
+        const filePath = path.join(tempDir, 'image.png');
+        await fs.writeFile(filePath, 'image bytes');
+        const validatePath = harness.host[method] as (filePath: string) => Promise<unknown>;
+        await expect(validatePath(filePath)).resolves.toMatchObject({
+          absolutePath: filePath,
+          fileName: 'image.png',
+          sizeBytes: 11,
+        });
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it
+    .skipIf(process.platform !== 'win32')
+    .each(['validateSessionImageUploadPath', 'validateSessionFileUploadPath'])(
+    '%s rejects a file replaced while opening and closes its handle',
+    async (method) => {
+      const harness = createHarness();
+      handlers.push(harness.handler);
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-upload-swap-'));
+      const originalOpen = fs.open.bind(fs);
+      let close: ReturnType<typeof vi.spyOn> | undefined;
+      const filePath = path.join(tempDir, 'image.png');
+      await fs.writeFile(filePath, 'original');
+      const open = vi.spyOn(fs, 'open').mockImplementation(async (target, flags, mode) => {
+        if (target === filePath) {
+          await fs.rename(filePath, path.join(tempDir, 'original.png'));
+          await fs.writeFile(filePath, 'replacement');
+        }
+        const handle = await originalOpen(target, flags, mode);
+        if (target === filePath) close = vi.spyOn(handle, 'close');
+        return handle;
+      });
+      try {
+        const validatePath = harness.host[method] as (filePath: string) => Promise<unknown>;
+        await expect(validatePath(filePath)).rejects.toThrow();
+        expect(close).toHaveBeenCalledOnce();
+      } finally {
+        open.mockRestore();
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    }
+  );
 });
