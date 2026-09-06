@@ -819,9 +819,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   ) : null}
                   <div className="flex min-w-0 items-center gap-1.5">
                     <SessionRowLeadingSlot
-                      isWaitingPermission={task.isWaitingPermission}
-                      isWorking={task.isWorking}
-                      hasUnreadMessages={task.hasUnreadMessages}
                       showMenuButton={hasMenuActions}
                       menuLabel={moreActionsLabel}
                     />
@@ -852,6 +849,9 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     </div>
                     {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
                     <SidebarRowEndSlot
+                      isWaitingPermission={task.isWaitingPermission}
+                      isWorking={task.isWorking}
+                      hasUnreadMessages={task.hasUnreadMessages}
                       restIcon={
                         isChatTask ? (
                           <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
