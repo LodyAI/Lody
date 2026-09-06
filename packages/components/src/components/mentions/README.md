@@ -7,8 +7,13 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 ## Files
 
 - `combined-mention-textarea.tsx` combines sources, hydrators, triggers, and
-  `MentionInput` for chat composer usage, and exposes `mentionActionsRef`
-  (`insertSessionMention`) for drop-time insertion.
+  the native input for chat composer usage. Its `mentionActionsRef` exposes
+  `insertSessionMention` for drops and `insertBrowserPageReference` for browser
+  toolbar insertion.
+- `url-reference-source.ts` recognizes bounded pasted URL ranges;
+  `url-reference-input.tsx` applies them after native paste/redo commits through
+  `MentionInput`. `inline-reference-actions.tsx` renders open, copy, and removal
+  actions for composer and transcript references.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
 - `mention-two-level-menu.tsx` renders that contract as the single `@` menu and

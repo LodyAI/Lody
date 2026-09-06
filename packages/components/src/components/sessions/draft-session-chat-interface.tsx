@@ -519,6 +519,7 @@ export const DraftSessionChatInterface = memo(
             // workspace context. A selected Role's own first-turn instruction
             // is already included in `promptPayload` above.
             inputConfig: buildSessionTurnInputConfig({
+              machine: sessionMachine,
               inputBlocks,
               prompt: promptPayload,
               cliType: draft.cliType,
@@ -554,6 +555,7 @@ export const DraftSessionChatInterface = memo(
           knownIssuePrItems,
           mcpSelection.selectedIds,
           parentRepoFullName,
+          sessionMachine,
           selectedModeId,
           selectedModelId,
           tasksFeatureEnabled,

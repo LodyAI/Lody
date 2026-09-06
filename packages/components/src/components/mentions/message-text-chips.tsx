@@ -1,7 +1,14 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { sanitizeMessageTextSpans, type MessageTextSpan } from '@lody/shared';
+import {
+  sanitizeMessageTextSpans,
+  isInlineReferenceKind,
+  getInlineReferenceUrl,
+  type MessageTextSpan,
+} from '@lody/shared';
+import { Popover, PopoverTrigger } from '@/ui/popover';
+import { InlineReferenceActions } from './inline-reference-actions';
 import { cn } from '@/lib/utils';
 import {
   getMentionKindIcon,
@@ -113,6 +120,7 @@ function MessageTextChip({
   /** Only pasted text has an action: it expands in place. */
   onToggle?: () => void;
 }) {
+  const [referenceOpen, setReferenceOpen] = React.useState(false);
   const isBoxed = Boolean(onToggle);
   const className = cn(
     isBoxed ? CHIP_BUTTON_CLASS_NAME : CHIP_CLASS_NAME,
@@ -158,6 +166,36 @@ function MessageTextChip({
     </>
   );
 
+  if (
+    isInlineReferenceKind(span.kind) &&
+    span.target &&
+    getInlineReferenceUrl(span.kind, span.target)
+  ) {
+    return (
+      <Popover open={referenceOpen} onOpenChange={setReferenceOpen}>
+        <PopoverTrigger asChild>
+          <span
+            role="button"
+            tabIndex={0}
+            className={cn(className, 'cursor-pointer hover:underline focus-visible:underline')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setReferenceOpen(true);
+              }
+            }}
+          >
+            {content}
+          </span>
+        </PopoverTrigger>
+        <InlineReferenceActions
+          kind={span.kind}
+          target={span.target}
+          onClose={() => setReferenceOpen(false)}
+        />
+      </Popover>
+    );
+  }
   return onToggle ? (
     <button type="button" className={className} onClick={onToggle}>
       {content}

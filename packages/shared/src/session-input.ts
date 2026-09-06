@@ -1,3 +1,8 @@
+import { isInlineReferenceKind } from './inline-references';
+import {
+  machineSupportsInlineReferencesProtocol,
+  type MachineProtocolCapabilityCarrier,
+} from './machine-protocol-capabilities';
 import type {
   ACPSessionConfig,
   AcpConfigOptionValue,
@@ -620,6 +625,7 @@ export const historyItemsToInputBlocks = (
 };
 
 export const buildSessionTurnInputConfig = (args: {
+  machine?: MachineProtocolCapabilityCarrier | null;
   inputBlocks: readonly SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: string;
@@ -634,7 +640,16 @@ export const buildSessionTurnInputConfig = (args: {
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
 }): ACPSessionConfig => {
-  const normalizedInputBlocks = normalizeSessionInputBlocks(args.inputBlocks, '');
+  // Downgrade metadata before normalization: an older daemon rejects unknown
+  // span kinds and would otherwise discard the entire mixed attachment input.
+  const compatibleInputBlocks = machineSupportsInlineReferencesProtocol(args.machine)
+    ? args.inputBlocks
+    : args.inputBlocks.map((block) => {
+        if (block.type !== 'text' || !block.spans) return block;
+        const spans = block.spans.filter((span) => !isInlineReferenceKind(span.kind));
+        return { ...block, spans: spans.length > 0 ? spans : undefined };
+      });
+  const normalizedInputBlocks = normalizeSessionInputBlocks(compatibleInputBlocks, '');
 
   return {
     prompt: args.prompt ?? extractPromptPreviewFromInputBlocks(normalizedInputBlocks),

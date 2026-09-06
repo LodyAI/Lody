@@ -3859,5 +3859,14 @@
   "sessions.fileActions.fileMissing": "That file no longer exists.",
   "sessions.fileActions.openFailed": "Could not open that file.",
   "sessions.fileActions.more": "File actions",
-  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it."
+  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it.",
+  "mention.category.browser.label": "Browser",
+  "mention.reference.actionFailed": "Could not complete this action",
+  "mention.reference.unavailable": "Reference unavailable",
+  "mention.reference.openPage": "Open browser page",
+  "mention.reference.openUrl": "Open link",
+  "mention.reference.copyUrl": "Copy URL",
+  "mention.reference.remove": "Remove reference",
+  "sessions.browser.referenceInChat": "Reference in chat",
+  "sessions.browser.referenceUnavailable": "This browser reference is unavailable."
 }

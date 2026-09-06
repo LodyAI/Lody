@@ -38,6 +38,7 @@ type SessionBrowserToolbarProps = {
   onReload: () => void;
   onStop: () => void;
   onToggleAnnotation: () => void;
+  onReferencePage?: () => void;
   onShare: () => void;
   onStopSharing: () => void;
 };
@@ -89,6 +90,7 @@ export function SessionBrowserToolbar({
   onReload,
   onStop,
   onToggleAnnotation,
+  onReferencePage,
   onShare,
   onStopSharing,
 }: SessionBrowserToolbarProps) {
@@ -135,6 +137,15 @@ export function SessionBrowserToolbar({
           {loading ? <X className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
         </ToolbarButton>
 
+        {onReferencePage && (
+          <ToolbarButton
+            label={t('sessions.browser.referenceInChat', 'Reference in chat')}
+            onClick={onReferencePage}
+            disabled={busy}
+          >
+            <MessageCircle className="h-4 w-4" />
+          </ToolbarButton>
+        )}
         <form className="min-w-0 flex-1 px-1" onSubmit={submit}>
           <div className="flex h-8 min-w-0 items-center rounded-md border border-input-border bg-input-field transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
             <input

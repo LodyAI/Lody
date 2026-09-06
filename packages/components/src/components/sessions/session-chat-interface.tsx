@@ -1,3 +1,5 @@
+import { buildQueuedInputConfig } from './message-queue/queued-input-config';
+import type { BrowserPageReference } from '@lody/shared';
 import {
   startTransition,
   forwardRef,
@@ -65,7 +67,6 @@ import { toast } from 'sonner';
 import type {
   LocalProjectId,
   MessageContent,
-  MessageQueueItemInput,
   MessageQueueItem,
   ProjectRef,
   SessionHistory,
@@ -1723,6 +1724,7 @@ export function SessionSearchBar({
 }
 
 interface SessionChatInterfaceProps {
+  browserPageReference?: BrowserPageReference;
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
@@ -1843,6 +1845,7 @@ export type SessionChatInterfaceHandle = {
   copyConversationHistory: () => Promise<void>;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
+  insertBrowserPageReference: (reference: BrowserPageReference) => boolean;
   insertSessionMention: (sessionId: string) => boolean;
 };
 
@@ -1947,6 +1950,7 @@ export const SessionChatInterface = memo(
       forkWorktreeAvailability = 'hidden',
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
+      browserPageReference,
       onNavigateSession,
       onConversationPrepared,
       onConversationPrepareError,
@@ -3558,6 +3562,7 @@ export const SessionChatInterface = memo(
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
           const inputConfig = buildSessionTurnInputConfig({
+            machine: sessionMachine,
             inputBlocks,
             cliType: session.cliType,
             agentType: session.agentType,
@@ -3671,6 +3676,7 @@ export const SessionChatInterface = memo(
         session.id,
         session.machineId,
         session.userId,
+        sessionMachine,
         trackMessageSend,
         touchSessionActivity,
         updateHistoryEntry,
@@ -3699,6 +3705,7 @@ export const SessionChatInterface = memo(
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
             : undefined;
           const inputConfig = buildSessionTurnInputConfig({
+            machine: sessionMachine,
             inputBlocks,
             cliType: session.cliType,
             agentType: session.agentType,
@@ -3713,22 +3720,7 @@ export const SessionChatInterface = memo(
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
             resume: session.acpSessionId ?? undefined,
           });
-          const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
-            prompt: inputConfig.prompt,
-            inputBlocks,
-            cliType: inputConfig.cliType,
-            agentType: inputConfig.agentType,
-            modeId: inputConfig.modeId ?? undefined,
-            modelId: inputConfig.modelId ?? undefined,
-            configOptionValues: inputConfig.configOptionValues ?? undefined,
-            issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...mcpSelection.selectedIds],
-            taskToolsEnabled: inputConfig.taskToolsEnabled,
-            agentRoleId: inputConfig.agentRoleId,
-            agentRoleRevision: inputConfig.agentRoleRevision,
-            resume: inputConfig.resume ?? undefined,
-            chainDepth: 0,
-          };
+          const queuedInputConfig = buildQueuedInputConfig(inputConfig);
 
           if (!guardNewBillableTurn()) {
             return false;
@@ -3770,6 +3762,7 @@ export const SessionChatInterface = memo(
         session.agentType,
         session.cliType,
         session.userId,
+        sessionMachine,
         sessionProject,
         t,
         tasksEnabled,
@@ -4768,6 +4761,8 @@ export const SessionChatInterface = memo(
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
+        insertBrowserPageReference: (reference) =>
+          inputAreaRef.current?.insertBrowserPageReference(reference) ?? false,
         copyConversationHistory: handleCopyConversationHistory,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
@@ -5991,6 +5986,7 @@ export const SessionChatInterface = memo(
                       the bottom surface; chat queue is bypassed for the same reason. */}
                   {shouldReplaceComposerWithPermission ? null : (
                     <SessionChatInputArea
+                      browserPageReference={browserPageReference}
                       claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
                       ref={inputAreaRef}
                       session={session}

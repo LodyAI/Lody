@@ -3859,5 +3859,14 @@
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.openFailed": "无法打开该文件。",
   "sessions.fileActions.more": "文件操作",
-  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。"
+  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。",
+  "mention.category.browser.label": "浏览器",
+  "mention.reference.actionFailed": "无法完成此操作",
+  "mention.reference.unavailable": "引用不可用",
+  "mention.reference.openPage": "打开浏览器页面",
+  "mention.reference.openUrl": "打开链接",
+  "mention.reference.copyUrl": "复制网址",
+  "mention.reference.remove": "移除引用",
+  "sessions.browser.referenceInChat": "在聊天中引用",
+  "sessions.browser.referenceUnavailable": "此浏览器引用不可用。"
 }

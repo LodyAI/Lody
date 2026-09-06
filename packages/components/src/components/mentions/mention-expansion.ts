@@ -5,6 +5,9 @@ import {
   type MessageTextSpan,
   type MessageTextSpanKind,
   type TextRewrite,
+  parseBrowserPageReference,
+  getInlineReferenceUrl,
+  isInlineReferenceKind,
 } from '@lody/shared';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import {
@@ -101,10 +104,17 @@ export function buildVerbatimMentionRewrites(
     if (!kind || !VERBATIM_SPAN_KINDS.has(kind)) continue;
     const label = text.slice(mention.start, mention.end);
     if (!label) continue;
+    if (isInlineReferenceKind(kind) && !getInlineReferenceUrl(kind, mention.value)) continue;
+    const displayLabel =
+      kind === 'browser_page'
+        ? parseBrowserPageReference(mention.value)?.title || label
+        : kind === 'github_repo'
+          ? label.replace(/^https?:\/\/github\.com\//i, '').replace(/\/$/, '')
+          : label;
     rewrites.push({
       start: mention.start,
       end: mention.end,
-      span: { kind: kind as MessageTextSpanKind, label, target: mention.value },
+      span: { kind: kind as MessageTextSpanKind, label: displayLabel, target: mention.value },
     });
   }
   return rewrites;

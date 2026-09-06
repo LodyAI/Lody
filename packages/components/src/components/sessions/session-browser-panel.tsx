@@ -1,3 +1,8 @@
+import {
+  encodeBrowserPageReference,
+  parseBrowserPageReference,
+  type BrowserPageReference,
+} from '@lody/shared';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Globe2, Loader2, ShieldAlert } from 'lucide-react';
 import { useAtomValue } from 'jotai';
@@ -54,6 +59,10 @@ import { clearManagedPreviewFrame } from './managed-preview-frame-cache';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 
 type SessionBrowserPanelProps = {
+  onBrowserPageReferenceChange?: (reference: BrowserPageReference | undefined) => void;
+  onReferencePage?: (reference: BrowserPageReference) => void;
+  referenceNavigationRequest?: { id: number; url: string };
+  onReferenceNavigationRequestHandled?: (id: number) => void;
   session: SessionMeta;
   active?: boolean;
   className?: string;
@@ -97,6 +106,10 @@ export function SessionBrowserPanel(props: SessionBrowserPanelProps) {
 }
 
 function SessionBrowserPanelController({
+  onBrowserPageReferenceChange,
+  onReferencePage,
+  referenceNavigationRequest,
+  onReferenceNavigationRequestHandled,
   session,
   active = true,
   className,
@@ -713,12 +726,14 @@ function SessionBrowserPanelController({
       publicState?.canGoBack &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.back(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.back(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack) {
@@ -741,12 +756,14 @@ function SessionBrowserPanelController({
       publicState?.canGoForward &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.forward(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.forward(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward) {
@@ -765,12 +782,14 @@ function SessionBrowserPanelController({
 
   const handleReload = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.reload(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.reload(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (viewerUrl) {
@@ -788,12 +807,14 @@ function SessionBrowserPanelController({
 
   const handleStop = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.stop(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.stop(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && annotationAvailable) {
@@ -953,6 +974,38 @@ function SessionBrowserPanelController({
     [openAddress]
   );
 
+  const browserPageReference = useMemo(() => {
+    if (!currentAddress) return undefined;
+    const encoded = encodeBrowserPageReference({
+      version: 1,
+      machineId: session.machineId,
+      sessionId: session.id,
+      url: currentAddress.logicalUrl,
+      title: currentAddress.engine === 'public-web' ? publicState?.title : undefined,
+    });
+    return encoded ? (parseBrowserPageReference(encoded) ?? undefined) : undefined;
+  }, [currentAddress, publicState?.title, session.id, session.machineId]);
+  useEffect(() => {
+    onBrowserPageReferenceChange?.(active ? browserPageReference : undefined);
+    return () => onBrowserPageReferenceChange?.(undefined);
+  }, [active, browserPageReference, onBrowserPageReferenceChange]);
+  const handledReferenceRequest = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (
+      !referenceNavigationRequest ||
+      handledReferenceRequest.current === referenceNavigationRequest.id
+    )
+      return;
+    handledReferenceRequest.current = referenceNavigationRequest.id;
+    onReferenceNavigationRequestHandled?.(referenceNavigationRequest.id);
+    try {
+      // The reference menu is an explicit user action, like address-bar navigation.
+      // openAddress still owns managed preview approval.
+      void openAddress(parseBrowserAddress(referenceNavigationRequest.url));
+    } catch (navigationError) {
+      setError(errorMessage(navigationError));
+    }
+  }, [referenceNavigationRequest, openAddress, onReferenceNavigationRequestHandled]);
   const loading =
     currentAddress?.engine === 'public-web' ? publicState?.phase === 'loading' : managedLoading;
   const navigationBusy = busy || managedNavigationPhase !== null;
@@ -968,6 +1021,11 @@ function SessionBrowserPanelController({
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
       <SessionBrowserToolbar
+        onReferencePage={
+          browserPageReference && onReferencePage
+            ? () => onReferencePage(browserPageReference)
+            : undefined
+        }
         leadingSlot={leadingSlot}
         focusAddress={active && currentAddress === null}
         address={address}

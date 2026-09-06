@@ -939,3 +939,70 @@ describe('session-input helpers', () => {
     }
   });
 });
+
+describe('inline reference compatibility on dispatch', () => {
+  const text = 'file https://example.com https://github.com/example/repo http://localhost:3000/';
+  const oldSpan = { start: 0, end: 4, kind: 'file' as const, label: 'file', target: 'file' };
+  const inputBlocks = [
+    {
+      type: 'text' as const,
+      text,
+      spans: [
+        oldSpan,
+        {
+          start: 5,
+          end: 24,
+          kind: 'url' as const,
+          label: 'example',
+          target: 'https://example.com',
+        },
+        {
+          start: 25,
+          end: 56,
+          kind: 'github_repo' as const,
+          label: 'repo',
+          target: 'https://github.com/example/repo',
+        },
+        {
+          start: 57,
+          end: text.length,
+          kind: 'browser_page' as const,
+          label: 'page',
+          target: 'http://localhost:3000/',
+        },
+      ],
+    },
+    { type: 'image' as const, imageId: 'synthetic-image', mimeType: 'image/png', sizeBytes: 12 },
+    localFilePayload,
+  ];
+  it.each([undefined, {}, { protocolCapabilities: { inlineReferences: 0 } }])(
+    'preserves prompt, attachments and legacy spans for %j',
+    (machine) => {
+      const config = buildSessionTurnInputConfig({
+        inputBlocks,
+        cliType: 'acp',
+        agentType: 'test',
+        machine,
+        mcpServerIds: [],
+        prompt: 'explicit prompt',
+      });
+      expect(config.inputBlocks).toEqual([
+        { ...inputBlocks[0], spans: [oldSpan] },
+        inputBlocks[1],
+        inputBlocks[2],
+      ]);
+      expect(config.prompt).toBe('explicit prompt');
+      expect(config.mcpServerIds).toEqual([]);
+      expect(inputBlocks[0].spans).toHaveLength(4);
+    }
+  );
+  it('retains metadata for a supporting daemon', () => {
+    const config = buildSessionTurnInputConfig({
+      inputBlocks,
+      cliType: 'acp',
+      agentType: 'test',
+      machine: { protocolCapabilities: { inlineReferences: 1 } },
+    });
+    expect(config.inputBlocks).toEqual(inputBlocks);
+  });
+});

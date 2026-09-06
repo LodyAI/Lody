@@ -14,6 +14,11 @@ import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { findPastedUrlReferences } from '@/components/mentions/url-reference-source';
+import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
+import { buildVerbatimMentionRewrites } from '@/components/mentions/mention-expansion';
+import { applyTextRewrites } from '@lody/shared';
+import type { Mention as MentionRange } from '@/ui/mention/index';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
 registerBuiltInCommands();
@@ -458,4 +463,43 @@ export const LandingWithPastedText: Story = {
       </div>
     </div>
   ),
+};
+
+function InlineReferencesDemo() {
+  const [text, setText] = useState(
+    'Compare https://github.com/LodyAI/Lody with https://example.com/docs?view=full#overview'
+  );
+  const [ranges, setRanges] = useState<MentionRange[]>(() => findPastedUrlReferences(text));
+  const message = applyTextRewrites(text, buildVerbatimMentionRewrites(text, ranges));
+  return (
+    <div className="mx-auto max-w-2xl space-y-8 p-8">
+      <ChatComposer
+        promptValue={text}
+        onPromptChange={setText}
+        selector={null}
+        primaryAction={null}
+        onMentionRangesChange={setRanges}
+        persistedMentions={findPastedUrlReferences(text).map((range) => ({
+          ...range,
+          kind: range.kind ?? 'url',
+        }))}
+        browserPageReference={{
+          version: 1,
+          machineId: 'demo-machine',
+          sessionId: 'demo-session',
+          url: 'https://example.com/docs',
+          title: 'Documentation',
+        }}
+      />
+      <div className="whitespace-pre-wrap text-sm">
+        <MessageTextWithChips text={message.text} spans={message.spans} />
+      </div>
+    </div>
+  );
+}
+
+export const InlineReferences: Story = { render: () => <InlineReferencesDemo /> };
+export const InlineReferencesDark: Story = {
+  render: () => <InlineReferencesDemo />,
+  globals: { theme: 'dark' },
 };
