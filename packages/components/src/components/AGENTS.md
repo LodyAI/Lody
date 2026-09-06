@@ -9,67 +9,42 @@ Files: `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`,
 `sidebar-*.tsx`, `sessions/session-list-rows.ts`, `lib/session-opened-by-tree.ts`.
 Reasoning: [components-sidebar-session-tree.md](../../../../.agents/docs/components-sidebar-session-tree.md).
 
-- Sidebar rows are sessions, not Tasks.
-- EVERY desktop session row is a drag source for a session mention
-  (`lib/session-mention-drag.ts`, dropped on the conversation page or the landing).
-  Session tabs in `session-tab-bar.tsx` are the same gesture: parent tabs HTML5-drag,
-  child session tabs arm the in-flight store from dnd-kit. `startSessionMentionDrag` /
-  `armSessionMentionDrag` light `ConversationDropOverlay` immediately, before
-  `dragenter`. A row whose surface is a navigation `<a>` overlay must put `draggable` on
-  the ROW and `draggable={false}` on that anchor.
-- EVERY desktop row also exposes Mark as unread from that shared ⋯ menu — Workspace,
-  Local Project, Updated, and Pinned renderers must all wire it; hide the action once
-  the row is unread.
-- `SessionMeta.openedBySessionId` (a Session created BY another, e.g. the
-  `lody_session_create` MCP tool) indents that row under its opener via
-  `lib/session-opened-by-tree.ts`. EVERY session list uses it — `session-list.tsx`
-  groups, the local-project sections, and `sidebar-updated-session-list.tsx` (Updated
-  bucket and Pinned section) — plus `sidebar-navigation-model.ts`, so keyboard nav
-  matches what is rendered.
-- It is presentation only and is NOT `parentSessionId`: opened Sessions keep their own
-  workspace/lifecycle and stay first-class rows, while `parentSessionId` children never
-  reach the sidebar at all (`sessionListAtom`).
-- TWO fields, never merged: `openedBySessionId` is the PRECISE opener and drives
-  navigation; `openedByRowSessionId` is the sidebar ROW to indent under. They differ when
-  an agent inside a child Tab creates a Session, so `buildSidebarOpenerRowResolver`
-  (`sessions/session-list-rows.ts`) walks `parentSessionId` up to the root row. Never
-  "simplify" that by rewriting `openedBySessionId` to the root: "Go to Opener Session"
-  and the conversation's "Opened by" entry must land on the exact Tab that created it.
-- The opener and unrelated top-level rows keep the exact flat-list alignment. The shared
-  leading slot owns the node-centre affordance: an opener shows its disclosure at rest
-  and swaps it for ⋯ on row hover; a child shows ├/└ and swaps those for ⋯ in the SAME
-  7px-centred position. It draws the tree UNCONDITIONALLY — a working / unread / waiting
-  row must never lose its nesting, which is the whole point of moving status out of it.
-  Only a child widens that slot from 14px to 26px, producing the 12px title indent
-  without shifting the row background. Keep connector geometry in
-  `sidebar-row-shared.tsx`, and keep the context menu's expand/collapse item wired to the
-  same toggle callback.
-- Desktop row status (working / waiting / unread) belongs to the END slot
-  (`SessionRowStatusIndicator` inside `SidebarRowEndSlot`) and nowhere else. While a
-  status shows it REPLACES that slot's resting content — line diff, `Mergeable`, worktree
-  glyph, PR icon, mobile time — so the right edge is one 14px mark; the metrics stay one
-  hover away in the desktop info card. Pass the three flags to the end slot, never to the
-  leading slot. The mobile chat rows keep their own leading-node rule
-  ([mobile/AGENTS.md](mobile/AGENTS.md)); do not assume the two match.
-- The resolver needs `allActiveSessions`, so any new list must take it from the sidebar
-  rather than re-deriving it from rows.
-- The tree never hides a Session: a missing, cross-section, cross-group, cycling, or
-  deeper-than-one-level opener degrades to a top-level row, and the preview cap
-  (`MAX_VISIBLE_SESSIONS` / `SHOW_FULL_BUCKET_THRESHOLD`) counts top-level rows.
-- Every list here is sorted by latest activity, so each surface passes `rootRank` and an
-  opener is ranked by its FRESHEST opened Session.
-- Collapse state is the shared `sidebarCollapsedOpenedBySessionsAtom` and defaults to
-  EXPANDED. Both navigation directions must stay reachable: the tree and the row context
-  menu's "Go to Opener Session" in every sidebar list,
-  `SessionHeaderMenu.openedByRelations`, and the in-conversation cards for successful
-  create Operations / the opened Session's precise opener. The mobile chat lists render
-  the same tree from the same two fields, per bucket, minus the disclosure — see
+- Sidebar rows are Sessions, not Tasks. Every desktop row supports session-mention
+  drag and Mark as unread through the shared menu (hidden when already unread),
+  including Workspace, Local Project, Updated, and Pinned renderers.
+- Parent tabs use HTML5 drag; child tabs arm the dnd-kit in-flight store.
+  `startSessionMentionDrag` / `armSessionMentionDrag` must light
+  `ConversationDropOverlay` before `dragenter`. Put `draggable` on the row and
+  `draggable={false}` on its navigation anchor.
+- Every session list and `sidebar-navigation-model.ts` uses
+  `lib/session-opened-by-tree.ts`: session-list groups, local-project sections,
+  Updated, and Pinned. Supply `allActiveSessions` from the sidebar, not list rows.
+- Keep `openedBySessionId` as the precise opener for navigation and
+  `openedByRowSessionId` as the sidebar indentation target. Resolve the latter with
+  `buildSidebarOpenerRowResolver` by walking `parentSessionId` to a root row; never
+  rewrite the precise opener. Opened Sessions retain independent workspace/lifecycle;
+  `parentSessionId` child Tabs stay excluded by `sessionListAtom`.
+- Keep opener and unrelated top-level alignment unchanged. In `sidebar-row-shared.tsx`,
+  the leading slot always draws the tree, regardless of working/unread/waiting state:
+  disclosure for openers, ├/└ for children, swapping to ⋯ on hover at the same 7px
+  centre. Only children widen the slot from 14px to 26px (12px title indent, unchanged
+  row background). The context menu and disclosure use the same toggle callback.
+- Desktop working/waiting/unread flags go only to `SessionRowStatusIndicator` in
+  `SidebarRowEndSlot`. Status replaces resting metrics with one 14px mark; metrics
+  remain in the hover info card. Mobile keeps its separate leading-node rule in
   [mobile/AGENTS.md](mobile/AGENTS.md).
-- Session lifecycle actions traverse both relations: a root archive, restore, or delete
-  includes child Tabs and every independently opened descendant. Child Tabs share the
-  root's machine lifecycle command; independently opened Sessions enqueue their own. The
-  archive list keeps the opened-by indentation while child Tabs remain inside their
-  owning Session's archived-tab UI.
+- Never hide a Session: missing, cross-section, cross-group, cycling, or
+  deeper-than-one-level openers fall back to top-level rows. Preview caps
+  (`MAX_VISIBLE_SESSIONS` / `SHOW_FULL_BUCKET_THRESHOLD`) count top-level rows.
+  Every surface passes `rootRank`; rank an opener by its freshest opened Session.
+- Share `sidebarCollapsedOpenedBySessionsAtom`, default EXPANDED. Keep both navigation
+  directions reachable through the tree, every row's "Go to Opener Session" menu,
+  `SessionHeaderMenu.openedByRelations`, and create-Operation/opener conversation
+  cards. Mobile uses the same two fields per bucket without a disclosure.
+- Root archive/restore/delete traverses child Tabs and independently opened
+  descendants. Tabs share the root's machine lifecycle command; opened Sessions
+  enqueue their own. Archive lists retain opened-by indentation and keep child Tabs
+  inside their owning Session's archived-tab UI.
 
 ## Entry points, drafts, and layout
 
