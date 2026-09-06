@@ -216,10 +216,9 @@ export class LocalFileResources {
         async pull(controller) {
           try {
             if (request.signal.aborted || resource.revoked) throw new Error('Preview cancelled.')
-            if (revision(await reader.stat()) !== resource.revision)
-              throw new Error('File changed. Reopen the preview.')
             const bytes = await readWindow(reader, start, Math.min(64 * 1024, end - start + 1))
             if (!bytes.length) throw new Error('File changed. Reopen the preview.')
+            // Check after IO and before delivery: this also catches changes preceding the read.
             if (revision(await reader.stat()) !== resource.revision)
               throw new Error('File changed. Reopen the preview.')
             start += bytes.length

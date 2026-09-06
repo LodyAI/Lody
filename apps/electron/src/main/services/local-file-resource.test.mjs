@@ -103,3 +103,46 @@ void test('image decode budget is based on dimensions, not encoded file length',
   assert.equal(result.code, 'too_large')
   assert.match(result.message, /dimensions/)
 })
+
+void test('a change during a stream read is rejected before its bytes are exposed', async (t) => {
+  const file = await fixture(t, 'large.txt', 'a'.repeat(600_000))
+  const resources = new LocalFileResources()
+  const result = await resources.preview(1, file)
+  const writer = await open(file.absolutePath, 'r+')
+  t.after(() => writer.close())
+  const prototype = Object.getPrototypeOf(writer)
+  const read = prototype.read
+  t.mock.method(prototype, 'read', async function (...args) {
+    const chunk = await read.apply(this, args)
+    // Explicitly change the revision between the read and delivery; no timer race.
+    await writer.truncate(600_001)
+    return chunk
+  })
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=0-10' } })
+  )
+  await assert.rejects(response.arrayBuffer(), /File changed/)
+})
+
+for (const extension of ['bmp', 'ico']) {
+  void test(`${extension} headers remain previewable without library dimension support`, async (t) => {
+    const bytes = Buffer.alloc(64)
+    if (extension === 'bmp') {
+      bytes.write('BM')
+      bytes.writeUInt32LE(40, 14)
+      bytes.writeInt32LE(16, 18)
+      bytes.writeInt32LE(16, 22)
+    } else {
+      bytes.writeUInt16LE(1, 2)
+      bytes.writeUInt16LE(1, 4)
+      bytes[6] = 16
+      bytes[7] = 16
+    }
+    const file = await fixture(t, `image.${extension}`, bytes)
+    const resources = new LocalFileResources()
+    const result = await resources.preview(1, file)
+    assert.equal(result.status, 'resource')
+    const response = await resources.respond(new Request(result.url))
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+  })
+}
