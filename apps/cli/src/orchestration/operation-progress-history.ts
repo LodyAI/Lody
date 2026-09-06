@@ -1,7 +1,6 @@
 import {
   getServerNow,
   type LodyOperationItemResult,
-  type MessageContent,
   type OperationProgressContent,
   type OperationProgressItem,
   type OperationProgressStatus,
@@ -28,17 +27,8 @@ export const getOperationProgressTargetKey = (target: {
   userTurnId: string;
 }): string => `${target.sessionId}\0${target.userTurnId}`;
 
-const TERMINAL_PROGRESS_STATUSES = new Set<OperationProgressStatus>([
-  'succeeded',
-  'failed',
-  'cancelled',
-]);
-
 const progressStatusRank = (status: OperationProgressStatus): number =>
   status === 'created' ? 0 : status === 'running' ? 1 : 2;
-
-const isOperationProgressContent = (item: MessageContent): item is OperationProgressContent =>
-  item.type === 'operation_progress';
 
 const progressStatusForItem = (
   operation: StoredLodyOperation,
@@ -95,21 +85,14 @@ const mergeProgressItem = (
   existing: OperationProgressItem | undefined,
   next: OperationProgressItem
 ): OperationProgressItem => {
-  if (!existing) return next;
-  const existingRank = progressStatusRank(existing.status);
-  const nextRank = progressStatusRank(next.status);
-  if (nextRank > existingRank) {
-    return { ...existing, ...next, status: next.status };
-  }
-  if (nextRank < existingRank) {
+  // Terminal snapshots stay fixed; running must not regress to created.
+  if (
+    existing &&
+    (progressStatusRank(existing.status) === 2 ||
+      progressStatusRank(existing.status) > progressStatusRank(next.status))
+  )
     return existing;
-  }
-  // Terminal state is monotonic. Do not let a stale/older snapshot flip a
-  // terminal target to another terminal result after one was published.
-  if (TERMINAL_PROGRESS_STATUSES.has(existing.status)) {
-    return existing;
-  }
-  return { ...existing, ...next, status: next.status };
+  return { ...existing, ...next };
 };
 
 export const mergeOperationProgressContent = (
@@ -137,15 +120,14 @@ export const upsertOperationProgressHistory = async (
   operation: StoredLodyOperation,
   now: () => number = getServerNow,
   statusByTarget?: OperationProgressStatusByTarget
-): Promise<boolean> => {
-  if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return false;
+): Promise<void> => {
+  if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
   const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
   const timestamp = new Date(now()).toISOString();
-  let changed = false;
   await sessionDoc.updateHistory((history) => {
     const existingIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
     const existing = existingIndex >= 0 ? history[existingIndex] : undefined;
-    const existingProgress = existing?.items?.find(isOperationProgressContent);
+    const existingProgress = existing?.items?.find((item) => item.type === 'operation_progress');
     // A prior card proves existence, not the current execution state. Keep that
     // evidence separate so a stale running snapshot cannot mask root termination.
     const materializedTargets = new Set(
@@ -154,11 +136,10 @@ export const upsertOperationProgressHistory = async (
     const content = buildOperationProgressContent(operation, statusByTarget, materializedTargets);
     if (!content) return history;
     const merged = mergeOperationProgressContent(existingProgress, content);
-    const nextItems = [merged as MessageContent];
+    const nextItems = [merged];
     if (existing && JSON.stringify(existing.items ?? []) === JSON.stringify(nextItems)) {
       return history;
     }
-    changed = true;
     const entry: SessionHistoryInput = {
       ...(existing ?? {}),
       id,
@@ -172,5 +153,4 @@ export const upsertOperationProgressHistory = async (
     if (existingIndex < 0) return [...history, entry];
     return history.map((candidate, index) => (index === existingIndex ? entry : candidate));
   });
-  return changed;
 };

@@ -5,12 +5,15 @@ import { sessionDocSchema } from '@lody/shared';
 
 import type {
   LodyOperationItemResult,
+  OperationProgressContent,
+  OperationProgressStatus,
   SessionHistoryInput,
   SessionId,
   StoredLodyOperation,
 } from '@lody/shared';
 import {
   buildOperationProgressContent,
+  mergeOperationProgressContent,
   getOperationProgressTargetKey,
   getOperationProgressTurnId,
   upsertOperationProgressHistory,
@@ -511,3 +514,53 @@ it.each(['running', 'succeeded'] as const)(
     ).toEqual([{ target, status }]);
   }
 );
+
+it('preserves all 25 merge transitions, including terminal labels and running-to-created regressions', () => {
+  const statuses: OperationProgressStatus[] = [
+    'created',
+    'running',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ];
+  const target = { sessionId: 'merge-child' as SessionId, userTurnId: 'merge-turn' };
+  for (const before of statuses) {
+    for (const after of statuses) {
+      const previous = { target, status: before, label: 'original' };
+      const incoming = { target, status: after, label: 'updated' };
+      const content: OperationProgressContent = {
+        type: 'operation_progress',
+        operationId: 'merge',
+        operationKind: 'session_create',
+        items: [previous],
+      };
+      const keepPrevious =
+        ['succeeded', 'failed', 'cancelled'].includes(before) ||
+        (before === 'running' && after === 'created');
+      expect(
+        mergeOperationProgressContent(content, { ...content, items: [incoming] }).items,
+        `${before} -> ${after}`
+      ).toEqual([keepPrevious ? previous : incoming]);
+    }
+  }
+});
+
+it('keeps the original history object for identical progress snapshots', async () => {
+  let history: SessionHistoryInput[] = [];
+  const doc = {
+    updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+      history = update(history);
+    },
+  };
+  const operation = baseOperation([
+    {
+      status: 'active',
+      inputDurable: true,
+      target: { sessionId: 'unchanged-child' as SessionId, userTurnId: 'unchanged-turn' },
+    },
+  ]);
+  await upsertOperationProgressHistory(doc, operation, () => 0);
+  const first = history;
+  await upsertOperationProgressHistory(doc, operation, () => 1);
+  expect(history).toBe(first);
+});

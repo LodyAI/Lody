@@ -354,10 +354,8 @@ export class LodyOperationCoordinator {
       latestOperation = this.withStore((store) =>
         store.updateItems(operation.requesterSessionId, operation.operationId, items)
       );
-      await this.writeOperationProgress(latestOperation);
-    } else {
-      await this.writeOperationProgress(latestOperation);
     }
+    await this.writeOperationProgress(latestOperation);
     if (items.every((item) => item.status !== 'active')) {
       const completion: LodyOperationCompletion = { type: 'result', value: { items } };
       latestOperation = this.withStore((store) =>
