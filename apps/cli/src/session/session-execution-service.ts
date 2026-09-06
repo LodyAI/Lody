@@ -4223,10 +4223,6 @@ export class SessionExecutionService {
             // request later fails. Do not prepend that context again on the next turn.
             return self
               .tryPromise(async () => {
-                await self.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
-                  accountContinuation: null,
-                });
-                await self.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
                 const scope = {
                   workspaceId: self.deps.workspaceId,
                   machineId: self.deps.machineId,
@@ -4235,6 +4231,13 @@ export class SessionExecutionService {
                 const binding = await getSessionAccountBinding(scope);
                 if (binding)
                   await setSessionAccountBinding(scope, { ...binding, accountContinuation: null });
+                // Restart resolves the installation-local binding, so acknowledge
+                // consumption there before publishing its display mirror. A
+                // failed mirror write must not replay already-consumed context.
+                await self.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+                  accountContinuation: null,
+                });
+                await self.deps.workspaceDocument.persistPendingChanges('session-account-handoff');
               })
               .pipe(
                 Effect.catchAll(() =>

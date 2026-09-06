@@ -1,4 +1,5 @@
 import {
+  getSessionAccountBinding,
   resolveSessionAccountMeta,
   setSessionAccountBinding,
 } from '../src/session/session-account-binding-store';
@@ -2899,135 +2900,220 @@ describe('SessionExecutionService', () => {
     { resident: true, outcome: 'failure', output: false },
     { resident: true, outcome: 'failure', output: true },
     { resident: true, outcome: 'success', output: false },
+    { resident: true, outcome: 'success', output: true, failurePoint: 'upsert' },
+    { resident: true, outcome: 'success', output: true, failurePoint: 'flush' },
+    { resident: true, outcome: 'success', output: true, failurePoint: 'binding' },
   ])(
-    'preserves continuation context with resident=$resident outcome=$outcome output=$output',
-    async ({ resident, outcome, output }) => {
-      const id = 'account-continuation-session' as SessionId;
-      const acpSessionId = 'account-continuation-provider' as ACPSessionId;
-      let meta: Partial<SessionMeta> = {
-        acpSessionId,
-        accountProfileId: '00000000-0000-4000-8000-00000000000b',
-        accountContinuation: { acpSessionId },
-        isArchived: false,
-      };
-      let history: SessionHistoryInput[] = [
-        {
-          id: 'prior-user',
-          role: 'user',
-          timestamp: '2026-01-01T00:00:00Z',
-          fileDiff: [],
-          items: [{ type: 'text', text: 'Preserve the original task context.' }],
-        },
-        {
-          id: 'current-user',
-          role: 'user',
-          timestamp: '2026-01-01T00:01:00Z',
-          fileDiff: [],
-          items: [{ type: 'text', text: 'Continue now.' }],
-        },
-      ];
-      const sessionDoc = {
-        getMetaState: vi.fn(async () => meta),
-        setStatus: vi.fn(async () => {}),
-        setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => history),
-        updateHistory: vi.fn(
-          async (update: (previous: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-            history = update(history);
-          }
-        ),
-      };
-      const prompt = vi.fn(async () => {
-        if (outcome === 'failure') throw new Error('provider request failed');
-        return {};
-      });
-      const runtime = {
-        sessionId: id,
-        acpSessionId,
-        agentClient: {
-          isCreated: () => true,
-          prompt,
-          cancel: vi.fn(async () => {}),
-          currentModel: undefined,
-        },
-        terminalManager: {},
-        getWorkdir: () => '/tmp',
-        getHostWorkdir: () => '/tmp',
-        getParentSessionId: () => undefined,
-        exec: vi.fn(async () => ''),
-        terminate: vi.fn(async () => {}),
-        updateGitIdentity: vi.fn(),
-        createAgent: vi.fn(async () => acpSessionId),
-        applyExecutionPlaneLimits: vi.fn(async () => {}),
-      };
-      let created = resident;
-      const createSession = vi.fn(async () => {
-        created = true;
-        return runtime;
-      });
-      const deps = createBaseDeps({
-        sessionManager: {
-          getSession: () => (created ? runtime : null),
-          getPendingSession: () => null,
-          createSession,
-          setSessionError: vi.fn(),
-          terminateSession: vi.fn(),
-          refreshGhTokenForSession: vi.fn(async () => {}),
-        } as unknown as SessionManager,
-        workspaceDocument: {
-          repo: {
-            upsertDocMeta: vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
-              meta = { ...meta, ...patch };
-            }),
-            getDocMeta: vi.fn(async () => undefined),
-          },
-          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-          updateAcpCapabilities: vi.fn(async () => {}),
-          persistPendingChanges: vi.fn(async () => {}),
-        } as unknown as LoroDocumentManager,
-        buildAcpPromptBlocks: vi.fn(
-          async (): Promise<ContentBlock[]> => [{ type: 'text', text: 'prompt with context' }]
-        ),
-        hasPromptOutputForTurn: () => output,
-        observePromptOutputForTurn: () => output,
-      });
-      const service = new SessionExecutionService(deps);
-      const request = {
-        type: 'session/chat' as const,
-        sessionId: id,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        acpSessionConfig: {
-          prompt: 'Continue now.',
-          cliType: 'builtin' as const,
-          agentType: 'codex',
-        },
-        userTurnId: 'current-user',
-        userId: 'user-1',
-        userName: 'User',
-        userEmail: 'user@example.com',
-      };
-      await service.continueSession(request);
-      expect(deps.buildAcpPromptBlocks).toHaveBeenCalledWith(
-        expect.objectContaining({
-          replayPromptText: expect.stringContaining('Preserve the original task context.'),
-        })
-      );
-      expect(prompt).toHaveBeenCalledTimes(1);
-      expect(meta.accountContinuation).toEqual(output ? null : { acpSessionId });
-      if (!resident)
-        expect(createSession).toHaveBeenCalledWith(
-          expect.objectContaining({ accountProfileId: meta.accountProfileId }),
-          expect.objectContaining({ resumeSessionId: acpSessionId })
-        );
-      if (output) {
-        prompt.mockResolvedValue({});
-        await service.continueSession({ ...request, userTurnId: 'next-user' });
-        expect(deps.buildAcpPromptBlocks).toHaveBeenLastCalledWith(
-          expect.objectContaining({ replayPromptText: undefined })
-        );
+    'preserves continuation context with resident=$resident outcome=$outcome output=$output failurePoint=$failurePoint',
+    async ({ resident, outcome, output, failurePoint }) => {
+      const actual = await vi.importActual<
+        typeof import('../src/session/session-account-binding-store')
+      >('../src/session/session-account-binding-store');
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-continuation-ack-'));
+      const previousDataDir = process.env.LODY_DATA_DIR;
+      process.env.LODY_DATA_DIR = dataDir;
+      let injectFailure = true;
+      try {
+        await vi
+          .mocked(resolveSessionAccountMeta)
+          .withImplementation(actual.resolveSessionAccountMeta, async () =>
+            vi
+              .mocked(getSessionAccountBinding)
+              .withImplementation(actual.getSessionAccountBinding, async () =>
+                vi.mocked(setSessionAccountBinding).withImplementation(
+                  async (scope, binding) => {
+                    if (
+                      injectFailure &&
+                      failurePoint === 'binding' &&
+                      binding.accountContinuation === null
+                    )
+                      throw new Error('local binding write failed');
+                    await actual.setSessionAccountBinding(scope, binding);
+                  },
+                  async () => {
+                    const id = 'account-continuation-session' as SessionId;
+                    const acpSessionId = 'account-continuation-provider' as ACPSessionId;
+                    let meta: Partial<SessionMeta> = {
+                      acpSessionId,
+                      accountProfileId: '00000000-0000-4000-8000-00000000000b',
+                      accountContinuation: { acpSessionId },
+                      isArchived: false,
+                    };
+                    const scope = {
+                      workspaceId: 'workspace-1',
+                      machineId: 'machine-1',
+                      sessionId: id,
+                    };
+                    await actual.setSessionAccountBinding(scope, {
+                      accountProfileId: meta.accountProfileId,
+                      acpSessionId,
+                      accountContinuation: { acpSessionId },
+                    });
+                    const staleMeta = { ...meta };
+                    let history: SessionHistoryInput[] = [
+                      {
+                        id: 'prior-user',
+                        role: 'user',
+                        timestamp: '2026-01-01T00:00:00Z',
+                        fileDiff: [],
+                        items: [{ type: 'text', text: 'Preserve the original task context.' }],
+                      },
+                      {
+                        id: 'current-user',
+                        role: 'user',
+                        timestamp: '2026-01-01T00:01:00Z',
+                        fileDiff: [],
+                        items: [{ type: 'text', text: 'Continue now.' }],
+                      },
+                    ];
+                    const sessionDoc = {
+                      getMetaState: vi.fn(async () => meta),
+                      setStatus: vi.fn(async () => {}),
+                      setBaseBranch: vi.fn(async () => {}),
+                      getHistory: vi.fn(async () => history),
+                      updateHistory: vi.fn(
+                        async (
+                          update: (previous: SessionHistoryInput[]) => SessionHistoryInput[]
+                        ) => {
+                          history = update(history);
+                        }
+                      ),
+                    };
+                    const prompt = vi.fn(async () => {
+                      if (outcome === 'failure') throw new Error('provider request failed');
+                      return {};
+                    });
+                    const runtime = {
+                      sessionId: id,
+                      acpSessionId,
+                      agentClient: {
+                        isCreated: () => true,
+                        prompt,
+                        cancel: vi.fn(async () => {}),
+                        currentModel: undefined,
+                      },
+                      terminalManager: {},
+                      getWorkdir: () => '/tmp',
+                      getHostWorkdir: () => '/tmp',
+                      getParentSessionId: () => undefined,
+                      exec: vi.fn(async () => ''),
+                      terminate: vi.fn(async () => {}),
+                      updateGitIdentity: vi.fn(),
+                      createAgent: vi.fn(async () => acpSessionId),
+                      applyExecutionPlaneLimits: vi.fn(async () => {}),
+                    };
+                    let created = resident;
+                    const createSession = vi.fn(async () => {
+                      created = true;
+                      return runtime;
+                    });
+                    const deps = createBaseDeps({
+                      sessionManager: {
+                        getSession: () => (created ? runtime : null),
+                        getPendingSession: () => null,
+                        createSession,
+                        setSessionError: vi.fn(),
+                        terminateSession: vi.fn(),
+                        refreshGhTokenForSession: vi.fn(async () => {}),
+                      } as unknown as SessionManager,
+                      workspaceDocument: {
+                        repo: {
+                          upsertDocMeta: vi.fn(
+                            async (_room: string, patch: Partial<SessionMeta>) => {
+                              if (
+                                injectFailure &&
+                                failurePoint === 'upsert' &&
+                                patch.accountContinuation === null
+                              )
+                                throw new Error('display update failed');
+                              meta = { ...meta, ...patch };
+                            }
+                          ),
+                          getDocMeta: vi.fn(async () => undefined),
+                        },
+                        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+                        updateAcpCapabilities: vi.fn(async () => {}),
+                        persistPendingChanges: vi.fn(async (reason?: string) => {
+                          if (
+                            injectFailure &&
+                            failurePoint === 'flush' &&
+                            reason === 'session-account-handoff'
+                          )
+                            throw new Error('display flush failed');
+                        }),
+                      } as unknown as LoroDocumentManager,
+                      buildAcpPromptBlocks: vi.fn(
+                        async (): Promise<ContentBlock[]> => [
+                          { type: 'text', text: 'prompt with context' },
+                        ]
+                      ),
+                      hasPromptOutputForTurn: () => output,
+                      observePromptOutputForTurn: () => output,
+                    });
+                    const service = new SessionExecutionService(deps);
+                    const request = {
+                      type: 'session/chat' as const,
+                      sessionId: id,
+                      machineId: 'machine-1',
+                      workspaceId: 'workspace-1' as WorkspaceId,
+                      acpSessionConfig: {
+                        prompt: 'Continue now.',
+                        cliType: 'builtin' as const,
+                        agentType: 'codex',
+                      },
+                      userTurnId: 'current-user',
+                      userId: 'user-1',
+                      userName: 'User',
+                      userEmail: 'user@example.com',
+                    };
+                    await service.continueSession(request);
+                    expect(deps.buildAcpPromptBlocks).toHaveBeenCalledWith(
+                      expect.objectContaining({
+                        replayPromptText: expect.stringContaining(
+                          'Preserve the original task context.'
+                        ),
+                      })
+                    );
+                    expect(prompt).toHaveBeenCalledTimes(1);
+                    const acknowledged = output && failurePoint !== 'binding';
+                    expect(
+                      (await actual.getSessionAccountBinding(scope))?.accountContinuation
+                    ).toEqual(acknowledged ? null : { acpSessionId });
+                    expect(meta.accountContinuation).toEqual(
+                      output && failurePoint !== 'binding' && failurePoint !== 'upsert'
+                        ? null
+                        : { acpSessionId }
+                    );
+                    if (!resident)
+                      expect(createSession).toHaveBeenCalledWith(
+                        expect.objectContaining({ accountProfileId: meta.accountProfileId }),
+                        expect.objectContaining({ resumeSessionId: acpSessionId })
+                      );
+                    if (output) {
+                      prompt.mockResolvedValue({});
+                      // Reconstruct execution from an unacknowledged display snapshot after restart.
+                      meta = { ...staleMeta };
+                      injectFailure = false;
+                      const restarted = new SessionExecutionService(deps);
+                      await restarted.continueSession({ ...request, userTurnId: 'next-user' });
+                      expect(deps.buildAcpPromptBlocks).toHaveBeenLastCalledWith(
+                        expect.objectContaining({
+                          replayPromptText: acknowledged
+                            ? undefined
+                            : expect.stringContaining('Preserve the original task context.'),
+                        })
+                      );
+                    }
+                    expect(history.some((entry) => entry.id === 'prior-user')).toBe(true);
+                  }
+                )
+              )
+          );
+      } finally {
+        if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+        else process.env.LODY_DATA_DIR = previousDataDir;
+        fs.rmSync(dataDir, { recursive: true, force: true });
       }
-      expect(history.some((entry) => entry.id === 'prior-user')).toBe(true);
     }
   );
 
