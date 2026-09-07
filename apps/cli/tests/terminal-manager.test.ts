@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync, chmodSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
@@ -103,5 +107,96 @@ describe('ShellTerminalManager', () => {
 
     expect(terminate).toHaveBeenCalledWith(false);
     expect(processHandle.child.kill).not.toHaveBeenCalled();
+  });
+
+  it('runs an unsplit shell command line through a shell (command has spaces, no args)', async () => {
+    const processHandle = createProcessHandle(async () => {});
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'noop',
+      applyLimits: async () => {},
+      spawn: vi.fn(async () => processHandle),
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    const manager = new ShellTerminalManager({
+      logger: createSilentLogger(),
+      sessionLabel: 'test-session',
+      getActiveAcpSessionId: () => 'acp-1',
+      resolveWorkdir: (cwd) => cwd ?? process.cwd(),
+      buildEnv: () => process.env,
+      sandbox,
+    });
+
+    await manager.createTerminal('acp-1', 'ls -la /foo', []);
+
+    const expectedShell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+    const expectedFlag = process.platform === 'win32' ? '/c' : '-c';
+    expect(sandbox.spawn).toHaveBeenCalledWith(
+      expectedShell,
+      [expectedFlag, 'ls -la /foo'],
+      expect.objectContaining({ captureOutput: true })
+    );
+  });
+
+  it('leaves a spec-conformant split command (executable + args) untouched', async () => {
+    const processHandle = createProcessHandle(async () => {});
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'noop',
+      applyLimits: async () => {},
+      spawn: vi.fn(async () => processHandle),
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    const manager = new ShellTerminalManager({
+      logger: createSilentLogger(),
+      sessionLabel: 'test-session',
+      getActiveAcpSessionId: () => 'acp-1',
+      resolveWorkdir: (cwd) => cwd ?? process.cwd(),
+      buildEnv: () => process.env,
+      sandbox,
+    });
+
+    await manager.createTerminal('acp-1', 'git', ['status', '--short']);
+
+    expect(sandbox.spawn).toHaveBeenCalledWith(
+      'git',
+      ['status', '--short'],
+      expect.objectContaining({ captureOutput: true })
+    );
+  });
+
+  it('spawns a zero-argument executable path containing spaces directly', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lody-term-'));
+    const toolPath = join(dir, 'my tool');
+    writeFileSync(toolPath, '#!/bin/sh\necho hi\n');
+    chmodSync(toolPath, 0o755);
+
+    const processHandle = createProcessHandle(async () => {});
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'noop',
+      applyLimits: async () => {},
+      spawn: vi.fn(async () => processHandle),
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    const manager = new ShellTerminalManager({
+      logger: createSilentLogger(),
+      sessionLabel: 'test-session',
+      getActiveAcpSessionId: () => 'acp-1',
+      resolveWorkdir: (cwd) => cwd ?? dir,
+      buildEnv: () => process.env,
+      sandbox,
+    });
+
+    await manager.createTerminal('acp-1', 'my tool', [], dir);
+
+    expect(sandbox.spawn).toHaveBeenCalledWith(
+      'my tool',
+      [],
+      expect.objectContaining({ cwd: dir, captureOutput: true })
+    );
   });
 });
