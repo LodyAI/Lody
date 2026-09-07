@@ -146,6 +146,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => await waitForInitialMetaSync),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -199,6 +200,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => false),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => false),
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -246,6 +248,7 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -323,6 +326,7 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => true),
       createAgentConfig: vi.fn(async () => 'agent-config-id'),
       getAcpCapabilities,
@@ -349,5 +353,51 @@ describe('Lody.registerAgent', () => {
     expect(mocks.fetchAcpCapabilities).not.toHaveBeenCalled();
     expect(getAcpCapabilities).not.toHaveBeenCalled();
     expect(updateAcpCapabilities).not.toHaveBeenCalled();
+  });
+
+  // A builtin provider the user removed on this machine must not come back through the next
+  // startup auto-registration. It is not in the list, but that is the result of the removal,
+  // not "never created".
+  it('does not recreate a builtin agent the user removed on this machine', async () => {
+    const hasAgentConfig = vi.fn(async () => false);
+    const createAgentConfig = vi.fn(async () => 'agent-config-id');
+    const documentManager = {
+      hasCompletedInitialMetaSync: vi.fn(() => true),
+      waitForInitialMetaSync: vi.fn(async () => true),
+      syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set(['kimi'])),
+      hasAgentConfig,
+      createAgentConfig,
+      getAcpCapabilities: vi.fn(async () => null),
+      updateAcpCapabilities: vi.fn(async () => {}),
+      applyTitleGenerationDefaults: vi.fn(async () => {}),
+    } as unknown as LoroDocumentManager;
+
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine-name',
+      },
+      documentManager
+    );
+
+    await lody.registerAgent(['kimi', 'codex']);
+    await flushMicrotasks();
+
+    // The removed type is not created.
+    expect(createAgentConfig).not.toHaveBeenCalledWith(
+      'builtin',
+      'kimi',
+      'machine-1',
+      expect.anything()
+    );
+    // Types that were never removed still register, proving the skip is per type and does not
+    // bail out of the whole loop.
+    expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 });

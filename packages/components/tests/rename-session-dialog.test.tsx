@@ -13,6 +13,66 @@ import { initI18n } from '../src/i18n';
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
+type MockResizeObserverInstance = {
+  callback: ResizeObserverCallback;
+  targets: Set<Element>;
+};
+
+const resizeObserverInstances: MockResizeObserverInstance[] = [];
+
+class MockResizeObserver {
+  private readonly instance: MockResizeObserverInstance;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.instance = { callback, targets: new Set<Element>() };
+    resizeObserverInstances.push(this.instance);
+  }
+
+  observe = (target: Element) => {
+    this.instance.targets.add(target);
+  };
+
+  unobserve = (target: Element) => {
+    this.instance.targets.delete(target);
+  };
+
+  disconnect = () => {
+    this.instance.targets.clear();
+  };
+}
+
+/**
+ * jsdom has no layout, so on mount the field reports the zero width and zero
+ * scroll height that a not-yet-laid-out textarea reports in a browser. This
+ * stands in for the layout that arrives afterwards: `scrollHeight` wraps the
+ * current value at the current width, which is what the dialog measures.
+ */
+function attachLayout(textarea: HTMLTextAreaElement, lineHeight: number, charWidth: number) {
+  const computed = window.getComputedStyle(textarea);
+  const padding =
+    (Number.parseFloat(computed.paddingTop) || 0) +
+    (Number.parseFloat(computed.paddingBottom) || 0);
+  let width = 0;
+  Object.defineProperty(textarea, 'clientWidth', {
+    configurable: true,
+    get: () => width,
+  });
+  Object.defineProperty(textarea, 'scrollHeight', {
+    configurable: true,
+    get: () => {
+      if (width <= 0) return 0;
+      const charsPerLine = Math.max(1, Math.floor(width / charWidth));
+      const lines = Math.max(1, Math.ceil(textarea.value.length / charsPerLine));
+      return lines * lineHeight + padding;
+    },
+  });
+  return {
+    setWidth: (next: number) => {
+      width = next;
+    },
+  };
+}
+
 function setTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
   setter?.call(textarea, value);
@@ -157,5 +217,62 @@ describe('RenameSessionDialogView', () => {
     });
 
     expect(onRenameSession).toHaveBeenCalledWith('sidebar-session', 'Renamed from sidebar');
+  });
+
+  it('grows the title field once the dialog panel has been laid out', async () => {
+    // `observeResizeOnAnimationFrame` defers to a frame; run it inline so the
+    // assertions do not depend on the scheduler.
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('ResizeObserver', MockResizeObserver);
+    resizeObserverInstances.length = 0;
+
+    // jsdom applies no Tailwind, so the line height is the function's own
+    // fallback and the padding/border come from the UA stylesheet. Assertions
+    // are relative to the one-line height so they do not encode either.
+    const LINE_HEIGHT = 20;
+    const CHAR_WIDTH = 8;
+    const title = 'A generated session title long enough to wrap onto a second line';
+
+    await act(async () => {
+      root?.render(
+        <RenameSessionDialogView
+          target={{ sessionId: 'grow-session' as SessionId, initialTitle: title }}
+          onClose={vi.fn()}
+          onRename={vi.fn()}
+        />
+      );
+    });
+
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea');
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    const field = textarea as HTMLTextAreaElement;
+    // The mount measurement ran before the portalled panel had a width, so the
+    // field sits at its one-line height holding a value that wraps.
+    const oneLineHeight = Number.parseFloat(field.style.height);
+    expect(oneLineHeight).toBeGreaterThan(0);
+
+    const layout = attachLayout(field, LINE_HEIGHT, CHAR_WIDTH);
+    const observed = resizeObserverInstances.find((instance) => instance.targets.has(field));
+    expect(observed).toBeDefined();
+
+    await act(async () => {
+      layout.setWidth(CHAR_WIDTH * 40);
+      observed?.callback([], observed as unknown as ResizeObserver);
+    });
+
+    expect(field.style.height).toBe(`${oneLineHeight + LINE_HEIGHT}px`);
+    expect(field.style.overflowY).toBe('hidden');
+
+    await act(async () => {
+      setTextareaValue(field, title.repeat(4));
+    });
+
+    // Past four lines the field stops growing and scrolls instead.
+    expect(field.style.height).toBe(`${oneLineHeight + LINE_HEIGHT * 3}px`);
+    expect(field.style.overflowY).toBe('auto');
   });
 });

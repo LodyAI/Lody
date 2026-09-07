@@ -105,6 +105,10 @@ export const isSessionGoalWorking = isSessionGoalActive;
 export const isSessionGoalPaused = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'paused';
 
+/** A paused or blocked goal can continue when the user explicitly resumes it. */
+export const isSessionGoalResumable = (goal: SessionGoalMessage | null | undefined): boolean =>
+  goal?.status === 'paused' || goal?.status === 'blocked';
+
 export const isSessionGoalComplete = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'complete';
 

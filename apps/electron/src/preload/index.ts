@@ -3,13 +3,15 @@ import { ipcBridge } from './ipc-bridge'
 import { electronAPI } from '@electron-toolkit/preload'
 import { setupRenderer } from '@better-auth/electron/preload'
 import os from 'node:os'
+import { readPreferredSystemLanguagesArgument } from '../system-language-argument'
 
 setupRenderer()
 
 const platformInfo = {
   os: process.platform,
   homeDir: os.homedir(),
-  machineName: os.hostname()
+  machineName: os.hostname(),
+  preferredSystemLanguages: readPreferredSystemLanguagesArgument(process.argv)
 }
 
 if (process.contextIsolated) {

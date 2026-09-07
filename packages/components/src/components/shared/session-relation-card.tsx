@@ -1,4 +1,4 @@
-import type { ElementType } from 'react';
+import type { ElementType, ReactNode } from 'react';
 import { ArrowUpRight, GitBranchPlus } from 'lucide-react';
 
 import { Button } from '@/ui/button';
@@ -13,6 +13,7 @@ export function SessionRelationCard({
   actionIcon: ActionIcon = ArrowUpRight,
   className,
   relation,
+  status,
 }: {
   label: string;
   sessionTitle: string;
@@ -22,6 +23,7 @@ export function SessionRelationCard({
   actionIcon?: ElementType<{ className?: string }>;
   className?: string;
   relation: 'opened' | 'opened-by';
+  status?: ReactNode;
 }) {
   return (
     <div
@@ -40,6 +42,7 @@ export function SessionRelationCard({
           </div>
         </div>
       </div>
+      {status}
       <Button
         type="button"
         variant="outline"

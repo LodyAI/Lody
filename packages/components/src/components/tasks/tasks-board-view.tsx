@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   closestCorners,
@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { formatShortMonthYear } from '@/lib/format-relative-time';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { getTaskStatusPresentation, TASK_STATUS_PRESENTATION } from './task-status-presentation';
 
 export type { TaskBoardMove };
@@ -199,6 +200,8 @@ function TaskCard({
   return (
     <button
       type="button"
+      data-id={`task:${task.taskId}`}
+      data-scope-item="row"
       ref={sortable?.setNodeRef}
       style={style}
       onClick={onOpen}
@@ -339,6 +342,8 @@ function TaskListRow({
   return (
     <button
       type="button"
+      data-id={`task:${task.taskId}`}
+      data-scope-item="row"
       onClick={onOpen}
       className={cn(
         'group flex h-9 w-full items-center gap-2 rounded-md px-3 text-left',
@@ -591,6 +596,8 @@ function BoardColumn({
   isDropTarget: boolean;
 }) {
   const { t } = useTranslation();
+  const scopeId = useId();
+  useListKeyboardNavigation({ scopeId });
   const presentation = getTaskStatusPresentation(status);
   const { setNodeRef, isOver } = useDroppable({
     id: taskBoardColumnDropId(status),
@@ -600,7 +607,13 @@ function BoardColumn({
   const highlight = isOver || isDropTarget;
 
   return (
-    <section data-task-board-column="" className="flex h-full w-72 shrink-0 flex-col gap-2">
+    <FocusScope
+      id={scopeId}
+      role="region"
+      aria-label={t(presentation.labelKey, presentation.labelFallback)}
+      data-task-board-column=""
+      className="flex h-full w-72 shrink-0 flex-col gap-2"
+    >
       <header className="flex shrink-0 items-center gap-2 px-1">
         <presentation.Icon className={cn('h-3.5 w-3.5', presentation.className)} />
         <h2 className="text-[11px] font-medium tracking-wide text-muted-foreground">
@@ -636,7 +649,7 @@ function BoardColumn({
           ))}
         </SortableContext>
       </div>
-    </section>
+    </FocusScope>
   );
 }
 
@@ -698,6 +711,8 @@ export function TasksBoardView({
   // After a real drag, the browser may still fire click — swallow that open.
   const suppressOpenRef = useRef(false);
   const boardRef = useBoardWheelScroll(layout === 'board');
+  const listScopeId = useId();
+  useListKeyboardNavigation({ enabled: layout === 'list', scopeId: listScopeId });
 
   const tasksById = useMemo(() => {
     const map = new Map<string, TaskCardData>();
@@ -850,7 +865,7 @@ export function TasksBoardView({
     // the inbox strip above — without it, rounded group headers would flush
     // against the pane edge (and a right-only margin looks broken).
     return (
-      <div className="flex w-full flex-col gap-3 px-3 py-3">
+      <FocusScope id={listScopeId} role="region" className="flex w-full flex-col gap-3 px-3 py-3">
         {listGroups.map((group) => (
           // 2px between header↔rows and row↔row so hover washes don't fuse;
           // larger gap-3 between status sections keeps groups distinct.
@@ -866,7 +881,7 @@ export function TasksBoardView({
             ))}
           </section>
         ))}
-      </div>
+      </FocusScope>
     );
   }
 

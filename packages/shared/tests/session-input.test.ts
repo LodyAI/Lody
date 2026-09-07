@@ -10,7 +10,9 @@ import {
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
+  resolveSessionConversationSourceFence,
   resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
@@ -190,6 +192,106 @@ describe('session-input helpers', () => {
       modelId: 'model-b',
       configOptionValues: { approval: 'never' },
     });
+  });
+
+  it('keeps one causal Turn key when a queued Turn is promoted to history', () => {
+    const queued = resolveSessionConversationSourceFence(
+      [{ id: 'turn-1', role: 'user' }],
+      [{ $cid: 'queue-cid', userTurnId: 'turn-2', acpSessionConfig: {} }]
+    );
+    const promoted = resolveSessionConversationSourceFence([
+      { id: 'turn-1', role: 'user' },
+      { id: 'turn-2', role: 'user' },
+    ]);
+
+    expect(queued.currentTurnKey).toBe('turn:turn-2');
+    expect(promoted.currentTurnKey).toBe('turn:turn-2');
+    expect(queued.knownTurnKeys).toEqual(['turn:turn-2', 'turn:turn-1']);
+    expect(promoted.knownTurnKeys).toEqual(['turn:turn-2', 'turn:turn-1']);
+
+    const legacyQueued = resolveSessionConversationSourceFence(
+      [],
+      [{ $cid: 'legacy-cid', acpSessionConfig: {} }]
+    );
+    const legacyPromoted = resolveSessionConversationSourceFence([
+      { id: 'queued-legacy-cid', role: 'user' },
+    ]);
+    expect(legacyQueued.currentTurnKey).toBe('turn:queued-legacy-cid');
+    expect(legacyPromoted.currentTurnKey).toBe('turn:queued-legacy-cid');
+  });
+
+  it('inherits the latest explicit Role across legacy or non-composer Turns', () => {
+    const history = [
+      {
+        id: 'turn-role',
+        role: 'user',
+        inputConfig: { agentRoleId: 'role-reviewer', agentRoleRevision: 7 },
+      },
+      {
+        id: 'turn-programmatic',
+        role: 'user',
+        inputConfig: { prompt: 'continue automatically' },
+      },
+    ];
+    expect(resolveSessionConversationConfig(history)).toMatchObject({
+      sourceConfigKey: 'history:turn-programmatic',
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 7,
+    });
+
+    expect(
+      resolveSessionConversationConfig([
+        ...history,
+        { id: 'turn-none', role: 'user', inputConfig: { agentRoleId: null } },
+      ])
+    ).toMatchObject({
+      sourceConfigKey: 'history:turn-none',
+      agentRoleId: null,
+    });
+  });
+
+  it('resolves ACP runtime config only for the latest accepted user turn', () => {
+    const history = [
+      { id: 'turn-1', role: 'user' as const },
+      { id: 'assistant-1', role: 'assistant' as const },
+      { id: 'turn-2', role: 'user' as const },
+    ];
+
+    expect(
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-2',
+        basedOnUserTurnId: 'turn-2',
+        revision: 3,
+        modeId: 'default',
+        modelId: 'gpt-5.6-sol',
+        configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+      })
+    ).toEqual({
+      sourceConfigKey: 'runtime:acp-2:3',
+      modeId: 'default',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+    });
+
+    expect(
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 9,
+        modeId: 'default',
+      })
+    ).toBeNull();
+  });
+
+  it('does not let runtime state override a frozen queued turn', () => {
+    expect(
+      resolveSessionAcpRuntimeConfig([{ id: 'turn-1', role: 'user' }], [{ $cid: 'queue-1' }], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 1,
+        configOptionValues: { collaboration_mode: 'default' },
+      })
+    ).toBeNull();
   });
 
   it('resolves the frozen Task tool gate with legacy inputs disabled', () => {

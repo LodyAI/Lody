@@ -16,6 +16,7 @@ import {
   safeParseServerReceiveMessage,
   safeParseServerToMachine,
   MachineAcpCapabilitiesRefreshRequestSchema,
+  MachineAcpCapabilitiesRefreshResponseSchema,
   ServerToClientSchema,
   SessionCancelRequestSchema,
   SessionChatRequestSchema,
@@ -26,7 +27,8 @@ import {
   SessionIdSchema,
   SessionImagePayloadSchema,
 } from '../src/message-schemas';
-import type { SessionImagePayload } from '../src/ai';
+import { ACP_CAPABILITY_CACHE_VERSION, type SessionImagePayload } from '../src/ai';
+import { ACP_AUTHENTICATION_FORM_MAX_BYTES } from '../src/acp-authentication-limits';
 import type { SessionId } from '../src/ids';
 
 describe('branded id schemas', () => {
@@ -247,28 +249,75 @@ describe('message-schemas machine ACP capabilities refresh', () => {
     expect(BuiltinRuntimeOverridesSchema.safeParse({ grokPath: '/opt/grok' }).success).toBe(true);
   });
 
-  it('accepts provider env for capability probing', () => {
-    const result = MachineAcpCapabilitiesRefreshRequestSchema.safeParse({
+  it('accepts only a persisted config reference for capability probing', () => {
+    const request = {
       type: 'machine/acp-capabilities-refresh',
       machineId: 'machine-1',
       workspaceId: 'workspace-1',
       configId: 'config-1',
-      cliType: 'registry',
-      agentType: 'env-agent',
-      env: {
-        ACP_PROVIDER_TOKEN: 'secret-token',
-      },
-    });
+    };
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.env).toEqual({ ACP_PROVIDER_TOKEN: 'secret-token' });
-    }
+    expect(MachineAcpCapabilitiesRefreshRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      MachineAcpCapabilitiesRefreshRequestSchema.safeParse({
+        ...request,
+        cliType: 'registry',
+        agentType: 'env-agent',
+        customAcp: { command: '/tmp/untrusted-acp' },
+        env: { ACP_PROVIDER_TOKEN: 'attacker-controlled' },
+        runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
+      }).success
+    ).toBe(false);
+  });
+
+  it('preserves the complete capability used to converge the renderer after refresh', () => {
+    const response = {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: 'machine-1',
+      configId: 'config-1',
+      cliType: 'registry',
+      agentType: 'deepseek',
+      success: true,
+      capability: {
+        cliType: 'registry',
+        agentType: 'deepseek',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        sourceVersion: 'registry:deepseek:test',
+        modes: [],
+        models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'kimi-k3',
+            options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+          },
+          {
+            id: 'reasoning_effort',
+            name: 'Thinking',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'max',
+            options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
+          },
+        ],
+        modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+        sessionFork: false,
+        fetchedAt: 1,
+      },
+    };
+
+    expect(MachineAcpCapabilitiesRefreshResponseSchema.parse(response).capability).toEqual(
+      response.capability
+    );
   });
 });
 
 describe('message-schemas machine ACP authentication', () => {
-  it('accepts browser authorization, code submission, and the final response', () => {
+  it('accepts config-bound starts and request-bound follow-ups', () => {
     const request = {
       type: 'machine/acp-authenticate',
       machineId: 'machine-1',
@@ -276,9 +325,14 @@ describe('message-schemas machine ACP authentication', () => {
       requestId: 'auth-1',
       action: 'start',
       configId: 'config-1',
-      cliType: 'builtin',
-      agentType: 'kimi',
-      runtimeOverrides: { kimiPath: '/opt/kimi' },
+    };
+    const forgedStart = {
+      ...request,
+      cliType: 'registry',
+      agentType: 'custom-agent',
+      customAcp: { command: '/tmp/untrusted-acp' },
+      env: { TOKEN: 'attacker-controlled' },
+      runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
     };
     const progress = {
       type: 'machine/acp-authentication-progress',
@@ -291,7 +345,9 @@ describe('message-schemas machine ACP authentication', () => {
       expiresInSeconds: 1800,
     };
     const submitCode = {
-      ...request,
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
       requestId: 'auth-input-1',
       action: 'submit-code',
       authenticationRequestId: 'auth-1',
@@ -309,15 +365,214 @@ describe('message-schemas machine ACP authentication', () => {
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',
     };
+    const methodProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'auth-methods',
+      interactionId: 'method-choice-1',
+      authMethods: [{ type: 'agent', id: 'oauth', name: 'Browser' }],
+    };
+    const formProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+      status: 'input-required',
+      interactionId: 'form-1',
+      message: 'Complete sign-in',
+      form: {
+        fields: [
+          { id: 'code', type: 'secret', label: 'Code', required: true },
+          {
+            id: 'account',
+            type: 'select',
+            label: 'Account',
+            required: true,
+            options: [{ value: 'work', label: 'Work' }],
+          },
+        ],
+      },
+    };
+    const submitInput = {
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      requestId: 'auth-input-2',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-1',
+      interactionId: 'form-1',
+      authenticationInput: JSON.stringify({
+        action: 'accept',
+        content: { code: 'one-time-code', account: 'work' },
+      }),
+    };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
+    expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitCode).success).toBe(true);
+    expect(MachineAcpAuthenticateRequestSchema.safeParse(submitInput).success).toBe(true);
+    expect(
+      MachineAcpAuthenticateRequestSchema.safeParse({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        requestId: 'auth-cancel-1',
+        action: 'cancel',
+        authenticationRequestId: 'auth-1',
+        customAcp: { command: '/tmp/untrusted-acp' },
+      }).success
+    ).toBe(false);
     expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(progress).success).toBe(true);
+    expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(methodProgress).success).toBe(
+      true
+    );
+    expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(formProgress).success).toBe(
+      true
+    );
     expect(MachineAcpAuthenticateResponseSchema.safeParse(response).success).toBe(true);
     expect(LocalSessionControlResponseSchema.safeParse(response).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(submitCode)).success).toBe(true);
     expect(ServerToClientSchema.safeParse(progress).success).toBe(true);
+  });
+
+  it('rejects unsafe authorization schemes and incomplete interaction progress', () => {
+    const base = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'custom-agent',
+    };
+
+    for (const authorizationUrl of ['javascript:alert(1)', 'file:///tmp/credential']) {
+      expect(
+        MachineAcpAuthenticationProgressMessageSchema.safeParse({
+          ...base,
+          status: 'authorization',
+          authorizationUrl,
+        }).success
+      ).toBe(false);
+    }
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'http://127.0.0.1:8787/callback',
+      }).success
+    ).toBe(true);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'authorization',
+        authorizationUrl: 'https://provider.example.test/oauth',
+        requiresAuthorizationConsent: true,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [{ type: 'env_var', id: 'legacy-env', name: 'Legacy environment' }],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [
+          { type: 'agent', id: 'oauth', name: 'Browser' },
+          { type: 'agent', id: 'oauth', name: 'Duplicate' },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'auth-methods',
+        interactionId: 'methods-1',
+        authMethods: [{ type: 'agent', name: 'Missing id' }],
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+        form: {
+          fields: [
+            {
+              id: 'token',
+              type: 'secret',
+              label: 'Token',
+              required: true,
+              defaultValue: 'must-not-be-retained',
+            },
+          ],
+        },
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...base,
+        status: 'input-required',
+        interactionId: 'form-1',
+        form: {
+          fields: [
+            {
+              id: 'account',
+              type: 'select',
+              label: 'Account',
+              required: true,
+              options: [{ value: 'work', label: 'Work' }],
+              defaultValue: 'missing',
+            },
+          ],
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects a form whose valid individual fields exceed the total byte budget', () => {
+    const options = Array.from({ length: 20 }, (_, index) => ({
+      value: `${String(index).padStart(2, '0')}-${'x'.repeat(16_380)}`,
+      label: `Option ${index}`,
+    }));
+    const form = {
+      fields: [
+        {
+          id: 'account',
+          type: 'select',
+          label: 'Account',
+          required: true,
+          options,
+        },
+      ],
+    };
+    expect(new TextEncoder().encode(JSON.stringify(form)).byteLength).toBeGreaterThan(
+      ACP_AUTHENTICATION_FORM_MAX_BYTES
+    );
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        type: 'machine/acp-authentication-progress',
+        machineId: 'machine-1',
+        requestId: 'auth-1',
+        agentType: 'custom-agent',
+        status: 'input-required',
+        interactionId: 'form-1',
+        form,
+      }).success
+    ).toBe(false);
   });
 });
 

@@ -1,3 +1,4 @@
+import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Mention, MentionInput } from '@/ui/mention';
 import { MentionTwoLevelMenuBody } from '@/components/mentions/mention-two-level-menu';
@@ -41,19 +42,16 @@ const FILES: MentionCandidate[] = [
     kind: 'dir',
     path: 'src/components/mentions',
     token: 'src/components/mentions/',
-    searchable: 'src/components/mentions/',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/ui/mention/mention-root.tsx',
     token: 'src/ui/mention/mention-root.tsx',
-    searchable: 'src/ui/mention/mention-root.tsx',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/components/mentions/mention-registry.ts',
     token: 'src/components/mentions/mention-registry.ts',
-    searchable: 'src/components/mentions/mention-registry.ts',
   }),
 ];
 
@@ -65,7 +63,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3312',
     label: '3312',
     searchableNumber: '3312',
-    searchableTitle: 'mention menu cannot be scrolled on mobile',
   }),
   toIssuePrCandidate({
     number: 3298,
@@ -74,7 +71,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3298',
     label: '3298',
     searchableNumber: '3298',
-    searchableTitle: 'switching sessions janks the composer',
   }),
 ];
 
@@ -212,16 +208,18 @@ type HarnessProps = {
   categories?: MentionCategory[];
   /** Desktop shows a side panel for the highlighted candidate; mobile does not. */
   withDetail?: boolean;
+  /** Constrains the menu to a mobile-composer-sized surface. */
+  narrow?: boolean;
 };
 
-function Harness({ search, categories = CATEGORIES, withDetail = true }: HarnessProps) {
+function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }: HarnessProps) {
   const view = selectMentionMenuView(categories, search);
   const candidates = getMentionViewCandidates(view);
   const detail = withDetail ? (candidates[0]?.detail ?? null) : null;
   const inputValue = `@${search}`;
 
   return (
-    <div className="h-[460px] w-[760px] p-6">
+    <div className={narrow ? 'h-[460px] w-[320px] p-3' : 'h-[460px] w-[760px] p-6'}>
       <Mention
         open
         triggers={['@']}
@@ -249,6 +247,77 @@ function Harness({ search, categories = CATEGORIES, withDetail = true }: Harness
   );
 }
 
+const SESSION_CANDIDATES: MentionCandidate[] = [
+  {
+    value: 'session-current',
+    label: 'current-parser-work',
+    insertText: '@current-parser-work',
+    kind: 'session',
+    icon: 'session',
+    title: 'Current parser work',
+  },
+  {
+    value: 'session-other',
+    label: 'other-project-work',
+    insertText: '@other-project-work',
+    kind: 'session',
+    icon: 'session',
+    title: 'Other project work',
+  },
+];
+
+function SessionScopeHarness({
+  initialScope,
+  currentProjectEmpty = false,
+  narrow = false,
+}: {
+  initialScope: 'current' | 'all';
+  currentProjectEmpty?: boolean;
+  narrow?: boolean;
+}) {
+  const [scope, setScope] = React.useState(initialScope);
+  const candidates =
+    scope === 'all'
+      ? currentProjectEmpty
+        ? SESSION_CANDIDATES.slice(1)
+        : SESSION_CANDIDATES
+      : currentProjectEmpty
+        ? []
+        : SESSION_CANDIDATES.slice(0, 1);
+  const sessionCategory = category('session', 'session', 'Sessions', 'session', candidates, {
+    header: {
+      ariaLabel: 'Session project scope',
+      options: [
+        {
+          label: 'Current project',
+          selected: scope === 'current',
+          onSelect: () => setScope('current'),
+        },
+        {
+          label: 'All projects',
+          selected: scope === 'all',
+          onSelect: () => setScope('all'),
+        },
+      ],
+    },
+    emptyState:
+      scope === 'current' && currentProjectEmpty
+        ? {
+            message: 'There are no other sessions in the current project.',
+            action: {
+              label: 'View all projects',
+              ariaLabel: 'Show sessions from all projects',
+              onAction: () => setScope('all'),
+            },
+          }
+        : undefined,
+  });
+
+  return (
+    <Harness search="session:" categories={[sessionCategory]} withDetail={false} narrow={narrow} />
+  );
+}
+
 const meta = {
   title: 'Mentions/MentionTwoLevelMenu',
   component: Harness,
@@ -271,6 +340,26 @@ export const AggregateSearch: Story = {
 /** `@issue:` — the second level, scoped to one category. */
 export const IssueCategory: Story = {
   args: { search: 'issue:' },
+};
+
+export const SessionCurrentProject: Story = {
+  args: { search: 'session:' },
+  render: () => <SessionScopeHarness initialScope="current" />,
+};
+
+export const SessionAllProjects: Story = {
+  args: { search: 'session:' },
+  render: () => <SessionScopeHarness initialScope="all" />,
+};
+
+export const SessionCurrentProjectEmpty: Story = {
+  args: { search: 'session:' },
+  render: () => <SessionScopeHarness initialScope="current" currentProjectEmpty />,
+};
+
+export const SessionScopeNarrow: Story = {
+  args: { search: 'session:' },
+  render: () => <SessionScopeHarness initialScope="current" narrow />,
 };
 
 /** `@skill:` — the second level with the detail panel populated. */

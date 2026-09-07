@@ -9,8 +9,10 @@ import {
   type AcpConfigOptionValue,
   type AgentConfigCliType,
   type SessionId,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import type { Logger } from '@/utils/logger';
 
 const MAX_ACP_CONFIG_VALUE_LOG_LENGTH = 160;
@@ -61,6 +63,8 @@ type AcpSessionRunConfigApplyResult = {
   rejectedSelections: string[];
   /** Rejections that should become a user-visible Agent warning. */
   warningSelections: string[];
+  /** Agent-confirmed state after applying the requested selections. */
+  runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
 };
 
 function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
@@ -108,11 +112,13 @@ export async function applyAcpSessionRunConfig(args: {
   );
   if (!agentClient?.isCreated() || !acpSessionId) {
     logger.debug(`[${sessionId}] applyAcpSessionRunConfig skipped (agentClient not ready)`);
-    return { rejectedSelections: [], warningSelections: [] };
+    return { rejectedSelections: [], warningSelections: [], runtimeConfigPatch: null };
   }
 
   const rejectedSelections: string[] = [];
   const warningSelections: string[] = [];
+  let confirmedLegacyModeId: string | undefined;
+  let confirmedLegacyModelId: string | undefined;
   const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
   const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
   const recordRejection = (selection: string, suppressWarning: boolean): void => {
@@ -132,6 +138,7 @@ export async function applyAcpSessionRunConfig(args: {
   if (config.modeId) {
     try {
       await agentClient.setSessionMode?.(acpSessionId, config.modeId);
+      confirmedLegacyModeId = config.modeId;
     } catch (error) {
       recordRejection(
         `mode=${JSON.stringify(config.modeId)}`,
@@ -145,6 +152,7 @@ export async function applyAcpSessionRunConfig(args: {
   if (config.modelId) {
     try {
       await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
+      confirmedLegacyModelId = config.modelId;
     } catch (error) {
       recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
       logger.debug(
@@ -158,6 +166,7 @@ export async function applyAcpSessionRunConfig(args: {
       if (!config.modeId && typeof value === 'string') {
         try {
           await agentClient.setSessionMode?.(acpSessionId, value);
+          confirmedLegacyModeId = value;
         } catch (error) {
           logger.debug(
             `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
@@ -173,6 +182,7 @@ export async function applyAcpSessionRunConfig(args: {
       if (!config.modelId && typeof value === 'string') {
         try {
           await agentClient.unstable_setSessionModel?.(acpSessionId, value);
+          confirmedLegacyModelId = value;
         } catch (error) {
           logger.debug(
             `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
@@ -199,5 +209,28 @@ export async function applyAcpSessionRunConfig(args: {
   }
 
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
-  return { rejectedSelections, warningSelections };
+  const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
+    acpSessionId,
+    agentClient.getConfigOptions()
+  );
+  if (confirmedLegacyModeId) {
+    runtimeConfigPatch.modeId = confirmedLegacyModeId;
+    if (
+      !isSensitiveAcpConfigOptionId(modeConfigId) &&
+      agentConfigOptions.some((option) => option.id === modeConfigId)
+    ) {
+      runtimeConfigPatch.configOptionValues = {
+        ...runtimeConfigPatch.configOptionValues,
+        [modeConfigId]: confirmedLegacyModeId,
+      };
+    }
+  }
+  if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
+    runtimeConfigPatch.modelId = confirmedLegacyModelId;
+  }
+  return {
+    rejectedSelections,
+    warningSelections,
+    runtimeConfigPatch,
+  };
 }

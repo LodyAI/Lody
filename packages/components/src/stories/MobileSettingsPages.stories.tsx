@@ -7,6 +7,7 @@ import {
   createCapabilitySet,
   createLocalPlatformProvider,
   createStaticStore,
+  type CloudApi,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 
@@ -17,8 +18,10 @@ import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-
 import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settings';
 import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout';
 import { SettingsCategoryList } from '@/components/settings/settings-category-list';
+import { WorkspaceJoinRequestsSettings } from '@/components/settings/workspace-join-requests-settings';
 import { StableSessionContext, type StableSessionValue } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
+import { cloudOperations, type WorkspaceJoinOwnerState } from '@/lib/cloud-api-operations';
 import { AuthProvider } from '@/providers/convex-provider';
 import { RoutedStory } from './settings-story-shell';
 
@@ -66,8 +69,22 @@ const localStoryPlatform = createLocalPlatformProvider({
     activeWorkspaceId: storyOrganization.id,
   }),
 });
+const storyWorkspaceJoinOwnerState: WorkspaceJoinOwnerState = {
+  activeLink: null,
+  pendingRequests: [],
+  hasMorePendingRequests: false,
+};
+const storyCloudApi = {
+  useQuery: (operation) =>
+    operation.name === cloudOperations.workspaceJoinRequests.getOwnerState.name
+      ? storyWorkspaceJoinOwnerState
+      : undefined,
+  useMutation: () => async () => null,
+  useAction: () => async () => null,
+} as CloudApi;
 const storyPlatform = {
   ...localStoryPlatform,
+  cloudApi: storyCloudApi,
   capabilities: createCapabilitySet([
     ...localStoryPlatform.capabilities.list(),
     'cloudAccount',
@@ -75,6 +92,7 @@ const storyPlatform = {
     'usageAnalytics',
     'billing',
     'bugReport',
+    'teamSharing',
   ]),
 };
 const storyAuthClient = {
@@ -307,32 +325,47 @@ const storyInvitations = [
   },
 ];
 
+function WorkspaceSettingsStory({ showJoinRequests = false }: { showJoinRequests?: boolean }) {
+  return (
+    <MobileAccountSettings
+      surface="workspace"
+      currentUser={storyUser}
+      organization={
+        showJoinRequests
+          ? { ...storyOrganization, name: 'Riverstone Research Workspace' }
+          : storyOrganization
+      }
+      role="owner"
+      hasAdminPermission
+      members={storyMembers}
+      pendingInvitations={showJoinRequests ? [] : storyInvitations}
+      onSignOut={fn()}
+      onInviteMember={async () => null}
+      onRemoveMember={asyncNoop}
+      onUpdateRole={asyncNoop}
+      onCopyInviteLink={asyncNoop}
+      onCancelInvitation={asyncNoop}
+      onLeaveOrganization={asyncNoop}
+      onDeleteOrganization={asyncNoop}
+      onDeleteAccount={asyncNoop}
+      onRenameOrganization={asyncNoop}
+      getInviteLink={() => 'https://example.com/invite/abc'}
+      onUploadAvatar={async () => ''}
+      workspaceJoinRequestsSlot={
+        showJoinRequests ? (
+          <WorkspaceJoinRequestsSettings workspaceId={storyOrganization.id} />
+        ) : undefined
+      }
+    />
+  );
+}
+
 /** Workspace sub-page: name/logo, members, invitations, danger zone. */
 export const Workspace: Story = {
-  args: {
-    title: 'Workspace',
-    children: (
-      <MobileAccountSettings
-        surface="workspace"
-        currentUser={storyUser}
-        organization={storyOrganization}
-        role="owner"
-        hasAdminPermission
-        members={storyMembers}
-        pendingInvitations={storyInvitations}
-        onSignOut={fn()}
-        onInviteMember={async () => null}
-        onRemoveMember={asyncNoop}
-        onUpdateRole={asyncNoop}
-        onCopyInviteLink={asyncNoop}
-        onCancelInvitation={asyncNoop}
-        onLeaveOrganization={asyncNoop}
-        onDeleteOrganization={asyncNoop}
-        onDeleteAccount={asyncNoop}
-        onRenameOrganization={asyncNoop}
-        getInviteLink={() => 'https://example.com/invite/abc'}
-        onUploadAvatar={async () => ''}
-      />
-    ),
-  },
+  args: { title: 'Workspace', children: <WorkspaceSettingsStory /> },
+};
+
+/** Owner workspace with the join-request card and a long editable name. */
+export const WorkspaceJoinRequests: Story = {
+  args: { title: 'Workspace', children: <WorkspaceSettingsStory showJoinRequests /> },
 };

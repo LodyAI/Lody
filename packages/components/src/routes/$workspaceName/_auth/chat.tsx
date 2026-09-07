@@ -1,37 +1,36 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChatLanding } from '@/components/chat/chat-landing';
+import {
+  parseChatLandingSearch,
+  type ChatLandingSearch,
+} from '@/components/chat/chat-landing-derived';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { mobileWorkspaceBaseContextAtom } from '@/atoms';
 
-export type ChatSearch = {
-  context?: 'local' | 'github' | 'chat';
-  machine?: string;
-  project?: string;
-  repo?: string;
-  resetDraftKey?: string;
-};
+export type ChatSearch = ChatLandingSearch;
 
 export const Route = createFileRoute('/$workspaceName/_auth/chat')({
   component: ChatRoute,
-  validateSearch: (search: Record<string, unknown>): ChatSearch => ({
-    context:
-      search.context === 'local' || search.context === 'github' || search.context === 'chat'
-        ? search.context
-        : undefined,
-    machine: typeof search.machine === 'string' ? search.machine : undefined,
-    project: typeof search.project === 'string' ? search.project : undefined,
-    repo: typeof search.repo === 'string' ? search.repo : undefined,
-    resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
-  }),
+  validateSearch: parseChatLandingSearch,
 });
 
 function ChatRoute() {
   const { workspaceName } = Route.useParams();
   const search = Route.useSearch();
+  const navigate = Route.useNavigate();
   const isMobile = useIsMobile();
   const setMobileBaseContext = useSetAtom(mobileWorkspaceBaseContextAtom);
+
+  // Selection steering is an in-place correction of the current address, not
+  // a visit to a new page, so the mirror always replaces.
+  const handleSelectionUrlSync = useCallback(
+    (selectionSearch: ChatLandingSearch) => {
+      void navigate({ search: selectionSearch, replace: true });
+    },
+    [navigate]
+  );
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -61,6 +60,7 @@ function ChatRoute() {
       preSelectedProject={search.project}
       preSelectedRepo={search.repo}
       resetDraftKey={search.resetDraftKey}
+      onSelectionUrlSync={handleSelectionUrlSync}
     />
   );
 }

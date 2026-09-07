@@ -14,8 +14,10 @@ import {
   getRegisteredSystemSkillDirs,
   getSkillMarkdownBody,
   getSkillScanCandidateDirs,
+  isRegisteredSkillAgentType,
   parseSkillFrontmatter,
 } from '../src/acp/skills';
+import { BUILTIN_AGENTS } from '../src/ai';
 
 describe('getSkillMarkdownBody', () => {
   it('strips a leading frontmatter block and returns the trimmed body', () => {
@@ -140,12 +142,52 @@ describe('project skills helpers', () => {
     expect([
       ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'cline' }]),
     ]).toEqual(['~/.cline/skills']);
+    // Project dirs but no global dir at all — distinct from an all-empty mapping.
     expect([
-      ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'kimi-code-cli' }]),
+      ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'promptscript' }]),
     ]).toEqual([]);
+    expect([
+      ...getRegisteredSkillDirs([{ cliType: 'registry', agentType: 'promptscript' }]),
+    ]).toEqual([DEFAULT_PROJECT_SKILL_DIR]);
     expect([
       ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'deepagents' }]),
     ]).toEqual([]);
+  });
+
+  it('maps pi, grok, kimi, and deepseek to the shared ~/.agents/skills dir their engines scan', () => {
+    for (const agentType of [
+      'pi',
+      'pi-acp',
+      'grok',
+      'kimi',
+      'kimi-code',
+      'kimi-code-cli',
+      'deepseek',
+    ]) {
+      expect(
+        getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType }]).has(
+          DEFAULT_AGENTS_GLOBAL_SKILL_DIR
+        )
+      ).toBe(true);
+    }
+  });
+
+  it('maps kimi to the .kimi-code brand dirs its engine scans, not the .kimi ones', () => {
+    for (const agentType of ['kimi', 'kimi-code', 'kimi-code-cli']) {
+      const agent = { cliType: 'registry' as const, agentType };
+      expect([...getRegisteredSkillDirs([agent])].sort()).toEqual(
+        [DEFAULT_PROJECT_SKILL_DIR, '.kimi-code/skills'].sort()
+      );
+      expect(getRegisteredGlobalSkillDirs([agent]).has('~/.kimi-code/skills')).toBe(true);
+    }
+    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).not.toContain('~/.kimi/skills');
+    expect(getSkillScanCandidateDirs()).not.toContain('.kimi/skills');
+  });
+
+  it('registers every builtin agent type so none falls back to an unfiltered menu', () => {
+    for (const { agentType } of BUILTIN_AGENTS) {
+      expect(isRegisteredSkillAgentType(agentType)).toBe(true);
+    }
   });
 
   it('exposes codex built-in system skill dirs separate from global dirs', () => {

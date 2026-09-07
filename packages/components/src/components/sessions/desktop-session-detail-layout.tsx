@@ -3,6 +3,8 @@ import { motion, useReducedMotion } from 'framer-motion';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/utils';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/ui/resizable';
+import { FocusScope } from '@/ui/focus-scope';
+import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
 
 export type DesktopSessionDetailLayoutProps = {
   defaultSizes: {
@@ -149,13 +151,16 @@ export function DesktopSessionDetailLayout({
           minSize={15}
           className="min-w-[280px]"
         >
-          <div className="flex h-full flex-col bg-background">
+          <FocusScope
+            id={WORKSPACE_FOCUS_SCOPES.sessionConversation}
+            className="flex h-full flex-col bg-background"
+          >
             {topBar}
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="min-h-0 flex-1 overflow-hidden">{chatSurfaces}</div>
               {terminalDock}
             </div>
-          </div>
+          </FocusScope>
         </ResizablePanel>
 
         <ResizableHandle
@@ -216,7 +221,9 @@ export function DesktopSessionDetailLayout({
               ease: [0.32, 0.72, 0, 1],
             }}
           >
-            {secondaryPanel}
+            <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel} className="h-full">
+              {secondaryPanel}
+            </FocusScope>
           </motion.div>
         </ResizablePanel>
       </ResizablePanelGroup>

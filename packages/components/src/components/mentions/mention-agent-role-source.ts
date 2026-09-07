@@ -94,6 +94,9 @@ export const buildAgentRoleMentionContext = (options: {
   if (mentionSource?.kind === 'local') {
     return { kind: 'machine', machineId: mentionSource.machineId };
   }
+  if (mentionSource?.kind === 'provider' && mentionSource.localProject) {
+    return { kind: 'machine', machineId: mentionSource.localProject.machineId };
+  }
   // A GitHub project whose files are being read out of a live worktree is
   // already checked out on one machine, so it is pinned like a local project.
   if (mentionSource?.kind === 'github' && mentionSource.repoFullName) {

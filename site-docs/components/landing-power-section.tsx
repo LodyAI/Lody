@@ -19,6 +19,7 @@ export type PowerSectionCopy = {
    * Rendered as a short list under the header — no pills / media.
    */
   points?: readonly string[];
+  docsLink?: { href: string; label: string };
   features: readonly {
     id: PowerDemoId;
     title: string;
@@ -142,6 +143,11 @@ export function LandingPowerSection({
             {copy.title}
           </h2>
           <p className="uw-power__body">{copy.body}</p>
+          {copy.docsLink ? (
+            <p className="uw-section-docs">
+              <a href={copy.docsLink.href}>{copy.docsLink.label}</a>
+            </p>
+          ) : null}
           {copy.points && copy.points.length > 0 ? (
             <ul className="uw-power__points">
               {copy.points.map((point) => (

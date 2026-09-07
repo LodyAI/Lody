@@ -3,6 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+import { hasRelatedIssueLink } from './pr-issue-link.mjs';
+
 const REQUIRED_HEADINGS = [
   '## Related issue',
   '## Problem / pressure',
@@ -10,7 +12,6 @@ const REQUIRED_HEADINGS = [
   '## Test plan',
   '## Context handoff',
 ];
-const RELATED_ISSUE_PATTERN = /https:\/\/github\.com\/LodyAI\/Lody\/issues\/[1-9]\d*/i;
 const CONTEXT_HANDOFF_BEGIN = '<!-- context-handoff:begin -->';
 const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
 const REQUIRED_CONTEXT_HEADINGS = [
@@ -108,11 +109,7 @@ function isCompleteContext(value) {
 }
 
 export function hasRelatedIssueReference(body) {
-  const section = sectionBody((body ?? '').replace(/\r\n/g, '\n'), '## Related issue');
-  if (!section) {
-    return false;
-  }
-  return RELATED_ISSUE_PATTERN.test(section.replace(/<!--[\s\S]*?-->/g, ''));
+  return hasRelatedIssueLink(body);
 }
 
 export function checkPullRequestBody(body) {
@@ -141,7 +138,7 @@ export function checkPullRequestBody(body) {
 
   if (requiredHeadingCounts.get('## Related issue') === 1 && !hasRelatedIssueReference(text)) {
     findings.push(
-      '## Related issue must contain a full Lody issue URL such as https://github.com/LodyAI/Lody/issues/123.'
+      '## Related issue must contain a Lody issue reference such as `Closes #123` or `Refs #123`.'
     );
   }
 

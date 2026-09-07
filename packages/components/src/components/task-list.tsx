@@ -51,7 +51,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -70,6 +69,7 @@ import {
   SessionRowLeadingSlot,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SessionMergeablePill,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -191,26 +191,6 @@ export function getVisibleTaskGroupTasks(
   whetherShowFullList: boolean
 ): TaskListTask[] {
   return whetherShowFullList ? group.tasks : group.tasks.slice(0, MAX_VISIBLE_TASKS);
-}
-
-function TaskListSkeleton({ className }: { className?: string }) {
-  const rowWidths = ['w-[70%]', 'w-[58%]', 'w-[76%]', 'w-[62%]', 'w-[68%]', 'w-[54%]'];
-  return (
-    <div className={cn('space-y-3', className)}>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-24" />
-        <div className="space-y-2 rounded-lg border border-border/50 p-2">
-          {rowWidths.map((width, index) => (
-            <div key={index} className="flex items-center gap-2 px-1 py-1.5">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className={cn('h-3', width)} />
-              <Skeleton className="ml-auto h-3 w-10" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function normalizeRepoFullName(value: TaskListTask['repoFullName']): string | null {
@@ -537,6 +517,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
+          data-id={`group:${group.key}`}
+          data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
             'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
@@ -779,6 +761,9 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   role={!useAnchor && isSelectable ? 'button' : undefined}
                   tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                   aria-disabled={!isSelectable ? true : undefined}
+                  aria-current={isSelected ? 'page' : undefined}
+                  data-id={`session:${task.taskId}`}
+                  data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
                   className={cn(
                     'group relative w-full rounded-md text-left',
@@ -834,9 +819,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   ) : null}
                   <div className="flex min-w-0 items-center gap-1.5">
                     <SessionRowLeadingSlot
-                      isWaitingPermission={task.isWaitingPermission}
-                      isWorking={task.isWorking}
-                      hasUnreadMessages={task.hasUnreadMessages}
                       showMenuButton={hasMenuActions}
                       menuLabel={moreActionsLabel}
                     />
@@ -867,6 +849,9 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     </div>
                     {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
                     <SidebarRowEndSlot
+                      isWaitingPermission={task.isWaitingPermission}
+                      isWorking={task.isWorking}
+                      hasUnreadMessages={task.hasUnreadMessages}
                       restIcon={
                         isChatTask ? (
                           <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
@@ -1104,6 +1089,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
           {shouldShowExpandCollapse && (
             <button
               type="button"
+              data-id={`show-more:${group.key}`}
+              data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
                 'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
@@ -1295,7 +1282,7 @@ export const TaskList = memo(function TaskList({
         {headerAction ? (
           <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>
         ) : null}
-        <TaskListSkeleton className={className} />
+        <SidebarListSkeleton className={className} />
       </div>
     );
   }

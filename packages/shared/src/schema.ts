@@ -282,6 +282,22 @@ const historyMessageItemSchema = schema
             return Array.isArray(v.commands) ? true : 'Missing commands';
           case 'system_notice':
             return typeof v.name === 'string' ? true : 'Missing name';
+          case 'operation_progress':
+            return typeof v.operationId === 'string' &&
+              (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              Array.isArray(v.items) &&
+              v.items.every(
+                (item) =>
+                  isRecord(item) &&
+                  isRecord(item.target) &&
+                  typeof item.target.sessionId === 'string' &&
+                  typeof item.target.userTurnId === 'string' &&
+                  (item.label === undefined || typeof item.label === 'string') &&
+                  typeof item.status === 'string' &&
+                  ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
+              )
+              ? true
+              : 'Missing operation progress metadata';
           case 'operation_completion':
             return typeof v.deliveryId === 'string' &&
               typeof v.operationId === 'string' &&
@@ -442,6 +458,16 @@ const issuePrMentionSchema = schema.LoroMap({
   number: schema.Number(),
 });
 
+// Loro Mirror passes null through transforms without invoking encode/decode.
+// The transform therefore gives this optional string its domain-level explicit
+// None state while retaining a primitive string in the CRDT when an id exists.
+const agentRoleIdSchema = schema
+  .String<AgentRoleId>({ required: false })
+  .transform<AgentRoleId | null>({
+    decode: (value) => value,
+    encode: (value) => value,
+  });
+
 const acpSessionConfigSchema = schema
   .LoroMap(
     {
@@ -459,6 +485,9 @@ const acpSessionConfigSchema = schema
       mcpServerIds: schema.Any({ required: false }),
       /** Whether the built-in Lody Task MCP tools are mounted for this Turn. */
       taskToolsEnabled: schema.Boolean({ required: false }),
+      /** Agent Role selected for this Turn; null is explicit None. */
+      agentRoleId: agentRoleIdSchema,
+      agentRoleRevision: schema.Number({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -728,9 +757,18 @@ export type PendingScheduledTask = {
   /** Stable id: cron job id, or a fixed key for the session's single pending wakeup. */
   id: string;
   kind: 'cron' | 'wakeup';
-  /** When this task set entry was last recorded, epoch ms. */
+  /**
+   * When this task set entry was last recorded, epoch ms. For calls persisted with
+   * `recordedAtMs` this is the tool call's own first-sighting stamp (the true creation
+   * moment); older history falls back to the owning turn's START — never its `endedAt`,
+   * which merged cron-fire turns can push past a one-shot's fire minute.
+   */
   createdAtMs: number;
-  /** Wakeup fire time (epoch ms). Absent for cron jobs (they use a schedule expression). */
+  /**
+   * Wakeup fire time (epoch ms); also the runtime-committed fire time of a one-shot cron
+   * whose CronCreate output carried a `nextFireAt` line. Absent for recurring cron jobs
+   * (they resolve from their schedule expression relative to now).
+   */
   scheduledForMs?: number;
   /** Cron schedule expression / human-readable schedule string. */
   humanSchedule?: string;
@@ -831,6 +869,14 @@ export type SessionMeta = {
    * payload never synced. It suppresses only a matching producer pointer.
    */
   lastMissingHistoryUserMsgId?: string;
+  /**
+   * Exact dispatch activation retired because its history entry is already
+   * terminal — the turn ran, only the pointer was stale. Recorded beside the
+   * producer-owned pointers instead of rewriting them, because there is no CAS
+   * against a concurrent send. It suppresses only a matching pointer, and the
+   * turn it names is terminal, so a later settlement may replace it freely.
+   */
+  settledActivationUserMsgId?: string;
   /** Goal thread id the user dismissed from the banner after it reached a terminal state.
    *  The banner stays hidden until a goal with a different threadId arrives. */
   dismissedGoalThreadId?: string;
@@ -886,6 +932,45 @@ export type SessionMeta = {
    */
   autoReview?: SessionAutoReviewMeta;
 };
+
+/**
+ * Resolve the dispatch activation a machine still owes work for.
+ *
+ * The pointer pair alone is NOT the answer: two suppression slots retire an
+ * activation without rewriting the producer-owned pointers, so raw
+ * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
+ * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
+ * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
+ * whose history entry is already terminal. Every consumer that asks "does this
+ * session still owe a turn?" — dispatch, idle GC, auto review, MCP status —
+ * must go through here, or they disagree with the watcher and hang.
+ */
+export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
+  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
+  const settledUserTurnId = meta.settledActivationUserMsgId;
+  if (
+    typeof meta.processingUserMsgId === 'string' &&
+    meta.processingUserMsgId.length > 0 &&
+    meta.processingUserMsgId !== missingUserTurnId &&
+    meta.processingUserMsgId !== settledUserTurnId
+  ) {
+    return meta.processingUserMsgId;
+  }
+  if (
+    typeof meta.latestUserMsgId === 'string' &&
+    meta.latestUserMsgId.length > 0 &&
+    meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
+    meta.latestUserMsgId !== missingUserTurnId &&
+    meta.latestUserMsgId !== settledUserTurnId
+  ) {
+    return meta.latestUserMsgId;
+  }
+  return undefined;
+}
+
+export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
+  return getPendingUserTurnActivationId(meta) !== undefined;
+}
 
 export type SessionLegacyMetaFields = {
   /** Deprecated legacy snapshot; new writes keep goal state in session history. */
@@ -981,6 +1066,38 @@ const sessionForkOperationDocSchema = schema.LoroMap(
 );
 
 /**
+ * ACP-reported runtime configuration after a Turn has started. This is shared
+ * control state, not transcript content: `basedOnUserTurnId` supplies the
+ * causal fence that prevents a late update from changing a newer Turn's
+ * composer baseline.
+ */
+export type SessionAcpRuntimeConfigSnapshot = {
+  acpSessionId: ACPSessionId;
+  basedOnUserTurnId: string;
+  revision: number;
+  modeId?: string;
+  modelId?: string;
+  configOptionValues?: Record<string, AcpConfigOptionValue>;
+};
+
+export type SessionAcpRuntimeConfigPatch = Omit<
+  SessionAcpRuntimeConfigSnapshot,
+  'basedOnUserTurnId' | 'revision'
+>;
+
+const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
+  {
+    acpSessionId: schema.String<ACPSessionId>(),
+    basedOnUserTurnId: schema.String(),
+    revision: schema.Number(),
+    modeId: schema.String({ required: false }),
+    modelId: schema.String({ required: false }),
+    configOptionValues: schema.Any({ required: false }),
+  },
+  { required: false }
+);
+
+/**
  * Root schema for a session doc.
  *
  * Synced docs outlive the builds that write them: a client on a newer schema
@@ -1001,6 +1118,7 @@ export const sessionDocSchema = schema({
   forkOperation: sessionForkOperationDocSchema,
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
+  acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 
 /**

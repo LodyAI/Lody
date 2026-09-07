@@ -1,0 +1,90 @@
+name: Reusable PR contribution policy
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  reconcile:
+    name: Reconcile PR contribution policy
+    runs-on: ubuntu-latest
+    steps:
+      # This workflow has a write-capable token. Policy always comes from the
+      # trusted default branch, never from the pull request head.
+      - name: Checkout trusted policy revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.sha || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Reconcile pull requests
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url')
+            const policy = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-policy.mjs`
+            ).href)
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const eventDriven = context.eventName === 'pull_request_target'
+            const failures = []
+            const invalid = []
+            const numbers = eventDriven
+              ? [context.payload.pull_request.number]
+              : (await github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100,
+                })).map((pullRequest) => pullRequest.number)
+
+            if (!eventDriven) {
+              await policy.ensurePolicyLabels(github, owner, repo)
+            }
+
+            for (const number of numbers) {
+              try {
+                // Pull details, labels, body, and diff size must come from one
+                // current API response rather than the event or list snapshot.
+                const pullRequest = (await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: number,
+                })).data
+                const result = await policy.reconcilePullRequest({
+                  github,
+                  owner,
+                  repo,
+                  pullRequest,
+                  defaultBranch: context.payload.repository.default_branch,
+                  expireOverdue: !eventDriven,
+                })
+                for (const warning of result.warnings) {
+                  core.warning(`PR #${number}: ${warning}`)
+                }
+                core.info(`PR #${number}: ${result.disposition}/${result.state}`)
+                if (
+                  eventDriven &&
+                  result.disposition === policy.PULL_REQUEST_DISPOSITION.EXTERNAL &&
+                  result.state !== 'valid'
+                ) {
+                  invalid.push(`#${number}: ${policy.formatCheckerFindings(
+                    result.validation ?? { findings: ['PR policy is expired.'] }
+                  )}`)
+                }
+              } catch (error) {
+                failures.push(`#${number}: ${error.message}`)
+                core.error(`PR #${number}: ${error.stack || error.message}`)
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(`PR policy reconciliation failed:\n${failures.join('\n')}`)
+            } else if (invalid.length > 0) {
+              core.setFailed(invalid.join('\n\n'))
+            }

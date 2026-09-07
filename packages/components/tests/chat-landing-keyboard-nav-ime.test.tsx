@@ -2,7 +2,7 @@
 
 import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useChatLandingKeyboardNav } from '../src/hooks/use-chat-landing-keyboard-nav';
 
@@ -17,6 +17,16 @@ function KeyboardNavHarness() {
   return (
     <div ref={rootRef}>
       <textarea aria-label="Prompt" />
+    </div>
+  );
+}
+
+function BoundaryHarness() {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useChatLandingKeyboardNav(rootRef, { enabled: true });
+  return (
+    <div ref={rootRef}>
+      <button type="button">Option</button>
     </div>
   );
 }
@@ -66,5 +76,32 @@ describe('chat landing keyboard navigation IME handling', () => {
     });
 
     expect(document.activeElement).not.toBe(textarea);
+  });
+
+  it('yields an unhandled horizontal boundary to the scope switcher', async () => {
+    await act(async () => root.render(<BoundaryHarness />));
+    const button = container.querySelector('button')!;
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      bottom: 40,
+      height: 20,
+      left: 20,
+      right: 80,
+      top: 20,
+      width: 60,
+      x: 20,
+      y: 20,
+      toJSON: () => ({}),
+    });
+    button.focus();
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'ArrowLeft',
+    });
+
+    await act(async () => button.dispatchEvent(event));
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(button);
   });
 });

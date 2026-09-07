@@ -9,12 +9,22 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
-import type { SessionId } from './ids';
+import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema } from './session-orchestration';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 import { normalizeMcpServerIdSelection } from './workspace-mcp';
+import {
+  ACP_AUTH_FORM_FIELD_MAX_COUNT,
+  ACP_AUTH_ID_MAX_LENGTH,
+  ACP_AUTH_LABEL_MAX_LENGTH,
+  ACP_AUTH_METHOD_MAX_COUNT,
+  ACP_AUTH_SELECT_OPTION_MAX_COUNT,
+  ACP_AUTH_TEXT_MAX_LENGTH,
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  isAcpAuthenticationFormWithinByteLimit,
+} from './acp-authentication-limits';
 
 // ============================================
 // BASE ID TYPE SCHEMAS
@@ -357,6 +367,8 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -376,6 +388,8 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -471,6 +485,23 @@ export const normalizeSessionTurnInputConfig = (
   const taskToolsEnabled = maybeParseField(z.boolean(), record.taskToolsEnabled);
   if (taskToolsEnabled !== undefined) {
     normalized.taskToolsEnabled = taskToolsEnabled;
+  }
+
+  if (record.agentRoleId === null) {
+    normalized.agentRoleId = null;
+  } else {
+    const agentRoleId = trimOptionalString(record.agentRoleId);
+    if (agentRoleId) {
+      normalized.agentRoleId = agentRoleId as AgentRoleId;
+    }
+  }
+
+  const agentRoleRevision = maybeParseField(
+    z.number().int().nonnegative(),
+    record.agentRoleRevision
+  );
+  if (agentRoleRevision !== undefined) {
+    normalized.agentRoleRevision = agentRoleRevision;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
@@ -1151,15 +1182,156 @@ const AcpModelSchema = z
   })
   .strict();
 
+const AcpConfigOptionValueSummarySchema = z
+  .object({
+    value: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    group: z.string().optional(),
+  })
+  .strict();
+
+const AcpConfigOptionSummarySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    type: z.enum(['select', 'boolean']),
+    currentValue: AcpConfigOptionValueSchema,
+    options: z.array(AcpConfigOptionValueSummarySchema),
+  })
+  .strict();
+
+const AcpCapabilityCacheEntrySchema = z
+  .object({
+    cliType: AgentConfigCliTypeSchema,
+    agentType: z.string().trim().min(1),
+    cacheVersion: z.number().optional(),
+    provenance: z.literal('runtime').optional(),
+    sourceVersion: z.string().optional(),
+    modes: z.array(AcpModeSchema),
+    models: z.array(AcpModelSchema),
+    configOptions: z.array(AcpConfigOptionSummarySchema).optional(),
+    modelReasoningEfforts: z.record(z.string(), z.array(z.string())).optional(),
+    availableCommands: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            description: z.string().optional(),
+          })
+          .strict()
+      )
+      .optional(),
+    sessionFork: z.boolean().optional(),
+    acknowledgedSteer: z.boolean().optional(),
+    sessionForkWorktree: z.boolean().optional(),
+    fetchedAt: z.number(),
+  })
+  .strict();
+
 const MachineAcpAuthMethodSummarySchema = z
   .object({
     type: z.enum(['agent', 'env_var', 'terminal']),
-    id: z.string().optional(),
-    name: z.string().optional(),
-    description: z.string().optional(),
-    args: z.array(z.string()).optional(),
+    id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    name: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    args: z.array(z.string().max(ACP_AUTH_LABEL_MAX_LENGTH)).max(64).optional(),
   })
   .strict();
+
+const MachineAcpAuthenticationFormFieldSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      type: z.literal('text'),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+      required: z.boolean(),
+      defaultValue: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      type: z.literal('secret'),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+      required: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      type: z.literal('select'),
+      label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+      description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+      required: z.boolean(),
+      options: z
+        .array(
+          z
+            .object({
+              value: z.string().min(1).max(ACP_AUTH_TEXT_MAX_LENGTH),
+              label: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+            })
+            .strict()
+        )
+        .min(1)
+        .max(ACP_AUTH_SELECT_OPTION_MAX_COUNT),
+      defaultValue: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    })
+    .strict(),
+]);
+
+const MachineAcpAuthenticationFormSchema = z
+  .object({
+    title: z.string().max(ACP_AUTH_LABEL_MAX_LENGTH).optional(),
+    description: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    fields: z
+      .array(MachineAcpAuthenticationFormFieldSchema)
+      .min(1)
+      .max(ACP_AUTH_FORM_FIELD_MAX_COUNT),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!isAcpAuthenticationFormWithinByteLimit(value)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Authentication form exceeds the serialized size limit',
+      });
+    }
+    const fieldIds = new Set<string>();
+    value.fields.forEach((field, fieldIndex) => {
+      if (fieldIds.has(field.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['fields', fieldIndex, 'id'],
+          message: 'Authentication form field ids must be unique',
+        });
+      }
+      fieldIds.add(field.id);
+      if (field.type !== 'select') return;
+      const optionValues = new Set<string>();
+      field.options.forEach((option, optionIndex) => {
+        if (optionValues.has(option.value)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['fields', fieldIndex, 'options', optionIndex, 'value'],
+            message: 'Authentication select option values must be unique',
+          });
+        }
+        optionValues.add(option.value);
+      });
+      if (field.defaultValue !== undefined && !optionValues.has(field.defaultValue)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['fields', fieldIndex, 'defaultValue'],
+          message: 'Authentication select default must match an option',
+        });
+      }
+    });
+  });
 
 export const MachineAcpCapabilitiesRefreshRequestSchema = z
   .object({
@@ -1167,11 +1339,6 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
-    cliType: AgentConfigCliTypeSchema,
-    agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-    env: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
@@ -1195,6 +1362,7 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
         })
       )
       .optional(),
+    capability: AcpCapabilityCacheEntrySchema.optional(),
     availableCommands: z
       .array(
         z.object({
@@ -1204,51 +1372,42 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
       )
       .optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     error: z.string().optional(),
   })
   .strict();
 
-export const MachineAcpAuthenticateRequestSchema = z
-  .object({
-    type: z.literal('machine/acp-authenticate'),
-    machineId: MachineIdSchema,
-    workspaceId: WorkspaceIdSchema,
-    requestId: z.string().trim().min(1),
-    action: z.enum(['start', 'cancel', 'submit-code']),
-    authenticationRequestId: z.string().trim().min(1).optional(),
-    authorizationCode: z.string().trim().min(1).max(4096).optional(),
-    configId: AgentConfigIdSchema.optional(),
-    cliType: AgentConfigCliTypeSchema,
-    agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
-    env: z.record(z.string(), z.string()).optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.action === 'submit-code') {
-      if (!value.authenticationRequestId) {
-        context.addIssue({
-          code: 'custom',
-          path: ['authenticationRequestId'],
-          message: 'authenticationRequestId is required when submitting an authorization code',
-        });
-      }
-      if (!value.authorizationCode) {
-        context.addIssue({
-          code: 'custom',
-          path: ['authorizationCode'],
-          message: 'authorizationCode is required when submitting an authorization code',
-        });
-      }
-    } else if (value.authenticationRequestId || value.authorizationCode) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Authorization-code fields are only valid for submit-code',
-      });
-    }
-  });
+const MachineAcpAuthenticateRequestBaseSchema = z.object({
+  type: z.literal('machine/acp-authenticate'),
+  machineId: MachineIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  requestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+});
+
+export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action', [
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('start'),
+    configId: AgentConfigIdSchema,
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('cancel'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('submit-code'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+  }).strict(),
+  MachineAcpAuthenticateRequestBaseSchema.extend({
+    action: z.literal('submit-input'),
+    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    authenticationInput: z.string().min(1).max(65536),
+  }).strict(),
+]);
 
 export const MachineAcpAuthenticateResponseSchema = z
   .object({
@@ -1257,10 +1416,20 @@ export const MachineAcpAuthenticateResponseSchema = z
     requestId: z.string().trim().min(1),
     agentType: z.string().trim().min(1),
     success: z.boolean(),
-    disposition: z.enum(['authenticated', 'cancelled', 'not-running', 'input-accepted', 'error']),
+    disposition: z.enum([
+      'authenticated',
+      'cancelled',
+      'not-running',
+      'input-accepted',
+      'method-required',
+      'error',
+    ]),
     capabilitiesRefreshed: z.boolean().optional(),
     authRequired: z.boolean().optional(),
-    authMethods: z.array(MachineAcpAuthMethodSummarySchema).optional(),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
     error: z.string().optional(),
   })
   .strict();
@@ -1271,15 +1440,41 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
     machineId: MachineIdSchema,
     requestId: z.string().trim().min(1),
     agentType: z.string().trim().min(1),
-    status: z.enum(['starting', 'authorization', 'output', 'authenticated', 'cancelled', 'error']),
-    authorizationUrl: z.string().url().max(8192).optional(),
+    status: z.enum([
+      'starting',
+      'auth-methods',
+      'authorization',
+      'input-required',
+      'output',
+      'authenticated',
+      'cancelled',
+      'error',
+    ]),
+    authMethods: z
+      .array(MachineAcpAuthMethodSummarySchema)
+      .max(ACP_AUTH_METHOD_MAX_COUNT)
+      .optional(),
+    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    message: z.string().max(ACP_AUTH_TEXT_MAX_LENGTH).optional(),
+    form: MachineAcpAuthenticationFormSchema.optional(),
+    authorizationUrl: z
+      .string()
+      .url()
+      .max(ACP_AUTHORIZATION_URL_MAX_LENGTH)
+      .refine((value) => {
+        const protocol = new URL(value).protocol;
+        return protocol === 'https:' || protocol === 'http:';
+      }, 'authorizationUrl must use http or https')
+      .optional(),
     userCode: z.string().trim().min(1).max(128).optional(),
     acceptsAuthorizationCode: z.boolean().optional(),
     authorizationCodePublicKey: RpcSecretPublicKeySchema.optional(),
+    authenticationInputPublicKey: RpcSecretPublicKeySchema.optional(),
+    requiresAuthorizationConsent: z.boolean().optional(),
     expiresInSeconds: z.number().int().positive().optional(),
     stream: z.enum(['stdout', 'stderr']).optional(),
-    output: z.string().optional(),
-    error: z.string().optional(),
+    output: z.string().max(16_384).optional(),
+    error: z.string().max(65_536).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -1288,6 +1483,37 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
         code: 'custom',
         path: ['authorizationUrl'],
         message: 'authorizationUrl is required for authorization progress',
+      });
+    }
+    if (
+      value.status === 'auth-methods' &&
+      (!value.interactionId ||
+        !value.authMethods?.length ||
+        value.authMethods.some((method) => !method.id || method.type !== 'agent') ||
+        new Set(value.authMethods.map((method) => method.id)).size !== value.authMethods.length)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authMethods'],
+        message: 'auth-methods progress requires an interaction and methods with ids',
+      });
+    }
+    if (value.status === 'input-required' && (!value.interactionId || !value.form)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['form'],
+        message: 'input-required progress requires an interaction and form',
+      });
+    }
+    if (
+      value.status === 'authorization' &&
+      value.requiresAuthorizationConsent &&
+      !value.interactionId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['interactionId'],
+        message: 'URL consent requires an interaction id',
       });
     }
   });
@@ -1702,7 +1928,7 @@ export const SessionPreviewCreateRequestSchema = z
     approval: z
       .object({
         source: z.enum(['browser_address', 'share_action']),
-        targetClass: z.enum(['loopback', 'private_lan']),
+        targetClass: z.literal('loopback'),
         target: PreviewTargetSchema,
         confirmedByUserId: z.string().trim().min(1),
         confirmedAt: z.number().int().nonnegative(),
@@ -2899,6 +3125,7 @@ export const ChatFailedReasonSchema = z.enum([
   'acp_auth_required',
   'acp_internal_error',
   'acp_upstream_api_error',
+  'acp_provider_overloaded',
   'acp_session_storage_incompatible',
   'acp_resource_not_found',
   'acp_request_cancelled',
@@ -2977,6 +3204,9 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
     toolName: z.string().optional(),
     // IANA timezone of the machine that ran a scheduling tool (cron is local-time to it).
     schedulingTimeZone: z.string().optional(),
+    // Epoch ms when a scheduling tool call was first persisted (true creation moment;
+    // turn-level timestamps are not a safe proxy — see `recordedAtMs` in ai.ts).
+    recordedAtMs: z.number().optional(),
     permissionRequest: PermissionRequestInfoSchema.optional(),
   }),
   z.object({
@@ -2993,19 +3223,43 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       'session_chat',
       'session_chat_many',
     ]),
+    progressMessageId: z.string().trim().min(1).optional(),
     completion: z.unknown(),
     continuation: z
       .object({
-        status: z.literal('not_started'),
+        status: z.enum(['not_started', 'uncertain']),
         reason: z
           .object({
-            code: z.literal('CONFIGURATION_UNAVAILABLE'),
+            code: z.enum([
+              'CONFIGURATION_UNAVAILABLE',
+              'DELIVERY_ATTEMPTS_EXHAUSTED',
+              'DELIVERY_EXECUTION_UNCERTAIN',
+            ]),
             message: z.string(),
           })
           .strict(),
       })
       .strict()
       .optional(),
+  }),
+  z.object({
+    type: z.literal('operation_progress'),
+    operationId: LodyOperationIdSchema,
+    operationKind: z.enum(['session_create', 'session_create_many']),
+    items: z.array(
+      z
+        .object({
+          target: z
+            .object({
+              sessionId: SessionIdSchema,
+              userTurnId: z.string().trim().min(1),
+            })
+            .strict(),
+          label: z.string().optional(),
+          status: z.enum(['created', 'running', 'succeeded', 'failed', 'cancelled']),
+        })
+        .strict()
+    ),
   }),
 ]);
 

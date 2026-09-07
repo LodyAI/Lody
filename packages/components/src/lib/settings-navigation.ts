@@ -1,19 +1,29 @@
-export type SettingsBackDestination = 'settings-list' | 'chat';
+export type SettingsBackDestination =
+  | { kind: 'settings-list' }
+  | { kind: 'source'; to: string }
+  | { kind: 'chat' };
 
 type GetSettingsBackDestinationOptions = {
   isMobile: boolean;
   settingsListPage: boolean;
+  from?: string;
 };
 
 export function getSettingsBackDestination({
   isMobile,
   settingsListPage,
+  from,
 }: GetSettingsBackDestinationOptions): SettingsBackDestination {
   if (isMobile && !settingsListPage) {
-    return 'settings-list';
+    return { kind: 'settings-list' };
   }
 
-  return 'chat';
+  const source = resolveSettingsCloseTo(from);
+  if (source) {
+    return { kind: 'source', to: source };
+  }
+
+  return { kind: 'chat' };
 }
 
 /** Whether `pathname` is anywhere inside the workspace's settings section. */

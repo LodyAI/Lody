@@ -12,7 +12,7 @@ import {
 } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
-import { JoinCommunityDialog } from '@/components/settings/join-community-dialog';
+import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -192,19 +192,19 @@ export function MobileAboutSettings() {
 
       <MobileSettingsSection title={t('settings.about.linksTitle', 'Links')}>
         <MobileSettingsRowGroup>
-          <MobileSettingsRow
-            label={t('settings.about.website', 'Website')}
-            onClick={handleOpenWebsite}
-            trailing={<ExternalLink className="h-4 w-4" />}
-          />
+          <MobileSettingsRow label={t('settings.about.community', 'Community')}>
+            <JoinCommunityButton />
+          </MobileSettingsRow>
           <MobileSettingsRow
             label={t('settings.about.downloadApps', 'Download apps')}
             onClick={handleOpenDownloadPage}
             trailing={<ExternalLink className="h-4 w-4" />}
           />
-          <MobileSettingsRow label={t('settings.about.community', 'Community')}>
-            <JoinCommunityDialog />
-          </MobileSettingsRow>
+          <MobileSettingsRow
+            label={t('settings.about.website', 'Website')}
+            onClick={handleOpenWebsite}
+            trailing={<ExternalLink className="h-4 w-4" />}
+          />
           {/* Dialog is self-contained (renders its own DialogTrigger button); we
              keep the trigger button in the row's right slot rather than making
              the entire row tappable so the dialog's controlled-open state stays

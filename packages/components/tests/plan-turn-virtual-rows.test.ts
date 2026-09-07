@@ -105,6 +105,45 @@ describe('approved plan renders its own region', () => {
     ]);
   });
 
+  it('sorts agent attachments below the plan and keeps the answer visible above them', () => {
+    // A plan runs long, so an attachment above it is stranded mid-markdown.
+    // Emitted attachment-first; rendered plan-first.
+    const rows = buildRows(
+      [
+        tool('read-1', 'read'),
+        {
+          type: 'file',
+          fileId: 'f1',
+          fileName: 'report.md',
+          mimeType: 'text/markdown',
+          sizeBytes: 10,
+          sha256: 'a',
+          textPreview: true,
+          uploadedAt: 0,
+          transport: 'r2',
+        },
+        { type: 'text', text: 'Here is the plan and the report.' },
+        {
+          type: 'proposed_plan',
+          turnId: 'turn-plan',
+          markdown: '# Plan',
+          status: 'completed',
+          isLatest: true,
+        },
+      ] as unknown as MessageContent[],
+      true
+    );
+
+    // The answer keeps its place above the tail: a turn ending in a `file` used
+    // to report no visible answer, which folded the answer into "Worked for …".
+    expect(visibleContentKinds(rows)).toEqual([
+      'worked_group_header',
+      'content:text',
+      'content:proposed_plan',
+      'content:file',
+    ]);
+  });
+
   it('keeps every step visible while the turn is still streaming', () => {
     const rows = buildRows(planTurnItems, false);
 

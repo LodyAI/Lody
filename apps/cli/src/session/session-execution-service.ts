@@ -2,6 +2,7 @@ import {
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigCliType,
+  type AgentConfigMeta,
   type ChatFailedCode,
   type ChatFailedReason,
   type IssuePRMention,
@@ -139,6 +140,11 @@ type FinalizeTurnContext = {
 };
 
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
+// Renderer, local IPC, and Machine RPC wait at most 300s for the complete
+// authentication workflow. Keep the post-login capability proof inside that
+// envelope and leave a small delivery margin for the final response.
+const ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS = 295_000;
+const ACP_POST_AUTH_REFRESH_MAX_MS = 60_000;
 
 /**
  * Shown in chat when a turn ends with no agent output at all. It names the most
@@ -206,12 +212,19 @@ type PromptHandoffRun = {
   signalSuccessor: () => void;
 };
 
+type TurnInvocation = {
+  /** Causal input Turn for authorization and durable provenance. */
+  sourceTurnId: string;
+  requesterUserId?: string;
+  inputConfig: SessionTurnInputConfig;
+};
+
 type TurnRuntimeState = {
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
   userTurnId?: string;
-  requesterUserId?: string;
+  invocation?: TurnInvocation;
   session?: ISession;
   project?: ProjectRef;
   baseCommitHash?: string | null;
@@ -227,6 +240,11 @@ type TurnRuntimeState = {
   cancelFinalized: boolean;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
+  settlement?: {
+    callback: (settlement: SessionTurnSettlement) => Promise<void>;
+    forcedOutcome?: SessionTurnSettlement;
+    completed: boolean;
+  };
   /** Logical prompt tail currently owned by the one session-owner fiber. */
   activePromptRun?: PromptHandoffRun;
   /** Serialized ancillary finalization for yielded logical turns. */
@@ -303,6 +321,15 @@ type VisibleSessionTurnOptions = {
   sessionDoc: SessionDocument;
   session?: ISession;
   userTurnId?: string;
+  invocation?: TurnInvocation;
+  /**
+   * Turn that deterministically owns the assistant history entry. Delivery
+   * uses its system Turn here while leaving userTurnId absent so it cannot
+   * mutate user dispatch status or pointers.
+   */
+  assistantEntryParentTurnId?: string;
+  onTurnStarted?: () => Promise<boolean>;
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
   /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
@@ -327,10 +354,18 @@ type SessionDispatchOptions = {
   /**
    * Runs only after this process has synchronously claimed the per-Session
    * visible-turn owner. Delivery uses this to append its system cause without
-   * racing a user dispatch between the idle check and the history write.
+   * racing a user dispatch between the idle check and the history write. False
+   * means an external durable claim lost contention; the turn is released
+   * without history, ACP, failure, or settlement side effects.
    */
-  onTurnClaimed?: () => Promise<void>;
+  onTurnClaimed?: () => Promise<boolean>;
+  /** Runs immediately before the request can cross into the ACP provider. */
+  onTurnStarted?: () => Promise<boolean>;
+  /** Reports whether the provider was handled, cancelled, never started, or left uncertain. */
+  onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
 };
+
+type SessionTurnSettlement = 'handled' | 'cancelled' | 'not_started' | 'uncertain';
 
 export type PreparedSessionDispatchRequest =
   | { mode: 'create'; request: SessionCreateRequestValidated }
@@ -340,6 +375,7 @@ export type PreparedSessionDispatchOptions = {
   sessionId: SessionId;
   sessionDoc: SessionDocument;
   userTurnId: string;
+  invocation: TurnInvocation;
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
@@ -362,6 +398,17 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   reason: ChatFailedReason;
 }> {}
 
+class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
+  sessionId: SessionId;
+  turnId: string;
+}> {}
+
+class SessionTurnStartFenceFailed extends Data.TaggedError('SessionTurnStartFenceFailed')<{
+  sessionId: SessionId;
+  turnId: string;
+  cause: unknown;
+}> {}
+
 const isSessionTurnCancelled = (error: unknown): error is SessionTurnCancelled => {
   return (
     typeof error === 'object' &&
@@ -377,6 +424,24 @@ const isSessionTurnHalted = (error: unknown): error is SessionTurnHalted => {
     error !== null &&
     '_tag' in error &&
     error._tag === 'SessionTurnHalted'
+  );
+};
+
+const isSessionTurnClaimContended = (error: unknown): error is SessionTurnClaimContended => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'SessionTurnClaimContended'
+  );
+};
+
+const isSessionTurnStartFenceFailed = (error: unknown): error is SessionTurnStartFenceFailed => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    '_tag' in error &&
+    error._tag === 'SessionTurnStartFenceFailed'
   );
 };
 
@@ -431,7 +496,11 @@ export type SessionExecutionServiceDeps = {
       acpSessionId: ACPSessionId | null;
       agentClient: unknown;
     },
-    config: ApplyModeAndModelConfig
+    config: ApplyModeAndModelConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+    }
   ) => Promise<void>;
   createAssistantEntryForTurn: (
     sessionId: SessionId,
@@ -572,6 +641,9 @@ type AcpAuthenticationOptions = {
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
+type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
+  Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'>;
+
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
   const record =
     typeof method === 'object' && method !== null
@@ -579,13 +651,18 @@ const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary =>
       : ({} as Record<string, unknown>);
   const type =
     record.type === 'terminal' || record.type === 'env_var' ? record.type : ('agent' as const);
+  const boundedString = (value: unknown, maxLength: number): string | undefined =>
+    typeof value === 'string' ? value.slice(0, maxLength) : undefined;
+  const id = boundedString(record.id, 1024);
+  const name = boundedString(record.name, 4096);
+  const description = boundedString(record.description, 16_384);
   return {
     type,
-    ...(typeof record.id === 'string' ? { id: record.id } : {}),
-    ...(typeof record.name === 'string' ? { name: record.name } : {}),
-    ...(typeof record.description === 'string' ? { description: record.description } : {}),
+    ...(id !== undefined ? { id } : {}),
+    ...(name !== undefined ? { name } : {}),
+    ...(description !== undefined ? { description } : {}),
     ...(Array.isArray(record.args) && record.args.every((arg) => typeof arg === 'string')
-      ? { args: record.args }
+      ? { args: record.args.slice(0, 64).map((arg) => arg.slice(0, 4096)) }
       : {}),
   };
 };
@@ -1222,7 +1299,10 @@ export class SessionExecutionService {
         return preConfigRejection;
       }
       if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig);
+        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
+          sessionDoc,
+          basedOnUserTurnId: options.userTurnId,
+        });
       }
 
       const preSubmitRejection = await rejectBeforeProviderSubmission();
@@ -1251,6 +1331,17 @@ export class SessionExecutionService {
         ) {
           return reject('stale-turn', 'Steer application arrived after ownership changed');
         }
+
+        // The provider has accepted this steer and may execute tools before
+        // history/finalization catches up. Switch causal identity first.
+        runtime.invocation = {
+          sourceTurnId: options.userTurnId,
+          requesterUserId: options.userId,
+          inputConfig: options.inputConfig,
+        };
+        // Provider acceptance hands the original dispatch forward. A later
+        // user-owned steer turn must not cancel or reopen that responsibility.
+        await this.settleVisibleTurn(runtime, 'handled', { force: true });
 
         try {
           await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
@@ -1304,7 +1395,6 @@ export class SessionExecutionService {
         runtime.activePromptRun = nextPromptRun;
         runtime.turnId = nextTurnId;
         runtime.userTurnId = options.userTurnId;
-        runtime.requesterUserId = options.userId;
         this.markCurrentTurn(options.sessionId, nextTurnId);
         ownedPromptRun.signalSuccessor();
         return {
@@ -1437,6 +1527,7 @@ export class SessionExecutionService {
           sessionId,
           sessionDoc: options.sessionDoc,
           userTurnId,
+          invocation: options.invocation,
           dispatchSource,
           unhandledErrorCode: 'session_chat_failed',
           describeUnhandledError: (error) =>
@@ -1508,16 +1599,17 @@ export class SessionExecutionService {
   }
 
   private createTurnRuntime(
-    sessionId: SessionId,
-    turnId: string,
-    userTurnId?: string,
-    session?: ISession
+    options: Pick<
+      VisibleSessionTurnOptions,
+      'sessionId' | 'session' | 'userTurnId' | 'invocation' | 'onTurnSettled'
+    > & { turnId: string }
   ): TurnRuntimeState {
     return {
-      sessionId,
-      turnId,
-      userTurnId,
-      session,
+      sessionId: options.sessionId,
+      turnId: options.turnId,
+      userTurnId: options.userTurnId,
+      invocation: options.invocation,
+      session: options.session,
       promptStarted: false,
       promptInFlight: false,
       autoPromptInFlight: false,
@@ -1529,8 +1621,30 @@ export class SessionExecutionService {
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
+      ...(options.onTurnSettled
+        ? { settlement: { callback: options.onTurnSettled, completed: false } }
+        : {}),
       yieldedFinalization: Promise.resolve(),
     };
+  }
+
+  private async settleVisibleTurn(
+    runtime: TurnRuntimeState,
+    outcome: SessionTurnSettlement,
+    options: { force?: boolean } = {}
+  ): Promise<void> {
+    const settlement = runtime.settlement;
+    if (!settlement || settlement.completed) return;
+    if (options.force) settlement.forcedOutcome = outcome;
+    const effectiveOutcome = settlement.forcedOutcome ?? outcome;
+    try {
+      await settlement.callback(effectiveOutcome);
+      settlement.completed = true;
+    } catch (error) {
+      this.deps.logger.error(
+        `[${runtime.sessionId}] Failed to persist ${effectiveOutcome} turn settlement: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private getTurnRuntime(sessionId: SessionId, turnId: string): TurnRuntimeState | undefined {
@@ -1846,7 +1960,13 @@ export class SessionExecutionService {
     }
     runtime.prePromptFailureRecorded = true;
     const message = formatErrorMessage(error);
-    if (isGitExecutableNotFoundError(error)) {
+    // A first turn on a brand-new session establishes the ACP session here, so
+    // an agent that requires sign-in fails before the prompt. Keep the specific
+    // reason: it is what lets the client offer the authentication flow instead
+    // of a generic "failed before the agent could start".
+    if (error instanceof AcpAuthenticationRequiredError) {
+      await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
+    } else if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,
         'turn_pre_prompt_failed',
@@ -2502,7 +2622,8 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
-    const { sessionId, sessionDoc, session, userTurnId } = options;
+    const { sessionId, sessionDoc, userTurnId } = options;
+    const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
       sessionId,
       ...(userTurnId ? { userTurnId } : {}),
@@ -2531,13 +2652,13 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
-      turnId = this.deps.beginConversationTurn(sessionId, userTurnId, {
+      turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
         deferACPUpdateTarget: true,
       });
       this.markCurrentTurn(sessionId, turnId);
-      runtime = this.createTurnRuntime(sessionId, turnId, userTurnId, session);
+      runtime = this.createTurnRuntime({ ...options, turnId });
       this.registerTurnRuntime(runtime);
     } finally {
       releaseConflict();
@@ -2670,7 +2791,7 @@ export class SessionExecutionService {
                         sessionDoc,
                         runtime.turnId,
                         runtime.session?.agentClient?.currentModel,
-                        userTurnId
+                        assistantEntryParentTurnId
                       )
                   )
                 );
@@ -2715,6 +2836,35 @@ export class SessionExecutionService {
                 if (!agentClient || !acpSessionId) {
                   yield* Effect.fail(new Error('Agent session was not ready'));
                   return undefined;
+                }
+                if (!runtime.promptStarted && options.onTurnStarted) {
+                  const started = yield* self.tryPromise(options.onTurnStarted).pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new SessionTurnStartFenceFailed({
+                          sessionId,
+                          turnId: runtime.turnId,
+                          cause,
+                        })
+                    ),
+                    // Finalize while this runtime still owns the session; settlement is not success.
+                    Effect.tapError(() =>
+                      self.ignoreWithWarning(
+                        sessionId,
+                        'Failed to finalize a rejected Delivery start fence',
+                        self.tryPromise(() => self.handleTurnError(sessionId, sessionDoc))
+                      )
+                    )
+                  );
+                  if (!started) {
+                    yield* Effect.fail(
+                      new SessionTurnClaimContended({
+                        sessionId,
+                        turnId: runtime.turnId,
+                      })
+                    );
+                    return undefined;
+                  }
                 }
                 runtime.terminateSessionOnCancel = false;
                 self.deps.activateConversationTurnForACPUpdates(sessionId, runtime.turnId);
@@ -2782,13 +2932,23 @@ export class SessionExecutionService {
 
     const fiber = Effect.runFork(program);
     runtime.fiber = fiber;
+    let settlement: SessionTurnSettlement | undefined;
     try {
       await this.awaitTurnFiber(fiber, sessionId, turnId);
       if (outcome === 'unknown') {
         outcome = 'completed';
       }
+      settlement = 'handled';
     } catch (error) {
-      if (isSessionTurnHalted(error)) {
+      if (isSessionTurnClaimContended(error)) {
+        outcome = 'claim-contended';
+      } else if (isSessionTurnStartFenceFailed(error)) {
+        outcome = 'start-fence-failed';
+        this.deps.logger.warn(
+          `[${sessionId}] Delivery start fence failed before provider execution: ${formatErrorMessage(error.cause)}`
+        );
+        settlement = 'not_started';
+      } else if (isSessionTurnHalted(error)) {
         outcome = `halted-${error.reason}`;
         await this.finalizeHaltedTurn({
           sessionId,
@@ -2796,10 +2956,8 @@ export class SessionExecutionService {
           turnId: runtime.turnId,
           reason: error.reason,
         });
-        return outcome;
-      }
-
-      if (
+        settlement = 'handled';
+      } else if (
         isSessionTurnCancelled(error) ||
         runtime.cancelFinalized ||
         runtime.cancelRequested ||
@@ -2807,25 +2965,37 @@ export class SessionExecutionService {
         (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId))
       ) {
         outcome = 'cancelled';
-        return outcome;
+        const explicitlyCancelled =
+          runtime.cancelRequested ||
+          this.isTurnCancelled(sessionId, runtime.turnId) ||
+          (await this.isUserTurnCancelled(sessionDoc, runtime.userTurnId));
+        settlement = explicitlyCancelled
+          ? 'cancelled'
+          : runtime.promptStarted
+            ? 'uncertain'
+            : 'not_started';
+      } else {
+        await this.handleVisibleTurnUnhandledError({
+          sessionId,
+          sessionDoc,
+          userTurnId: runtime.userTurnId,
+          runtime,
+          error,
+          code: effectiveErrorContext.code,
+          describe: effectiveErrorContext.describe,
+          onUnhandledError: effectiveErrorContext.onUnhandledError,
+        });
+        outcome = 'unhandled-error-recorded';
+        settlement = 'handled';
       }
-
-      await this.handleVisibleTurnUnhandledError({
-        sessionId,
-        sessionDoc,
-        userTurnId: runtime.userTurnId,
-        runtime,
-        error,
-        code: effectiveErrorContext.code,
-        describe: effectiveErrorContext.describe,
-        onUnhandledError: effectiveErrorContext.onUnhandledError,
-      });
-      outcome = 'unhandled-error-recorded';
     } finally {
       if (!runtime.promptStarted) {
         this.deps.clearConversationTurn(sessionId, runtime.turnId);
       }
       span.end({ outcome, turnId });
+    }
+    if (settlement) {
+      await this.settleVisibleTurn(runtime, settlement);
     }
     return outcome;
   }
@@ -2957,6 +3127,28 @@ export class SessionExecutionService {
   /** The `userTurnId` owned by the session's active turn runtime, if any. */
   getActiveUserTurnId(sessionId: SessionId): string | undefined {
     return this.turnRuntimeBySession.get(sessionId)?.userTurnId;
+  }
+
+  getActiveInvocationContext(sessionId: SessionId):
+    | {
+        requesterUserId: string;
+        sourceTurnId: string;
+        inputConfig: SessionTurnInputConfig;
+      }
+    | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime) {
+      return undefined;
+    }
+    const { invocation } = runtime;
+    if (!invocation?.requesterUserId) {
+      throw new Error(`Active invocation identity is unavailable for session ${sessionId}`);
+    }
+    return {
+      requesterUserId: invocation.requesterUserId,
+      sourceTurnId: invocation.sourceTurnId,
+      inputConfig: invocation.inputConfig,
+    };
   }
 
   private async setDispatchProcessing(
@@ -3250,7 +3442,18 @@ export class SessionExecutionService {
     }
     const body = dispatchOptions?.onTurnClaimed
       ? (ctx: VisibleSessionTurnContext) =>
-          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(Effect.flatMap(() => turn.body(ctx)))
+          Effect.promise(dispatchOptions.onTurnClaimed!).pipe(
+            Effect.flatMap((claimed) =>
+              claimed
+                ? turn.body(ctx)
+                : Effect.fail(
+                    new SessionTurnClaimContended({
+                      sessionId: message.sessionId,
+                      turnId: ctx.turnId,
+                    })
+                  )
+            )
+          )
       : turn.body;
     await this.runVisibleSessionTurn(turn.options, body);
   }
@@ -3578,7 +3781,6 @@ export class SessionExecutionService {
     ): Effect.Effect<void, unknown, Scope.Scope> =>
       Effect.gen(function* () {
         const { turnId, runtime, abortIfCancelled, openAssistantEntry, prompt } = ctx;
-        runtime.requesterUserId = message.userId;
         let activeSession = readySession;
         let staleAcpPromptRecoveryAttempted = false;
         let baseCommitHash: string | null = null;
@@ -3676,10 +3878,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId, triggerReason },
               async () =>
-                await self.deps.applyAcpModeAndModel(targetSession, {
-                  ...acpSessionConfig,
-                  configOptionValues: acpSessionConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  targetSession,
+                  {
+                    ...acpSessionConfig,
+                    configOptionValues: acpSessionConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: executionUserTurnId,
+                  }
+                )
             )
           );
 
@@ -3839,7 +4048,7 @@ export class SessionExecutionService {
 
         const completedTurnId = runtime.turnId;
         const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
-        const completedRequesterUserId = runtime.requesterUserId ?? userId;
+        const completedRequesterUserId = runtime.invocation?.requesterUserId ?? userId;
         // Read before finalization clears the turn's ACP update state.
         const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
 
@@ -3968,6 +4177,16 @@ export class SessionExecutionService {
         sessionDoc,
         ...(session ? { session } : {}),
         userTurnId: executionUserTurnId,
+        invocation: {
+          sourceTurnId: userTurnId,
+          requesterUserId: userId,
+          inputConfig: acpSessionConfig,
+        },
+        ...(dispatchOptions?.dispatchSource === 'delivery'
+          ? { assistantEntryParentTurnId: userTurnId }
+          : {}),
+        ...(dispatchOptions?.onTurnStarted ? { onTurnStarted: dispatchOptions.onTurnStarted } : {}),
+        ...(dispatchOptions?.onTurnSettled ? { onTurnSettled: dispatchOptions.onTurnSettled } : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4288,6 +4507,15 @@ export class SessionExecutionService {
         sessionId,
         sessionDoc,
         userTurnId,
+        ...(userTurnId
+          ? {
+              invocation: {
+                sourceTurnId: userTurnId,
+                requesterUserId: message.userId,
+                inputConfig: acpSessionConfig,
+              },
+            }
+          : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4309,7 +4537,6 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
-          runtime.requesterUserId = message.userId;
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -4461,10 +4688,17 @@ export class SessionExecutionService {
               'execution.apply_acp_mode_model',
               { sessionId, turnId },
               async () =>
-                await self.deps.applyAcpModeAndModel(session, {
-                  ...agentConfig,
-                  configOptionValues: agentConfig.configOptionValues,
-                })
+                await self.deps.applyAcpModeAndModel(
+                  session,
+                  {
+                    ...agentConfig,
+                    configOptionValues: agentConfig.configOptionValues,
+                  },
+                  {
+                    sessionDoc,
+                    basedOnUserTurnId: userTurnId,
+                  }
+                )
             )
           );
 
@@ -4504,7 +4738,8 @@ export class SessionExecutionService {
 
           const completedTurnId = runtime.turnId;
           const completedUserTurnId = runtime.userTurnId ?? userTurnId;
-          const completedRequesterUserId = runtime.requesterUserId ?? sessionConfig.requesterUserId;
+          const completedRequesterUserId =
+            runtime.invocation?.requesterUserId ?? sessionConfig.requesterUserId;
           // Read before finalization clears the turn's ACP update state.
           const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
 
@@ -4799,6 +5034,7 @@ export class SessionExecutionService {
           agentType: config.agentType,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
+          env: config.env,
         });
       const existing = await this.deps.workspaceDocument.getAcpCapabilities(
         this.deps.machineId,
@@ -4837,11 +5073,15 @@ export class SessionExecutionService {
     message: MachineAcpAuthenticateRequestValidated,
     options: AcpAuthenticationOptions = {}
   ): Promise<MachineAcpAuthenticateResponse> {
+    const workflowStartedAt = Date.now();
+    const targetRequestId =
+      message.action === 'start' ? message.requestId : message.authenticationRequestId;
+    const activeAgentType = this.acpAuthenticationManager.getAgentType(targetRequestId);
     const base = {
       type: 'machine/acp-authenticate_response' as const,
       machineId: this.deps.machineId,
       requestId: message.requestId,
-      agentType: message.agentType,
+      agentType: activeAgentType ?? 'unknown',
     };
     if (message.machineId !== this.deps.machineId) {
       return {
@@ -4855,62 +5095,118 @@ export class SessionExecutionService {
     if (message.action === 'cancel') {
       return {
         ...base,
-        ...this.acpAuthenticationManager.cancel(message.agentType, message.requestId),
+        ...this.acpAuthenticationManager.cancel(message.authenticationRequestId),
       };
     }
     if (message.action === 'submit-code') {
-      if (!message.authenticationRequestId || !message.authorizationCode) {
-        return {
-          ...base,
-          success: false,
-          disposition: 'error',
-          error: 'Missing authentication request or authorization code',
-        };
-      }
       return {
         ...base,
         ...this.acpAuthenticationManager.submitAuthorizationCode(
-          message.agentType,
           message.authenticationRequestId,
           message.authorizationCode
         ),
       };
     }
+    if (message.action === 'submit-input') {
+      return {
+        ...base,
+        ...this.acpAuthenticationManager.submitAuthenticationInput(
+          message.authenticationRequestId,
+          message.interactionId,
+          message.authenticationInput
+        ),
+      };
+    }
+
+    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+      message.configId,
+      this.deps.machineId
+    );
+    if (!config || (config.cliType === 'custom' && !config.customAcp)) {
+      return {
+        ...base,
+        success: false,
+        disposition: 'error',
+        error: `Provider config not found or invalid on this machine: ${message.configId}`,
+      };
+    }
+    const resolvedBase = { ...base, agentType: config.agentType };
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
+      if (event.status === 'auth-methods') {
+        options.onProgress?.({
+          type: 'machine/acp-authentication-progress',
+          machineId: this.deps.machineId,
+          requestId: message.requestId,
+          agentType: config.agentType,
+          status: event.status,
+          interactionId: event.interactionId,
+          authMethods: event.authMethods.map(summarizeAcpAuthMethod),
+        });
+        return;
+      }
       options.onProgress?.({
         type: 'machine/acp-authentication-progress',
         machineId: this.deps.machineId,
         requestId: message.requestId,
-        agentType: message.agentType,
+        agentType: config.agentType,
         ...event,
       });
     };
     const result = await this.acpAuthenticationManager.authenticate({
       requestId: message.requestId,
-      cliType: message.cliType,
-      agentType: message.agentType,
-      customAcp: message.customAcp,
-      runtimeOverrides: message.runtimeOverrides,
-      env: message.env,
+      cliType: config.cliType,
+      agentType: config.agentType,
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
       onProgress,
     });
-
-    if (result.success && result.disposition === 'authenticated' && message.configId) {
-      const refresh = await this.refreshMachineAcpCapabilities({
-        type: 'machine/acp-capabilities-refresh',
-        machineId: message.machineId,
-        workspaceId: message.workspaceId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        customAcp: message.customAcp,
-        runtimeOverrides: message.runtimeOverrides,
-        env: message.env,
-      });
+    if (result.success && result.disposition === 'authenticated') {
+      const refreshController = new AbortController();
+      const refreshTimeoutMs = Math.max(
+        1,
+        Math.min(
+          ACP_POST_AUTH_REFRESH_MAX_MS,
+          ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS - (Date.now() - workflowStartedAt)
+        )
+      );
+      const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
+      refreshTimeout.unref?.();
+      let refresh: MachineAcpCapabilitiesRefreshResponse;
+      try {
+        refresh = await this.refreshMachineAcpCapabilitiesForConfig(
+          {
+            type: 'machine/acp-capabilities-refresh',
+            machineId: message.machineId,
+            workspaceId: message.workspaceId,
+            configId: message.configId,
+            cliType: config.cliType,
+            agentType: config.agentType,
+            customAcp: config.customAcp,
+            runtimeOverrides: config.runtimeOverrides,
+            env: config.env,
+          },
+          { signal: refreshController.signal }
+        );
+      } catch (error) {
+        refresh = {
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId: message.machineId,
+          configId: message.configId,
+          cliType: config.cliType,
+          agentType: config.agentType,
+          success: false,
+          error: refreshController.signal.aborted
+            ? 'Authentication succeeded, but capability verification timed out'
+            : formatErrorMessage(error),
+        };
+      } finally {
+        clearTimeout(refreshTimeout);
+      }
       if (!refresh.success) {
         return {
-          ...base,
+          ...resolvedBase,
           ...result,
           capabilitiesRefreshed: false,
           authRequired: refresh.authRequired,
@@ -4918,10 +5214,10 @@ export class SessionExecutionService {
           error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
         };
       }
-      return { ...base, ...result, capabilitiesRefreshed: true };
+      return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
     }
 
-    return { ...base, ...result };
+    return { ...resolvedBase, ...result };
   }
 
   async refreshMachineAcpCapabilities(
@@ -4933,13 +5229,46 @@ export class SessionExecutionService {
         type: 'machine/acp-capabilities-refresh_response',
         machineId: this.deps.machineId,
         configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
         error: `Machine mismatch: expected ${this.deps.machineId}, got ${message.machineId}`,
       };
     }
 
+    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+      message.configId,
+      this.deps.machineId
+    );
+    if (!config) {
+      return {
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId: this.deps.machineId,
+        configId: message.configId,
+        cliType: 'builtin',
+        agentType: 'unknown',
+        success: false,
+        error: `Provider config not found on this machine: ${message.configId}`,
+      };
+    }
+
+    return await this.refreshMachineAcpCapabilitiesForConfig(
+      {
+        ...message,
+        cliType: config.cliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        env: config.env,
+      },
+      options
+    );
+  }
+
+  private async refreshMachineAcpCapabilitiesForConfig(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    options: AcpBinaryProgressOptions = {}
+  ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     // Config identity is part of the key because the response and cache row are
     // both config-scoped even when two configs share identical launch inputs.
     const dedupeKey = computeAcpRefreshDedupeKey(
@@ -5024,7 +5353,7 @@ export class SessionExecutionService {
   }
 
   private async executeAcpRefresh(
-    message: MachineAcpCapabilitiesRefreshRequestValidated,
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     options: AcpBinaryProgressOptions = {}
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     try {
@@ -5058,7 +5387,7 @@ export class SessionExecutionService {
       );
 
       options.signal?.throwIfAborted();
-      await this.deps.workspaceDocument.updateAcpCapabilities(
+      const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
         message.cliType,
@@ -5074,6 +5403,7 @@ export class SessionExecutionService {
             agentType: message.agentType,
             customAcp: message.customAcp,
             runtimeOverrides: message.runtimeOverrides,
+            env: message.env,
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
@@ -5095,6 +5425,7 @@ export class SessionExecutionService {
           category: opt.category,
           optionCount: opt.options.length,
         })),
+        capability,
         availableCommands,
       };
     } catch (error) {
@@ -5121,7 +5452,7 @@ export class SessionExecutionService {
   }
 
   private async emitBuiltinRuntimeStatusForRefresh(
-    message: MachineAcpCapabilitiesRefreshRequestValidated,
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     onProgress: AcpBinaryProgressSink | undefined
   ): Promise<void> {
     if (!onProgress || message.cliType !== 'builtin') {

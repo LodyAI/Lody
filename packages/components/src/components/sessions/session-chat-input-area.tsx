@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useMemo,
+  useLayoutEffect,
   memo,
   forwardRef,
   useImperativeHandle,
@@ -14,9 +15,14 @@ import { useAtomValue } from 'jotai';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { Button } from '@/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
-import { useSessionAgentRole } from '@/hooks/use-session-agent-role';
+import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
-import { doesAgentRolePinPermissionMode } from '@/lib/composer-agent-roles';
+import {
+  doesAgentRolePinPermissionMode,
+  resolveTurnAgentRoleForRunConfig,
+  type ComposerRunConfigOverrides,
+  type SessionTurnAgentRoleSelection as ComposerTurnAgentRoleSelection,
+} from '@/lib/composer-agent-roles';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   AgentRoleEditorDialog,
@@ -35,6 +41,7 @@ import {
 } from '@/components/chat/chat-composer';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
+import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import {
@@ -58,6 +65,8 @@ import {
 import { IMAGE_UPLOAD_REASONS, type ImageUploadReason } from '@lody/shared';
 import type {
   AcpCommandSummary,
+  AgentRole,
+  AgentRoleId,
   CommentReferencePayload,
   SessionMeta,
   SessionId,
@@ -279,6 +288,19 @@ const revokeImagePreviewUrls = (images: readonly Pick<PendingImage, 'previewUrl'
   }
 };
 
+/**
+ * Seed the composer text draft for a session that has not mounted yet. The
+ * composer hydrates from this cache on mount, so callers can hand text across
+ * a tab promotion without holding a ref to the future component.
+ */
+export const setSessionChatInputTextDraft = (sessionId: SessionId, text: string): void => {
+  if (text) {
+    sessionDraftsCache.set(sessionId, text);
+  } else {
+    sessionDraftsCache.delete(sessionId);
+  }
+};
+
 export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
   const images = getSessionImageDrafts(sessionId);
   const files = getSessionFileDrafts(sessionId);
@@ -356,6 +378,8 @@ export function getSessionChatInputAreaShellClassName({
 }
 
 export interface SessionChatInputAreaProps {
+  /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   sessionLocalProjectRootPath: string | null;
   isMachineRemoved: boolean;
@@ -367,6 +391,15 @@ export interface SessionChatInputAreaProps {
   isEmptyConversation: boolean;
   selectedModeId: string | null;
   selectedModelId: string | null;
+  /** Role identity restored from the latest accepted/queued Turn. */
+  durableAgentRoleId?: AgentRoleId | null;
+  durableAgentRoleRevision?: number;
+  durableAgentRoleSourceTurnKey?: string;
+  durableAgentRoleKnownTurnKeys?: readonly string[];
+  /** False while this Session's durable document is still hydrating. */
+  durableAgentRoleReady?: boolean;
+  /** True when the composer run config differs through an unsent user edit. */
+  runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
   modelOptions: AcpSessionSelectOption[];
   /** Subscription limits already resolved from this session's machine Flock data. */
@@ -390,6 +423,8 @@ export interface SessionChatInputAreaProps {
   isRepoPublic?: boolean;
   /** Available slash commands from the ACP agent. */
   availableCommands?: AcpCommandSummary[];
+  /** False while this retained composer is hidden behind another session tab. */
+  commandsEnabled?: boolean;
   freeTurnLimitNotice?: {
     current: number;
     limit: number;
@@ -403,11 +438,21 @@ export interface SessionChatInputAreaProps {
   onModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
-  onSendMessage: (inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  onSendMessage: (
+    inputBlocks: SessionInputBlock[],
+    agentRole: SessionTurnAgentRoleSelection
+  ) => Promise<boolean>;
   onStop: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
   /** When provided and conversation is empty, the agent config badge becomes a selector. */
   onAgentConfigChange?: (selection: AgentSelection) => void;
+  /**
+   * New-Session surfaces may provide complete Role semantics. Existing
+   * Sessions omit this and keep the same-agent-type run-config-only behavior.
+   */
+  agentRoleControl?: SessionAgentRoleControl;
+  /** Receives durable Role editor saves owned by a new-Session surface. */
+  onAgentRoleSaved?: (role: AgentRole, meta: { created: boolean }) => void;
   initialInputText?: string;
   onInputValueChange?: (value: string) => void;
   disableImageUpload?: boolean;
@@ -423,6 +468,8 @@ export interface SessionChatInputAreaProps {
   ) => void | Promise<void>;
 }
 
+export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
+
 export type SessionChatInputAreaHandle = {
   setInputText: (text: string) => void;
   focusInput: () => void;
@@ -437,12 +484,17 @@ export type SessionChatInputAreaHandle = {
    * caller can leave the gesture unacknowledged instead of implying a change.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /** Role identity committed in the currently rendered composer. */
+  getAgentRoleSelection: (
+    runConfigOverrides?: ComposerRunConfigOverrides
+  ) => SessionTurnAgentRoleSelection;
 };
 
 export const SessionChatInputArea = memo(
   forwardRef<SessionChatInputAreaHandle, SessionChatInputAreaProps>(function SessionChatInputArea(
     {
       session,
+      claimNavigationFocus,
       sessionLocalProjectRootPath,
       isMachineRemoved,
       canStopAgent = false,
@@ -452,6 +504,12 @@ export const SessionChatInputArea = memo(
       isEmptyConversation,
       selectedModeId,
       selectedModelId,
+      durableAgentRoleId,
+      durableAgentRoleRevision,
+      durableAgentRoleSourceTurnKey,
+      durableAgentRoleKnownTurnKeys,
+      durableAgentRoleReady,
+      runConfigHasUserEdits,
       modeOptions,
       modelOptions,
       rateLimits,
@@ -461,6 +519,7 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       isRepoPublic,
       availableCommands,
+      commandsEnabled = true,
       freeTurnLimitNotice,
       queueDisplay,
       mcp,
@@ -472,6 +531,8 @@ export const SessionChatInputArea = memo(
       onStop,
       onRemoveQueueItem: _onRemoveQueueItem,
       onAgentConfigChange,
+      agentRoleControl,
+      onAgentRoleSaved,
       initialInputText,
       onInputValueChange,
       disableImageUpload = false,
@@ -517,7 +578,18 @@ export const SessionChatInputArea = memo(
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const restoreFocusAfterRejectedMobileSendRef = useRef(false);
+    useLayoutEffect(() => {
+      if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
+        textareaRef.current?.focus({ preventScroll: true });
+      }
+    }, [claimNavigationFocus, usesMobileKeyboardAction]);
+    const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
+    const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
+    const agentRoleRunConfigRef = useRef({
+      modeId: selectedModeId,
+      modelId: selectedModelId,
+      configOptionValues: configOptionValues ?? {},
+    });
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const activeSessionIdRef = useRef(session.id);
     activeSessionIdRef.current = session.id;
@@ -709,7 +781,7 @@ export const SessionChatInputArea = memo(
     // The visible draft can move into an in-flight submission immediately while
     // its actual state stays intact until the durable writer accepts it. A
     // rejected send simply reveals the preserved draft again.
-    const [submissionPending, setSubmissionPending] = useState(false);
+    const { submissionPending, beginSubmission } = useComposerSubmission(session.id, textareaRef);
     const expandPromptMentionsRef = useRef<
       (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt
     >(({ text }) => ({ text }));
@@ -747,7 +819,6 @@ export const SessionChatInputArea = memo(
     const [prevSessionId, setPrevSessionId] = useState(session.id);
     if (prevSessionId !== session.id) {
       setPrevSessionId(session.id);
-      setSubmissionPending(false);
       const cached = sessionDraftsCache.get(session.id) ?? initialInputText ?? '';
       setUserInputState(cached);
       setPendingImages(getSessionImageDrafts(session.id));
@@ -777,11 +848,7 @@ export const SessionChatInputArea = memo(
       (value: string) => {
         setUserInputState(value);
         onInputValueChange?.(value);
-        if (value) {
-          sessionDraftsCache.set(session.id, value);
-        } else {
-          sessionDraftsCache.delete(session.id);
-        }
+        setSessionChatInputTextDraft(session.id, value);
       },
       [onInputValueChange, session.id]
     );
@@ -1624,6 +1691,13 @@ export const SessionChatInputArea = memo(
         toggleVisualAnnotationReference,
         handleImageDrop,
         insertSessionMention,
+        getAgentRoleSelection: (runConfigOverrides) =>
+          resolveTurnAgentRoleForRunConfig({
+            turnSelection: agentRoleTurnSelectionRef.current,
+            role: selectedAgentRoleRef.current,
+            current: agentRoleRunConfigRef.current,
+            overrides: runConfigOverrides,
+          }),
       }),
       [
         setInputText,
@@ -1654,206 +1728,202 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
-    const sendMessage = useCallback(
-      async (source: 'keyboard' | 'button' = 'button') => {
-        if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'free_session_turn_limit_reached',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (isArchived) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'session_archived',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (isMachineRemoved) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'machine_removed',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        if (isExternalHistoryRefreshing) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'external_history_syncing',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: pendingImages.length > 0,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        const currentValue = textareaRef.current?.value ?? userInput;
-        // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
-        // that need no rewrite all resolve against the same original text, and
-        // the spans record where each landed.
-        const expandedPrompt = expandPromptMentionsRef.current({
-          text: currentValue,
-          mentions: mentionRangesRef.current,
-          pastedTextDrafts,
+    const sendMessage = useCallback(async () => {
+      if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'free_session_turn_limit_reached',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
         });
-        const trimmedPrompt = expandedPrompt.text.trim();
-        // The trim moves every character left; re-anchor before the offsets ship.
-        const trimmedSpans = reanchorMessageTextSpansForTrim(
-          expandedPrompt.text,
-          trimmedPrompt,
-          expandedPrompt.spans
-        );
-        const textBlocks: SessionInputBlock[] = trimmedPrompt
-          ? [
-              {
-                type: 'text',
-                text: trimmedPrompt,
-                ...(trimmedSpans ? { spans: trimmedSpans } : {}),
-              },
-            ]
-          : [];
-        const uploadedImages = pendingImages
-          .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
-            return image.status === 'uploaded' && !!image.uploaded;
-          })
-          .map((image) => toImageInputBlock(image.uploaded));
-        const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
-        // A still-uploading file (not failed) blocks send; failed ones are
-        // skipped so a single failed attachment doesn't trap the message.
-        const hasBlockingFiles = pendingFiles.some((file) =>
-          isSessionFileTransferPhase(file.status)
-        );
-        const uploadedFiles = pendingFiles
-          .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
-            return file.status === 'uploaded' && !!file.uploaded;
-          })
-          .map((file) => toFileInputBlock(file.uploaded));
-        if (hasBlockingImages || hasBlockingFiles) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'image_upload_in_progress',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: true,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
-        const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
-          type: 'comment_reference' as const,
+        return;
+      }
+      if (isArchived) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'session_archived',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      if (durableAgentRoleReady === false) {
+        return;
+      }
+      if (isMachineRemoved) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'machine_removed',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      if (isExternalHistoryRefreshing) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'external_history_syncing',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: pendingImages.length > 0,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      const currentValue = textareaRef.current?.value ?? userInput;
+      // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
+      // that need no rewrite all resolve against the same original text, and
+      // the spans record where each landed.
+      const expandedPrompt = expandPromptMentionsRef.current({
+        text: currentValue,
+        mentions: mentionRangesRef.current,
+        pastedTextDrafts,
+      });
+      const trimmedPrompt = expandedPrompt.text.trim();
+      // The trim moves every character left; re-anchor before the offsets ship.
+      const trimmedSpans = reanchorMessageTextSpansForTrim(
+        expandedPrompt.text,
+        trimmedPrompt,
+        expandedPrompt.spans
+      );
+      const textBlocks: SessionInputBlock[] = trimmedPrompt
+        ? [
+            {
+              type: 'text',
+              text: trimmedPrompt,
+              ...(trimmedSpans ? { spans: trimmedSpans } : {}),
+            },
+          ]
+        : [];
+      const uploadedImages = pendingImages
+        .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
+          return image.status === 'uploaded' && !!image.uploaded;
+        })
+        .map((image) => toImageInputBlock(image.uploaded));
+      const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
+      // A still-uploading file (not failed) blocks send; failed ones are
+      // skipped so a single failed attachment doesn't trap the message.
+      const hasBlockingFiles = pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+      const uploadedFiles = pendingFiles
+        .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
+          return file.status === 'uploaded' && !!file.uploaded;
+        })
+        .map((file) => toFileInputBlock(file.uploaded));
+      if (hasBlockingImages || hasBlockingFiles) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'image_upload_in_progress',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: true,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
+      const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
+        type: 'comment_reference' as const,
+        ...item.reference,
+      }));
+      const visualAnnotationRefBlocks: SessionInputBlock[] =
+        visualAnnotationReferencesRef.current.map((item) => ({
+          type: 'visual_annotation_reference' as const,
           ...item.reference,
         }));
-        const visualAnnotationRefBlocks: SessionInputBlock[] =
-          visualAnnotationReferencesRef.current.map((item) => ({
-            type: 'visual_annotation_reference' as const,
-            ...item.reference,
-          }));
-        const submittedVisualAnnotationReferences = visualAnnotationReferencesRef.current.map(
-          (item) => item.reference
-        );
+      const submittedVisualAnnotationReferences = visualAnnotationReferencesRef.current.map(
+        (item) => item.reference
+      );
 
-        if (
-          textBlocks.length === 0 &&
-          uploadedImages.length === 0 &&
-          uploadedFiles.length === 0 &&
-          commentRefBlocks.length === 0 &&
-          visualAnnotationRefBlocks.length === 0
-        ) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'empty_input',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: false,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
+      if (
+        textBlocks.length === 0 &&
+        uploadedImages.length === 0 &&
+        uploadedFiles.length === 0 &&
+        commentRefBlocks.length === 0 &&
+        visualAnnotationRefBlocks.length === 0
+      ) {
+        capturePostHogEvent(postHog, 'session/input_blocked', {
+          reason: 'empty_input',
+          entrypoint: 'session_chat',
+          project_kind: sessionProjectKind,
+          has_pending_images: false,
+          workspace_id: workspaceId ?? null,
+          session_id: session.id,
+        });
+        return;
+      }
 
-        const inputBlocks: SessionInputBlock[] = [
-          ...commentRefBlocks,
-          ...visualAnnotationRefBlocks,
-          ...uploadedImages,
-          ...uploadedFiles,
-          ...textBlocks,
-        ];
-        const dismissKeyboardForSubmit =
-          usesMobileKeyboardAction && (source === 'keyboard' || source === 'button');
-        if (dismissKeyboardForSubmit) {
-          // The mobile Send action should dismiss the soft keyboard at the same
-          // immediate handoff boundary as the visible draft, not after the
-          // asynchronous local writer accepts the turn.
-          textareaRef.current?.blur();
-        }
-        setSubmissionPending(true);
-        // React still owns the preserved draft state. Clear only the visible DOM
-        // immediately so Enter/click feedback does not wait for local IPC.
-        if (textareaRef.current) {
-          textareaRef.current.value = '';
-        }
-        let accepted = false;
-        try {
-          accepted = await onSendMessage(inputBlocks);
-          if (accepted) {
+      const inputBlocks: SessionInputBlock[] = [
+        ...commentRefBlocks,
+        ...visualAnnotationRefBlocks,
+        ...uploadedImages,
+        ...uploadedFiles,
+        ...textBlocks,
+      ];
+      const submittedDraft = {
+        text: sessionDraftsCache.get(session.id),
+        images: sessionImageDraftsCache.get(session.id),
+        files: sessionFileDraftsCache.get(session.id),
+        pastedText: sessionPastedTextDraftsCache.get(session.id),
+      };
+      const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
+      if (!submission) return;
+      try {
+        const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
+        if (accepted) {
+          if (submission.isCurrent()) {
             clearInput();
             clearPendingImages();
             clearPendingFiles();
             updatePastedTextDraftsForSession(session.id, () => []);
             publishCommentReferences([]);
             publishVisualAnnotationReferences([]);
-            if (submittedVisualAnnotationReferences.length > 0) {
-              void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
-            }
+          } else if (
+            sessionDraftsCache.get(session.id) === submittedDraft.text &&
+            sessionImageDraftsCache.get(session.id) === submittedDraft.images &&
+            sessionFileDraftsCache.get(session.id) === submittedDraft.files &&
+            sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText
+          ) {
+            // Acceptance retires the original cached draft even after unmount.
+            // A later edit owns a different snapshot and must survive. Never
+            // write component state from a retired submission.
+            clearSessionChatInputDrafts(session.id);
           }
-        } finally {
-          restoreFocusAfterRejectedMobileSendRef.current = dismissKeyboardForSubmit && !accepted;
-          setSubmissionPending(false);
+          if (submittedVisualAnnotationReferences.length > 0) {
+            void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
+          }
         }
-      },
-      [
-        clearInput,
-        clearPendingImages,
-        clearPendingFiles,
-        freeTurnLimitNotice,
-        isArchived,
-        isExternalHistoryRefreshing,
-        isMachineRemoved,
-        onSendMessage,
-        onVisualAnnotationReferencesSubmitted,
-        pendingFiles,
-        pendingImages,
-        pastedTextDrafts,
-        publishCommentReferences,
-        publishVisualAnnotationReferences,
-        postHog,
-        session.id,
-        sessionProjectKind,
-        updatePastedTextDraftsForSession,
-        userInput,
-        usesMobileKeyboardAction,
-        workspaceId,
-      ]
-    );
-
-    useEffect(() => {
-      if (submissionPending || !restoreFocusAfterRejectedMobileSendRef.current) {
-        return;
+      } finally {
+        submission.finish();
       }
-      restoreFocusAfterRejectedMobileSendRef.current = false;
-      textareaRef.current?.focus();
-    }, [submissionPending]);
+    }, [
+      beginSubmission,
+      clearInput,
+      clearPendingImages,
+      clearPendingFiles,
+      freeTurnLimitNotice,
+      isArchived,
+      durableAgentRoleReady,
+      isExternalHistoryRefreshing,
+      isMachineRemoved,
+      onSendMessage,
+      onVisualAnnotationReferencesSubmitted,
+      pendingFiles,
+      pendingImages,
+      pastedTextDrafts,
+      publishCommentReferences,
+      publishVisualAnnotationReferences,
+      postHog,
+      session.id,
+      sessionProjectKind,
+      updatePastedTextDraftsForSession,
+      userInput,
+      usesMobileKeyboardAction,
+      workspaceId,
+    ]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1870,7 +1940,7 @@ export const SessionChatInputArea = memo(
           return;
         }
         e.preventDefault();
-        void sendMessage('keyboard');
+        void sendMessage();
       },
       [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
     );
@@ -1899,6 +1969,7 @@ export const SessionChatInputArea = memo(
       isMachineRemoved ||
       isArchived ||
       isExternalHistoryRefreshing ||
+      durableAgentRoleReady === false ||
       Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit);
     const attachmentAddEnabled = !isArchived;
     const sessionLocalFileSource = useMemo(
@@ -1940,6 +2011,13 @@ export const SessionChatInputArea = memo(
           provider: codeCollabMentionFiles.provider,
           providerPending: codeCollabMentionFilesPending,
           providerMessage: codeCollabMentionFiles.message,
+          localProject:
+            session.project?.kind === 'local'
+              ? {
+                  machineId: session.machineId,
+                  localProjectId: session.project.localProjectId,
+                }
+              : undefined,
           githubRepoFullName: repoFullName || undefined,
           isPublic: isRepoPublic,
         };
@@ -2060,17 +2138,23 @@ export const SessionChatInputArea = memo(
       session.agentConfigId && session.machineId
         ? { agentId: session.agentConfigId, machineId: session.machineId }
         : null;
-    /* Role, in an EXISTING session. The agent is fixed here, so this offers
-       only Roles bound to an agent of the same TYPE and applies only their run
-       config — see `useSessionAgentRole`. The row is NOT gated on
-       `isEmptyConversation`: those values stay changeable every turn, so a Role
-       that packages them stays useful for the whole conversation. */
+    /* Existing Sessions use their exact machine/provider, run-config-only Role control.
+       A not-yet-created child-tab draft supplies its own complete new-Session
+       control instead. The row is NOT gated on `isEmptyConversation`: these
+       values stay changeable every turn in an existing conversation too. */
     const [agentRoleEditor, setAgentRoleEditor] = useState<AgentRoleEditorState | null>(null);
     const { roles: accessibleAgentRoles } = useWorkspaceAgentRoles();
     const sessionAgentRole = useSessionAgentRole({
       sessionId: session.id,
       provenanceRoleId: session.agentRoleId,
-      agentType: session.agentType,
+      provenanceRoleRevision: session.agentRoleRevision,
+      durableRoleId: durableAgentRoleId,
+      durableRoleRevision: durableAgentRoleRevision,
+      durableSourceTurnKey: durableAgentRoleSourceTurnKey,
+      durableKnownSourceTurnKeys: durableAgentRoleKnownTurnKeys,
+      durableRoleReady: durableAgentRoleReady,
+      machineId: session.machineId,
+      agentConfigId: session.agentConfigId,
       modelOptions,
       selectedModelId,
       onModelChange,
@@ -2079,13 +2163,54 @@ export const SessionChatInputArea = memo(
       onModeChange,
       configOptionSelectors: configOptionSelectors ?? [],
       configOptionValues,
+      runConfigHasUserEdits,
       onConfigOptionChange,
     });
+    const effectiveAgentRoleControl = agentRoleControl ?? sessionAgentRole;
+    const selectedAgentRoleItem = effectiveAgentRoleControl.selectedRoleId
+      ? effectiveAgentRoleControl.items.find(
+          (item) => item.role.id === effectiveAgentRoleControl.selectedRoleId
+        )
+      : undefined;
+    const selectedAgentRoleItemId = selectedAgentRoleItem?.role.id;
+    const selectedAgentRoleItemRevision = selectedAgentRoleItem?.role.revision;
+    const agentRoleTurnSelection = useMemo<SessionTurnAgentRoleSelection>(
+      () =>
+        agentRoleControl
+          ? selectedAgentRoleItemId && selectedAgentRoleItemRevision !== undefined
+            ? {
+                agentRoleId: selectedAgentRoleItemId,
+                agentRoleRevision: selectedAgentRoleItemRevision,
+              }
+            : null
+          : sessionAgentRole.turnSelection,
+      [
+        agentRoleControl,
+        selectedAgentRoleItemId,
+        selectedAgentRoleItemRevision,
+        sessionAgentRole.turnSelection,
+      ]
+    );
+    useLayoutEffect(() => {
+      agentRoleTurnSelectionRef.current = agentRoleTurnSelection;
+      selectedAgentRoleRef.current = selectedAgentRoleItem?.role;
+      agentRoleRunConfigRef.current = {
+        modeId: selectedModeId,
+        modelId: selectedModelId,
+        configOptionValues: configOptionValues ?? {},
+      };
+    }, [
+      agentRoleTurnSelection,
+      configOptionValues,
+      selectedAgentRoleItem?.role,
+      selectedModeId,
+      selectedModelId,
+    ]);
     const agentRolesProp = useMemo(
       () => ({
-        items: sessionAgentRole.items,
-        selectedRoleId: sessionAgentRole.selectedRoleId,
-        onSelect: sessionAgentRole.onSelect,
+        items: effectiveAgentRoleControl.items,
+        selectedRoleId: effectiveAgentRoleControl.selectedRoleId,
+        onSelect: effectiveAgentRoleControl.onSelect,
         onCreate: () =>
           setAgentRoleEditor(
             openAgentRoleEditorForCreate(
@@ -2106,13 +2231,13 @@ export const SessionChatInputArea = memo(
         selectedModeId,
         session.agentConfigId,
         session.machineId,
-        sessionAgentRole,
+        effectiveAgentRoleControl,
       ]
     );
-    const sessionAgentRolePinsPermissionMode = useMemo(() => {
-      if (!sessionAgentRole.selectedRoleId) return false;
-      const selectedRole = sessionAgentRole.items.find(
-        (item) => item.role.id === sessionAgentRole.selectedRoleId
+    const selectedAgentRolePinsPermissionMode = useMemo(() => {
+      if (!effectiveAgentRoleControl.selectedRoleId) return false;
+      const selectedRole = effectiveAgentRoleControl.items.find(
+        (item) => item.role.id === effectiveAgentRoleControl.selectedRoleId
       )?.role;
       if (!selectedRole) return false;
       const { source } = resolvePermissionModeFace({
@@ -2127,8 +2252,8 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       modeOptions,
       selectedModeId,
-      sessionAgentRole.items,
-      sessionAgentRole.selectedRoleId,
+      effectiveAgentRoleControl.items,
+      effectiveAgentRoleControl.selectedRoleId,
     ]);
     const mobileFooterSelectorNode = isMobile ? (
       <MobileSessionRunConfig
@@ -2181,7 +2306,7 @@ export const SessionChatInputArea = memo(
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
         />
-        {sessionAgentRolePinsPermissionMode ? null : (
+        {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
             modeOptions={modeOptions}
             selectedModeId={selectedModeId}
@@ -2275,7 +2400,7 @@ export const SessionChatInputArea = memo(
         type="button"
         size="icon"
         variant="ghost"
-        onClick={() => void sendMessage('button')}
+        onClick={() => void sendMessage()}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
@@ -2306,6 +2431,7 @@ export const SessionChatInputArea = memo(
         variant="session"
         mentionSource={isArchived ? undefined : mentionSource}
         availableCommands={isArchived ? undefined : availableCommands}
+        commandsEnabled={commandsEnabled}
         skillAgent={skillAgent}
         currentSessionId={session.id}
         promptRef={textareaRef}
@@ -2385,6 +2511,7 @@ export const SessionChatInputArea = memo(
             accessibleRoles={accessibleAgentRoles}
             onChange={setAgentRoleEditor}
             onClose={() => setAgentRoleEditor(null)}
+            onSaved={onAgentRoleSaved}
             source="session_composer"
           />
         ) : null}

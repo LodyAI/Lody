@@ -57,6 +57,7 @@ import {
   type AcpConfigOptionSummary,
   type AgentConfigMeta,
   type AgentRoleId,
+  type LocalProjectGitState,
   type LocalProjectId,
   type MachineLegacyMetaFields,
   type MachineId,
@@ -99,6 +100,7 @@ import { LoroDocumentManager, type SessionDocument } from '@/lib/loro/doc';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import {
   canRequestMachineForCliToken,
+  canUseMachineForCliToken,
   type WorkspaceBillingEntitlement,
   listWorkspaceGitHubRepositoriesForCliToken,
   listWorkspacesForToken,
@@ -125,6 +127,15 @@ import { getCliHttpFetch } from '@/utils/http-transport';
 
 type CommonOptions = CommonCommandOptions;
 
+export type DelegatedSessionRequester = {
+  userId: string;
+};
+
+type ResolvedSessionRequester = {
+  userId: string;
+  isDelegated: boolean;
+};
+
 export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
 export const DEFAULT_SESSION_HISTORY_LIMIT = 50;
@@ -144,10 +155,8 @@ export type CreateOptions = CommonOptions &
     currentSessionId?: SessionId;
     defaultMachineId?: MachineId;
     requesterUserId?: string;
-    /**
-     * Trusted Session attribution supplied by an internal caller. Access checks
-     * must continue to use requesterUserId, which is bound to CLI auth.
-     */
+    /** Trusted human requester supplied by a delegated internal caller. */
+    delegatedRequester?: DelegatedSessionRequester;
     sessionOwnerUserId?: string;
     parent?: string;
     useCurrentSessionAsParent?: boolean;
@@ -463,6 +472,7 @@ function formatVisibleTranscriptItem(item: MessageContent): string | undefined {
       deliveryId: item.deliveryId,
       operationId: item.operationId,
       operationKind: item.operationKind,
+      ...(item.progressMessageId ? { progressMessageId: item.progressMessageId } : {}),
       completion: item.completion,
       ...(item.continuation ? { continuation: item.continuation } : {}),
     });
@@ -1885,15 +1895,39 @@ export async function readSessionMachineAccess(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   requesterUserId?: string;
+  delegatedRequester?: DelegatedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserId,
+    args.delegatedRequester
+  );
+  return await readResolvedSessionMachineAccess({
+    auth: args.auth,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    requester,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+}
+
+async function readResolvedSessionMachineAccess(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requester: ResolvedSessionRequester;
+  localProjectId?: string;
+}): Promise<MachineAccessCheckResult> {
   try {
-    return await canRequestMachineForCliToken({
+    const readAccess = args.requester.isDelegated
+      ? canUseMachineForCliToken
+      : canRequestMachineForCliToken;
+    return await readAccess({
       token: args.auth.token,
       workspaceId: args.workspaceId,
       machineId: args.machineId,
-      requesterUserId,
+      requesterUserId: args.requester.userId,
       ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
     });
   } catch (error) {
@@ -1907,10 +1941,10 @@ async function assertMachineAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<void> {
-  const access = await readSessionMachineAccess(args);
+  const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
     throw new Error(`Machine access denied for ${args.machineId}: ${access.reason}`);
   }
@@ -2059,6 +2093,28 @@ export function resolveSessionCommandRequesterUserId(
   return auth.userId;
 }
 
+export function resolveSessionRequester(
+  auth: Pick<AuthContext, 'userId'>,
+  requesterUserId?: string,
+  delegatedRequester?: DelegatedSessionRequester
+): ResolvedSessionRequester {
+  if (!delegatedRequester) {
+    return {
+      userId: resolveSessionCommandRequesterUserId(auth, requesterUserId),
+      isDelegated: false,
+    };
+  }
+  const delegatedUserId = normalizeCliValue(delegatedRequester.userId);
+  if (!delegatedUserId) {
+    throw new Error('Delegated Session requester must identify a user.');
+  }
+  const requested = normalizeCliValue(requesterUserId);
+  if (requested !== undefined && requested !== delegatedUserId) {
+    throw new Error('Requester identity must match the delegated Session requester.');
+  }
+  return { userId: delegatedUserId, isDelegated: true };
+}
+
 export function resolveSessionCreateOwnerUserId(
   requesterUserId: string,
   sessionOwnerUserId?: string
@@ -2095,16 +2151,16 @@ async function listAuthorizedMachineMetasForCreate(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machines: readonly MachineMeta[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<MachineMeta[]> {
   const rows = await Promise.all(
     args.machines.map(async (machine) => ({
       machine,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: machine.id,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
       }),
     }))
   );
@@ -2121,16 +2177,16 @@ async function filterAuthorizedLocalProjectsForCreate<
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjects: readonly T[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<T[]> {
   const rows = await Promise.all(
     args.localProjects.map(async (project) => ({
       project,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: args.machineId,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
         localProjectId: project.id,
       }),
     }))
@@ -2147,7 +2203,7 @@ async function resolveTargetMachineForCreate(args: {
   auth: AuthContext;
   machineSelector?: string;
   defaultMachineId?: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   parentSessionId?: SessionId;
 }): Promise<MachineMeta> {
   const machines = await listMachineMetasForWorkspace(args.manager);
@@ -2158,7 +2214,7 @@ async function resolveTargetMachineForCreate(args: {
     auth: args.auth,
     workspaceId: args.workspaceId,
     machines,
-    requesterUserId: args.requesterUserId,
+    requester: args.requester,
   });
   if (authorizedMachines.length === 0) {
     throw new Error('No authorized machines are available in this workspace.');
@@ -2248,12 +2304,12 @@ async function assertGitHubRepoAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   repoFullName: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<void> {
   const repos = await listWorkspaceGitHubRepositoriesForCliToken({
     token: args.auth.token,
     workspaceId: args.workspaceId,
-    requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+    requesterUserId: args.requesterUserId,
     enabledOnly: true,
   });
   const normalized = args.repoFullName.toLowerCase();
@@ -2268,7 +2324,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<
   | { success: true; state: Awaited<ReturnType<typeof getLocalProjectGitStateAtRootPath>> }
   | { success: false; error: string; message?: string }
@@ -2289,7 +2345,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
     async (client) =>
       await client.requestLocalProjectGitState({
         localProjectId: args.localProjectId as LocalProjectId,
-        requestedByUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+        requestedByUserId: args.requesterUserId,
         timeoutMs: 30_000,
       })
   );
@@ -2302,60 +2358,148 @@ export async function readLocalProjectGitStateOnMachine(args: {
   return response;
 }
 
-async function resolveLocalProjectBranchOnMachine(args: {
+/**
+ * Create-time projection of a local project's git state onto the `ProjectRef`
+ * fields the daemon and every GitHub surface later read.
+ */
+type LocalProjectCreateGitContext = {
+  branch?: string;
+  githubRepoFullName?: string;
+};
+
+/**
+ * A local project's `origin` only becomes a Session's repository identity when
+ * the workspace actually enables that repository, which is exactly what desktop
+ * creation does (`chat-landing.tsx`). Matching is case-insensitive and returns
+ * the workspace's spelling so the persisted `repoFullName` is the same string
+ * every repository lookup uses.
+ */
+function selectWorkspaceRepoFullName(
+  githubRepoFullName: string | null | undefined,
+  workspaceRepositories: readonly { fullName: string }[]
+): string | undefined {
+  const repoFullName = normalizeCliValue(githubRepoFullName);
+  if (!repoFullName) {
+    return undefined;
+  }
+  const normalized = repoFullName.toLowerCase();
+  return workspaceRepositories.find((repo) => repo.fullName.toLowerCase() === normalized)?.fullName;
+}
+
+/**
+ * Pure part of local create resolution: branch selection and GitHub identity
+ * read off one git-state snapshot.
+ *
+ * Identity is resolved for direct and worktree local sessions alike, because a
+ * Session's repository is a property of the project rather than of the workdir
+ * mode; without it `createSessionResult` persists no `repoFullName` and the
+ * client hides `Create PR` / `Commit & Push` and skips post-turn PR detection.
+ * An unauthorized or absent `origin` simply leaves the Session local.
+ */
+export function resolveLocalProjectCreateGitContext(args: {
+  gitState: LocalProjectGitState;
+  workspaceRepositories: readonly { fullName: string }[];
+  requestedBranch?: string;
+  useWorktree?: boolean;
+}): LocalProjectCreateGitContext {
+  const requestedBranch = normalizeCliValue(args.requestedBranch);
+  if (!args.gitState.git) {
+    if (args.useWorktree === true) {
+      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
+    }
+    if (requestedBranch) {
+      throw new Error('Cannot use --branch with a local project that is not a git repository.');
+    }
+    return {};
+  }
+  const githubRepoFullName = selectWorkspaceRepoFullName(
+    args.gitState.githubRepoFullName,
+    args.workspaceRepositories
+  );
+  const identity = githubRepoFullName ? { githubRepoFullName } : {};
+  // Keep direct local sessions branchless. The target daemon must use the
+  // directory as it exists at dispatch time rather than switching back to a
+  // branch observed by this remote preflight.
+  if (!requestedBranch && args.useWorktree !== true) {
+    return identity;
+  }
+  if (args.gitState.branches.length === 0) {
+    if (requestedBranch) {
+      throw new Error(`Local project branch not found: ${requestedBranch}`);
+    }
+    throw new Error('The local project does not have a branch to use as a worktree base.');
+  }
+  const branch = resolveBaseBranchPreference({
+    preferredBranch: requestedBranch,
+    baseBranch: args.gitState.currentBranch,
+    fallbackBranch: args.gitState.defaultBranch ?? args.gitState.branches[0],
+  });
+  // Only the remote machine can resolve refs, so map a typed `--branch main`
+  // onto one of the selectors it reported instead of demanding an exact match.
+  const selected = selectLocalProjectBranchSelector(args.gitState.branches, branch);
+  if (!selected) {
+    throw new Error(`Local project branch not found: ${branch}`);
+  }
+  return { branch: selected, ...identity };
+}
+
+/**
+ * Repository identity is best effort: a workspace whose repository list cannot
+ * be read still creates the local Session, just without GitHub actions.
+ */
+async function listWorkspaceGitHubRepositoriesBestEffort(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  requesterUserId: string;
+}): Promise<{ fullName: string }[]> {
+  try {
+    return await listWorkspaceGitHubRepositoriesForCliToken({
+      token: args.auth.token,
+      workspaceId: args.workspaceId,
+      requesterUserId: args.requesterUserId,
+      enabledOnly: true,
+    });
+  } catch (error) {
+    getLogger('session').warn(
+      `Workspace GitHub repositories unavailable; creating the local session without repository identity: ${formatErrorMessage(
+        error
+      )}`
+    );
+    return [];
+  }
+}
+
+async function resolveLocalProjectCreateGitContextOnMachine(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
   requestedBranch?: string;
   useWorktree?: boolean;
-}): Promise<string | undefined> {
-  // Keep direct local sessions branchless. The target daemon must use the
-  // directory as it exists at dispatch time rather than switching back to a
-  // branch observed by this remote preflight.
-  if (!args.requestedBranch?.trim() && args.useWorktree !== true) {
-    return undefined;
-  }
-
+}): Promise<LocalProjectCreateGitContext> {
   const response = await readLocalProjectGitStateOnMachine(args);
   if (!response.success) {
-    if (args.requestedBranch || args.useWorktree === true) {
+    // Only an explicit branch or a worktree base depends on this read; a direct
+    // local session must still be creatable when the state cannot be read.
+    if (normalizeCliValue(args.requestedBranch) || args.useWorktree === true) {
       throw new Error(response.message ?? response.error);
     }
-    return undefined;
+    return {};
   }
-  if (!response.state.git) {
-    if (args.useWorktree === true) {
-      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
-    }
-    if (args.requestedBranch) {
-      throw new Error('Cannot use --branch with a local project that is not a git repository.');
-    }
-    return undefined;
-  }
-  if (response.state.branches.length === 0) {
-    if (args.requestedBranch?.trim()) {
-      throw new Error(`Local project branch not found: ${args.requestedBranch.trim()}`);
-    }
-    if (args.useWorktree === true) {
-      throw new Error('The local project does not have a branch to use as a worktree base.');
-    }
-    return undefined;
-  }
-  const branch = resolveBaseBranchPreference({
-    preferredBranch: args.requestedBranch,
-    baseBranch: response.state.currentBranch,
-    fallbackBranch: response.state.defaultBranch ?? response.state.branches[0],
+  // Only a project that actually reports a GitHub `origin` needs the workspace
+  // repository list, so a purely local project stays off the network.
+  const workspaceRepositories =
+    response.state.git && normalizeCliValue(response.state.githubRepoFullName)
+      ? await listWorkspaceGitHubRepositoriesBestEffort(args)
+      : [];
+  return resolveLocalProjectCreateGitContext({
+    gitState: response.state,
+    workspaceRepositories,
+    ...(args.requestedBranch ? { requestedBranch: args.requestedBranch } : {}),
+    ...(args.useWorktree !== undefined ? { useWorktree: args.useWorktree } : {}),
   });
-  // Only the remote machine can resolve refs, so map a typed `--branch main`
-  // onto one of the selectors it reported instead of demanding an exact match.
-  const selected = selectLocalProjectBranchSelector(response.state.branches, branch);
-  if (!selected) {
-    throw new Error(`Local project branch not found: ${branch}`);
-  }
-  return selected;
 }
 
 async function resolveLocalProjectRefOnMachineOrThrow(
@@ -2364,7 +2508,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   auth: AuthContext,
   machineId: MachineId,
   selector: string,
-  requesterUserId: string | undefined,
+  requester: ResolvedSessionRequester,
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
@@ -2380,7 +2524,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     workspaceId,
     machineId,
     localProjects,
-    requesterUserId,
+    requester,
   });
   if (authorizedLocalProjects.length === 0) {
     throw new Error('No authorized local projects are available on the target machine.');
@@ -2403,13 +2547,13 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     );
   }
   const project = matches[0]!;
-  const branch = await resolveLocalProjectBranchOnMachine({
+  const { branch, githubRepoFullName } = await resolveLocalProjectCreateGitContextOnMachine({
     auth,
     workspaceId,
     machineId,
     localProjectId: project.id,
     localRootPath: project.rootPath,
-    requesterUserId,
+    requesterUserId: requester.userId,
     requestedBranch,
     useWorktree,
   });
@@ -2417,6 +2561,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     kind: 'local',
     localProjectId: project.id,
     ...(branch ? { branch } : {}),
+    ...(githubRepoFullName ? { githubRepoFullName } : {}),
     ...(useWorktree === true ? { useWorktree: true } : {}),
   };
 }
@@ -2480,14 +2625,12 @@ async function resolveCreateContext(args: {
   workspace: WorkspaceSummary;
   manager: LoroDocumentManager;
   options: CreateOptions;
+  requester: ResolvedSessionRequester;
   skipMachineAvailabilityCheck?: boolean;
 }): Promise<ResolvedCreateContext> {
   const workspaceId = args.workspace.id as WorkspaceId;
   const agentSelector = resolveCreateAgentSelector(args.options);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.options.requesterUserId
-  );
+  const requesterUserId = args.requester.userId;
   const parentSelector = normalizeCliValue(args.options.parent);
   const currentSessionId = resolveCreateCurrentSessionId(args.options);
   if (parentSelector && args.options.useCurrentSessionAsParent === true) {
@@ -2532,14 +2675,14 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     machineSelector: args.options.machine,
     defaultMachineId: args.options.defaultMachineId,
-    requesterUserId,
+    requester: args.requester,
     parentSessionId,
   });
   await assertMachineAccess({
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
     await ensureTargetMachineOnline({
@@ -2596,7 +2739,7 @@ async function resolveCreateContext(args: {
       args.auth,
       targetMachine.id,
       normalizedLocalProject,
-      requesterUserId,
+      args.requester,
       requestedBranch,
       args.options.worktree === true
     );
@@ -2606,7 +2749,7 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
   });
 
@@ -2638,7 +2781,12 @@ export async function validateSessionCreateOptions(args: {
    */
   dispatchConfig?: ResolvedTurnDispatchConfig;
 }): Promise<ResolvedTurnDispatchConfig> {
-  const resolved = await resolveCreateContext(args);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.options.requesterUserId,
+    args.options.delegatedRequester
+  );
+  const resolved = await resolveCreateContext({ ...args, requester });
   return await resolveEffectiveSessionCreateDispatchConfig({
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
@@ -2825,12 +2973,17 @@ export async function createSessionResult(
       sessionId: options.sessionId,
     });
   }
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, options.requesterUserId);
+  const requester = resolveSessionRequester(
+    auth,
+    options.requesterUserId,
+    options.delegatedRequester
+  );
+  const requesterUserId = requester.userId;
   const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
     requesterUserId,
     options.sessionOwnerUserId
   );
-  const resolved = await resolveCreateContext({ auth, workspace, manager, options });
+  const resolved = await resolveCreateContext({ auth, workspace, manager, options, requester });
   const {
     targetMachine,
     agentConfig,
@@ -2997,12 +3150,30 @@ export async function validateSessionChatTarget(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requesterUserIdOverride?: string;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserIdOverride,
+    args.delegatedRequester
+  );
+  return await validateSessionChatTargetForRequester({
+    auth: args.auth,
+    workspace: args.workspace,
+    manager: args.manager,
+    sessionId: args.sessionId,
+    requester,
+  });
+}
+
+async function validateSessionChatTargetForRequester(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  requester: ResolvedSessionRequester;
 }): Promise<SessionMeta> {
   await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.requesterUserIdOverride
-  );
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -3011,7 +3182,7 @@ export async function validateSessionChatTarget(args: {
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
   });
   await ensureTargetMachineOnline({
@@ -3039,7 +3210,8 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-  }
+  },
+  delegatedRequester?: DelegatedSessionRequester
 ): Promise<{
   sessionId: SessionId;
   machineId: MachineId;
@@ -3047,13 +3219,14 @@ export async function sendSessionChatResult(
   userTurnId: string;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, requesterUserIdOverride);
-  const session = await validateSessionChatTarget({
+  const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
+  const requesterUserId = requester.userId;
+  const session = await validateSessionChatTargetForRequester({
     auth,
     workspace,
     manager,
     sessionId,
-    requesterUserIdOverride,
+    requester,
   });
   if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
     const capability = await readAgentAcpCapability({
@@ -3880,6 +4053,7 @@ const sessionCancelCommand = new Command('cancel')
             auth,
             workspaceId,
             machineId: session.machineId,
+            requester: resolveSessionRequester(auth),
             localProjectId:
               session.project?.kind === 'local' ? session.project.localProjectId : undefined,
           });

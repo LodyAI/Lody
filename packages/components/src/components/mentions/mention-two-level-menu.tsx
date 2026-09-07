@@ -26,6 +26,7 @@ import {
   selectMentionViewActivations,
   type MentionCandidate,
   type MentionCandidateDetail,
+  type MentionCategoryAction,
   type MentionCategory,
   type MentionIcon,
   type MentionMenuView,
@@ -265,15 +266,67 @@ function Message({ children, tone }: { children: React.ReactNode; tone?: 'error'
   );
 }
 
-/** The second level's only chrome: the way back. */
-function CategoryBreadcrumb({ showBack, onBack }: { showBack: boolean; onBack: () => void }) {
+function CategoryAction({ action }: { action: MentionCategoryAction }) {
+  return (
+    <button
+      type="button"
+      aria-label={action.ariaLabel}
+      className="flex max-w-full min-w-0 select-none items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={action.onAction}
+    >
+      <span className="truncate">{action.label}</span>
+    </button>
+  );
+}
+
+function CategoryHeaderOptions({ header }: { header: NonNullable<MentionCategory['header']> }) {
+  return (
+    <div
+      role="group"
+      aria-label={header.ariaLabel}
+      className="ml-auto flex shrink-0 items-center rounded-md bg-muted-foreground/[0.08] p-0.5"
+    >
+      {header.options.map((option) => (
+        <button
+          key={option.label}
+          type="button"
+          aria-pressed={option.selected}
+          className={cn(
+            'h-6 rounded-[4px] px-2 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
+            option.selected
+              ? 'bg-background font-medium text-foreground shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            if (!option.selected) option.onSelect();
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Generic second-level chrome: navigation plus optional category-owned context/action. */
+function CategoryBreadcrumb({
+  showBack,
+  onBack,
+  category,
+}: {
+  showBack: boolean;
+  onBack: () => void;
+  category: MentionCategory;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border bg-popover px-2 py-1.5 text-xs text-muted-foreground">
+    <div className="sticky top-0 z-10 flex min-w-0 select-none items-center gap-3 border-b border-border bg-popover px-2 py-1.5">
       {showBack ? (
         <button
           type="button"
-          className="-ml-1 flex items-center gap-0.5 rounded px-1 py-0.5 hover:text-foreground"
+          className="-ml-1 flex h-6 shrink-0 items-center gap-0.5 rounded px-1 text-xs text-muted-foreground hover:text-foreground"
           // Keep focus in the composer: the menu closes the moment it blurs.
           onPointerDown={(event) => event.preventDefault()}
           onClick={onBack}
@@ -282,6 +335,7 @@ function CategoryBreadcrumb({ showBack, onBack }: { showBack: boolean; onBack: (
           {t('mention.menu.back', 'Back')}
         </button>
       ) : null}
+      {category.header ? <CategoryHeaderOptions header={category.header} /> : null}
     </div>
   );
 }
@@ -356,7 +410,7 @@ export function MentionTwoLevelMenuBody({
     const { category, candidates } = view;
     return (
       <>
-        <CategoryBreadcrumb showBack={showBack} onBack={onBack} />
+        <CategoryBreadcrumb showBack={showBack} onBack={onBack} category={category} />
         {category.notice ? (
           <div className="px-2 pt-2 pb-1 text-xs text-muted-foreground">{category.notice}</div>
         ) : null}
@@ -376,6 +430,13 @@ export function MentionTwoLevelMenuBody({
           </div>
         ) : category.status === 'loading' ? (
           <Message>{t('mention.menu.loading', 'Loading…')}</Message>
+        ) : category.emptyState ? (
+          <div className="flex flex-col items-start gap-1.5 px-2 py-2 text-sm text-muted-foreground">
+            <span>{category.emptyState.message}</span>
+            {category.emptyState.action ? (
+              <CategoryAction action={category.emptyState.action} />
+            ) : null}
+          </div>
         ) : (
           <Message>{t('mention.menu.noResults', 'No results')}</Message>
         )}

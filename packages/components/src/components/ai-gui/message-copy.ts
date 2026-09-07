@@ -9,6 +9,51 @@ import {
 export const USER_TEXT_RENDER_LINE_LIMIT = 10;
 export const USER_TEXT_RENDER_CHAR_LIMIT = 900;
 
+/**
+ * Items that are never folded into a turn's work region: attachments the agent
+ * produced, the plan surfaces, the goal marker, and the "Exited Plan Mode"
+ * switch that closes a plan turn.
+ *
+ * ONE list, used for both questions it answers — "does this item fold?" and
+ * "is this item part of the tail that trails the answer?". They were two lists
+ * (the tail one held only `image_group` and `switch_mode`), so a turn ending in
+ * a `file` or a `proposed_plan` found no trailing tail, reported no visible
+ * answer text, and folded the answer itself into "Worked for …". Attachments
+ * now sort BELOW the plan, which puts a `file` last far more often, so the two
+ * lists have to agree.
+ */
+const isNeverCollapsedAssistantItem = (content: MessageContent | undefined): boolean =>
+  content?.type === 'image_group' ||
+  content?.type === 'image' ||
+  content?.type === 'file' ||
+  content?.type === 'plan' ||
+  content?.type === 'goal' ||
+  content?.type === 'proposed_plan' ||
+  (content?.type === 'tool_call' && content.kind === 'switch_mode');
+
+/**
+ * The answer is the final contiguous run of text before the never-collapsed
+ * tail, not necessarily the last item. Every adjacent text block in that run
+ * stays visible; a non-text item is the boundary between work and the answer.
+ */
+const getFinalTextRunStart = (items: MessageContent[]): number => {
+  let index = items.length - 1;
+
+  while (index >= 0 && isNeverCollapsedAssistantItem(items[index])) {
+    index -= 1;
+  }
+
+  if (items[index]?.type !== 'text') {
+    return items.length;
+  }
+
+  while (index > 0 && items[index - 1]?.type === 'text') {
+    index -= 1;
+  }
+
+  return index;
+};
+
 export const shouldCollapseAssistantMessageItem = ({
   content,
   index,
@@ -21,43 +66,15 @@ export const shouldCollapseAssistantMessageItem = ({
   isTurnFinished: boolean;
 }): boolean => {
   const itemCount = items.length;
-  const visibleTextIndex = getTextIndexBeforeTrailingNeverCollapsedItems(items);
+  const visibleTextRunStart = getFinalTextRunStart(items);
 
   return (
     isTurnFinished &&
     itemCount > 1 &&
     index < itemCount - 1 &&
-    index !== visibleTextIndex &&
-    content.type !== 'image_group' &&
-    content.type !== 'file' &&
-    content.type !== 'plan' &&
-    content.type !== 'goal' &&
-    content.type !== 'proposed_plan' &&
-    !(content.type === 'tool_call' && content.kind === 'switch_mode')
+    !(content.type === 'text' && index >= visibleTextRunStart) &&
+    !isNeverCollapsedAssistantItem(content)
   );
-};
-
-/**
- * Items that are appended AFTER the assistant's answer and are themselves never
- * collapsed: generated images, and the "Exited Plan Mode" switch that closes a
- * plan turn. The answer before them is still the answer, so it must not be
- * demoted to process output just because it is no longer the last item.
- */
-const isTrailingNeverCollapsedItem = (content: MessageContent | undefined): boolean =>
-  content?.type === 'image_group' ||
-  (content?.type === 'tool_call' && content.kind === 'switch_mode');
-
-const getTextIndexBeforeTrailingNeverCollapsedItems = (items: MessageContent[]): number => {
-  let index = items.length - 1;
-  if (!isTrailingNeverCollapsedItem(items[index])) {
-    return -1;
-  }
-
-  while (index >= 0 && isTrailingNeverCollapsedItem(items[index])) {
-    index -= 1;
-  }
-
-  return items[index]?.type === 'text' ? index : -1;
 };
 
 // Copyable text = plain `text` answers plus `proposed_plan` markdown. The plan

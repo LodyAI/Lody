@@ -14,12 +14,19 @@ import {
 // The menu resolves its default agent pool from machine presence; these
 // surfaces pass their agent in explicitly, so the pool is not under test.
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
-
+vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSessionMentionItems: () => [],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
 import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
+import { ChatComposer } from '../src/components/chat/chat-composer';
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
 import { MobileRunConfigSheet } from '../src/components/mobile/mobile-run-config-sheet';
 import { initI18n } from '../src/i18n';
-
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -261,6 +268,45 @@ describe('composer model picker search', () => {
         'a[href="https://github.com/deepseek-ai/deepseek-harness/discussions/4065"]'
       )
     ).toBeNull();
+  });
+
+  it('does not steal focus to composer textarea when clicking search input inside ChatComposer with focusOnContainerClick', async () => {
+    const textareaRef = { current: null as HTMLTextAreaElement | null };
+    await act(async () => {
+      root?.render(
+        createElement(ChatComposer, {
+          promptRef: textareaRef,
+          promptValue: '',
+          onPromptChange: () => undefined,
+          focusOnContainerClick: true,
+          footerSelector: createElement(DesktopRunConfigMenu, desktopProps),
+        })
+      );
+    });
+    // Open menu on pointerdown
+    await act(async () => {
+      container
+        ?.querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    });
+    const modelRow = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
+      node.textContent?.trim().startsWith('Model')
+    );
+    await act(async () => {
+      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const search = document.querySelector<HTMLInputElement>('input[aria-label="Search models"]');
+    expect(search).not.toBeNull();
+
+    // Click directly on search input
+    await act(async () => {
+      search?.focus();
+      search?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Verify search input retained focus and textarea did NOT steal focus
+    expect(document.activeElement).toBe(search);
+    expect(document.activeElement).not.toBe(textareaRef.current);
   });
 
   /* ── Mobile: the same rule inside the run-config sheet ── */

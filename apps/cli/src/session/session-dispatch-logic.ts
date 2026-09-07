@@ -13,6 +13,8 @@ import {
   historyItemsToInputBlocks,
   normalizeSessionInputBlocks,
   getLocalProjectHistoryProviderKey,
+  resolveSessionHistoryStatus,
+  hasPendingUserTurnActivation,
   type MachineId,
   type SessionHistoryInput,
   type SessionInputBlock,
@@ -44,39 +46,22 @@ export type SessionWatchSnapshot = {
 };
 
 /**
- * Resolve the metadata activation whose payload the machine still needs to consume.
+ * Whether an activation can still be explained by history that has not synced.
  *
- * `lastMissingHistoryUserMsgId` is a negative acknowledgement for one exact
- * activation. Keeping the producer-owned pointers intact avoids racing a later
- * producer write; comparing ids makes the acknowledgement harmless as soon as a
- * different turn is published. The marker is a PERMANENT one-shot negative ack
- * for that exact turn: a late-arriving history entry is never re-dispatched by
- * any path (the renderer shows it as "not delivered" and offers resending the
- * same content as a NEW message instead); only a different producer id wakes
- * the session again.
+ * The meta pointers are an activation INDEX, not the truth, so they may disagree
+ * with history — but exactly one disagreement is legitimate: the entry has not
+ * arrived yet. Once it is here and terminal, waiting cannot change the answer.
  */
-export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
-  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
-  if (
-    typeof meta.processingUserMsgId === 'string' &&
-    meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId
-  ) {
-    return meta.processingUserMsgId;
+export function isActivationAwaitingHistory(
+  history: SessionHistoryInput[],
+  pendingUserTurnId: string
+): boolean {
+  const entry = history.find((item) => item.role === 'user' && item.id === pendingUserTurnId);
+  if (!entry) {
+    return true;
   }
-  if (
-    typeof meta.latestUserMsgId === 'string' &&
-    meta.latestUserMsgId.length > 0 &&
-    meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId
-  ) {
-    return meta.latestUserMsgId;
-  }
-  return undefined;
-}
-
-export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
-  return getPendingUserTurnActivationId(meta) !== undefined;
+  const status = resolveSessionHistoryStatus(entry);
+  return status !== 'handled' && status !== 'failed' && status !== 'canceled';
 }
 
 // ── Action types ────────────────────────────────────────────────────────────
@@ -312,6 +297,8 @@ export function findNextDispatchableUserTurn(
     // Recovery already surfaced a delivery failure for this exact activation.
     // A history payload that arrives after the bounded wait must not resurrect
     // the failed turn when an unrelated signal opens the room later.
+    // `settledActivationUserMsgId` needs no twin exclusion here: a settled turn
+    // is terminal in history by construction, so no path below can return it.
     if (entry.id === meta.lastMissingHistoryUserMsgId) {
       continue;
     }

@@ -23,7 +23,9 @@ import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { openExternalUrl } from '@/lib/native-browser';
+import { Button } from '@/ui/button';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export interface ProjectsScreenLocalEntry {
   key: string;
@@ -55,11 +57,15 @@ export interface ProjectsScreenViewProps {
   localImportDisabledHint?: string;
   /** Whether the connect-GitHub action is enabled (workspace ready). */
   canConnectGitHub: boolean;
+  /** True while the GitHub repository list is still loading. */
+  loadingRepos: boolean;
   selectedProjectKey?: string | null;
   onSelectProject?: (selection: DesktopOnboardingProjectSelection) => void;
   onAddLocal: () => void;
   onConnectGitHub: () => void;
   onBack: () => void;
+  /** Leave onboarding project-less; the summary must say so honestly. */
+  onSkip: () => void;
   onComplete: (selection: DesktopOnboardingProjectSelection) => void;
 }
 
@@ -71,11 +77,13 @@ export function ProjectsScreenView({
   canImportLocal,
   localImportDisabledHint,
   canConnectGitHub,
+  loadingRepos,
   selectedProjectKey,
   onSelectProject,
   onAddLocal,
   onConnectGitHub,
   onBack,
+  onSkip,
   onComplete,
 }: ProjectsScreenViewProps) {
   const { t } = useTranslation();
@@ -105,35 +113,45 @@ export function ProjectsScreenView({
       }}
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
-        <OnboardingNextButton
-          finish
-          onClick={() => {
-            const selectedLocal = local.find(
-              (entry) => `local:${entry.key}` === resolvedSelectedProjectKey
-            );
-            if (selectedLocal) {
-              onComplete({
-                kind: 'local',
-                machineId: selectedLocal.machineId,
-                localProjectId: selectedLocal.localProjectId,
-                name: selectedLocal.name,
-              });
-              return;
-            }
-            const selectedGitHub = github.find(
-              (entry) => `github:${entry.key}` === resolvedSelectedProjectKey
-            );
-            if (selectedGitHub) {
-              onComplete({
-                kind: 'github',
-                repoFullName: selectedGitHub.key,
-                name: selectedGitHub.name,
-              });
-            }
-          }}
-          disabled={!hasAnyProject || resolvedSelectedProjectKey === null}
-          label={t('common.next', 'Next')}
-        />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="lg"
+            onClick={onSkip}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            {t('onboarding.projects.skip', 'Skip for now')}
+          </Button>
+          <OnboardingNextButton
+            finish
+            onClick={() => {
+              const selectedLocal = local.find(
+                (entry) => `local:${entry.key}` === resolvedSelectedProjectKey
+              );
+              if (selectedLocal) {
+                onComplete({
+                  kind: 'local',
+                  machineId: selectedLocal.machineId,
+                  localProjectId: selectedLocal.localProjectId,
+                  name: selectedLocal.name,
+                });
+                return;
+              }
+              const selectedGitHub = github.find(
+                (entry) => `github:${entry.key}` === resolvedSelectedProjectKey
+              );
+              if (selectedGitHub) {
+                onComplete({
+                  kind: 'github',
+                  repoFullName: selectedGitHub.key,
+                  name: selectedGitHub.name,
+                });
+              }
+            }}
+            disabled={!hasAnyProject || resolvedSelectedProjectKey === null}
+            label={t('common.next', 'Next')}
+          />
+        </div>
       }
     >
       <div className="flex flex-col gap-4">
@@ -193,7 +211,12 @@ export function ProjectsScreenView({
 
         {!hasAnyProject ? (
           <p className="text-center text-xs text-muted-foreground/80">
-            {t('onboarding.projects.needAtLeastOne', 'Add at least one project to finish setup.')}
+            {loadingRepos
+              ? t('onboarding.projects.loadingRepos', 'Loading your repositories…')
+              : t(
+                  'onboarding.projects.needAtLeastOne',
+                  'Add at least one project to finish setup.'
+                )}
           </p>
         ) : null}
       </div>
@@ -203,11 +226,13 @@ export function ProjectsScreenView({
 
 interface ProjectsScreenProps {
   onBack: () => void;
+  onSkip: () => void;
   onComplete: (selection: DesktopOnboardingProjectSelection) => void;
 }
 
-export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
+export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -283,6 +308,11 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
 
   const handleAddLocalProject = useCallback(() => {
     if (!canImportLocal || !selectLocalProjectDirectory) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'local_project_import',
+    });
     void (async () => {
       try {
         setImporting(true);
@@ -292,7 +322,15 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
           selectDirectory: selectLocalProjectDirectory,
           timeoutMessage: t('localProjects.add.timeout', 'The machine did not respond in time.'),
         });
-        if (!result) return;
+        if (!result) {
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'projects',
+            operation: 'local_project_import',
+            result: 'cancelled',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
+          return;
+        }
         setSelectedProject({
           kind: 'local',
           machineId: result.machineId,
@@ -307,17 +345,43 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
             homeDir: window.__LODY_PLATFORM__?.homeDir,
           });
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'local_project_import',
+          result: 'imported',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('Failed to import local project', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'local_project_import',
+          failure_code: 'local_project_import_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('onboarding.projects.localImportFailed', 'Could not add the local project.'));
       } finally {
         setImporting(false);
       }
     })();
-  }, [canImportLocal, selectLocalProjectDirectory, runtime, setLocalProbeResult, t, workspaceId]);
+  }, [
+    analytics,
+    canImportLocal,
+    selectLocalProjectDirectory,
+    runtime,
+    setLocalProbeResult,
+    t,
+    workspaceId,
+  ]);
 
   const handleConnectGitHub = useCallback(() => {
     if (workspaceId === null) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'github_install',
+    });
     setConnectingGitHub(true);
     void (async () => {
       try {
@@ -330,11 +394,25 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
         });
         const installUrl = `https://github.com/apps/${githubAppName}/installations/new?state=${encodeURIComponent(state)}`;
         const opened = await openExternalUrl(installUrl);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'github_install',
+          result: opened ? 'external_browser' : 'current_window',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
         if (!opened) {
           // Final fallback: navigate the current window so the user is not stranded.
           window.location.assign(installUrl);
         }
       } catch (error) {
+        console.error('[onboarding] Failed to start GitHub installation:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'github_install',
+          failure_code: 'github_install_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           t('settings.integrations.github.connectFailed', 'Failed to start GitHub installation'),
           {
@@ -348,7 +426,15 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
         setConnectingGitHub(false);
       }
     })();
-  }, [createGitHubInstallState, getConvexErrorMessage, isElectron, t, workspaceId, workspaceSlug]);
+  }, [
+    analytics,
+    createGitHubInstallState,
+    getConvexErrorMessage,
+    isElectron,
+    t,
+    workspaceId,
+    workspaceSlug,
+  ]);
 
   const local: ProjectsScreenLocalEntry[] = useMemo(
     () =>
@@ -383,6 +469,7 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
       canImportLocal={canImportLocal}
       localImportDisabledHint={localImportDisabledHint}
       canConnectGitHub={canUseGitHub && workspaceId !== null}
+      loadingRepos={canUseGitHub && workspaceId !== null && repos === undefined}
       selectedProjectKey={
         selectedProject?.kind === 'local'
           ? `local:${selectedProject.machineId}:${selectedProject.localProjectId}`
@@ -394,6 +481,7 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
       onAddLocal={handleAddLocalProject}
       onConnectGitHub={handleConnectGitHub}
       onBack={onBack}
+      onSkip={onSkip}
       onComplete={onComplete}
     />
   );

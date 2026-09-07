@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasBuiltinEnvAuthentication,
+  supportsAuthenticationWhenRequired,
   supportsBuiltinAuthentication,
+  usesAcpProtocolAuthentication,
 } from '../src/agent-authentication';
 
 describe('hasBuiltinEnvAuthentication', () => {
@@ -94,10 +96,45 @@ describe('supportsBuiltinAuthentication', () => {
     ).toBe(false);
   });
 
-  it('refuses sign-in for registry and custom providers', () => {
+  it('refuses the builtin login flow for registry and custom providers', () => {
     expect(supportsBuiltinAuthentication({ cliType: 'registry', agentType: 'gemini' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: 'custom', agentType: 'my-agent' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'auggie' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: undefined, agentType: undefined })).toBe(false);
+  });
+});
+
+describe('usesAcpProtocolAuthentication', () => {
+  it('covers exactly the third-party ACP providers', () => {
+    expect(usesAcpProtocolAuthentication('registry')).toBe(true);
+    expect(usesAcpProtocolAuthentication('custom')).toBe(true);
+    expect(usesAcpProtocolAuthentication('builtin')).toBe(false);
+    expect(usesAcpProtocolAuthentication(undefined)).toBe(false);
+  });
+});
+
+describe('supportsAuthenticationWhenRequired', () => {
+  it('offers the ACP exchange to registry and custom agents', () => {
+    // The whole point: a registry agent reporting auth-required used to have no
+    // way to sign in at all.
+    expect(
+      supportsAuthenticationWhenRequired({ cliType: 'registry', agentType: 'antigravity-acp' })
+    ).toBe(true);
+    expect(supportsAuthenticationWhenRequired({ cliType: 'custom', agentType: 'my-agent' })).toBe(
+      true
+    );
+  });
+
+  it('keeps the managed builtin login flow and excludes providers with neither', () => {
+    expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'codex' })).toBe(
+      true
+    );
+    // DeepSeek Harness authenticates purely through env vars.
+    expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'deepseek' })).toBe(
+      false
+    );
+    expect(supportsAuthenticationWhenRequired({ cliType: undefined, agentType: undefined })).toBe(
+      false
+    );
   });
 });

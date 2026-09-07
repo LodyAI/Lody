@@ -9,10 +9,8 @@ import {
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
-  type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
-  type CustomAcpLaunchSpec,
   type MachineId,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
@@ -46,6 +44,7 @@ import {
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
+import type { DesktopOnboardingProviderSelection } from '@/atoms/onboarding';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
@@ -65,6 +64,7 @@ import {
 import { labelForAgent } from '@/components/settings/provider-row';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { ProviderSetupRow } from '@/components/settings/provider-setup-row';
+import { ProviderProgressButton } from '@/components/settings/provider-progress-button';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import type { TourConfigurationState } from '../tour/tour-app';
@@ -77,6 +77,7 @@ import {
   providerTestActivityFromProgress,
   type ProviderTestActivity,
 } from '../provider-test-state';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
 
@@ -182,7 +183,7 @@ export interface ProvidersScreenViewProps {
   testActivities?: Record<string, ProviderTestActivity>;
   /** Latest failed probe detail, kept available after its toast disappears. */
   failureReasons?: Record<string, string>;
-  selectedConfigId?: string | null;
+  selectedProviderId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
   localMachineId?: MachineId | null;
@@ -205,7 +206,7 @@ export interface ProvidersScreenViewProps {
   onBack: () => void;
   /** Defer provider setup and jump to the next step. */
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
 }
 
 export function ProvidersScreenView({
@@ -214,7 +215,7 @@ export function ProvidersScreenView({
   testStatuses,
   testActivities = {},
   failureReasons = {},
-  selectedConfigId,
+  selectedProviderId,
   noLocalMachine,
   localMachineId = null,
   localMachine,
@@ -232,8 +233,18 @@ export function ProvidersScreenView({
 }: ProvidersScreenViewProps) {
   const { t } = useTranslation();
   const canProceed = !noLocalMachine && configs.length + setups.length > 0;
-  const resolvedSelectedConfigId = selectedConfigId ?? configs[0]?.id ?? setups[0]?.id ?? null;
-  const previewConfig = configs.find((config) => config.id === resolvedSelectedConfigId);
+  const resolvedSelectedProviderId = selectedProviderId ?? configs[0]?.id ?? setups[0]?.id ?? null;
+  const previewConfig = configs.find((config) => config.id === resolvedSelectedProviderId);
+  const previewSetup = setups.find((setup) => setup.id === resolvedSelectedProviderId);
+  const selectedProvider: DesktopOnboardingProviderSelection | null = previewConfig
+    ? { kind: 'agentConfig', agentConfigId: previewConfig.id, agentName: previewConfig.name }
+    : previewSetup
+      ? {
+          kind: 'providerSetup',
+          providerSetupId: previewSetup.id,
+          agentName: previewSetup.config.name,
+        }
+      : null;
   const previewStatus = previewConfig ? testStatuses[previewConfig.id] : undefined;
   const previewActivity = previewConfig ? testActivities[previewConfig.id] : undefined;
   const previewAgentStatus: TourConfigurationState['agentStatus'] = noLocalMachine
@@ -257,7 +268,7 @@ export function ProvidersScreenView({
       title={t('onboarding.providers.title', 'Connect a coding agent')}
       description={t(
         'onboarding.providers.description',
-        'Add a provider now. Runtime downloads continue in the background, and Lody asks you to sign in when ready.'
+        'Add an Agent now. Lody will continue setup and let you know if anything needs your attention.'
       )}
       previewIdentity={
         previewConfig
@@ -289,8 +300,8 @@ export function ProvidersScreenView({
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
-            onClick={() => resolvedSelectedConfigId && onNext(resolvedSelectedConfigId)}
-            disabled={!canProceed || resolvedSelectedConfigId === null}
+            onClick={() => selectedProvider && onNext(selectedProvider)}
+            disabled={!canProceed || selectedProvider === null}
           />
         </div>
       }
@@ -322,7 +333,7 @@ export function ProvidersScreenView({
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
                   const activity = testActivities[config.id];
                   const activityPercent = getProviderTestActivityPercent(activity);
-                  const selected = config.id === resolvedSelectedConfigId;
+                  const selected = config.id === resolvedSelectedProviderId;
                   return (
                     <motion.div
                       key={config.id}
@@ -385,35 +396,25 @@ export function ProvidersScreenView({
                         <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
                           {t('common.edit', 'Edit')}
                         </Button>
-                        {status !== 'needs-auth' ? (
-                          <Button
-                            variant={
-                              activity ? 'outline' : status === 'passed' ? 'ghost' : 'outline'
+                        {activity ? (
+                          <ProviderProgressButton
+                            percent={activityPercent}
+                            label={
+                              activityPercent !== null
+                                ? `${activityPercent}%`
+                                : t('onboarding.providers.workingAction', 'Working')
                             }
+                          />
+                        ) : status !== 'needs-auth' ? (
+                          <Button
+                            variant={status === 'passed' ? 'ghost' : 'outline'}
                             size="sm"
-                            className={cn(
-                              'relative min-w-[4.5rem] overflow-hidden',
-                              activity && 'disabled:opacity-100'
-                            )}
-                            disabled={Boolean(activity) || noLocalMachine}
+                            disabled={noLocalMachine}
                             onClick={() => onTest(config)}
                           >
-                            {activityPercent !== null ? (
-                              <span
-                                aria-hidden="true"
-                                className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
-                                style={{ width: `${activityPercent}%` }}
-                              />
-                            ) : null}
-                            <span className="relative z-10 tabular-nums">
-                              {activity
-                                ? activityPercent !== null
-                                  ? `${activityPercent}%`
-                                  : t('onboarding.providers.workingAction', 'Working')
-                                : status === 'passed'
-                                  ? t('onboarding.providers.retest', 'Re-test')
-                                  : t('onboarding.providers.test', 'Test')}
-                            </span>
+                            {status === 'passed'
+                              ? t('onboarding.providers.retest', 'Re-test')
+                              : t('onboarding.providers.test', 'Test')}
                           </Button>
                         ) : null}
                         <Button
@@ -462,15 +463,15 @@ export function ProvidersScreenView({
         >
           <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
           {configs.length + setups.length === 0
-            ? t('onboarding.providers.addFirst', 'Add your first provider')
-            : t('onboarding.providers.addAnother', 'Add another provider')}
+            ? t('onboarding.providers.addFirst', 'Add your first Agent')
+            : t('onboarding.providers.addAnother', 'Add another Agent')}
         </button>
 
         {!noLocalMachine && !canProceed ? (
           <p className="text-center text-xs text-muted-foreground/80">
             {t(
               'onboarding.providers.needTested',
-              'Add a provider to continue, or skip and configure later.'
+              'Add an Agent to continue, or skip and configure later.'
             )}
           </p>
         ) : null}
@@ -571,7 +572,7 @@ function AgentShowcase({
 interface ProvidersScreenProps {
   onBack: () => void;
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
   onManagedRuntimeSelected: (agentType: ManagedBuiltinAgentType) => void;
 }
 
@@ -582,6 +583,7 @@ export function ProvidersScreen({
   onManagedRuntimeSelected,
 }: ProvidersScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -629,7 +631,7 @@ export function ProvidersScreen({
   const [testActivities, setTestActivities] = useState<Record<string, ProviderTestActivity>>({});
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const testRunsRef = useRef(createProviderTestRunRegistry());
-  const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AgentConfigMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -638,9 +640,9 @@ export function ProvidersScreen({
       ...localConfigs.map((config) => config.id),
       ...localSetups.map((setup) => setup.id),
     ]);
-    if (selectedConfigId && availableIds.has(selectedConfigId as AgentConfigId)) return;
-    setSelectedConfigId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
-  }, [localConfigs, localSetups, selectedConfigId]);
+    if (selectedProviderId && availableIds.has(selectedProviderId as AgentConfigId)) return;
+    setSelectedProviderId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
+  }, [localConfigs, localSetups, selectedProviderId]);
 
   const setStatus = (id: AgentConfigId, status: ProviderTestStatus) =>
     setTestStatuses((prev) => ({ ...prev, [id]: status }));
@@ -715,6 +717,15 @@ export function ProvidersScreen({
         const services = getIpcServices();
         const restart = services ? services.cli.restart.bind(services.cli) : undefined;
         if (!restart) {
+          console.error(
+            '[onboarding] Local agent restart is unavailable while waiting for provider setup'
+          );
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'local_agent_recovery',
+            failure_code: 'restart_unavailable',
+            retryable: true,
+          });
           toast.error(
             t(
               'onboarding.providers.localAgentUnreachable',
@@ -724,14 +735,33 @@ export function ProvidersScreen({
           return;
         }
 
+        const restartStartedAtMs = analytics.now();
+        analytics.capture('onboarding/operation_started', {
+          step: 'providers',
+          operation: 'local_agent_restart',
+        });
         void restart()
           .then((result) => {
             if (cancelled) return;
             if (!result.ok) {
               throw new Error(result.error || 'restart_failed');
             }
+            analytics.capture('onboarding/operation_succeeded', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+            });
             secondTimeoutId = window.setTimeout(() => {
               if (cancelled) return;
+              console.error(
+                '[onboarding] Local agent remained unreachable after an automatic restart'
+              );
+              analytics.capture('onboarding/operation_failed', {
+                step: 'providers',
+                operation: 'local_agent_recovery',
+                failure_code: 'local_agent_unreachable',
+                retryable: true,
+              });
               toast.error(
                 t(
                   'onboarding.providers.localAgentUnreachable',
@@ -742,6 +772,14 @@ export function ProvidersScreen({
           })
           .catch((error) => {
             if (cancelled) return;
+            console.error('[onboarding] Failed to restart the local agent:', error);
+            analytics.capture('onboarding/operation_failed', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              failure_code: 'local_agent_restart_failed',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+              retryable: true,
+            });
             toast.error(
               t(
                 'onboarding.providers.localAgentUnreachable',
@@ -758,16 +796,12 @@ export function ProvidersScreen({
       if (firstTimeoutId !== null) window.clearTimeout(firstTimeoutId);
       if (secondTimeoutId !== null) window.clearTimeout(secondTimeoutId);
     };
-  }, [localMachine, localProbeAttempted, t]);
+  }, [analytics, localMachine, localProbeAttempted, t]);
 
   const refreshCapabilities = useCallback(
     async (args: {
+      machineId: MachineId;
       configId: AgentConfigId;
-      cliType: AgentConfigCliType;
-      agentType: string;
-      customAcp?: CustomAcpLaunchSpec;
-      runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
-      env?: Record<string, string>;
       signal?: AbortSignal;
       onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
     }) => {
@@ -777,14 +811,9 @@ export function ProvidersScreen({
       const response = await runtime.requestMachineAcpCapabilitiesRefresh(
         {
           type: 'machine/acp-capabilities-refresh',
-          machineId: localMachineId,
+          machineId: args.machineId,
           workspaceId,
           configId: args.configId,
-          cliType: args.cliType,
-          agentType: args.agentType,
-          customAcp: args.customAcp,
-          runtimeOverrides: args.runtimeOverrides,
-          env: args.env,
         },
         { signal: args.signal, onProgress: args.onProgress }
       );
@@ -803,7 +832,11 @@ export function ProvidersScreen({
       }
       // The machine flock doc only syncs once per session; force a re-sync so
       // the freshly probed capabilities surface without a reload.
-      await resyncMachineFlockRows(runtime, localMachineId);
+      await resyncMachineFlockRows(runtime, args.machineId, {
+        refreshedCapability: response.capability
+          ? { configId: response.configId, value: response.capability }
+          : undefined,
+      });
       return response;
     },
     [localMachineId, runtime, t, workspaceId]
@@ -816,6 +849,11 @@ export function ProvidersScreen({
   const handleTest = useCallback(
     (config: AgentConfigMeta) => {
       const run = testRunsRef.current.start(config.id);
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_test',
+      });
       setTestActivities((prev) => ({
         ...prev,
         [config.id]: { phase: 'checking-runtime' },
@@ -823,12 +861,8 @@ export function ProvidersScreen({
       void (async () => {
         try {
           const response = await refreshCapabilities({
+            machineId: config.machineId,
             configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            env: config.env,
             signal: run.signal,
             onProgress: (progress) => {
               if (!testRunsRef.current.isCurrent(config.id, run)) return;
@@ -842,8 +876,22 @@ export function ProvidersScreen({
           clearTestActivity(config.id);
           clearFailureReason(config.id);
           setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'providers',
+            operation: 'agent_test',
+            result: response.authRequired ? 'needs_auth' : 'passed',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
         } catch (error) {
           if (!testRunsRef.current.finish(config.id, run)) return;
+          console.error(`[onboarding] Failed to test Agent ${config.name}:`, error);
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'agent_test',
+            failure_code: 'agent_test_failed',
+            duration_ms: analytics.durationSince(startedAtMs),
+            retryable: true,
+          });
           clearTestActivity(config.id);
           const failureReason = error instanceof Error ? error.message : String(error);
           setFailureReasons((prev) => ({ ...prev, [config.id]: failureReason }));
@@ -857,12 +905,20 @@ export function ProvidersScreen({
         }
       })();
     },
-    [clearFailureReason, clearTestActivity, refreshCapabilities, t]
+    [analytics, clearFailureReason, clearTestActivity, refreshCapabilities, t]
   );
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
       if (!localMachineId || !dialogMode) return;
+      const operation =
+        dialogMode.kind === 'edit'
+          ? 'agent_config_update'
+          : payload.backgroundSetup
+            ? 'agent_setup_create'
+            : 'agent_config_create';
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', { step: 'providers', operation });
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -884,7 +940,7 @@ export function ProvidersScreen({
           } else {
             await createConfig(config);
           }
-          setSelectedConfigId(config.id);
+          setSelectedProviderId(config.id);
         } else {
           invalidateTestRun(dialogMode.config.id);
           await updateConfig({
@@ -906,7 +962,20 @@ export function ProvidersScreen({
           clearFailureReason(dialogMode.config.id);
           setStatus(dialogMode.config.id, 'untested');
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to save Agent configuration:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation,
+          failure_code: `${operation}_failed`,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           dialogMode.kind === 'create'
             ? t('agents.createConfigError', 'Failed to create configuration')
@@ -916,6 +985,7 @@ export function ProvidersScreen({
       }
     },
     [
+      analytics,
       clearFailureReason,
       createConfig,
       createSetup,
@@ -929,34 +999,78 @@ export function ProvidersScreen({
 
   const handleRetrySetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_retry_request',
+        attempt: setup.attempt + 1,
+      });
       try {
         await retrySetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to retry Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          failure_code: 'agent_setup_retry_failed',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.retryFailed', 'Could not retry provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [retrySetup, t]
+    [analytics, retrySetup, t]
   );
 
   const handleDeleteSetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_cancel',
+      });
       try {
         await deleteSetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to cancel Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          failure_code: 'agent_setup_cancel_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [deleteSetup, t]
+    [analytics, deleteSetup, t]
   );
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'providers',
+      operation: 'agent_config_delete',
+    });
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
@@ -967,7 +1081,20 @@ export function ProvidersScreen({
         return rest;
       });
       setPendingDelete(null);
+      analytics.capture('onboarding/operation_succeeded', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        duration_ms: analytics.durationSince(startedAtMs),
+      });
     } catch (error) {
+      console.error('[onboarding] Failed to delete Agent configuration:', error);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        failure_code: 'agent_config_delete_failed',
+        duration_ms: analytics.durationSince(startedAtMs),
+        retryable: true,
+      });
       toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'), {
         description: error instanceof Error ? error.message : String(error),
       });
@@ -984,12 +1111,12 @@ export function ProvidersScreen({
         testStatuses={testStatuses}
         testActivities={testActivities}
         failureReasons={failureReasons}
-        selectedConfigId={selectedConfigId}
+        selectedProviderId={selectedProviderId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
         localMachine={localMachine}
         onEdit={(config) => setDialogMode({ kind: 'edit', config })}
-        onSelect={(config) => setSelectedConfigId(config.id)}
+        onSelect={(config) => setSelectedProviderId(config.id)}
         onTest={handleTest}
         onAuthenticated={(config) => {
           clearFailureReason(config.id);

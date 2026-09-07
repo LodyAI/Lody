@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { applyTextRewrites, type ProjectSkill, type ProjectSkillGroup } from '@lody/shared';
+import {
+  applyTextRewrites,
+  DEFAULT_AGENTS_GLOBAL_SKILL_DIR,
+  type ProjectSkill,
+  type ProjectSkillGroup,
+} from '@lody/shared';
 import {
   buildSkillMentionItems,
   buildSkillMentionRewrites,
+  getAllowedSkillMentionDirs,
   getSkillMentionToken,
   hydrateSkillMentionsFromText,
   mergeMentionSkillState,
@@ -111,6 +117,45 @@ describe('buildSkillMentionItems', () => {
         .map((i) => i.dir)
         .sort()
     ).toEqual(['.agents/skills', '.claude/skills', '~/.claude/skills']);
+  });
+});
+
+describe('getAllowedSkillMentionDirs', () => {
+  it('returns no whitelist when the agent is unknown or only partly identified', () => {
+    expect(getAllowedSkillMentionDirs(undefined)).toBeNull();
+    expect(getAllowedSkillMentionDirs({ cliType: 'custom' })).toBeNull();
+    expect(getAllowedSkillMentionDirs({ agentType: 'claude' })).toBeNull();
+  });
+
+  it('returns no whitelist for an unregistered agent type instead of an empty one', () => {
+    // An empty-but-present whitelist filters every candidate out; `null` keeps
+    // them. Custom agents get generated `custom-<uuid>` types.
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'custom', agentType: 'custom-2f1a' });
+    expect(allowed).toBeNull();
+
+    const items = buildSkillMentionItems(GROUPS);
+    expect(selectSkillMentionCandidates(items, '', allowed).map((i) => i.token)).toEqual([
+      'claude-only',
+      'code-review',
+      'deep-research',
+      'global-only',
+      'qwen-only',
+    ]);
+  });
+
+  it('keeps an explicit empty whitelist for a registered agent that reads no skills', () => {
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'registry', agentType: 'deepagents' });
+    expect(allowed).not.toBeNull();
+    expect([...(allowed ?? [])]).toEqual([]);
+    expect(selectSkillMentionCandidates(buildSkillMentionItems(GROUPS), '', allowed)).toEqual([]);
+  });
+
+  it('offers ~/.agents/skills to grok, pi, and kimi', () => {
+    for (const agentType of ['grok', 'pi-acp', 'kimi-code']) {
+      expect(getAllowedSkillMentionDirs({ cliType: 'registry', agentType })).toContain(
+        DEFAULT_AGENTS_GLOBAL_SKILL_DIR
+      );
+    }
   });
 });
 

@@ -141,7 +141,10 @@ export function useOnboardingBuiltinRuntimePrefetch(
         }
       },
       (agentType, error) => {
-        console.debug(`[onboarding] Builtin agent runtime prefetch failed for ${agentType}:`, error);
+        console.error(
+          `[onboarding] Builtin Agent runtime prefetch failed for ${agentType}:`,
+          error
+        );
       }
     );
 

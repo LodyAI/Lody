@@ -14,6 +14,22 @@ export type SessionInfoBarGitHubActionId =
   | 'ready-for-review'
   | 'merge';
 
+const SESSION_TURN_GITHUB_ACTION_IDS = new Set<SessionInfoBarGitHubActionId>([
+  'create-pr',
+  'create-draft-pr',
+  'commit-and-push',
+  'fix-ci-errors',
+  'resolve-conflicts',
+]);
+
+/** Agent-driven GitHub actions need a hydrated Session Turn configuration. */
+export function shouldDisableSessionInfoBarGitHubActionForHydration(
+  actionId: SessionInfoBarGitHubActionId,
+  sessionDocReady: boolean
+): boolean {
+  return !sessionDocReady && SESSION_TURN_GITHUB_ACTION_IDS.has(actionId);
+}
+
 export function resolveSessionInfoBarGitHubActionIds({
   canShowGitHubActions,
   hasExistingPr,

@@ -1,8 +1,10 @@
 import type { SessionId } from '@lody/shared';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import SessionDetail from '@/components/sessions/session-detail';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
+import { formatSessionTabSearch } from '@/lib/session-tab-url';
 
 export type SessionDetailSearch = {
   tab?: string;
@@ -75,5 +77,30 @@ export const Route = createFileRoute('/$workspaceName/_auth/sessions/$sessionId'
     pr: parsePrNumber(search.pr),
     browser: parseBrowserFlag(search.browser),
   }),
+  /* Entry-scoped last-active-tab restoration. An ABSENT `?tab` means "no
+     explicit choice" (external entries: sidebar rows, notifications, pasted
+     URLs) and is filled in from the per-session last-active store as ONE
+     replace redirect before anything renders. In-session tab activation
+     always writes an explicit value — the parent tab included
+     (`formatExplicitSessionTabSearch`) — so a user's return to the parent is
+     never re-restored, and the replace keeps tab-less entries out of the
+     history stack. This is the only non-user `?tab` writer; `SessionDetail`
+     itself never rewrites the URL from derived state. */
+  beforeLoad: ({ params, search }) => {
+    if (search.tab !== undefined) {
+      return;
+    }
+    const storedTabId = readStoredLastActiveTabState(params.sessionId as SessionId)?.sessionTabId;
+    const tab = storedTabId ? formatSessionTabSearch(storedTabId, params.sessionId) : undefined;
+    if (tab === undefined) {
+      return;
+    }
+    throw redirect({
+      to: '/$workspaceName/sessions/$sessionId',
+      params,
+      search: { ...search, tab },
+      replace: true,
+    });
+  },
   component: SessionDetailRoute,
 });

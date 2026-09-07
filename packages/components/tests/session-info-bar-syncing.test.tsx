@@ -132,4 +132,28 @@ describe('SessionInfoBar syncing indicator', () => {
     act(() => pauseButton?.click());
     expect(onGoalCommand).toHaveBeenCalledWith('pause', ACTIVE_GOAL);
   });
+
+  it('shows and dispatches Resume for a blocked Codex goal', () => {
+    const blockedGoal: SessionGoalMessage = { ...ACTIVE_GOAL, status: 'blocked' };
+    const onGoalCommand = vi.fn();
+    act(() => {
+      root.render(
+        <SessionInfoBar
+          {...CONTEXT_LESS_PROPS}
+          goal={blockedGoal}
+          goalCommands={SESSION_GOAL_COMMANDS}
+          onGoalCommand={onGoalCommand}
+        />
+      );
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Goal"]')?.click());
+    const resumeButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Resume'
+    );
+    expect(resumeButton).toBeDefined();
+
+    act(() => resumeButton?.click());
+    expect(onGoalCommand).toHaveBeenCalledWith('resume', blockedGoal);
+  });
 });

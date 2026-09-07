@@ -9,9 +9,10 @@ import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
  * with a text composer. This hook makes every option reachable without the mouse:
  *
  *   - Arrow keys do 2D spatial navigation: ↑/↓ move between rows (nearest column),
- *     ←/→ move within a row. The highlight follows the real layout because we focus
- *     the actual element and mirror it onto `[data-qs-active]`. Arrows ONLY act when
- *     focus is already inside `rootRef`, so they never hijack the sidebar / page.
+ *     ←/→ move within a row, then yield at the horizontal edge so the shell can switch
+ *     FocusScope. The highlight follows the real layout because we focus the actual
+ *     element and mirror it onto `[data-qs-active]`. Arrows ONLY act when focus is
+ *     already inside `rootRef`, so they never hijack the sidebar / page.
  *   - Esc steps out: from the composer → onto the first option (focus-move mode); from
  *     an option → blur + clear the highlight (exit focus-move mode entirely). After that
  *     exit, an arrow key re-enters focus-move mode (landing back on the option you left),
@@ -270,10 +271,14 @@ export function useChatLandingKeyboardNav(
       }
 
       const neighbor = spatialNeighbor(active, options, direction);
-      event.preventDefault(); // swallow either way so the window never scrolls
       if (neighbor) {
+        event.preventDefault();
         event.stopImmediatePropagation();
         focusOption(neighbor);
+      } else if (direction === 'up' || direction === 'down') {
+        // Vertical boundaries stay inside this 2D list. Horizontal boundaries
+        // deliberately yield so the shell can switch FocusScope.
+        event.preventDefault();
       }
     };
 

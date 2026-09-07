@@ -3,8 +3,10 @@
 out
 src/routeTree.gen.ts
 public/sitemap.xml
+public/docs-search.json
 public/llms.txt
 public/llms-full.txt
 public/rss.xml
 public/rss-zh.xml
 lib/blog-reading-time.generated.ts
+lib/docs-faq.generated.ts

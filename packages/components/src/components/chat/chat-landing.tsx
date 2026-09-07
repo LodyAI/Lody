@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   buildPendingUserHistoryEntry,
   buildSessionPreparationRunConfig,
@@ -71,7 +71,8 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  sidebarCollapsedAtom,
+  navigationSidebarHiddenAtom,
+  showNavigationSidebarAtom,
   tasksFeatureEnabledAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
@@ -80,6 +81,7 @@ import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
+import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
@@ -100,7 +102,7 @@ import {
 import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
@@ -188,6 +190,7 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
+import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
 import {
   extractIssuePRMentionsFromText,
@@ -199,6 +202,10 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
+import {
+  buildChatLandingDraftKey,
+  chatLandingAppliedResetKeyAtomFamily,
+} from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -343,7 +350,11 @@ import {
   useMobileHomeExcludedSetAtom,
 } from '@/atoms/mobile-home-state';
 import {
+  buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
+  getChatLandingSelectionSearch,
+  getChatLandingSelectionSyncDecision,
+  type ChatLandingSearch,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
@@ -370,6 +381,12 @@ interface ChatLandingProps {
   preSelectedMachine?: string;
   preSelectedProject?: string;
   preSelectedRepo?: string;
+  /**
+   * Mirrors the composer's effective selection back into the chat-route URL
+   * (with `replace`) once the URL names a selection. Passed by the desktop
+   * chat route only; mobile keeps its base-context model.
+   */
+  onSelectionUrlSync?: (search: ChatLandingSearch) => void;
   resetDraftKey?: string;
   resetDraftOnKeyChange?: boolean;
 }
@@ -546,6 +563,7 @@ function WorkspaceChatLanding({
   preSelectedMachine,
   preSelectedProject,
   preSelectedRepo,
+  onSelectionUrlSync,
   resetDraftKey,
   resetDraftOnKeyChange = true,
 }: ChatLandingProps) {
@@ -909,8 +927,8 @@ function WorkspaceChatLanding({
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
-  const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;
     return machineId && machines.has(machineId) ? machineId : null;
@@ -942,6 +960,12 @@ function WorkspaceChatLanding({
   const [sessionState, setSessionState] = useAtom(
     chatLandingSessionStateAtomFamily(chatLandingStateKey)
   );
+  /**
+   * Scope for the attachment draft and the reserved session id. Unlike the
+   * prompt text this is workspace-scoped, because an uploaded image/file is
+   * addressable only inside the workspace it was uploaded to.
+   */
+  const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateKey, workspaceSlug);
   const prompt = sessionState.prompt;
   const [draftActivityRevision, setDraftActivityRevision] = useState(0);
   const pastedTextDrafts = useMemo(
@@ -1053,17 +1077,6 @@ function WorkspaceChatLanding({
      mobile create flow existed and was an actively confusing UX
      (settings ≠ where you go to create something new). */
   const [mobileCreateWorkspaceOpen, setMobileCreateWorkspaceOpen] = useState(false);
-  const {
-    state: sessionConfigSelectionState,
-    selectedModeId,
-    selectedModelId,
-    configOptionValues,
-    selectMode: setSelectedModeId,
-    selectModel: setSelectedModelName,
-    selectConfigOption: handleConfigOptionChange,
-    dispatch: dispatchSessionConfigSelection,
-  } = useAcpSessionConfigSelectionState();
-
   // ── GitHub context state ──
   const [selectedRepo, setSelectedRepo] = useState<string | undefined>(undefined);
   const selectedRepoWorktreeSetup = useMemo(() => {
@@ -1145,6 +1158,9 @@ function WorkspaceChatLanding({
   const fireProjectSelectedOnChange = useFireOnKeyChange();
   const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  // False while a just-applied URL intent has not rendered yet; the selection
+  // mirror must not compare against that pre-application state.
+  const selectionSyncArmedRef = useRef(false);
   const selectedLocalProjectRef = useRef<LocalProjectSelection | null>(null);
   selectedLocalProjectRef.current = selectedLocalProject;
   // `machines` is read inside fetchLocalGitState only for an offline pre-check.
@@ -1274,7 +1290,7 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
     resetSessionId: resetDraftSessionId,
-  } = useChatLandingDraftSession();
+  } = useChatLandingDraftSession(chatLandingDraftKey);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const {
     imageItems,
@@ -1288,6 +1304,7 @@ function WorkspaceChatLanding({
     clearPendingImages,
     buildInputBlocks,
   } = useChatLandingImageDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     isMobile,
@@ -1306,13 +1323,15 @@ function WorkspaceChatLanding({
     clearPendingFiles,
     buildFileInputBlocks,
   } = useChatLandingFileDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     machineId: selectedMachineId,
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
-  const lastAppliedResetDraftKeyRef = useRef<string | null>(null);
+  const draftStore = useStore();
+  const appliedResetKeyAtom = chatLandingAppliedResetKeyAtomFamily(chatLandingDraftKey);
 
   useEffect(() => {
     if (!resetDraftKey) {
@@ -1320,10 +1339,10 @@ function WorkspaceChatLanding({
     }
 
     const scopedResetKey = `${chatLandingStateKey ?? 'anonymous'}:${resetDraftKey}`;
-    if (lastAppliedResetDraftKeyRef.current === scopedResetKey) {
+    if (draftStore.get(appliedResetKeyAtom) === scopedResetKey) {
       return;
     }
-    lastAppliedResetDraftKeyRef.current = scopedResetKey;
+    draftStore.set(appliedResetKeyAtom, scopedResetKey);
     if (resetDraftOnKeyChange) {
       setSessionState({ prompt: '', pastedTextDrafts: [] });
     }
@@ -1332,9 +1351,11 @@ function WorkspaceChatLanding({
     clearPendingFiles();
     resetDraftSessionId();
   }, [
+    appliedResetKeyAtom,
     chatLandingStateKey,
     clearPendingFiles,
     clearPendingImages,
+    draftStore,
     resetDraftSessionId,
     resetDraftKey,
     resetDraftOnKeyChange,
@@ -1395,11 +1416,11 @@ function WorkspaceChatLanding({
   );
 
   // Auto-focus textarea on mount (desktop only)
-  const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
+  const mobileKeyboardRef = useRef(usesMobileKeyboardAction);
+  mobileKeyboardRef.current = usesMobileKeyboardAction;
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (!isMobileRef.current) {
+      if (!mobileKeyboardRef.current) {
         promptTextareaRef.current?.focus();
       }
     });
@@ -1407,19 +1428,34 @@ function WorkspaceChatLanding({
   }, []);
 
   // ── Apply pre-selection from search params ──
-  const preSelectionKey = `${preSelectedContext}|${preSelectedMachine}|${preSelectedProject}|${preSelectedRepo}`;
+  const preSelectionKey = buildChatLandingPreSelectionKey({
+    context: preSelectedContext,
+    machine: preSelectedMachine,
+    project: preSelectedProject,
+    repo: preSelectedRepo,
+  });
   useEffect(() => {
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
+    // The applied selection reaches state next render; disarm the mirror so it
+    // cannot race this intent with the still-stale selection (see the mirror
+    // effect below, which must run after this one).
+    selectionSyncArmedRef.current = false;
 
     if (preSelectedContext === 'chat') {
       setContextType('chat');
     } else if (preSelectedContext === 'local' && preSelectedMachine && preSelectedProject) {
       setContextType('local');
-      handleSelectedLocalProjectChange({
-        machineId: preSelectedMachine as MachineId,
-        localProjectId: preSelectedProject as LocalProjectId,
-      });
+      const currentProject = selectedLocalProjectRef.current;
+      if (
+        currentProject?.machineId !== preSelectedMachine ||
+        currentProject?.localProjectId !== preSelectedProject
+      ) {
+        handleSelectedLocalProjectChange({
+          machineId: preSelectedMachine as MachineId,
+          localProjectId: preSelectedProject as LocalProjectId,
+        });
+      }
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
@@ -1432,6 +1468,54 @@ function WorkspaceChatLanding({
     preSelectedRepo,
     handleSelectedLocalProjectChange,
   ]);
+
+  // ── Mirror the effective selection back into the URL ──
+  // The composer owns the selection once pre-selection is applied. When the
+  // URL names a selection, it must keep telling the truth: steering or
+  // clearing the composer would otherwise leave a stale project in the URL,
+  // and re-activating that project's sidebar row would be an identical-URL
+  // no-op. A plain /chat URL names nothing and stays plain, so restored
+  // defaults and auto-selection never rewrite the home landing's address.
+  const selectionSearch = useMemo(
+    () =>
+      getChatLandingSelectionSearch({
+        contextType,
+        machineId: selectedLocalProject?.machineId ?? null,
+        localProjectId: selectedLocalProject?.localProjectId ?? null,
+        repoFullName: selectedRepo ?? null,
+      }),
+    [contextType, selectedLocalProject, selectedRepo]
+  );
+  const urlNamesSelection =
+    preSelectedContext !== undefined ||
+    preSelectedMachine !== undefined ||
+    preSelectedProject !== undefined ||
+    preSelectedRepo !== undefined;
+  useEffect(() => {
+    if (!onSelectionUrlSync) return;
+    const selectionKey = buildChatLandingPreSelectionKey({
+      context: selectionSearch.context,
+      machine: selectionSearch.machine,
+      project: selectionSearch.project,
+      repo: selectionSearch.repo,
+    });
+    const decision = getChatLandingSelectionSyncDecision({
+      urlNamesSelection,
+      intentApplied: preSelectionAppliedRef.current === preSelectionKey,
+      armed: selectionSyncArmedRef.current,
+      urlKey: preSelectionKey,
+      selectionKey,
+    });
+    if (decision === 'arm') {
+      selectionSyncArmedRef.current = true;
+      return;
+    }
+    if (decision !== 'sync') return;
+    // The URL will soon name this state-originated selection; stamp it as
+    // already applied so the pre-selection effect does not re-apply it.
+    preSelectionAppliedRef.current = selectionKey;
+    onSelectionUrlSync(selectionSearch);
+  }, [onSelectionUrlSync, urlNamesSelection, preSelectionKey, selectionSearch]);
 
   // ── Machine-owner authorization check for local projects ──
   useEffect(() => {
@@ -1518,46 +1602,12 @@ function WorkspaceChatLanding({
     () => (selectedAgent ? machines.get(selectedAgent.machineId) : undefined),
     [machines, selectedAgent]
   );
-  const selectorOptions = useAcpSelectorOptions({
-    configId: selectedConfig?.id,
-    cliType: selectedConfig?.cliType,
-    agentType: selectedConfig?.agentType,
-    selectedModeId,
-    selectedModelId,
-    configOptionValues,
-    runtimeOverrides: selectedConfig?.runtimeOverrides,
-    machine: selectedMachine,
-  });
-  const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
-  const dispatchConfigOptionValues = useMemo(
-    () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-    [configOptionSelectors, configOptionValues]
-  );
-  const selectedRateLimits =
-    selectedConfig &&
-    canShowSubscriptionRateLimits({
-      cliType: selectedConfig.cliType,
-      agentType: selectedConfig.agentType,
-      config: selectedConfig,
-    })
-      ? selectedMachine?.raceLimits
-      : undefined;
-  // The landing knows the picked provider's full config, so eligibility is
-  // decided here rather than from `cliType`/`agentType` further down.
-  const showCodexResetForecast =
-    !!selectedConfig &&
-    canShowCodexResetForecast({
-      cliType: selectedConfig.cliType,
-      agentType: selectedConfig.agentType,
-      config: selectedConfig,
-    });
-  const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* ── Agent Role selection ──
      A Role is one packaged run configuration, so picking one flows through the
      SAME preference channel as this agent's remembered defaults rather than a
-     second apply path: the reconcile pass seeds mode/model/options from the
-     Role before paint, and an option the agent no longer supports falls back to
-     the agent's own value there — visibly — instead of being forced in.
+     second apply path: the derivation seeds mode/model/options from the Role,
+     and an option the agent no longer supports falls back to the agent's own
+     value there — visibly — instead of being forced in.
 
      `token` makes re-picking the same Role after hand-editing a knob a new
      preference, and the preference deliberately OUTLIVES `activeAgentRole`
@@ -1607,15 +1657,66 @@ function WorkspaceChatLanding({
     }
     return selectedAgent ? (agentDefaultsCache.get(selectedAgent.agentId) ?? {}) : {};
   }, [activeAgentRolePreference, selectedAgent]);
-  useReconcileAcpSessionConfigSelection({
+  /* No effects: user edits are the only stored selection state; the effective
+     values derive per render. Candidates feed the capability lookup so the
+     catalog can depend on the selection without feeding back into it. */
+  const {
+    selection: sessionConfigSelection,
+    candidates: sessionConfigCandidates,
+    appliedTargetKey: appliedSessionConfigTargetKey,
+    selectMode: setSelectedModeId,
+    selectModel: setSelectedModelName,
+    selectConfigOption: handleConfigOptionChange,
+  } = useAcpSessionConfigSelectionState({
     targetKey: selectedAgent ? `${selectedAgent.machineId}:${selectedAgent.agentId}` : null,
     preferenceRevision: activeAgentRolePreference
       ? `role:${activeAgentRolePreference.role.id}:${activeAgentRolePreference.role.revision}:${activeAgentRolePreference.token}`
       : (selectedAgent?.agentId ?? 'none'),
     preferences: selectedAgentDefaults,
-    selectorOptions,
-    dispatch: dispatchSessionConfigSelection,
   });
+  const selectorOptions = useAcpSelectorOptions({
+    configId: selectedConfig?.id,
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+    selectedModeId: sessionConfigCandidates.modeId,
+    selectedModelId: sessionConfigCandidates.modelId,
+    configOptionValues: sessionConfigCandidates.configOptionValues,
+    runtimeOverrides: selectedConfig?.runtimeOverrides,
+    machine: selectedMachine,
+  });
+  const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
+  const {
+    selectedModeId,
+    selectedModelId,
+    configOptionValues,
+    configOptionSelectors: resolvedConfigOptionSelectors,
+  } = useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+  });
+  const dispatchConfigOptionValues = useMemo(
+    () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
+    [configOptionValues, resolvedConfigOptionSelectors]
+  );
+  const selectedRateLimits =
+    selectedConfig &&
+    canShowSubscriptionRateLimits({
+      cliType: selectedConfig.cliType,
+      agentType: selectedConfig.agentType,
+      config: selectedConfig,
+    })
+      ? selectedMachine?.raceLimits
+      : undefined;
+  // The landing knows the picked provider's full config, so eligibility is
+  // decided here rather than from `cliType`/`agentType` further down.
+  const showCodexResetForecast =
+    !!selectedConfig &&
+    canShowCodexResetForecast({
+      cliType: selectedConfig.cliType,
+      agentType: selectedConfig.agentType,
+      config: selectedConfig,
+    });
+  const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* The Role the composer IS, not the one last clicked. The footer names a Role
      only while every value that Role pins is still what will run, so moving a
      knob — or an unsupported pin falling back — takes the name away instead of
@@ -1684,42 +1785,45 @@ function WorkspaceChatLanding({
       setPendingRecentRunConfig(null);
       return;
     }
-    if (
-      sessionConfigSelectionState.targetKey !==
-      `${selectedAgent.machineId}:${selectedAgent.agentId}`
-    ) {
+    if (appliedSessionConfigTargetKey !== `${selectedAgent.machineId}:${selectedAgent.agentId}`) {
       return;
     }
     // A cold agent reports no models until its capabilities resolve; applying
     // then would silently drop the recorded model. Wait — unless the user has
     // meanwhile picked a model themselves, which outranks the entry.
     if (pendingRecentRunConfig.modelId && modelOptions.length === 0) {
-      if (sessionConfigSelectionState.model.origin === 'user') {
+      if (sessionConfigSelection.edits.model !== undefined) {
         setPendingRecentRunConfig(null);
       }
       return;
     }
     setPendingRecentRunConfig(null);
-    if (
+    const appliedModelId =
       pendingRecentRunConfig.modelId &&
       modelOptions.some((option) => option.value === pendingRecentRunConfig.modelId)
-    ) {
-      setSelectedModelName(pendingRecentRunConfig.modelId);
+        ? pendingRecentRunConfig.modelId
+        : undefined;
+    if (appliedModelId) {
+      setSelectedModelName(appliedModelId);
     }
     for (const { configId, value } of resolveApplicableConfigOptionValues(
       pendingRecentRunConfig,
-      configOptionSelectors
+      configOptionSelectors,
+      // The selectors still describe the model this entry replaces, so its
+      // effort must not be validated against the outgoing model's ladder.
+      { switchesModel: appliedModelId !== undefined && appliedModelId !== selectedModelId }
     )) {
       handleConfigOptionChange(configId, value);
     }
   }, [
+    appliedSessionConfigTargetKey,
     configOptionSelectors,
     handleConfigOptionChange,
     modelOptions,
     pendingRecentRunConfig,
     selectedAgent,
-    sessionConfigSelectionState.model.origin,
-    sessionConfigSelectionState.targetKey,
+    selectedModelId,
+    sessionConfigSelection.edits.model,
     setSelectedModelName,
   ]);
   const availableCommands = useAvailableCommands({
@@ -2973,6 +3077,8 @@ function WorkspaceChatLanding({
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
         taskToolsEnabled: tasksFeatureEnabled,
+        agentRoleId: activeAgentRole?.id ?? null,
+        agentRoleRevision: activeAgentRole?.revision,
       });
       const pendingHistoryEntry = buildPendingUserHistoryEntry({
         userId,
@@ -3175,10 +3281,9 @@ function WorkspaceChatLanding({
         promptTextareaRef.current?.blur();
         setMobileNewChatOpen(false);
       }
-      await navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug, sessionId },
-      });
+      await navigate(
+        getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
+      );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
         user_id: userId ?? null,
@@ -3398,7 +3503,7 @@ function WorkspaceChatLanding({
     [handleSelectedLocalProjectChange]
   );
   const desktopAgentMachineIds = useMemo(
-    () => (scopedMachineId ? [scopedMachineId] : undefined),
+    () => (scopedMachineId ? [scopedMachineId] : []),
     [scopedMachineId]
   );
   /* Roles offered for the machine this chat will start on. Scoped to that one
@@ -3674,6 +3779,11 @@ function WorkspaceChatLanding({
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
+          disabledReason={
+            scopedMachineId
+              ? undefined
+              : t('chat.machineSelector.selectFirst', 'Select a machine first')
+          }
           fallbackAgent={{
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
@@ -6224,7 +6334,7 @@ function WorkspaceChatLanding({
             localTab: t('chat.contextSwitch.localProjects', 'Local'),
             githubTab: t('chat.contextSwitch.github', 'GitHub'),
             addProjectMenu: t('chat.contextSwitch.addProjectMenu', 'Add project'),
-            addLocalProject: t('chat.contextSwitch.addProject', 'Add a local project'),
+            addLocalProject: t('chat.contextSwitch.addProject', 'Add a folder'),
             addLocalProjectHint: t(
               'chat.contextSwitch.addLocalProjectHint',
               'Browse the machine and pick a folder'
@@ -6332,6 +6442,7 @@ function WorkspaceChatLanding({
             void navigate({
               to: '/$workspaceName/settings',
               params: { workspaceName: workspaceSlug },
+              search: { from: getAppCurrentPathWithSearch() },
             });
           }}
           /* New-chat chip opens the bottom-sheet composer. Stays on the
@@ -6474,12 +6585,12 @@ function WorkspaceChatLanding({
         onGoToAgentSettings={handleGoToAgentSettings}
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
-          !isMobile && isLeftSidebarCollapsed ? (
+          !isMobile && isLeftSidebarHidden ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setLeftSidebarCollapsed(false)}
+              onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               className="h-7 w-7 shrink-0 text-muted-foreground"
             >

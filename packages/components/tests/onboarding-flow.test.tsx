@@ -60,6 +60,7 @@ import {
   ProjectsScreenView,
 } from '../src/components/onboarding/screens/projects-screen';
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
+import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
 import { TestCloudPlatformProvider } from './test-platform';
 
@@ -217,10 +218,12 @@ describe('desktop onboarding flow', () => {
           connectingGitHub={false}
           canImportLocal
           canConnectGitHub={false}
+          loadingRepos={false}
           selectedProjectKey={`local:${selectedMachine}:${selectedProject}`}
           onAddLocal={vi.fn()}
           onConnectGitHub={vi.fn()}
           onBack={vi.fn()}
+          onSkip={vi.fn()}
           onComplete={onComplete}
         />
       );
@@ -244,7 +247,7 @@ describe('desktop onboarding flow', () => {
       root?.render(
         <TestCloudPlatformProvider>
           <Provider store={store}>
-            <ProjectsScreen onBack={vi.fn()} onComplete={vi.fn()} />
+            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
           </Provider>
         </TestCloudPlatformProvider>
       );
@@ -263,7 +266,7 @@ describe('desktop onboarding flow', () => {
     });
   });
 
-  it('continues with the exact durable provider setup id', async () => {
+  it('keeps a pending setup distinct from a completed AgentConfig', async () => {
     const onNext = vi.fn();
     const setup: ProviderSetupTask = {
       v: 1,
@@ -291,7 +294,50 @@ describe('desktop onboarding flow', () => {
           configs={[]}
           setups={[setup]}
           testStatuses={{}}
-          selectedConfigId={setup.id}
+          selectedProviderId={setup.id}
+          noLocalMachine={false}
+          localMachineId={machineId}
+          onEdit={vi.fn()}
+          onTest={vi.fn()}
+          onDelete={vi.fn()}
+          onAdd={vi.fn()}
+          onBack={vi.fn()}
+          onSkip={vi.fn()}
+          onNext={onNext}
+        />
+      );
+    });
+
+    expect(findButton(container, 'Working').disabled).toBe(true);
+
+    await act(async () => {
+      findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onNext).toHaveBeenCalledWith({
+      kind: 'providerSetup',
+      providerSetupId: setup.id,
+      agentName: setup.config.name,
+    });
+  });
+
+  it('continues with an AgentConfig only after it is published', async () => {
+    const onNext = vi.fn();
+    const config: AgentConfigMeta = {
+      id: 'config-ready' as AgentConfigId,
+      machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+    };
+
+    await act(async () => {
+      root?.render(
+        <ProvidersScreenView
+          configs={[config]}
+          testStatuses={{}}
+          selectedProviderId={config.id}
           noLocalMachine={false}
           localMachineId={machineId}
           onEdit={vi.fn()}
@@ -308,7 +354,11 @@ describe('desktop onboarding flow', () => {
     await act(async () => {
       findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(onNext).toHaveBeenCalledWith(setup.id);
+    expect(onNext).toHaveBeenCalledWith({
+      kind: 'agentConfig',
+      agentConfigId: config.id,
+      agentName: config.name,
+    });
   });
 
   it('keeps provider activity compact in the badge and progress button', async () => {
@@ -377,5 +427,45 @@ describe('desktop onboarding flow', () => {
     expect(
       container.querySelector('[aria-label="Failed: The API key was rejected."]')
     ).not.toBeNull();
+  });
+
+  it('keeps failed Agent setup retryable from Summary with investigation detail', async () => {
+    const retry = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('machine is offline'))
+      .mockResolvedValueOnce(undefined);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await act(async () => {
+      root?.render(
+        <SummaryScreen
+          agentState="failed"
+          agentName="Codex"
+          agentFailureCode="runtime-install-failed"
+          onBack={vi.fn()}
+          onComplete={vi.fn()}
+          onRetryAgent={retry}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Failure code: runtime-install-failed');
+    await act(async () => {
+      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('machine is offline');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[onboarding] Failed to retry Agent setup from Summary:',
+      expect.any(Error)
+    );
+    expect(findButton(container, 'Retry').disabled).toBe(false);
+
+    await act(async () => {
+      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(retry).toHaveBeenCalledTimes(2);
   });
 });

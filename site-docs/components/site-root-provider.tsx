@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
 import type { ReactNode } from 'react';
 
+import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
 type SiteLocale = 'en' | 'zh';
@@ -13,6 +14,8 @@ const locales = [
 
 const zhTranslations = {
   chooseLanguage: '选择语言',
+  search: '搜索文档',
+  searchNoResult: '没有找到相关内容',
   toc: '本页目录',
 };
 
@@ -47,6 +50,7 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
   return (
     <RootProvider
       theme={{ defaultTheme: 'dark', disableTransitionOnChange: false }}
+      search={{ SearchDialog: DocsSearchDialog }}
       i18n={{
         locale,
         locales,

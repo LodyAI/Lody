@@ -221,9 +221,20 @@ export class Lody {
       return false;
     }
 
+    // "Not in the list" cannot tell "never created" from "just removed by the user".
+    // Removal intent lives in this set; skipping it adds a removed provider back on
+    // every startup.
+    const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
+
     for (const cliType of cliTypes) {
       const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
       if (!builtinRuntime) {
+        continue;
+      }
+      if (optedOut.has(cliType)) {
+        this.logger.debug(
+          `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
+        );
         continue;
       }
       const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);

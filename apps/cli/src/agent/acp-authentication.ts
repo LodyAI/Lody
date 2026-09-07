@@ -1,28 +1,52 @@
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import spawn from 'cross-spawn';
+import { randomUUID } from 'node:crypto';
+import * as acp from '@agentclientprotocol/sdk';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
+import { z } from 'zod';
 import type {
   AgentConfigCliType,
   BuiltinCliType,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
+  MachineAcpAuthenticationForm,
 } from '@lody/shared';
 import {
+  ACP_AUTHENTICATION_FORM_MAX_BYTES,
+  ACP_AUTH_FORM_FIELD_MAX_COUNT,
+  ACP_AUTH_ID_MAX_LENGTH,
+  ACP_AUTH_LABEL_MAX_LENGTH,
+  ACP_AUTH_METHOD_MAX_COUNT,
+  ACP_AUTH_SELECT_OPTION_MAX_COUNT,
+  ACP_AUTH_TEXT_MAX_LENGTH,
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  getLodyElicitationMeta,
   getManagedBuiltinRuntimeByAgentType,
   hasBuiltinEnvAuthentication,
+  isAcpAuthenticationFormWithinByteLimit,
   isManagedBuiltinAgentType,
 } from '@lody/shared';
 
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { BuiltinAuthenticationOutputParser } from './acp-authentication-output';
-import { shutdownLocalAcpAgent } from './acp-runner';
+import {
+  AcpAgentAuthorizationOutputParser,
+  BuiltinAuthenticationOutputParser,
+} from './acp-authentication-output';
+import { shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
+import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
+import { appendStderrTail, createAcpStartupMonitor } from './acp-startup-monitor';
+import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
+import { withLodyNpmCacheForNpx } from './npx-cache';
+import { withAcpSessionStartSlot } from './acp-session-start-gate';
+import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
+  resolveACPProcessLaunchAsync,
   resolveBuiltinAuthenticationProcessLaunch,
   type ResolvedACPProcessLaunch,
   withDefaultAcpPathEntries,
@@ -30,12 +54,22 @@ import {
 
 export type AcpAuthenticationProgressEvent =
   | { status: 'starting' }
+  | { status: 'auth-methods'; interactionId: string; authMethods: AuthMethod[] }
   | {
       status: 'authorization';
       authorizationUrl: string;
       userCode?: string;
       acceptsAuthorizationCode?: boolean;
       expiresInSeconds?: number;
+      interactionId?: string;
+      message?: string;
+      requiresAuthorizationConsent?: boolean;
+    }
+  | {
+      status: 'input-required';
+      interactionId: string;
+      message: string;
+      form: MachineAcpAuthenticationForm;
     }
   | { status: 'output'; stream: 'stdout' | 'stderr'; output: string }
   | { status: 'authenticated' }
@@ -47,7 +81,11 @@ export type AcpAuthenticationResult =
       success: true;
       disposition: 'authenticated' | 'cancelled' | 'not-running' | 'input-accepted';
     }
-  | { success: false; disposition: 'error'; error: string };
+  | {
+      success: false;
+      disposition: 'error';
+      error: string;
+    };
 
 // Finish before the UI/RPC 300s deadline, leaving enough time for graceful
 // termination, SIGKILL escalation, and the final response to travel back.
@@ -100,7 +138,27 @@ type RunningAuthentication = {
   terminating: boolean;
   acceptsAuthorizationCode: boolean;
   authorizationCodeSubmitted: boolean;
+  abortController: AbortController;
+  pendingInteraction?: {
+    id: string;
+    resolve: (input: AcpAuthenticationInteractionInput) => void;
+  };
 };
+
+type AcpAuthenticationInteractionInput =
+  | { action: 'accept'; methodId?: string; content?: Record<string, unknown> }
+  | { action: 'decline' | 'cancel' };
+
+const AcpAuthenticationInteractionInputSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('accept'),
+      methodId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+      content: z.record(z.string(), z.unknown()).optional(),
+    })
+    .strict(),
+  z.object({ action: z.enum(['decline', 'cancel']) }).strict(),
+]);
 
 type AcpAuthenticationManagerOptions = {
   authenticationTimeoutMs?: number;
@@ -129,6 +187,162 @@ type ProbeBuiltinAuthenticationOptions = {
   resolveLoginShellEnv?: typeof getLoginShellEnv;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+function isAllowedAuthorizationUrl(value: string): boolean {
+  if (value.length > ACP_AUTHORIZATION_URL_MAX_LENGTH) return false;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function toAuthenticationForm(
+  request: acp.CreateElicitationRequest
+): MachineAcpAuthenticationForm | null {
+  const rawRequest = asRecord(request);
+  const schema = asRecord(rawRequest?.requestedSchema);
+  const properties = asRecord(schema?.properties);
+  if (!rawRequest || rawRequest.mode !== 'form' || !schema || !properties) return null;
+  const propertyEntries = Object.entries(properties);
+  if (propertyEntries.length === 0 || propertyEntries.length > ACP_AUTH_FORM_FIELD_MAX_COUNT) {
+    return null;
+  }
+  if (
+    (typeof schema.title === 'string' && schema.title.length > ACP_AUTH_LABEL_MAX_LENGTH) ||
+    (typeof schema.description === 'string' && schema.description.length > ACP_AUTH_TEXT_MAX_LENGTH)
+  ) {
+    return null;
+  }
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) || schema.required.some((value) => typeof value !== 'string'))
+  ) {
+    return null;
+  }
+  const required = new Set((schema.required as string[] | undefined) ?? []);
+  if ([...required].some((id) => !Object.hasOwn(properties, id))) return null;
+  const fields: MachineAcpAuthenticationForm['fields'] = [];
+  for (const [id, rawProperty] of propertyEntries) {
+    const property = asRecord(rawProperty);
+    if (!property || property.type !== 'string') return null;
+    const label = typeof property.title === 'string' && property.title.trim() ? property.title : id;
+    const description = typeof property.description === 'string' ? property.description : undefined;
+    if (
+      !id.trim() ||
+      id.length > ACP_AUTH_ID_MAX_LENGTH ||
+      !label.trim() ||
+      label.length > ACP_AUTH_LABEL_MAX_LENGTH ||
+      (description?.length ?? 0) > ACP_AUTH_TEXT_MAX_LENGTH
+    ) {
+      return null;
+    }
+    const meta = asRecord(property._meta);
+    const secret =
+      getLodyElicitationMeta(property._meta)?.secret === true ||
+      meta?.secret === true ||
+      meta?.sensitive === true ||
+      property.format === 'password';
+    // Defaults travel in retained Machine RPC progress. Never copy a secret
+    // default into that durable progress stream, even if the provider supplied one.
+    const defaultValue =
+      !secret && typeof property.default === 'string' ? property.default : undefined;
+    if ((defaultValue?.length ?? 0) > ACP_AUTH_TEXT_MAX_LENGTH) return null;
+    if (
+      (property.oneOf !== undefined && !Array.isArray(property.oneOf)) ||
+      (property.enum !== undefined && !Array.isArray(property.enum))
+    ) {
+      return null;
+    }
+    const titledOptions = Array.isArray(property.oneOf)
+      ? property.oneOf.map((rawOption) => {
+          const option = asRecord(rawOption);
+          if (!option || typeof option.const !== 'string' || !option.const) return null;
+          const optionLabel =
+            typeof option.title === 'string' && option.title.trim() ? option.title : option.const;
+          return { value: option.const, label: optionLabel };
+        })
+      : [];
+    const enumOptions = Array.isArray(property.enum)
+      ? property.enum.map((value) =>
+          typeof value === 'string' && value ? { value, label: value } : null
+        )
+      : [];
+    if (
+      titledOptions.some((option) => option === null) ||
+      enumOptions.some((option) => option === null)
+    ) {
+      return null;
+    }
+    const options = titledOptions.length > 0 ? titledOptions : enumOptions;
+    if (
+      ((Array.isArray(property.oneOf) || Array.isArray(property.enum)) && options.length === 0) ||
+      options.length > ACP_AUTH_SELECT_OPTION_MAX_COUNT ||
+      options.some(
+        (option) =>
+          option === null ||
+          option.value.length > ACP_AUTH_TEXT_MAX_LENGTH ||
+          option.label.length > ACP_AUTH_LABEL_MAX_LENGTH
+      )
+    ) {
+      return null;
+    }
+    if (options.length > 0) {
+      if (new Set(options.map((option) => option?.value)).size !== options.length) {
+        return null;
+      }
+      if (defaultValue !== undefined && !options.some((option) => option?.value === defaultValue)) {
+        return null;
+      }
+      fields.push({
+        id,
+        type: 'select',
+        label,
+        ...(description !== undefined ? { description } : {}),
+        required: required.has(id),
+        options: options.filter((option): option is { value: string; label: string } => !!option),
+        ...(defaultValue !== undefined ? { defaultValue } : {}),
+      });
+      continue;
+    }
+    fields.push(
+      secret
+        ? {
+            id,
+            type: 'secret',
+            label,
+            ...(description !== undefined ? { description } : {}),
+            required: required.has(id),
+          }
+        : {
+            id,
+            type: 'text',
+            label,
+            ...(description !== undefined ? { description } : {}),
+            required: required.has(id),
+            ...(defaultValue !== undefined ? { defaultValue } : {}),
+          }
+    );
+  }
+  if (fields.length === 0) return null;
+  const form = {
+    title: typeof schema.title === 'string' ? schema.title : undefined,
+    description: typeof schema.description === 'string' ? schema.description : undefined,
+    fields,
+  };
+  return isAcpAuthenticationFormWithinByteLimit(form) ? form : null;
+}
+
+function getAuthMethodType(method: AuthMethod): 'agent' | 'env_var' | 'terminal' {
+  const type = asRecord(method)?.type;
+  return type === 'env_var' || type === 'terminal' ? type : 'agent';
+}
+
 function getBuiltinDisplayName(agentType: string): string {
   return getManagedBuiltinRuntimeByAgentType(agentType)?.displayName ?? agentType;
 }
@@ -156,10 +370,15 @@ async function buildAuthenticationProcessEnv(options: {
     NO_COLOR: '1',
   };
   delete baseEnv.FORCE_COLOR;
-  return withoutElectronBootstrapCredentials(
-    withDefaultAcpPathEntries(
-      mergeACPProcessEnv(options.launch, mergeLoginShellEnv(baseEnv, loginShellEnv)),
-      options.agentType
+  return withLoopbackNoProxy(
+    withoutElectronBootstrapCredentials(
+      withLodyNpmCacheForNpx(
+        options.launch.command,
+        withDefaultAcpPathEntries(
+          mergeACPProcessEnv(options.launch, mergeLoginShellEnv(baseEnv, loginShellEnv)),
+          options.agentType
+        )
+      )
     )
   );
 }
@@ -315,16 +534,11 @@ export class AcpAuthenticationManager {
     env?: Record<string, string>;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
-    if (options.cliType !== 'builtin' || !isManagedBuiltinAgentType(options.agentType)) {
-      return {
-        success: false,
-        disposition: 'error',
-        error: `Authentication is not supported for ${options.agentType}`,
-      };
-    }
-
-    const displayName = getBuiltinDisplayName(options.agentType);
-    const agentType: BuiltinCliType = options.agentType;
+    const isBuiltinAuthentication =
+      options.cliType === 'builtin' && isManagedBuiltinAgentType(options.agentType);
+    const displayName = isBuiltinAuthentication
+      ? getBuiltinDisplayName(options.agentType)
+      : options.agentType;
 
     if (this.runningByAgentType.has(options.agentType)) {
       return {
@@ -341,6 +555,7 @@ export class AcpAuthenticationManager {
       terminating: false,
       acceptsAuthorizationCode: false,
       authorizationCodeSubmitted: false,
+      abortController: new AbortController(),
     };
     // Reserve the slot before any async launch preparation. This makes
     // concurrent starts and cancellation deterministic even before spawn.
@@ -363,6 +578,9 @@ export class AcpAuthenticationManager {
     timeoutHandle = setTimeout(() => {
       if (running.cancelled) return;
       running.timedOut = true;
+      running.abortController.abort();
+      running.pendingInteraction?.resolve({ action: 'cancel' });
+      running.pendingInteraction = undefined;
       if (!running.child && this.runningByAgentType.get(options.agentType) === running) {
         this.runningByAgentType.delete(options.agentType);
       }
@@ -371,6 +589,10 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      if (!isBuiltinAuthentication) {
+        return await this.authenticateProtocolDrivenAcp(options, running);
+      }
+      const agentType = options.agentType as BuiltinCliType;
       const launch = await resolveBuiltinAuthenticationProcessLaunch({
         cliType: options.cliType,
         agentType: options.agentType,
@@ -468,13 +690,21 @@ export class AcpAuthenticationManager {
     }
   }
 
-  cancel(agentType: string, requestId: string): AcpAuthenticationResult {
-    const running = this.runningByAgentType.get(agentType);
-    if (!running || running.requestId !== requestId) {
+  getAgentType(requestId: string): string | undefined {
+    return this.findRunningAuthentication(requestId)?.agentType;
+  }
+
+  cancel(requestId: string): AcpAuthenticationResult {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
       return { success: true, disposition: 'not-running' };
     }
+    const { agentType, running } = active;
 
     running.cancelled = true;
+    running.abortController.abort();
+    running.pendingInteraction?.resolve({ action: 'cancel' });
+    running.pendingInteraction = undefined;
     if (!running.child && this.runningByAgentType.get(agentType) === running) {
       this.runningByAgentType.delete(agentType);
     }
@@ -482,15 +712,12 @@ export class AcpAuthenticationManager {
     return { success: true, disposition: 'cancelled' };
   }
 
-  submitAuthorizationCode(
-    agentType: string,
-    requestId: string,
-    authorizationCode: string
-  ): AcpAuthenticationResult {
-    const running = this.runningByAgentType.get(agentType);
-    if (!running || running.requestId !== requestId) {
+  submitAuthorizationCode(requestId: string, authorizationCode: string): AcpAuthenticationResult {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
       return { success: true, disposition: 'not-running' };
     }
+    const { agentType, running } = active;
     if (!running.acceptsAuthorizationCode) {
       return {
         success: false,
@@ -538,11 +765,362 @@ export class AcpAuthenticationManager {
     }
   }
 
+  submitAuthenticationInput(
+    requestId: string,
+    interactionId: string,
+    authenticationInput: string
+  ): AcpAuthenticationResult {
+    const active = this.findRunningAuthentication(requestId);
+    if (!active) {
+      return { success: true, disposition: 'not-running' };
+    }
+    const { agentType, running } = active;
+    const pending = running.pendingInteraction;
+    if (!pending || pending.id !== interactionId) {
+      return {
+        success: false,
+        disposition: 'error',
+        error: `${getBuiltinDisplayName(agentType)} is not waiting for this authentication input`,
+      };
+    }
+    const parsedJson = (() => {
+      try {
+        return JSON.parse(authenticationInput) as unknown;
+      } catch {
+        return null;
+      }
+    })();
+    const parsed = AcpAuthenticationInteractionInputSchema.safeParse(parsedJson);
+    if (!parsed.success) {
+      return { success: false, disposition: 'error', error: 'Invalid authentication input' };
+    }
+    running.pendingInteraction = undefined;
+    pending.resolve(parsed.data);
+    return { success: true, disposition: 'input-accepted' };
+  }
+
+  private findRunningAuthentication(
+    requestId: string
+  ): { agentType: string; running: RunningAuthentication } | undefined {
+    for (const [agentType, running] of this.runningByAgentType) {
+      if (running.requestId === requestId) return { agentType, running };
+    }
+    return undefined;
+  }
+
+  private waitForAuthenticationInput(
+    running: RunningAuthentication,
+    interactionId: string
+  ): Promise<AcpAuthenticationInteractionInput> | null {
+    // The renderer presents one authentication interaction at a time. Decline
+    // a concurrent request instead of replacing the active resolver and
+    // leaving the first ACP request hung until the global timeout.
+    if (running.pendingInteraction) {
+      return null;
+    }
+    return new Promise((resolve) => {
+      running.pendingInteraction = { id: interactionId, resolve };
+      if (running.abortController.signal.aborted) {
+        running.pendingInteraction = undefined;
+        resolve({ action: 'cancel' });
+      }
+    });
+  }
+
+  private async authenticateProtocolDrivenAcp(
+    options: {
+      requestId: string;
+      cliType: AgentConfigCliType;
+      agentType: string;
+      customAcp?: CustomAcpLaunchSpec;
+      runtimeOverrides?: BuiltinRuntimeOverrides;
+      env?: Record<string, string>;
+      onProgress?: (event: AcpAuthenticationProgressEvent) => void;
+    },
+    running: RunningAuthentication
+  ): Promise<AcpAuthenticationResult> {
+    const launch = await resolveACPProcessLaunchAsync({
+      cliType: options.cliType,
+      agentType: options.agentType,
+      customAcp: options.customAcp,
+      runtimeOverrides: options.runtimeOverrides,
+      signal: running.abortController.signal,
+    });
+    const env = await buildAuthenticationProcessEnv({
+      launch,
+      agentType: options.agentType,
+      env: options.env,
+      resolveLoginShellEnv: this.resolveLoginShellEnv,
+    });
+    // The process stdout is the ACP JSON-RPC channel. In a headless shell,
+    // TERM can make browser launchers fall back to w3m/lynx and render HTML
+    // onto stdout, corrupting that channel.
+    delete env.TERM;
+    running.abortController.signal.throwIfAborted();
+    let lastStderrTail = '';
+    await withAcpSessionStartSlot(
+      {
+        label: `acp-auth:${options.agentType}`,
+        logger: this.logger,
+        abortSignal: running.abortController.signal,
+      },
+      async () =>
+        await runNpxStartupWithRecovery({
+          command: launch.command,
+          args: launch.args,
+          env,
+          logger: this.logger,
+          logPrefix: '[acp-auth]',
+          getStderrTail: () => lastStderrTail,
+          attempt: async ({ args }) => {
+            running.abortController.signal.throwIfAborted();
+            lastStderrTail = '';
+            options.onProgress?.({ status: 'starting' });
+            const child = spawnAcpProcess({
+              cliType: options.cliType,
+              agentType: options.agentType,
+              customAcp: options.customAcp,
+              runtimeOverrides: options.runtimeOverrides,
+              workdir: process.cwd(),
+              env,
+              command: launch.command,
+              args: [...args],
+              spawnImpl: this.spawnProcess,
+            });
+            running.child = child;
+            running.terminating = false;
+            child.stderr?.setEncoding('utf8');
+            const authorizationParser = new AcpAgentAuthorizationOutputParser();
+            child.stderr?.on('data', (chunk: string) => {
+              // Keep only an in-memory tail for the existing npx recovery
+              // classifier. Authentication process output is never forwarded
+              // into retained Machine RPC progress.
+              lastStderrTail = appendStderrTail(lastStderrTail, chunk);
+              const authorization = authorizationParser.push(chunk);
+              if (authorization && isAllowedAuthorizationUrl(authorization.authorizationUrl)) {
+                options.onProgress?.({ status: 'authorization', ...authorization });
+              }
+            });
+            const startupMonitor = createAcpStartupMonitor(
+              {
+                onExit: (listener) => {
+                  child.on('exit', listener);
+                  return () => child.off('exit', listener);
+                },
+                onError: (listener) => {
+                  child.on('error', listener);
+                  return () => child.off('error', listener);
+                },
+              },
+              {
+                sessionId: `acp-auth:${options.agentType}`,
+                command: launch.command,
+                args: [...args],
+                // Do not attach provider output to an error that crosses the
+                // Machine RPC boundary.
+                getStderrTail: () => '',
+              }
+            );
+
+            try {
+              running.abortController.signal.throwIfAborted();
+              if (!child.stdin || !child.stdout) {
+                throw new Error(`${options.agentType} ACP authentication streams are unavailable`);
+              }
+              let interactionError: string | undefined;
+              const app = acp
+                .client({ name: 'lody-authentication' })
+                .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
+                  const raw = asRecord(params);
+                  if (raw?.mode === 'url') {
+                    if (typeof raw.url !== 'string' || !isAllowedAuthorizationUrl(raw.url)) {
+                      const error = `${options.agentType} requested an unsafe authentication URL. Lody only opens HTTP and HTTPS authorization pages.`;
+                      interactionError = error;
+                      this.logger.debug(`[acp-auth] ${error}`);
+                      options.onProgress?.({ status: 'error', error });
+                      return { action: 'decline' as const };
+                    }
+                    const interactionId = randomUUID();
+                    const inputPromise = this.waitForAuthenticationInput(running, interactionId);
+                    if (!inputPromise) return { action: 'decline' as const };
+                    options.onProgress?.({
+                      status: 'authorization',
+                      authorizationUrl: raw.url,
+                      interactionId,
+                      message:
+                        typeof raw.message === 'string'
+                          ? raw.message.slice(0, ACP_AUTH_TEXT_MAX_LENGTH)
+                          : undefined,
+                      requiresAuthorizationConsent: true,
+                    });
+                    const input = await inputPromise;
+                    return input.action === 'accept'
+                      ? { action: 'accept' as const }
+                      : { action: input.action };
+                  }
+                  const form = toAuthenticationForm(params);
+                  if (!form) {
+                    const error = `${options.agentType} requested an unsupported authentication form or one larger than Lody's ${ACP_AUTHENTICATION_FORM_MAX_BYTES / 1024} KiB limit. Lody currently supports text, secret, and single-select fields.`;
+                    interactionError = error;
+                    this.logger.debug(`[acp-auth] ${error}`);
+                    options.onProgress?.({ status: 'error', error });
+                    return { action: 'decline' as const };
+                  }
+                  const interactionId = randomUUID();
+                  const inputPromise = this.waitForAuthenticationInput(running, interactionId);
+                  if (!inputPromise) return { action: 'decline' as const };
+                  options.onProgress?.({
+                    status: 'input-required',
+                    interactionId,
+                    message:
+                      typeof raw?.message === 'string'
+                        ? raw.message.slice(0, ACP_AUTH_TEXT_MAX_LENGTH)
+                        : `Enter the information requested by ${options.agentType}`,
+                    form,
+                  });
+                  const input = await inputPromise;
+                  return input.action === 'accept'
+                    ? { action: 'accept' as const, content: input.content ?? {} }
+                    : { action: input.action };
+                });
+              const stream = acp.ndJsonStream(
+                createStdinWritableStream(child.stdin),
+                createStdoutReadableStream(child.stdout)
+              );
+              await Promise.race([
+                app.connectWith(stream, async (context) => {
+                  const initialized = await context.request(
+                    acp.methods.agent.initialize,
+                    {
+                      protocolVersion: acp.PROTOCOL_VERSION,
+                      clientCapabilities: {
+                        auth: { terminal: false },
+                        elicitation: { form: {}, url: {} },
+                      },
+                      clientInfo: { name: 'lody', title: 'Lody', version: '1' },
+                    },
+                    { cancellationSignal: running.abortController.signal }
+                  );
+                  const advertisedMethods = [...(initialized.authMethods ?? [])];
+                  const methods = advertisedMethods.filter(
+                    (method) => getAuthMethodType(method) === 'agent'
+                  );
+                  if (methods.length === 0) {
+                    const unsupportedTypes = new Set(
+                      advertisedMethods.map((method) => getAuthMethodType(method))
+                    );
+                    const hasDeprecatedEnv = unsupportedTypes.has('env_var');
+                    const hasUnsupportedTerminal = unsupportedTypes.has('terminal');
+                    throw new Error(
+                      hasDeprecatedEnv && hasUnsupportedTerminal
+                        ? `${options.agentType} only advertised deprecated env_var and unsupported terminal authentication methods`
+                        : hasDeprecatedEnv
+                          ? `${options.agentType} only advertised the deprecated ACP env_var authentication method`
+                          : hasUnsupportedTerminal
+                            ? `${options.agentType} only advertised terminal authentication, which requires an interactive terminal that is not available over Machine RPC`
+                            : `${options.agentType} did not advertise an authentication method`
+                    );
+                  }
+                  if (
+                    methods.length > ACP_AUTH_METHOD_MAX_COUNT ||
+                    new Set(methods.map((method) => method.id)).size !== methods.length ||
+                    methods.some(
+                      (method) =>
+                        typeof method.id !== 'string' ||
+                        !method.id.trim() ||
+                        method.id.length > ACP_AUTH_ID_MAX_LENGTH
+                    )
+                  ) {
+                    throw new Error(
+                      `${options.agentType} advertised too many or invalid authentication methods`
+                    );
+                  }
+                  let methodId: string | undefined;
+                  if (methods.length === 1) {
+                    methodId = methods[0]?.id;
+                  }
+                  if (!methodId) {
+                    const interactionId = randomUUID();
+                    const inputPromise = this.waitForAuthenticationInput(running, interactionId);
+                    if (!inputPromise) {
+                      throw new Error(
+                        `${options.agentType} requested overlapping authentication interactions`
+                      );
+                    }
+                    options.onProgress?.({
+                      status: 'auth-methods',
+                      interactionId,
+                      authMethods: methods,
+                    });
+                    const input = await inputPromise;
+                    if (input.action !== 'accept' || !input.methodId) {
+                      throw new DOMException('ACP authentication was cancelled', 'AbortError');
+                    }
+                    methodId = input.methodId;
+                  }
+                  const selectedMethod = methods.find((method) => method.id === methodId);
+                  if (!selectedMethod) {
+                    const advertisedMethod = advertisedMethods.find(
+                      (method) => method.id === methodId
+                    );
+                    if (advertisedMethod) {
+                      throw new Error(
+                        getAuthMethodType(advertisedMethod) === 'env_var'
+                          ? `${options.agentType} authentication method ${methodId} uses deprecated env_var authentication`
+                          : `${options.agentType} authentication method ${methodId} requires an interactive terminal that is not available over Machine RPC`
+                      );
+                    }
+                    throw new Error(
+                      `${options.agentType} no longer advertises authentication method ${methodId}`
+                    );
+                  }
+                  await context.request(
+                    acp.methods.agent.authenticate,
+                    { methodId },
+                    { cancellationSignal: running.abortController.signal }
+                  );
+                  if (interactionError) {
+                    throw new Error(interactionError);
+                  }
+                }),
+                startupMonitor.abortPromise,
+              ]);
+            } finally {
+              running.pendingInteraction?.resolve({ action: 'cancel' });
+              running.pendingInteraction = undefined;
+              startupMonitor.dispose();
+              await shutdownLocalAcpAgent({
+                agentProcess: child,
+                logger: this.logger,
+                sessionLabel: `acp-auth:${options.agentType}:protocol`,
+                exitTimeoutMs: this.terminationGraceMs,
+              }).catch((error: unknown) => {
+                this.logger.debug(
+                  `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
+                );
+              });
+              if (running.child === child) running.child = undefined;
+            }
+          },
+        })
+    );
+
+    // Process shutdown is part of the bounded authentication workflow. A
+    // cancellation or timeout that lands during cleanup must not be overwritten
+    // by a late authenticated result.
+    running.abortController.signal.throwIfAborted();
+    options.onProgress?.({ status: 'authenticated' });
+    return { success: true, disposition: 'authenticated' };
+  }
+
   private terminateAuthentication(
     agentType: string,
     running: RunningAuthentication,
     reason: 'cancelled' | 'timed out'
   ): void {
+    // Protocol authentication spans launch preparation, a JSON-RPC wait, and
+    // possibly a second process, so the signal is raised even with no child yet.
+    running.abortController.abort();
     if (running.terminating || !running.child) return;
     running.terminating = true;
     void shutdownLocalAcpAgent({

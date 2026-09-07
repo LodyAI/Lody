@@ -2,6 +2,13 @@ import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
+import {
+  detectBrowserLanguage,
+  fallbackLanguage,
+  initI18n,
+  readStoredLanguagePreference
+} from '@lody/components/i18n'
+import { languageAtom } from '@lody/components/atoms/settings'
 import '@lody/components/tailwind/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
@@ -120,6 +127,17 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  // Resolve and persist the desktop's first-run language before React can
+  // commit. AppInitializer keeps later changes synchronized; awaiting here
+  // closes the window where onboarding could paint once in English first.
+  const storedLanguage = readStoredLanguagePreference()
+  const detectedLanguage = storedLanguage ?? detectBrowserLanguage()
+  const bootLanguage = detectedLanguage ?? fallbackLanguage
+  await initI18n(bootLanguage)
+  if (!storedLanguage && detectedLanguage) {
+    jotaiStore.set(languageAtom, detectedLanguage)
+  }
+
   const isFileProtocol = window.location.protocol === 'file:'
   const router = createRouter({
     authClient,

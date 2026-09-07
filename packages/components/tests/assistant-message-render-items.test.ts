@@ -91,8 +91,8 @@ describe('buildAssistantMessageRenderItems', () => {
       }))
     ).toEqual([
       { type: 'text', itemIndex: 1, displayIndex: 0 },
-      { type: 'image_group', itemIndex: 3, displayIndex: 1 },
-      { type: 'proposed_plan', itemIndex: 2, displayIndex: 2 },
+      { type: 'proposed_plan', itemIndex: 2, displayIndex: 1 },
+      { type: 'image_group', itemIndex: 3, displayIndex: 2 },
     ]);
 
     const imageRenderItem = renderItems.find((item) => item.content.type === 'image_group');
@@ -115,5 +115,57 @@ describe('buildAssistantMessageRenderItems', () => {
 
     expect(renderedEntry.key).toBe('assistant-1:3:0:img-agent');
     expect(findSessionImageGalleryEntryIndex(galleryEntries, renderedEntry.key)).toBe(0);
+  });
+  it('sorts agent attachments below the plan, and leaves plan-less turns alone', () => {
+    // A plan runs long; an attachment above it is stranded mid-markdown.
+    const withPlan = [
+      { type: 'text', text: 'Answer' },
+      { type: 'file', fileId: 'f1' },
+      {
+        type: 'proposed_plan',
+        turnId: 't',
+        markdown: '# Plan',
+        status: 'completed',
+        isLatest: true,
+      },
+      { type: 'image_group', images: [{ imageId: 'i1', mimeType: 'image/png', sizeBytes: 1 }] },
+    ] as unknown as MessageContent[];
+
+    expect(buildAssistantMessageRenderItems(withPlan).map((i) => i.content.type)).toEqual([
+      'text',
+      'proposed_plan',
+      'file',
+      'image_group',
+    ]);
+
+    // Files and images stay together rather than straddling the plan.
+    const attachmentsFirst = [
+      { type: 'image_group', images: [{ imageId: 'i1', mimeType: 'image/png', sizeBytes: 1 }] },
+      {
+        type: 'proposed_plan',
+        turnId: 't',
+        markdown: '# Plan',
+        status: 'completed',
+        isLatest: true,
+      },
+      { type: 'file', fileId: 'f1' },
+    ] as unknown as MessageContent[];
+
+    expect(buildAssistantMessageRenderItems(attachmentsFirst).map((i) => i.content.type)).toEqual([
+      'proposed_plan',
+      'image_group',
+      'file',
+    ]);
+
+    // No plan: the turn's own order is authoritative.
+    const withoutPlan = [
+      { type: 'file', fileId: 'f1' },
+      { type: 'text', text: 'Answer' },
+    ] as unknown as MessageContent[];
+
+    expect(buildAssistantMessageRenderItems(withoutPlan).map((i) => i.content.type)).toEqual([
+      'file',
+      'text',
+    ]);
   });
 });

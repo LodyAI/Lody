@@ -28,7 +28,11 @@ export function useSessionMcpSelection(
     setOverride(undefined);
   }, [persistedKey]);
 
-  const baseSelection = override ?? persistedIds ?? getDefaultSelectedMcpServerIds(servers);
+  // Memoized so a caller with no persisted ids (a fresh draft/landing composer)
+  // gets an identity-stable selection; a fresh array here would invalidate
+  // every send-payload/menu memo built on `selectedIds` each render.
+  const defaultSelectedIds = useMemo(() => getDefaultSelectedMcpServerIds(servers), [servers]);
+  const baseSelection = override ?? persistedIds ?? defaultSelectedIds;
   const selectedIds = useMemo(() => {
     // An empty catalog is authoritative only after the first remote sync. Until
     // then, preserve persisted ids so a fast send cannot erase a session's MCP

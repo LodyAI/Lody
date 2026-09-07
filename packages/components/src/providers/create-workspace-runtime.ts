@@ -1,3 +1,4 @@
+import { getMachineRoomId, type MachineMeta } from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -465,6 +466,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let machineRpcStreamsClientReady: Promise<LoroStreamsJsonStreamClient> | null = null;
   let transportStreamsBaseUrl: string | null = null;
   let detachMetaRoomStatusListener: (() => void) | null = null;
+  let metaRoomJoinPromise: Promise<void> | null = null;
   // Meta room health tracker, registered in roomSyncRegistry like every other
   // room (durable sessions, presence). Recreated fresh on each
   // ensureMetaRoomSynced cycle so stale first-sync/status state from a
@@ -1679,6 +1681,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
   } = createWorkspaceMachineRpcFacade({
+    getMachineProtocolCapabilities: async (machineId) => {
+      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
+      return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
+    },
     workspaceId,
     targetRouter,
     getMachineRpcClient,
@@ -1821,11 +1827,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        customAcp: message.customAcp,
-        runtimeOverrides: message.runtimeOverrides,
-        env: message.env,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress(progress);
@@ -1840,8 +1841,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
           configId: message.configId,
-          cliType: message.cliType,
-          agentType: message.agentType,
+          cliType: 'builtin',
+          agentType: 'unknown',
           success: false,
           error: 'timeout: ACP capability refresh timed out',
         }
@@ -1851,8 +1852,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         type: 'machine/acp-capabilities-refresh_response',
         machineId: message.machineId,
         configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -1882,8 +1883,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
           configId: message.configId,
-          cliType: message.cliType,
-          agentType: message.agentType,
+          cliType: 'builtin',
+          agentType: 'unknown',
           success: false,
           error: `Local session control cannot route ${message.type} to machine ${message.machineId}`,
         };
@@ -1902,8 +1903,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
           configId: message.configId,
-          cliType: message.cliType,
-          agentType: message.agentType,
+          cliType: 'builtin',
+          agentType: 'unknown',
           success: false,
           error: localResult.error,
         };
@@ -1924,8 +1925,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
           configId: message.configId,
-          cliType: message.cliType,
-          agentType: message.agentType,
+          cliType: 'builtin',
+          agentType: 'unknown',
           success: false,
           error: 'Local session control did not return an ACP capability refresh response',
         }
@@ -1937,8 +1938,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         type: 'machine/acp-capabilities-refresh_response',
         machineId: message.machineId,
         configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
@@ -1952,26 +1953,50 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): Promise<void> => {
     try {
       const client = await getMachineRpcClient(message.machineId);
-      const response = await client.requestMachineAcpAuthenticate({
+      const common = {
         requestId: message.requestId,
-        action: message.action,
-        authenticationRequestId: message.authenticationRequestId,
-        authorizationCode: message.authorizationCode,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        customAcp: message.customAcp,
-        runtimeOverrides: message.runtimeOverrides,
-        env: message.env,
         onProgress: handleMachineAcpAuthenticationProgress,
         timeoutMs: 300000,
-      });
+      };
+      const response = await (() => {
+        switch (message.action) {
+          case 'start':
+            return client.requestMachineAcpAuthenticate({
+              ...common,
+              action: message.action,
+              configId: message.configId,
+            });
+          case 'cancel':
+            return client.requestMachineAcpAuthenticate({
+              ...common,
+              action: message.action,
+              authenticationRequestId: message.authenticationRequestId,
+            });
+          case 'submit-code':
+            return client.requestMachineAcpAuthenticate({
+              ...common,
+              action: message.action,
+              authenticationRequestId: message.authenticationRequestId,
+              authorizationCode: message.authorizationCode,
+            });
+          case 'submit-input':
+            return client.requestMachineAcpAuthenticate({
+              ...common,
+              action: message.action,
+              authenticationRequestId: message.authenticationRequestId,
+              interactionId: message.interactionId,
+              authenticationInput: message.authenticationInput,
+            });
+          default:
+            throw new Error('Unsupported ACP authentication action');
+        }
+      })();
       handleMachineAcpAuthenticateResponse(
         response ?? {
           type: 'machine/acp-authenticate_response',
           machineId: message.machineId,
           requestId: message.requestId,
-          agentType: message.agentType,
+          agentType: 'unknown',
           success: false,
           disposition: 'error',
           error: 'timeout: ACP authentication timed out',
@@ -1982,7 +2007,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         type: 'machine/acp-authenticate_response',
         machineId: message.machineId,
         requestId: message.requestId,
-        agentType: message.agentType,
+        agentType: 'unknown',
         success: false,
         disposition: 'error',
         error: error instanceof Error ? error.message : String(error),
@@ -2246,7 +2271,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         type: 'machine/acp-authenticate_response',
         machineId: message.machineId,
         requestId: message.requestId,
-        agentType: message.agentType,
+        agentType: 'unknown',
         success: false,
         disposition: 'error',
         error,
@@ -2453,11 +2478,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               machineId,
               workspaceId,
               configId: config.id,
-              cliType: config.cliType,
-              agentType: config.agentType,
-              customAcp: config.customAcp,
-              runtimeOverrides: config.runtimeOverrides,
-              env: config.env,
             },
             { signal }
           );
@@ -2468,6 +2488,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           if (signal.aborted) return;
           await resyncMachineFlockRows({ repo, workspaceId }, machineId, {
             requireRemoteSync: true,
+            refreshedCapability: response.capability
+              ? { configId: response.configId, value: response.capability }
+              : undefined,
           });
         },
         onError: (error, context) => {
@@ -2933,7 +2956,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsTokenProvider = null;
   };
 
-  const ensureMetaRoomSynced = async (syncPhase: 'initial' | 'recovery' = 'initial') => {
+  const joinAndWatchMetaRoom = async (syncPhase: 'initial' | 'recovery') => {
     if (metaSub) {
       return;
     }
@@ -3139,8 +3162,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     void watchMetaFirstSync(
       'Failed to sync repo meta room',
       'Timed out waiting for repo meta room initial sync',
-      'initial'
+      syncPhase
     );
+  };
+
+  const ensureMetaRoomSynced = async (syncPhase: 'initial' | 'recovery' = 'initial') => {
+    if (metaSub) {
+      return;
+    }
+    if (metaRoomJoinPromise) {
+      await metaRoomJoinPromise;
+      return;
+    }
+
+    const pendingJoin = joinAndWatchMetaRoom(syncPhase);
+    metaRoomJoinPromise = pendingJoin;
+    try {
+      await pendingJoin;
+    } finally {
+      if (metaRoomJoinPromise === pendingJoin) {
+        metaRoomJoinPromise = null;
+      }
+    }
   };
 
   const restartDurableTransportForMetaSyncRecovery = async (reason: string): Promise<void> => {
@@ -3242,13 +3285,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           initialMetaSyncFailed,
         }
       );
-      if (!metaSub) {
-        await ensureMetaRoomSynced();
-      }
       notifyConnectionStateInputsChanged();
       // A fresh token is a hard reconnect signal: connections that died on 401
       // while the old token was stale (e.g. wake after a long sleep) can only
-      // recover now. trigger() resets the retry backoff and reconciles.
+      // recover now. The forced run is immediate but remains part of the same
+      // recovery episode, so repeated rotations cannot erase its backoff.
       localReconnectLoop?.trigger('token-refresh');
       return;
     }
@@ -3388,6 +3429,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ? { transportIds: ['local'], resetBackoff: true }
               : { resetBackoff: true }
           );
+          // A failed repo-level meta attach leaves no subscription for
+          // repo.reconnect() to revive. Rejoin it through the same recovery
+          // episode instead of letting auth refresh start a new initial sync.
+          if (!metaSub && !disposePromise) {
+            await ensureMetaRoomSynced('recovery');
+          }
         }
       }
       if (

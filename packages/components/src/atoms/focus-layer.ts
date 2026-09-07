@@ -3,14 +3,13 @@ import { atom } from 'jotai';
 /** Group key for the "Chats" (no-repo) sidebar group. */
 export const ONLY_CHATS_KEY = '__only_chats__';
 
-/**
- * Focus layer for keyboard navigation.
- *
- * L1 = sidebar list selection (arrow keys move highlight)
- * L2 = session browse (arrow keys scroll chat)
- * L3 = input mode (typing in composer)
- */
-export type FocusLayer = 'L1' | 'L2' | 'L3';
+export const WORKSPACE_FOCUS_SCOPES = {
+  chatLanding: 'chat-landing',
+  sessionConversation: 'session-conversation',
+  sessionSidePanel: 'session-side-panel',
+  sidebar: 'workspace-sidebar',
+  content: 'workspace-content',
+} as const;
 
 /**
  * Represents a navigable item in the sidebar flat list.
@@ -20,17 +19,6 @@ export type SidebarNavItem =
   | { kind: 'session'; sessionId: string; groupKey: string }
   | { kind: 'show-more'; groupKey: string; expanded: boolean }
   | { kind: 'local-project'; machineId: string; localProjectId: string; collapsed: boolean };
-
-/**
- * Current keyboard focus layer. Default is L3 (input mode).
- */
-export const focusLayerAtom = atom<FocusLayer>('L3');
-
-/**
- * Index of the highlighted item in the sidebar flat list.
- * -1 means no item is highlighted.
- */
-export const sidebarHighlightIndexAtom = atom<number>(-1);
 
 /**
  * Flat list of navigable sidebar items, written by the sidebar and read by

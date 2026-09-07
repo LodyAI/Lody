@@ -19,6 +19,7 @@ vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => []
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
+import { TooltipProvider } from '../src/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -100,7 +101,13 @@ describe('DesktopRunConfigMenu role face', () => {
 
   const render = async (props: Partial<MenuProps> = {}): Promise<HTMLDivElement> => {
     await act(async () => {
-      root?.render(createElement(DesktopRunConfigMenu, { ...baseProps, ...props }));
+      root?.render(
+        createElement(
+          TooltipProvider,
+          { delayDuration: 0 },
+          createElement(DesktopRunConfigMenu, { ...baseProps, ...props })
+        )
+      );
     });
     return container as HTMLDivElement;
   };
@@ -110,6 +117,26 @@ describe('DesktopRunConfigMenu role face', () => {
     const trigger = view.querySelector('button[aria-label="Run configuration"]');
     expect(trigger?.textContent).toContain('Codex Primary');
     expect(trigger?.textContent).toContain('5.5');
+  });
+
+  it('keeps the menu closed and explains when a machine must be selected first', async () => {
+    const disabledReason = 'Select a machine first';
+    const view = await render({ disabledReason });
+    const trigger = view.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]');
+    expect(trigger?.getAttribute('aria-disabled')).toBe('true');
+
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+
+    await act(async () => {
+      trigger?.focus();
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(disabledReason);
+    });
   });
 
   it('gives the button to the Role alone and leaves its values inert beside it', async () => {

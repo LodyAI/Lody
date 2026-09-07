@@ -7,23 +7,21 @@ import {
 } from '@/components/mentions/mention-analytics';
 import {
   buildItemSuggestions,
-  getIssuePrFuseOptions,
   IssuePrMentionHydrator,
   IssuePrMentionTitleHint,
   useKnownIssuePrItems,
-  type ItemSuggestion as IssuePrSuggestion,
 } from '@/components/mentions/issue-pr-hash-mention';
-import {
-  getFuseOptions,
-  hydrateFileMentionsFromText,
-  type PathSuggestion,
-} from '@/components/mentions/file-at-mention';
+import { hydrateFileMentionsFromText } from '@/components/mentions/file-at-mention';
 import {
   buildSessionMentionInsertion,
+  filterSessionMentionItemsByProject,
+  getMentionSourceProjectKey,
   hydrateSessionMentionsFromText,
   resolveSessionMentionIds,
   useSessionMentionItems,
   type SessionMentionItem,
+  type SessionMentionProjectKey,
+  type SessionMentionProjectScope,
 } from '@/components/mentions/mention-session-source';
 import {
   buildAgentRoleMentionContext,
@@ -32,7 +30,6 @@ import {
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { applyAgentRoleEmojiChip } from '@/components/mentions/mention-chips';
-import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
 import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import {
   sanitizeMentionRanges,
@@ -62,6 +59,8 @@ import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 
 // ============================================================================
 // Two-level `@` menu
@@ -78,8 +77,7 @@ function isLazySourceLoading(status: string, hasData: boolean) {
 
 /**
  * Builds the mention registry from the composer's already-fetched data and
- * renders the single `@` menu. Lives inside `<Mention>` so Fuse loading stays
- * keyed to the menu actually being open.
+ * renders the single `@` menu.
  */
 function TwoLevelMentionMenu({
   fileData,
@@ -98,6 +96,8 @@ function TwoLevelMentionMenu({
   availableCommands,
   enableSessionMentions,
   sessionItems,
+  sessionProjectKey,
+  commandsEnabled,
   enableAgentRoleMentions,
   agentRoleItems,
   surface,
@@ -119,6 +119,8 @@ function TwoLevelMentionMenu({
   availableCommands?: AcpCommandSummary[];
   enableSessionMentions: boolean;
   sessionItems: SessionMentionItem[];
+  sessionProjectKey: SessionMentionProjectKey;
+  commandsEnabled: boolean;
   enableAgentRoleMentions: boolean;
   agentRoleItems: readonly AgentRoleMentionItem[];
   surface: MentionSurface;
@@ -126,42 +128,44 @@ function TwoLevelMentionMenu({
   const context = useMentionContext('TwoLevelMentionMenu');
   const { t } = useTranslation();
   const active = context.open;
+  const [sessionProjectScope, setSessionProjectScope] =
+    React.useState<SessionMentionProjectScope>('current');
+
+  React.useEffect(() => {
+    if (!active) setSessionProjectScope('current');
+  }, [active]);
+
+  const toggleSessionProjectScope = React.useCallback(() => {
+    setSessionProjectScope((scope) => (scope === 'current' ? 'all' : 'current'));
+  }, []);
+  const sessionMenuOpen =
+    active &&
+    context.trigger === '@' &&
+    parseMentionNamespaceSearch(context.filterStore.search)?.namespace === 'session';
+  useCommand(
+    {
+      id: 'mention.toggleSessionProjectScope',
+      titleKey: 'commands.mention.toggleSessionProjectScope',
+      title: 'Toggle Session Mention Project Scope',
+      category: 'Editor',
+      keybindings: getCommandKeybindings('mention.toggleSessionProjectScope'),
+      allowInTextInput: true,
+      when: () => sessionMenuOpen,
+      run: toggleSessionProjectScope,
+    },
+    enableSessionMentions && active && commandsEnabled
+  );
 
   const fileIndex = React.useMemo(
     () =>
       enableFileMentions ? buildMentionFileIndex(fileData.entry, buildLazyDirectoryToken) : null,
     [enableFileMentions, fileData.entry]
   );
-  const fileFuseCtor = useMentionFuseCtor<PathSuggestion>(active && fileIndex !== null);
-  const fileFuse = React.useMemo(() => {
-    if (!fileFuseCtor || !fileIndex) return null;
-    try {
-      return new fileFuseCtor(fileIndex.allSuggestions, getFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [fileFuseCtor, fileIndex]);
-
   const issuePrSuggestions = React.useMemo(
     () =>
       enableIssueMentions && issuePrData.entry ? buildItemSuggestions(issuePrData.entry.items) : [],
     [enableIssueMentions, issuePrData.entry]
   );
-  const issuePrFuseCtor = useMentionFuseCtor<IssuePrSuggestion>(
-    active && issuePrSuggestions.length > 0
-  );
-  const createIssuePrFuse = React.useCallback(
-    (list: IssuePrSuggestion[]) => {
-      if (!issuePrFuseCtor || list.length === 0) return null;
-      try {
-        return new issuePrFuseCtor(list, getIssuePrFuseOptions());
-      } catch {
-        return null;
-      }
-    },
-    [issuePrFuseCtor]
-  );
-
   const fileSource = React.useMemo<MentionCategorySources['file']>(
     () => ({
       enabled: enableFileMentions,
@@ -187,9 +191,8 @@ function TwoLevelMentionMenu({
             )
         : undefined,
       index: fileIndex,
-      fuse: fileFuse,
     }),
-    [enableFileMentions, fileData, fileFuse, fileIndex, fileSourceKind, t]
+    [enableFileMentions, fileData, fileIndex, fileSourceKind, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -216,17 +219,8 @@ function TwoLevelMentionMenu({
           : undefined,
       onActivate: activateIssuePr,
       suggestions: issuePrSuggestions,
-      createFuse: createIssuePrFuse,
     }),
-    [
-      activateIssuePr,
-      createIssuePrFuse,
-      enableIssueMentions,
-      issuePrData,
-      issuePrSuggestions,
-      repoFullName,
-      t,
-    ]
+    [activateIssuePr, enableIssueMentions, issuePrData, issuePrSuggestions, repoFullName, t]
   );
 
   const skillSource = React.useMemo<MentionCategorySources['skill']>(
@@ -250,9 +244,66 @@ function TwoLevelMentionMenu({
     [allowedSkillDirs, enableSkillMentions, onSkillsActivate, skillItems, skillState, t]
   );
 
+  const visibleSessionItems = React.useMemo(
+    () => filterSessionMentionItemsByProject(sessionItems, sessionProjectKey, sessionProjectScope),
+    [sessionItems, sessionProjectKey, sessionProjectScope]
+  );
+  const currentSessionScopeLabel =
+    sessionProjectKey === 'chat'
+      ? t('mention.session.scope.none', 'No project')
+      : t('mention.session.scope.current', 'Current project');
   const sessionSource = React.useMemo<MentionCategorySources['session']>(
-    () => ({ enabled: enableSessionMentions, items: sessionItems }),
-    [enableSessionMentions, sessionItems]
+    () => ({
+      enabled: enableSessionMentions,
+      items: visibleSessionItems,
+      header: {
+        ariaLabel: t('mention.session.scope.label', 'Session project scope'),
+        options: [
+          {
+            label: currentSessionScopeLabel,
+            selected: sessionProjectScope === 'current',
+            onSelect: () => setSessionProjectScope('current'),
+          },
+          {
+            label: t('mention.session.scope.all', 'All projects'),
+            selected: sessionProjectScope === 'all',
+            onSelect: () => setSessionProjectScope('all'),
+          },
+        ],
+      },
+      emptyState:
+        sessionProjectScope === 'current'
+          ? {
+              message:
+                sessionProjectKey === 'chat'
+                  ? t(
+                      'mention.session.empty.none',
+                      'There are no other sessions without a project.'
+                    )
+                  : t(
+                      'mention.session.empty.current',
+                      'There are no other sessions in the current project.'
+                    ),
+              action: {
+                label: t('mention.session.scope.viewAll', 'View all projects'),
+                ariaLabel: t(
+                  'mention.session.scope.showAllAria',
+                  'Show sessions from all projects'
+                ),
+                onAction: toggleSessionProjectScope,
+              },
+            }
+          : undefined,
+    }),
+    [
+      currentSessionScopeLabel,
+      enableSessionMentions,
+      sessionProjectKey,
+      sessionProjectScope,
+      t,
+      toggleSessionProjectScope,
+      visibleSessionItems,
+    ]
   );
 
   const agentRoleSource = React.useMemo<MentionCategorySources['agentRole']>(
@@ -503,6 +554,8 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
+  /** False for a mounted but hidden composer that must not own app commands. */
+  commandsEnabled?: boolean;
   /** Dropped from the `@session:` category — a session never references itself. */
   currentSessionId?: string | null;
   value: string;
@@ -563,6 +616,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
+      commandsEnabled = true,
       currentSessionId,
       value,
       onValueChange,
@@ -654,6 +708,10 @@ export const CombinedMentionTextarea = React.forwardRef<
       [initializeLazyDirectory]
     );
     const sessionItems = useSessionMentionItems(currentSessionId);
+    const sessionProjectKey = React.useMemo(
+      () => getMentionSourceProjectKey(mentionSource),
+      [mentionSource]
+    );
     const agentRoleContext = React.useMemo(
       () =>
         buildAgentRoleMentionContext({
@@ -740,9 +798,9 @@ export const CombinedMentionTextarea = React.forwardRef<
         });
     }, [externalMentions, internalMentions]);
 
-    const [instanceKey, setInstanceKey] = React.useState(0);
     const prevValueRef = React.useRef(value);
-    const shouldRefocusRef = React.useRef(false);
+    const [hydrationKey, setHydrationKey] = React.useState(0);
+    const [menuOpen, setMenuOpen] = React.useState(false);
 
     // A draft swap, applied during render so the outgoing draft's ranges are
     // never painted over the incoming text — not even for one frame. Remounting
@@ -752,45 +810,35 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (renderedDraftKey !== draftKey) {
       setRenderedDraftKey(draftKey);
       setInternalMentions([]);
-      setInstanceKey((k) => k + 1);
+      setMenuOpen(false);
       // The swap is not an edit, so it must not read as one: an incoming empty
       // draft would otherwise trip the cleared-input reset below and report the
       // *new* draft's ranges as emptied.
       prevValueRef.current = value;
     }
 
+    // Clearing content resets data and re-arms hydration, not the input DOM.
+    // Replacing the textarea here loses browser focus and breaks submission's
+    // disabled → enabled handoff. Only a different draft replaces the tree.
     React.useEffect(() => {
       const prevValue = prevValueRef.current;
       prevValueRef.current = value;
       if (!resetOnEmpty) return;
       if (prevValue !== '' && value === '') {
-        // Track whether the textarea had focus before the reset so we can restore it
-        const textarea = ref && typeof ref === 'object' && 'current' in ref ? ref.current : null;
-        if (textarea && document.activeElement === textarea) {
-          shouldRefocusRef.current = true;
-        }
         setInternalMentions([]);
         handleMentionValuesChange([]);
         onExternalMentionsChange?.([]);
         onMentionRangesChange?.([]);
-        setInstanceKey((k) => k + 1);
+        setMenuOpen(false);
+        setHydrationKey((k) => k + 1);
       }
     }, [
       handleMentionValuesChange,
       onExternalMentionsChange,
       onMentionRangesChange,
-      ref,
       resetOnEmpty,
       value,
     ]);
-
-    // Re-focus the textarea after the Mention tree remounts due to instanceKey change
-    React.useEffect(() => {
-      if (!shouldRefocusRef.current) return;
-      shouldRefocusRef.current = false;
-      const textarea = ref && typeof ref === 'object' && 'current' in ref ? ref.current : null;
-      textarea?.focus();
-    }, [instanceKey, ref]);
 
     const enableCommandMentions = Boolean(availableCommands && availableCommands.length > 0);
     const hasExternalMentionSupport =
@@ -844,7 +892,9 @@ export const CombinedMentionTextarea = React.forwardRef<
 
     return (
       <Mention
-        key={instanceKey}
+        key={draftKey}
+        open={value !== '' && menuOpen}
+        onOpenChange={setMenuOpen}
         triggers={triggers}
         trigger={triggers[0] ?? '@'}
         inputValue={value}
@@ -860,50 +910,52 @@ export const CombinedMentionTextarea = React.forwardRef<
         loop
         className="w-full"
       >
-        <FileMentionHydrator
-          text={value}
-          getKnownPaths={getKnownFileTokens}
-          enabled={enableFileMentions}
-        />
-        {persistedMentions && persistedMentions.length > 0 ? (
-          <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
-        ) : null}
-        <SessionMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={sessionItems}
-          enabled={enableSessionMentions}
-        />
-        <AgentRoleMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={agentRoleItems}
-          enabled={enableAgentRoleMentions}
-        />
-        {mentionActionsRef ? (
-          <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
-        ) : null}
-        {enableSkillMentions ? (
-          <SkillMentionHydrator
+        <React.Fragment key={hydrationKey}>
+          <FileMentionHydrator
             text={value}
-            knownTokens={knownSkillTokens}
-            enabled={skillsActive}
+            getKnownPaths={getKnownFileTokens}
+            enabled={enableFileMentions}
           />
-        ) : null}
-        {enableIssueMentions ? (
-          <>
-            <IssuePrMentionHydrator
+          {persistedMentions && persistedMentions.length > 0 ? (
+            <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
+          ) : null}
+          <SessionMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={sessionItems}
+            enabled={enableSessionMentions}
+          />
+          <AgentRoleMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={agentRoleItems}
+            enabled={enableAgentRoleMentions}
+          />
+          {mentionActionsRef ? (
+            <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
+          ) : null}
+          {enableSkillMentions ? (
+            <SkillMentionHydrator
               text={value}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
+              knownTokens={knownSkillTokens}
+              enabled={skillsActive}
             />
-            <IssuePrMentionTitleHint
-              repoFullName={githubRepoFullName}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
-            />
-          </>
-        ) : null}
+          ) : null}
+          {enableIssueMentions ? (
+            <>
+              <IssuePrMentionHydrator
+                text={value}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions}
+              />
+              <IssuePrMentionTitleHint
+                repoFullName={githubRepoFullName}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions}
+              />
+            </>
+          ) : null}
+        </React.Fragment>
         <MentionLabel className="sr-only">{label}</MentionLabel>
         <MentionInput
           ref={ref}
@@ -931,6 +983,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           availableCommands={availableCommands}
           enableSessionMentions={enableSessionMentions}
           sessionItems={sessionItems}
+          sessionProjectKey={sessionProjectKey}
+          commandsEnabled={commandsEnabled}
           enableAgentRoleMentions={enableAgentRoleMentions}
           agentRoleItems={agentRoleItems}
           surface={mentionSurface}

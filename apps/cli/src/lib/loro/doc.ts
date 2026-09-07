@@ -14,6 +14,7 @@ import {
   getSessionIdFromRoomId,
   AgentConfigId,
   MachineId,
+  ManagedBuiltinAgentType,
   SessionHistoryInput,
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
@@ -42,6 +43,8 @@ import {
   getServerNow,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
+  getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderSetups,
   getMachineFlockDocId,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -53,6 +56,11 @@ import {
   type SessionForkOperation,
   SessionForkOperationSchema,
   type LodyPresenceStateMap,
+  type SessionAcpRuntimeConfigPatch,
+  type SessionAcpRuntimeConfigSnapshot,
+  isSensitiveAcpConfigOptionId,
+  BuiltinRuntimeOverridesSchema,
+  CustomAcpLaunchSpecSchema,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
@@ -94,6 +102,7 @@ import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-bind
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   listMergedAgentConfigs,
+  readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
   upsertMachineAgentConfig,
 } from '@/lib/agent-config-machine-flock';
@@ -104,6 +113,43 @@ const normalizeSessionHistoryEntry = (entry: SessionHistoryInput): SessionHistor
   ...entry,
   inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
 });
+
+const isValidDaemonLaunchConfig = (
+  config: AgentConfigMeta,
+  expectedConfigId: AgentConfigId,
+  expectedMachineId: MachineId
+): boolean => {
+  if (
+    config.id !== expectedConfigId ||
+    config.machineId !== expectedMachineId ||
+    typeof config.agentType !== 'string' ||
+    config.agentType.trim().length === 0 ||
+    typeof config.env !== 'object' ||
+    config.env === null ||
+    Array.isArray(config.env) ||
+    Object.values(config.env).some((value) => typeof value !== 'string')
+  ) {
+    return false;
+  }
+
+  if (config.cliType === 'custom') {
+    return (
+      CustomAcpLaunchSpecSchema.safeParse(config.customAcp).success &&
+      config.runtimeOverrides === undefined
+    );
+  }
+  if (config.cliType === 'registry') {
+    return config.customAcp === undefined && config.runtimeOverrides === undefined;
+  }
+  if (config.cliType === 'builtin') {
+    return (
+      config.customAcp === undefined &&
+      (config.runtimeOverrides === undefined ||
+        BuiltinRuntimeOverridesSchema.safeParse(config.runtimeOverrides).success)
+    );
+  }
+  return false;
+};
 
 type GlobalWithOptionalBun = typeof globalThis & { Bun?: unknown };
 type GlobalWithWebSocket = { WebSocket: typeof ProxiedWebSocket };
@@ -1327,6 +1373,11 @@ export class LoroDocumentManager {
     return false;
   }
 
+  /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
+  async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
+    return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
+  }
+
   async getAgentConfigById(
     agentConfigId: AgentConfigId,
     machineId?: MachineId
@@ -1338,6 +1389,37 @@ export class LoroDocumentManager {
     }
     const configs = await listMergedAgentConfigs(this.repo, this.workspaceId);
     return configs.find((config) => config.id === agentConfigId) ?? null;
+  }
+
+  /**
+   * Resolve the daemon-authoritative Provider config used by a process-launching
+   * Machine RPC. Published configs and durable provider-setup rows are the only
+   * accepted sources; caller-supplied launch fields never participate.
+   */
+  async getAgentConfigForMachineLaunch(
+    agentConfigId: AgentConfigId,
+    machineId: MachineId
+  ): Promise<AgentConfigMeta | null> {
+    const config = await this.getAgentConfigById(agentConfigId, machineId);
+    if (config) {
+      return isValidDaemonLaunchConfig(config, agentConfigId, machineId) ? config : null;
+    }
+
+    const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      prefixes: [
+        machineFlockKeys.providerSetup(agentConfigId),
+        machineFlockKeys.providerSetupCancellation(agentConfigId),
+      ],
+    });
+    if (getMachineFlockProviderSetupCancellations(rows)[agentConfigId]) {
+      return null;
+    }
+    const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
+    return setup?.machineId === machineId &&
+      isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
+      ? setup.config
+      : null;
   }
 
   async createAgentConfig(
@@ -1441,14 +1523,14 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
     options.signal?.throwIfAborted();
-    await this.machine.updateAcpCapabilities(
+    return await this.machine.updateAcpCapabilities(
       configId,
       cliType,
       agentType,
@@ -1625,6 +1707,29 @@ type SessionDocInitialState = {
   history?: SessionHistoryInput[];
   forkOperation?: SessionForkOperation;
 };
+
+const configOptionValuesEqual = (
+  left: SessionAcpRuntimeConfigSnapshot['configOptionValues'],
+  right: SessionAcpRuntimeConfigSnapshot['configOptionValues']
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  return (
+    leftKeys.length === Object.keys(right).length &&
+    leftKeys.every((key) => left[key] === right[key])
+  );
+};
+
+const acpRuntimeConfigEqual = (
+  left: SessionAcpRuntimeConfigSnapshot,
+  right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
+): boolean =>
+  left.acpSessionId === right.acpSessionId &&
+  left.basedOnUserTurnId === right.basedOnUserTurnId &&
+  left.modeId === right.modeId &&
+  left.modelId === right.modelId &&
+  configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
 
 /**
  * Hard cap on how long a queued message can hold the head-of-queue dispatch lock
@@ -2009,6 +2114,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
+      acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
 
@@ -2082,6 +2188,84 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       }
       return prev;
     });
+  }
+
+  applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): boolean {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
+
+    const durablePatch: SessionAcpRuntimeConfigPatch =
+      patch.configOptionValues === undefined
+        ? patch
+        : {
+            ...patch,
+            configOptionValues: Object.fromEntries(
+              Object.entries(patch.configOptionValues).filter(
+                ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+              )
+            ),
+          };
+
+    const state = this.mirror.getState();
+    const incomingTurnIndex = state.history.findIndex(
+      (entry) => entry.role === 'user' && entry.id === basedOnUserTurnId
+    );
+    let latestUserTurnIndex = -1;
+    for (let index = state.history.length - 1; index >= 0; index -= 1) {
+      if (state.history[index]?.role === 'user') {
+        latestUserTurnIndex = index;
+        break;
+      }
+    }
+    if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+      return false;
+    }
+
+    const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+    const currentTurnIndex = current
+      ? state.history.findIndex(
+          (entry) => entry.role === 'user' && entry.id === current.basedOnUserTurnId
+        )
+      : -1;
+    if (currentTurnIndex > incomingTurnIndex) {
+      return false;
+    }
+
+    const continuesCurrentSnapshot =
+      current?.acpSessionId === durablePatch.acpSessionId &&
+      current.basedOnUserTurnId === basedOnUserTurnId;
+    const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+      ...(continuesCurrentSnapshot
+        ? {
+            ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+            ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+            ...(current.configOptionValues !== undefined
+              ? { configOptionValues: current.configOptionValues }
+              : {}),
+          }
+        : {}),
+      ...durablePatch,
+      basedOnUserTurnId,
+    };
+    if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+      return false;
+    }
+
+    const next: SessionAcpRuntimeConfigSnapshot = {
+      ...nextWithoutRevision,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    this.mirror.setState((prev) => {
+      // Mirror exposes readonly state to callers, but setState supplies its mutable draft.
+      // @ts-expect-error mutable Mirror draft
+      prev.acpRuntimeConfig = next;
+      return prev;
+    });
+    return true;
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
@@ -2508,6 +2692,30 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }
   }
 
+  /**
+   * Append a user turn and publish its dispatch pointer as ONE operation.
+   *
+   * Both writes are a single fact — "this turn is waiting to run" — split across
+   * two documents, because the pointer lives in workspace meta (the activation
+   * index startup scans) and so cannot be derived from history. Pairing them by
+   * convention leaves every producer one forgotten line from a turn that runs
+   * without advancing `latestUserMsgId`; see `../../session/AGENTS.md` for what
+   * that costs. History is written first so the content lands before the pointer
+   * that advertises it, and `lastMissingHistoryUserMsgId` is left alone: clearing
+   * it belongs to producers that first supersede the acknowledged entry.
+   */
+  async appendUserTurn(entry: SessionHistoryInput): Promise<void> {
+    if (entry.role !== 'user') {
+      throw new Error(
+        `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
+      );
+    }
+    await this.updateHistory((history) => [...history, entry]);
+    await this.repo.upsertDocMeta(this.roomId, {
+      latestUserMsgId: entry.id,
+    } satisfies Partial<SessionMeta>);
+  }
+
   private summarizeHistoryTailForDiagnostics(
     history: SessionHistoryInput[]
   ): Record<string, unknown> {
@@ -2911,6 +3119,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     modes: entry.modes,
     models: entry.models,
     configOptions: entry.configOptions,
+    modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -3000,7 +3209,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
       id: mode.id,
@@ -3042,7 +3251,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       serializeAcpCapabilityWithoutFetchTime(existing) ===
         serializeAcpCapabilityWithoutFetchTime(entry)
     ) {
-      return;
+      return existing;
     }
     options.signal?.throwIfAborted();
     const changed = writeMachineFlockRowToFlock(handle.flock, {
@@ -3057,6 +3266,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
+    return entry;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

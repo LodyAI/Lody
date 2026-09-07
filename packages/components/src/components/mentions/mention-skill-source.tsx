@@ -5,6 +5,7 @@ import {
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
   getRegisteredSystemSkillDirs,
+  isRegisteredSkillAgentType,
   type AgentConfigCliType,
   type ProjectSkill,
   type ProjectSkillScope,
@@ -167,6 +168,11 @@ export function getAllowedSkillMentionDirs(
   skillAgent: { cliType?: AgentConfigCliType; agentType?: string } | undefined
 ): ReadonlySet<string> | null {
   if (!skillAgent?.cliType || !skillAgent.agentType) {
+    return null;
+  }
+  // Unregistered types have no known dirs; an empty whitelist would hide every
+  // skill, so they get none. A registered one keeps its whitelist when empty.
+  if (!isRegisteredSkillAgentType(skillAgent.agentType)) {
     return null;
   }
   const agent = { cliType: skillAgent.cliType, agentType: skillAgent.agentType };

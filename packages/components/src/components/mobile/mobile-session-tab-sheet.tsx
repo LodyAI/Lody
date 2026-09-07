@@ -5,6 +5,7 @@ import {
   FileDiff,
   FolderOpen,
   GitPullRequest,
+  Hand,
   Loader2,
   MonitorPlay,
   Plus,
@@ -26,9 +27,11 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/draw
  * to one.
  *
  * Each conversation row reads `[status] title elapsed`: the status slot is a
- * spinner while working, else an unread accent dot, else empty; elapsed is the
- * relative "Xm ago" of the last activity (task-list style). The component is
- * pure — the caller resolves running/unread/active/lastActivityAt (see
+ * warning-tone hand while the conversation is blocked on a permission request,
+ * else a spinner while working, else an unread accent dot, else empty; elapsed
+ * is the relative "Xm ago" of the last activity (task-list style). The
+ * component is pure — the caller resolves
+ * waitingPermission/running/unread/active/lastActivityAt (see
  * `session-detail.tsx` wiring) so the sheet stays trivially story-able.
  */
 export type ConversationTabEntry = {
@@ -37,8 +40,14 @@ export type ConversationTabEntry = {
   active: boolean;
   /** The session's main thread — pinned first, marked with a "Main" chip. */
   main?: boolean;
-  /** Working (or waiting on permission) → spinner. */
+  /** Working → spinner. A permission request also counts as working. */
   running: boolean;
+  /**
+   * Blocked on a permission request → hand, outranking the spinner. A child
+   * (subagent) tab is the case this exists for: it is the only place its
+   * "needs you" state surfaces while another tab is on screen.
+   */
+  waitingPermission?: boolean;
   /** Unread messages → accent dot. */
   unread: boolean;
   /** Last activity timestamp (ms) for the trailing relative time; null hides it. */
@@ -142,11 +151,13 @@ export function MobileSessionTabSheet({
                 key={c.id}
                 active={c.active}
                 running={c.running}
+                waitingPermission={c.waitingPermission === true}
                 unread={c.unread}
                 label={c.title || t('sessions.untitled', 'Untitled')}
                 mainChip={c.main ? t('sessions.tabs.mainTab', 'Main') : null}
                 elapsed={formatRelativeTime(c.lastActivityAt, t)}
                 unreadLabel={t('sessions.unreadMessages', 'Unread messages')}
+                waitingPermissionLabel={t('sessions.waitingPermission', 'Waiting for permission')}
                 onSelect={() => select(() => onSelectConversation(c.id))}
               />
             ))}
@@ -266,21 +277,25 @@ function GroupCard({ children }: { children: ReactNode }) {
 function ConversationRow({
   active,
   running,
+  waitingPermission,
   unread,
   label,
   mainChip,
   elapsed,
   unreadLabel,
+  waitingPermissionLabel,
   onSelect,
 }: {
   active: boolean;
   running: boolean;
+  waitingPermission: boolean;
   unread: boolean;
   label: string;
   /** Localized "Main" badge text; null hides the chip. */
   mainChip?: string | null;
   elapsed: string;
   unreadLabel: string;
+  waitingPermissionLabel: string;
   onSelect: () => void;
 }) {
   return (
@@ -297,7 +312,11 @@ function ConversationRow({
       )}
     >
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        {running ? (
+        {/* Precedence matches the mobile project screen and the desktop sidebar:
+            "this tab needs you" beats "this tab is busy" beats "unread". */}
+        {waitingPermission ? (
+          <Hand className="h-4 w-4 text-status-warning" aria-label={waitingPermissionLabel} />
+        ) : running ? (
           <Loader2 className="h-4 w-4 animate-spin text-tab-active-accent" aria-hidden="true" />
         ) : unread ? (
           <span className="h-2 w-2 rounded-full bg-primary" aria-label={unreadLabel} />
@@ -384,6 +403,11 @@ function ViewerRow({
  *   - else working → hollow ring with a slow opacity "breathe" (a background
  *     agent is still running — ambient, nothing to do yet).
  * Shape (solid vs ring) carries the distinction so it survives reduced-motion.
+ *
+ * There is deliberately no third "waiting for approval" state here: a dot can
+ * only differ by color, and `--status-warning` resolves to `--primary` in
+ * VS Code-derived themes, so it would be the unread dot. The waiting hand lives
+ * in the sheet rows, where a glyph has room to be a glyph.
  */
 export function MobileSessionTabButton({
   hasUnread,

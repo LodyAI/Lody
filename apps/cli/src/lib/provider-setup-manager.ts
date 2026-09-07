@@ -4,6 +4,7 @@ import {
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
   getMachineFlockProviderSetups,
+  findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
   getServerNow,
   machineFlockKeys,
@@ -186,11 +187,6 @@ export class ProviderSetupManager {
         machineId: this.machineId,
         workspaceId: this.workspaceId,
         configId: verifying.config.id,
-        cliType: verifying.config.cliType,
-        agentType: verifying.config.agentType,
-        customAcp: verifying.config.customAcp,
-        runtimeOverrides: verifying.config.runtimeOverrides,
-        env: verifying.config.env,
       });
       if (response.success) {
         await this.publishVerifiedConfig(verifying.id, attempt);
@@ -343,6 +339,7 @@ export class ProviderSetupManager {
         machineFlockKeys.providerSetupCancellation(setupId),
         machineFlockKeys.agentConfig(setupId),
       ],
+      families: ['builtinAgentOptOut'],
     });
     const cancellation = getMachineFlockProviderSetupCancellations(rows)[setupId];
     if (cancellation) {
@@ -369,6 +366,13 @@ export class ProviderSetupManager {
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
     flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
+    // Publishing is the user adding the provider explicitly, so the earlier same-type
+    // removal intent has to be retracted too, or the list holds it while startup still
+    // treats it as removed.
+    const optOutKey = findBuiltinAgentOptOutToRetract(rows, setup.config);
+    if (optOutKey) {
+      flock.delete(optOutKey, now);
+    }
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
     flock.commit();
     await this.repo.flush();

@@ -1,0 +1,20 @@
+---
+title: '20260901-3'
+version: 0.89.3
+date: 2026-09-01
+description: Added Codex capacity retries and a lightweight join entry, and improved session configuration and rendering stability.
+---
+
+Version 0.89.3
+
+### ✨ New
+
+- Codex capacity failures now support an explicit retry followed by bounded automatic retries with a countdown and cancellation control.
+- Added a lightweight join entry that handles join flows without loading the full application shell.
+
+### 🐛 Fixes and Improvements
+
+- Fixed repeated updates and render loops in session configuration, session tabs, workspace access fallback, and browser visibility synchronization.
+- Fixed session switching, deep-link restoration, and pending states under asynchronous data and rapid user actions.
+- Improved resilience to malformed session parent-child relationships and render errors, preventing redirect loops and renderer crashes.
+- Thanks to external contributor Wibus Wu for the Codex retry and lightweight join entry features.

@@ -36,6 +36,7 @@ export * from './bug-report';
 export * from './billing';
 export * from './agent-brand';
 export * from './agent-authentication';
+export * from './acp-authentication-limits';
 export * from './schema';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';

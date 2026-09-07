@@ -221,7 +221,7 @@ export const DownloadingRuntime: Story = {
       [codexConfig.id]: { phase: 'downloading-runtime', percent: 64 },
       [kimiConfig.id]: { phase: 'extracting-runtime' },
     },
-    selectedConfigId: codexConfig.id,
+    selectedProviderId: codexConfig.id,
     noLocalMachine: false,
   },
 };
@@ -236,7 +236,7 @@ export const RecheckingVerified: Story = {
     testActivities: {
       [claudeConfig.id]: { phase: 'probing-provider' },
     },
-    selectedConfigId: claudeConfig.id,
+    selectedProviderId: claudeConfig.id,
     noLocalMachine: false,
   },
 };

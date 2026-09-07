@@ -170,6 +170,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -249,6 +250,7 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
+import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
 import { ensureValidBranchName } from '@/agent/branch-name-generator';
@@ -260,6 +262,7 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
@@ -874,6 +877,7 @@ export class MessageHandler {
   private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
+  private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
   private static readonly MACHINE_ACCESS_REGISTRATION_CACHE_TTL_MS = 20 * 60_000;
   private machineAccessRegistrationInFlight: Promise<void> | null = null;
   private machineAccessRegistrationExpiresAtMs = 0;
@@ -1713,13 +1717,30 @@ export class MessageHandler {
       acpSessionId: ACPSessionId | null;
       agentClient: AgentClient | null;
     },
-    config: AcpSessionRunConfig
+    config: AcpSessionRunConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+    }
   ): Promise<void> {
-    const { warningSelections } = await applyAcpSessionRunConfig({
+    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
       config,
       logger: this.logger,
     });
+
+    if (runtimeConfigPatch && context.basedOnUserTurnId) {
+      const basedOnUserTurnId = context.basedOnUserTurnId;
+      const persistRuntimeConfig = async (): Promise<void> => {
+        await this.awaitTurnHistoryGate(session.sessionId);
+        context.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+      };
+      void persistRuntimeConfig().catch((error) => {
+        this.logger.warn(
+          `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
+        );
+      });
+    }
 
     if (warningSelections.length > 0) {
       // Not awaited: this is reporting, and the prompt hot path must not block
@@ -2817,6 +2838,9 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2841,8 +2865,12 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(delegatedRequester
+          ? { delegatedRequester }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
@@ -2891,12 +2919,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      delegatedRequester
     );
   }
 
@@ -3014,7 +3043,13 @@ export class MessageHandler {
       },
     });
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
-      this.handleAgentPermissionRequest(sessionId, requestId, request, agentClient?.currentModel)
+      this.handleAgentPermissionRequest(
+        sessionId,
+        requestId,
+        request,
+        agentClient?.currentModel,
+        agentClient
+      )
     );
     this.autoPromptRunner = new AutoPromptRunner({
       workspaceId: this.workspaceId,
@@ -3063,14 +3098,15 @@ export class MessageHandler {
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      applyAcpModeAndModel: async (session, acpConfig) =>
+      applyAcpModeAndModel: async (session, acpConfig, context) =>
         await this.applyAcpModeAndModel(
           session as {
             sessionId: SessionId;
             acpSessionId: ACPSessionId | null;
             agentClient: AgentClient | null;
           },
-          acpConfig
+          acpConfig,
+          context
         ),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo, userTurnId) =>
         await this.createAssistantEntryForTurn(
@@ -3240,61 +3276,56 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onAcpBinaryProgress,
-          signal,
-        }) =>
+        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
             },
             { onAcpBinaryProgress, signal }
           ),
-        authenticateMachineAcp: async ({
-          requestId,
-          action,
-          authenticationRequestId,
-          authorizationCode,
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onProgress,
-        }) =>
-          await this.authenticateMachineAcpAndResumeSetup(
-            {
-              type: 'machine/acp-authenticate',
-              machineId: this.machineId,
-              workspaceId: this.workspaceId,
-              requestId,
-              action,
-              authenticationRequestId,
-              authorizationCode,
-              configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
-            },
-            { onProgress }
-          ),
+        authenticateMachineAcp: async (args) => {
+          const common = {
+            type: 'machine/acp-authenticate' as const,
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+            requestId: args.requestId,
+          };
+          const message: MachineAcpAuthenticateRequestValidated = (() => {
+            switch (args.action) {
+              case 'start':
+                return { ...common, action: args.action, configId: args.configId };
+              case 'cancel':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                };
+              case 'submit-code':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  authorizationCode: args.authorizationCode,
+                };
+              case 'submit-input':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  interactionId: args.interactionId,
+                  authenticationInput: args.authenticationInput,
+                };
+              default:
+                throw new Error('Unsupported ACP authentication action');
+            }
+          })();
+          return await this.authenticateMachineAcpAndResumeSetup(message, {
+            onProgress: args.onProgress,
+          });
+        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',
@@ -5201,6 +5232,16 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
+            group.updates.map((update) => update.notification)
+          );
+          if (runtimeConfigPatch && group.target.userTurnId) {
+            sessionDoc.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
+          } else if (runtimeConfigPatch) {
+            this.logger.debug(
+              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
+            );
+          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,
@@ -5782,20 +5823,9 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
-            }
-            break;
-          }
-        }
-        return history;
-      });
+      await sessionDoc.updateHistory((history) =>
+        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+      );
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
@@ -6209,24 +6239,79 @@ export class MessageHandler {
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
     if (project?.kind === 'local') {
-      const workspaceRoot = await resolveWorkspaceLocalProjectRootPath(
+      const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
         project.localProjectId
       );
-      if (!workspaceRoot) {
+      if (!originalRootPath) {
         return {
           ok: false,
           error: 'workspace_unavailable',
           message: `Local project not found in workspace: ${project.localProjectId}`,
         };
       }
+      const isLocalWorktree = meta.isWorktree === true || project.useWorktree === true;
+      if (!isLocalWorktree) {
+        return {
+          ok: true,
+          workspaceRoot: originalRootPath,
+          source: `local-project:${project.localProjectId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      const worktreeManager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
+        source: { kind: 'local-shared', originalRootPath },
+        logger: this.logger,
+      });
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      // Fork metadata is persisted before asynchronous worktree creation starts. Never fall
+      // back to originalRootPath here: it is the shared main checkout, so All Changes would
+      // show another checkout's edits. Wait for the session, then recheck the worktree manager.
+      this.logCodeCollabDebug(
+        `[${sessionId}] Code Collab v2 workspace resolution waiting for local worktree ownerSessionId=${ownerSessionId} project=${project.localProjectId}`
+      );
+      const waited = await waitForSessionWorkspaceRoot({
+        targetSessionId: ownerSessionId,
+        activeSource:
+          ownerSessionId === sessionId
+            ? 'active-session-after-wait'
+            : `active-parent-session:${ownerSessionId}`,
+        pendingSource:
+          ownerSessionId === sessionId
+            ? 'pending-session-after-wait'
+            : `pending-parent-session:${ownerSessionId}`,
+        timeoutMs: CODE_COLLAB_WORKSPACE_WAIT_TIMEOUT_MS,
+      });
+      if (waited) {
+        return waited.ok ? { ...waited, ...ownerSessionIdField(ownerSessionId) } : waited;
+      }
+
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing-after-wait:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
       return {
-        ok: true,
-        workspaceRoot,
-        source: `local-project:${project.localProjectId}`,
-        ...ownerSessionIdField(ownerSessionId),
+        ok: false,
+        error: 'session_initializing',
+        message:
+          'Session workspace is still being prepared. Code Collab will start after the session is ready.',
       };
     }
 
@@ -6506,11 +6591,25 @@ export class MessageHandler {
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
-      case 'file/preview-local':
+      case 'file/resolve-local':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.filePreviewService.previewFile(request.params, {
-          allowArbitraryPaths: true,
-        });
+        return await this.filePreviewService.resolveLocalFile(request.params);
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        return invocation
+          ? {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: true as const,
+              ...invocation,
+            }
+          : {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: false as const,
+            };
+      }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',
@@ -8251,7 +8350,6 @@ export class MessageHandler {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
       message.action === 'start' &&
-      message.configId &&
       response.success &&
       response.disposition === 'authenticated'
     ) {
@@ -8349,7 +8447,8 @@ export class MessageHandler {
     sessionId: SessionId,
     requestId: string,
     request: RequestPermissionRequest,
-    model?: ModelInfo
+    model?: ModelInfo,
+    agentClient?: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
   ): Promise<RequestPermissionResponse> {
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
@@ -8456,6 +8555,26 @@ export class MessageHandler {
       return { outcome: { outcome: 'cancelled' } };
     }
 
+    const automaticOutcome = isAskUserQuestionRequest
+      ? undefined
+      : agentClient?.getAutomaticToolPermissionOutcome(request, false);
+    if (automaticOutcome) {
+      try {
+        await updatePermissionOutcomeInHistory(doc, requestId, automaticOutcome, this.logger);
+      } catch (error) {
+        this.logger.error(
+          `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+        );
+        return { outcome: { outcome: 'cancelled' } };
+      }
+      capturePermissionResolved('allow', { resolutionSource: 'run_config_auto_approve' });
+      return { outcome: automaticOutcome };
+    }
+
+    const pendingRequests = this.pendingPermissionRequests.get(sessionId) ?? new Set<string>();
+    pendingRequests.add(requestId);
+    this.pendingPermissionRequests.set(sessionId, pendingRequests);
+
     try {
       // The durable marker rides the same meta write as the status. Status is
       // repaired to idle by the heartbeat TTL; this is not, because an offline
@@ -8472,6 +8591,7 @@ export class MessageHandler {
       );
     }
 
+    let resolved = false;
     const permissionUserId = historyUserId ?? metaUserId ?? this.userId;
 
     const notificationService = this.notificationService;
@@ -8503,6 +8623,7 @@ export class MessageHandler {
       if (requestKind === 'permission') {
         void (async () => {
           const historySynced = await doc.waitUntilSynced();
+          if (resolved) return;
           if (!historySynced) {
             this.logger.debug(
               `[${sessionId}] Permission request history was not confirmed before Live Activity sync; sending notification fallback`
@@ -8514,6 +8635,7 @@ export class MessageHandler {
           const liveActivityResult = await this.syncLiveActivitySummary(permissionUserId, {
             permissionAlert: true,
           });
+          if (resolved) return;
           if (liveActivityResult.sent && !liveActivityResult.ended) {
             return;
           }
@@ -8537,12 +8659,14 @@ export class MessageHandler {
 
     // Subscribe to LoroDoc and wait for outcome
     return new Promise<RequestPermissionResponse>((resolve) => {
-      let resolved = false;
       let timedOutResolution = false;
       let unsubscribe: (() => void) | null = null;
+      let unsubscribeConfig: (() => void) | undefined;
       let timeoutId: NodeJS.Timeout | null = null;
 
       const cleanup = () => {
+        unsubscribeConfig?.();
+        unsubscribeConfig = undefined;
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;
@@ -8555,11 +8679,23 @@ export class MessageHandler {
 
       const resolveWithOutcome = async (
         outcome: RequestPermissionResponse['outcome'],
-        resolutionSource: string = 'client'
+        resolutionSource: string = 'client',
+        persistOutcome = false
       ) => {
         if (resolved) return;
         resolved = true;
         cleanup();
+
+        if (persistOutcome) {
+          try {
+            await updatePermissionOutcomeInHistory(doc, requestId, outcome, this.logger);
+          } catch (error) {
+            this.logger.error(
+              `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+            );
+            outcome = { outcome: 'cancelled' };
+          }
+        }
 
         // Accumulate permission wait time for this session
         const requestStartTime = this.permissionRequestStartTimes.get(requestId);
@@ -8573,14 +8709,17 @@ export class MessageHandler {
           );
         }
 
-        // Single funnel for client answers, cancels, and timeouts, so clearing
-        // here cannot leave a stale "waiting on you" behind.
-        try {
-          await doc.clearAwaitingUser();
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
-          );
+        // A drained tool must not clear a still-pending question's waiting state.
+        pendingRequests.delete(requestId);
+        if (pendingRequests.size === 0) {
+          this.pendingPermissionRequests.delete(sessionId);
+          try {
+            await doc.clearAwaitingUser();
+          } catch (error) {
+            this.logger.debug(
+              `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
+            );
+          }
         }
 
         this.logger.info(`Permission resolved for session ${sessionId}: ${outcome.outcome}`);
@@ -8620,6 +8759,7 @@ export class MessageHandler {
           // the visible active scope ended; only restore `running` while active
           // presence is still owned locally.
           if (
+            !this.pendingPermissionRequests.has(sessionId) &&
             shouldRestoreRunningAfterPermission({
               hasActivePresence: this.hasSessionActivePresence(sessionId),
               status: currentStatus,
@@ -8657,8 +8797,30 @@ export class MessageHandler {
         });
       }
 
+      const checkAutomaticOutcome = (pending: boolean) => {
+        // A client decision already written to history wins over a later mode toggle.
+        checkForOutcome();
+        if (resolved || isAskUserQuestionRequest) return;
+        const outcome = agentClient?.getAutomaticToolPermissionOutcome(request, pending);
+        if (outcome) void resolveWithOutcome(outcome, 'run_config_auto_approve', true);
+      };
+      if (agentClient && !isAskUserQuestionRequest) {
+        let wasAutomatic =
+          agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+        unsubscribeConfig = agentClient.subscribeConfigOptions(() => {
+          const isAutomatic =
+            agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+          const enabled = isAutomatic && !wasAutomatic;
+          wasAutomatic = isAutomatic;
+          // Unrelated config updates must not drain a request queued while YOLO was already on.
+          if (enabled) checkAutomaticOutcome(true);
+        });
+      }
+
       // Check immediately in case outcome was already written
-      checkForOutcome();
+      // or the config changed while history/status/notifications were being prepared.
+      checkAutomaticOutcome(false);
+      if (resolved) return;
 
       // Setup timeout
       timeoutId = setTimeout(() => {
@@ -9456,6 +9618,7 @@ export class MessageHandler {
 
   cancelPendingPermissionRequests(): void {
     this.permissionRequestStartTimes.clear();
+    this.pendingPermissionRequests.clear();
   }
 
   /**
@@ -9829,11 +9992,10 @@ export class MessageHandler {
       return false;
     }
 
-    if (meta.processingUserMsgId) {
-      return true;
-    }
-
-    return Boolean(meta.latestUserMsgId && meta.latestUserMsgId !== meta.lastHandledUserMsgId);
+    // Same predicate the dispatch watcher uses: a retired activation leaves the
+    // pointers unequal on purpose, and a raw comparison would pin the session
+    // in memory forever.
+    return hasPendingUserTurnActivation(meta);
   }
 
   /**

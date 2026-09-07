@@ -15,6 +15,7 @@ import { DeepSeekIcon } from './deepseek-icon';
 import { GlmIcon } from './glm-icon';
 import { MinimaxIcon } from './minimax-icon';
 import { OpenAIIcon } from './openai-icon';
+import { InlineSvg } from './inline-svg';
 import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
 
 const registryNameMap = new Map(REGISTRY_ACP_AGENTS.map((a) => [a.id, a.name] as const));
@@ -59,12 +60,6 @@ export type AgentIconSlug =
   | { kind: 'builtin'; agentType: BuiltinAgentType }
   | { kind: 'preset'; preset: 'deepseek-claude' | 'deepseek-reasonix' }
   | { kind: 'registry'; agentType: string };
-
-function InlineSvg({ raw, className }: { raw: string; className: string }) {
-  return (
-    <span className={className} aria-hidden="true" dangerouslySetInnerHTML={{ __html: raw }} />
-  );
-}
 
 export function AgentIcon({
   cliType,

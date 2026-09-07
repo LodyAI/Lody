@@ -10,15 +10,18 @@ import {
   type SessionExecutionServiceDeps,
 } from '../src/session/session-execution-service';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
+  type AgentConfigMeta,
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
   type SessionGoalMessage,
   type SessionHistoryInput,
   type SessionId,
+  type SessionMeta,
   type SessionInputBlock,
   type WorkspaceId,
 } from '@lody/shared';
@@ -30,8 +33,22 @@ import {
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
+import { LodyOperationStore } from '../src/orchestration/operation-store';
+import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
+import { shouldWatchSession } from '../src/session/session-dispatch-logic';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
+
+const createLaunchConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta => ({
+  id: capabilityConfigId,
+  machineId: 'machine-1',
+  name: 'Test Provider',
+  description: undefined,
+  cliType: 'registry',
+  agentType: 'codex',
+  env: { TOKEN: 'shared' },
+  ...overrides,
+});
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -174,6 +191,17 @@ const createBaseDeps = (
     }));
   }
 
+  const workspaceWithLaunchConfig = deps.workspaceDocument as unknown as {
+    getAgentConfigForMachineLaunch?: (
+      agentConfigId: AgentConfigId,
+      machineId: MachineId
+    ) => Promise<AgentConfigMeta | null>;
+  };
+  workspaceWithLaunchConfig.getAgentConfigForMachineLaunch ??= vi.fn(
+    async (agentConfigId: AgentConfigId, machineId: MachineId) =>
+      createLaunchConfig({ id: agentConfigId, machineId })
+  );
+
   const workspaceWithDocFactory = deps.workspaceDocument as unknown as {
     getOrCreateSessionDoc: (...args: unknown[]) => Promise<unknown>;
   };
@@ -240,15 +268,21 @@ describe('SessionExecutionService', () => {
       turnId: 'assistant:user-1',
       promptPromise: new Promise(() => {}),
     });
+    const onTurnSettled = vi.fn(async () => {});
     const runtime = {
       sessionId,
       turnId: 'assistant:user-1',
       userTurnId: 'user-1',
       session: activeSession,
       promptInFlight: true,
-      requesterUserId: 'user-1',
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
       activePromptRun: initialPromptRun,
       yieldedFinalization: Promise.resolve(),
+      settlement: { callback: onTurnSettled, completed: false },
     };
     (
       service as unknown as {
@@ -266,6 +300,8 @@ describe('SessionExecutionService', () => {
         inputConfig: { prompt: 'change direction' },
       })
     ).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
 
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledWith(
       sessionId,
@@ -282,6 +318,16 @@ describe('SessionExecutionService', () => {
     );
     expect(runtime.turnId).toBe('assistant:user-2');
     expect(runtime.userTurnId).toBe('user-2');
+    expect(runtime.invocation).toEqual({
+      requesterUserId: 'user-1',
+      sourceTurnId: 'user-2',
+      inputConfig: { prompt: 'change direction' },
+    });
+    expect(service.getActiveInvocationContext(sessionId)).toEqual({
+      requesterUserId: 'user-1',
+      sourceTurnId: 'user-2',
+      inputConfig: { prompt: 'change direction' },
+    });
     expect(initialPromptRun.successor?.turnId).toBe('assistant:user-2');
     expect(runtime.activePromptRun.turnId).toBe('assistant:user-2');
 
@@ -363,6 +409,7 @@ describe('SessionExecutionService', () => {
       })
     ).resolves.toEqual({ success: true });
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith('acp-steer'));
+    expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
   it('completes A to B to C when yielded prompts never settle', async () => {
@@ -461,18 +508,22 @@ describe('SessionExecutionService', () => {
       ),
     });
     const service = new SessionExecutionService(deps);
-    const lifecycle = service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
-      userTurnId: 'user-a',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    const onTurnSettled = vi.fn(async () => {});
+    const lifecycle = service.continueSession(
+      {
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
+        userTurnId: 'user-a',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      },
+      { onTurnSettled }
+    );
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
     const steerB = service.steerSession({
@@ -493,6 +544,8 @@ describe('SessionExecutionService', () => {
     const releaseB = vi.fn();
     applicationB.resolve({ steerId: 'steer-b', release: releaseB });
     await expect(steerB).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
     expect(releaseB).toHaveBeenCalledOnce();
     expect(deps.activateConversationTurnForACPUpdates).toHaveBeenCalledTimes(2);
     expect(
@@ -573,6 +626,7 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.notifySessionCompleted).toHaveBeenCalledTimes(1);
     expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+    expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
   it('rejects steer without mutating the active turn when the agent lacks support', async () => {
@@ -1096,7 +1150,14 @@ describe('SessionExecutionService', () => {
   // left the user with an unanswered message and no error anywhere.
   const runSilentPromptTurn = async (options: {
     sessionId: string;
+    attempts?: number;
     hasPromptOutputForTurn: boolean;
+    dispatchSource?: 'delivery';
+    onTurnClaimed?: () => Promise<boolean>;
+    onTurnStarted?: () => Promise<boolean>;
+    onTurnSettled?: (
+      settlement: 'handled' | 'cancelled' | 'not_started' | 'uncertain'
+    ) => Promise<void>;
   }) => {
     let history: Array<Record<string, unknown>> = [
       {
@@ -1126,9 +1187,12 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-silent'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
+    let status = SessionStatusFactory.idle();
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
+      setStatus: vi.fn(async (next: typeof status) => {
+        status = next;
+      }),
       setLastMessageAt: vi.fn(async () => {}),
       getHistory: vi.fn(async () => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
@@ -1136,8 +1200,19 @@ describe('SessionExecutionService', () => {
       }),
     };
     const notifySessionCompleted = vi.fn(async () => {});
+    const onTurnSettled = options.onTurnSettled ?? vi.fn(async () => {});
+    const finalizationOwners: boolean[] = [];
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
+      beginConversationTurn: vi.fn(
+        (_sessionId: SessionId, parentTurnId?: string) => `assistant:${parentTurnId ?? 'unbound'}`
+      ),
+      createAssistantEntryForTurn: vi.fn(async (_sessionId, _sessionDoc, turnId) => {
+        const entry = { id: turnId, role: 'assistant', finished: false, endedAt: undefined };
+        history = history.some((item) => item.id === turnId)
+          ? history.map((item) => (item.id === turnId ? entry : item))
+          : [...history, entry];
+      }),
       sessionManager: {
         getSession: vi.fn(() => activeSession),
         getPendingSession: vi.fn(() => null),
@@ -1157,23 +1232,44 @@ describe('SessionExecutionService', () => {
       turnFinalization: {
         ...createBaseDeps({}).turnFinalization,
         notifySessionCompleted,
+        finalizeACPState: vi.fn(async (_sessionId, turnId) => {
+          finalizationOwners.push(
+            service.getExecutionSnapshot(options.sessionId as SessionId).hasActiveTurn
+          );
+          history = markAssistantTurnFinished(history as SessionHistoryInput[], {
+            turnId,
+            endedAt: 42,
+          });
+        }),
       },
       observePromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
     });
 
     const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId: options.sessionId as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    for (let attempt = 0; attempt < (options.attempts ?? 1); attempt += 1) {
+      await service.continueSession(
+        {
+          type: 'session/chat',
+          sessionId: options.sessionId as SessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project: undefined,
+          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-user-1',
+          userId: 'user-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        },
+        options.dispatchSource
+          ? {
+              dispatchSource: options.dispatchSource,
+              onTurnSettled,
+              ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
+              ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
+            }
+          : undefined
+      );
+    }
 
     return {
       deps,
@@ -1181,7 +1277,11 @@ describe('SessionExecutionService', () => {
       notifySessionCompleted,
       upsertDocMeta,
       agentClient,
+      onTurnSettled,
       getHistory: () => history,
+      getStatus: () => status,
+      finalizationOwners,
+      service,
     };
   };
 
@@ -1221,6 +1321,209 @@ describe('SessionExecutionService', () => {
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
     expect(getHistory()[0]?.status).toBe('handled');
     expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds a Delivery assistant to its system turn without claiming user dispatch state', async () => {
+    const { deps, upsertDocMeta, onTurnSettled, getHistory } = await runSilentPromptTurn({
+      sessionId: 'session-delivery-turn',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+    });
+    const sessionDoc = await deps.workspaceDocument.getOrCreateSessionDoc(
+      'session-delivery-turn' as SessionId
+    );
+
+    expect(deps.beginConversationTurn).toHaveBeenCalledWith(
+      'session-delivery-turn',
+      'turn-user-1',
+      {
+        dispatchSource: 'delivery',
+        sessionDoc,
+        deferACPUpdateTarget: true,
+      }
+    );
+    expect(deps.createAssistantEntryForTurn).toHaveBeenCalledWith(
+      'session-delivery-turn',
+      sessionDoc,
+      'assistant:turn-user-1',
+      undefined,
+      'turn-user-1'
+    );
+    expect(getHistory()[0]?.status).toBe('pending');
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
+    expect(
+      upsertDocMeta.mock.calls.some(([, patch]) => {
+        const fields = patch as Record<string, unknown>;
+        return 'processingUserMsgId' in fields || 'lastHandledUserMsgId' in fields;
+      })
+    ).toBe(false);
+  });
+
+  it('settles a silent Delivery turn as durably handled', async () => {
+    const { onTurnSettled } = await runSilentPromptTurn({
+      sessionId: 'session-silent-delivery-turn',
+      hasPromptOutputForTurn: false,
+      dispatchSource: 'delivery',
+    });
+
+    expect(onTurnSettled).toHaveBeenCalledWith('handled');
+  });
+
+  it('crosses the durable Delivery start fence before calling the provider', async () => {
+    const onTurnStarted = vi.fn(async () => true);
+    const { agentClient } = await runSilentPromptTurn({
+      sessionId: 'session-delivery-start-fence',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+      onTurnStarted,
+    });
+
+    expect(onTurnStarted).toHaveBeenCalledOnce();
+    expect(onTurnStarted.mock.invocationCallOrder[0]).toBeLessThan(
+      agentClient.prompt.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+  });
+
+  it('settles failed Delivery start fences as not started and restores idle state', async () => {
+    const onTurnSettled = vi.fn(async () => {});
+    const { deps, agentClient, getHistory, getStatus, service, finalizationOwners } =
+      await runSilentPromptTurn({
+        sessionId: 'session-delivery-start-fence-failure',
+        attempts: 2,
+        hasPromptOutputForTurn: false,
+        dispatchSource: 'delivery',
+        onTurnStarted: async () => {
+          throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+        },
+        onTurnSettled,
+      });
+
+    expect(agentClient.prompt).not.toHaveBeenCalled();
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(onTurnSettled).toHaveBeenCalledTimes(2);
+    expect(onTurnSettled).toHaveBeenCalledWith('not_started');
+    expect(getHistory()[0]?.status).toBe('pending');
+    expect(getHistory().find((entry) => entry.role === 'assistant')).toMatchObject({
+      id: 'assistant:turn-user-1',
+      finished: true,
+      endedAt: 42,
+    });
+    expect(getStatus()).toEqual(SessionStatusFactory.idle());
+    expect(finalizationOwners).toEqual([true, true]);
+    expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
+    expect(
+      service.getExecutionSnapshot('session-delivery-start-fence-failure' as SessionId)
+    ).toMatchObject({ hasActiveTurn: false });
+    expect(
+      shouldWatchSession({
+        meta: { status: getStatus() } as SessionMeta,
+        hasUnprocessedCancelRequest: false,
+        hasRpcTurnOffer: false,
+        hasAccessRetry: false,
+      })
+    ).toBe(false);
+  });
+
+  it('does not replay a real stored Delivery when settlement persistence fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-delivery-execution-integration-'));
+    const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'));
+    const requesterSessionId = 'session-delivery-store' as SessionId;
+    const operationId = 'operation-delivery-store';
+    const workerBootId = 'worker-integration';
+    const claimId = 'claim-integration';
+    try {
+      store.accept({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        ownerMachineId: 'machine-1' as MachineId,
+        requesterSessionId,
+        requesterUserId: 'user-1',
+        operationId,
+        kind: 'session_chat',
+        canonicalCommand: { prompt: 'integration' },
+        frozenContinuationConfig: {
+          inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
+        },
+        initiatorChainDepth: 0,
+        createdAt: '2026-09-05T00:00:00.000Z',
+        deadlineAt: '2026-09-05T01:00:00.000Z',
+        items: [],
+      });
+      store.finish(requesterSessionId, operationId, { type: 'cancelled' });
+
+      const { agentClient } = await runSilentPromptTurn({
+        sessionId: requesterSessionId,
+        hasPromptOutputForTurn: true,
+        dispatchSource: 'delivery',
+        onTurnClaimed: async () => {
+          const claim = store.claimDeliveryExecution(requesterSessionId, operationId, {
+            claimId,
+            workerBootId,
+          });
+          if (claim.status !== 'claimed') return false;
+          return store.prepareClaimedDeliveryExecution(
+            requesterSessionId,
+            operationId,
+            workerBootId,
+            claimId
+          ).prepared;
+        },
+        onTurnStarted: async () =>
+          store.markClaimedDeliveryExecutionStarted(
+            requesterSessionId,
+            operationId,
+            workerBootId,
+            claimId
+          ),
+        onTurnSettled: async (settlement) => {
+          expect(settlement).toBe('handled');
+          throw new Error('settlement write failed');
+        },
+      });
+
+      expect(agentClient.prompt).toHaveBeenCalledOnce();
+      expect(store.getDelivery(requesterSessionId, operationId)).toMatchObject({
+        state: 'pending',
+        executionPhase: 'started',
+        attemptCount: 1,
+        activeClaimId: claimId,
+      });
+      expect(
+        store.recoverOrphanedDeliveryClaims('workspace-1' as WorkspaceId, 'worker-replacement')
+      ).toBe(1);
+      expect(
+        store.claimDeliveryExecution(requesterSessionId, operationId, {
+          claimId: 'replacement-claim',
+          workerBootId: 'worker-replacement',
+        })
+      ).toMatchObject({
+        status: 'in_flight',
+        delivery: { executionPhase: 'uncertain', attemptCount: 1 },
+      });
+    } finally {
+      store.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('silently releases a Delivery turn when its durable attempt claim loses contention', async () => {
+    const onTurnClaimed = vi.fn(async () => false);
+    const { deps, agentClient, onTurnSettled, getHistory } = await runSilentPromptTurn({
+      sessionId: 'session-contended-delivery-turn',
+      hasPromptOutputForTurn: true,
+      dispatchSource: 'delivery',
+      onTurnClaimed,
+    });
+
+    expect(onTurnClaimed).toHaveBeenCalledOnce();
+    expect(agentClient.prompt).not.toHaveBeenCalled();
+    expect(deps.createAssistantEntryForTurn).not.toHaveBeenCalled();
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(onTurnSettled).not.toHaveBeenCalled();
+    expect(deps.clearConversationTurn).toHaveBeenCalledWith(
+      'session-contended-delivery-turn',
+      'assistant:turn-user-1'
+    );
+    expect(getHistory()[0]?.status).toBe('pending');
   });
 
   it('rejects a chat turn before prompt when memory pressure persists', async () => {
@@ -1319,7 +1622,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('starts active presence before prepared dispatch awaits machine access', async () => {
+  it('exposes RPC invocation identity before prepared dispatch awaits machine access', async () => {
     let resolveAccess!: (value: {
       outcome: 'indeterminate';
       cause: 'network';
@@ -1347,7 +1650,12 @@ describe('SessionExecutionService', () => {
       sessionId: 'session-prepared-presence' as SessionId,
       sessionDoc,
       userTurnId: 'turn-prepared-presence',
-      dispatchSource: 'crdt',
+      invocation: {
+        sourceTurnId: 'turn-prepared-presence',
+        requesterUserId: 'user-b',
+        inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
+      },
+      dispatchSource: 'rpc',
       accessPromise,
       requestPromise: new Promise<never>(() => {}),
       onAccessAllowed,
@@ -1362,11 +1670,16 @@ describe('SessionExecutionService', () => {
     expect(deps.beginConversationTurn).toHaveBeenCalledWith(
       'session-prepared-presence',
       'turn-prepared-presence',
-      { dispatchSource: 'crdt', sessionDoc, deferACPUpdateTarget: true }
+      { dispatchSource: 'rpc', sessionDoc, deferACPUpdateTarget: true }
     );
     expect(service.getExecutionSnapshot('session-prepared-presence' as SessionId)).toMatchObject({
       activeTurnId: 'assistant:turn-prepared-presence',
       hasActiveTurn: true,
+    });
+    expect(service.getActiveInvocationContext('session-prepared-presence' as SessionId)).toEqual({
+      requesterUserId: 'user-b',
+      sourceTurnId: 'turn-prepared-presence',
+      inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
     });
     expect(onAccessAllowed).not.toHaveBeenCalled();
 
@@ -1423,6 +1736,7 @@ describe('SessionExecutionService', () => {
       sessionId,
       sessionDoc: sessionDoc as never,
       userTurnId,
+      invocation: { sourceTurnId: userTurnId, inputConfig: {} },
       dispatchSource: 'crdt',
       accessPromise: new Promise<never>(() => {}),
       requestPromise: new Promise<never>(() => {}),
@@ -1435,6 +1749,9 @@ describe('SessionExecutionService', () => {
       activeTurnId: turnId,
       hasActiveTurn: true,
     });
+    expect(() => service.getActiveInvocationContext(sessionId)).toThrow(
+      'Active invocation identity is unavailable'
+    );
 
     await expect(
       service.cancelSession({
@@ -1535,6 +1852,7 @@ describe('SessionExecutionService', () => {
       sessionId,
       sessionDoc: preparedSessionDoc as never,
       userTurnId,
+      invocation: { sourceTurnId: userTurnId, inputConfig: {} },
       dispatchSource: 'rpc',
       accessPromise: Promise.resolve({ outcome: 'allowed' as const }),
       requestPromise: new Promise<never>(() => {}),
@@ -1683,113 +2001,129 @@ describe('SessionExecutionService', () => {
     expect(activeClearedAt).toBeGreaterThan(finalizeStartedAt);
   });
 
-  it('restores and retries a stale in-memory ACP session when the connection is closed', async () => {
-    const sessionId = 'session-stale-acp' as SessionId;
-    const acpSessionId = 'acp-stale' as ACPSessionId;
-    const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
-    let history: Array<Record<string, unknown>> = [
-      {
-        id: 'turn-user-1',
-        role: 'user',
-        status: 'pending',
-        read: false,
-      },
-    ];
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        throw new Error('ACP connection closed');
-      }),
-      currentModel: undefined,
-    };
-    const restoredAgentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const exec = vi.fn(async (command: string, args: string[]) => {
-      const key = `${command} ${args.join(' ')}`;
-      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
-      if (key === 'git rev-parse HEAD') return 'abc123\n';
-      return '';
-    });
-    const activeSession = {
-      sessionId,
-      acpSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec,
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => acpSessionId),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const restoredSession = {
-      ...activeSession,
-      acpSessionId: restoredAcpSessionId,
-      agentClient: restoredAgentClient,
-      createAgent: vi.fn(async () => restoredAcpSessionId),
-    };
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
-        history = updater(history);
-      }),
-    };
-    const deps = createBaseDeps({});
-    const sessionManager = deps.sessionManager as unknown as {
-      getSession: ReturnType<typeof vi.fn>;
-      terminateSession: ReturnType<typeof vi.fn>;
-      createSession: ReturnType<typeof vi.fn>;
-    };
-    const workspaceDocument = deps.workspaceDocument as unknown as {
-      getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
-    };
-    sessionManager.getSession.mockReturnValue(activeSession);
-    sessionManager.createSession.mockResolvedValue(restoredSession);
-    workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+  it.each([undefined, 'delivery'] as const)(
+    'restores a stale ACP session without repeating the start fence for %s dispatch',
+    async (dispatchSource) => {
+      const sessionId = 'session-stale-acp' as SessionId;
+      const acpSessionId = 'acp-stale' as ACPSessionId;
+      const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
+      let history: Array<Record<string, unknown>> = [
+        {
+          id: 'turn-user-1',
+          role: 'user',
+          status: 'pending',
+          read: false,
+        },
+      ];
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => {
+          throw new Error('ACP connection closed');
+        }),
+        currentModel: undefined,
+      };
+      const restoredAgentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const exec = vi.fn(async (command: string, args: string[]) => {
+        const key = `${command} ${args.join(' ')}`;
+        if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
+        if (key === 'git rev-parse HEAD') return 'abc123\n';
+        return '';
+      });
+      const activeSession = {
+        sessionId,
+        acpSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec,
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => acpSessionId),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const restoredSession = {
+        ...activeSession,
+        acpSessionId: restoredAcpSessionId,
+        agentClient: restoredAgentClient,
+        createAgent: vi.fn(async () => restoredAcpSessionId),
+      };
+      const sessionDoc = {
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async () => {}),
+        waitUntilSynced: vi.fn(async () => {}),
+        getHistory: vi.fn(async () => history),
+        updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+          history = updater(history);
+        }),
+      };
+      const deps = createBaseDeps({});
+      const sessionManager = deps.sessionManager as unknown as {
+        getSession: ReturnType<typeof vi.fn>;
+        terminateSession: ReturnType<typeof vi.fn>;
+        createSession: ReturnType<typeof vi.fn>;
+      };
+      const workspaceDocument = deps.workspaceDocument as unknown as {
+        getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
+      };
+      sessionManager.getSession.mockReturnValue(activeSession);
+      sessionManager.createSession.mockResolvedValue(restoredSession);
+      workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
 
-    const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: undefined,
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-user-1',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+      const onTurnStarted = vi
+        .fn(async () => {
+          throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+        })
+        .mockResolvedValueOnce(true);
+      const onTurnSettled = vi.fn(async () => {});
+      const service = new SessionExecutionService(deps);
+      await service.continueSession(
+        {
+          type: 'session/chat',
+          sessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project: undefined,
+          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-user-1',
+          userId: 'user-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        },
+        dispatchSource ? { dispatchSource, onTurnStarted, onTurnSettled } : undefined
+      );
 
-    expect(agentClient.prompt).toHaveBeenCalledWith(
-      'acp-stale',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
+      expect(agentClient.prompt).toHaveBeenCalledWith(
+        'acp-stale',
+        [{ type: 'text', text: 'hello' }],
+        {
+          signal: expect.any(AbortSignal),
+        }
+      );
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
+      expect(sessionManager.createSession).toHaveBeenCalled();
+      expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
+        'acp-restored',
+        [{ type: 'text', text: 'hello' }],
+        {
+          signal: expect.any(AbortSignal),
+        }
+      );
+      expect(deps.recordChatFailure).not.toHaveBeenCalled();
+      expect(history[0]?.status).toBe(dispatchSource === 'delivery' ? 'pending' : 'handled');
+      if (dispatchSource === 'delivery') {
+        expect(onTurnSettled).toHaveBeenCalledWith('handled');
+        expect(onTurnStarted).toHaveBeenCalledOnce();
       }
-    );
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
-    expect(sessionManager.createSession).toHaveBeenCalled();
-    expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-      'acp-restored',
-      [{ type: 'text', text: 'hello' }],
-      {
-        signal: expect.any(AbortSignal),
-      }
-    );
-    expect(deps.recordChatFailure).not.toHaveBeenCalled();
-    expect(history[0]?.status).toBe('handled');
-  });
+    }
+  );
 
   it('does not write legacy code-session tags when Code Collab is enabled for new turns', async () => {
     let history: Array<Record<string, unknown>> = [
@@ -3815,6 +4149,59 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
   });
 
+  it('reports authentication required when a first turn cannot create its session', async () => {
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => undefined),
+      getHistory: vi.fn(async () => []),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+      roomId: 'session-session-create-auth',
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(async () => {
+        throw new AcpAuthenticationRequiredError([{ id: 'oauth-personal', name: 'Google' }]);
+      }),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-create-auth' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: { prompt: 'hello', cliType: 'registry', agentType: 'antigravity-acp' },
+      userTurnId: 'turn-create-auth',
+      userId: 'user-2',
+      userName: 'User 2',
+      userEmail: 'user2@example.com',
+    });
+
+    // The generic pre-prompt reason would leave the client with no way to sign in.
+    expect(deps.recordChatFailure).toHaveBeenCalledWith(
+      sessionDoc,
+      'acp_auth_required',
+      'Authentication required'
+    );
+  });
+
   it.each([
     {
       name: 'reports an ordinary restore failure',
@@ -4559,19 +4946,23 @@ describe('SessionExecutionService', () => {
       expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
     });
 
+    const onTurnSettled = vi.fn(async () => {});
     service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId: 'session-prompt-cancel' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-prompt-cancel',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
+    await service.continueSession(
+      {
+        type: 'session/chat',
+        sessionId: 'session-prompt-cancel' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-prompt-cancel',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      },
+      { onTurnSettled }
+    );
 
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel');
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
@@ -4582,6 +4973,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'turn-prompt-cancel',
       processingUserMsgId: undefined,
     });
+    expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
   });
 
   it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {
@@ -5371,18 +5763,25 @@ describe('SessionExecutionService', () => {
     const authenticate = vi
       .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
       .mockResolvedValue({ success: true, disposition: 'authenticated' });
-    const service = new SessionExecutionService(createBaseDeps({}));
-    const refresh = vi.spyOn(service, 'refreshMachineAcpCapabilities').mockResolvedValue({
-      type: 'machine/acp-capabilities-refresh_response',
-      machineId: 'machine-1' as MachineId,
-      configId: capabilityConfigId,
-      cliType: 'builtin',
-      agentType: 'kimi',
-      success: false,
-      authRequired: true,
-      authMethods: [{ type: 'terminal', args: ['--login'] }],
-      error: 'Authentication required',
+    const fetchAcpCapabilities = vi.fn(async () => {
+      throw new AcpAuthenticationRequiredError([{ type: 'terminal', args: ['--login'] }]);
     });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities,
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({
+              cliType: 'builtin',
+              agentType: 'kimi',
+              env: {},
+              runtimeOverrides: { kimiPath: '/test/kimi' },
+            })
+          ),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      })
+    );
 
     try {
       const result = await service.authenticateMachineAcp({
@@ -5392,8 +5791,6 @@ describe('SessionExecutionService', () => {
         requestId: 'auth-1',
         action: 'start',
         configId: capabilityConfigId,
-        cliType: 'builtin',
-        agentType: 'kimi',
       });
 
       expect(result).toEqual(
@@ -5407,8 +5804,133 @@ describe('SessionExecutionService', () => {
         })
       );
     } finally {
-      refresh.mockRestore();
       authenticate.mockRestore();
+    }
+  });
+
+  it('launches authentication only from the daemon-authoritative persisted config', async () => {
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'cancelled' });
+    const persistedConfig = createLaunchConfig({
+      cliType: 'custom',
+      agentType: 'persisted-custom',
+      customAcp: { command: '/opt/trusted/custom-acp', args: ['--stdio'] },
+      env: { TRUSTED_TOKEN: 'from-local-config' },
+      runtimeOverrides: undefined,
+    });
+    const getAgentConfigForMachineLaunch = vi.fn(async () => persistedConfig);
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch,
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      await expect(
+        service.authenticateMachineAcp({
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'auth-persisted-custom',
+          action: 'start',
+          configId: capabilityConfigId,
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          success: true,
+          disposition: 'cancelled',
+          agentType: 'persisted-custom',
+        })
+      );
+      expect(getAgentConfigForMachineLaunch).toHaveBeenCalledWith(capabilityConfigId, 'machine-1');
+      expect(authenticate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'custom',
+          agentType: 'persisted-custom',
+          customAcp: { command: '/opt/trusted/custom-acp', args: ['--stdio'] },
+          env: { TRUSTED_TOKEN: 'from-local-config' },
+        })
+      );
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('refuses authentication when the config is not persisted on the target machine', async () => {
+    const authenticate = vi.spyOn(AcpAuthenticationManager.prototype, 'authenticate');
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: vi.fn(async () => null),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      await expect(
+        service.authenticateMachineAcp({
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'auth-missing-config',
+          action: 'start',
+          configId: 'missing-config' as AgentConfigId,
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          success: false,
+          disposition: 'error',
+          error: expect.stringContaining('Provider config not found or invalid'),
+        })
+      );
+      expect(authenticate).not.toHaveBeenCalled();
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('bounds the post-authentication capability proof inside the renderer deadline', async () => {
+    vi.useFakeTimers();
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'authenticated' });
+    const fetchAcpCapabilities = vi.fn(
+      (...args: unknown[]) =>
+        new Promise<never>((_resolve, reject) => {
+          const signal = (args[5] as { signal?: AbortSignal } | undefined)?.signal;
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        })
+    );
+    const service = new SessionExecutionService(createBaseDeps({ fetchAcpCapabilities }));
+
+    try {
+      const resultPromise = service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'auth-refresh-timeout',
+        action: 'start',
+        configId: capabilityConfigId,
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(resultPromise).resolves.toEqual(
+        expect.objectContaining({
+          success: true,
+          disposition: 'authenticated',
+          capabilitiesRefreshed: false,
+          error: 'Authentication succeeded, but capability verification timed out',
+        })
+      );
+      expect(fetchAcpCapabilities).toHaveBeenCalledOnce();
+    } finally {
+      authenticate.mockRestore();
+      vi.useRealTimers();
     }
   });
 
@@ -5428,32 +5950,89 @@ describe('SessionExecutionService', () => {
           action: 'submit-code',
           authenticationRequestId: 'auth-1',
           authorizationCode: 'browser-code',
-          cliType: 'builtin',
-          agentType: 'claude',
         })
       ).resolves.toEqual(expect.objectContaining({ success: true, disposition: 'input-accepted' }));
-      expect(submitAuthorizationCode).toHaveBeenCalledWith('claude', 'auth-1', 'browser-code');
+      expect(submitAuthorizationCode).toHaveBeenCalledWith('auth-1', 'browser-code');
     } finally {
       submitAuthorizationCode.mockRestore();
     }
   });
 
+  it('forwards a Custom ACP form response to the active authentication request', async () => {
+    const submitAuthenticationInput = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'submitAuthenticationInput')
+      .mockReturnValue({ success: true, disposition: 'input-accepted' });
+    const service = new SessionExecutionService(createBaseDeps({}));
+    const authenticationInput = JSON.stringify({
+      action: 'accept',
+      content: { account: 'work', code: 'secret-code' },
+    });
+
+    try {
+      await expect(
+        service.authenticateMachineAcp({
+          type: 'machine/acp-authenticate',
+          machineId: 'machine-1' as MachineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          requestId: 'auth-input-2',
+          action: 'submit-input',
+          authenticationRequestId: 'auth-custom',
+          interactionId: 'form-1',
+          authenticationInput,
+        })
+      ).resolves.toEqual(expect.objectContaining({ success: true, disposition: 'input-accepted' }));
+      expect(submitAuthenticationInput).toHaveBeenCalledWith(
+        'auth-custom',
+        'form-1',
+        authenticationInput
+      );
+    } finally {
+      submitAuthenticationInput.mockRestore();
+    }
+  });
+
   it('refreshes machine ACP capabilities and persists them to machine meta', async () => {
-    const updateAcpCapabilities = vi.fn(async () => {});
-    const fetchAcpCapabilities = vi.fn(async () => ({
-      modes: [{ id: 'agent', name: 'Agent Mode' }],
-      models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+    const capability = {
+      cliType: 'registry' as const,
+      agentType: 'deepseek',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'registry:deepseek:unknown',
+      modes: [],
+      models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
       configOptions: [
         {
-          id: 'approval',
-          name: 'Approval Policy',
-          category: 'safety',
-          options: [{ id: 'never', name: 'Never' }],
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'kimi-k3',
+          options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'max',
+          options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
         },
       ],
+      modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+      sessionFork: false,
+      acknowledgedSteer: true,
+      sessionForkWorktree: false,
+      fetchedAt: 1,
+    };
+    const updateAcpCapabilities = vi.fn(async () => capability);
+    const fetchAcpCapabilities = vi.fn(async () => ({
+      modes: [],
+      models: capability.models,
+      configOptions: capability.configOptions,
       availableCommands: [{ name: 'review', description: 'Review changes' }],
       sessionFork: false,
       acknowledgedSteer: true,
+      modelReasoningEfforts: capability.modelReasoningEfforts,
     }));
 
     const deps = createBaseDeps({
@@ -5464,6 +6043,12 @@ describe('SessionExecutionService', () => {
         },
         getOrCreateSessionDoc: vi.fn(),
         updateAcpCapabilities,
+        getAgentConfigForMachineLaunch: vi.fn(async () =>
+          createLaunchConfig({
+            agentType: 'deepseek',
+            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
+          })
+        ),
       } as unknown as LoroDocumentManager,
       fetchAcpCapabilities,
     });
@@ -5474,14 +6059,11 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry',
-      agentType: 'codex',
-      env: { ACP_PROVIDER_TOKEN: 'secret-token' },
     });
 
     expect(fetchAcpCapabilities).toHaveBeenCalledWith(
       'registry',
-      'codex',
+      'deepseek',
       { ACP_PROVIDER_TOKEN: 'secret-token' },
       undefined,
       undefined,
@@ -5493,22 +6075,14 @@ describe('SessionExecutionService', () => {
       'machine-1',
       capabilityConfigId,
       'registry',
-      'codex',
-      [{ id: 'agent', name: 'Agent Mode' }],
-      [{ modelId: 'gpt-5', name: 'GPT-5' }],
-      [
-        {
-          id: 'approval',
-          name: 'Approval Policy',
-          category: 'safety',
-          options: [{ id: 'never', name: 'Never' }],
-        },
-      ],
+      'deepseek',
+      [],
+      capability.models,
+      capability.configOptions,
       [{ name: 'review', description: 'Review changes' }],
       false,
-      'registry:codex:unknown',
-      // Per-model reasoning efforts: this stub agent reports none.
-      undefined,
+      'registry:deepseek:unknown',
+      capability.modelReasoningEfforts,
       true,
       { signal: expect.any(AbortSignal) }
     );
@@ -5518,8 +6092,9 @@ describe('SessionExecutionService', () => {
         machineId: 'machine-1',
         configId: capabilityConfigId,
         cliType: 'registry',
-        agentType: 'codex',
+        agentType: 'deepseek',
         success: true,
+        capability,
       })
     );
   });
@@ -5554,14 +6129,11 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
-      env: { TOKEN: 'shared' },
     };
 
     const first = service.refreshMachineAcpCapabilities(request);
     const second = service.refreshMachineAcpCapabilities(request);
-    const third = service.refreshMachineAcpCapabilities({ ...request, env: { TOKEN: 'shared' } });
+    const third = service.refreshMachineAcpCapabilities(request);
     release();
     const [a, b, c] = await Promise.all([first, second, third]);
 
@@ -5611,8 +6183,6 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
     };
     const firstController = new AbortController();
     const secondController = new AbortController();
@@ -5678,8 +6248,6 @@ describe('SessionExecutionService', () => {
         machineId: 'machine-1',
         workspaceId: 'workspace-1' as WorkspaceId,
         configId: capabilityConfigId,
-        cliType: 'registry',
-        agentType: 'codex',
       },
       { signal: controller.signal }
     );
@@ -5734,8 +6302,6 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
     };
     const controller = new AbortController();
 
@@ -5771,9 +6337,6 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
-      env: { TOKEN: 'shared' },
     };
 
     const first = service.refreshMachineAcpCapabilities(request);
@@ -5786,7 +6349,7 @@ describe('SessionExecutionService', () => {
     await Promise.all([first, second]);
   });
 
-  it('does not deduplicate ACP refreshes across different envs', async () => {
+  it('does not deduplicate ACP refreshes across authoritative config revisions', async () => {
     let releaseFirst: () => void = () => {};
     let releaseSecond: () => void = () => {};
     const firstFetched = new Promise<void>((resolve) => {
@@ -5802,25 +6365,27 @@ describe('SessionExecutionService', () => {
       return { modes: [], models: [] };
     });
 
-    const deps = createBaseDeps({ fetchAcpCapabilities });
+    const getAgentConfigForMachineLaunch = vi
+      .fn()
+      .mockResolvedValueOnce(createLaunchConfig({ env: { TOKEN: 'A' } }))
+      .mockResolvedValueOnce(createLaunchConfig({ env: { TOKEN: 'B' } }));
+    const deps = createBaseDeps({
+      fetchAcpCapabilities,
+      workspaceDocument: {
+        getAgentConfigForMachineLaunch,
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
     const service = new SessionExecutionService(deps);
     const baseRequest = {
       type: 'machine/acp-capabilities-refresh' as const,
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
     };
 
-    const first = service.refreshMachineAcpCapabilities({
-      ...baseRequest,
-      env: { TOKEN: 'A' },
-    });
-    const second = service.refreshMachineAcpCapabilities({
-      ...baseRequest,
-      env: { TOKEN: 'B' },
-    });
+    const first = service.refreshMachineAcpCapabilities(baseRequest);
+    const second = service.refreshMachineAcpCapabilities(baseRequest);
 
     releaseFirst();
     releaseSecond();
@@ -5864,8 +6429,6 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
-      cliType: 'registry' as const,
-      agentType: 'codex',
     };
 
     const failed = await service.refreshMachineAcpCapabilities(request);

@@ -273,6 +273,34 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
   });
 
+  it('groups category scope options separately from back navigation', () => {
+    const selectAll = vi.fn();
+    const categories = makeCategories();
+    const issue = categories.find((entry) => entry.id === 'issue');
+    if (!issue) throw new Error('expected issue category');
+    issue.header = {
+      ariaLabel: 'Session project scope',
+      options: [
+        { label: 'Current project', selected: true, onSelect: vi.fn() },
+        { label: 'All projects', selected: false, onSelect: selectAll },
+      ],
+    };
+
+    render('@issue:', categories);
+
+    const scope = container?.querySelector('[role="group"][aria-label="Session project scope"]');
+    const buttons = Array.from(scope?.querySelectorAll('button') ?? []);
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      'Current project',
+      'All projects',
+    ]);
+    expect(buttons[0]?.getAttribute('aria-pressed')).toBe('true');
+    expect(buttons[1]?.getAttribute('aria-pressed')).toBe('false');
+
+    act(() => buttons[1]?.click());
+    expect(selectAll).toHaveBeenCalledOnce();
+  });
+
   it('commits a candidate with its own insert text', () => {
     render('@issue:');
 

@@ -5,7 +5,6 @@ import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
 import {
   buildPathSuggestions,
   getSuggestions,
-  type FuseInstance,
   type PathSuggestion,
 } from '@/components/mentions/file-at-mention';
 import {
@@ -118,6 +117,26 @@ export type MentionCategoryActivation = {
   activate: () => void;
 };
 
+export type MentionCategoryAction = {
+  label: string;
+  ariaLabel: string;
+  onAction: () => void;
+};
+
+export type MentionCategoryHeader = {
+  ariaLabel: string;
+  options: ReadonlyArray<{
+    label: string;
+    selected: boolean;
+    onSelect: () => void;
+  }>;
+};
+
+export type MentionCategoryEmptyState = {
+  message: string;
+  action?: MentionCategoryAction;
+};
+
 export type MentionCategory = {
   id: MentionCategoryId;
   /** The `<namespace>:` segment of the drill-down prefix. */
@@ -137,6 +156,10 @@ export type MentionCategory = {
   message?: string;
   /** Rendered above the rows, e.g. the truncated-file-list warning. */
   notice?: string;
+  /** Optional second-level chrome supplied by the category, without menu id special-casing. */
+  header?: MentionCategoryHeader;
+  /** Optional actionable empty state supplied by the category. */
+  emptyState?: MentionCategoryEmptyState;
   /**
    * Candidates for a term inside this category. Lazy on purpose: ranking the
    * file index is the expensive one, and a query aimed at another category
@@ -307,7 +330,6 @@ export function buildMentionFileIndex(
       kind: 'dir',
       path: token.replace(/\/+$/u, ''),
       token,
-      searchable: token.toLowerCase(),
     });
   }
   if (lazyDirs.length === 0) return base;
@@ -337,11 +359,10 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
 export function buildFileCandidates(
   index: FileSuggestionIndex | null,
   term: string,
-  fuse: FuseInstance<PathSuggestion> | null,
   limit?: number
 ): MentionCandidate[] {
   if (!index) return [];
-  return applyLimit(getSuggestions(index, term, fuse), limit).map(toFileCandidate);
+  return applyLimit(getSuggestions(index, term), limit).map(toFileCandidate);
 }
 
 export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
@@ -366,10 +387,9 @@ export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
 export function buildIssuePrCandidates(
   scoped: IssuePrSuggestion[],
   term: string,
-  fuse: FuseInstance<IssuePrSuggestion> | null,
   limit?: number
 ): MentionCandidate[] {
-  return applyLimit(getIssuePrSuggestions(scoped, term, fuse), limit).map(toIssuePrCandidate);
+  return applyLimit(getIssuePrSuggestions(scoped, term), limit).map(toIssuePrCandidate);
 }
 
 /** i18n'd labels for the skill detail panel, supplied by `useMentionCategories`. */
@@ -444,7 +464,6 @@ export function toSessionCandidate(
     kind: 'session',
     icon: 'session',
     title: item.title || labels.untitled,
-    subtitle: item.projectLabel,
   };
 }
 
@@ -562,17 +581,10 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
 export type MentionCategorySources = {
   file?: SourceState & {
     index: FileSuggestionIndex | null;
-    fuse: FuseInstance<PathSuggestion> | null;
     notice?: string;
   };
   issuePr?: SourceState & {
     suggestions: readonly IssuePrSuggestion[];
-    /**
-     * Builds a matcher over one category's slice. The caller owns loading the
-     * Fuse constructor so the menu keeps its module-cached, activation-keyed
-     * loading; returning null falls back to substring matching.
-     */
-    createFuse: (list: IssuePrSuggestion[]) => FuseInstance<IssuePrSuggestion> | null;
   };
   skill?: SourceState & {
     items: readonly SkillMentionItem[];
@@ -583,6 +595,8 @@ export type MentionCategorySources = {
   };
   session?: SourceState & {
     items: readonly SessionMentionItem[];
+    header?: MentionCategoryHeader;
+    emptyState?: MentionCategoryEmptyState;
   };
   agentRole?: SourceState & {
     items: readonly AgentRoleMentionItem[];
@@ -599,9 +613,8 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
   const { t } = useTranslation();
   const { file, issuePr, skill, command, session, agentRole } = sources;
 
-  // Partitioned once and shared with the Fuse indexes: the cache holds both
-  // types, and re-splitting it inside `getCandidates` walked the whole list
-  // twice on every keystroke.
+  // Partitioned once: the cache holds both types, and re-splitting it inside
+  // `getCandidates` would walk the whole list twice on every keystroke.
   const issueSuggestions = React.useMemo(
     () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'issue') : []),
     [issuePr]
@@ -610,16 +623,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'pr') : []),
     [issuePr]
   );
-  const createIssuePrFuse = issuePr?.createFuse;
-  const issueFuse = React.useMemo(
-    () => createIssuePrFuse?.(issueSuggestions) ?? null,
-    [createIssuePrFuse, issueSuggestions]
-  );
-  const prFuse = React.useMemo(
-    () => createIssuePrFuse?.(prSuggestions) ?? null,
-    [createIssuePrFuse, prSuggestions]
-  );
-
   return React.useMemo(() => {
     const categories: MentionCategory[] = [];
 
@@ -631,7 +634,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'file',
         ...sourceCategoryFields('file', file),
         notice: file.notice,
-        getCandidates: (term, limit) => buildFileCandidates(file.index, term, file.fuse, limit),
+        getCandidates: (term, limit) => buildFileCandidates(file.index, term, limit),
       });
     }
 
@@ -642,8 +645,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.issue.label', 'Issues'),
         icon: 'issue',
         ...sourceCategoryFields('issuePr', issuePr),
-        getCandidates: (term, limit) =>
-          buildIssuePrCandidates(issueSuggestions, term, issueFuse, limit),
+        getCandidates: (term, limit) => buildIssuePrCandidates(issueSuggestions, term, limit),
       });
       categories.push({
         id: 'pr',
@@ -651,7 +653,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.pr.label', 'Pull Requests'),
         icon: 'pr',
         ...sourceCategoryFields('issuePr', issuePr),
-        getCandidates: (term, limit) => buildIssuePrCandidates(prSuggestions, term, prFuse, limit),
+        getCandidates: (term, limit) => buildIssuePrCandidates(prSuggestions, term, limit),
       });
     }
 
@@ -693,6 +695,8 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.session.label', 'Sessions'),
         icon: 'session',
         ...sourceCategoryFields('session', session),
+        header: session.header,
+        emptyState: session.emptyState,
         getCandidates: (term, limit) =>
           buildSessionCandidates(
             session.items,
@@ -727,17 +731,5 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     }
 
     return categories;
-  }, [
-    agentRole,
-    command,
-    file,
-    issueFuse,
-    issuePr,
-    issueSuggestions,
-    prFuse,
-    prSuggestions,
-    session,
-    skill,
-    t,
-  ]);
+  }, [agentRole, command, file, issuePr, issueSuggestions, prSuggestions, session, skill, t]);
 }

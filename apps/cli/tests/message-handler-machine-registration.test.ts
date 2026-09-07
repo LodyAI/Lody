@@ -179,9 +179,14 @@ describe('MessageHandler machine registration', () => {
 
     expect(registeredMeta.rpcVersion).toBe('1');
     expect(registeredMeta.name).toBe('machine-name');
+    // Exhaustive on purpose: registration is where a capability key and its
+    // version reach every client, so adding one must be acknowledged here.
     expect(registeredMeta.protocolCapabilities).toEqual({
+      acpAuthenticationInteractions: 2,
       localProjectRemoval: 1,
+      localFileResources: 1,
       providerSetup: 1,
+      acpProtocolAuthentication: 2,
     });
 
     await handler.cleanup();

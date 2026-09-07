@@ -51,6 +51,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'View',
   },
   {
+    id: 'layout.toggleZenMode',
+    titleKey: 'commands.layout.toggleZenMode',
+    title: 'Toggle Zen Layout',
+    category: 'View',
+  },
+  {
     id: 'session.new',
     titleKey: 'commands.session.new',
     title: 'New Chat',
@@ -117,12 +123,6 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
-    id: 'session.closeFocusedTab',
-    titleKey: 'commands.session.closeFocusedTab',
-    title: 'Close Focused Tab',
-    category: 'Session',
-  },
-  {
     id: 'session.toggleTerminal',
     titleKey: 'commands.session.toggleTerminal',
     title: 'Toggle Terminal',
@@ -181,6 +181,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     titleKey: 'commands.session.cycleThinkEffort',
     title: 'Cycle Thinking Effort',
     category: 'Session',
+  },
+  {
+    id: 'mention.toggleSessionProjectScope',
+    titleKey: 'commands.mention.toggleSessionProjectScope',
+    title: 'Toggle Session Mention Project Scope',
+    category: 'Editor',
   },
 ];
 

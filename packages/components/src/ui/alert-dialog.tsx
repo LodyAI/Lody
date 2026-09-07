@@ -3,6 +3,7 @@ import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
 
 import { cn } from '@/lib/utils';
 import { buttonVariants } from './button';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 
 function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
@@ -31,7 +32,9 @@ const AlertDialogOverlay = React.forwardRef<
         className
       )}
       {...props}
-    />
+    >
+      <WindowDragStrip />
+    </AlertDialogPrimitive.Overlay>
   );
 });
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;

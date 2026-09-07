@@ -7,15 +7,13 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
-import type { AgentConfigId, McpServerId, SessionId } from './ids';
+import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
-  DEEPSEEK_HARNESS_MODELS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
-  DEEPSEEK_HARNESS_REASONING_OPTIONS,
 } from './deepseek-harness';
 
 export const MANAGED_BUILTIN_RUNTIMES = [
@@ -279,7 +277,11 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+// 7: entries probed before the legacy `model[effort]` derivation became
+// Codex-only carry a bogus ladder for every agent that spells other variants
+// with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
+// per-model effort picker would rebuild that model's ladder from it.
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -391,6 +393,8 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
+  modelReasoningEfforts?: Record<string, string[]>;
 };
 
 /** Codex mode that routes approval requests to a model reviewer subagent. */
@@ -439,28 +443,6 @@ const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     type: 'select',
     currentValue: 'standard',
     options: DEEPSEEK_HARNESS_AGENT_PRESETS.map((preset) => ({ ...preset })),
-  },
-  {
-    id: 'model',
-    name: 'Model',
-    description: 'DeepSeek model used for the session',
-    category: 'model',
-    type: 'select',
-    currentValue: 'deepseek-v4-pro',
-    options: DEEPSEEK_HARNESS_MODELS.map((model) => ({
-      value: model.modelId,
-      name: model.name,
-      description: model.description,
-    })),
-  },
-  {
-    id: 'reasoning_effort',
-    name: 'Reasoning effort',
-    description: 'How much reasoning effort the model should use',
-    category: 'thought_level',
-    type: 'select',
-    currentValue: 'max',
-    options: DEEPSEEK_HARNESS_REASONING_OPTIONS.map((option) => ({ ...option })),
   },
 ];
 
@@ -600,7 +582,7 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
   },
   {
     id: 'default',
-    name: 'Default',
+    name: 'Manual',
     description: 'Standard behavior, prompts for dangerous operations',
   },
   {
@@ -618,6 +600,11 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
     name: "Don't Ask",
     description: "Don't prompt for permissions, deny if not pre-approved",
   },
+  {
+    id: 'bypassPermissions',
+    name: 'Bypass Permissions',
+    description: 'Bypass all permission checks',
+  },
 ];
 
 /**
@@ -632,9 +619,9 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
  * - `render: 'icon'` + `tone: 'neutral'`: a notable but non-risky mode
  *   (read-only, accept-edits, plan) — plain indicator.
  * - `render: 'icon'` + `tone: 'warning'`: a mode that changes the safety model —
- *   Codex `agent-full-access` (Full access) OR Claude `dontAsk` (Don't Ask /
- *   skip permissions, which drops the human out of the approval loop) — amber so
- *   the risk is visible at a glance.
+ *   Codex `agent-full-access` (Full access), Claude `dontAsk` (Don't Ask /
+ *   skip permissions), or Claude `bypassPermissions` (bypass all checks) — amber
+ *   so the risk is visible at a glance.
  * - `render: 'auto-label'`: show the literal short text "Auto" (Claude auto and
  *   Codex agent-auto-review route approval prompts to a reviewing model, so a
  *   short name fits better than a glyph).
@@ -677,6 +664,8 @@ export function classifyPermissionModeFace(modeId: string | null | undefined): P
     case 'dontAsk':
       // "Don't Ask" skips the human approval prompt — flag it like full access.
       return { kind: 'deny', tone: 'warning', render: 'icon' };
+    case 'bypassPermissions':
+      return { kind: 'full-access', tone: 'warning', render: 'icon' };
     case 'yolo':
     case 'always-approve':
       return { kind: 'full-access', tone: 'warning', render: 'icon' };
@@ -690,28 +679,28 @@ export function classifyPermissionModeFace(modeId: string | null | undefined): P
 const CLAUDE_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
   {
     modelId: 'default',
-    name: 'Default',
-    description: 'Claude Code default model',
+    name: 'Default (recommended)',
+    description: 'Opus (1M context)',
   },
   {
-    modelId: 'opus',
-    name: 'Opus',
-    description: 'Claude Opus',
+    modelId: 'opus[1m]',
+    name: 'Opus (1M context)',
+    description: 'Opus 5 with 1M context · Best for everyday, complex tasks',
   },
   {
-    modelId: 'claude-fable-5[1m]',
+    modelId: 'claude-fable-5-1[1m]',
     name: 'Fable',
-    description: 'Claude Fable 5 with 1M context',
+    description: 'Fable 5.1 · Most capable for your hardest and longest-running tasks',
   },
   {
     modelId: 'sonnet',
     name: 'Sonnet',
-    description: 'Claude Sonnet',
+    description: 'Sonnet 5 · Efficient for routine tasks',
   },
   {
     modelId: 'haiku',
     name: 'Haiku',
-    description: 'Claude Haiku',
+    description: 'Haiku 4.5 · Fastest for quick answers',
   },
 ];
 
@@ -754,7 +743,18 @@ const CLAUDE_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
       { value: 'low', name: 'Low' },
       { value: 'medium', name: 'Medium' },
       { value: 'high', name: 'High' },
+      { value: 'xhigh', name: 'Xhigh' },
+      { value: 'max', name: 'Max' },
     ],
+  },
+  {
+    id: 'fast',
+    name: 'Fast mode',
+    description: 'Faster responses on supported models',
+    category: 'model_config',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
   },
 ];
 
@@ -912,10 +912,14 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: GROK_STATIC_MODES,
     models: GROK_STATIC_MODELS,
     configOptions: GROK_STATIC_CONFIG_OPTIONS,
+    modelReasoningEfforts: {
+      'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+      'grok-4.5': ['high', 'medium', 'low'],
+    },
   },
   deepseek: {
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
-    models: DEEPSEEK_HARNESS_MODELS.map((model) => ({ ...model })),
+    models: [],
     configOptions: DEEPSEEK_HARNESS_CONFIG_OPTIONS,
   },
 };
@@ -931,6 +935,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelReasoningEfforts
+    ? {
+        modelReasoningEfforts: Object.fromEntries(
+          Object.entries(capabilities.modelReasoningEfforts).map(([modelId, efforts]) => [
+            modelId,
+            [...efforts],
+          ])
+        ),
+      }
+    : {}),
 });
 
 /**
@@ -1127,6 +1141,7 @@ export type ChatFailedReason =
   | 'acp_auth_required' // -32000: Authentication required
   | 'acp_internal_error' // -32603: Internal JSON-RPC error
   | 'acp_upstream_api_error' // -32603 with upstream API error (500/529) - transient, retryable
+  | 'acp_provider_overloaded' // provider capacity exhausted; safe to continue in a new turn
   | 'acp_session_storage_incompatible' // -32603 from an incompatible session-persistence root
   | 'acp_resource_not_found' // -32002: Resource not found
   | 'acp_request_cancelled' // -32800: Request cancelled
@@ -1492,6 +1507,15 @@ export type MessageContent =
        * for scheduling tool calls; see `collectPendingScheduledTasksFromHistory`.
        */
       schedulingTimeZone?: string;
+      /**
+       * Epoch ms when this tool call was first persisted by the machine that ran it.
+       * Only set for scheduling tool calls: the turn entry's timestamps are NOT a safe
+       * proxy for the creation moment (cron-fire follow-up turns are runtime-internal
+       * steers, so one history entry can aggregate several runtime turns and its
+       * `endedAt` keeps advancing past a one-shot's fire minute). See
+       * `collectPendingScheduledTasksFromHistory`.
+       */
+      recordedAtMs?: number;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];
@@ -1512,6 +1536,7 @@ export type MessageContent =
       meta?: SystemNoticeMeta[SystemNoticeName];
     }
   | OperationCompletionContent
+  | OperationProgressContent
   | {
       type: 'worktree_script';
       phase: WorktreeScriptPhase;
@@ -1597,6 +1622,15 @@ export type ACPSessionConfig = {
   mcpServerIds?: McpServerId[];
   /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
   taskToolsEnabled?: boolean;
+  /**
+   * Agent Role identity selected in the composer for this Turn. Null is an
+   * explicit None selection; absence is legacy/unknown. This is provenance for
+   * restoring synchronized composer state, not an instruction to re-resolve the
+   * mutable Role catalog during execution.
+   */
+  agentRoleId?: AgentRoleId | null;
+  /** Catalog revision whose values were frozen into this Turn. */
+  agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;
@@ -1609,4 +1643,4 @@ export type ACPSessionConfig = {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPSessionConfig>;
-import type { OperationCompletionContent } from './session-orchestration';
+import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

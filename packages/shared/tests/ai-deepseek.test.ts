@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getBuiltinAgentByAgentType,
   getManagedBuiltinRuntimeByAgentType,
+  getStaticBuiltinAcpCapabilities,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
 } from '../src/ai';
@@ -27,5 +28,14 @@ describe('builtin DeepSeek Harness shared contract', () => {
         env: { DEEPSEEK_API_KEY: 'test-key' },
       })
     ).toBe(false);
+  });
+
+  it('waits for a live probe before advertising endpoint-dependent model options', () => {
+    const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'deepseek');
+    expect(capabilities?.models).toEqual([]);
+    expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
+      'mode',
+      'agent_preset',
+    ]);
   });
 });

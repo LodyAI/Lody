@@ -12,8 +12,6 @@ body:
 
         Keep every required section and confirmation. Issues that bypass or remove the form are marked `status:needs-issue-body` until corrected; only repository owners and automated bots are exempt.
 
-        Opening this issue does not authorize a pull request. If you want to contribute a fix, wait for a Lody maintainer to explicitly agree on the scope and approach before implementing it or opening a pull request.
-
         This tracker covers the open-source desktop app, CLI, daemon, agent runtime, and packages in this repository. For hosted services, Web or mobile apps, accounts, or billing, use [Lody Support](https://lody.ai/support).
 
         **Do not post security vulnerabilities or sensitive data here.** Follow the [security policy](https://github.com/LodyAI/Lody/security/policy), and redact credentials, private repository content, agent conversations, prompts, personal data, and sensitive paths from every example and log.
@@ -138,6 +136,4 @@ body:
         - label: This is not a security vulnerability; security reports follow the repository's security policy.
           required: true
         - label: I removed credentials, private source, conversations, prompts, personal data, and other sensitive information.
-          required: true
-        - label: If I plan to submit a pull request, I will wait for a Lody maintainer to explicitly agree on the scope and approach before implementation.
           required: true

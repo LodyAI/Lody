@@ -195,6 +195,29 @@ describe('ContextChip actions', () => {
     expect(container.querySelector('button[aria-label="More actions"]')).toBeNull();
   });
 
+  it('keeps the location tooltip stable across context rerenders', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    for (let render = 0; render < 20; render += 1) {
+      await act(async () => {
+        root?.render(
+          createElement(ContextChip, {
+            mode: 'stage',
+            projectName: 'loro-dev/lody',
+            branch: `fix/location-tooltip-${render}`,
+            workspaceLocation: { kind: 'worktree', path: '/tmp/lody-worktree' },
+          })
+        );
+      });
+    }
+
+    expect(container.querySelector('button[aria-label="Worktree"]')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+  });
+
   it('renders the compact merge split button and switches methods without merging', async () => {
     const onMerge = vi.fn();
     const onSelectMethod = vi.fn();

@@ -15,6 +15,7 @@ import {
   Link2,
   Loader2,
   LockKeyhole,
+  Mail,
   Pencil,
   Pin,
   PinOff,
@@ -32,7 +33,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionOpenedByTreeRow,
@@ -43,6 +43,7 @@ import {
   SessionRowWorktreeIndicator,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SidebarSectionHeader,
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
@@ -161,6 +162,7 @@ export type SidebarUpdatedContextMenuLabels = {
   pin: string;
   unpin: string;
   archive: string;
+  markUnread: string;
   copyUrl: string;
   shareWithTeam: string;
   onlyOwnerCanShare: string;
@@ -177,34 +179,6 @@ export type SidebarUpdatedContextMenuLabels = {
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
   return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
-}
-
-function SidebarUpdatedSessionListSkeleton({ className }: { className?: string }) {
-  // Three buckets each with a header and a couple of rows; matches the
-  // SessionListSkeleton density so the two organize modes look the same when
-  // the session list is still loading.
-  const bucketRows: string[][] = [
-    ['w-[68%]', 'w-[58%]', 'w-[74%]'],
-    ['w-[60%]', 'w-[52%]'],
-  ];
-  return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {bucketRows.map((rows, bucketIndex) => (
-        <div key={bucketIndex} className="space-y-2">
-          <Skeleton className="h-3 w-16" />
-          <div className="space-y-2 rounded-lg border border-border/50 p-2">
-            {rows.map((width, rowIndex) => (
-              <div key={rowIndex} className="flex items-center gap-2 px-1 py-1.5">
-                <Skeleton className="h-7 w-7 rounded-md" />
-                <Skeleton className={cn('h-3', width)} />
-                <Skeleton className="ml-auto h-3 w-10" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function parseGitHubPrNumber(url: string): number | null {
@@ -338,6 +312,8 @@ export type SidebarUpdatedSessionListProps = {
    * mobile rows expose the same action via left-swipe + tap-to-confirm.
    */
   onArchiveItem?: (id: string) => void;
+  /** Mark a read desktop item unread. */
+  onMarkItemUnread?: (id: string) => void;
   /** Rename an item through the shared Rename Chat dialog. */
   onRenameItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /**
@@ -398,6 +374,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   labels,
   onSelectItem,
   onArchiveItem,
+  onMarkItemUnread,
   onRenameItem,
   onTogglePinItem,
   onCopyItemUrl,
@@ -440,6 +417,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
       onlyOwnerCanShare: t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share'),
@@ -502,7 +480,11 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <SidebarUpdatedSessionListSkeleton className={className} />
+        <SidebarListSkeleton
+          className={className}
+          showHeaderIcon={false}
+          sectionClassName="mb-4 last:mb-0"
+        />
       </div>
     );
   }
@@ -585,6 +567,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           href={getItemHref?.(node.item.id)}
                           onSelect={onSelectItem}
                           onArchive={onArchiveItem}
+                          onMarkUnread={onMarkItemUnread}
                           onRename={onRenameItem}
                           onTogglePin={onTogglePinItem}
                           onCopyUrl={onCopyItemUrl}
@@ -646,6 +629,7 @@ type UpdatedItemRowProps = {
   href?: string;
   onSelect?: (id: string, tabSessionId?: string) => void;
   onArchive?: (id: string) => void;
+  onMarkUnread?: (id: string) => void;
   onRename?: (id: string, nextTitle: string) => void | Promise<void>;
   onTogglePin?: (id: string, nextPinned: boolean) => void;
   onCopyUrl?: (id: string) => void;
@@ -668,6 +652,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   href,
   onSelect,
   onArchive,
+  onMarkUnread,
   onRename,
   onTogglePin,
   onCopyUrl,
@@ -733,6 +718,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     : undefined;
 
   const canArchive = typeof onArchive === 'function';
+  const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
   const canRename = typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
@@ -767,6 +753,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     (canRename ||
       canTogglePin ||
       canArchive ||
+      canMarkUnread ||
       canCopyUrl ||
       Boolean(shareMenuState) ||
       Boolean(branchName) ||
@@ -800,12 +787,19 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     </span>
   );
 
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
+
   const row = (
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-current={selected ? 'page' : undefined}
+      data-id={`updated:${item.id}`}
+      data-scope-item="row"
+      data-sidebar-session-id={item.id}
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
+      data-menu-open={rowMenuOpen ? '' : undefined}
       // Drag a conversation onto a chat surface to mention it there.
       draggable
       onDragStart={(event) =>
@@ -821,7 +815,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
           'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
@@ -864,15 +858,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
       <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
         <SessionRowLeadingSlot
-          isWaitingPermission={item.isWaitingPermission}
-          isWorking={item.isWorking}
-          hasUnreadMessages={item.hasUnreadMessages}
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
           openedByTree={openedByTree}
           fadeClassName="group-hover/row:opacity-0"
           restPointerClassName="group-hover/row:pointer-events-none"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
         />
         <SessionRowAuthorAvatar author={item.owner} />
         {showPinnedIcon && item.isPinned ? (
@@ -897,6 +888,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         </div>
         {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
         <SidebarRowEndSlot
+          isWaitingPermission={item.isWaitingPermission}
+          isWorking={item.isWorking}
+          hasUnreadMessages={item.hasUnreadMessages}
           fadeClassName="group-hover/row:opacity-0"
           restIcon={
             showPr ||
@@ -932,7 +926,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
               />
             ) : undefined
           }
@@ -971,7 +965,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setRowMenuOpen}>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
@@ -993,7 +987,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.openPr}
           </ContextMenuItem>
         ) : null}
-        {handlePrOpen && (canRename || canTogglePin || canArchive || canCopyUrl || branchName) ? (
+        {handlePrOpen &&
+        (canRename || canTogglePin || canArchive || canMarkUnread || canCopyUrl || branchName) ? (
           <ContextMenuSeparator />
         ) : null}
         {canRename ? (
@@ -1016,6 +1011,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenuItem>
         ) : null}
+        {canMarkUnread ? (
+          <ContextMenuItem
+            onSelect={() => {
+              onMarkUnread?.(item.id);
+            }}
+          >
+            <Mail />
+            {contextMenuLabels.markUnread}
+          </ContextMenuItem>
+        ) : null}
         {canArchive ? (
           <ContextMenuItem
             onSelect={() => {
@@ -1026,7 +1031,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.archive}
           </ContextMenuItem>
         ) : null}
-        {(canRename || canTogglePin || canArchive) && (canCopyUrl || branchName) ? (
+        {(canRename || canTogglePin || canArchive || canMarkUnread) &&
+        (canCopyUrl || branchName) ? (
           <ContextMenuSeparator />
         ) : null}
         {canCopyUrl ? (

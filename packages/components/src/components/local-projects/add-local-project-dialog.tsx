@@ -64,7 +64,7 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
   const headerTitle =
     c.phase === 'machine'
       ? t('localProjects.add.pickMachine', 'Choose a machine')
-      : t('localProjects.add.title', 'Add a local project');
+      : t('localProjects.add.title', 'Add a folder');
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
@@ -657,7 +657,7 @@ export function AddLocalProjectDialog({
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
-  const a11yTitle = t('localProjects.add.title', 'Add a local project');
+  const a11yTitle = t('localProjects.add.title', 'Add a folder');
   const a11yDescription = t(
     'localProjects.add.dialogDescription',
     'Browse the machine and choose a folder to add as a local project.'

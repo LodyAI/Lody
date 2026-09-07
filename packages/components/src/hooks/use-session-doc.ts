@@ -98,7 +98,8 @@ const updateOnlyChangesHistory = (
   previous.mq === next.mq &&
   previous.forkOperation === next.forkOperation &&
   previous.preview === next.preview &&
-  previous.externalHistoryCursor === next.externalHistoryCursor;
+  previous.externalHistoryCursor === next.externalHistoryCursor &&
+  previous.acpRuntimeConfig === next.acpRuntimeConfig;
 
 export function useSessionDoc(
   sessionId: SessionId,
@@ -119,6 +120,7 @@ export function useSessionDoc(
       forkOperation: undefined,
       preview: undefined,
       externalHistoryCursor: undefined,
+      acpRuntimeConfig: undefined,
     }),
     [sessionId]
   );

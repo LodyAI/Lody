@@ -428,6 +428,57 @@ describe('useSessionActions', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
+  it('marks a session unread by moving only its read receipt behind the latest message', async () => {
+    const sessionId = 'session-mark-unread' as SessionId;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const sessionMeta = {
+      ...createSessionPayload(sessionId),
+      id: sessionId,
+      createdAt: '2026-09-04T00:00:00.000Z',
+      lastMessageAt: 500,
+      lastReadAt: 500,
+    } as SessionMeta;
+    const runtime = createRuntime({
+      repo: {
+        // The sidebar's rendered cache can lead the async repo read during
+        // hydration; the visible row's action must still work in that window.
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
+    });
+
+    await actions.markSessionUnread(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
+      lastReadAt: 499,
+    });
+  });
+
+  it('does not invent activity when marking an empty session unread', async () => {
+    const sessionId = 'empty-session-mark-unread' as SessionId;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            ...createSessionPayload(sessionId),
+            id: sessionId,
+            createdAt: '2026-09-04T00:00:00.000Z',
+          } as SessionMeta,
+        })),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime);
+
+    await actions.markSessionUnread(sessionId);
+
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
   it('starts dispatch RPC without waiting for the metadata pointer write', async () => {
     const sessionId = 'session-dispatch-parallel' as SessionId;
     const userTurnId = 'user-turn-dispatch-parallel';
@@ -484,10 +535,9 @@ describe('useSessionActions', () => {
     });
     await vi.waitFor(() => expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1));
 
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
+    expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
+      latestUserMsgId: userTurnId,
+    });
     expect(setState).not.toHaveBeenCalled();
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 
@@ -719,7 +769,14 @@ describe('useSessionActions', () => {
     expect(startSession).toHaveBeenCalledOnce();
     expect(startSession).toHaveBeenCalledWith(
       sessionId,
-      expect.objectContaining({ id: sessionId, machineId: 'machine-1' }),
+      // lastMessageAt rides the accept unit itself: the meta always carries
+      // the first message's activity, so a close racing the first turn can
+      // never mistake the session for an empty, deletable one.
+      expect.objectContaining({
+        id: sessionId,
+        machineId: 'machine-1',
+        lastMessageAt: expect.any(Number),
+      }),
       expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
       expect.objectContaining({ userTurnId: result.historyEntry.id })
     );
@@ -1003,6 +1060,39 @@ describe('useSessionActions', () => {
       expect.objectContaining({
         needToArchiveSessions: { [sessionId]: true },
       })
+    );
+  });
+
+  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
+    const sessionId = 'session-archive-known-meta' as SessionId;
+    const renderedMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      createdAt: new Date().toISOString(),
+      parentSessionId: 'parent-session-1' as SessionId,
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    // The repo cannot read the doc meta yet (child session still hydrating).
+    const getDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
+    });
+
+    await actions.archiveSession(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
+    );
+
+    // A session neither the repo nor the UI knows still fails loudly.
+    await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
+      'Session metadata missing'
     );
   });
 

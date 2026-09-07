@@ -30,6 +30,7 @@ import {
   collectErrorBoundaryEnvironment,
   isRawConvexServerError,
 } from '@/lib/error-boundary-report';
+import { getSessionRenderTraceText } from '@/lib/session-render-trace';
 import { cn } from '@/lib/utils';
 
 export type ErrorBoundaryFallbackVariant = 'page' | 'section' | 'inline';
@@ -89,6 +90,7 @@ export function ErrorBoundaryFallback({
         boundaryName,
         componentStack,
         environment: collectErrorBoundaryEnvironment(),
+        renderTrace: getSessionRenderTraceText(),
       }),
     [error, boundaryName, componentStack]
   );

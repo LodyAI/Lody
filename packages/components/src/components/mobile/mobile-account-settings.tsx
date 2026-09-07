@@ -391,7 +391,7 @@ export function MobileAccountSettings({
               ) : (
                 <button
                   type="button"
-                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
                   onClick={beginUserNameEdit}
                   disabled={isSavingUserName}
                   aria-label={t('settings.profile.nameEditLabel')}
@@ -402,7 +402,7 @@ export function MobileAccountSettings({
                   {isSavingUserName ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+                    <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
                   )}
                 </button>
               )
@@ -492,7 +492,7 @@ export function MobileAccountSettings({
               ) : (
                 <button
                   type="button"
-                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
                   onClick={beginWorkspaceNameEdit}
                   disabled={isRenamingOrganization}
                   aria-label={t('settings.account.workspaceNameEditLabel')}
@@ -501,7 +501,7 @@ export function MobileAccountSettings({
                   {isRenamingOrganization ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+                    <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
                   )}
                 </button>
               )
@@ -717,7 +717,11 @@ export function MobileAccountSettings({
         </MobileSettingsSection>
       ) : null}
 
-      {isWorkspaceSurface ? workspaceJoinRequestsSlot : null}
+      {isWorkspaceSurface && workspaceJoinRequestsSlot ? (
+        <MobileSettingsSection noCard>
+          <div className="mx-3">{workspaceJoinRequestsSlot}</div>
+        </MobileSettingsSection>
+      ) : null}
 
       {surface === 'account' && canGenerateCliApiKey ? (
         <MobileSettingsSection

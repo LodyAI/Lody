@@ -28,7 +28,12 @@ declare global {
     __LODY_NATIVE__?: boolean;
     __LODY_CORDOVA_READY__?: boolean;
     __LODY_ELECTRON__?: true;
-    __LODY_PLATFORM__?: { os: string; homeDir: string; machineName?: string };
+    __LODY_PLATFORM__?: {
+      os: string;
+      homeDir: string;
+      machineName?: string;
+      preferredSystemLanguages?: readonly string[];
+    };
     __LODY_BOOT__?: LodyBootController;
     __LODY_LIVE_ACTIVITY__?: LodyLiveActivityBridge;
     __LODY_APP_STORE_REVIEW__?: LodyAppStoreReviewBridge;

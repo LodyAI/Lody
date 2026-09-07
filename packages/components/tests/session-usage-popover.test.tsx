@@ -99,6 +99,39 @@ describe('SessionUsagePopover', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
+  it('shows Fable weekly as a distinct meter beside shared quotas', async () => {
+    await renderUsage({
+      agentType: 'claude',
+      modelId: 'claude-fable-5',
+      showRateLimitWithoutContext: true,
+      rateLimits: {
+        [getRateLimitEntryKey('claude', 'claude')]: {
+          limitId: 'claude',
+          scope: { providerId: 'claude' },
+          windows: [
+            { usedPercent: 12, windowDurationSeconds: 18_000, resetsAtEpochSeconds: null },
+            { usedPercent: 30, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
+            {
+              label: 'Fable',
+              usedPercent: 67,
+              windowDurationSeconds: 604_800,
+              resetsAtEpochSeconds: null,
+            },
+          ],
+        },
+      },
+    });
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const popover = document.body.querySelector('[aria-label="Usage"]');
+    expect(
+      Array.from(popover?.querySelectorAll('[role="progressbar"]') ?? []).map((meter) =>
+        meter.getAttribute('aria-label')
+      )
+    ).toEqual(['Weekly: 30% used', 'Weekly · Fable: 67% used', '5 hours: 12% used']);
+  });
+
   it('shows a truthful unavailable state when the provider omits utilization', async () => {
     const unavailableLimits: MachineRateLimits = {
       [getRateLimitEntryKey('grok', 'grok')]: {

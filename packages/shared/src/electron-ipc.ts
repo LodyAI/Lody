@@ -163,6 +163,21 @@ export const LaunchLocalPathInputSchema = z.discriminatedUnion('kind', [
 
 export type LaunchLocalPathInput = z.infer<typeof LaunchLocalPathInputSchema>;
 
+export const PathLauncherProbeSchema = z
+  .object({
+    launchers: z
+      .array(
+        z
+          .object({
+            launcherId: z.string().trim().min(1).max(200),
+            input: LaunchLocalPathInputSchema,
+          })
+          .strict()
+      )
+      .max(30),
+  })
+  .strict();
+
 export type LaunchLocalPathResult =
   | {
       launched: true;
@@ -279,6 +294,18 @@ export const CliRuntimeStateSchema = z
       .strict()
       .optional(),
     connectedWorkspaces: z.array(CliRuntimeWorkspaceSchema).optional(),
+    // Keep additive runtime-state extensions at this passthrough top level.
+    // Older v1 consumers reject unknown keys inside the strict backend and
+    // workspace objects, but safely ignore an unknown top-level field.
+    connectionAges: z
+      .object({
+        backendNotConnectedSinceMs: z.number().int().nonnegative().optional(),
+        workspaceNotConnectedSinceMs: z
+          .record(z.string().min(1), z.number().int().nonnegative())
+          .optional(),
+      })
+      .strict()
+      .optional(),
     machineId: z.string().min(1).optional(),
     pid: z.number().int(),
     updatedAtMs: z.number(),

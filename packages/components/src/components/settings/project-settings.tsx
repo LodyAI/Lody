@@ -78,7 +78,10 @@ import { settingContainerClass } from '.';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
 import { useGithubProjectWorktreeSaves } from '@/hooks/use-github-project-worktree-admin';
-import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
+import {
+  AddLocalProjectDialogContainer,
+  useAddLocalProjectMachines,
+} from '@/components/local-projects/add-local-project-dialog-container';
 import { ProjectSkillsTab } from './project-skills-tab';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
@@ -148,6 +151,13 @@ type ProjectSettingsSelection =
   | { key: string; kind: 'local'; row: ProjectSettingsRow }
   | { key: string; kind: 'github'; row: GithubProjectSettingsRow };
 
+/** A machine the current user is allowed to add folders to. */
+export type AddableProjectMachine = {
+  machineId: MachineId;
+  machineName: string;
+  online: boolean;
+};
+
 export type ProjectSettingsViewProps = {
   sections: ProjectSettingsSection[];
   githubSections: GithubProjectSettingsSection[];
@@ -187,7 +197,11 @@ export type ProjectSettingsViewProps = {
     row: GithubProjectSettingsRow,
     config: WorktreeCleanupScriptConfig
   ) => Promise<void>;
-  onAddLocalProject?: () => void;
+  /** Machines the current user may add folders to, including ones that have no
+      project yet — those still get a pill so the folder can be added here. */
+  addableMachines?: readonly AddableProjectMachine[];
+  /** Opens the folder picker; a machine id pre-selects that machine. */
+  onAddLocalProject?: (machineId?: MachineId | null) => void;
   onAddGitHubProject?: () => void;
 };
 
@@ -303,6 +317,25 @@ export function ProjectSettingsComponent({
   const resolvedInitialProjectKey =
     initialProjectKey !== undefined ? initialProjectKey : modalProjectTarget;
   const [addLocalProjectDialogOpen, setAddLocalProjectDialogOpen] = useState(false);
+  const [addLocalProjectMachineId, setAddLocalProjectMachineId] = useState<MachineId | null>(null);
+  /* Same ownership rule the picker itself applies, so a machine the user may
+     add to shows up here even before it has a single project. */
+  const { machines: pickerMachines } = useAddLocalProjectMachines();
+  const addableMachines = useMemo<AddableProjectMachine[]>(
+    () =>
+      pickerMachines
+        .filter((machine) => machine.canAddProjects)
+        .map((machine) => ({
+          machineId: machine.id,
+          machineName: machine.name,
+          online: machine.online,
+        })),
+    [pickerMachines]
+  );
+  const handleAddLocalProject = useCallback((machineId?: MachineId | null) => {
+    setAddLocalProjectMachineId(machineId ?? null);
+    setAddLocalProjectDialogOpen(true);
+  }, []);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
      same data model without duplicating mutations / catalog state. */
@@ -400,12 +433,14 @@ export function ProjectSettingsComponent({
         onWorktreeCleanupChange={onWorktreeCleanupChange}
         onGithubWorktreeSetupChange={onGithubWorktreeSetupChange}
         onGithubWorktreeCleanupChange={onGithubWorktreeCleanupChange}
-        onAddLocalProject={() => setAddLocalProjectDialogOpen(true)}
+        addableMachines={addableMachines}
+        onAddLocalProject={handleAddLocalProject}
         onAddGitHubProject={workspaceSlug ? handleAddGitHubProject : undefined}
       />
       <AddLocalProjectDialogContainer
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
+        initialMachineId={addLocalProjectMachineId}
       />
     </>
   );
@@ -430,6 +465,7 @@ function ProjectSettingsDesktop({
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
+  addableMachines,
   onAddLocalProject,
   onAddGitHubProject,
   initialMachineId,
@@ -443,8 +479,30 @@ function ProjectSettingsDesktop({
   const totalCount = totalProjects + totalGithubProjects;
   const isAnyLoading = isLoading || githubProjectsLoading;
 
-  // Pills under the title: GitHub first (if any repos), then each machine that
-  // has local projects. The selected pill drives the left project list.
+  /* One entry per machine that has local projects OR that the user may add a
+     folder to, so a machine connected but still empty is reachable here
+     instead of only from the generic add menu. */
+  const machineEntries = useMemo<AddableProjectMachine[]>(() => {
+    const byId = new Map<MachineId, AddableProjectMachine>();
+    for (const section of sections) {
+      byId.set(section.machineId, {
+        machineId: section.machineId,
+        machineName: section.machineName,
+        online: onlineMachineIds.has(section.machineId),
+      });
+    }
+    for (const machine of addableMachines ?? []) {
+      if (byId.has(machine.machineId)) continue;
+      byId.set(machine.machineId, {
+        ...machine,
+        online: machine.online || onlineMachineIds.has(machine.machineId),
+      });
+    }
+    return [...byId.values()];
+  }, [sections, addableMachines, onlineMachineIds]);
+
+  // Pills under the title: GitHub first (if any repos), then each machine.
+  // The selected pill drives the left project list.
   const pills = useMemo<MachinePillItem[]>(() => {
     const list: MachinePillItem[] = [];
     if (githubSections.length > 0) {
@@ -454,15 +512,15 @@ function ProjectSettingsDesktop({
         icon: <Github className="h-3.5 w-3.5" />,
       });
     }
-    for (const section of sections) {
+    for (const machine of machineEntries) {
       list.push({
-        id: section.machineId,
-        label: section.machineName,
-        online: onlineMachineIds.has(section.machineId),
+        id: machine.machineId,
+        label: machine.machineName,
+        online: machine.online,
       });
     }
     return list;
-  }, [sections, githubSections, onlineMachineIds, t]);
+  }, [machineEntries, githubSections, t]);
 
   const [selectedPillId, setSelectedPillId] = useState<string | null>(
     () => initialMachineId ?? null
@@ -494,11 +552,33 @@ function ProjectSettingsDesktop({
   const addProjectActions =
     onAddLocalProject || onAddGitHubProject ? (
       <ProjectAddMenu
-        onAddLocalProject={onAddLocalProject}
+        onAddLocalProject={onAddLocalProject ? () => onAddLocalProject() : undefined}
         onAddGitHubProject={onAddGitHubProject}
         className="h-8 w-8 shrink-0 bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.1]"
       />
     ) : null;
+
+  /* The selected pill scopes the add action: the picker opens straight on that
+     machine (its Back button still leads to the full machine list). */
+  const addableMachineIds = useMemo(
+    () => new Set((addableMachines ?? []).map((machine) => machine.machineId)),
+    [addableMachines]
+  );
+  const selectedMachine =
+    machineEntries.find((entry) => entry.machineId === resolvedPillId) ?? null;
+  const selectedMachineAddTarget =
+    onAddLocalProject && selectedMachine && addableMachineIds.has(selectedMachine.machineId)
+      ? selectedMachine
+      : null;
+  const addToSelectedMachine = selectedMachineAddTarget
+    ? () => onAddLocalProject?.(selectedMachineAddTarget.machineId)
+    : null;
+  const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
+  const addFolderToMachineTitle = selectedMachineAddTarget
+    ? t('workspace.projects.addFolderOnMachine', 'Add a folder on {{machine}}', {
+        machine: selectedMachineAddTarget.machineName,
+      })
+    : undefined;
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -513,7 +593,7 @@ function ProjectSettingsDesktop({
   };
 
   return (
-    <div className={cn(settingContainerClass, 'md:max-w-6xl')}>
+    <div className={cn(settingContainerClass, 'flex h-full min-h-0 flex-col md:max-w-6xl')}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">
@@ -534,7 +614,7 @@ function ProjectSettingsDesktop({
           <Loader2 className="h-4 w-4 animate-spin" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
-      ) : totalCount === 0 ? (
+      ) : totalCount === 0 && machineEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 px-3 py-12 text-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
@@ -544,7 +624,7 @@ function ProjectSettingsDesktop({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <MachinePills
             pills={pills}
             selectedId={resolvedPillId}
@@ -552,37 +632,73 @@ function ProjectSettingsDesktop({
               setSelectedPillId(id);
               setSelectedProjectKey(null);
             }}
+            trailing={
+              addToSelectedMachine ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  title={addFolderToMachineTitle}
+                  className="h-6 gap-1 rounded-full border border-border/60 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+                  onClick={addToSelectedMachine}
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  {addFolderLabel}
+                </Button>
+              ) : null
+            }
           />
-          <div className="flex h-[calc(90vh-16rem)] min-h-[400px] min-w-0">
+          <div className="flex min-h-0 min-w-0 flex-1">
             <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
-              {isGithubPill
-                ? githubSections.map((section) => (
-                    <div key={section.owner} className="mb-2">
-                      <ProjectOwnerLabel owner={section.owner} />
-                      {section.rows.map((row) => (
-                        <ProjectMasterRow
-                          key={row.key}
-                          selected={selectedProject?.key === row.key}
-                          icon={<OwnerAvatar owner={section.owner} />}
-                          title={row.name}
-                          subtitle={row.repoFullName}
-                          onClick={() => setSelectedProjectKey(row.key)}
-                        />
-                      ))}
-                    </div>
-                  ))
-                : currentSelections.map((selection) =>
-                    selection.kind === 'local' ? (
+              {isGithubPill ? (
+                githubSections.map((section) => (
+                  <div key={section.owner} className="mb-2">
+                    <ProjectOwnerLabel owner={section.owner} />
+                    {section.rows.map((row) => (
                       <ProjectMasterRow
-                        key={selection.key}
-                        selected={selectedProject?.key === selection.key}
-                        icon={<Folder className="h-3.5 w-3.5" />}
-                        title={selection.row.project.name}
-                        subtitle={selection.row.project.rootPath}
-                        onClick={() => setSelectedProjectKey(selection.key)}
+                        key={row.key}
+                        selected={selectedProject?.key === row.key}
+                        icon={<OwnerAvatar owner={section.owner} />}
+                        title={row.name}
+                        subtitle={row.repoFullName}
+                        onClick={() => setSelectedProjectKey(row.key)}
                       />
-                    ) : null
-                  )}
+                    ))}
+                  </div>
+                ))
+              ) : currentSelections.length === 0 ? (
+                <div className="flex flex-col items-start gap-2 px-2 py-4">
+                  <p className="text-xs text-muted-foreground">
+                    {t('workspace.projects.machineEmpty', 'No folders added on this machine yet.')}
+                  </p>
+                  {addToSelectedMachine ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title={addFolderToMachineTitle}
+                      className="h-7 gap-1 px-2 text-xs"
+                      onClick={addToSelectedMachine}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5" />
+                      {addFolderLabel}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                currentSelections.map((selection) =>
+                  selection.kind === 'local' ? (
+                    <ProjectMasterRow
+                      key={selection.key}
+                      selected={selectedProject?.key === selection.key}
+                      icon={<Folder className="h-3.5 w-3.5" />}
+                      title={selection.row.project.name}
+                      subtitle={selection.row.project.rootPath}
+                      onClick={() => setSelectedProjectKey(selection.key)}
+                    />
+                  ) : null
+                )
+              )}
             </div>
             <div className="min-w-0 flex-1 overflow-hidden">
               {selectedProject ? (
@@ -691,7 +807,7 @@ function ProjectAddMenu({
           <DropdownMenuItem onSelect={() => onAddLocalProject()}>
             <FolderPlus className="h-4 w-4" />
             <span className="flex min-w-0 flex-col">
-              <span>{t('chat.contextSwitch.addProject', 'Add a local project')}</span>
+              <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
               <span className="text-xs text-muted-foreground">
                 {t(
                   'chat.contextSwitch.addLocalProjectHint',
@@ -1395,6 +1511,8 @@ export function ProjectHistoryImportPanel({
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = getHistoryProviderLabel(state.provider);
   const catalogSessions = state.catalog?.sessions ?? [];
+  const hasSyncedCatalog = state.catalog !== null;
+  const hasCatalogSessions = catalogSessions.length > 0;
   const selectedSet = new Set(state.selectedSessionIds);
   const [conflictSessionToResolve, setConflictSessionToResolve] =
     useState<LocalProjectHistoryCatalogItem | null>(null);
@@ -1461,61 +1579,63 @@ export function ProjectHistoryImportPanel({
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col bg-tab-active text-xs">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-tab-border px-3 py-2">
-          <span className="truncate text-muted-foreground">{statusLabel}</span>
-          <div className="flex shrink-0 items-center gap-2">
-            {state.canSync && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className={historyActionButtonClass}
-                    disabled={state.isSyncing || state.isImporting}
-                    onClick={() => {
-                      void onSyncHistory?.(row, state.provider);
-                    }}
-                  >
-                    {state.isSyncing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                    <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="left">
-                  {t('workspace.projects.syncHistoryTooltip', {
-                    defaultValue: 'Sync {{provider}} history',
-                    provider: providerLabel,
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={historyActionButtonClass}
-              disabled={
-                state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
-              }
-              onClick={() => {
-                void onImportHistory?.(row, state.provider);
-              }}
-            >
-              {state.isImporting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
+        {hasCatalogSessions ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-tab-border px-3 py-2">
+            <span className="truncate text-muted-foreground">{statusLabel}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              {state.canSync && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={historyActionButtonClass}
+                      disabled={state.isSyncing || state.isImporting}
+                      onClick={() => {
+                        void onSyncHistory?.(row, state.provider);
+                      }}
+                    >
+                      {state.isSyncing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    {t('workspace.projects.syncHistoryTooltip', {
+                      defaultValue: 'Sync {{provider}} history',
+                      provider: providerLabel,
+                    })}
+                  </TooltipContent>
+                </Tooltip>
               )}
-              {t('workspace.projects.importSelectedHistory', {
-                defaultValue: 'Import',
-              })}
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={historyActionButtonClass}
+                disabled={
+                  state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
+                }
+                onClick={() => {
+                  void onImportHistory?.(row, state.provider);
+                }}
+              >
+                {state.isImporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                {t('workspace.projects.importSelectedHistory', {
+                  defaultValue: 'Import',
+                })}
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : null}
         {state.errorMessage !== null && state.errorMessage.length > 0 ? (
           <div className="scrollbar-pro flex max-h-28 shrink-0 items-start gap-2 overflow-y-auto border-b border-tab-border bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
             <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
@@ -1544,7 +1664,7 @@ export function ProjectHistoryImportPanel({
             ) : null}
           </div>
         )}
-        {catalogSessions.length > 0 && (
+        {hasCatalogSessions && (
           <div className="shrink-0 border-b border-tab-border px-3 py-2">
             <div
               role="button"
@@ -1579,12 +1699,59 @@ export function ProjectHistoryImportPanel({
             </div>
           </div>
         )}
-        {catalogSessions.length === 0 ? (
-          <div className="px-3 py-4 text-muted-foreground">
-            {t('workspace.projects.historyEmpty', {
-              defaultValue: 'No {{provider}} conversations found',
-              provider: providerLabel,
-            })}
+        {!hasCatalogSessions ? (
+          <div className="flex min-h-44 flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-foreground/[0.06]">
+              <MessagesSquare className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="mt-3 max-w-sm">
+              <p className="font-medium text-foreground">
+                {hasSyncedCatalog
+                  ? t('workspace.projects.historyEmpty', {
+                      defaultValue: 'No {{provider}} conversations found',
+                      provider: providerLabel,
+                    })
+                  : t('workspace.projects.historyInitialSyncTitle', {
+                      defaultValue: 'Sync {{provider}} conversations',
+                      provider: providerLabel,
+                    })}
+              </p>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                {hasSyncedCatalog
+                  ? t('workspace.projects.historyEmptyHint', {
+                      defaultValue:
+                        'Start a conversation for this project in {{provider}}, then sync again.',
+                      provider: providerLabel,
+                    })
+                  : t('workspace.projects.historyInitialSyncHint', {
+                      defaultValue:
+                        "Find this project's conversations in {{provider}}, then choose which ones to import.",
+                      provider: providerLabel,
+                    })}
+              </p>
+            </div>
+            {state.canSync ? (
+              <Button
+                type="button"
+                size="sm"
+                className="mt-4"
+                disabled={state.isSyncing || state.isImporting || !onSyncHistory}
+                onClick={() => {
+                  void onSyncHistory?.(row, state.provider);
+                }}
+              >
+                {state.isSyncing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {hasSyncedCatalog
+                    ? t('workspace.projects.syncHistoryAgain', 'Sync again')
+                    : t('workspace.projects.syncHistory', 'Sync')}
+                </span>
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div className="scrollbar-pro min-h-0 flex-1 divide-y divide-tab-border overflow-y-auto overscroll-contain">

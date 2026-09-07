@@ -5,7 +5,14 @@ File attachments use `file` blocks; the product contract is in
 
 - `session-file-card.tsx` — pure card (icon by extension, name, size; pending/expired/
   previewable/downloadable derived from transport + `getServerNow()` expiry) and
-  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`.
+  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`,
+  test: `tests/session-file-card.test.tsx`.
+- One card, one primary action — EXCEPT an HTML attachment, which also gets a separate
+  download button for the source bytes. Its click opens the RENDERED page (browser
+  surface or live file preview), a surface with no control of its own for the file that
+  was uploaded; every other previewable file opens the preview dialog, which already
+  downloads from inside, so it must not grow a duplicate control. That button carries the
+  in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
   markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
   Story: `SessionFilePreviewPanel.stories.tsx`.

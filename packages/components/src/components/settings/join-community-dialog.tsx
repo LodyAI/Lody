@@ -1,52 +1,40 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRight, Users } from 'lucide-react';
-import { COMMUNITY_WECHAT_QR_API_PATH, buildSessionImageApiUrl } from '@lody/shared';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/ui';
-import { API_BASE_URL } from '@/lib';
+import { Users } from 'lucide-react';
+import { SiDiscord } from 'react-icons/si';
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
+// The Feishu group QR ships with the app rather than being fetched from the
+// server worker: About must render it on a desktop or mobile client that is
+// offline or signed out, and the OSS desktop entry makes no product-cloud
+// requests at all. Rotating the invite therefore means replacing this file.
+import communityFeishuQrUrl from '@/assets/community-feishu-qr.png';
 
-// The server worker serves the ops-managed WeChat group QR image (see
-// packages/shared/src/community.ts); a missing upload surfaces as the
-// onError fallback below instead of a broken image.
-const DEFAULT_WECHAT_QR_URL = buildSessionImageApiUrl(API_BASE_URL, COMMUNITY_WECHAT_QR_API_PATH);
-
+/**
+ * The Join-community dialog itself: controlled, trigger-less, and mounted by
+ * whichever surface opens it — the About settings button (`JoinCommunityButton`)
+ * and the sidebar help menu (`JoinCommunityDialogContainer`) share this one
+ * component so both routes look identical.
+ */
 export function JoinCommunityDialog({
   open,
   onOpenChange,
-  wechatQrUrl = DEFAULT_WECHAT_QR_URL,
+  qrImageUrl = communityFeishuQrUrl,
 }: {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  wechatQrUrl?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Overridable so Storybook can pin a fixture instead of the bundled asset. */
+  qrImageUrl?: string;
 }) {
   const { t } = useTranslation();
-  const [internalOpen, setInternalOpen] = useState(false);
-  const [qrLoadFailed, setQrLoadFailed] = useState(false);
-  const isOpen = open ?? internalOpen;
-  const setIsOpen = onOpenChange ?? setInternalOpen;
 
   const handleJoinDiscord = () => {
     void openExternalUrl(LODY_DISCORD_URL);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 px-2.5">
-          <Users className="mr-1 h-3.5 w-3.5" />
-          {t('settings.about.joinCommunity', 'Join community')}
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
@@ -61,29 +49,21 @@ export function JoinCommunityDialog({
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/70 p-4">
-            {qrLoadFailed ? (
-              <div className="flex h-48 w-48 items-center justify-center rounded-md border border-dashed border-border/70 px-4 text-center text-xs text-muted-foreground">
-                {t(
-                  'settings.about.wechatQrUnavailable',
-                  'The QR code is unavailable right now. Please try again later.'
-                )}
-              </div>
-            ) : (
-              <img
-                src={wechatQrUrl}
-                alt={t('settings.about.wechatGroupQrAlt', 'Lody WeChat group QR code')}
-                className="h-48 w-48 rounded-md bg-white object-contain"
-                onError={() => setQrLoadFailed(true)}
-              />
-            )}
+            {/* The white plate is not decoration: a QR inverted by a dark theme
+               does not scan. */}
+            <img
+              src={qrImageUrl}
+              alt={t('settings.about.feishuGroupQrAlt', 'Lody Feishu group QR code')}
+              className="h-40 w-40 rounded-md bg-white object-contain"
+            />
             <div className="text-center">
               <p className="text-sm font-medium text-foreground">
-                {t('settings.about.wechatGroup', 'WeChat group')}
+                {t('settings.about.feishuGroup', 'Feishu group')}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {t(
-                  'settings.about.wechatGroupHint',
-                  'Scan the QR code with WeChat to join the group.'
+                  'settings.about.feishuGroupHint',
+                  'Scan the QR code with Feishu to join the group.'
                 )}
               </p>
             </div>
@@ -94,7 +74,7 @@ export function JoinCommunityDialog({
             className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-border/70 bg-card/70 p-4 transition-colors hover:bg-hover"
           >
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-              <ArrowUpRight className="h-6 w-6 text-muted-foreground" />
+              <SiDiscord className="h-6 w-6 text-muted-foreground" />
             </span>
             <span className="text-sm font-medium text-foreground">
               {t('settings.about.joinDiscord', 'Join Discord')}
@@ -106,5 +86,25 @@ export function JoinCommunityDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Settings → About → Community entry. Highlighted (primary) rather than the
+ * outline used by the neighbouring link rows, because it is the row we want
+ * people to notice.
+ */
+export function JoinCommunityButton() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button size="sm" className="h-7 px-2.5" onClick={() => setOpen(true)}>
+        <Users className="mr-1 h-3.5 w-3.5" />
+        {t('settings.about.joinCommunity', 'Join community')}
+      </Button>
+      <JoinCommunityDialog open={open} onOpenChange={setOpen} />
+    </>
   );
 }

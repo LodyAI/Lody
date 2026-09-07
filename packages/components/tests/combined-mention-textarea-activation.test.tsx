@@ -11,6 +11,7 @@ const sessionItems: Array<{
   title: string;
   slug: string;
   activityAt?: number;
+  projectKey: 'chat' | `github:${string}` | `local:${string}:${string}`;
 }> = [];
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
@@ -48,6 +49,7 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
 
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
 import { initI18n } from '../src/i18n';
+import { commands } from '../src/lib/commands';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -84,6 +86,8 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   async function render(props: {
     value: string;
     skillAgent?: { machineId?: string; cliType?: string };
+    mentionSource?: unknown;
+    commandsEnabled?: boolean;
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -92,6 +96,8 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           value={value}
           onValueChange={setValue}
           skillAgent={props.skillAgent as never}
+          mentionSource={props.mentionSource as never}
+          commandsEnabled={props.commandsEnabled}
           resetOnEmpty={false}
         />
       );
@@ -145,7 +151,12 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   });
 
   it('mounts the mention tree when sessions are the only mentionable type', async () => {
-    sessionItems.push({ sessionId: 's1', title: 'Fix the parser', slug: 'fix-the-parser' });
+    sessionItems.push({
+      sessionId: 's1',
+      title: 'Fix the parser',
+      slug: 'fix-the-parser',
+      projectKey: 'chat',
+    });
 
     await render({ value: '' });
 
@@ -154,9 +165,27 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
     sessionItems.push(
-      { sessionId: 's1', title: 'First session', slug: 'first-session', activityAt: 3 },
-      { sessionId: 's2', title: 'Second session', slug: 'second-session', activityAt: 2 },
-      { sessionId: 's3', title: 'Third session', slug: 'third-session', activityAt: 1 }
+      {
+        sessionId: 's1',
+        title: 'First session',
+        slug: 'first-session',
+        activityAt: 3,
+        projectKey: 'chat',
+      },
+      {
+        sessionId: 's2',
+        title: 'Second session',
+        slug: 'second-session',
+        activityAt: 2,
+        projectKey: 'chat',
+      },
+      {
+        sessionId: 's3',
+        title: 'Third session',
+        slug: 'third-session',
+        activityAt: 1,
+        projectKey: 'chat',
+      }
     );
     await render({ value: '' });
     await typeInto('@session:');
@@ -178,6 +207,110 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       );
     });
     expect(highlightedRowText()).toContain('Second session');
+  });
+
+  it('starts in the current project and toggles without losing query or focus', async () => {
+    sessionItems.push(
+      {
+        sessionId: 'current',
+        title: 'Current parser work',
+        slug: 'current-parser-work',
+        activityAt: 2,
+        projectKey: 'github:lodyai/lody',
+      },
+      {
+        sessionId: 'other',
+        title: 'Other parser work',
+        slug: 'other-parser-work',
+        activityAt: 1,
+        projectKey: 'github:lodyai/other',
+      }
+    );
+    await render({
+      value: '',
+      mentionSource: { kind: 'github', repoFullName: ' LodyAI/Lody ' },
+    });
+    await typeInto('@session:parser');
+
+    const input = textarea();
+    if (!input) throw new Error('composer textarea missing');
+    expect(document.body.textContent).toContain('Current parser work');
+    expect(document.body.textContent).not.toContain('Other parser work');
+    expect(document.body.textContent).toContain('Current project');
+
+    const toggle = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[role="group"][aria-label="Session project scope"] button'
+      )
+    ).find((button) => button.textContent === 'All projects');
+    if (!toggle) throw new Error('scope toggle missing');
+    await act(async () => {
+      toggle.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+      toggle.click();
+    });
+
+    expect(input.value).toBe('@session:parser');
+    expect(document.activeElement).toBe(input);
+    expect(document.body.textContent).toContain('Other parser work');
+    expect(document.body.textContent).toContain('All projects');
+
+    // Going back within the same open menu preserves the temporary scope.
+    await typeInto('@');
+    await typeInto('@session:parser');
+    expect(document.body.textContent).toContain('Other parser work');
+
+    // Closing the menu resets the next open to the current project.
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    await typeInto('');
+    await typeInto('@session:parser');
+    expect(document.body.textContent).not.toContain('Other parser work');
+    expect(document.body.textContent).toContain('Current project');
+  });
+
+  it('offers all projects from an empty current-project result and scopes the command', async () => {
+    sessionItems.push({
+      sessionId: 'other',
+      title: 'Cross project session',
+      slug: 'cross-project-session',
+      activityAt: 1,
+      projectKey: 'github:lodyai/other',
+    });
+    await render({
+      value: '',
+      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+    });
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+    await typeInto('@session:cross');
+    expect(document.body.textContent).toContain(
+      'There are no other sessions in the current project.'
+    );
+    expect(document.body.textContent).not.toContain('Cross project session');
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(true);
+    await act(async () => Promise.resolve());
+    expect(document.body.textContent).toContain('Cross project session');
+
+    await typeInto('@');
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+  });
+
+  it('does not let a hidden retained composer own the scope command', async () => {
+    sessionItems.push({
+      sessionId: 'other',
+      title: 'Other session',
+      slug: 'other-session',
+      activityAt: 1,
+      projectKey: 'chat',
+    });
+    await render({ value: '', commandsEnabled: false });
+    await typeInto('@session:');
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
   });
 
   it('does not scan skills until something asks for them', async () => {

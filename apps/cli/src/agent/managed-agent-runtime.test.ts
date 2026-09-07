@@ -293,9 +293,9 @@ describe('ManagedAgentRuntimeManager', () => {
     expect(mapManagedRuntimePlatform('kimi-code', 'win32', 'x64')).toBe('node');
   });
 
-  it('pins Grok 1.0.0 for every supported native platform', () => {
+  it('pins Grok 1.0.13 for every supported native platform', () => {
     expect(GROK_BUILD_RUNTIME_VERSION).toBe(grokRuntimeManifest.officialRuntime.version);
-    expect(grokRuntimeManifest.officialRuntime.minimumSupportedVersion).toBe('1.0.0');
+    expect(grokRuntimeManifest.officialRuntime.minimumSupportedVersion).toBe('1.0.13');
     expect(mapManagedRuntimePlatform('grok-build', 'darwin', 'arm64')).toBe('darwin-arm64');
     expect(mapManagedRuntimePlatform('grok-build', 'linux', 'x64')).toBe('linux-x64');
     expect(mapManagedRuntimePlatform('grok-build', 'win32', 'arm64')).toBe('win32-arm64');

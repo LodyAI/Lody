@@ -73,6 +73,7 @@ import {
 } from './acknowledged-steer';
 import type { SessionMcpCatalogSelector } from './session-mcp-resolver';
 import {
+  getBuiltinToolPermissionOutcome,
   parseLodyExtensionCapabilities,
   parseLodyExtensionMessage,
   parseRateLimitsSnapshot,
@@ -645,6 +646,7 @@ export class AgentClient implements acp.Client {
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
+  private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
@@ -916,6 +918,10 @@ export class AgentClient implements acp.Client {
     }
 
     const notification = parseSessionNotification(params);
+
+    if (notification.update.sessionUpdate === 'config_option_update') {
+      this.applyConfigOptionsState(notification.update.configOptions, true);
+    }
 
     this.handleGoalSessionInfoUpdate(notification);
     this.handleCodexWarningSessionInfoUpdate(notification);
@@ -1603,9 +1609,12 @@ export class AgentClient implements acp.Client {
     // Drop config options the current version intentionally skips (e.g. the
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
-    this.configOptions = filterAcpConfigOptions(sessionResponse.configOptions ?? []);
-    this.legacySessionModelState = readLegacySessionModelState(sessionResponse) ?? null;
     this.currentModel = undefined;
+    this.applyConfigOptionsState(
+      sessionResponse.configOptions ?? [],
+      sessionResponse.configOptions !== undefined
+    );
+    this.legacySessionModelState = readLegacySessionModelState(sessionResponse) ?? null;
     const initialModelOption = this.findConfigOptionByCategory('model');
     if (
       initialModelOption?.type === 'select' &&
@@ -1615,6 +1624,48 @@ export class AgentClient implements acp.Client {
     } else if (this.legacySessionModelState?.currentModelId) {
       this.currentModel = this.resolveModelInfo(this.legacySessionModelState.currentModelId);
     }
+  }
+
+  private applyConfigOptionsState(
+    configOptions: readonly acp.SessionConfigOption[],
+    replaceConfigOptionValues: boolean
+  ): void {
+    this.configOptions = filterAcpConfigOptions(configOptions);
+    if (replaceConfigOptionValues) {
+      for (const configId of Object.keys(this.configOptionValues)) {
+        delete this.configOptionValues[configId];
+      }
+      for (const option of this.configOptions) {
+        if (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean') {
+          this.configOptionValues[option.id] = option.currentValue;
+        }
+      }
+    }
+
+    const modelOption = this.findConfigOptionByCategory('model');
+    if (modelOption?.type === 'select' && typeof modelOption.currentValue === 'string') {
+      this.currentModel = this.resolveModelInfo(modelOption.currentValue);
+    } else if (this.currentModel) {
+      this.currentModel = this.resolveModelInfo(this.currentModel.modelId);
+    } else {
+      this.currentModel = undefined;
+    }
+    for (const listener of this.configOptionsListeners) listener();
+  }
+
+  private retainLegacyConfigOptionValue(configId: string, value: AcpConfigOptionValue): void {
+    this.configOptionValues[configId] = value;
+    this.configOptions = this.configOptions.map((option) => {
+      if (option.id !== configId) return option;
+      if (option.type === 'select' && typeof value === 'string') {
+        return { ...option, currentValue: value };
+      }
+      if (option.type === 'boolean' && typeof value === 'boolean') {
+        return { ...option, currentValue: value };
+      }
+      return option;
+    });
+    for (const listener of this.configOptionsListeners) listener();
   }
 
   async startSession(
@@ -2481,19 +2532,17 @@ export class AgentClient implements acp.Client {
       this.options.sessionId
     );
 
-    if (result?.configOptions) {
+    if (result?.configOptions !== undefined) {
       // The agent returns the full option list, which re-includes any filtered
       // option (e.g. `agent`); drop it again here. See BC doc entry
       // BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
-      this.configOptions = filterAcpConfigOptions(result.configOptions);
-      // Keep the thought-level label carried on currentModel in sync when the
-      // user changes the thinking level (or any config option) mid-session.
-      if (this.currentModel) {
-        this.currentModel = this.resolveModelInfo(this.currentModel.modelId);
-      }
+      this.applyConfigOptionsState(result.configOptions, true);
+    } else if (result) {
+      // Older agents may acknowledge the request without returning the full
+      // snapshot. Keep replacement startup and runtime projection on the same
+      // accepted value for any matching option the agent already advertised.
+      this.retainLegacyConfigOptionValue(configId, value);
     }
-
-    if (result) this.configOptionValues[configId] = value;
 
     this.logger.debug(
       `[${this.options.sessionId}] ACP session config option set: ${configId}=${value}`
@@ -2504,6 +2553,26 @@ export class AgentClient implements acp.Client {
   /** Returns the config options currently known for this session. */
   getConfigOptions(): acp.SessionConfigOption[] {
     return this.configOptions;
+  }
+
+  subscribeConfigOptions(listener: () => void): () => void {
+    this.configOptionsListeners.add(listener);
+    return () => {
+      this.configOptionsListeners.delete(listener);
+    };
+  }
+
+  getAutomaticToolPermissionOutcome(
+    request: acp.RequestPermissionRequest,
+    pending: boolean
+  ): acp.RequestPermissionResponse['outcome'] | undefined {
+    if (request.sessionId !== this.acpSessionId) return undefined;
+    return getBuiltinToolPermissionOutcome({
+      agentConfig: this.options.agentConfig,
+      configOptions: this.configOptions,
+      request,
+      pending,
+    });
   }
 
   /**

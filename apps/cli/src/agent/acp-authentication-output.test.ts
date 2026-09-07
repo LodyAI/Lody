@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { BuiltinAuthenticationOutputParser } from './acp-authentication-output';
+import {
+  AcpAgentAuthorizationOutputParser,
+  BuiltinAuthenticationOutputParser,
+} from './acp-authentication-output';
 
 describe('BuiltinAuthenticationOutputParser', () => {
   it('parses Codex device authorization across output chunks', () => {
@@ -65,5 +68,40 @@ describe('BuiltinAuthenticationOutputParser', () => {
     const parser = new BuiltinAuthenticationOutputParser('codex');
 
     expect(parser.push('Open https://attacker.example/codex/device and continue')).toBeUndefined();
+  });
+});
+
+describe('AcpAgentAuthorizationOutputParser', () => {
+  it('offers an https authorization URL a third-party agent printed', () => {
+    const parser = new AcpAgentAuthorizationOutputParser();
+    const url = 'https://accounts.google.com/o/oauth2/auth?client_id=test&scope=profile';
+
+    expect(parser.push(`Visit ${url} to finish signing in\n`)).toEqual({
+      authorizationUrl: url,
+    });
+  });
+
+  it('ignores links that are not authorization endpoints', () => {
+    const parser = new AcpAgentAuthorizationOutputParser();
+
+    expect(
+      parser.push('Read the docs at https://example.com/docs/getting-started for setup')
+    ).toBeUndefined();
+  });
+
+  it('ignores plaintext http URLs', () => {
+    const parser = new AcpAgentAuthorizationOutputParser();
+
+    expect(parser.push('Open http://example.com/oauth/authorize?client_id=test')).toBeUndefined();
+  });
+
+  it('never offers to send an authorization code back over the protocol channel', () => {
+    const parser = new AcpAgentAuthorizationOutputParser();
+    const url = 'https://example.com/device?user_code=ABCD-EFGH';
+
+    expect(parser.push(`Enter the code at ${url}\n`)).toEqual({
+      authorizationUrl: url,
+      userCode: 'ABCD-EFGH',
+    });
   });
 });

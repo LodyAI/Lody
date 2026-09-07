@@ -449,3 +449,23 @@ export function buildPathLauncherLaunchInput(
 
   throw new Error(`Path launcher ${launcher.id} cannot build a launch request`);
 }
+
+export function buildPathLauncherProbes(
+  launchers: readonly PathLauncherOption[],
+  targetPath: string,
+  platform?: string | null
+): Array<{ launcherId: string; input: LaunchLocalPathInput }> {
+  const checks: Array<{ launcherId: string; input: LaunchLocalPathInput }> = [];
+  for (const launcher of launchers) {
+    if (
+      launcher.kind === 'custom' &&
+      !validateCustomPathLauncherCommandTemplate(launcher.commandTemplate).ok
+    )
+      continue;
+    checks.push({
+      launcherId: getPathLauncherId(launcher),
+      input: buildPathLauncherLaunchInput(launcher, targetPath, platform),
+    });
+  }
+  return checks;
+}

@@ -6,6 +6,7 @@ import {
   isAuthenticationRequiredACPError,
   isAgentDisconnectedError,
   isAcpSessionNotFoundError,
+  isProviderOverloadedACPError,
   mapACPErrorToFailureReason,
   parseACPError,
   shouldRecoverStaleACPConnectionPrompt,
@@ -71,6 +72,24 @@ describe('ACP error classification', () => {
     }
     expect(mapACPErrorToFailureReason(parsed)).toBe('acp_upstream_api_error');
     expect(shouldTerminateOnACPError(parsed, 'acp_upstream_api_error')).toBe(false);
+  });
+
+  it('maps Codex model capacity to a resumable provider overload', () => {
+    const parsed = parseACPError({
+      code: ACP_ERROR_CODES.INTERNAL_ERROR,
+      message: 'Internal error',
+      data: {
+        message: 'Selected model is at capacity. Please try a different model.',
+        codexErrorInfo: 'serverOverloaded',
+      },
+    });
+
+    if (!parsed) {
+      throw new Error('expected ACP error to parse');
+    }
+    expect(isProviderOverloadedACPError(parsed)).toBe(true);
+    expect(mapACPErrorToFailureReason(parsed)).toBe('acp_provider_overloaded');
+    expect(shouldTerminateOnACPError(parsed, 'acp_provider_overloaded')).toBe(false);
   });
 
   it('maps DeepSeek Harness compression conflicts to an actionable storage reason', () => {

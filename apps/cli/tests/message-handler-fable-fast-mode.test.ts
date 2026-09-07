@@ -38,7 +38,8 @@ type ApplyAcpModeAndModel = (
     agentType?: string;
     modelId?: string;
     configOptionValues?: Record<string, AcpConfigOptionValue>;
-  }
+  },
+  context: { sessionDoc: unknown }
 ) => Promise<void>;
 
 function createHarness() {
@@ -86,12 +87,17 @@ function createHarness() {
     },
   };
 
+  const applyAcpModeAndModel = (
+    handler as unknown as {
+      applyAcpModeAndModel: ApplyAcpModeAndModel;
+    }
+  ).applyAcpModeAndModel.bind(handler);
+
   return {
     apply: (
-      handler as unknown as {
-        applyAcpModeAndModel: ApplyAcpModeAndModel;
-      }
-    ).applyAcpModeAndModel.bind(handler),
+      targetSession: Parameters<ApplyAcpModeAndModel>[0],
+      config: Parameters<ApplyAcpModeAndModel>[1]
+    ) => applyAcpModeAndModel(targetSession, config, { sessionDoc: {} }),
     session,
     setSessionConfigOption,
     unstableSetSessionModel,
@@ -99,20 +105,17 @@ function createHarness() {
 }
 
 describe('MessageHandler Claude Fable Fast mode compatibility', () => {
-  it.each(['fast', 'fast-mode'])(
-    'does not send %s=false to a Fable model',
-    async (configId) => {
-      const { apply, session, setSessionConfigOption } = createHarness();
+  it.each(['fast', 'fast-mode'])('does not send %s=false to a Fable model', async (configId) => {
+    const { apply, session, setSessionConfigOption } = createHarness();
 
-      await apply(session, {
-        agentType: 'claude',
-        modelId: 'claude-fable-5[1m]',
-        configOptionValues: { [configId]: false },
-      });
+    await apply(session, {
+      agentType: 'claude',
+      modelId: 'claude-fable-5[1m]',
+      configOptionValues: { [configId]: false },
+    });
 
-      expect(setSessionConfigOption).not.toHaveBeenCalled();
-    }
-  );
+    expect(setSessionConfigOption).not.toHaveBeenCalled();
+  });
 
   it('recognizes Fable when the target model is carried as a config option', async () => {
     const { apply, session, setSessionConfigOption, unstableSetSessionModel } = createHarness();

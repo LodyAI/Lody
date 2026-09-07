@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import queueCurrent from '@/assets/onboarding/intro/queue-current.png';
 import quietWork from '@/assets/onboarding/intro/quiet-work.png';
 import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
 import readyToBegin from '@/assets/onboarding/intro/ready-to-begin.png';
-import { languageAtom } from '@/atoms/settings';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
+import { WINDOW_DRAG_EXEMPT_CLASS } from '@/ui/window-drag-region';
 import type { AudioLayers } from './use-onboarding-audio';
 import { playClick, playCut, playReveal, playSelect } from './ui-sounds';
 
@@ -288,9 +287,8 @@ export function IntroSequence({
 }): React.JSX.Element {
   const [current, setCurrent] = useState(0);
   const handoffTimer = useRef<number | null>(null);
-  const { t } = useTranslation();
-  const [language] = useAtom(languageAtom);
-  const chinese = language === 'zh_CN';
+  const { t, i18n } = useTranslation();
+  const chinese = (i18n.resolvedLanguage ?? i18n.language) === 'zh_CN';
   const [departing, setDeparting] = useState(false);
 
   // Remember the beat we came from so its sentence can fade out underneath the
@@ -410,7 +408,10 @@ export function IntroSequence({
                   playClick();
                   setCurrent(LAST);
                 }}
-                className="absolute right-8 top-7 z-10 border-b border-transparent px-1 py-1 font-mono text-[10.5px] tracking-[0.08em] text-slate-600 transition-colors hover:border-slate-500 hover:text-slate-950"
+                className={cn(
+                  WINDOW_DRAG_EXEMPT_CLASS,
+                  'absolute right-8 top-14 z-10 border-b border-transparent px-1 py-1 font-mono text-[10.5px] tracking-[0.08em] text-slate-600 transition-colors hover:border-slate-500 hover:text-slate-950'
+                )}
               >
                 {t('onboarding.intro.skip', 'Skip intro')}
               </button>

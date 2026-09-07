@@ -82,6 +82,30 @@ export function useChatLandingDefaults({
 }: UseChatLandingDefaultsArgs) {
   const initializedRef = useRef(false);
   const initializedWorkspaceIdRef = useRef<string | null>(null);
+  /* The contextType restore is a RENDER-PHASE state adjustment ("adjusting
+     state when a prop changes" — react.dev/learn/you-might-not-need-an-effect),
+     ONE-SHOT per workspace entry and deliberately not an effect write. As an
+     effect it re-ran (without latching) on the load effect's wait-for-data
+     early returns, while chat-landing's auto-switch effect moves `contextType`
+     away from a context whose backing collection is empty under a DIFFERENT
+     readiness guard — re-writing the stored context every pre-init run turned
+     that disagreement into an unbounded write ping-pong (#185 shape). Adjusted
+     during render there is no effect to re-arm, the restored value lands in
+     the SAME commit (no pre-restore flash), and afterwards the auto-switch
+     rules own the field. State (not a ref) guards the one-shot so an aborted
+     concurrent render retries instead of consuming the restore. */
+  const [restoredContextTypeWorkspaceId, setRestoredContextTypeWorkspaceId] = useState<
+    string | null
+  >(null);
+  if (workspaceId && restoredContextTypeWorkspaceId !== workspaceId) {
+    setRestoredContextTypeWorkspaceId(workspaceId);
+    if (shouldRestoreContextType) {
+      const storedContextType = readChatLandingDefaults(workspaceId)?.contextType;
+      if (storedContextType && storedContextType !== contextType) {
+        setContextType(storedContextType);
+      }
+    }
+  }
   const [canPersist, setCanPersist] = useState(false);
   const [repoDefaultsReady, setRepoDefaultsReady] = useState(false);
 
@@ -99,21 +123,18 @@ export function useChatLandingDefaults({
     if (!workspaceId) return;
 
     const stored = readChatLandingDefaults(workspaceId);
-    const effectiveContextType =
-      shouldRestoreContextType && stored?.contextType ? stored.contextType : contextType;
+    // The render-phase adjustment above has already landed any stored
+    // contextType by the time this effect runs, so the live value is the
+    // effective one.
     const storedLocalMachineId = stored?.localMachineId as MachineId | null | undefined;
     const storedLocalProjectId = stored?.localProjectId as LocalProjectId | null | undefined;
     const requiredMachineId =
-      effectiveContextType === 'local'
+      contextType === 'local'
         ? (selectedLocalProject?.machineId ?? selectedMachineId ?? storedLocalMachineId ?? null)
         : null;
     const hasStoredRepo = Boolean(stored?.repoFullName);
     const isRepoReady = !hasStoredRepo || repositories !== undefined;
     setRepoDefaultsReady(isRepoReady);
-
-    if (shouldRestoreContextType && stored?.contextType && stored.contextType !== contextType) {
-      setContextType(stored.contextType);
-    }
 
     // Apply local project selection
     if (!selectedLocalProject && storedLocalMachineId && storedLocalProjectId) {

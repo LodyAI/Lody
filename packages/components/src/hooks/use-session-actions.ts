@@ -373,6 +373,7 @@ export type SessionActions = {
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
+  markSessionUnread: (sessionId: SessionId) => Promise<void>;
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -640,6 +641,12 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+      // The accept unit includes the first user message, so the meta it
+      // publishes already carries that activity. Written here, not by a
+      // follow-up touch: a close between acceptance and the first turn must
+      // never make the session look empty (empty tabs are deleted, not
+      // archived).
+      sessionMeta.lastMessageAt = getServerNow();
       const sessionRoomId = getSessionRoomId(sessionId);
       const historyEntry = { ...history, id: uuidv4() } as SessionHistory;
       const inputConfig = normalizeSessionTurnInputConfig(historyEntry.inputConfig);
@@ -851,7 +858,6 @@ export function useSessionActions(): SessionActions {
       try {
         await runtime.writer.upsertDocMeta(roomId, {
           latestUserMsgId: userTurnId,
-          lastMissingHistoryUserMsgId: undefined,
         } as Partial<SessionMeta>);
       } catch (error) {
         // The RPC fast path may already have delivered this turn to the CLI; a
@@ -1063,6 +1069,34 @@ export function useSessionActions(): SessionActions {
     [runtime]
   );
 
+  const markSessionUnread = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(existing)) return;
+      // Prefer the repo read, but fall back to the same rendered metadata cache
+      // as Archive. A sidebar row can arrive before the repo read hydrates; an
+      // action offered on that visible row must not become a silent no-op.
+      const repoMeta = existing?.meta as SessionMeta | undefined;
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const lastMessageAt =
+        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+        getFiniteTimestamp(cachedMeta?.lastMessageAt);
+      if (lastMessageAt === null) return;
+
+      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known message; do not touch the
+      // activity timestamp, which would reorder the sidebar.
+      await runtime.writer.upsertDocMeta(roomId, {
+        lastReadAt: lastMessageAt - 1,
+      } as Partial<SessionMeta>);
+    },
+    [runtime, store]
+  );
+
   const invalidateExternalHistoryCatalog = useCallback(
     async (sessionMeta: SessionMeta | undefined) => {
       if (!runtime) {
@@ -1179,9 +1213,15 @@ export function useSessionActions(): SessionActions {
       }
 
       const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
+      const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
         | undefined;
+      // The repo read is preferred (freshest lifecycle fields), but it can lag
+      // a session the UI already renders. The archive write below is an
+      // idempotent patch, so the rendered meta cache is enough to proceed — a
+      // session the UI can show must also be closable.
+      const sessionMeta =
+        repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
       if (!sessionMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
@@ -1230,7 +1270,7 @@ export function useSessionActions(): SessionActions {
         lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store, getSessionLifecycleMetas]
   );
 
   const restoreSession = useCallback(
@@ -1400,6 +1440,7 @@ export function useSessionActions(): SessionActions {
     updateSessionTitle,
     transferSessionOwner,
     markSessionRead,
+    markSessionUnread,
     deleteSessions,
     archiveSession,
     restoreSession,

@@ -178,7 +178,7 @@ function getSessionShareActionLabel(
 
 /** Shared chrome for status pills in the session conversation header (Private, Archived). */
 const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
+  'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
   'text-[0.7rem] font-medium leading-none text-muted-foreground transition-colors ' +
   'hover:border-border hover:text-foreground ' +
   'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +

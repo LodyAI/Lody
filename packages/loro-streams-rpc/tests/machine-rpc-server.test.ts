@@ -142,6 +142,10 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-code-ack',
             action: 'start',
             authorizationCode: 'secret-browser-code',
+            authenticationInput: 'secret-form-input',
+            authorizationCodeEnvelope: { ciphertext: 'secret-code-ciphertext' },
+            authenticationInputEnvelope: { ciphertext: 'secret-form-ciphertext' },
+            env: { PROVIDER_TOKEN: 'secret-provider-token' },
             cliType: 'builtin',
             agentType: 'claude',
           },
@@ -155,7 +159,15 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
     await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledOnce());
     expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCode":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInput":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCodeEnvelope":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInputEnvelope":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"env":"[REDACTED]"');
     expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-browser-code');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-input');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-code-ciphertext');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-ciphertext');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-provider-token');
     server.stop();
   });
 
@@ -350,8 +362,6 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-claude',
             action: 'start',
             configId,
-            cliType: 'builtin',
-            agentType: 'claude',
           },
         },
       ],
@@ -362,11 +372,18 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     await server.start();
     await fake.waitForAppendedCount(1);
-    const publicKey = (
+    const authorizationProgress = (
       fake.appended[0]!.value as {
-        result: { authorizationCodePublicKey: RpcSecretPublicKey };
+        result: {
+          authorizationCodePublicKey: RpcSecretPublicKey;
+          authenticationInputPublicKey?: RpcSecretPublicKey;
+        };
       }
-    ).result.authorizationCodePublicKey;
+    ).result;
+    const publicKey = authorizationProgress.authorizationCodePublicKey;
+    // Preserve the old built-in OAuth progress shape for strict older clients.
+    // The generic key is advertised only by the new interactive protocol flows.
+    expect(authorizationProgress.authenticationInputPublicKey).toBeUndefined();
     const authorizationCodeEnvelope = await encryptRpcSecret(
       publicKey,
       'browser-returned-code',
@@ -387,9 +404,6 @@ describe('LoroStreamsMachineRpcServer', () => {
             action: 'submit-code',
             authenticationRequestId: 'auth-claude',
             authorizationCodeEnvelope,
-            configId,
-            cliType: 'builtin',
-            agentType: 'claude',
           },
         },
       ],
@@ -404,6 +418,63 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     releaseStart();
     await fake.waitForAppendedCount(3);
+    server.stop();
+  });
+
+  it('carries only the persisted config reference when starting authentication', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const authenticateMachineAcp = vi.fn(
+      async (args): Promise<MachineAcpAuthenticateResponse> => ({
+        type: 'machine/acp-authenticate_response',
+        machineId,
+        requestId: args.requestId,
+        agentType: 'antigravity-acp',
+        success: true,
+        disposition: 'authenticated',
+      })
+    );
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      maxConcurrentRequests: 1,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      authenticateMachineAcp,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0' as const,
+          rpcVersion: '1',
+          machineId,
+          workspaceId,
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          id: 'auth-pick',
+          method: 'machine/acp-authenticate',
+          params: {
+            requestId: 'auth-antigravity',
+            action: 'start',
+            configId,
+          },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    await server.start();
+    await fake.waitForAppendedCount(1);
+    expect(authenticateMachineAcp).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'auth-antigravity', action: 'start', configId })
+    );
     server.stop();
   });
 
@@ -1733,9 +1804,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'builtin',
-            agentType: 'codex',
-            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
           },
         },
       ],
@@ -1805,10 +1873,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'custom',
-            agentType: 'custom-agent',
-            customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
           },
         },
       ],
@@ -1826,10 +1890,6 @@ describe('LoroStreamsMachineRpcServer', () => {
     expect(refreshMachineAcpCapabilities).toHaveBeenCalledWith(
       expect.objectContaining({
         configId,
-        cliType: 'custom',
-        agentType: 'custom-agent',
-        customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-        env: { ACP_PROVIDER_TOKEN: 'secret-token' },
         onAcpBinaryProgress: expect.any(Function),
       })
     );
@@ -1889,10 +1949,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       replyTo: 'workspace-1:rpc:res:machine-1',
       sentAt: Date.now(),
       expiresAt: Date.now() + 5000,
-      params: {
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-      },
+      params: {},
     };
     fake.pushBatch({
       messages: [
@@ -2041,8 +2098,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'builtin',
-            agentType: 'codex',
           },
         },
       ],
@@ -2116,9 +2171,6 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-1',
             action: 'start',
             configId,
-            cliType: 'builtin',
-            agentType: 'kimi',
-            runtimeOverrides: { kimiPath: '/opt/kimi' },
           },
         },
       ],
@@ -2137,8 +2189,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       expect.objectContaining({
         requestId: 'auth-1',
         action: 'start',
-        agentType: 'kimi',
-        runtimeOverrides: { kimiPath: '/opt/kimi' },
+        configId,
         onProgress: expect.any(Function),
       })
     );

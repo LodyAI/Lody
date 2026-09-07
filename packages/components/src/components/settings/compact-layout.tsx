@@ -32,7 +32,10 @@ export function CompactSection({
 }: CompactSectionProps) {
   return (
     <section
-      className={cn('rounded-lg border border-border/70 bg-card/60 text-sm shadow-none', className)}
+      className={cn(
+        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm shadow-none',
+        className
+      )}
     >
       {title || headerRight ? (
         <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
