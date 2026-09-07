@@ -10,6 +10,9 @@ new scopes need `CLAUDE.md` symlinks). Per
 [document maintenance](.agents/README.md), Specs need human review while
 `.agents/` and directory READMEs explain. Private records stay private.
 
+Non-trivial work MUST add or update an [Agent Note](.agents/notes/AGENTS.md#when-to-write)
+in the same PR, including design-only conclusions. Only mechanical/local edits are exempt.
+
 ## Repository boundary
 
 Standalone public source tree: `apps/{cli,electron}` and the packages they
@@ -87,10 +90,7 @@ after changing package scope or cloud/local composition.
 
 ## Project map
 
-`apps/cli` (agent, persistence, Machine RPC), `apps/electron` (desktop +
-bundled CLI), `packages/components` (shared UI), `packages/platform` (ports),
-`packages/cloud-api` (optional-cloud DTOs), `packages/shared` (schemas),
-`packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`, `site-docs`.
+See the [repository map](README.md#repository).
 
 ## Checks and commits
 
