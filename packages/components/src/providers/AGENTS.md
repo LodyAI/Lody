@@ -48,6 +48,10 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
 - Cloud Electron waits for the first **Run local agent** setting snapshot before creating
   its workspace runtime. Enabled uses dual sync; disabled uses cloud-only sync and must
   not attach the local data plane or surface its reconnect state.
+- Meta-room attachment is single-flight per runtime. Token, network, and visibility edges may
+  force one immediate recovery attempt, but they must preserve the current outage's retry history;
+  only a sustained healthy dwell resets backoff. Every attempt after the first is a `recovery`
+  phase, including one prompted by a rotated token.
 - Workspace-level rooms without a machine owner use the platform fallback. Task rooms and
   the Task Index depend on this behavior; returning no transport silently disables task
   synchronization.

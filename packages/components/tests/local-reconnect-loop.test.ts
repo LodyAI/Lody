@@ -86,10 +86,7 @@ describe('createLocalReconnectLoop', () => {
           loop.update();
           yield* TestClock.adjust(Duration.millis(0));
           yield* flushMicrotasks;
-          expect(calls).toEqual([
-            { force: true },
-            { force: false },
-          ]);
+          expect(calls).toEqual([{ force: true }, { force: false }]);
         }),
       {
         onReconnect: ({ force }, harness) => {
@@ -107,6 +104,31 @@ describe('createLocalReconnectLoop', () => {
         loop.trigger('visibility-wake');
         yield* flushMicrotasks;
         expect(calls).toEqual([{ force: true, triggerReason: 'visibility-wake' }]);
+      })
+    );
+  });
+
+  it('does not forgive retry history when an external trigger forces an immediate attempt', async () => {
+    await withTestLoop(({ loop, calls, setHasProblem }) =>
+      Effect.gen(function* () {
+        setHasProblem(true);
+        loop.update();
+        yield* TestClock.adjust(Duration.millis(0));
+        yield* flushMicrotasks;
+        expect(calls).toHaveLength(1);
+
+        // A fresh credential deserves an immediate attempt, but the outage is
+        // still the same one. After that forced attempt, retry 3 must retain
+        // the accumulated 2s delay instead of restarting at 1s.
+        loop.trigger('token-refresh');
+        yield* flushMicrotasks;
+        expect(calls).toHaveLength(2);
+        yield* TestClock.adjust(Duration.millis(1_999));
+        yield* flushMicrotasks;
+        expect(calls).toHaveLength(2);
+        yield* TestClock.adjust(Duration.millis(1));
+        yield* flushMicrotasks;
+        expect(calls).toHaveLength(3);
       })
     );
   });
