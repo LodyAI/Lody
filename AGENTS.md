@@ -4,14 +4,26 @@
 
 ## Context maintenance
 
-Read every `AGENTS.md` from root to the changed file; read `.github/AGENTS.md`
-before PR/Issue work. Invariants live in the nearest `AGENTS.md` (under 8 KiB;
-new scopes need `CLAUDE.md` symlinks). Per
-[document maintenance](.agents/README.md), Specs need human review while
-`.agents/` and directory READMEs explain. Private records stay private.
-
-Non-trivial work MUST add or update an [Agent Note](.agents/notes/AGENTS.md#when-to-write)
-in the same PR, including design-only conclusions. Only mechanical/local edits are exempt.
+- Before work, read scoped `AGENTS.md`, relevant Specs, active notes, `.agents/docs/`,
+  and module READMEs; archives are historical, not current authority.
+  Read `.github/AGENTS.md` before PR/Issue work.
+- Specs express intent, docs explain implementation, notes explain decisions.
+  Check code and evidence: distinguish bugs, stale docs, and unimplemented intent.
+  Never change a Spec to justify a bug; separate intent, inspection, and test results.
+- Changed intent/guarantees MUST update the [Spec](specs/AGENTS.md) as `draft`.
+  `approved` requires linked human approval of that revision; `outdated` needs review.
+  Only meaning-preserving editorial changes may retain approval.
+- Non-trivial work MUST add/update an [Agent Note](.agents/notes/AGENTS.md#when-to-write)
+  in the same PR; substantial research/design conclusions also require a note
+  without a PR. Reuse the owning note; link different decisions. Only mechanical/local
+  edits without changed decisions are exempt. Proposals stay `proposed`.
+- Update affected docs/READMEs. Run `pnpm run docs status` at start, `pnpm run docs check`
+  at finish; review SHA-protected changes before confirming. Checks prove neither
+  product correctness nor approval. [Details](.agents/README.md).
+- Translation may follow later; it never grants approval. Keep private records private.
+  For read-only tasks, report deferred documentation updates instead of writing.
+- Invariants stay in the nearest `AGENTS.md` (<8 KiB; new scopes need `CLAUDE.md`
+  symlinks), not in explanatory docs or notes.
 
 ## Repository boundary
 
@@ -56,34 +68,24 @@ and Web/mobile app sources.
   document and selected ids in each user turn input config. Do not add machine bindings.
   Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
   driving turn's selection into ACP startup rather than rereading session history.
-- Workspace catalog mutations (MCP servers and Agent Roles) are durable on the local
-  Flock write and shared by an explicit upload that follows it. Settings surfaces resolve
-  on durability and do not wait on or report that upload: the row already exists, the
-  joined room carries the document when a one-shot upload cannot, and a banner about it is
-  something the user can neither act on nor dismiss. What is forbidden is the opposite —
-  reporting a durable write as failed, or rolling one back, because the upload did not go
-  through. The CLI still reports its own sync result to the terminal.
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+- MCP/Role catalog writes resolve on local Flock durability, followed by explicit
+  upload. Settings neither await nor report upload; upload failure must not fail or
+  roll back a durable write. CLI reports its sync result. See
+  [catalog explanation](.agents/docs/workspace-catalog-durability.md).
+- Roles use one workspace Flock `agentRole` family; sharing updates `visibility`.
+  Store no secrets, API keys, MCP selections, or memory; apply
+  `isSensitiveAgentRoleConfigOptionKey` on read and write. Roles pin permission via
+  `runConfig.modeId` or `_permission`; hide the separate composer permission button
+  when pinned, but keep warning-tone modes visibly marked on every such surface.
+  Role-level auto-approval policy is out of scope. Settings/mentions use
+  `canReadAgentRole`/`canManageAgentRole`; MCP resolves explicit Role ids from the
+  catalog without requiring mention-scoped authorization.
+- Roles bind exact `machineId + agentConfigId`, never fall back, and remain listed
+  with precise reasons but unmentionable when machine/config/model/mode is unavailable.
+  Before Operation acceptance, MCP resolves the current `agentRoleId` row and freezes
+  canonical Prompt, target, Role revision, and dispatch config into the Operation;
+  edits/deletion cannot change recovery or retry. `SessionMeta.agentRoleId` and
+  `agentRoleRevision` are display-only creation provenance.
 
 `pnpm check:public-boundary` is the executable repository boundary and must pass
 after changing package scope or cloud/local composition.

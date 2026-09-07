@@ -21,6 +21,13 @@ instructions expose the requirement directly; the finishing workflow applies it 
 both code diffs and design conclusions. Proposals remain proposals until adopted
 and implemented. Public notes contain public rationale, not private transcripts.
 
+The root maintenance checklist also states which Specs, notes, docs, and READMEs
+to read before work; when changed intent returns a Spec to draft; and why linked
+human approval cannot be replaced by passing checks. Detailed workflows remain in
+their existing documents. Catalog explanations moved to
+[a dedicated guide](../../../docs/workspace-catalog-durability.md), while all binding
+catalog rules remain in the root, to accommodate the checklist within the size limit.
+
 This refines the note-writing threshold in the earlier
 [maintenance proposal](../../proposed/process/2026-09-05-human-reviewed-spec-maintenance.md).
 Its translation, Spec approval, and historical-retention policies are unchanged.

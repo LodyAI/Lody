@@ -13,6 +13,8 @@ Translation: current
 
 [Note 规则](../../AGENTS.md#when-to-write) 统一定义触发条件，包括调查、设计结论及明确禁止文件写入的任务。根说明直接展示要求，收尾流程同时检查代码 diff 和设计结论。提案在被采纳并实施前仍是提案。公开 note 保存可公开的理由，不保存私有对话原文。
 
+根维护清单还直接列出开工前应读的 Specs、notes、docs 和 README，说明意图改变时 Spec 退回草案，以及检查通过不能代替有链接的人工批准。详细流程仍保留在原文档中。目录写入的解释性文字移到[独立说明](../../../docs/workspace-catalog-durability.md)，所有对应业务约束仍在根文件中，为清单腾出空间且不提高大小限制。
+
 本次细化此前[文档维护提案](../../proposed/process/2026-09-05-human-reviewed-spec-maintenance.zh.md)中的 note 更新门槛，不改变其翻译、Spec 审批和历史保留规则。根说明的目录清单改为链接 README 中的仓库导航，为规则腾出空间，不删除业务约束，也不提高大小限制。
 
 ## 方案与影响
