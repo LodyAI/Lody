@@ -456,8 +456,15 @@ export function ProvidersScreenView({
                           {activity ? (
                             <ProviderActivityAction activity={activity} config={config} />
                           ) : status !== 'needs-auth' ? (
+                            // Always outline, passed or not. Ghosting the
+                            // button once a test succeeded emptied the slot of
+                            // everything but a word, so the one row that had
+                            // been verified read as a hole in the column while
+                            // its neighbours kept a bordered control. A fixed
+                            // slot only holds the column if what sits in it
+                            // keeps its shape too.
                             <Button
-                              variant={status === 'passed' ? 'ghost' : 'outline'}
+                              variant="outline"
                               size="sm"
                               className="w-full px-0"
                               disabled={noLocalMachine}
