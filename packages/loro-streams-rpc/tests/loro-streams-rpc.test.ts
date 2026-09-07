@@ -3158,3 +3158,124 @@ describe('machine RPC response live transport fallback', () => {
     dispatcher.stop();
   });
 });
+
+describe('pending RPC deadline', () => {
+  // Flush the microtask queue without advancing the (faked) clock, so the
+  // response loop can deliver a pushed batch between timer advances.
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  const registerRefresh = (
+    dispatcher: LoroStreamsRpcResponseDispatcher,
+    onAcpBinaryProgress: (message: unknown) => void
+  ) =>
+    dispatcher.registerPending('request-1', {
+      machineId: 'machine-1',
+      method: 'machine/acp-capabilities-refresh',
+      timeoutMs: 1_000,
+      startedAtMs: Date.now(),
+      onAcpBinaryProgress: onAcpBinaryProgress as never,
+    });
+
+  const progressBatch = (nextOffset: string): LoroJsonStreamBatch => ({
+    messages: [
+      {
+        jsonrpc: '2.0',
+        id: 'request-1',
+        method: 'machine/acp-capabilities-refresh',
+        rpcVersion: '1',
+        machineId: 'machine-1',
+        result: {
+          type: 'machine/acp-binary-progress',
+          machineId: 'machine-1',
+          agentType: 'kimi',
+          status: 'downloading',
+          percent: 42,
+        },
+      },
+    ],
+    nextOffset,
+    cursor: `cursor-${nextOffset}`,
+    upToDate: true,
+  });
+
+  it('measures silence, so a reporting download cannot expire its own request', async () => {
+    // The startup budget excludes runtime download on the stated grounds that
+    // progress frames keep resetting this deadline. With an absolute timer that
+    // was simply false: a download slower than the budget expired the very
+    // request that was reporting it, and the user got a client-side timeout
+    // instead of the machine's answer.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const progress: unknown[] = [];
+      let settled = false;
+      const pending = registerRefresh(dispatcher, (message) => progress.push(message)).then(
+        (value) => {
+          settled = true;
+          return value;
+        }
+      );
+
+      for (let elapsed = 0; elapsed < 5_000; elapsed += 800) {
+        await vi.advanceTimersByTimeAsync(800);
+        fake.pushBatch(progressBatch(String(elapsed)));
+        await flushMicrotasks();
+      }
+
+      // Five seconds on a one-second deadline, and still in flight.
+      expect(progress).toHaveLength(7);
+      expect(settled).toBe(false);
+
+      dispatcher.stop();
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still gives up once the machine goes quiet', async () => {
+    // The point of re-arming is that silence, not elapsed work, is what a
+    // dead daemon looks like. A machine that stops reporting must still expire.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const pending = registerRefresh(dispatcher, () => {});
+
+      await vi.advanceTimersByTimeAsync(800);
+      fake.pushBatch(progressBatch('1'));
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(800);
+      await flushMicrotasks();
+      // 1.6s total, but only 0.8s since the last frame.
+      await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBeNull();
+
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -38,9 +38,17 @@ export const ACP_NPX_STARTUP_MAX_ATTEMPTS = 3;
  * Worst-case machine time for ONE startup attempt: the slowest `initialize`
  * followed by `session/new`.
  *
- * Runtime download is deliberately excluded. It streams progress frames, so an
- * inactivity-based transport timeout is continuously reset while it runs and a
- * slow download cannot expire the request.
+ * Runtime download is deliberately excluded, and that exclusion is load-bearing
+ * rather than optimistic: a download streams progress frames, and BOTH client
+ * transports measure silence rather than elapsed time. The local Electron path
+ * uses `request.setTimeout`, which Node arms on the socket and resets on every
+ * received chunk; the Streams path re-arms its pending deadline on each
+ * progress frame (`LoroStreamsRpcResponseDispatcher.renewPending`). A download
+ * that reports progress therefore cannot expire the request that is reporting
+ * it, however long it runs.
+ *
+ * Everything below is the SILENT part of a startup — no frame is emitted across
+ * any of it — which is why it has to be budgeted to the millisecond.
  */
 export const ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS =
   ACP_COLD_NPX_INIT_TIMEOUT_MS + ACP_NEW_SESSION_TIMEOUT_MS;
@@ -54,16 +62,45 @@ export const ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS =
 const ACP_STARTUP_ATTEMPT_CLEANUP_MS = 10_000;
 
 /**
- * Worst-case machine time for a capability refresh: every attempt the recovery
- * policy is allowed to make, plus the cleanup between them.
+ * How long a startup may wait for one of the process-wide ACP session-start
+ * slots (`AcpSessionStartGate`) before the machine gives up on it.
+ *
+ * The queue sits OUTSIDE `runNpxStartupWithRecovery`, so it is not covered by
+ * any of the per-attempt timeouts above, and it emits no frame — a queued start
+ * is pure silence on the wire. An unbounded queue therefore makes every number
+ * in this file a claim the machine cannot keep: the client would eventually
+ * expire a request whose work had not yet begun.
+ *
+ * This is a POLICY bound, not a derived one. Deriving it would mean "however
+ * long the slot ahead of me may take", which is the whole startup budget again
+ * and would push the client backstop past three quarters of an hour for a
+ * daemon that is simply dead. Five minutes covers real contention — onboarding
+ * warms several runtimes against two slots, and the downloads that make those
+ * starts slow happen outside the gate — and turns the pathological case into
+ * the machine's own reported "busy" failure instead of a client-side timeout
+ * with no reason attached.
+ *
+ * A heartbeat during the wait would remove the need for any bound, since the
+ * client deadline measures silence. It needs a progress frame that older
+ * clients ignore instead of mistaking for a final response, which neither
+ * transport can do yet.
+ */
+export const ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS = 300_000;
+
+/**
+ * Worst-case machine time for a capability refresh: the wait for a start slot,
+ * every attempt the recovery policy is allowed to make, and the cleanup between
+ * them.
  *
  * Budgeting a single attempt is what makes a client backstop lie. The machine
  * treats a cold `initialize` timeout as a reason to purge and try again, so a
  * one-attempt budget expires while the machine is still executing its intended
  * recovery — and the user is told "timed out" instead of the reason the machine
- * would have reported on attempt three.
+ * would have reported on attempt three. The queue is the same mistake one level
+ * up: work that has not started yet still consumes the client's patience.
  */
 export const ACP_CAPABILITIES_REFRESH_MACHINE_BUDGET_MS =
+  ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS +
   ACP_NPX_STARTUP_MAX_ATTEMPTS * ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS +
   (ACP_NPX_STARTUP_MAX_ATTEMPTS - 1) * ACP_STARTUP_ATTEMPT_CLEANUP_MS;
 

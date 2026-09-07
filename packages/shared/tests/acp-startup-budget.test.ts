@@ -8,6 +8,7 @@ import {
   ACP_NEW_SESSION_TIMEOUT_MS,
   ACP_NPX_STARTUP_MAX_ATTEMPTS,
   ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS,
+  ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS,
 } from '../src/acp-startup-budget';
 
 describe('acp startup budget', () => {
@@ -27,6 +28,18 @@ describe('acp startup budget', () => {
     expect(ACP_NPX_STARTUP_MAX_ATTEMPTS).toBeGreaterThan(1);
     expect(ACP_CAPABILITIES_REFRESH_MACHINE_BUDGET_MS).toBeGreaterThan(
       ACP_NPX_STARTUP_MAX_ATTEMPTS * ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS
+    );
+  });
+
+  it('covers the wait for a start slot, which happens before any attempt', () => {
+    // The session-start gate queues outside `runNpxStartupWithRecovery` and
+    // emits no progress frame, so queue time is silence the client counts. A
+    // budget that starts at the first attempt expires requests whose work had
+    // not begun — and the machine has no reason to report for them.
+    expect(ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(ACP_CAPABILITIES_REFRESH_MACHINE_BUDGET_MS).toBeGreaterThanOrEqual(
+      ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS +
+        ACP_NPX_STARTUP_MAX_ATTEMPTS * ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS
     );
   });
 

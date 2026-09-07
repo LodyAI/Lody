@@ -40,13 +40,11 @@ and Web/mobile app sources.
   capabilities mean legacy/unsupported. Advertised set and version checks share one binding in
   `packages/shared/src/machine-protocol-capabilities.ts` so a key never travels without its version.
 - The machine owns the deadline for an ACP startup round-trip and answers with its own
-  failure reason. A client timeout over the same request is a backstop for a daemon that
-  died without replying, so it derives from
-  `packages/shared/src/acp-startup-budget.ts` and stays strictly above the machine's worst
-  case; never set a second, smaller client deadline that expires work the machine is still doing.
-  That worst case is the whole recovery policy, not one attempt: a cold `npx` initialize
-  timeout makes the machine purge and retry, and every retry gets the full per-attempt
-  timeouts again, so the attempt count lives in the same shared binding as the timeouts.
+  failure reason. A client timeout over that request is only a backstop for a daemon that
+  died without replying: derive it from `packages/shared/src/acp-startup-budget.ts`, keep it
+  strictly above the machine's whole recovery policy rather than one attempt, and measure
+  SILENCE, not elapsed work — a deadline that ignores progress frames expires the very
+  request those frames are reporting on.
 - Managed runtime downloads default to the public R2-backed channel owned by
   `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
   same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
@@ -68,27 +66,8 @@ and Web/mobile app sources.
   something the user can neither act on nor dismiss. What is forbidden is the opposite —
   reporting a durable write as failed, or rolling one back, because the upload did not go
   through. The CLI still reports its own sync result to the terminal.
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+- Agent Role invariants live in `packages/components/src/components/settings/AGENTS.md`,
+  and bind the CLI too: MCP creation resolves a Role from that same workspace catalog.
 
 `pnpm check:public-boundary` is the executable repository boundary and must pass
 after changing package scope or cloud/local composition.

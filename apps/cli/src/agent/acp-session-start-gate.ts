@@ -1,3 +1,5 @@
+import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
+
 import type { Logger } from '@/utils/logger';
 
 /**
@@ -13,13 +15,37 @@ export const ACP_SESSION_START_GATE_ENV = 'LODY_MAX_CONCURRENT_ACP_SESSION_START
 
 export type AcpSessionStartGateOptions = {
   maxConcurrent?: number;
+  waitTimeoutMs?: number;
 };
 
 export type AcpSessionStartSlotOptions = {
   label: string;
   logger?: Logger;
   abortSignal?: AbortSignal;
+  /** Overrides the gate's default queue deadline for one acquisition. */
+  waitTimeoutMs?: number;
 };
+
+/**
+ * A start that never reached the front of the queue.
+ *
+ * The wait is bounded so that it stays inside the machine's own startup budget:
+ * a queued start emits no progress frame, so an unbounded queue is silence the
+ * client eventually gives up on — and a client timeout carries no reason, while
+ * this does.
+ */
+export class AcpSessionStartQueueTimeoutError extends Error {
+  readonly waitedMs: number;
+
+  constructor(label: string, waitedMs: number, inUse: number, maxConcurrent: number) {
+    super(
+      `[${label}] Timed out after ${waitedMs}ms waiting for an ACP session-start slot ` +
+        `(${inUse}/${maxConcurrent} in use). The machine is busy starting other agents.`
+    );
+    this.name = 'AcpSessionStartQueueTimeoutError';
+    this.waitedMs = waitedMs;
+  }
+}
 
 type QueuedAcquire = {
   grant(): void;
@@ -45,10 +71,12 @@ export class AcpSessionStartGate {
   private available: number;
   private readonly waiters: QueuedAcquire[] = [];
   readonly maxConcurrent: number;
+  readonly waitTimeoutMs: number;
 
   constructor(options?: AcpSessionStartGateOptions) {
     this.maxConcurrent = resolveAcpSessionStartLimit(options?.maxConcurrent);
     this.available = this.maxConcurrent;
+    this.waitTimeoutMs = options?.waitTimeoutMs ?? ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS;
   }
 
   get inUse(): number {
@@ -79,26 +107,51 @@ export class AcpSessionStartGate {
       `[${options.label}] Waiting for ACP session-start slot (inUse=${this.inUse} queued=${this.queued + 1} max=${this.maxConcurrent})`
     );
 
+    const waitTimeoutMs = options.waitTimeoutMs ?? this.waitTimeoutMs;
+    const waitStartedAtMs = Date.now();
+
     await new Promise<void>((resolve, reject) => {
       let waiter: QueuedAcquire;
-      const onAbort = (): void => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const dequeue = (): void => {
         const index = this.waiters.indexOf(waiter);
         if (index >= 0) {
           this.waiters.splice(index, 1);
         }
+      };
+      const onAbort = (): void => {
+        dequeue();
         waiter.abort(new DOMException('ACP session start was cancelled', 'AbortError'));
+      };
+      const onTimeout = (): void => {
+        dequeue();
+        waiter.abort(
+          new AcpSessionStartQueueTimeoutError(
+            options.label,
+            Date.now() - waitStartedAtMs,
+            this.inUse,
+            this.maxConcurrent
+          )
+        );
       };
       waiter = {
         grant: () => {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
           options.abortSignal?.removeEventListener('abort', onAbort);
           resolve();
         },
         abort: (error) => {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
           options.abortSignal?.removeEventListener('abort', onAbort);
           reject(error);
         },
       };
       this.waiters.push(waiter);
+      if (waitTimeoutMs > 0 && Number.isFinite(waitTimeoutMs)) {
+        timeoutId = setTimeout(onTimeout, waitTimeoutMs);
+        // The daemon must still exit while a start is queued behind a stuck one.
+        timeoutId.unref?.();
+      }
       options.abortSignal?.addEventListener('abort', onAbort, { once: true });
       if (options.abortSignal?.aborted) {
         onAbort();
