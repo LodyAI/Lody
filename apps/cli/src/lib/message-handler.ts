@@ -3833,11 +3833,16 @@ export class MessageHandler {
     }
   }
 
-  private async readMachineCommandSnapshot(): Promise<MachineCommandSnapshot> {
+  private async readMachineCommandSnapshot(options?: {
+    strictFlock?: boolean;
+  }): Promise<MachineCommandSnapshot> {
     const machineRoomId = getMachineRoomId(this.machineId);
+    const flockRows = options?.strictFlock
+      ? this.readMachineFlockCommandRows()
+      : this.tryReadMachineFlockCommandRows();
     const [machineMetaDoc, machineFlockRows] = await Promise.all([
       this.workspaceDocument.repo.getDocMeta(machineRoomId),
-      this.tryReadMachineFlockCommandRows(),
+      flockRows,
     ]);
     return buildMachineCommandSnapshot(
       machineMetaDoc?.meta as MachineLegacyMetaFields | undefined,
@@ -3920,7 +3925,15 @@ export class MessageHandler {
   }
 
   private async processArchiveRequests(): Promise<void> {
-    const snapshot = await this.readMachineCommandSnapshot();
+    let snapshot: MachineCommandSnapshot;
+    try {
+      snapshot = await this.readMachineCommandSnapshot({ strictFlock: true });
+    } catch (error) {
+      this.logger.error(
+        `[archive] Failed to read Machine Flock; keeping archive request queued: ${formatErrorMessage(error)}`
+      );
+      return;
+    }
     const sessionIds = snapshot.archiveSessionIds;
     if (sessionIds.length === 0) {
       this.logger.debug('[archive] No pending archive requests');
@@ -3943,7 +3956,9 @@ export class MessageHandler {
       this.archiveInFlight.add(sessionId);
       try {
         this.logger.debug(`[archive] Start archiving session ${sessionId}`);
-        await this.archiveSessionResources(sessionId);
+        await this.archiveSessionResources(sessionId, {
+          machineFlockRows: snapshot.machineFlockRows,
+        });
         await this.removeArchiveRequest(sessionId);
         this.logger.debug(`[archive] Finished archiving session ${sessionId}`);
       } catch (error) {
@@ -3958,7 +3973,10 @@ export class MessageHandler {
 
   private async archiveSessionResources(
     sessionId: SessionId,
-    options?: { preserveWorktree?: boolean }
+    options?: {
+      preserveWorktree?: boolean;
+      machineFlockRows?: MachineFlockRowMap;
+    }
   ): Promise<void> {
     this.logger.debug(`[${sessionId}] Archiving session resources`);
 
@@ -3973,10 +3991,9 @@ export class MessageHandler {
     this.logger.debug(`[${sessionId}] Preview tunnel closed for archive`);
 
     const sessionRoomId = getSessionRoomId(sessionId);
-    const [sessionMetaDoc, archiveMachineMetaDoc, archiveMachineFlockRows] = await Promise.all([
+    const [sessionMetaDoc, archiveMachineMetaDoc] = await Promise.all([
       this.workspaceDocument.repo.getDocMeta(sessionRoomId),
       this.workspaceDocument.repo.getDocMeta(getMachineRoomId(this.machineId)),
-      this.tryReadMachineFlockCommandRows(),
     ]);
     const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
     const archiveMachineMeta = archiveMachineMetaDoc?.meta as MachineLegacyMetaFields | undefined;
@@ -3992,7 +4009,8 @@ export class MessageHandler {
       const cleanupTarget = this.resolveWorktreeCleanupTarget({
         sessionMeta,
         machineMeta: archiveMachineMeta,
-        machineFlockRows: archiveMachineFlockRows,
+        machineFlockRows:
+          options?.machineFlockRows ?? (await this.tryReadMachineFlockCommandRows()),
       });
       if (cleanupTarget) {
         const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));

@@ -39,9 +39,10 @@ const createSilentLogger = (): Logger => ({
 });
 
 type MessageHandlerInternals = {
+  processArchiveRequests: () => Promise<void>;
   archiveSessionResources: (
     sessionId: SessionId,
-    options?: { preserveWorktree?: boolean }
+    options?: { preserveWorktree?: boolean; machineFlockRows?: Record<string, MachineFlockScanRow> }
   ) => Promise<void>;
   deleteLocalProjectResources: (
     localProjectId: LocalProjectId,
@@ -75,8 +76,10 @@ function createHarness(options?: {
   machineFlockRows?: MachineFlockScanRow[];
   sessionMetas?: SessionMeta[];
   activeSessionIds?: SessionId[];
+  archiveSessionIds?: SessionId[];
   includeLegacySessionDeleteRequest?: boolean;
   localProjectRootPaths?: Record<LocalProjectId, string>;
+  machineFlockOpenError?: Error;
 }) {
   const sessionId = options?.sessionId ?? ('session-1' as SessionId);
   const childSessionIds = options?.childSessionIds ?? [];
@@ -128,7 +131,9 @@ function createHarness(options?: {
       if (roomId === machineRoomId) {
         return {
           meta: {
-            needToArchiveSessions: {},
+            needToArchiveSessions: Object.fromEntries(
+              (options?.archiveSessionIds ?? []).map((id) => [id, true])
+            ),
             needToDeleteSessions:
               options?.includeLegacySessionDeleteRequest === false ? {} : { [sessionId]: true },
             localProjects: Object.fromEntries(
@@ -149,15 +154,20 @@ function createHarness(options?: {
           : []
       ),
     })),
-    openFlockDoc: vi.fn(async () => ({
-      flock: {
-        scan: () => machineFlockRows,
-        set: flockSet,
-        delete: flockDelete,
-        commit: flockCommit,
-      },
-      syncOnce: vi.fn(async () => {}),
-    })),
+    openFlockDoc: vi.fn(async () => {
+      if (options?.machineFlockOpenError) {
+        throw options.machineFlockOpenError;
+      }
+      return {
+        flock: {
+          scan: () => machineFlockRows,
+          set: flockSet,
+          delete: flockDelete,
+          commit: flockCommit,
+        },
+        syncOnce: vi.fn(async () => {}),
+      };
+    }),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
       events.push(`meta:${roomId}:${patch.isArchived === true ? 'archived' : 'other'}`);
       const current = sessionMetas.get(roomId);
@@ -288,6 +298,22 @@ describe('MessageHandler terminal cleanup', () => {
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps archive requests queued when the Machine Flock read fails', async () => {
+    const sessionId = 'session-archive-flock-read-failure' as SessionId;
+    const { handler, sessionManager, repo } = createHarness({
+      sessionId,
+      archiveSessionIds: [sessionId],
+      machineFlockOpenError: new Error('temporary Machine Flock failure'),
+    });
+
+    await expect(handler.processArchiveRequests()).resolves.toBeUndefined();
+    expect(sessionManager.archiveSession).not.toHaveBeenCalled();
+    expect(repo.upsertDocMeta).not.toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
+    );
   });
 
   it('closes parent and active child terminals before permanent deletion cleanup', async () => {
