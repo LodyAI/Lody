@@ -8,28 +8,19 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `agent-client.ts`
 
-- Consume ACP extensions through `acp-extension-core` (`agentCapabilities._meta.lody`, session
-  `_meta.lody`, `_lody/...` methods). Provider-specific and pre-Core readers stay in the central
-  compatibility adapter, never in session consumers; normalized Core capabilities stay
-  provider-neutral.
+- Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
+  `_lody/...`. Provider/pre-Core readers stay in `lody-acp-extension.ts`; consumers stay neutral.
+- Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
+  the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
-- Registry Cursor identity (`cliType: 'registry'` and `agentType: 'cursor'`, never a same-named
-  custom or builtin config) gates the `parameterizedModelPicker` opt-in, the
-  `CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX` marker, and the
-  `cursorParameterizedModelPicker` protocol capability. `isAcpCapabilityCacheEntryCurrent`
-  rejects an unmarked registry Cursor row only on a machine that advertises that capability; a
-  legacy daemon's unmarked rows stay current. Predicate, suffix, and capability are one binding
-  in `@lody/shared`; never re-derive them in the CLI.
 - Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
   startup state.
 - Cache session `_meta.lody.modelReasoningEfforts`; Codex `model[effort]` only.
-- Config projections must consume agent-confirmed state from session setup and
-  `set_config_option` responses, not only `config_option_update` notifications. A
-  present `configOptions` — empty array included — is an authoritative full snapshot; only an
-  omitted field falls back to the requested value, and that fallback updates both replacement
-  startup state and the option's `currentValue`.
+- Project config from setup, `set_config_option` responses, and `config_option_update`.
+  Present `configOptions` (including `[]`) replaces the snapshot; only omission falls back
+  to the requested value, updating both replacement startup state and `currentValue`.
 - Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
   `limited` to the durable `blocked` status.
 - Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the
@@ -114,14 +105,6 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Registry Cursor's per-model catalog (`configOptionsByModel`, background in
-  [README.md](README.md)) is the latest successful `cursor/list_available_models` observation
-  from the explicit probe or a created session, never enumerated through
-  `session/set_config_option` (it rewrites the user's global Cursor config). A confirmed
-  `-32601` clears it and any other failure keeps the stored catalog; the write contract lives
-  in `../lib/loro/AGENTS.md`. `machine/acp-capabilities-refresh_response.capability` omits the
-  catalog: clients parse it through a strict schema, and the Flock row reader tolerates unknown
-  fields. `resolveAcpConfigOptionsForModel` in `@lody/shared` is the one composition rule.
 - Builtin Claude owns session titles through ACP `session_info_update`; store them only after
   `sanitizeLodyInternalInstructions`, and never start `title-generator.ts`'s isolated session
   for Claude. For Codex accept only `explicit` `_meta.lody.titleSource` names, ignore its

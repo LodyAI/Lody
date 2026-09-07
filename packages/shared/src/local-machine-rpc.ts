@@ -1,3 +1,4 @@
+import { LocalFileResolutionSchema } from './local-file-preview';
 import { z } from 'zod';
 import {
   CodeCollabV2ErrorSchema,
@@ -146,7 +147,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   // Loro Streams counterpart: the desktop user may inspect any local file,
   // while remote requests retain File Preview v3's restricted-root policy.
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('file/preview-local'),
+    method: z.literal('file/resolve-local'),
     params: FilePreviewV3RequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -247,6 +248,7 @@ export const LocalMachineRpcResultSchema = z.union([
   CodeCollabV2LspUnsupportedSchema,
   CodeCollabV2ErrorSchema,
   FilePreviewV3ResponseSchema,
+  LocalFileResolutionSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -304,3 +306,5 @@ export function safeParseLocalMachineRpcRequest(
     };
   }
 }
+
+export { FilePreviewV3ErrorSchema } from './file-preview';

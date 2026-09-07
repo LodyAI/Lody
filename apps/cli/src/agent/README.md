@@ -40,6 +40,18 @@ context/message-flow.md "Upstream".
 
 ## Background
 
+### Grok permission handling
+
+Grok's TUI combines the runtime YOLO setting with client-side `AllowOnce` responses.
+`lody-acp-extension.ts` owns this compatibility rule for builtin Grok only;
+`agent-client.ts` evaluates it against the accepted session config and exposes config
+subscriptions. `MessageHandler` persists the selected outcome in the existing permission
+history. Enabling Always Approve also drains already waiting requests and clears their UI
+state and subscriptions. New requests without `allow_once` stay interactive; the queue
+drain cancels such requests, matching the TUI without creating lasting grants. User
+questions and other providers do not participate. The Grok adapter passes native requests
+through so this durable flow remains their single owner.
+
 ### ACP start concurrency
 
 Unbounded concurrent Codex starts each spawn a lody.exe adapter, a Codex app-server, and a
@@ -179,7 +191,7 @@ make that observation. JSON-RPC `-32601` means the agent publishes no catalog an
 `null` to the write, which clears a stored one; a validation failure, timeout, or abort fails
 the probe with `[ACP_CAPABILITIES_INCOMPLETE]` so the Settings Test action can retry, while a
 session logs it and omits the field so the stored catalog is inherited (write contract in
-`../lib/loro/AGENTS.md`). `resolveAcpConfigOptionsForModel` in `@lody/shared` composes the
+`../AGENTS.md`). `resolveAcpConfigOptionsForModel` in `@lody/shared` composes the
 snapshot with the selected model's entry. The opt-in also changes the advertised model ids,
 so `getAcpCapabilitySourceVersion` appends `CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX`
 and the daemon advertises the `cursorParameterizedModelPicker` protocol capability; a

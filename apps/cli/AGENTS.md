@@ -3,7 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adapter background:
 [.agents/docs/cli-overview.md](../../.agents/docs/cli-overview.md). Scoped rules live under
-`src/{agent,commands,session,mcp,orchestration,preview,lib}`.
+`src/{agent,commands,session,mcp,orchestration,preview,lib}`; shared source contracts:
+[src/AGENTS.md](src/AGENTS.md).
 
 ## Build and packaging
 
@@ -54,18 +55,6 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 - `lody_session_create_options` publishes valid run-config values per agent config and stays
   sparse by default (online Machines, one agent config, the current local project, no GitHub
   fetch), expanding only through explicit query inputs.
-- INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
-  describe only the model current at probe time. Validate effort against the TARGET model using
-  `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
-  `validateTurnConfigOptionValues`. When the cache carries `configOptionsByModel` (registry
-  Cursor), mapping, turn validation, and inherited-default filtering read the TARGET model's
-  composed options through `resolveAcpConfigOptionsForModel`; inherited defaults are filtered
-  against the MERGED target model, and an explicit create `modelId` drops a parent's superseded
-  `model` option so the frozen Turn names one model. Dispatch what cannot be checked offline
-  as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
-  models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and

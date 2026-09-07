@@ -88,3 +88,16 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
   menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
   under `node --test` without the `electron` runtime.
+
+## Local file resources
+
+- CLI `file/resolve-local` owns session/path resolution; Electron owns file IO. Never
+  put local file bytes back into the daemon's JSON response or expose filesystem
+  paths in resource URLs. `local-file-resource.ts` issues opaque renderer-lifetime
+  capabilities, bounded per renderer, revoked on navigation/destruction.
+- Each resource read opens a regular file without following a substituted symlink
+  and checks device/inode/size/mtime/ctime before and during reads. Replacement or
+  modification invalidates the preview; no mixing revisions or writes through resources.
+- Text above the editor budget uses fixed bounded Range requests. Binary uses raw
+  streams with backpressure/cancellation; raster header dimensions bound decode cost.
+  The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.

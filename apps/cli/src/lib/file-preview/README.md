@@ -46,17 +46,13 @@ resolved-only comparison reported every deleted temp file as "outside the worksp
 
 Half a PNG is a corrupt file and half a JSON is a syntax error.
 
-## Why the local limits are derived from the IPC cap
+## Local resolution and resource IO are separate
 
-A remote preview is gzipped and base64'd through one Machine RPC response, which is
-what `FILE_PREVIEW_V3_LIMITS` sizes. A same-machine read does not cross that wire,
-but it is still a transport, and the local one is the tighter constraint: its client
-DESTROYS a response body past `LOCAL_IPC_MAX_RESPONSE_BODY_BYTES`, and the facade
-reports that as retryable I/O — the viewer would say "try again" about a file that
-will never load. Base64 expands by a fixed 4/3, but JSON string escaping is
-data-dependent (a file of newlines doubles, one of control bytes sextuples), so the
-encoded payload is measured rather than predicted. Past the limit the honest answer
-is the OS, which the viewer's error card offers.
+`file/resolve-local` resolves the session owner and canonical file path without
+reading contents. Electron's `local-file-resource.ts` provides small full text for
+editing and opaque resource URLs for paged text or streaming images. Per-read budgets,
+revision checks, cancellation, and virtual rows replace the old whole-file IPC ceiling.
+The remote `file/preview` retains its complete, bounded response for the remote wire.
 
 `maxBinaryBytes` is pinned to `SESSION_IMAGE_MAX_SIZE_BYTES` because that is the only
 budget for this payload shape (base64 image bytes in one Machine RPC response)

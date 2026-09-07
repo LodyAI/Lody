@@ -221,6 +221,12 @@ function normalizeRegistryAgent(agent) {
     return null;
   }
 
+  if (id === 'factory-droid' && distribution.npx?.args) {
+    distribution.npx.args = distribution.npx.args.map((arg) =>
+      arg === 'acp-daemon' ? 'acp' : arg
+    );
+  }
+
   return {
     id,
     name,

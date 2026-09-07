@@ -1,3 +1,4 @@
+import { getMachineRoomId, type MachineMeta } from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -1679,6 +1680,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
   } = createWorkspaceMachineRpcFacade({
+    getMachineProtocolCapabilities: async (machineId) => {
+      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
+      return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
+    },
     workspaceId,
     targetRouter,
     getMachineRpcClient,
