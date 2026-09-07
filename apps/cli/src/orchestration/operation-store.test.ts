@@ -1013,6 +1013,27 @@ const readLastCleanupAtMs = (dbPath: string): string | undefined => {
 };
 
 describe('maintenance-free open', () => {
+  it('migrates a current delivery schema that lacks progress settlements', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-progress-migration-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const initial = new LodyOperationStore(dbPath);
+    initial.close();
+
+    const legacy = new Database(dbPath);
+    legacy.exec('DROP TABLE operation_progress_settlements');
+    legacy.close();
+
+    const migrated = new LodyOperationStore(dbPath, undefined, { maintenance: false });
+    try {
+      expect(
+        migrated.listPendingProgress('workspace-1' as WorkspaceId, 'machine-1' as MachineId)
+      ).toEqual([]);
+    } finally {
+      migrated.close();
+    }
+  });
+
   it('does not acquire the SQLite writer lock when the schema is current', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-readonly-open-'));
     roots.add(root);
@@ -1126,4 +1147,54 @@ describe('runWithOperationStoreBusyRetry', () => {
     expect(isOperationStoreBusyError(new Error('database is locked'))).toBe(false);
     expect(isOperationStoreBusyError('database is locked')).toBe(false);
   });
+});
+
+it('retains unfinished progress ownership across delivery consumption, reopening and retention cleanup', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'lody-progress-obligation-'));
+  roots.add(root);
+  const dbPath = path.join(root, 'operations.sqlite3');
+  let now = Date.parse('2026-07-20T00:00:00Z');
+  const input = { ...baseInput(), kind: 'session_create' as const };
+  let store = new LodyOperationStore(dbPath, () => now);
+  store.accept(input);
+  store.cancel(input.requesterSessionId, input.operationId);
+  const claim = store.claimDeliveryFinalization(input.requesterSessionId, input.operationId, {
+    claimId: 'progress-retention-claim',
+    workerBootId: 'progress-retention-worker',
+  });
+  expect(claim.status).toBe('claimed');
+  expect(
+    store.consumeClaimedDelivery(
+      input.requesterSessionId,
+      input.operationId,
+      'progress-retention-worker',
+      'progress-retention-claim'
+    ).consumed
+  ).toBe(true);
+  store.close();
+  now += 100 * 24 * 60 * 60 * 1000;
+  store = new LodyOperationStore(dbPath, () => now);
+  try {
+    expect(store.listPendingDeliveries(input.workspaceId)).toEqual([]);
+    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toMatchObject([
+      { operationId: input.operationId },
+    ]);
+    expect(
+      store.listPendingProgress('other-workspace' as WorkspaceId, input.ownerMachineId)
+    ).toEqual([]);
+    expect(store.listPendingProgress(input.workspaceId, 'other-machine' as MachineId)).toEqual([]);
+    store.settleProgress(input.requesterSessionId, input.operationId);
+    expect(store.listPendingProgress(input.workspaceId, input.ownerMachineId)).toEqual([]);
+  } finally {
+    store.close();
+  }
+  now += 2 * 24 * 60 * 60 * 1000;
+  store = new LodyOperationStore(dbPath, () => now);
+  try {
+    expect(() => store.get(input.requesterSessionId, input.operationId)).toThrow(
+      'Operation not found'
+    );
+  } finally {
+    store.close();
+  }
 });

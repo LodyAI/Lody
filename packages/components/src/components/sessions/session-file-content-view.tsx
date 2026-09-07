@@ -1,6 +1,8 @@
+import { PagedFileViewer } from './paged-file-viewer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
+  Download,
   Eye,
   EyeClosed,
   Loader2,
@@ -67,6 +69,7 @@ import {
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import { downloadBytesAsFile } from '@/lib/download-file';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
@@ -934,6 +937,12 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
+  const isHtmlFile = isHtmlPath(normalizedPath);
+  const handleDownloadHtml = useCallback(() => {
+    if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
+    const content = latestEditorTextRef.current ?? data.snapshot.text;
+    downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
+  }, [data, normalizedPath]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -1004,6 +1013,16 @@ function SessionFileContentViewImpl({
     normalizedPath,
     shouldUseProviderFileContent,
   ]);
+
+  const handleReloadHtmlPreview = useCallback(() => {
+    setHtmlPreviewCommand((current) => ({
+      id: (current?.id ?? 0) + 1,
+      action: 'reload',
+    }));
+    if (shouldUseProviderFileContent) {
+      handleProviderRefresh();
+    }
+  }, [handleProviderRefresh, shouldUseProviderFileContent]);
 
   // LSP entry points. Enabled whenever the provider supplies content
   // for this view (including read-only mode — read roles can
@@ -1160,8 +1179,23 @@ function SessionFileContentViewImpl({
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
   } else if (data.snapshot.kind === 'binary') {
-    body = <SessionFileBinaryPreview path={normalizedPath} bytes={data.snapshot.bytes} />;
+    body = (
+      <SessionFileBinaryPreview
+        path={normalizedPath}
+        bytes={data.snapshot.bytes}
+        url={data.snapshot.url}
+      />
+    );
   } else if (data.snapshot.kind === 'missing') {
     body = (
       <SessionFileErrorState
@@ -1329,10 +1363,11 @@ function SessionFileContentViewImpl({
   const showWordWrapButton =
     isTextFileReady && !showSvgRendered && !showMarkdownRendered && !showHtmlRendered;
   const showSaveButton = isProviderFileEditable && isTextFileReady;
-  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady;
+  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
     showPreviewToggle ||
     isMarkdownTextFile ||
+    (isHtmlFile && isTextFileReady) ||
     showSearchButton ||
     showSaveButton ||
     showRefreshButton;
@@ -1407,17 +1442,28 @@ function SessionFileContentViewImpl({
             {showHtmlRendered ? (
               <button
                 type="button"
-                onClick={() =>
-                  setHtmlPreviewCommand((current) => ({
-                    id: (current?.id ?? 0) + 1,
-                    action: 'reload',
-                  }))
-                }
+                onClick={handleReloadHtmlPreview}
+                disabled={isRefreshing}
                 title={t('sessions.browser.reload', 'Reload')}
                 aria-label={t('sessions.browser.reload', 'Reload')}
+                aria-busy={isRefreshing}
+                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+            {isHtmlFile && isTextFileReady ? (
+              <button
+                type="button"
+                onClick={handleDownloadHtml}
+                title={t('sessions.fileActions.download', 'Download file')}
+                aria-label={t('sessions.fileActions.download', 'Download file')}
                 className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             ) : null}
             {showWordWrapButton ? (

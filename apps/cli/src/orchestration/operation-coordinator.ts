@@ -16,6 +16,7 @@ import {
   type LodyOperationItemResult,
   type MachineId,
   type MessageContent,
+  type OperationProgressStatus,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
@@ -39,6 +40,12 @@ import {
   getLodyOperationStorePath,
   LodyOperationStore,
 } from './operation-store';
+import {
+  getOperationProgressTargetKey,
+  getOperationProgressTurnId,
+  upsertOperationProgressHistory,
+  type OperationProgressStatusByTarget,
+} from './operation-progress-history';
 
 type TargetSubscription = {
   unsubscribe: () => void;
@@ -180,6 +187,7 @@ export class LodyOperationCoordinator {
   private metaWatch: RepoWatchHandle | null = null;
   private store: LodyOperationStore | null = null;
   private storeWatch: Pick<FSWatcher, 'close'> | null = null;
+  private progressRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private storeWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private readonly materializationClaimToken = randomUUID();
@@ -253,6 +261,8 @@ export class LodyOperationCoordinator {
     this.storeWatch = null;
     if (this.storeWakeTimer) clearTimeout(this.storeWakeTimer);
     this.storeWakeTimer = null;
+    if (this.progressRetryTimer) clearTimeout(this.progressRetryTimer);
+    this.progressRetryTimer = null;
     if (this.store) {
       try {
         const abandonedClaims = this.store.abandonDeliveryClaimsOwnedBy(
@@ -349,6 +359,27 @@ export class LodyOperationCoordinator {
       await this.reconcileOperation(operation);
     }
 
+    const pendingProgress = this.withStore((store) =>
+      store.listPendingProgress(this.options.workspaceId, this.options.machineId)
+    );
+    for (const operation of pendingProgress) await this.writeOperationProgress(operation);
+    if (
+      this.withStore((store) =>
+        store.listPendingProgress(this.options.workspaceId, this.options.machineId)
+      ).length > 0
+    ) {
+      if (!this.progressRetryTimer) {
+        this.progressRetryTimer = setTimeout(() => {
+          this.progressRetryTimer = null;
+          void this.wake('progress-retry');
+        }, 5_000);
+        this.progressRetryTimer.unref?.();
+      }
+    } else if (this.progressRetryTimer) {
+      clearTimeout(this.progressRetryTimer);
+      this.progressRetryTimer = null;
+    }
+
     const pendingDeliveries = this.withStore((store) =>
       store.listPendingDeliveries(this.options.workspaceId)
     );
@@ -390,19 +421,144 @@ export class LodyOperationCoordinator {
       return;
     }
     const changed = JSON.stringify(items) !== JSON.stringify(operation.items);
+    let latestOperation = operation;
     if (changed) {
-      this.withStore((store) =>
+      latestOperation = this.withStore((store) =>
         store.updateItems(operation.requesterSessionId, operation.operationId, items)
       );
     }
+    await this.writeOperationProgress(latestOperation);
     if (items.every((item) => item.status !== 'active')) {
       const completion: LodyOperationCompletion = { type: 'result', value: { items } };
-      this.withStore((store) =>
+      latestOperation = this.withStore((store) =>
         store.finish(operation.requesterSessionId, operation.operationId, completion)
       );
+      await this.writeOperationProgress(latestOperation);
       this.clearDeadline(operation);
       this.clearOperationMaterializationRetries(operation);
     }
+  }
+
+  private async writeOperationProgress(operation: StoredLodyOperation): Promise<void> {
+    const ownerStore = this.store;
+    if (!ownerStore) return;
+    try {
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
+      const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
+        getSessionRoomId(operation.requesterSessionId)
+      );
+      if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) return;
+      const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
+        operation.requesterSessionId
+      );
+      const statusByTarget = await this.collectOperationProgressTargetStatuses(operation);
+      // A previous lease must not resume writing after stop/restart.
+      if (!this.started || this.store !== ownerStore) return;
+      await upsertOperationProgressHistory(sessionDoc, operation, this.now, statusByTarget);
+      if (
+        operation.state === 'finished' &&
+        this.progressIsSettled(operation, await sessionDoc.getHistory(), statusByTarget)
+      ) {
+        // The SQLite acknowledgement must never outrun local Loro durability.
+        await this.options.workspaceDocument.repo.flush();
+        if (!this.started || this.store !== ownerStore) return;
+        this.withStore((store) =>
+          store.settleProgress(operation.requesterSessionId, operation.operationId)
+        );
+      }
+    } catch (error) {
+      this.options.logger.warn(
+        `[orchestration] Progress update failed for ${operation.operationId}; retrying on a later wake: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private progressIsSettled(
+    operation: StoredLodyOperation,
+    history: SessionHistoryInput[],
+    observed: OperationProgressStatusByTarget
+  ): boolean {
+    const row = history.find(
+      (entry) =>
+        entry.id === getOperationProgressTurnId(operation.requesterSessionId, operation.operationId)
+    );
+    const content = row?.items?.find((item) => item.type === 'operation_progress');
+    const published = new Map(
+      (content?.items ?? []).map((item) => [
+        getOperationProgressTargetKey(item.target),
+        item.status,
+      ])
+    );
+    const expected = new Map(observed);
+    for (const item of operation.items) {
+      if (!('target' in item) || !item.target) continue;
+      const key = getOperationProgressTargetKey(item.target);
+      if (expected.has(key)) continue;
+      if (
+        item.status === 'succeeded' ||
+        item.status === 'cancelled' ||
+        (item.status === 'failed' && item.error.code === 'TARGET_FAILED')
+      ) {
+        if (item.status === 'succeeded' || published.has(key)) expected.set(key, item.status);
+      } else if (item.status === 'active' && item.inputDurable) expected.set(key, 'created');
+    }
+    // Previously published targets stay owned even when metadata is temporarily absent.
+    if (published.size !== expected.size) return false;
+    return [...expected].every(
+      ([key, status]) =>
+        status !== 'created' && status !== 'running' && published.get(key) === status
+    );
+  }
+
+  private async collectOperationProgressTargetStatuses(
+    operation: StoredLodyOperation
+  ): Promise<OperationProgressStatusByTarget> {
+    const statuses = new Map<string, OperationProgressStatus>();
+    await this.mapItemsWithConcurrency(operation.items, 5, async (item) => {
+      if (!('target' in item) || !item.target) return;
+      if (item.status === 'active' && !item.inputDurable) return;
+      const target = item.target;
+      const metaRecord = await this.options.workspaceDocument.repo.getDocMeta(
+        getSessionRoomId(target.sessionId)
+      );
+      if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) return;
+      const meta = metaRecord.meta as SessionMeta;
+      const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
+        target.sessionId
+      );
+      this.subscribeTarget(target.sessionId, sessionDoc);
+      const history = await sessionDoc.getHistory();
+      const userTurn = history.find(
+        (entry) => entry.id === target.userTurnId && entry.role === 'user'
+      );
+      if (!userTurn) return;
+      const key = getOperationProgressTargetKey(target);
+      if (userTurn.status === 'failed') {
+        statuses.set(key, 'failed');
+        return;
+      }
+      if (userTurn.status === 'canceled') {
+        statuses.set(key, 'cancelled');
+        return;
+      }
+      if (terminalAssistantFor(history, target.userTurnId)) {
+        statuses.set(key, 'succeeded');
+        return;
+      }
+      const execution = this.options.executionService.getExecutionSnapshot(target.sessionId);
+      if (
+        execution.activeTurnId === `assistant:${target.userTurnId}` ||
+        meta.processingUserMsgId === target.userTurnId ||
+        userTurn.status === 'processing'
+      ) {
+        statuses.set(key, 'running');
+        return;
+      }
+      statuses.set(key, 'created');
+    });
+    return statuses;
   }
 
   private async reconcileItem(
@@ -498,7 +654,7 @@ export class LodyOperationCoordinator {
           ),
         };
       }
-      this.withStore((store) =>
+      const materializedOperation = this.withStore((store) =>
         store.markItemInputDurable(
           operation.requesterSessionId,
           operation.operationId,
@@ -506,6 +662,8 @@ export class LodyOperationCoordinator {
           claimedMaterialization ? this.materializationClaimToken : undefined
         )
       );
+      // Publish each recovered child without waiting for slower batch siblings.
+      await this.writeOperationProgress(materializedOperation);
       this.clearMaterializationRetry(operation, index);
       item = { ...item, inputDurable: true };
     }
@@ -601,7 +759,7 @@ export class LodyOperationCoordinator {
   }
 
   private subscribeTarget(sessionId: SessionId, sessionDoc: SessionDocument): void {
-    if (this.targetSubscriptions.has(sessionId)) return;
+    if (!this.started || this.targetSubscriptions.has(sessionId)) return;
     const unsubscribe =
       sessionDoc.mirror?.subscribe(() => {
         void this.wake('target-history');
@@ -1352,41 +1510,46 @@ export class LodyOperationCoordinator {
     if (!operation.completion) {
       throw new Error(`Finished Operation ${operation.operationId} has no completion.`);
     }
-    const item: MessageContent = {
-      type: 'operation_completion',
-      deliveryId: delivery.deliveryId,
-      operationId: operation.operationId,
-      operationKind: operation.kind,
-      completion: operation.completion,
-      ...(continuationFailure
-        ? {
-            continuation: {
-              status: continuationFailure.status ?? ('not_started' as const),
-              reason: {
-                code: continuationFailure.code,
-                message: continuationFailure.message,
+    const completion = operation.completion;
+    const buildTurn = (progressMessageId: string | undefined): SessionHistoryInput => {
+      const item: MessageContent = {
+        type: 'operation_completion',
+        deliveryId: delivery.deliveryId,
+        operationId: operation.operationId,
+        operationKind: operation.kind,
+        ...(progressMessageId ? { progressMessageId } : {}),
+        completion,
+        ...(continuationFailure
+          ? {
+              continuation: {
+                status: continuationFailure.status ?? ('not_started' as const),
+                reason: {
+                  code: continuationFailure.code,
+                  message: continuationFailure.message,
+                },
               },
-            },
-          }
-        : {}),
-    };
-    const turn: SessionHistoryInput = {
-      id: delivery.systemTurnId,
-      role: 'system',
-      userId: operation.requesterUserId,
-      timestamp: new Date(this.now()).toISOString(),
-      items: [item],
-      fileDiff: [],
-      finished: true,
-      inputConfig: {
-        ...operation.frozenContinuationConfig.inputConfig,
-        prompt: completionText(operation),
-        chainDepth: operation.initiatorChainDepth + 1,
-      },
+            }
+          : {}),
+      };
+      return {
+        id: delivery.systemTurnId,
+        role: 'system',
+        userId: operation.requesterUserId,
+        timestamp: new Date(this.now()).toISOString(),
+        items: [item],
+        fileDiff: [],
+        finished: true,
+        inputConfig: {
+          ...operation.frozenContinuationConfig.inputConfig,
+          prompt: completionText(operation),
+          chainDepth: operation.initiatorChainDepth + 1,
+        },
+      };
     };
     await sessionDoc.updateHistory((history) => {
+      const progressMessageId = this.findProgressMessageId(history, operation);
       const existing = history.find((entry) => entry.id === delivery.systemTurnId);
-      if (!existing) return [...history, turn];
+      if (!existing) return [...history, buildTurn(progressMessageId)];
       if (existing.role !== 'system') return history;
       return history.map((entry) =>
         entry.id !== delivery.systemTurnId
@@ -1400,9 +1563,12 @@ export class LodyOperationCoordinator {
                 ) {
                   return existingItem;
                 }
+                const linkedItem = progressMessageId
+                  ? { ...existingItem, progressMessageId }
+                  : existingItem;
                 if (continuationFailure) {
                   return {
-                    ...existingItem,
+                    ...linkedItem,
                     continuation: {
                       status: continuationFailure.status ?? ('not_started' as const),
                       reason: {
@@ -1412,11 +1578,50 @@ export class LodyOperationCoordinator {
                     },
                   };
                 }
-                const { continuation: _continuation, ...withoutContinuation } = existingItem;
+                const { continuation: _continuation, ...withoutContinuation } = linkedItem;
                 return withoutContinuation;
               }),
             }
       );
     });
+  }
+
+  private findProgressMessageId(
+    history: SessionHistoryInput[],
+    operation: StoredLodyOperation
+  ): string | undefined {
+    if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') {
+      return undefined;
+    }
+    const progressMessageId = getOperationProgressTurnId(
+      operation.requesterSessionId,
+      operation.operationId
+    );
+    const progress = history
+      .find((entry) => entry.id === progressMessageId && entry.role === 'system')
+      ?.items?.find(
+        (item) => item.type === 'operation_progress' && item.operationId === operation.operationId
+      );
+    if (progress?.type !== 'operation_progress') return undefined;
+    const covered = new Map(
+      progress.items.map((item) => [getOperationProgressTargetKey(item.target), item.status])
+    );
+    // A partial row is not permission to hide every successful-target fallback.
+    // Include the completion payload as well as stored items for recovery snapshots.
+    const completion = operation.completion;
+    const results =
+      completion?.type === 'result'
+        ? completion.value.items
+        : completion?.type === 'cancelled'
+          ? (completion.partial?.items ?? [])
+          : [];
+    const complete = [...operation.items, ...results].every((item) =>
+      item.status === 'succeeded'
+        ? covered.get(getOperationProgressTargetKey(item.target)) === 'succeeded'
+        : item.status === 'active' && item.inputDurable
+          ? covered.has(getOperationProgressTargetKey(item.target))
+          : true
+    );
+    return complete ? progressMessageId : undefined;
   }
 }

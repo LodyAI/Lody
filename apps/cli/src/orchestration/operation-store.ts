@@ -589,6 +589,39 @@ export class LodyOperationStore {
     return rows.map((row) => this.decodeOperation(row));
   }
 
+  // Absence of a settlement is the durable obligation, including for Operations
+  // created before this table existed. Delivery consumption does not discharge it.
+  listPendingProgress(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {
+    return this.db
+      .prepare(
+        `SELECT operations.* FROM operations
+      WHERE workspace_id = ? AND owner_machine_id = ? AND state = 'finished'
+        AND kind IN ('session_create', 'session_create_many')
+        AND NOT EXISTS (SELECT 1 FROM operation_progress_settlements p
+          WHERE p.requester_session_id = operations.requester_session_id
+            AND p.operation_id = operations.operation_id)
+      ORDER BY created_at, requester_session_id, operation_id`
+      )
+      .all(workspaceId, ownerMachineId)
+      .map((row) => this.decodeOperation(row));
+  }
+
+  settleProgress(requesterSessionId: SessionId, operationId: string): void {
+    this.db
+      .transaction(() => {
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO operation_progress_settlements
+        (requester_session_id, operation_id)
+        SELECT requester_session_id, operation_id FROM operations
+        WHERE requester_session_id = ? AND operation_id = ? AND state = 'finished'
+          AND kind IN ('session_create', 'session_create_many')`
+          )
+          .run(requesterSessionId, operationId);
+      })
+      .immediate();
+  }
+
   updateItems(
     requesterSessionId: SessionId,
     operationId: string,
@@ -1347,6 +1380,11 @@ export class LodyOperationStore {
           .prepare(
             `DELETE FROM operations
            WHERE state = 'finished'
+             AND (kind NOT IN ('session_create', 'session_create_many') OR EXISTS (
+               SELECT 1 FROM operation_progress_settlements p
+               WHERE p.requester_session_id = operations.requester_session_id
+                 AND p.operation_id = operations.operation_id
+             ))
              AND EXISTS (
                SELECT 1 FROM deliveries
                WHERE deliveries.requester_session_id = operations.requester_session_id
@@ -1453,6 +1491,14 @@ export class LodyOperationStore {
           ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS operation_progress_settlements (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations (requester_session_id, operation_id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS orchestration_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -1497,6 +1543,7 @@ export class LodyOperationStore {
       'index:deliveries_pending_session',
       'table:delivery_execution_state',
       'table:operation_item_materializations',
+      'table:operation_progress_settlements',
       'table:orchestration_meta',
     ]);
     const existingObjects = this.db

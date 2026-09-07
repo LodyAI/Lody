@@ -1255,6 +1255,11 @@
   "sessions.openedBy.backToOpener": "返回创建对话",
   "sessions.openedBy.openOpener": "由此会话打开",
   "sessions.openedBy.openedSessions": "打开的会话",
+  "sessions.openedBy.status.created": "已创建",
+  "sessions.openedBy.status.running": "正在运行",
+  "sessions.openedBy.status.succeeded": "成功完成",
+  "sessions.openedBy.status.failed": "失败",
+  "sessions.openedBy.status.cancelled": "已取消",
   "sessions.openedBy.viewSession": "查看对话",
   "sessions.sharing.visibility": "可见范围",
   "sessions.sharing.team": "团队可见",
@@ -3860,5 +3865,10 @@
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.openFailed": "无法打开该文件。",
   "sessions.fileActions.more": "文件操作",
-  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。"
+  "sessions.fileActions.downloadTooLarge": "该文件过大，无法在此下载。请在拥有该文件的机器上打开。",
+  "sessions.fileViewer.paged": "大文件 · 只读",
+  "sessions.fileViewer.previousPage": "上一页",
+  "sessions.fileViewer.nextPage": "下一页",
+  "sessions.fileViewer.page": "页码",
+  "sessions.fileViewer.pageUnavailable": "文件已更改或无法读取，请重新打开预览。"
 }

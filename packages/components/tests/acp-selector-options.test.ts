@@ -8,7 +8,7 @@ import {
 import {
   buildAcpSelectorOptions,
   buildAllConfigOptionSelectors,
-  normalizeCodexReasoningEffortSelectors,
+  normalizeReasoningEffortSelectors,
   resolvePlanModeSelectorEnabled,
   togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
@@ -60,6 +60,55 @@ const codexModelAndReasoningOptions = (
     options: reasoningOptions,
   },
 ];
+
+/**
+ * A runtime-probed builtin Grok cache entry: the model option and flat
+ * thought-level list measured at probe time, plus the per-model ladder map
+ * the adapter publishes.
+ */
+const grokMachineWithLadderProbe = ({
+  currentModelId,
+  models,
+  currentEffort,
+  effortOptions,
+  modelReasoningEfforts,
+}: {
+  currentModelId: string;
+  models: Array<{ modelId: string; name: string }>;
+  currentEffort: string;
+  effortOptions: Array<{ value: string; name: string }>;
+  modelReasoningEfforts: Record<string, string[]>;
+}) =>
+  machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'builtin',
+      agentType: 'grok',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: currentModelId,
+          options: models.map((model) => ({ value: model.modelId, name: model.name })),
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Reasoning Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: currentEffort,
+          options: effortOptions,
+        },
+      ],
+      modelReasoningEfforts,
+      fetchedAt: 1,
+    },
+  });
 
 describe('buildAcpSelectorOptions', () => {
   it('synthesizes registry model selectors when a stale cache stores empty config options', () => {
@@ -598,6 +647,161 @@ describe('buildAcpSelectorOptions', () => {
     });
   });
 
+  it('rebuilds the Grok thought-level ladder for the selected model, not the probed one', () => {
+    /* The capability probe measured the thought-level list while a model with
+       a `high`/`low`/`max` ladder was current; selecting Grok 4.6 must restore
+       its own ladder instead of the probed one (LodyAI/Lody#149). */
+    const grokMachineWithProbedKimiLadder = grokMachineWithLadderProbe({
+      currentModelId: 'kimi-k3-256k',
+      models: [
+        { modelId: 'grok-4.6', name: 'Grok 4.6' },
+        { modelId: 'grok-4.5', name: 'Grok 4.5' },
+        { modelId: 'kimi-k3-256k', name: 'Kimi K3 256K' },
+      ],
+      currentEffort: 'high',
+      effortOptions: [
+        { value: 'high', name: 'High' },
+        { value: 'low', name: 'Low' },
+        { value: 'max', name: 'Max' },
+      ],
+      modelReasoningEfforts: {
+        'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+        'grok-4.5': ['high', 'medium', 'low'],
+        'kimi-k3-256k': ['high', 'low', 'max'],
+      },
+    });
+
+    const options46 = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.6',
+      machine: grokMachineWithProbedKimiLadder,
+    });
+    const selector46 = options46.configOptionSelectors.find(
+      (candidate) => candidate.configId === 'reasoning_effort'
+    );
+    expect(selector46?.options).toEqual([
+      { value: 'xhigh', label: 'X-High', description: undefined },
+      { value: 'high', label: 'High', description: undefined },
+      { value: 'medium', label: 'Medium', description: undefined },
+      { value: 'low', label: 'Low', description: undefined },
+    ]);
+    expect(selector46?.currentValue).toBe('high');
+
+    const options45 = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.5',
+      machine: grokMachineWithProbedKimiLadder,
+    });
+    expect(
+      options45.configOptionSelectors
+        .find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'medium', 'low']);
+  });
+
+  it('falls back to medium rather than the highest target-model tier', () => {
+    /* The probed model's current effort (`max`) is invalid for Grok 4.6,
+       whose ladder starts at `xhigh`: the fallback must pick the neutral
+       tier instead of silently defaulting the next turn to maximum effort. */
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.6',
+      machine: grokMachineWithLadderProbe({
+        currentModelId: 'kimi-k3-256k',
+        models: [
+          { modelId: 'grok-4.6', name: 'Grok 4.6' },
+          { modelId: 'kimi-k3-256k', name: 'Kimi K3 256K' },
+        ],
+        currentEffort: 'max',
+        effortOptions: [
+          { value: 'high', name: 'High' },
+          { value: 'low', name: 'Low' },
+          { value: 'max', name: 'Max' },
+        ],
+        modelReasoningEfforts: {
+          'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+        },
+      }),
+    });
+
+    const selector = options.configOptionSelectors.find(
+      (candidate) => candidate.configId === 'reasoning_effort'
+    );
+    expect(selector?.currentValue).toBe('medium');
+  });
+
+  it('follows the static Grok per-model ladders before any probe', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.5',
+      machine: machineWithCapabilities({}),
+    });
+
+    expect(
+      options.configOptionSelectors
+        .find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'medium', 'low']);
+  });
+
+  it('keeps the Codex hardcoded tiers richer than a synthesized map rebuild', () => {
+    /* When the Codex cache carries a per-model map richer than the probed
+       thought-level list (the probe ran under a lesser model), the map-driven
+       rebuild would synthesize label-only `max`/`ultra` and the hardcoded
+       normalizer would then skip its described options. Codex stays on its
+       hardcoded path so the described tiers keep winning. */
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-5.6-sol',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: codexModelAndReasoningOptions('medium', [
+            { value: 'low', name: 'low' },
+            { value: 'medium', name: 'medium' },
+          ]),
+          modelReasoningEfforts: {
+            'gpt-5.6-sol': ['low', 'medium', 'max', 'ultra'],
+          },
+          fetchedAt: 1,
+        },
+      }),
+    });
+
+    expect(
+      options.configOptionSelectors.find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options
+    ).toEqual([
+      { value: 'low', label: 'low', description: undefined },
+      { value: 'medium', label: 'medium', description: undefined },
+      {
+        value: 'max',
+        label: 'Max',
+        description: 'Maximum reasoning depth for the hardest problems',
+      },
+      {
+        value: 'ultra',
+        label: 'Ultra',
+        description: 'Maximum reasoning with automatic task delegation',
+      },
+    ]);
+  });
+
   it('does not use static or default cached builtin capabilities when a runtime override is set', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -832,14 +1036,14 @@ describe('buildAcpSelectorOptions', () => {
     };
 
     expect(
-      normalizeCodexReasoningEffortSelectors([reasoningSelector], {
+      normalizeReasoningEffortSelectors([reasoningSelector], {
         cliType: 'builtin',
         agentType: 'claude',
         selectedModelId: 'gpt-5.6-sol',
       })
     ).toEqual([reasoningSelector]);
     expect(
-      normalizeCodexReasoningEffortSelectors([customSelector], {
+      normalizeReasoningEffortSelectors([customSelector], {
         cliType: 'builtin',
         agentType: 'codex',
         selectedModelId: 'gpt-5.6-sol',

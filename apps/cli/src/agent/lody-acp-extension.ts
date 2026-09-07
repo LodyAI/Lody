@@ -1,4 +1,13 @@
-import { normalizePersistedRateLimit } from '@lody/shared';
+import {
+  isAskUserQuestionPermissionRequest,
+  normalizePersistedRateLimit,
+  type AgentConfigCliType,
+} from '@lody/shared';
+import type {
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionConfigOption,
+} from '@agentclientprotocol/sdk';
 import {
   LODY_EXTENSION_METHODS,
   normalizeLodyExtensionMethod,
@@ -7,6 +16,31 @@ import {
   type SessionUsageUpdate,
 } from 'acp-extension-core';
 import { z } from 'zod';
+
+/** Grok's official TUI owns this behavior in addition to the runtime YOLO flag. */
+export function getBuiltinToolPermissionOutcome(args: {
+  agentConfig?: { cliType: AgentConfigCliType; agentType: string };
+  configOptions: readonly SessionConfigOption[];
+  request: RequestPermissionRequest;
+  pending: boolean;
+}): RequestPermissionResponse['outcome'] | undefined {
+  if (
+    args.agentConfig?.cliType !== 'builtin' ||
+    args.agentConfig.agentType !== 'grok' ||
+    isAskUserQuestionPermissionRequest(args.request)
+  ) {
+    return undefined;
+  }
+  const permission = args.configOptions.find((option) => option.id === 'permission_mode');
+  if (permission?.type !== 'select' || permission.currentValue !== 'always-approve') {
+    return undefined;
+  }
+  const allowOnce = args.request.options.find((option) => option.kind === 'allow_once');
+  if (allowOnce) return { outcome: 'selected', optionId: allowOnce.optionId };
+  // Match the TUI's queue drain: never turn a mode toggle into a lasting grant.
+  // A new request with no AllowOnce remains interactive; an already queued one is cancelled.
+  return args.pending ? { outcome: 'cancelled' } : undefined;
+}
 
 const VersionOneSchema = z.object({ version: z.literal(1) });
 const LodyCapabilitiesSchema = z

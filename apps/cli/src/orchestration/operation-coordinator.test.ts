@@ -56,6 +56,10 @@ const makeHarness = async (options?: {
   historyFailuresBeforeSuccess?: number;
   beforeRequesterHistoryWrite?: () => Promise<void>;
   materializeTargetOverride?: () => Promise<void>;
+  operationKind?: 'session_create' | 'session_create_many' | 'session_chat';
+  failProgressHistoryWrites?: boolean;
+  progressHistoryFailures?: number;
+  failProgressFlush?: boolean;
   targetDocSync?: () => Promise<{
     history?: SessionHistoryInput[];
     meta?: SessionMeta;
@@ -114,6 +118,7 @@ const makeHarness = async (options?: {
   ]);
   const subscribers = new Map<SessionId, Set<() => void>>();
   let historyUpdateAttempt = 0;
+  let remainingProgressHistoryFailures = options?.progressHistoryFailures ?? 0;
   const sessionDoc = (sessionId: SessionId) => ({
     mirror: {
       subscribe: (callback: () => void) => {
@@ -125,6 +130,8 @@ const makeHarness = async (options?: {
     },
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+      const current = histories.get(sessionId) ?? [];
+      const next = update(current);
       if (sessionId === requesterSessionId) {
         await options?.beforeRequesterHistoryWrite?.();
         historyUpdateAttempt += 1;
@@ -132,7 +139,19 @@ const makeHarness = async (options?: {
           throw new Error('transient history write failure');
         }
       }
-      histories.set(sessionId, update(histories.get(sessionId) ?? []));
+      const progressItems = (history: SessionHistoryInput[]) =>
+        history.flatMap(
+          (entry) => entry.items?.filter((item) => item.type === 'operation_progress') ?? []
+        );
+      if (
+        sessionId === requesterSessionId &&
+        JSON.stringify(progressItems(next)) !== JSON.stringify(progressItems(current)) &&
+        (options?.failProgressHistoryWrites === true || remainingProgressHistoryFailures > 0)
+      ) {
+        remainingProgressHistoryFailures = Math.max(0, remainingProgressHistoryFailures - 1);
+        throw new Error('progress history unavailable');
+      }
+      histories.set(sessionId, next);
     },
   });
   const flockRows = options?.machineAgentConfig
@@ -167,6 +186,9 @@ const makeHarness = async (options?: {
     return meta ? { meta } : undefined;
   });
   const repo = {
+    flush: async () => {
+      if (options?.failProgressFlush) throw new Error('flush unavailable');
+    },
     watch: () => ({ unsubscribe: vi.fn() }),
     getDocMeta,
     getMeta: getRepoMeta,
@@ -298,7 +320,7 @@ const makeHarness = async (options?: {
     requesterSessionId,
     requesterUserId: 'user-1',
     operationId: 'review-round-1',
-    kind: 'session_chat',
+    kind: options?.operationKind ?? 'session_chat',
     canonicalCommand: { sessionId: targetSessionId, prompt: 'work' },
     frozenContinuationConfig: {
       ...(options?.agentConfigId ? { agentConfigId: options.agentConfigId } : {}),
@@ -335,6 +357,12 @@ const makeHarness = async (options?: {
     openFlockDoc,
     logger,
     materializeTarget,
+    notifyTargetHistory: () => {
+      for (const callback of subscribers.get(targetSessionId) ?? []) callback();
+    },
+    setProgressWriteFailures: (count: number) => {
+      remainingProgressHistoryFailures = count;
+    },
     triggerOperationStoreWake: () => operationStoreWake?.(path.basename(storePath)),
     setPendingUser: (value: boolean) => {
       pendingUser = value;
@@ -1236,6 +1264,472 @@ describe('LodyOperationCoordinator', () => {
               status: 'not_started',
               reason: expect.objectContaining({ code: 'CONFIGURATION_UNAVAILABLE' }),
             },
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('does not let progress write failures block operation finalization or delivery', async () => {
+    const options: {
+      operationKind: 'session_create';
+      failProgressHistoryWrites: boolean;
+    } = {
+      operationKind: 'session_create',
+      failProgressHistoryWrites: true,
+    };
+    const harness = await makeHarness(options);
+    harness.histories.set(harness.targetSessionId, [
+      {
+        id: 'turn-1',
+        role: 'user',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [{ type: 'text', text: 'work' }],
+        fileDiff: [],
+        status: 'handled',
+      },
+      {
+        id: 'assistant:turn-1',
+        role: 'assistant',
+        userTurnId: 'turn-1',
+        timestamp: '2026-07-20T00:00:01.000Z',
+        items: [{ type: 'text', text: 'done' }],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const requesterHistory = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some((item) => item.type === 'operation_progress')
+      )
+    ).toBe(false);
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some(
+          (item) => item.type === 'operation_completion' && item.progressMessageId === undefined
+        )
+      )
+    ).toBe(true);
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1').state).toBe('finished');
+    } finally {
+      store.close();
+    }
+
+    options.failProgressHistoryWrites = false;
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    expect(harness.continueSession).toHaveBeenCalledOnce();
+    expect(
+      harness.histories
+        .get(harness.requesterSessionId)
+        ?.some((entry) => entry.items?.some((item) => item.type === 'operation_progress'))
+    ).toBe(true);
+  });
+
+  it('repairs terminal create progress during pending completion delivery', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      progressHistoryFailures: 2,
+    });
+    harness.histories.set(harness.targetSessionId, [
+      {
+        id: 'turn-1',
+        role: 'user',
+        timestamp: '2026-07-20T00:00:00.000Z',
+        items: [{ type: 'text', text: 'work' }],
+        fileDiff: [],
+        status: 'handled',
+      },
+      {
+        id: 'assistant:turn-1',
+        role: 'assistant',
+        userTurnId: 'turn-1',
+        timestamp: '2026-07-20T00:00:01.000Z',
+        items: [{ type: 'text', text: 'done' }],
+        fileDiff: [],
+        finished: true,
+      },
+    ]);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const requesterHistory = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some((item) => item.type === 'operation_progress')
+      )
+    ).toBe(true);
+    expect(
+      requesterHistory.some((entry) =>
+        entry.items?.some(
+          (item) =>
+            item.type === 'operation_completion' &&
+            item.progressMessageId === 'operation-progress:requester-1:review-round-1'
+        )
+      )
+    ).toBe(true);
+  });
+
+  it('keeps durable create targets queued until exact target execution evidence is present', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      targetInputDurable: true,
+      acceptedInputDurable: true,
+      busy: true,
+      activeTurnId: 'assistant:unrelated-turn',
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const progress = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.id === 'operation-progress:requester-1:review-round-1');
+    expect(progress?.items).toEqual([
+      {
+        type: 'operation_progress',
+        operationId: 'review-round-1',
+        operationKind: 'session_create',
+        items: [{ target: { sessionId: 'target-1', userTurnId: 'turn-1' }, status: 'created' }],
+      },
+    ]);
+  });
+
+  it('marks create progress running only for the exact target turn', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      targetInputDurable: true,
+      acceptedInputDurable: true,
+      busy: true,
+      activeTurnId: 'assistant:turn-1',
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const progress = harness.histories
+      .get(harness.requesterSessionId)
+      ?.find((entry) => entry.id === 'operation-progress:requester-1:review-round-1');
+    expect(progress?.items).toEqual([
+      {
+        type: 'operation_progress',
+        operationId: 'review-round-1',
+        operationKind: 'session_create',
+        items: [{ target: { sessionId: 'target-1', userTurnId: 'turn-1' }, status: 'running' }],
+      },
+    ]);
+  });
+
+  it.each([
+    { completeCoverage: false, progressStatus: 'succeeded' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'created' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'running' as const, shouldLink: false },
+    { completeCoverage: true, progressStatus: 'succeeded' as const, shouldLink: true },
+  ])(
+    'only suppresses current complete batch cards ($completeCoverage, $progressStatus)',
+    async ({ completeCoverage, progressStatus, shouldLink }) => {
+      const harness = await makeHarness({
+        operationKind: 'session_create_many',
+        failProgressHistoryWrites: true,
+      });
+      const targets = [
+        { sessionId: 'batch-child-a' as SessionId, userTurnId: 'batch-turn-a' },
+        { sessionId: harness.targetSessionId, userTurnId: 'turn-1' },
+      ];
+      const results = targets.map((target) => ({
+        status: 'succeeded' as const,
+        target,
+        assistantTurnId: `assistant:${target.userTurnId}`,
+      }));
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        store.updateItems(harness.requesterSessionId, 'review-round-1', results);
+        store.finish(harness.requesterSessionId, 'review-round-1', {
+          type: 'result',
+          value: { items: results },
+        });
+      } finally {
+        store.close();
+      }
+      harness.histories.set(harness.requesterSessionId, [
+        {
+          id: 'operation-progress:requester-1:review-round-1',
+          role: 'system',
+          timestamp: '2026-07-20T00:00:00.000Z',
+          fileDiff: [],
+          items: [
+            {
+              type: 'operation_progress',
+              operationId: 'review-round-1',
+              operationKind: 'session_create_many',
+              items: targets
+                .slice(0, completeCoverage ? 2 : 1)
+                .map((target) => ({ target, status: progressStatus })),
+            },
+          ],
+        },
+      ]);
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      harness.coordinator.stop();
+      const completion = harness.histories
+        .get(harness.requesterSessionId)
+        ?.flatMap((entry) => entry.items ?? [])
+        .find((item) => item.type === 'operation_completion');
+      expect(completion?.type).toBe('operation_completion');
+      if (completion?.type !== 'operation_completion') throw new Error('Missing completion');
+      expect(completion.progressMessageId).toBe(
+        shouldLink ? 'operation-progress:requester-1:review-round-1' : undefined
+      );
+      expect(completion.completion).toMatchObject({ type: 'result', value: { items: results } });
+    }
+  );
+
+  it.each(
+    (['deadline', 'cancelled', 'error'] as const).flatMap((reason) =>
+      (['succeeded', 'failed', 'cancelled'] as const).map((terminal) => ({ reason, terminal }))
+    )
+  )(
+    'reconciles target $terminal after root $reason, delivery and daemon restart without another continuation',
+    async ({ reason, terminal }) => {
+      const harness = await makeHarness({
+        operationKind: 'session_create',
+        deadlineAt: reason === 'deadline' ? '2026-07-19T23:59:59.000Z' : '2026-07-21T00:00:00.000Z',
+      });
+      if (reason !== 'deadline') {
+        const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+        try {
+          if (reason === 'cancelled') store.cancel(harness.requesterSessionId, 'review-round-1');
+          else
+            store.finish(harness.requesterSessionId, 'review-round-1', {
+              type: 'error',
+              error: {
+                code: 'COORDINATOR_FAILED',
+                message: 'synthetic root error',
+                retryable: false,
+              },
+            });
+        } finally {
+          store.close();
+        }
+      }
+      const targetHistory = harness.histories.get(harness.targetSessionId);
+      const targetTurn = targetHistory?.[0];
+      if (!targetHistory || !targetTurn) throw new Error('missing target fixture');
+      targetHistory[0] = { ...targetTurn, status: 'processing' };
+      const read = () => {
+        const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+        try {
+          return {
+            pending: store.listPendingProgress(
+              'workspace-1' as WorkspaceId,
+              'machine-1' as MachineId
+            ),
+            deliveries: store.listPendingDeliveries('workspace-1' as WorkspaceId),
+            completion: store.get(harness.requesterSessionId, 'review-round-1').completion,
+          };
+        } finally {
+          store.close();
+        }
+      };
+      const status = () =>
+        harness.histories
+          .get(harness.requesterSessionId)
+          ?.flatMap((row) => row.items ?? [])
+          .find((item) => item.type === 'operation_progress')?.items[0]?.status;
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      expect(read().pending).toHaveLength(1);
+      expect(read().deliveries).toEqual([]);
+      const meta = harness.metas.get(harness.targetSessionId);
+      if (!meta) throw new Error('missing target metadata fixture');
+      harness.metas.delete(harness.targetSessionId);
+      harness.notifyTargetHistory();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      expect(read().pending).toHaveLength(1);
+      harness.metas.set(harness.targetSessionId, meta);
+      const rootResult = read().completion;
+      const requesterBefore = harness.histories.get(harness.requesterSessionId) ?? [];
+      const continuationIds = requesterBefore
+        .filter((row) => row.role === 'assistant')
+        .map((row) => row.id);
+      expect(continuationIds).toHaveLength(1);
+      harness.coordinator.stop();
+      // Opening the same SQLite store must restore observation even with no active Operation/Delivery.
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      expect(status()).toBe('running');
+      targetHistory[0] = {
+        ...targetTurn,
+        status:
+          terminal === 'succeeded' ? 'handled' : terminal === 'failed' ? 'failed' : 'canceled',
+      };
+      if (terminal === 'succeeded')
+        targetHistory.push({
+          id: 'late-answer',
+          role: 'assistant',
+          userTurnId: 'turn-1',
+          timestamp: '2026-07-20T00:01:00.000Z',
+          items: [{ type: 'text', text: 'late success' }],
+          fileDiff: [],
+          finished: true,
+        });
+      harness.notifyTargetHistory();
+      await harness.coordinator.idle();
+      expect(status()).toBe(terminal);
+      expect(read().pending).toEqual([]);
+      expect(read().completion).toEqual(rootResult);
+      expect(
+        harness.histories
+          .get(harness.requesterSessionId)
+          ?.filter((row) => row.role === 'assistant')
+          .map((row) => row.id)
+      ).toEqual(continuationIds);
+      harness.coordinator.stop();
+    }
+  );
+
+  it('does not let an in-flight progress read write after the owning worker stops', async () => {
+    let signalRead: () => void = () => {};
+    let releaseRead: () => void = () => {};
+    const readStarted = new Promise<void>((resolve) => {
+      signalRead = resolve;
+    });
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      beforeTargetMetaRead: async () => {
+        signalRead();
+        await readGate;
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      store.cancel(harness.requesterSessionId, 'review-round-1');
+    } finally {
+      store.close();
+    }
+    harness.coordinator.start();
+    const wake = harness.coordinator.wake('observe-owner-stop');
+    await readStarted;
+    harness.coordinator.stop();
+    releaseRead();
+    await wake;
+    expect(harness.histories.get(harness.requesterSessionId)).toEqual([]);
+  });
+
+  it('keeps progress pending until the terminal Loro write is flushed', async () => {
+    const options = { operationKind: 'session_create' as const, failProgressFlush: true };
+    const harness = await makeHarness(options);
+    const targetHistory = harness.histories.get(harness.targetSessionId);
+    if (!targetHistory) throw new Error('missing target fixture');
+    targetHistory.push({
+      id: 'answer',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:01:00.000Z',
+      items: [{ type: 'text', text: 'done' }],
+      fileDiff: [],
+      finished: true,
+    });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+      expect(
+        store.listPendingProgress('workspace-1' as WorkspaceId, 'machine-1' as MachineId)
+      ).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+    options.failProgressFlush = false;
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const recovered = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(
+        recovered.listPendingProgress('workspace-1' as WorkspaceId, 'machine-1' as MachineId)
+      ).toEqual([]);
+    } finally {
+      recovered.close();
+    }
+  });
+
+  it('retries failed terminal progress writes after delivery without needing another history event', async () => {
+    vi.useFakeTimers();
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+    });
+    const targetHistory = harness.histories.get(harness.targetSessionId);
+    const targetTurn = targetHistory?.[0];
+    if (!targetHistory || !targetTurn) throw new Error('missing target fixture');
+    targetHistory[0] = { ...targetTurn, status: 'processing' };
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.setProgressWriteFailures(1);
+    targetHistory[0] = { ...targetTurn, status: 'failed' };
+    harness.notifyTargetHistory();
+    await harness.coordinator.idle();
+    const status = () =>
+      harness.histories
+        .get(harness.requesterSessionId)
+        ?.flatMap((row) => row.items ?? [])
+        .find((item) => item.type === 'operation_progress')?.items[0]?.status;
+    expect(status()).toBe('running');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await harness.coordinator.idle();
+    expect(status()).toBe('failed');
+    harness.coordinator.stop();
+  });
+
+  it('links operation completion to existing create progress history', async () => {
+    const harness = await makeHarness({
+      operationKind: 'session_create',
+      deadlineAt: '2026-07-19T23:59:59.000Z',
+      agentConfigId: 'removed-agent-config',
+      configurationSyncSucceeds: true,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    const history = harness.histories.get(harness.requesterSessionId) ?? [];
+    expect(history).toEqual([
+      expect.objectContaining({
+        id: 'operation-progress:requester-1:review-round-1',
+        role: 'system',
+        items: [expect.objectContaining({ type: 'operation_progress' })],
+      }),
+      expect.objectContaining({
+        id: 'operation-completion:requester-1:review-round-1',
+        role: 'system',
+        items: [
+          expect.objectContaining({
+            type: 'operation_completion',
+            progressMessageId: 'operation-progress:requester-1:review-round-1',
           }),
         ],
       }),

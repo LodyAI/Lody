@@ -1,3 +1,7 @@
+import {
+  registerLocalFileResourceScheme,
+  installLocalFileResourceProtocol
+} from './services/local-file-resource-protocol'
 import { app, BrowserWindow, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
@@ -71,6 +75,8 @@ if (
     app.commandLine.appendSwitch('password-store', 'gnome-libsecret')
   }
 }
+
+registerLocalFileResourceScheme()
 
 const LODY_PROTOCOL = desktopInstallationProfile.desktopProtocol
 const PRODUCT_NAME = desktopInstallationProfile.desktopProductName
@@ -178,6 +184,7 @@ if (hasSingleInstanceLock) {
 if (hasSingleInstanceLock) {
   recordE2EBootDiagnostic('waiting-for-app-ready')
   const appReady = app.whenReady().then(() => {
+    installLocalFileResourceProtocol()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 

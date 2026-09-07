@@ -1255,6 +1255,11 @@
   "sessions.openedBy.backToOpener": "Back to session",
   "sessions.openedBy.openOpener": "Opened by",
   "sessions.openedBy.openedSessions": "Opened sessions",
+  "sessions.openedBy.status.created": "Created",
+  "sessions.openedBy.status.running": "Running",
+  "sessions.openedBy.status.succeeded": "Completed successfully",
+  "sessions.openedBy.status.failed": "Failed",
+  "sessions.openedBy.status.cancelled": "Cancelled",
   "sessions.openedBy.viewSession": "View session",
   "sessions.sharing.visibility": "Visibility",
   "sessions.sharing.team": "Team",
@@ -3860,5 +3865,10 @@
   "sessions.fileActions.fileMissing": "That file no longer exists.",
   "sessions.fileActions.openFailed": "Could not open that file.",
   "sessions.fileActions.more": "File actions",
-  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it."
+  "sessions.fileActions.downloadTooLarge": "This file is too large to download from here. Open it on the machine that owns it.",
+  "sessions.fileViewer.paged": "Large file · read-only",
+  "sessions.fileViewer.previousPage": "Previous page",
+  "sessions.fileViewer.nextPage": "Next page",
+  "sessions.fileViewer.page": "Page",
+  "sessions.fileViewer.pageUnavailable": "File changed or is unavailable. Reopen the preview."
 }
