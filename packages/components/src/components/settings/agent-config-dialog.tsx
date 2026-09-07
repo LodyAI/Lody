@@ -13,6 +13,7 @@ import {
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
+  machineSupportsNativePiRpc,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
@@ -451,6 +452,17 @@ type AgentTypeOption = {
 };
 
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
+  {
+    kind: 'builtin',
+    value: 'builtin:pi',
+    label: 'Pi (native RPC)',
+    descriptionKey: 'settings.agent.dialog.option.pi.description',
+    descriptionDefault:
+      'Native Pi RPC. Uses Pi login or environment keys; tools run without approval.',
+    cliType: 'builtin',
+    agentType: 'pi',
+    searchKeys: 'pi native rpc',
+  },
   {
     kind: 'builtin',
     value: 'builtin:kimi',
@@ -1027,12 +1039,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const isCustom = formData.cliType === 'custom';
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
+  const isNativePi = formData.cliType === 'builtin' && formData.agentType === 'pi';
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin);
+    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin || isNativePi);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1808,9 +1821,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ALL_OPTIONS;
-    return ALL_OPTIONS.filter((o) => o.searchKeys.toLowerCase().includes(q));
-  }, [query]);
+    return ALL_OPTIONS.filter(
+      (o) =>
+        (o.cliType !== 'builtin' || o.agentType !== 'pi' || machineSupportsNativePiRpc(machine)) &&
+        (!q || o.searchKeys.toLowerCase().includes(q))
+    );
+  }, [query, machine]);
 
   const groupedOptions = useMemo(() => {
     return {

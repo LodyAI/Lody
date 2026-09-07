@@ -22,6 +22,8 @@ context/message-flow.md "Upstream".
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
 - `setting.ts` — launch resolution for every agent kind.
+- `agent-connection.ts` / [`pi-rpc/`](pi-rpc/README.md) — the existing host connection
+  contract and native Pi JSONL implementation, shared by normal and probe/title startup.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule.
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package

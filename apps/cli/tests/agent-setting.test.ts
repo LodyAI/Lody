@@ -44,6 +44,21 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('launches the pinned native Pi RPC executable and versions its capability cache', async () => {
+    const launch = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' });
+    expect(launch).toEqual({
+      command: 'npx',
+      args: [
+        '--yes',
+        '--prefer-offline',
+        '@earendil-works/pi-coding-agent@0.85.1',
+        '--mode',
+        'rpc',
+      ],
+      capabilitySourceVersion: 'builtin-pi-rpc:0.85.1',
+    });
+  });
+
   it('requires the async launcher for managed builtin runtimes', () => {
     expect(() => resolveBuiltinACPSetting('claude')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);

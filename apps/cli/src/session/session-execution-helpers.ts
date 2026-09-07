@@ -1,4 +1,4 @@
-import { type IssuePRMention, type ProjectRef } from '@lody/shared';
+import { type AgentConfigCliType, type IssuePRMention, type ProjectRef } from '@lody/shared';
 
 export {
   extractPromptPreviewFromInputBlocks,
@@ -71,8 +71,13 @@ export const buildPrompt = (
   prompt: string,
   project?: ProjectRef,
   issuePRMentions?: IssuePRMention[],
-  feedbackPostId?: string
+  feedbackPostId?: string,
+  agent?: { cliType: AgentConfigCliType; agentType: string }
 ): string => {
+  const nativePi = agent?.cliType === 'builtin' && agent.agentType === 'pi';
+  // Pi interprets slash commands before model input. Host instructions would become arguments.
+  if (nativePi && prompt.trimStart().startsWith('/'))
+    return appendIssuePrMentionsToPrompt(prompt, issuePRMentions);
   const promptWithReferences = appendIssuePrMentionsToPrompt(prompt, issuePRMentions);
   const normalizedFeedbackPostId = feedbackPostId?.trim();
   const feedbackInstruction = normalizedFeedbackPostId
@@ -80,5 +85,5 @@ export const buildPrompt = (
     : '';
   const systemCommands = project?.kind === 'github' ? GITHUB_WORKTREE_SYSTEM_COMMANDS : '';
 
-  return `${promptWithReferences}${feedbackInstruction}${systemCommands}${LODY_MCP_TOOLS_REMINDER}`;
+  return `${promptWithReferences}${feedbackInstruction}${systemCommands}${nativePi ? '' : LODY_MCP_TOOLS_REMINDER}`;
 };

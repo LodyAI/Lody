@@ -4606,7 +4606,8 @@ export class SessionExecutionService {
             agentConfig.prompt,
             project,
             agentConfig.issuePRMentions,
-            fromFeedbackPostId
+            fromFeedbackPostId,
+            agentConfig
           );
           const startPromptBlocksBuild = () => {
             const promise = traceAsync(

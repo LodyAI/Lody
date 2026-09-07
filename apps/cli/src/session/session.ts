@@ -11,7 +11,7 @@ import {
 import { JsonLinesParser } from '../utils/json-lines-parser';
 import path from 'path';
 import { Logger } from '@/utils/logger';
-import { ndJsonStream } from '@agentclientprotocol/sdk';
+import { createAgentStream } from '@/agent/agent-connection';
 import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
 import { createAcpClient } from '@/agent/acp-runner';
@@ -609,7 +609,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
       const input = createStdinWritableStream(agentProcess.stdin);
       const output = createStdoutReadableStream(agentProcess.stdout);
-      const stream = ndJsonStream(input, output);
+      const stream = createAgentStream(input, output, callbacks);
       this.logger.debug(`[${this.sessionId}] ndJsonStream created, calling createAcpClient`);
       let client: AgentClient;
       let acpSessionId: ACPSessionId;

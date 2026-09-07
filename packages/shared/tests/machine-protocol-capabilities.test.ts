@@ -6,6 +6,7 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsAcpAuthenticationInteractionsProtocol,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsNativePiRpc,
 } from '../src/machine-protocol-capabilities';
 
 describe('ACP authentication interaction protocol capability', () => {
@@ -44,5 +45,13 @@ it('requires an advertised local file resource protocol, independent of release 
     machineSupportsLocalFileResourcesProtocol({
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     })
+  ).toBe(true);
+});
+
+it('offers native Pi only on a daemon with the RPC capability', () => {
+  expect(machineSupportsNativePiRpc(undefined)).toBe(false);
+  expect(machineSupportsNativePiRpc({ protocolCapabilities: { nativePiRpc: 0 } })).toBe(false);
+  expect(
+    machineSupportsNativePiRpc({ protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES })
   ).toBe(true);
 });

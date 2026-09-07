@@ -1,11 +1,10 @@
+import { createAgentStream, type AgentStream } from './agent-connection';
 import spawn from 'cross-spawn';
 import { type ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
 import {
-  ndJsonStream,
-  type Stream,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
@@ -70,7 +69,7 @@ import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 
 export type CreateAcpClientOptions = {
-  stream: Stream;
+  stream: AgentStream;
   workdir: string;
   logger: Logger;
   terminalManager: TerminalManager;
@@ -531,7 +530,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
 
     const output = createStdoutReadableStream(agentProcess.stdout);
     const input = createStdinWritableStream(agentProcess.stdin);
-    const stream = ndJsonStream(input, output);
+    const stream = createAgentStream(input, output, options);
 
     let rejectSignalAbort: ((error: DOMException) => void) | undefined;
     const signalAbort = options.signal

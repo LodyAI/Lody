@@ -3870,5 +3870,6 @@
   "sessions.fileViewer.previousPage": "Previous page",
   "sessions.fileViewer.nextPage": "Next page",
   "sessions.fileViewer.page": "Page",
-  "sessions.fileViewer.pageUnavailable": "File changed or is unavailable. Reopen the preview."
+  "sessions.fileViewer.pageUnavailable": "File changed or is unavailable. Reopen the preview.",
+  "settings.agent.dialog.option.pi.description": "Native Pi RPC. Uses Pi login or environment keys; tools run without approval."
 }

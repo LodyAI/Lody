@@ -1,3 +1,4 @@
+import { PI_RPC_VERSION } from './pi-rpc/version';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -221,6 +222,7 @@ export function getAcpCapabilitySourceVersion(
           ? `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${managedRuntimeVersion}`
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
+      if (input.agentType === 'pi') return `builtin-pi-rpc:${PI_RPC_VERSION}`;
       if (input.agentType === 'deepseek') {
         const baseUrl = input.env?.[DEEPSEEK_HARNESS_BASE_URL_ENV];
         return baseUrl?.trim()
@@ -386,6 +388,21 @@ async function resolveBuiltinACPProcessLaunch(
 ): Promise<ResolvedACPProcessLaunch> {
   if (!isBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported builtin ACP type: ${input.agentType}`);
+  }
+  if (input.agentType === 'pi') {
+    return {
+      command: 'npx',
+      args: [
+        '--yes',
+        NPX_CACHE_MODE_ARG,
+        `@earendil-works/pi-coding-agent@${PI_RPC_VERSION}`,
+        '--mode',
+        'rpc',
+        ...(input.env?.LODY_TITLE_AGENT === '1' ? ['--session-dir', '.pi-sessions'] : []),
+        ...(input.extraArgs ?? []),
+      ],
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
   }
   if (input.agentType === 'deepseek') {
     const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');

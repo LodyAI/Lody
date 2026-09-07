@@ -1,3 +1,5 @@
+import type { AgentConnection, AgentStream } from './agent-connection';
+import { PiRpcConnection } from './pi-rpc/connection';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -623,7 +625,7 @@ export type AcpWriteTextFileEvidence = {
 };
 
 export class AgentClient implements acp.Client {
-  private connection: acp.ClientSideConnection | null = null;
+  private connection: AgentConnection | null = null;
   private lastSessionUpdateAtMs = Date.now();
   logger: Logger;
   private readonly terminalManager: TerminalManager;
@@ -1669,7 +1671,7 @@ export class AgentClient implements acp.Client {
   }
 
   async startSession(
-    stream: acp.Stream,
+    stream: AgentStream,
     workdir: string,
     resumeSessionId?: ACPSessionId,
     timeoutOptions: AcpStartupTimeoutOptions = {},
@@ -1678,7 +1680,14 @@ export class AgentClient implements acp.Client {
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
-    const connection = new acp.ClientSideConnection(() => this, stream);
+    const connection: AgentConnection =
+      'protocol' in stream
+        ? new PiRpcConnection(stream, {
+            update: (notification) => this.sessionUpdate(notification),
+            usage: (usage) => this.options.onUsageUpdate?.(usage),
+            question: (request) => this.unstable_createElicitation(request),
+          })
+        : new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
     const sessionStartMeta = this.getSessionStartMeta();
@@ -1713,6 +1722,9 @@ export class AgentClient implements acp.Client {
     // it here so it overlaps the handshake instead of stalling `newSession`.
     // The rejection handler is attached immediately because an `initialize`
     // failure below would otherwise leave this promise unobserved.
+    const nativePi =
+      this.options.agentConfig?.cliType === 'builtin' &&
+      this.options.agentConfig.agentType === 'pi';
     const externalMcpLoad = this.options.loadExternalMcpServers?.();
     externalMcpLoad?.catch(() => undefined);
 
@@ -1828,7 +1840,15 @@ export class AgentClient implements acp.Client {
     const newSessionStart = performance.now();
     this.options.onStartupStage?.({ type: 'new_session_start' });
     let sessionResponse: acp.NewSessionResponse;
-    const mcpServers = await this.buildMcpServers(workdir, externalMcpLoad);
+    if (nativePi && externalMcpLoad) {
+      const selected = (await externalMcpLoad)({ http: false });
+      if (selected.servers.length > 0 || selected.problems.length > 0) {
+        throw new Error(
+          'Native Pi does not support workspace MCP servers. Clear the MCP selection before starting Pi.'
+        );
+      }
+    }
+    const mcpServers = nativePi ? [] : await this.buildMcpServers(workdir, externalMcpLoad);
 
     const canLoadSession = this.supportsLoadSession && hasLoadSessionMethod;
     const canResumeSession = this.supportsResume && hasResumeMethod;

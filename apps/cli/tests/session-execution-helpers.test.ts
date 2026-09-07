@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { buildPrompt } from '../src/session/session-execution-helpers';
 
 describe('session execution prompt helpers', () => {
+  it('preserves native Pi commands and gives model prompts only supported instructions', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'pi' };
+    const project = { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'feature' };
+    expect(buildPrompt('/stats', project, undefined, undefined, agent)).toBe('/stats');
+    expect(buildPrompt('/ask-fixture hello', project, undefined, undefined, agent)).toBe(
+      '/ask-fixture hello'
+    );
+    const prompt = buildPrompt('fix the bug', project, undefined, undefined, agent);
+    expect(prompt).toContain('Name branches based on the task content');
+    expect(prompt).not.toContain('Lody MCP');
+  });
+
   it('replaces detailed Lody MCP guidance with a concise reminder', () => {
     const prompt = buildPrompt('inspect the UI');
 

@@ -33,6 +33,7 @@ export type CliType = BuiltinCliType;
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
+  { agentType: 'pi', displayName: 'Pi (native RPC)' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -400,13 +401,14 @@ export type StaticBuiltinAcpCapabilities = {
 /** Codex mode that routes approval requests to a model reviewer subagent. */
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
-const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
+const BUILTIN_DEFAULT_MODE_IDS = {
+  pi: undefined,
   kimi: 'auto',
   grok: 'agent',
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
-};
+} satisfies Record<BuiltinAgentType, string | undefined>;
 
 /**
  * Lody-owned mode default for builtin agents when a turn has no
@@ -893,6 +895,7 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
 ];
 
 const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcpCapabilities> = {
+  pi: { modes: [], models: [], configOptions: [] },
   claude: {
     modes: CLAUDE_STATIC_MODES,
     models: CLAUDE_STATIC_MODELS,
