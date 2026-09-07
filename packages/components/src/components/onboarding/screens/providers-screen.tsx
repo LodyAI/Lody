@@ -447,7 +447,7 @@ export function ProvidersScreenView({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="w-16 shrink-0 px-0"
+                          className="w-12 shrink-0 px-0"
                           onClick={() => onEdit(config)}
                         >
                           {t('common.edit', 'Edit')}

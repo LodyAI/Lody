@@ -163,7 +163,7 @@ export function ProviderSetupRow({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1 pr-3">
-          <div className="w-16 shrink-0" />
+          <div className="w-12 shrink-0" />
           <div className="flex w-20 shrink-0 items-center justify-end">
             {active ? (
               <ProviderProgressButton
