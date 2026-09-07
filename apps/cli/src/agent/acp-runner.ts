@@ -66,6 +66,7 @@ import {
   resolveAcpLauncher,
 } from './acp-analytics';
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
+import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 
@@ -594,6 +595,12 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
       label: `acp-startup:${options.agentType}`,
       logger: options.logger,
       abortSignal: options.signal,
+      // This path is a capability refresh or a title run: both sit inside a
+      // client-visible budget, and the queue ahead of them emits no progress
+      // frame. Without a deadline here that wait is silence the client counts
+      // against a machine that has not started working yet. Session restore
+      // deliberately has no such bound — see the gate's options.
+      waitTimeoutMs: ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS,
     },
     async () =>
       await runNpxStartupWithRecovery({

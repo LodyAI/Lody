@@ -1,5 +1,3 @@
-import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
-
 import type { Logger } from '@/utils/logger';
 
 /**
@@ -15,6 +13,7 @@ export const ACP_SESSION_START_GATE_ENV = 'LODY_MAX_CONCURRENT_ACP_SESSION_START
 
 export type AcpSessionStartGateOptions = {
   maxConcurrent?: number;
+  /** Default queue deadline. Omitted means an unbounded wait. */
   waitTimeoutMs?: number;
 };
 
@@ -22,7 +21,14 @@ export type AcpSessionStartSlotOptions = {
   label: string;
   logger?: Logger;
   abortSignal?: AbortSignal;
-  /** Overrides the gate's default queue deadline for one acquisition. */
+  /**
+   * Deadline for reaching the front of the queue. Callers whose wait is inside
+   * a client-visible RPC budget MUST set it — see
+   * `ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS` — because a queued start emits no
+   * progress frame and the client counts that silence. It stays absent by
+   * default: a session restore wave is exactly the contention this gate exists
+   * to serialize, and failing its tail would undo the reason for the queue.
+   */
   waitTimeoutMs?: number;
 };
 
@@ -71,12 +77,12 @@ export class AcpSessionStartGate {
   private available: number;
   private readonly waiters: QueuedAcquire[] = [];
   readonly maxConcurrent: number;
-  readonly waitTimeoutMs: number;
+  readonly waitTimeoutMs: number | undefined;
 
   constructor(options?: AcpSessionStartGateOptions) {
     this.maxConcurrent = resolveAcpSessionStartLimit(options?.maxConcurrent);
     this.available = this.maxConcurrent;
-    this.waitTimeoutMs = options?.waitTimeoutMs ?? ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS;
+    this.waitTimeoutMs = options?.waitTimeoutMs;
   }
 
   get inUse(): number {
@@ -147,7 +153,7 @@ export class AcpSessionStartGate {
         },
       };
       this.waiters.push(waiter);
-      if (waitTimeoutMs > 0 && Number.isFinite(waitTimeoutMs)) {
+      if (waitTimeoutMs !== undefined && waitTimeoutMs > 0 && Number.isFinite(waitTimeoutMs)) {
         timeoutId = setTimeout(onTimeout, waitTimeoutMs);
         // The daemon must still exit while a start is queued behind a stuck one.
         timeoutId.unref?.();

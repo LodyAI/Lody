@@ -104,10 +104,35 @@ describe('AcpSessionStartGate', () => {
     expect(gate.inUse).toBe(0);
   });
 
-  it('defaults its queue deadline to the shared startup budget', () => {
-    expect(new AcpSessionStartGate({ maxConcurrent: 1 }).waitTimeoutMs).toBe(
-      ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS
-    );
+  it('waits without a deadline unless a caller sets one', async () => {
+    // A session restore wave is the contention this gate exists to serialize.
+    // Failing its tail on a queue deadline would undo the reason for the queue,
+    // so the bound belongs to callers whose wait sits inside an RPC budget.
+    expect(new AcpSessionStartGate({ maxConcurrent: 1 }).waitTimeoutMs).toBeUndefined();
+    expect(ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS).toBeGreaterThan(0);
+
+    vi.useFakeTimers();
+    try {
+      const gate = new AcpSessionStartGate({ maxConcurrent: 1 });
+      const holder = deferred();
+      const held = gate.run({ label: 'holder' }, async () => {
+        await holder.promise;
+      });
+      let ran = false;
+      const queued = gate.run({ label: 'queued' }, async () => {
+        ran = true;
+      });
+
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(gate.queued).toBe(1);
+
+      holder.resolve();
+      await Promise.all([held, queued]);
+      expect(ran).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('gives up on a start that never reaches the front of the queue', async () => {

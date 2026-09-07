@@ -62,8 +62,12 @@ export const ACP_STARTUP_ATTEMPT_MACHINE_BUDGET_MS =
 const ACP_STARTUP_ATTEMPT_CLEANUP_MS = 10_000;
 
 /**
- * How long a startup may wait for one of the process-wide ACP session-start
- * slots (`AcpSessionStartGate`) before the machine gives up on it.
+ * How long a startup INSIDE A CLIENT BUDGET may wait for one of the process-wide
+ * ACP session-start slots (`AcpSessionStartGate`) before the machine gives up.
+ *
+ * Callers pass it explicitly (`startLocalAcpAgent`); the gate has no default,
+ * because a session restore wave is the contention the queue exists to
+ * serialize and failing its tail would undo the reason for queueing at all.
  *
  * The queue sits OUTSIDE `runNpxStartupWithRecovery`, so it is not covered by
  * any of the per-attempt timeouts above, and it emits no frame — a queued start
