@@ -347,4 +347,32 @@ describe('reconnect storm repro', () => {
     expect(scans).toBeLessThanOrEqual(3);
     expect(reconciles).toBeLessThanOrEqual(3 * SESSION_ROOM_COUNT);
   });
+
+  it('SCENARIO E: a connected transport is not torn down while the meta room join is slower than backoff', async () => {
+    // Field shape for #399: transport already `connected`, meta room still
+    // `reconnecting`, join ~900ms, first backoff ~2.1s. repo.reconnect() used
+    // to restart the join and pin the loop at attempts 2-3.
+    const reconnectAtMs: number[] = [];
+    const reconnect = vi.fn(async () => {
+      reconnectAtMs.push(Date.now());
+    });
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, transportRooms: () => [] }, metaSub);
+
+    metaSub.emitStatus('reconnecting');
+    instance.setTransportStatus('connected');
+    expect(instance.getStreamsHealth()).toBe('recovering');
+
+    await vi.advanceTimersByTimeAsync(ONE_MINUTE_MS);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[SCENARIO E] reconnects/min=${reconnect.mock.calls.length} (pre-fix: watchdog + backoff tear-down of a live transport)`
+    );
+    expect(reconnect).not.toHaveBeenCalled();
+    expect(reconnectAtMs).toEqual([]);
+
+    metaSub.emitStatus('joined');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instance.getStreamsHealth()).toBe('connected');
+  });
 });

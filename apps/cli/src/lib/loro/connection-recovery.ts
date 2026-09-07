@@ -796,6 +796,18 @@ export class LoroConnectionRecoveryController {
     }
   }
 
+  /**
+   * Meta-room `connecting`/`reconnecting` means a join is already running.
+   * `repo.reconnect()` would tear down a live transport and restart that join
+   * (#399). Transport `disconnected` is a real failure and still reconnects.
+   */
+  private shouldPreserveInFlightMetaJoin(): boolean {
+    return (
+      this.transportStatus !== 'disconnected' &&
+      (this.metaRoomStatus === 'connecting' || this.metaRoomStatus === 'reconnecting')
+    );
+  }
+
   private updateBackoffAfterReconnect(reason: string, options: ReconnectOptions): void {
     if (this.isCleanedUp) {
       return;
@@ -810,6 +822,10 @@ export class LoroConnectionRecoveryController {
       // `force` already passes `resetBackoff: true` down to repo.reconnect();
       // it must NOT additionally erase this controller's flap history, or a
       // caller-triggered reconnect would hand the loop its base delay back.
+      return;
+    }
+
+    if (this.shouldPreserveInFlightMetaJoin()) {
       return;
     }
 
@@ -830,6 +846,13 @@ export class LoroConnectionRecoveryController {
       // supervises it, so CLI-authored ops for the room never reach the cloud
       // until a daemon restart. Sweep instead of returning early.
       await this.sweepRooms(reason);
+      return;
+    }
+
+    if (!options.force && this.shouldPreserveInFlightMetaJoin()) {
+      this.logger.debug(
+        `[${this.workspaceId}] Skipping Loro streams transport reconnect while the meta room join is in flight (reason=${reason}, health=${this.getStreamsHealth()}, transport=${this.transportStatus}, metaRoom=${this.metaRoomStatus ?? 'unknown'})`
+      );
       return;
     }
 
