@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/466
 
 [English](2026-09-07-explicit-agent-note-triggers.md) | 中文
 
